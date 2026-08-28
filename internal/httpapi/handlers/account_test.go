@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"os"
 	"slices"
+	"strconv"
 	"testing"
 	"time"
 
@@ -456,5 +457,112 @@ func TestSudoWindowIsNotSharedBetweenSessions(t *testing.T) {
 	}
 	if code := decodeProblem(t, raw).Code; code != "sudo.required" {
 		t.Errorf("code = %q, want sudo.required", code)
+	}
+}
+
+// TestRateLimitSlowsGuessingAndNeverLocksOut walks D-08 at the HTTP boundary:
+// the delay grows, then the endpoint answers 429 with Retry-After rather than
+// holding a connection open for half a minute -- and after the wait the correct
+// password still works, because there is no state to clear.
+func TestRateLimitSlowsGuessingAndNeverLocksOut(t *testing.T) {
+	s := newServer(t, 5*time.Minute)
+	owner := s.newClient(t)
+	owner.setup()
+
+	guesser := s.newClient(t)
+
+	var retryAfter string
+	var attempts int
+	for attempts = 1; attempts <= 8; attempts++ {
+		resp := guesser.login("wrong-password-" + string(rune('a'+attempts)))
+		if resp.StatusCode == http.StatusTooManyRequests {
+			retryAfter = resp.Header.Get("Retry-After")
+			break
+		}
+		if resp.StatusCode != http.StatusUnauthorized {
+			t.Fatalf("attempt %d: got %d, want 401 or 429", attempts, resp.StatusCode)
+		}
+	}
+	if retryAfter == "" {
+		t.Fatalf("guessing was never throttled to 429 after %d attempts", attempts)
+	}
+
+	seconds, err := strconv.Atoi(retryAfter)
+	if err != nil || seconds <= 0 {
+		t.Fatalf("Retry-After = %q, want a positive number of seconds", retryAfter)
+	}
+
+	// Waiting is always enough. Nothing has to be unlocked, because nothing
+	// locked (D-08).
+	time.Sleep(time.Duration(seconds+1) * time.Second)
+	if resp := guesser.login(testPass); resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("after waiting out the delay the correct password gives %d, want 204", resp.StatusCode)
+	}
+
+	// And the successful login cleared the episode.
+	if resp := guesser.login(testPass); resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("a second correct login gives %d, want 204", resp.StatusCode)
+	}
+}
+
+// TestRateLimitCoversTheSudoReAuthentication: the re-authentication endpoint is
+// a password oracle exactly like the login, so it shares the same protection
+// and the same counter.
+func TestRateLimitCoversTheSudoReAuthentication(t *testing.T) {
+	s := newServer(t, 5*time.Minute)
+	owner := s.newClient(t)
+	owner.setup()
+
+	var throttled bool
+	for attempt := 1; attempt <= 8; attempt++ {
+		resp, _ := owner.sudo("wrong-password-" + string(rune('a'+attempt)))
+		if resp.StatusCode == http.StatusTooManyRequests {
+			throttled = true
+			break
+		}
+		if resp.StatusCode != http.StatusUnauthorized {
+			t.Fatalf("attempt %d: got %d, want 401 or 429", attempt, resp.StatusCode)
+		}
+	}
+	if !throttled {
+		t.Fatal("repeated wrong passwords on the sudo endpoint were never throttled")
+	}
+}
+
+// TestMutatingRequestWithoutTheCSRFHeaderIs403 is the contract at the boundary
+// rather than at the middleware: a valid session cookie is not enough.
+func TestMutatingRequestWithoutTheCSRFHeaderIs403(t *testing.T) {
+	s := newServer(t, 5*time.Minute)
+	c := s.newClient(t)
+	c.setup()
+
+	resp, raw := c.do(http.MethodPost, "/api/v1/auth/logout", map[string]string{},
+		func(r *http.Request) { r.Header.Del("X-Holzkube-CSRF") })
+	if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("got %d, want 403 (body: %s)", resp.StatusCode, raw)
+	}
+	if code := decodeProblem(t, raw).Code; code != "csrf.precondition-unmet" {
+		t.Errorf("code = %q, want csrf.precondition-unmet", code)
+	}
+
+	// The same request with every precondition in place goes through, so the
+	// refusal above is about the header and not about the session.
+	if resp, raw := c.do(http.MethodPost, "/api/v1/auth/logout", map[string]string{}); resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("with all preconditions: got %d, want 204 (body: %s)", resp.StatusCode, raw)
+	}
+}
+
+// TestReadingRequestNeedsNoCSRFHeader keeps the preconditions off page loads.
+func TestReadingRequestNeedsNoCSRFHeader(t *testing.T) {
+	s := newServer(t, 5*time.Minute)
+	c := s.newClient(t)
+
+	resp, raw := c.do(http.MethodGet, "/api/v1/system/status", nil,
+		func(r *http.Request) {
+			r.Header.Del("X-Holzkube-CSRF")
+			r.Header.Del("Content-Type")
+		})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("got %d, want 200 (body: %s)", resp.StatusCode, raw)
 	}
 }
