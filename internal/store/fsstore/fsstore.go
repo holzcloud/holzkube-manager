@@ -11,7 +11,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sync"
 
 	"github.com/holzcloud/holzkube/internal/model"
 	"github.com/holzcloud/holzkube/internal/store"
@@ -21,6 +20,15 @@ import (
 type Store struct {
 	dir string
 
+	// release drops the process flock. It is held for the lifetime of the
+	// Store and dropped by Close.
+	release func() error
+
+	// entityMu is the middle layer of concurrency control: one mutex per
+	// record, shared by every entity store so that "users/a" and "sessions/a"
+	// are distinct keys.
+	entityMu *store.EntityLocks
+
 	users    *userStore
 	settings *settingsStore
 	sessions *sessionStore
@@ -28,7 +36,18 @@ type Store struct {
 
 // Open prepares dir as a holzkube data directory and returns a Store over it.
 // The directory is created 0700 if missing.
-func Open(dir string) (*Store, error) {
+//
+// The order of the startup steps is load-bearing:
+//
+//	create dir -> process flock -> permission guard -> sweep temp files
+//	-> schema migration -> entity directories
+//
+// The flock comes first because everything after it writes. The guard runs
+// before the migration so that a directory with wrong permissions is refused
+// before a backup tarball is written into it. The temp sweep runs before the
+// migration because the migration reads state, and a half-written temp file
+// left by a crash must never be read as state.
+func Open(dir string) (s *Store, err error) {
 	if dir == "" {
 		return nil, errors.New("fsstore: empty data directory")
 	}
@@ -40,10 +59,20 @@ func Open(dir string) (*Store, error) {
 		return nil, fmt.Errorf("fsstore: create data directory: %w", err)
 	}
 
-	s := &Store{dir: abs}
-	s.users = &userStore{dir: filepath.Join(abs, "users")}
-	s.settings = &settingsStore{path: filepath.Join(abs, "settings.json")}
-	s.sessions = &sessionStore{dir: filepath.Join(abs, "sessions")}
+	release, err := store.AcquireProcessLock(abs)
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		if err != nil {
+			_ = release()
+		}
+	}()
+
+	s = &Store{dir: abs, release: release, entityMu: store.NewEntityLocks()}
+	s.users = &userStore{dir: filepath.Join(abs, "users"), locks: s.entityMu}
+	s.settings = &settingsStore{path: filepath.Join(abs, "settings.json"), locks: s.entityMu}
+	s.sessions = &sessionStore{dir: filepath.Join(abs, "sessions"), locks: s.entityMu}
 
 	for _, sub := range []string{s.users.dir, s.sessions.dir} {
 		if err := os.MkdirAll(sub, dirPerm); err != nil {
@@ -61,9 +90,42 @@ func (s *Store) Users() store.UserStore        { return s.users }
 func (s *Store) Settings() store.SettingsStore { return s.settings }
 func (s *Store) Sessions() store.SessionStore  { return s.sessions }
 
-// Close releases the store. Phase 1 holds no long-lived handles; the process
-// lock and per-entity lock map arrive in plan 02.
-func (s *Store) Close() error { return nil }
+// Close releases the process lock. After Close another instance may open the
+// same data directory.
+func (s *Store) Close() error {
+	if s.release == nil {
+		return nil
+	}
+	release := s.release
+	s.release = nil
+	return release()
+}
+
+// Entity kinds. They are the first half of every per-entity lock key, which is
+// what keeps users/a and sessions/a from contending.
+const (
+	kindUsers    = "users"
+	kindSettings = "settings"
+	kindSessions = "sessions"
+
+	// settingsKey is the id half of the lock key for the settings singleton.
+	settingsKey = "singleton"
+)
+
+// marshalRecord serializes a record deterministically.
+//
+// Determinism is not cosmetic here. A repeated Put of an unchanged record must
+// produce byte-identical output, so that "the file changed" means the record
+// changed; and a pre-migration backup must diff readably against the migrated
+// directory. encoding/json emits struct fields in declaration order and sorts
+// map keys, so fixing the indentation is the only thing left to pin.
+func marshalRecord(v any) ([]byte, error) {
+	raw, err := json.MarshalIndent(v, "", "  ")
+	if err != nil {
+		return nil, err
+	}
+	return append(raw, '\n'), nil
+}
 
 // safeKey rejects any identifier that could escape its entity directory or
 // collide with the temp-file prefix used by writeAtomic. Deriving a filename
@@ -125,8 +187,8 @@ func listJSON(dir string, decode func(raw []byte) error) error {
 // --- users -----------------------------------------------------------------
 
 type userStore struct {
-	mu  sync.Mutex
-	dir string
+	locks *store.EntityLocks
+	dir   string
 }
 
 func (u *userStore) path(id model.UserID) (string, error) {
@@ -167,8 +229,7 @@ func (u *userStore) Put(_ context.Context, rec model.User) (model.User, error) {
 		return model.User{}, err
 	}
 
-	u.mu.Lock()
-	defer u.mu.Unlock()
+	defer u.locks.LockEntity(kindUsers, string(rec.ID))()
 
 	var current model.User
 	switch err := readJSON(p, &current); {
@@ -187,7 +248,7 @@ func (u *userStore) Put(_ context.Context, rec model.User) (model.User, error) {
 	}
 
 	rec.Rev++
-	raw, err := json.Marshal(rec)
+	raw, err := marshalRecord(rec)
 	if err != nil {
 		return model.User{}, err
 	}
@@ -202,8 +263,7 @@ func (u *userStore) Delete(_ context.Context, id model.UserID) error {
 	if err != nil {
 		return err
 	}
-	u.mu.Lock()
-	defer u.mu.Unlock()
+	defer u.locks.LockEntity(kindUsers, string(id))()
 	if err := removeAndSync(p); err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return store.ErrNotFound
@@ -216,8 +276,8 @@ func (u *userStore) Delete(_ context.Context, id model.UserID) error {
 // --- settings --------------------------------------------------------------
 
 type settingsStore struct {
-	mu   sync.Mutex
-	path string
+	locks *store.EntityLocks
+	path  string
 }
 
 func (s *settingsStore) Get(_ context.Context) (model.Settings, error) {
@@ -229,8 +289,7 @@ func (s *settingsStore) Get(_ context.Context) (model.Settings, error) {
 }
 
 func (s *settingsStore) Put(_ context.Context, rec model.Settings) (model.Settings, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	defer s.locks.LockEntity(kindSettings, settingsKey)()
 
 	var current model.Settings
 	switch err := readJSON(s.path, &current); {
@@ -249,7 +308,7 @@ func (s *settingsStore) Put(_ context.Context, rec model.Settings) (model.Settin
 	}
 
 	rec.Rev++
-	raw, err := json.Marshal(rec)
+	raw, err := marshalRecord(rec)
 	if err != nil {
 		return model.Settings{}, err
 	}
@@ -262,8 +321,8 @@ func (s *settingsStore) Put(_ context.Context, rec model.Settings) (model.Settin
 // --- sessions --------------------------------------------------------------
 
 type sessionStore struct {
-	mu  sync.Mutex
-	dir string
+	locks *store.EntityLocks
+	dir   string
 }
 
 func (s *sessionStore) path(id string) (string, error) {
@@ -307,8 +366,7 @@ func (s *sessionStore) Put(_ context.Context, rec model.Session) (model.Session,
 	if err != nil {
 		return model.Session{}, err
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	defer s.locks.LockEntity(kindSessions, rec.ID)()
 
 	var current model.Session
 	if err := readJSON(p, &current); err == nil {
@@ -318,7 +376,7 @@ func (s *sessionStore) Put(_ context.Context, rec model.Session) (model.Session,
 	}
 
 	rec.Rev++
-	raw, err := json.Marshal(rec)
+	raw, err := marshalRecord(rec)
 	if err != nil {
 		return model.Session{}, err
 	}
@@ -333,8 +391,7 @@ func (s *sessionStore) Delete(_ context.Context, id string) error {
 	if err != nil {
 		return err
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	defer s.locks.LockEntity(kindSessions, id)()
 	if err := removeAndSync(p); err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return nil

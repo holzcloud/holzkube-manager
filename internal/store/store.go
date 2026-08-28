@@ -24,6 +24,12 @@ var (
 
 	// ErrInvalidKey is returned for a key that cannot address a record.
 	ErrInvalidKey = errors.New("store: invalid key")
+
+	// ErrAlreadyRunning is returned when the data directory is already held by
+	// another process. It is a refusal to start, not a retryable condition:
+	// two instances on one directory is a corruption path that no in-process
+	// locking can detect.
+	ErrAlreadyRunning = errors.New("store: data directory already in use by another process")
 )
 
 // Store is the root of the persistence seam.
