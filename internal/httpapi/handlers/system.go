@@ -31,9 +31,22 @@ func SystemRoutes(d httpapi.Deps) []httpapi.Route {
 				// found broken at startup must stay reported (D-15). When
 				// startup was clean, re-verify live so that damage occurring
 				// while the process runs is not hidden until the next restart.
+				//
+				// The live re-verify is behind the session gate even though the
+				// route is not. This endpoint has to answer before
+				// authentication, because setup_required is what tells the UI
+				// whether to show the setup wizard -- but re-verification
+				// re-reads and re-hashes the whole window under the audit
+				// writer's mutex, and the audit middleware is fail-closed, so an
+				// anonymous caller repeating this request could stall or fail
+				// every authenticated mutation in the process. An anonymous
+				// caller gets the startup snapshot, which is the part of the
+				// answer they need; D-15 is unaffected either way, because a
+				// break found at startup is reported from the snapshot and is
+				// never re-checked here at all.
 				chain := d.AuditChain
-				if chain.OK && d.Audit != nil {
-					ok, file, line, err := d.Audit.Verify(r.Context())
+				if chain.OK && d.Audit != nil && d.Auth.IsAuthenticated(r.Context()) {
+					ok, file, line, err := d.Audit.CachedVerify(r.Context())
 					if err != nil {
 						httpapi.WriteInternal(w, r, d.Logger, err)
 						return
@@ -49,7 +62,16 @@ func SystemRoutes(d httpapi.Deps) []httpapi.Route {
 
 				writeJSON(w, http.StatusOK, systemStatus{
 					SetupRequired: len(users) == 0,
-					AuditChain:    chain,
+					// A name, never a path. The audit directory sits under the
+					// XDG-resolved absolute data directory, so the full path
+					// discloses the OS username and the home directory layout
+					// of a host whose data directory the threat model calls
+					// equivalent to root on every managed node -- and this
+					// answers before authentication. It is the same class of
+					// string Internal(err) exists to strip. The operator does
+					// not need the directory they configured; they deal with a
+					// break by hand on a host they are already logged in to.
+					AuditChain: chain.Public(),
 				})
 			}),
 		},

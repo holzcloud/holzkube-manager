@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	neturl "net/url"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -225,8 +226,15 @@ func TestSystemStatusKeepsAChainBreakVisible(t *testing.T) {
 		if status.AuditChain.BrokenAtLine != 1 {
 			t.Errorf("call %d: broken_at_line = %d, want 1", i+1, status.AuditChain.BrokenAtLine)
 		}
-		if status.AuditChain.File != path {
-			t.Errorf("call %d: file = %q, want %q", i+1, status.AuditChain.File, path)
+		// A name, never a path: this endpoint answers before authentication
+		// and the data directory is absolute, so a path here would disclose
+		// the OS user and their home directory layout to an anonymous caller.
+		if want := filepath.Base(path); status.AuditChain.File != want {
+			t.Errorf("call %d: file = %q, want %q", i+1, status.AuditChain.File, want)
+		}
+		if strings.ContainsRune(status.AuditChain.File, filepath.Separator) {
+			t.Errorf("call %d: file = %q leaks a filesystem path to an unauthenticated caller",
+				i+1, status.AuditChain.File)
 		}
 	}
 }

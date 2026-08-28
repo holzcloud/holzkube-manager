@@ -7,6 +7,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"path/filepath"
 	"time"
 
 	"github.com/holzcloud/holzkube/internal/audit"
@@ -41,10 +42,31 @@ type Route struct {
 }
 
 // ChainStatus is the audit hash-chain verdict as the UI consumes it.
+//
+// File may hold a full path internally; call Public before serialising it.
 type ChainStatus struct {
 	OK           bool   `json:"ok"`
 	BrokenAtLine int    `json:"broken_at_line"`
 	File         string `json:"file"`
+}
+
+// Public returns the verdict as it may be sent to a client: File carries a
+// file name, never a path.
+//
+// The audit directory lives under the XDG-resolved absolute data directory, so
+// a path here names the OS user and their home directory layout. The one
+// endpoint that serves this verdict answers before authentication, which makes
+// that free reconnaissance about the host the threat model calls equivalent to
+// root on every managed node. It is the same class of string Internal(err)
+// discards for the same reason.
+//
+// filepath.Base("") is ".", which would be a worse answer than the empty
+// string the caller meant, so an unset File stays unset.
+func (c ChainStatus) Public() ChainStatus {
+	if c.File != "" {
+		c.File = filepath.Base(c.File)
+	}
+	return c
 }
 
 // Deps is everything the HTTP layer needs.

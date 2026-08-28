@@ -51,8 +51,29 @@ type Logger struct {
 	// rather than carrying a reference field that would change the format.
 	pending map[uint64]Record
 
+	// lastVerify memoises the most recent verification verdict. Verify
+	// re-reads and re-hashes the whole window under l.mu, so without a floor
+	// on how often that happens a polling UI turns every open tab into a
+	// repeated full re-read that audit writes queue behind. A zero at means
+	// nothing has been verified yet.
+	lastVerify verdict
+
 	closed bool
 }
+
+// verdict is a remembered verification result.
+type verdict struct {
+	ok   bool
+	file string
+	line int
+	at   time.Time
+}
+
+// verifyCacheTTL is the floor between two live re-verifications. It is short
+// enough that damage done while the process runs surfaces within a poll or
+// two, and long enough that the cost does not scale with the number of
+// clients asking.
+const verifyCacheTTL = 30 * time.Second
 
 // Open prepares <dir>/audit and returns a Logger positioned after the last
 // record already on disk.
@@ -247,10 +268,48 @@ func (l *Logger) Outcome(_ context.Context, seq uint64, outcome string, cause er
 //
 // A chain nobody checks is theatre, so this runs at startup rather than behind
 // a button. Nothing here repairs what it finds.
-func (l *Logger) Verify(_ context.Context) (ok bool, file string, line int, err error) {
+func (l *Logger) Verify(ctx context.Context) (ok bool, file string, line int, err error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.verifyLocked(ctx)
+}
+
+// CachedVerify is Verify for the request path: it reuses a verdict newer than
+// verifyCacheTTL instead of re-reading the archive.
+//
+// Verification is the one operation here whose cost grows with the archive,
+// and it runs under the same mutex append takes, so an uncached re-verify per
+// request lets callers serialise audit writes against a full re-read. The
+// audit middleware is fail-closed, so a mutation whose intent cannot be
+// recorded is refused — which makes that a way to fail other people's writes,
+// not merely a slow endpoint.
+//
+// The cache is deliberately not invalidated by append. A verdict at most
+// verifyCacheTTL old is what this is for; a caller that needs the current
+// state of the file on disk wants Verify.
+func (l *Logger) CachedVerify(ctx context.Context) (ok bool, file string, line int, err error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
+	if v := l.lastVerify; !v.at.IsZero() && l.now().Sub(v.at) < verifyCacheTTL {
+		return v.ok, v.file, v.line, nil
+	}
+
+	ok, file, line, err = l.verifyLocked(ctx)
+	if err != nil {
+		// Nothing is cached on error: a failed read is not a verdict, and
+		// remembering it would suppress the retry that resolves it.
+		return false, "", 0, err
+	}
+
+	l.lastVerify = verdict{ok: ok, file: file, line: line, at: l.now()}
+	return ok, file, line, nil
+}
+
+// verifyLocked runs the verification window. The caller holds l.mu, which is
+// what keeps a page from being assembled out of a half-written line -- the
+// same reason Logger.Query takes it.
+func (l *Logger) verifyLocked(ctx context.Context) (ok bool, file string, line int, err error) {
 	files, err := allFiles(l.dir)
 	if err != nil {
 		return false, "", 0, err
@@ -258,5 +317,5 @@ func (l *Logger) Verify(_ context.Context) (ok bool, file string, line int, err 
 	if len(files) > 2 {
 		files = files[len(files)-2:]
 	}
-	return Verify(files)
+	return VerifyContext(ctx, files)
 }
