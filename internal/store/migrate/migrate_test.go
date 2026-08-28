@@ -157,12 +157,17 @@ func TestMigrateLegacyDirectoryWithoutVersionIsTreatedAsCurrent(t *testing.T) {
 }
 
 func TestMigrateUpgradeBacksUpBeforeChangingAnything(t *testing.T) {
-	dir := copyFixture(t, "version-previous")
+	// A real forward step: the directory sits at the version this binary
+	// writes today and the table advances it to the next one. That is the
+	// shape phase 3 adds. Driving it with a synthetic version 0 instead would
+	// exercise a version readVersion refuses as impossible.
+	dir := copyFixture(t, "version-current")
+	target := CurrentVersion + 1
 
 	var sawVersionAt string
 	migs := []Migration{{
-		From: CurrentVersion - 1,
-		To:   CurrentVersion,
+		From: CurrentVersion,
+		To:   target,
 		Apply: func(d string) error {
 			// The backup must already exist and VERSION must still be the old
 			// value at the moment the first migration runs.
@@ -174,15 +179,15 @@ func TestMigrateUpgradeBacksUpBeforeChangingAnything(t *testing.T) {
 		},
 	}}
 
-	if err := run(dir, migs); err != nil {
+	if err := run(dir, migs, target); err != nil {
 		t.Fatalf("run: %v", err)
 	}
 
-	if sawVersionAt != strconv.Itoa(CurrentVersion-1) {
-		t.Fatalf("VERSION was %q while the migration ran, want the old value %d", sawVersionAt, CurrentVersion-1)
+	if sawVersionAt != strconv.Itoa(CurrentVersion) {
+		t.Fatalf("VERSION was %q while the migration ran, want the old value %d", sawVersionAt, CurrentVersion)
 	}
-	if got := readVersionFile(t, dir); got != strconv.Itoa(CurrentVersion) {
-		t.Fatalf("VERSION = %q after a successful migration, want %d", got, CurrentVersion)
+	if got := readVersionFile(t, dir); got != strconv.Itoa(target) {
+		t.Fatalf("VERSION = %q after a successful migration, want %d", got, target)
 	}
 
 	files := backupFiles(t, dir)
@@ -190,7 +195,7 @@ func TestMigrateUpgradeBacksUpBeforeChangingAnything(t *testing.T) {
 		t.Fatalf("backups = %v, want exactly one tarball", files)
 	}
 	name := files[0]
-	wantPrefix := "pre-migration-" + strconv.Itoa(CurrentVersion-1) + "-to-" + strconv.Itoa(CurrentVersion) + "-"
+	wantPrefix := "pre-migration-" + strconv.Itoa(CurrentVersion) + "-to-" + strconv.Itoa(target) + "-"
 	if !strings.HasPrefix(name, wantPrefix) || !strings.HasSuffix(name, ".tar.gz") {
 		t.Fatalf("backup name %q does not match %s<timestamp>.tar.gz", name, wantPrefix)
 	}
@@ -208,22 +213,23 @@ func TestMigrateUpgradeBacksUpBeforeChangingAnything(t *testing.T) {
 }
 
 func TestMigrateFailureLeavesTheOldVersionInPlace(t *testing.T) {
-	dir := copyFixture(t, "version-previous")
+	dir := copyFixture(t, "version-current")
+	target := CurrentVersion + 1
 
 	boom := errors.New("migration exploded")
 	migs := []Migration{{
-		From:  CurrentVersion - 1,
-		To:    CurrentVersion,
+		From:  CurrentVersion,
+		To:    target,
 		Apply: func(string) error { return boom },
 	}}
 
-	err := run(dir, migs)
+	err := run(dir, migs, target)
 	if !errors.Is(err, boom) {
 		t.Fatalf("run error = %v, want the migration's own error", err)
 	}
 
-	if got := readVersionFile(t, dir); got != strconv.Itoa(CurrentVersion-1) {
-		t.Fatalf("VERSION = %q after a failed migration, want the old value %d", got, CurrentVersion-1)
+	if got := readVersionFile(t, dir); got != strconv.Itoa(CurrentVersion) {
+		t.Fatalf("VERSION = %q after a failed migration, want the old value %d", got, CurrentVersion)
 	}
 	if files := backupFiles(t, dir); len(files) != 1 {
 		t.Fatalf("backups = %v, want the pre-migration tarball to survive the failure", files)
@@ -283,5 +289,60 @@ func TestMigrationsAreOrderedAndForwardOnly(t *testing.T) {
 	}
 	if n := len(migrations); n > 0 && migrations[n-1].To != CurrentVersion {
 		t.Errorf("the last migration ends at %d but CurrentVersion is %d", migrations[n-1].To, CurrentVersion)
+	}
+}
+
+// A version the table cannot advance used to be backed up, skipped by every
+// migration, and then stamped as fully migrated anyway. The directory was
+// marked current while its records were still in the old shape, which is
+// exactly the silent data loss this package exists to prevent.
+func TestMigrateRefusesAVersionNoMigrationReaches(t *testing.T) {
+	dir := copyFixture(t, "version-current")
+	target := CurrentVersion + 2
+	before := listTree(t, dir)
+
+	// A hole: the table jumps straight to the last step, so nothing starts
+	// at CurrentVersion.
+	migs := []Migration{{
+		From:  CurrentVersion + 1,
+		To:    target,
+		Apply: func(string) error { t.Error("a migration ran for a path that has a hole in it"); return nil },
+	}}
+
+	err := run(dir, migs, target)
+	if err == nil {
+		t.Fatal("run stamped a version the migrations never reached")
+	}
+	if !strings.Contains(err.Error(), strconv.Itoa(CurrentVersion)) {
+		t.Fatalf("error %q does not name the version the chain is stuck at", err)
+	}
+
+	if got := readVersionFile(t, dir); got != strconv.Itoa(CurrentVersion) {
+		t.Fatalf("VERSION = %q, want it left at %d rather than stamped %d", got, CurrentVersion, target)
+	}
+	if after := listTree(t, dir); !slices.Equal(before, after) {
+		t.Fatalf("a directory that cannot be advanced was still written to:\nbefore %v\nafter  %v", before, after)
+	}
+	if files := backupFiles(t, dir); len(files) != 0 {
+		t.Fatalf("backups = %v; a refusal must not leave a tarball implying a migration was attempted", files)
+	}
+}
+
+// readVersion's own doc comment says no release ever wrote a version 0
+// layout. A parser that accepted one let that impossible version through to
+// the migration loop.
+func TestMigrateRefusesVersionZero(t *testing.T) {
+	dir := copyFixture(t, "version-previous")
+	before := listTree(t, dir)
+
+	err := Run(dir)
+	if err == nil {
+		t.Fatal("Run accepted VERSION 0, a version no release ever wrote")
+	}
+	if !errors.Is(err, ErrVersionUnreadable) {
+		t.Fatalf("err = %v, want ErrVersionUnreadable", err)
+	}
+	if after := listTree(t, dir); !slices.Equal(before, after) {
+		t.Fatalf("a refused start still wrote to the directory:\nbefore %v\nafter  %v", before, after)
 	}
 }

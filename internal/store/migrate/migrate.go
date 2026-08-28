@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -63,36 +64,50 @@ var migrations = []Migration{}
 
 // Run brings dir up to CurrentVersion, or refuses to start.
 func Run(dir string) error {
-	return run(dir, migrations)
+	return run(dir, migrations, CurrentVersion)
 }
 
-func run(dir string, migs []Migration) error {
-	from, err := readVersion(dir)
+// run advances dir to target using migs. target is a parameter rather than
+// CurrentVersion directly so that the whole upgrade path — backup, ordered
+// application, deferred VERSION write, failure handling — can be exercised
+// against a real forward step while the binary still defines only one schema
+// version. Tests drive a 1 -> 2 path, which is the shape phase 3 will add,
+// rather than a synthetic 0 -> 1 one that readVersion rejects as impossible.
+func run(dir string, migs []Migration, target int) error {
+	from, err := readVersion(dir, target)
 	if err != nil {
 		return err
 	}
 
 	switch {
-	case from > CurrentVersion:
+	case from > target:
 		return fmt.Errorf("%w: %s says version %d, this binary understands version %d; upgrade holzkube",
-			ErrVersionTooNew, filepath.Join(dir, VersionFileName), from, CurrentVersion)
-	case from == CurrentVersion:
+			ErrVersionTooNew, filepath.Join(dir, VersionFileName), from, target)
+	case from == target:
 		// Nothing to do, and deliberately nothing written: an upgrade that
 		// changed no schema must not churn the operator's data directory.
 		return nil
 	}
 
+	// Resolve the whole path before writing anything at all. A gap in the
+	// table used to be discovered only after the backup had been taken and
+	// every migration skipped, at which point VERSION was stamped current
+	// regardless — the directory was marked migrated when nothing had run.
+	// Refusing here means an unadvanceable directory is left exactly as it
+	// was found, with no tarball implying a migration was attempted.
+	planned, err := plan(migs, from, target)
+	if err != nil {
+		return err
+	}
+
 	// A backup before the first change, not after the last one. Everything
 	// below this line can fail with the directory half-migrated.
-	if _, err := backup.Create(dir, from, CurrentVersion); err != nil {
+	if _, err := backup.Create(dir, from, target); err != nil {
 		return fmt.Errorf("migrate: refusing to migrate without a backup: %w", err)
 	}
 
 	at := from
-	for _, m := range migs {
-		if m.From != at {
-			continue
-		}
+	for _, m := range planned {
 		if err := m.Apply(dir); err != nil {
 			// VERSION still reads the old value, so a fixed binary re-runs
 			// this migration rather than skipping it.
@@ -101,7 +116,38 @@ func run(dir string, migs []Migration) error {
 		at = m.To
 	}
 
-	return writeVersion(dir, CurrentVersion)
+	// plan guarantees this, so a mismatch means the table was mutated under
+	// us. Stamping the target anyway is the one outcome this package exists
+	// to prevent, so assert instead.
+	if at != target {
+		return fmt.Errorf("migrate: reached version %d, not %d; VERSION left at %d", at, target, from)
+	}
+
+	return writeVersion(dir, target)
+}
+
+// plan returns the migrations that advance from to target, in the order they
+// must run, or an error naming the version the chain gets stuck at.
+func plan(migs []Migration, from, target int) ([]Migration, error) {
+	var out []Migration
+	at := from
+	for at != target {
+		i := slices.IndexFunc(migs, func(m Migration) bool { return m.From == at })
+		if i < 0 {
+			return nil, fmt.Errorf(
+				"migrate: no migration path from version %d to %d; this binary has no step "+
+					"that starts at version %d, so the data directory cannot be advanced and "+
+					"has been left untouched", from, target, at)
+		}
+		if migs[i].To <= at {
+			return nil, fmt.Errorf(
+				"migrate: migration %d -> %d does not advance; the table is not forward-only",
+				migs[i].From, migs[i].To)
+		}
+		out = append(out, migs[i])
+		at = migs[i].To
+	}
+	return out, nil
 }
 
 // readVersion reports the schema version of dir.
@@ -111,7 +157,7 @@ func run(dir string, migs []Migration) error {
 // records mean a directory written by holzkube before VERSION existed, which
 // is version 1 — not version 0, because no release ever wrote a version 0
 // layout.
-func readVersion(dir string) (int, error) {
+func readVersion(dir string, target int) (int, error) {
 	path := filepath.Join(dir, VersionFileName)
 	raw, err := os.ReadFile(path) //nolint:gosec // migrate is part of the store layer and owns this path
 	switch {
@@ -121,10 +167,10 @@ func readVersion(dir string) (int, error) {
 			return 0, err
 		}
 		if empty {
-			if err := writeVersion(dir, CurrentVersion); err != nil {
+			if err := writeVersion(dir, target); err != nil {
 				return 0, err
 			}
-			return CurrentVersion, nil
+			return target, nil
 		}
 		if err := writeVersion(dir, 1); err != nil {
 			return 0, err
@@ -134,8 +180,12 @@ func readVersion(dir string) (int, error) {
 		return 0, fmt.Errorf("migrate: read %s: %w", path, err)
 	}
 
+	// v < 1, not v < 0: the doc comment above asserts that no release ever
+	// wrote a version 0 layout, and a parser that accepts one contradicts it.
+	// A VERSION of 0 reached the migration loop, matched no step, and was
+	// stamped current — the silent data loss this package exists to prevent.
 	v, err := strconv.Atoi(strings.TrimSpace(string(raw)))
-	if err != nil || v < 0 {
+	if err != nil || v < 1 {
 		return 0, fmt.Errorf("%w: %s contains %q", ErrVersionUnreadable, path, strings.TrimSpace(string(raw)))
 	}
 	return v, nil
