@@ -1,5 +1,7 @@
 package audit
 
+import "context"
+
 // Chain computation and verification.
 //
 // The formula is fixed and was settled by a human decision at the plan 01 gate:
@@ -50,16 +52,41 @@ func ComputeHash(prev string, r Record) (string, error) {
 // to this function that fixes what it finds: the finding stays until the
 // affected file has been dealt with by hand (D-15).
 func Verify(paths []string) (ok bool, file string, line int, err error) {
+	return VerifyContext(context.Background(), paths)
+}
+
+// cancelCheckEvery is how many records pass between cancellation checks. A
+// check per record would cost more than the hash it guards; a check per file
+// would let a single large day file run to completion after the caller left.
+const cancelCheckEvery = 256
+
+// VerifyContext is Verify, abandoned when ctx is done.
+//
+// Verification re-reads and re-hashes every record in the window, so it is the
+// one read in this package whose cost grows with the archive. A caller that
+// has gone away — a disconnected HTTP client, a cancelled startup — should not
+// keep paying for it, and on the request path it holds the append mutex while
+// it runs, so the work it abandons is work the next audit write does not queue
+// behind.
+func VerifyContext(ctx context.Context, paths []string) (ok bool, file string, line int, err error) {
 	prev := ""
 	seeded := false
 
 	for _, p := range paths {
+		if err := ctx.Err(); err != nil {
+			return false, "", 0, err
+		}
 		recs, readErr := readFile(p)
 		if readErr != nil {
 			return false, p, 0, readErr
 		}
 		for i, rec := range recs {
 			at := i + 1
+			if i%cancelCheckEvery == 0 {
+				if err := ctx.Err(); err != nil {
+					return false, "", 0, err
+				}
+			}
 
 			switch {
 			case !seeded:

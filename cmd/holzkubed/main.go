@@ -122,11 +122,15 @@ func run(args []string) error {
 		Auth:       authSvc,
 		Logger:     logger,
 		SudoWindow: cfg.SudoWindow,
+		// Public strips the directory: this verdict is served by an endpoint
+		// that answers before authentication, and chainFile is absolute. The
+		// operator-facing copy of the path is the log line above, which stays
+		// on this host.
 		AuditChain: httpapi.ChainStatus{
 			OK:           chainOK,
 			BrokenAtLine: brokenLine,
 			File:         chainFile,
-		},
+		}.Public(),
 	}
 
 	// The route table is assembled here, from each handler package's own Routes
