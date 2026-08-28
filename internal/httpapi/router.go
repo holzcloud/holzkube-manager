@@ -136,7 +136,7 @@ func (d Deps) fallback(known *http.ServeMux) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if isAPIPath(r.URL.Path) {
 			if _, pattern := known.Handler(r); pattern != "" {
-				WriteProblem(w, r, NotFound("notfound.method",
+				WriteProblem(w, r, MethodNotAllowed(
 					"The path exists but does not accept "+r.Method+"."))
 				return
 			}
