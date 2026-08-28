@@ -69,9 +69,12 @@ func newHarness(t *testing.T) *harness {
 		t.Fatalf("auth.New: %v", err)
 	}
 
-	chainOK, brokenLine, err := al.Verify(context.Background())
+	chainOK, chainFile, brokenLine, err := al.Verify(context.Background())
 	if err != nil {
 		t.Fatalf("audit.Verify: %v", err)
+	}
+	if chainOK {
+		chainFile = al.CurrentFile()
 	}
 
 	deps := httpapi.Deps{
@@ -80,7 +83,7 @@ func newHarness(t *testing.T) *harness {
 		Auth:       au,
 		Logger:     slog.New(slog.NewTextHandler(io.Discard, nil)),
 		SudoWindow: 5 * time.Minute,
-		AuditChain: httpapi.ChainStatus{OK: chainOK, BrokenAtLine: brokenLine, File: al.CurrentFile()},
+		AuditChain: httpapi.ChainStatus{OK: chainOK, BrokenAtLine: brokenLine, File: chainFile},
 	}
 	deps.Routes = slices.Concat(
 		handlers.SystemRoutes(deps),
@@ -309,7 +312,7 @@ func TestEndToEndSetupLoginAudit(t *testing.T) {
 		t.Fatalf("reopen audit log: %v", err)
 	}
 	defer verifier.Close()
-	ok, brokenLine, err := verifier.Verify(context.Background())
+	ok, _, brokenLine, err := verifier.Verify(context.Background())
 	if err != nil {
 		t.Fatalf("verify chain: %v", err)
 	}

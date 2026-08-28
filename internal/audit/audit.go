@@ -1,21 +1,23 @@
 // Package audit is holzkube's append-only JSONL log with a hash chain.
 //
-// It is called by middleware; it never reads an HTTP request. Rotation, gzip of
-// older files, verification of rotated files and allowlist redaction of params
-// belong to plan 03; this file establishes the format, the chain and the
-// intent/outcome pair.
+// It is called by middleware; it never reads an HTTP request. The format is
+// one record per line -- no indentation, ever. A record that spans several
+// lines has no line number to report, and reporting the line of the first
+// break is how a finding here becomes actionable.
+//
+// Responsibilities are split across four files: record.go owns the closed field
+// set and the canonical form, chain.go the anchor and verification, rotate.go
+// the daily file boundary and compression, query.go the read path. This file
+// owns the writer.
 package audit
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
-	"strings"
 	"sync"
 	"time"
 )
@@ -39,6 +41,10 @@ type Logger struct {
 	seq      uint64
 	lastHash string
 
+	// now is the clock. It is a field so a test can turn the day over without
+	// waiting for midnight; production always gets UTC wall time.
+	now func() time.Time
+
 	// pending links an outcome back to the intent that opened it. The record
 	// format is closed, so the outcome repeats the intent's identifying fields
 	// rather than carrying a reference field that would change the format.
@@ -50,6 +56,10 @@ type Logger struct {
 // Open prepares <dir>/audit and returns a Logger positioned after the last
 // record already on disk.
 func Open(dir string) (*Logger, error) {
+	return open(dir, func() time.Time { return time.Now().UTC() })
+}
+
+func open(dir string, now func() time.Time) (*Logger, error) {
 	if dir == "" {
 		return nil, errors.New("audit: empty data directory")
 	}
@@ -58,78 +68,45 @@ func Open(dir string) (*Logger, error) {
 		return nil, fmt.Errorf("audit: create log directory: %w", err)
 	}
 
-	l := &Logger{dir: logDir, pending: make(map[uint64]Record)}
+	l := &Logger{
+		dir:      logDir,
+		now:      now,
+		lastHash: Genesis,
+		pending:  make(map[uint64]Record),
+	}
 	if err := l.resume(); err != nil {
 		return nil, err
 	}
-	if err := l.openDay(time.Now().UTC()); err != nil {
+	if err := l.openDay(l.now()); err != nil {
 		return nil, err
 	}
 	return l, nil
 }
 
-// resume reads the newest existing file to recover the sequence number and the
-// tail of the chain, so a restart continues the chain instead of forking it.
+// resume recovers the sequence number and the tail of the chain, so a restart
+// continues the chain instead of forking it.
+//
+// It walks backwards past empty files: a day on which the process started and
+// wrote nothing leaves an empty file behind, and stopping at it would reset the
+// chain to the anchor and fork the archive at that seam.
 func (l *Logger) resume() error {
-	files, err := l.files()
+	files, err := allFiles(l.dir)
 	if err != nil {
 		return err
 	}
-	if len(files) == 0 {
-		return nil
-	}
-	recs, err := readFile(files[len(files)-1])
-	if err != nil {
-		return err
-	}
-	if len(recs) == 0 {
-		return nil
-	}
-	last := recs[len(recs)-1]
-	l.seq = last.Seq
-	l.lastHash = last.Hash
-	return nil
-}
-
-// files returns the audit files in ascending date order.
-func (l *Logger) files() ([]string, error) {
-	entries, err := os.ReadDir(l.dir)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return nil, nil
-		}
-		return nil, err
-	}
-	var out []string
-	for _, e := range entries {
-		n := e.Name()
-		if e.IsDir() || !strings.HasPrefix(n, filePrefix) || !strings.HasSuffix(n, fileSuffix) {
-			continue
-		}
-		out = append(out, filepath.Join(l.dir, n))
-	}
-	sort.Strings(out)
-	return out, nil
-}
-
-func (l *Logger) openDay(now time.Time) error {
-	day := now.Format(dayLayout)
-	if l.file != nil && l.day == day {
-		return nil
-	}
-	if l.file != nil {
-		if err := l.file.Close(); err != nil {
+	for i := len(files) - 1; i >= 0; i-- {
+		recs, err := readFile(files[i])
+		if err != nil {
 			return err
 		}
-		l.file = nil
+		if len(recs) == 0 {
+			continue
+		}
+		last := recs[len(recs)-1]
+		l.seq = last.Seq
+		l.lastHash = last.Hash
+		return nil
 	}
-	path := filepath.Join(l.dir, filePrefix+day+fileSuffix)
-	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, filePerm)
-	if err != nil {
-		return fmt.Errorf("audit: open %s: %w", path, err)
-	}
-	l.file = f
-	l.day = day
 	return nil
 }
 
@@ -159,7 +136,7 @@ func (l *Logger) append(rec Record) (Record, error) {
 	if l.closed {
 		return Record{}, errors.New("audit: logger is closed")
 	}
-	now := time.Now().UTC()
+	now := l.now()
 	if err := l.openDay(now); err != nil {
 		return Record{}, err
 	}
@@ -167,11 +144,14 @@ func (l *Logger) append(rec Record) (Record, error) {
 	rec.Seq = l.seq + 1
 	rec.TS = now
 	rec.PrevHash = l.lastHash
+	// Shortening here rather than at the call site is the point: no caller can
+	// forget, and the log therefore cannot hold a usable session token.
+	rec.Session = ShortSession(rec.Session)
 	if rec.Params == nil {
 		rec.Params = map[string]any{}
 	}
 
-	hash, err := rec.ComputeHash()
+	hash, err := ComputeHash(rec.PrevHash, rec)
 	if err != nil {
 		return Record{}, fmt.Errorf("audit: hash record: %w", err)
 	}
@@ -216,8 +196,11 @@ func (l *Logger) Attempt(_ context.Context, rec Record) (uint64, error) {
 //
 // It repeats the attempt's identifying fields. Params on the outcome carry only
 // the failure reason, if any: the input parameters were already recorded by the
-// attempt, and repeating them would double the surface that plan 03's redaction
-// has to cover.
+// attempt, and repeating them would double the surface redaction has to cover.
+//
+// There is no path that completes an attempt after the fact. An attempt with no
+// outcome means the process did not survive the action, which is a finding and
+// is left standing as one.
 func (l *Logger) Outcome(_ context.Context, seq uint64, outcome string, cause error) error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -248,7 +231,7 @@ func (l *Logger) Outcome(_ context.Context, seq uint64, outcome string, cause er
 }
 
 // List returns the records of the current day's file, newest first.
-// Filtering and pagination land in plan 03.
+// Filtering and pagination are Query's job.
 func (l *Logger) List(_ context.Context) ([]Record, error) {
 	path := l.CurrentFile()
 
@@ -265,66 +248,26 @@ func (l *Logger) List(_ context.Context) ([]Record, error) {
 	return recs, nil
 }
 
-// Verify recomputes the chain over the current day's file. It reports the
-// 1-based line number of the first record that does not verify.
+// Verify recomputes the chain over the current day's file and the one rotated
+// before it, and reports the file and 1-based line of the first break (D-15).
+//
+// Two files rather than the whole archive is the deliberate scope: it is what
+// can be checked at every start without the cost growing with the archive, and
+// it is enough to catch damage done since yesterday. Verifying further back is
+// what the file list of Verify is for.
 //
 // A chain nobody checks is theatre, so this runs at startup rather than behind
-// a button (D-15). Plan 03 extends it across the most recently rotated file.
-func (l *Logger) Verify(_ context.Context) (bool, int, error) {
-	path := l.CurrentFile()
-
+// a button. Nothing here repairs what it finds.
+func (l *Logger) Verify(_ context.Context) (ok bool, file string, line int, err error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
-	recs, err := readFile(path)
+	files, err := allFiles(l.dir)
 	if err != nil {
-		return false, 0, err
+		return false, "", 0, err
 	}
-
-	prev := ""
-	for i, rec := range recs {
-		if rec.PrevHash != prev {
-			return false, i + 1, nil
-		}
-		want, err := rec.ComputeHash()
-		if err != nil {
-			return false, i + 1, err
-		}
-		if want != rec.Hash {
-			return false, i + 1, nil
-		}
-		prev = rec.Hash
+	if len(files) > 2 {
+		files = files[len(files)-2:]
 	}
-	return true, 0, nil
-}
-
-// readFile decodes every line of an audit file in write order.
-func readFile(path string) ([]Record, error) {
-	f, err := os.Open(path) //nolint:gosec // audit owns its own log directory
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return nil, nil
-		}
-		return nil, err
-	}
-	defer f.Close()
-
-	var out []Record
-	sc := bufio.NewScanner(f)
-	sc.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
-	for sc.Scan() {
-		line := strings.TrimSpace(sc.Text())
-		if line == "" {
-			continue
-		}
-		var rec Record
-		if err := json.Unmarshal([]byte(line), &rec); err != nil {
-			return nil, fmt.Errorf("audit: decode %s line %d: %w", filepath.Base(path), len(out)+1, err)
-		}
-		out = append(out, rec)
-	}
-	if err := sc.Err(); err != nil {
-		return nil, err
-	}
-	return out, nil
+	return Verify(files)
 }
