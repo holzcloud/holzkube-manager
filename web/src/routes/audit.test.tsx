@@ -141,9 +141,15 @@ describe('AuditView', () => {
     expect(details.getByText('"holz"')).toBeInTheDocument()
   })
 
-  it('marks an intent that never got an outcome', async () => {
+  it('marks an intent whose successor is not its outcome', async () => {
+    // seq 6 is an attempt and seq 7 is a different action, so 6's outcome was
+    // never written: the process did not survive the action.
     stubAudit({
-      items: [record(6, { action: 'account.password', outcome: 'attempt' }), record(5)],
+      items: [
+        record(7, { action: 'auth.login', outcome: 'attempt' }),
+        record(6, { action: 'account.password', outcome: 'attempt' }),
+        record(5),
+      ],
       next_cursor: null,
     })
 
@@ -151,6 +157,61 @@ describe('AuditView', () => {
 
     const row = await screen.findByRole('button', { name: 'Record 6: account.password' })
     expect(within(row).getByText('attempt — no outcome')).toBeInTheDocument()
+  })
+
+  it('does not mark an attempt whose outcome follows it', async () => {
+    // The writer appends the outcome with the next sequence number and repeats
+    // the attempt's action, which is the pair this looks for.
+    stubAudit({
+      items: [
+        record(7, { action: 'account.password', outcome: 'error' }),
+        record(6, { action: 'account.password', outcome: 'attempt' }),
+      ],
+      next_cursor: null,
+    })
+
+    renderAudit()
+
+    const row = await screen.findByRole('button', { name: 'Record 6: account.password' })
+    expect(within(row).queryByText('attempt — no outcome')).not.toBeInTheDocument()
+  })
+
+  it('still marks an orphan when a later record repeats the same action', async () => {
+    // The old predicate asked whether *any* later record shared the action, so
+    // a genuinely orphaned auth.login stopped being flagged the moment the
+    // next login appeared -- which the very next login produces.
+    stubAudit({
+      items: [
+        record(8, { action: 'auth.login', outcome: 'success' }),
+        record(7, { action: 'auth.login', outcome: 'attempt' }),
+        record(6, { action: 'auth.login', outcome: 'attempt' }),
+      ],
+      next_cursor: null,
+    })
+
+    renderAudit()
+
+    // seq 6's successor is another attempt, so 6 never got its outcome.
+    const orphan = await screen.findByRole('button', { name: 'Record 6: auth.login' })
+    expect(within(orphan).getByText('attempt — no outcome')).toBeInTheDocument()
+
+    // seq 7 is properly paired with the success at seq 8.
+    const paired = await screen.findByRole('button', { name: 'Record 7: auth.login' })
+    expect(within(paired).queryByText('attempt — no outcome')).not.toBeInTheDocument()
+  })
+
+  it('does not claim an orphan for the newest record, whose outcome may be in flight', async () => {
+    stubAudit({
+      items: [record(6, { action: 'account.password', outcome: 'attempt' }), record(5)],
+      next_cursor: null,
+    })
+
+    renderAudit()
+
+    // Not loaded yet is not the same as absent: the record that would disprove
+    // the orphan is simply not in hand.
+    const row = await screen.findByRole('button', { name: 'Record 6: account.password' })
+    expect(within(row).queryByText('attempt — no outcome')).not.toBeInTheDocument()
   })
 
   it('offers paging for a numeric next_cursor and calls back with exactly that cursor', async () => {
