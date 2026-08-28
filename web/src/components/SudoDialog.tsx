@@ -39,10 +39,22 @@ export function SudoDialog() {
 
   useEffect(() => {
     onSudoRequired((next) => {
-      settled.current = false
+      setChallenge((current) => {
+        // A challenge that is being displaced is a challenge that was refused.
+        // Resetting `settled` without settling the outgoing one first left its
+        // `askForSudo` promise unresolved forever: `send` never returned, the
+        // caller's `await` hung for the life of the page, and there was no
+        // error and no toast to show for it -- only a spinner that never
+        // stopped. One destructive route exists today, so a single page cannot
+        // reach this yet; phase 6's node actions gate through this same dialog.
+        if (current !== null && !settled.current) {
+          current.settle(false)
+        }
+        settled.current = false
+        return next
+      })
       setPassword('')
       setMessage('')
-      setChallenge(next)
     })
     return () => onSudoRequired(null)
   }, [])
