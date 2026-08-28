@@ -237,24 +237,6 @@ func (l *Logger) Outcome(_ context.Context, seq uint64, outcome string, cause er
 	return err
 }
 
-// List returns the records of the current day's file, newest first.
-// Filtering and pagination are Query's job.
-func (l *Logger) List(_ context.Context) ([]Record, error) {
-	path := l.CurrentFile()
-
-	l.mu.Lock()
-	defer l.mu.Unlock()
-
-	recs, err := readFile(path)
-	if err != nil {
-		return nil, err
-	}
-	for i, j := 0, len(recs)-1; i < j; i, j = i+1, j-1 {
-		recs[i], recs[j] = recs[j], recs[i]
-	}
-	return recs, nil
-}
-
 // Verify recomputes the chain over the current day's file and the one rotated
 // before it, and reports the file and 1-based line of the first break (D-15).
 //
