@@ -4,7 +4,9 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -195,4 +197,65 @@ func snapshot(t *testing.T, dir string) map[string]string {
 		out[p] = string(raw)
 	}
 	return out
+}
+
+// TestVerifyReportsTheFileLineNotTheRecordIndex is what makes a finding
+// actionable. The package doc justifies JSONL on exactly this ground, the API
+// contract promises a 1-based line number, and the banner tells the operator
+// "line N of <file>" and expects them to go and look.
+//
+// readFile skips blank lines, so reporting the slice index sent them to the
+// wrong record -- while they were investigating tampering.
+func TestVerifyReportsTheFileLineNotTheRecordIndex(t *testing.T) {
+	dir := t.TempDir()
+	clk := newClock(t)
+	l := openAt(t, dir, clk)
+
+	for i := range 3 {
+		if _, err := l.Attempt(context.Background(), Record{
+			Actor:  "holz",
+			Action: fmt.Sprintf("account.password%d", i+1),
+		}); err != nil {
+			t.Fatalf("attempt: %v", err)
+		}
+	}
+	path := l.CurrentFile()
+	if err := l.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	lines := strings.Split(strings.TrimRight(string(raw), "\n"), "\n")
+	if len(lines) != 3 {
+		t.Fatalf("expected 3 records, got %d", len(lines))
+	}
+
+	// Two blank lines before the last record, and then tamper with it. The
+	// record is the 3rd record but the 5th line.
+	tampered := strings.Replace(lines[2], `"actor":"holz"`, `"actor":"mallory"`, 1)
+	if tampered == lines[2] {
+		t.Fatal("test did not tamper with anything; the record shape changed")
+	}
+	body := lines[0] + "\n" + lines[1] + "\n\n\n" + tampered + "\n"
+	if err := os.WriteFile(path, []byte(body), filePerm); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	ok, file, line, err := Verify([]string{path})
+	if err != nil {
+		t.Fatalf("Verify: %v", err)
+	}
+	if ok {
+		t.Fatal("Verify missed a rewritten actor")
+	}
+	if filepath.Base(file) != filepath.Base(path) {
+		t.Errorf("file = %q, want %q", file, path)
+	}
+	if line != 5 {
+		t.Errorf("broken_at_line = %d, want 5: the tampered record is on line 5 of the file, "+
+			"and is only the 3rd record because two blank lines precede it", line)
+	}
 }
