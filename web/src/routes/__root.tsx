@@ -5,7 +5,7 @@ import { AppShell } from '@/components/AppShell'
 import { SessionExpiryWatcher, SudoDialog } from '@/components/SudoDialog'
 import { notify, Toaster } from '@/components/Toaster'
 import { applyTheme, resolveTheme } from '@/hooks/useTheme'
-import { messageFor, type Problem, ProblemError } from '@/lib/problem'
+import type { Problem } from '@/lib/problem'
 import { ErrorPage } from '@/routes/error'
 
 /**
@@ -35,10 +35,18 @@ function RootLayout() {
   }, [])
 
   const onExpired = useCallback(
-    (problem: Problem) => {
+    (_problem: Problem) => {
       // Everything cached was read with a session that no longer exists.
       queryClient.clear()
-      notify.info('Your session ended.', messageFor(new ProblemError(problem)))
+      // UAT G-01-5: this used to lead with the same sentence the login card
+      // already shows, and then append the generic auth.* message -- which
+      // raises rejected credentials at a moment when nothing was rejected. The
+      // destination explains itself; the toast only has to say why the screen
+      // changed under the operator.
+      notify.info(
+        'Signed out automatically',
+        'Your session reached its limit while you were working.',
+      )
       void navigate({ to: '/login', search: { reason: 'expired' }, replace: true })
     },
     [navigate],
@@ -57,7 +65,7 @@ function RootLayout() {
 export const rootRoute = createRootRoute({
   component: RootLayout,
   errorComponent: ErrorPage,
-  notFoundComponent: () => <ErrorPage error={new Error('This page does not exist.')} />,
+  notFoundComponent: () => <ErrorPage notFound error={new Error('This page does not exist.')} />,
 })
 
 /**

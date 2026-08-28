@@ -76,7 +76,15 @@ function SetupPage() {
   }
 
   return (
-    <div className="flex min-h-dvh items-center justify-center p-6">
+    <div className="flex min-h-dvh flex-col items-center justify-center gap-6 p-6">
+      {/* UAT G-01-5: the first screen of the install named nothing. The login
+          card at least says "holzkube" in its own copy; setup said only
+          "Create the operator account", so the very first thing an operator
+          sees never identified the system they were configuring. */}
+      <div className="text-center">
+        <span className="font-heading text-xl font-semibold tracking-tight">holzkube</span>
+        <p className="text-sm text-muted-foreground">Talos cluster management</p>
+      </div>
       <Card className="w-full max-w-md">
         <CardHeader>
           <CardTitle>Create the operator account</CardTitle>

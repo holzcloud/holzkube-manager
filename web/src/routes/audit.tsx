@@ -167,7 +167,11 @@ function AuditView() {
           applyFilters()
         }}
       >
-        <div className="space-y-1">
+        {/* gap-1 rather than space-y-1: space-y targets :not(:last-child), and
+            Radix's hidden native <select> makes the Action trigger a non-last
+            child, so that field alone collected a 4px bottom margin and floated
+            off the row's baseline. A flex gap ignores out-of-flow children. */}
+        <div className="flex flex-col gap-1">
           <Label htmlFor="audit-from">From</Label>
           <Input
             id="audit-from"
@@ -177,7 +181,7 @@ function AuditView() {
           />
         </div>
 
-        <div className="space-y-1">
+        <div className="flex flex-col gap-1">
           <Label htmlFor="audit-to">To</Label>
           <Input
             id="audit-to"
@@ -187,7 +191,7 @@ function AuditView() {
           />
         </div>
 
-        <div className="space-y-1">
+        <div className="flex flex-col gap-1">
           <Label htmlFor="audit-action">Action</Label>
           <Select
             value={draft.action === '' ? ALL_ACTIONS : draft.action}
@@ -195,7 +199,7 @@ function AuditView() {
               setDraft({ ...draft, action: value === ALL_ACTIONS ? '' : value })
             }
           >
-            <SelectTrigger id="audit-action" className="w-56">
+            <SelectTrigger id="audit-action" className="h-8 w-56">
               <SelectValue placeholder="Any action" />
             </SelectTrigger>
             <SelectContent>
