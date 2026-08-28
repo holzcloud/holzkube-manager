@@ -294,6 +294,12 @@ func TestEndToEndSetupLoginAudit(t *testing.T) {
 		t.Errorf("newest record action = %q, want auth.login", got)
 	}
 
+	// --- 4b. The one thing that must never be in the file is not in the file.
+	// This reads the raw bytes rather than the decoded records: a leak that got
+	// past redaction would still be a leak if it were nested somewhere the
+	// struct does not model.
+	assertAuditFileHoldsNoSecret(t, h, afterLogin)
+
 	// --- 5. The chain over what was just written verifies, both via the API and directly.
 	resp, raw = h.do(t, http.MethodGet, "/api/v1/system/status", nil)
 	if err := json.Unmarshal(raw, &st); err != nil {
@@ -479,4 +485,37 @@ func findRawField(t *testing.T, raw []byte, field string) (json.RawMessage, bool
 	}
 	v, ok := m[field]
 	return v, ok
+}
+
+// assertAuditFileHoldsNoSecret reads the day file as bytes and fails if the
+// password, or a usable session token, survived into it. D-16 keeps the file
+// forever, so anything written here is written permanently (T-01-16).
+func assertAuditFileHoldsNoSecret(t *testing.T, h *harness, sessionToken string) {
+	t.Helper()
+
+	raw, err := os.ReadFile(h.logger.CurrentFile()) //nolint:gosec // test-owned temp dir
+	if err != nil {
+		t.Fatalf("read audit file: %v", err)
+	}
+	body := string(raw)
+
+	if strings.Contains(body, testPass) {
+		t.Fatalf("the operator password is in the audit log")
+	}
+	if sessionToken != "" && strings.Contains(body, sessionToken) {
+		t.Fatalf("a live session token is in the audit log")
+	}
+	if !strings.Contains(body, `"password":"<redacted>"`) {
+		t.Errorf("no redaction marker in the log; the body was not captured at all:\n%s", body)
+	}
+	if !strings.Contains(body, `"username":"`+testUser+`"`) {
+		t.Errorf("the allowlisted username did not survive into the log:\n%s", body)
+	}
+	// JSONL: every line is a whole record on its own.
+	for i, line := range strings.Split(strings.TrimSpace(body), "\n") {
+		var rec audit.Record
+		if err := json.Unmarshal([]byte(line), &rec); err != nil {
+			t.Errorf("line %d is not a complete record: %v", i+1, err)
+		}
+	}
 }

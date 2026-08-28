@@ -168,7 +168,7 @@ type auditAdapter struct {
 	deps Deps
 }
 
-func (a auditAdapter) Attempt(ctx context.Context, action, srcIP string) (uint64, error) {
+func (a auditAdapter) Attempt(ctx context.Context, action, srcIP string, params map[string]any) (uint64, error) {
 	if a.deps.Audit == nil {
 		return 0, errors.New("httpapi: audit log is not configured")
 	}
@@ -176,16 +176,16 @@ func (a auditAdapter) Attempt(ctx context.Context, action, srcIP string) (uint64
 	if u, ok := a.deps.Auth.CurrentUser(ctx); ok {
 		actor = u.Username
 	}
+	// params arrives already redacted: the middleware runs every captured body
+	// through the allowlist before it gets here, and there is no path that
+	// reaches this call with raw input. The session token is shortened inside
+	// the audit package, where no caller can forget to do it.
 	return a.deps.Audit.Attempt(ctx, audit.Record{
 		Actor:   actor,
 		Session: a.deps.Auth.SessionID(ctx),
 		SrcIP:   srcIP,
 		Action:  action,
-		// Input parameters are deliberately not captured here. Capturing them
-		// before allowlist redaction exists would write the setup and login
-		// passwords straight into an append-only log that is kept forever
-		// (D-16). Plan 03 adds the redactor and the capture together.
-		Params: map[string]any{},
+		Params:  params,
 	})
 }
 
