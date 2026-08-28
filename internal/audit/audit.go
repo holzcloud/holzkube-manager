@@ -12,6 +12,7 @@
 package audit
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -157,13 +158,19 @@ func (l *Logger) append(rec Record) (Record, error) {
 	}
 	rec.Hash = hash
 
-	line, err := json.Marshal(rec)
-	if err != nil {
+	// The written line is JSONL: exactly one record, no indentation, and no
+	// HTML escaping -- an operator greps this file, and "\u003credacted\u003e"
+	// helps nobody. The written form is free to differ from the canonical form
+	// the hash was taken over, because verification decodes the line back into
+	// a record and re-canonicalizes it rather than comparing bytes.
+	var line bytes.Buffer
+	enc := json.NewEncoder(&line)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(rec); err != nil {
 		return Record{}, fmt.Errorf("audit: encode record: %w", err)
 	}
-	line = append(line, '\n')
 
-	if _, err := l.file.Write(line); err != nil {
+	if _, err := l.file.Write(line.Bytes()); err != nil {
 		return Record{}, fmt.Errorf("audit: append record: %w", err)
 	}
 	// fsync per record. The volume is a handful per minute at most, and an
