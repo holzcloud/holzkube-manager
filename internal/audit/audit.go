@@ -216,8 +216,39 @@ func (l *Logger) Attempt(_ context.Context, rec Record) (uint64, error) {
 	if err != nil {
 		return 0, err
 	}
+	l.evictStalePending(written.TS)
 	l.pending[written.Seq] = written
 	return written.Seq, nil
+}
+
+// pendingTTL is how long an attempt waits for its outcome before the in-memory
+// correlation entry is dropped.
+//
+// An outcome arrives within one request, so anything older than this is not
+// going to be completed: the panic path deliberately never writes one, which is
+// the shape a post-mortem looks for. Generous enough that no live request is
+// ever evicted, short enough that the map cannot grow for the life of a
+// process.
+const pendingTTL = 5 * time.Minute
+
+// evictStalePending drops correlation entries no outcome will ever claim.
+//
+// The audit middleware does not defer the outcome write, on purpose, so a
+// handler panic leaves the entry behind -- and each one holds a whole Record
+// including its Params map. The Recover link exists because panics are expected
+// to happen, which makes that a repeatable allocation a caller with a session
+// can drive. store.EntityLocks refcounts the same shape for the same reason.
+//
+// Dropping the entry costs nothing the design wanted: the un-outcomed intent is
+// already durable on disk, and that record is the signal, not this map.
+//
+// The caller holds l.mu.
+func (l *Logger) evictStalePending(now time.Time) {
+	for seq, rec := range l.pending {
+		if now.Sub(rec.TS) > pendingTTL {
+			delete(l.pending, seq)
+		}
+	}
 }
 
 // Outcome writes the result record for a previously recorded attempt.
