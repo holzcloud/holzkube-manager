@@ -10,6 +10,17 @@ import (
 	"github.com/holzcloud/holzkube/internal/store"
 )
 
+// setInterrupt arms the crash hook for the duration of one test. It lives in a
+// test file so that no production build can reach it and so that atomic.go
+// does not import testing.
+func setInterrupt(t *testing.T, p interruptPoint) {
+	t.Helper()
+	interruptAfter.Store(int32(p))
+	t.Cleanup(clearInterrupt)
+}
+
+func clearInterrupt() { interruptAfter.Store(int32(interruptNone)) }
+
 // tempFilesIn reports every leftover temporary record under dir.
 func tempFilesIn(t *testing.T, dir string) []string {
 	t.Helper()

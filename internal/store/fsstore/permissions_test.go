@@ -204,7 +204,9 @@ func TestNoDirectFileAccessOutsideFsstore(t *testing.T) {
 	}
 
 	var violations []string
+	scanned := 0
 	scan := func(path string, exempt bool) {
+		scanned++
 		fset := token.NewFileSet()
 		file, err := parser.ParseFile(fset, path, nil, 0)
 		if err != nil {
@@ -261,6 +263,13 @@ func TestNoDirectFileAccessOutsideFsstore(t *testing.T) {
 	// separately that the seam itself stays clean: store.go declares the
 	// interface and must not touch a file.
 	scan(filepath.Join(root, "internal", "store", "store.go"), false)
+
+	// A guard that scans nothing passes for the wrong reason. If the relative
+	// path to the repository root ever breaks, this catches it instead of
+	// letting the architecture rule quietly stop being enforced.
+	if scanned < 15 {
+		t.Fatalf("scanned only %d source files; the guard is not reaching the tree (root %q)", scanned, root)
+	}
 
 	if len(violations) > 0 {
 		t.Fatalf("direct filesystem access outside the store implementation:\n  %s\n\n"+

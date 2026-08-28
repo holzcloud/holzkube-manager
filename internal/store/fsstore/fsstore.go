@@ -70,6 +70,14 @@ func Open(dir string) (s *Store, err error) {
 		}
 	}()
 
+	if err := Guard(abs); err != nil {
+		return nil, err
+	}
+
+	if err := sweepTempFiles(abs); err != nil {
+		return nil, err
+	}
+
 	if err := migrate.Run(abs); err != nil {
 		return nil, err
 	}
