@@ -115,6 +115,9 @@ func New(d Deps) http.Handler {
 	mux.Handle("/", d.fallback(known))
 
 	outer := middleware.Chain(
+		// Outermost, so it covers the file server and the problem responses
+		// the links below produce as well as the handlers.
+		middleware.SecurityHeaders(ContentSecurityPolicy()),
 		middleware.Recover(d.Logger, func(w http.ResponseWriter, r *http.Request, err error) {
 			WriteInternal(w, r, d.Logger, err)
 		}),
