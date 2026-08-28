@@ -43,6 +43,24 @@ type Record struct {
 	Hash      string         `json:"hash"`
 }
 
+// sessionPrefix is how much of a session token survives into a record.
+const sessionPrefix = 8
+
+// ShortSession truncates a session token to a correlation handle.
+//
+// The full token is a live credential. Writing it into a log that is kept
+// forever (D-16) would turn the archive into a store of every session that ever
+// existed, which is exactly the "the log itself becomes the secret store"
+// outcome D-14 forbids. Eight characters of a 256-bit token are far too few to
+// guess the rest and quite enough to tell two sessions apart, which is all the
+// forensic question needs.
+func ShortSession(token string) string {
+	if len(token) <= sessionPrefix {
+		return token
+	}
+	return token[:sessionPrefix] + "…"
+}
+
 // canonicalTS is the one true timestamp rendering for both the written line and
 // the hashed bytes. Round-tripping through it is stable: format -> parse ->
 // format yields the identical string.

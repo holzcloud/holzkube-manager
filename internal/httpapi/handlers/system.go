@@ -33,12 +33,18 @@ func SystemRoutes(d httpapi.Deps) []httpapi.Route {
 				// while the process runs is not hidden until the next restart.
 				chain := d.AuditChain
 				if chain.OK && d.Audit != nil {
-					ok, line, err := d.Audit.Verify(r.Context())
+					ok, file, line, err := d.Audit.Verify(r.Context())
 					if err != nil {
 						httpapi.WriteInternal(w, r, d.Logger, err)
 						return
 					}
-					chain = httpapi.ChainStatus{OK: ok, BrokenAtLine: line, File: d.Audit.CurrentFile()}
+					// A clean chain names the file that was checked; a broken
+					// one names the file the break is in, which is the file the
+					// operator has to deal with by hand.
+					if ok {
+						file = d.Audit.CurrentFile()
+					}
+					chain = httpapi.ChainStatus{OK: ok, BrokenAtLine: line, File: file}
 				}
 
 				writeJSON(w, http.StatusOK, systemStatus{
