@@ -44,16 +44,22 @@ export const REDACTED_MARKER = '<redacted>'
 
 const ALL_ACTIONS = '__all__'
 
-/** The action tokens `docs/api-contract.md` § Routes currently defines. */
+/**
+ * The *mutating* action tokens `docs/api-contract.md` § Routes defines.
+ *
+ * Read-only routes are deliberately absent. The audit middleware returns the
+ * handler unwrapped when the request is not mutating, so no record with an
+ * `auth.me`, `audit.list` or `system.status` action is ever written. Offering
+ * them as filters produced the empty state -- "No audit records match these
+ * filters. The log itself is untouched" -- which reads as a fact about the
+ * operator's activity rather than a fact about the filter.
+ */
 const ACTION_TOKENS = [
   'setup.create',
   'auth.login',
   'auth.logout',
-  'auth.me',
   'auth.sudo',
   'account.password',
-  'audit.list',
-  'system.status',
 ] as const
 
 interface Filters {
@@ -103,7 +109,22 @@ function AuditView() {
     queryKey: ['audit', filters, cursor],
     queryFn: async () => {
       const result = await api.audit(queryFor(filters, cursor))
-      setPages((previous) => (cursor === null ? [result.items] : [...previous, result.items]))
+      // Merged by seq rather than appended. A queryFn is not guaranteed to run
+      // once per logical page: the root client sets refetchOnWindowFocus with a
+      // 5s staleTime and StrictMode is on, so switching browser tabs and back
+      // re-ran this with a non-null cursor and appended the same page again.
+      // records = pages.flat() then held every record of that page twice,
+      // rendered with key={record.seq} -- duplicate React keys, and a forensic
+      // table showing the same event twice. isOrphanedIntent reads the same
+      // array, so the duplicates also changed which rows were flagged.
+      setPages((previous) => {
+        if (cursor === null) {
+          return [result.items]
+        }
+        const seen = new Set(previous.flat().map((record) => record.seq))
+        const fresh = result.items.filter((record) => !seen.has(record.seq))
+        return fresh.length === 0 ? previous : [...previous, fresh]
+      })
       return result
     },
   })
@@ -244,12 +265,27 @@ function AuditView() {
  * An intent with no matching outcome means the process did not survive the
  * action. It is the forensically interesting case, so it is marked rather than
  * left to be spotted by reading sequence numbers.
+ *
+ * The pairing is on the immediate successor, because that is how the writer
+ * emits them: `Outcome` appends the outcome with the next sequence number and
+ * repeats the attempt's identifying fields. Asking instead whether *any* later
+ * record shares the action hid real orphans -- a genuinely orphaned
+ * `auth.login` stopped being flagged as soon as the next login appeared, and
+ * with two interleaved attempts for one action neither was flagged even though
+ * one of them was orphaned. Silently not showing findings is worse than not
+ * having the feature.
  */
 function isOrphanedIntent(record: AuditRecord, all: AuditRecord[]): boolean {
   if (record.outcome !== 'attempt') {
     return false
   }
-  return !all.some((other) => other.seq > record.seq && other.action === record.action)
+  const successor = all.find((other) => other.seq === record.seq + 1)
+  // Not loaded yet is not the same as absent: only claim an orphan when the
+  // record that would disprove it is in hand.
+  if (successor === undefined) {
+    return false
+  }
+  return successor.action !== record.action || successor.outcome === 'attempt'
 }
 
 function targetOf(record: AuditRecord): string {
