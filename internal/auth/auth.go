@@ -1,5 +1,10 @@
-// Package auth owns password verification, the session lifecycle and the
-// sudo-mode window. It knows nothing about Talos and nothing about HTTP.
+// Package auth owns password verification, the session lifecycle, the sudo-mode
+// window and the login rate limit. It knows nothing about Talos and nothing
+// about HTTP.
+//
+// The file split follows the four concerns: argon.go is the cost of a password,
+// session.go is how long an identity lasts, sudo.go is what a valid session is
+// still not allowed to do, and ratelimit.go is how slowly guessing goes.
 package auth
 
 import (
@@ -7,51 +12,36 @@ import (
 	"crypto/subtle"
 	"errors"
 	"fmt"
-	"net/http"
+	"log/slog"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/alexedwards/argon2id"
 	"github.com/alexedwards/scs/v2"
 
-	"github.com/holzcloud/holzkube/internal/auth/scsstore"
 	"github.com/holzcloud/holzkube/internal/model"
 	"github.com/holzcloud/holzkube/internal/store"
 )
 
-// ErrInvalidCredentials is returned for both an unknown username and a wrong
-// password. Callers must not distinguish the two, and neither does this error.
+// ErrInvalidCredentials is returned for an unknown username, a wrong password
+// and a wrong current password on a change. Callers must not distinguish them,
+// and neither does this error.
 var ErrInvalidCredentials = errors.New("auth: invalid credentials")
-
-// CookieName is the session cookie's name.
-const CookieName = "holzkube_session"
-
-const (
-	sessionKeyUser      = "user_id"
-	sessionKeySudoUntil = "sudo_until"
-)
-
-// hashParams targets roughly a quarter second of work on the machines holzkube
-// runs on. The cost is the point: it is what turns an offline-quality brute
-// force back into a slow one. The parameters are stored inside the encoded hash
-// (FOUND-02), so they can be raised later without invalidating any password.
-var hashParams = &argon2id.Params{
-	Memory:      64 * 1024,
-	Iterations:  3,
-	Parallelism: 4,
-	SaltLength:  16,
-	KeyLength:   32,
-}
 
 // Service is the authentication service.
 type Service struct {
-	store store.Store
-	sm    *scs.SessionManager
+	store    store.Store
+	sm       *scs.SessionManager
+	lifetime time.Duration
+
+	// now is the clock. It exists so the absolute session limit and the sudo
+	// window can be tested at the durations they actually run at rather than
+	// at durations chosen to keep a test fast.
+	now func() time.Time
 }
 
 // New builds the service and its session manager. Sessions are absolute-lifetime
-// only (D-07): 24 hours from issue, no sliding idle window.
+// only (D-07): 24 hours from issue, with no sliding window.
 func New(st store.Store, lifetime time.Duration) (*Service, error) {
 	if st == nil {
 		return nil, errors.New("auth: nil store")
@@ -60,36 +50,17 @@ func New(st store.Store, lifetime time.Duration) (*Service, error) {
 		return nil, errors.New("auth: session lifetime must be positive")
 	}
 
-	sm := scs.New()
-	sm.Store = scsstore.New(st.Sessions())
-	sm.Lifetime = lifetime
-	sm.IdleTimeout = 0
-	sm.Cookie.Name = CookieName
-	sm.Cookie.Path = "/"
-	sm.Cookie.HttpOnly = true
-	sm.Cookie.Secure = true
-	sm.Cookie.SameSite = http.SameSiteLaxMode
-	sm.Cookie.Persist = true
+	// Calibrate here rather than lazily on the first login, so the cost is
+	// paid and reported at start instead of showing up as a slow first
+	// request that nobody can explain.
+	_ = ActiveParams()
 
-	return &Service{store: st, sm: sm}, nil
-}
-
-// Sessions exposes the session manager so the HTTP layer can install its
-// load-and-save middleware.
-func (s *Service) Sessions() *scs.SessionManager { return s.sm }
-
-// Hash derives an encoded argon2id hash. The encoded form carries the salt and
-// the cost parameters alongside the digest.
-func Hash(password string) (string, error) {
-	if password == "" {
-		return "", errors.New("auth: empty password")
-	}
-	return argon2id.CreateHash(password, hashParams)
-}
-
-// Verify checks a password against an encoded hash.
-func Verify(password, encodedHash string) (bool, error) {
-	return argon2id.ComparePasswordAndHash(password, encodedHash)
+	return &Service{
+		store:    st,
+		sm:       newSessionManager(st, lifetime),
+		lifetime: lifetime,
+		now:      time.Now,
+	}, nil
 }
 
 // decoyHash is verified against when the username is unknown, so that the
@@ -118,18 +89,12 @@ func (s *Service) FindByUsername(ctx context.Context, username string) (model.Us
 	return model.User{}, store.ErrNotFound
 }
 
-// Login verifies the credentials and, on success, rotates the session id before
-// attaching the identity to it.
-//
-// The order matters: RenewToken first, then write the identity. Renewing after
-// would leave the authenticated identity briefly reachable under the
-// pre-authentication session id, which is the session-fixation hole this is
-// here to close (FOUND-02).
-func (s *Service) Login(ctx context.Context, username, password string) (model.User, error) {
+// verifyPassword checks a password against the one account, spending the same
+// work whether the account exists or not.
+func (s *Service) verifyPassword(ctx context.Context, username, password string) (model.User, error) {
 	u, err := s.FindByUsername(ctx, username)
 	switch {
 	case errors.Is(err, store.ErrNotFound):
-		// Spend the same work as a real verification before failing.
 		if h := decoyHash(); h != "" {
 			_, _ = Verify(password, h)
 		}
@@ -145,12 +110,59 @@ func (s *Service) Login(ctx context.Context, username, password string) (model.U
 	if !ok {
 		return model.User{}, ErrInvalidCredentials
 	}
+	return u, nil
+}
+
+// Login verifies the credentials and, on success, rotates the session id before
+// attaching the identity to it.
+//
+// The order matters: RenewToken first, then write the identity. Renewing after
+// would leave the authenticated identity briefly reachable under the
+// pre-authentication session id, which is the session-fixation hole this is
+// here to close (FOUND-02).
+//
+// A successful login is also the only moment the cleartext password exists in
+// the process, so it is the only moment a hash written with older, cheaper
+// parameters can be upgraded. That is what makes raising the cost a decision
+// rather than a migration.
+func (s *Service) Login(ctx context.Context, username, password string) (model.User, error) {
+	u, err := s.verifyPassword(ctx, username, password)
+	if err != nil {
+		return model.User{}, err
+	}
 
 	if err := s.sm.RenewToken(ctx); err != nil {
 		return model.User{}, fmt.Errorf("auth: rotate session: %w", err)
 	}
-	s.sm.Put(ctx, sessionKeyUser, string(u.ID))
+	s.markAuthenticated(ctx, string(u.ID))
+
+	u = s.rehashIfOutdated(ctx, u, password)
 	return u, nil
+}
+
+// rehashIfOutdated rewrites the stored hash when the active parameters are
+// above the ones it was written with.
+//
+// Failure is logged and swallowed on purpose: the operator has just proved
+// their identity, and refusing the login because a background upgrade lost a
+// revision race would turn a security improvement into an outage.
+func (s *Service) rehashIfOutdated(ctx context.Context, u model.User, password string) model.User {
+	if !NeedsRehash(u.PasswordHash) {
+		return u
+	}
+	hash, err := Hash(password)
+	if err != nil {
+		slog.WarnContext(ctx, "could not rehash the password with the current parameters", slog.Any("error", err))
+		return u
+	}
+	u.PasswordHash = hash
+	updated, err := s.store.Users().Put(ctx, u)
+	if err != nil {
+		slog.WarnContext(ctx, "could not store the rehashed password", slog.Any("error", err))
+		return u
+	}
+	slog.InfoContext(ctx, "password hash upgraded to the current argon2id parameters")
+	return updated
 }
 
 // StartSession attaches an identity to a freshly rotated session without
@@ -160,7 +172,7 @@ func (s *Service) StartSession(ctx context.Context, u model.User) error {
 	if err := s.sm.RenewToken(ctx); err != nil {
 		return fmt.Errorf("auth: rotate session: %w", err)
 	}
-	s.sm.Put(ctx, sessionKeyUser, string(u.ID))
+	s.markAuthenticated(ctx, string(u.ID))
 	return nil
 }
 
@@ -169,10 +181,47 @@ func (s *Service) Logout(ctx context.Context) error {
 	return s.sm.Destroy(ctx)
 }
 
+// ChangePassword replaces the operator's password and invalidates every other
+// session.
+//
+// Keeping the calling session alive is deliberate. A password change in a
+// single-operator tool is nearly always a reaction to a suspicion; logging the
+// operator out of the browser they are fixing things in punishes exactly the
+// right instinct. Every other session goes, because those are the ones that
+// might not be theirs.
+func (s *Service) ChangePassword(ctx context.Context, current, next string) error {
+	u, ok := s.CurrentUser(ctx)
+	if !ok {
+		return ErrInvalidCredentials
+	}
+
+	valid, err := Verify(current, u.PasswordHash)
+	if err != nil {
+		return fmt.Errorf("auth: verify current password: %w", err)
+	}
+	if !valid {
+		return ErrInvalidCredentials
+	}
+
+	hash, err := Hash(next)
+	if err != nil {
+		return err
+	}
+	u.PasswordHash = hash
+	if _, err := s.store.Users().Put(ctx, u); err != nil {
+		return fmt.Errorf("auth: store new password: %w", err)
+	}
+
+	return s.InvalidateAllExcept(ctx, s.sm.Token(ctx))
+}
+
 // CurrentUser returns the authenticated account, if any.
 func (s *Service) CurrentUser(ctx context.Context) (model.User, bool) {
 	id := s.sm.GetString(ctx, sessionKeyUser)
 	if id == "" {
+		return model.User{}, false
+	}
+	if !s.withinAbsoluteLifetime(ctx) {
 		return model.User{}, false
 	}
 	u, err := s.store.Users().Get(ctx, model.UserID(id))
@@ -186,30 +235,6 @@ func (s *Service) CurrentUser(ctx context.Context) (model.User, bool) {
 func (s *Service) IsAuthenticated(ctx context.Context) bool {
 	_, ok := s.CurrentUser(ctx)
 	return ok
-}
-
-// SessionID returns the current session token, for the audit trail.
-func (s *Service) SessionID(ctx context.Context) string {
-	return s.sm.Token(ctx)
-}
-
-// HasSudo reports whether the session is inside its sudo window.
-//
-// Nothing in this plan opens the window: there is no re-authentication endpoint
-// yet, so the gate is fail-closed by construction and plan 04 is what makes it
-// passable. A gate that defaults open until someone remembers to close it is
-// not a gate.
-func (s *Service) HasSudo(ctx context.Context) bool {
-	until := s.sm.GetInt64(ctx, sessionKeySudoUntil)
-	if until == 0 {
-		return false
-	}
-	return time.Now().Before(time.Unix(until, 0))
-}
-
-// GrantSudo opens the sudo window for the given duration.
-func (s *Service) GrantSudo(ctx context.Context, window time.Duration) {
-	s.sm.Put(ctx, sessionKeySudoUntil, time.Now().Add(window).Unix())
 }
 
 func normalizeUsername(s string) string {
