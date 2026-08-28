@@ -102,6 +102,16 @@ func open(dir string, now func() time.Time) (*Logger, error) {
 	if err := l.openDay(l.now()); err != nil {
 		return nil, err
 	}
+
+	// Retry the housekeeping a previous run may have logged and moved past. A
+	// mid-run compression failure must not fail the mutation that crossed
+	// midnight, so it is logged there and the day is never retried by that
+	// process. Here it is: nothing is serving yet, and an archive holzkube
+	// cannot maintain is a legitimate refusal to start rather than a surprise
+	// months later next to the gap it caused.
+	if err := CompressOlderThan(l.dir, keepPlain); err != nil {
+		return nil, fmt.Errorf("audit: compress rotated day files: %w", err)
+	}
 	return l, nil
 }
 

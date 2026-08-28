@@ -23,6 +23,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"sort"
@@ -71,14 +72,22 @@ func (l *Logger) openDay(now time.Time) error {
 	l.day = day
 
 	if rotating {
-		// A failure here is fatal to the write, and therefore to the mutation
-		// that triggered it. That is the same fail-closed stance the rest of
-		// this subsystem takes: if holzkube cannot maintain its own archive --
-		// disk full, permissions changed underneath it -- the operator has to
-		// see that at once, not discover it months later next to the gap it
-		// caused.
+		// Rotation has already succeeded here: l.file and l.day were assigned
+		// above, and the archive is intact and appendable. Compression is
+		// housekeeping on yesterday's files and must not fail the mutation that
+		// happened to cross midnight.
+		//
+		// Returning the error used to look fail-closed and was not. The state
+		// had already advanced, so the next append took the early return at the
+		// top and never attempted compression again: exactly one request failed
+		// with internal.unexpected, at an arbitrary time, every request after it
+		// succeeded, and the compression silently never happened for that day.
+		// One redacted 500 is not "the operator sees it at once"; the log line
+		// below is, and Open retries the housekeeping at the next start, where
+		// a failure is a legitimate refusal to start.
 		if err := CompressOlderThan(l.dir, keepPlain); err != nil {
-			return err
+			slog.Error("audit: could not compress rotated day files",
+				slog.String("dir", l.dir), slog.Any("error", err))
 		}
 	}
 	return nil
