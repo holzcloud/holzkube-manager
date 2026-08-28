@@ -165,3 +165,54 @@ func TestGenerateIsCalledWithAUsableClock(t *testing.T) {
 		t.Errorf("NotBefore is %s, which is not in the past", cert.NotBefore)
 	}
 }
+
+// TestGenerateCoversTheBindAddress is the usability half of D-04: an operator
+// running --listen 192.168.1.5:8443 used to get a SAN mismatch stacked on top
+// of the self-signed warning, which is a second, differently-worded warning the
+// rationale exists to avoid.
+func TestGenerateCoversTheBindAddress(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		bind    string
+		wantIP  string
+		wantDNS string
+	}{
+		{name: "a LAN address", bind: "192.168.1.5", wantIP: "192.168.1.5"},
+		{name: "a name", bind: "homeserver.lan", wantDNS: "homeserver.lan"},
+		{name: "a wildcard is not an address to be reached at", bind: "0.0.0.0"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			certPath, _, _, err := Generate(dir, "homeserver", tc.bind)
+			if err != nil {
+				t.Fatalf("Generate: %v", err)
+			}
+			cert := parseCert(t, certPath)
+
+			// The defaults survive in every case.
+			if !slices.Contains(cert.DNSNames, "localhost") {
+				t.Errorf("DNSNames = %v, want localhost retained", cert.DNSNames)
+			}
+			if !slices.ContainsFunc(cert.IPAddresses, func(ip net.IP) bool {
+				return ip.Equal(net.IPv4(127, 0, 0, 1))
+			}) {
+				t.Errorf("IPAddresses = %v, want the loopback retained", cert.IPAddresses)
+			}
+
+			if tc.wantIP != "" {
+				want := net.ParseIP(tc.wantIP)
+				if !slices.ContainsFunc(cert.IPAddresses, func(ip net.IP) bool { return ip.Equal(want) }) {
+					t.Errorf("IPAddresses = %v, want %s", cert.IPAddresses, tc.wantIP)
+				}
+			}
+			if tc.wantDNS != "" && !slices.Contains(cert.DNSNames, tc.wantDNS) {
+				t.Errorf("DNSNames = %v, want %s", cert.DNSNames, tc.wantDNS)
+			}
+			if tc.bind == "0.0.0.0" {
+				if slices.ContainsFunc(cert.IPAddresses, func(ip net.IP) bool { return ip.IsUnspecified() }) {
+					t.Errorf("IPAddresses = %v, want no wildcard SAN", cert.IPAddresses)
+				}
+			}
+		})
+	}
+}
