@@ -189,6 +189,36 @@ describe('SudoDialog', () => {
     await user.click(screen.getByRole('button', { name: 'Cancel' }))
   })
 
+  it('settles the first challenge when a second one displaces it', async () => {
+    // Two destructive requests 428 while the dialog is open. The registration
+    // handler used to reset `settled` and replace the challenge, dropping the
+    // first caller's `settle` on the floor: its promise never resolved, so the
+    // caller's `await` hung for the life of the page with no error and no
+    // toast. Phase 6's node actions make this reachable from one screen.
+    const fetchMock = recordingFetch(
+      () => problemResponse(428, 'sudo.required', 'This action is destructive.'),
+      () => problemResponse(428, 'sudo.required', 'This action is destructive.'),
+    )
+
+    render(<SudoDialog />)
+
+    const first = api.changePassword('old-password-1', 'new-password-1')
+    const firstSettled = first.catch((error: unknown) => error)
+    await screen.findByRole('dialog')
+
+    const second = api.changePassword('old-password-2', 'new-password-2')
+    const secondSettled = second.catch((error: unknown) => error)
+
+    // The displaced challenge is a refused challenge: its caller is told the
+    // action did not happen instead of waiting forever.
+    await expect(firstSettled).resolves.toMatchObject({ code: 'sudo.required' })
+
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    // The second challenge is the live one and is still awaiting an answer.
+    await screen.findByRole('dialog')
+    void secondSettled
+  })
+
   it('does not prompt for a 428 when nothing is mounted to answer it', async () => {
     const fetchMock = recordingFetch(() =>
       problemResponse(428, 'sudo.required', 'This action is destructive.'),
