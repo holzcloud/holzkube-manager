@@ -10,21 +10,29 @@ and serves an embedded web UI.
 
 ## Build
 
-The frontend must be built before the Go compiler runs: `go:embed` reads
-`internal/httpapi/dist` at compile time, so a missing or stale bundle is
-compiled into the binary. The Taskfile encodes that ordering.
+One command produces the binary:
 
 ```sh
 task build          # builds web, then go, into bin/holzkubed
 ```
 
-Or by hand:
+The frontend is built **before** the Go compiler runs, and that ordering is a
+hard dependency rather than a convention: `go:embed` reads
+`internal/httpapi/dist` at compile time, so a missing or stale bundle is
+compiled into the binary and looks like a frontend bug afterwards. `build:go`
+depends on `build:web` in the Taskfile for exactly this reason.
+
+Without `task`:
 
 ```sh
-npm --prefix web install
+npm --prefix web ci      # ci, not install: builds what the lockfile pins
 npm --prefix web run build
 go build -o bin/holzkubed ./cmd/holzkubed
 ```
+
+Toolchain: Go 1.26.7 (pinned in `go.mod`), Node with npm, and — for the full
+task, lint and release chain — [`go-task`](https://taskfile.dev),
+`golangci-lint` v2.13.1 and `goreleaser` v2.18.0.
 
 ## Run
 
@@ -42,12 +50,24 @@ On first run holzkube generates a long-lived self-signed certificate into the
 data directory and logs its SHA-256 fingerprint:
 
 ```
-level=INFO msg="TLS certificate ready" sha256_fingerprint=ab12… url=https://127.0.0.1:8443
+level=INFO msg="TLS certificate ready" sha256_fingerprint=7B:20:0B:F1:…:F7:99 url=https://127.0.0.1:8443
 ```
 
 Your browser will warn about it. **Compare the fingerprint the browser shows
 against the one in the log before accepting it.** That comparison is the entire
 security value of the warning; clicking through without it accepts anything.
+
+The fingerprint is printed as colon-separated upper-case hex pairs, which is
+what browsers show in their certificate dialog — so the comparison is
+character-by-character with nothing to convert. The same string comes out of:
+
+```sh
+openssl x509 -in "$HOLZKUBE_DATA_DIR/cert.pem" -noout -fingerprint -sha256
+```
+
+The certificate is generated once and reused on every later start, so the
+fingerprint you accepted stays valid. It is a leaf certificate and not a
+certificate authority: it cannot sign anything else.
 
 There is no private CA and nothing is installed into your system trust store.
 To use your own certificate instead, pass `--tls-cert` and `--tls-key`.
@@ -68,10 +88,32 @@ flag > environment > default.
 | `--insecure-http` | `HOLZKUBE_INSECURE_HTTP` | `false` |
 | `--sudo-window` | `HOLZKUBE_SUDO_WINDOW` | `5m` |
 | `--session-lifetime` | `HOLZKUBE_SESSION_LIFETIME` | `24h` |
+| `--log-level` | `HOLZKUBE_LOG_LEVEL` | `info` |
+
+`--version` and `--help` print and exit; the help output is generated from the
+same table as the flags, so it cannot drift from them.
+
+Every option is logged at startup with its effective value **and where that
+value came from**:
+
+```
+level=INFO msg=configuration option=listen      value=127.0.0.1:8443 origin=default
+level=INFO msg=configuration option=sudo-window value=9m0s           origin=environment
+```
+
+A value that does not parse — a duration without a unit, an unknown log level —
+aborts the start with a message naming the option, its origin and the offending
+value. It never falls back to the default: running with a configuration the
+operator believes is in force but is not is the worse failure.
 
 The listener binds loopback by default. Exposing it on all interfaces is an
-explicit decision: a management tool reachable from every device on a flat home
+explicit decision, and it is not refused — but it is logged as a warning at
+every start: a management tool reachable from every device on a flat home
 network is a different security proposition entirely.
+
+`--insecure-http` serves plain HTTP and is **refused unless the bind address is
+loopback**. The session cookie grants access to cluster PKI; it does not cross a
+home network in the clear.
 
 ## Data directory
 
@@ -86,6 +128,50 @@ audit/                 append-only JSONL, one file per day
 ```
 
 It is plain files on purpose: readable, and backed up with `cp`.
+
+The directory is created with `0700` if it does not exist. An existing directory
+is left exactly as it is — the store refuses to start on a data directory that is
+group- or world-accessible, and quietly fixing it would hide the mistake instead
+of reporting it.
+
+### In a container
+
+`HOLZKUBE_DATA_DIR` is the volume path. Mount a named volume or bind mount there,
+give it to the non-root user the container runs as, and nothing else needs
+configuring — every option is an environment variable:
+
+```yaml
+services:
+  holzkube:
+    image: holzkube
+    user: "1000:1000"
+    environment:
+      HOLZKUBE_DATA_DIR: /data
+      HOLZKUBE_LISTEN: 0.0.0.0:8443
+    volumes:
+      - holzkube-data:/data
+    ports:
+      - "8443:8443"
+```
+
+### Blast radius — stated plainly
+
+From phase 2 this directory holds cluster CA **private keys**. Anyone who can
+read it can mint an admin `talosconfig` and an admin `kubeconfig`, and can
+therefore wipe every machine in the cluster. **The holzkube data directory is
+equivalent to root on every managed node.**
+
+Two consequences, neither of which code can fix:
+
+1. The host running holzkube is inside the cluster's trust boundary. It deserves
+   control-plane-grade treatment, not "that Raspberry Pi in the corner".
+2. Compromise of the host is compromise of the cluster. There is no partial
+   credential design that avoids this — generating machine configuration
+   genuinely requires the CA key.
+
+There is no encryption at rest in this version. The honest mitigation is
+full-disk encryption (FileVault, LUKS) plus host hygiene, and saying so is
+better than implying a defence in depth that does not exist.
 
 ## Audit log
 
@@ -102,14 +188,27 @@ only real answer and is not in this version.
 ## Development
 
 ```sh
-go test ./...              # Go tests
-npm --prefix web run lint  # Biome
-task dev                   # Vite dev server, proxying /api to :8443
+task test              # go test ./... -race
+task test:web          # vitest
+task lint              # golangci-lint and Biome
+task fmt               # gofmt and Biome, in place
+task dev               # Vite dev server, proxying /api to :8443
+task clean             # build output, never the tracked dist placeholder
+task release:snapshot  # cross-compiled archives locally, without publishing
 ```
 
 Run `./bin/holzkubed` in one terminal and `task dev` in another; the dev server
 proxies `/api` to `https://127.0.0.1:8443` and accepts the self-signed
 certificate.
+
+### Module layout
+
+`cmd/holzkubed` depends on the light `pkg/machinery` only. The Docker and QEMU
+provisioners live in the Talos **root** module, which pulls in a large part of an
+operating system, so they get their own module under
+[`sandbox/`](sandbox/README.md) — outside the product build and outside
+`go list ./...`. `internal/depguard_test.go` fails the build if a root-module
+package ever reaches `cmd/holzkubed`.
 
 ## Documentation
 
