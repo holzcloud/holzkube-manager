@@ -73,7 +73,7 @@ jobs:
           version: v2.13.1
 
       - name: Test Go
-        run: go test ./...
+        run: go test ./... -count=1 -race
 
   test-macos:
     name: Go tests (macOS)
@@ -88,12 +88,25 @@ jobs:
           go-version-file: go.mod
           cache-dependency-path: go.sum
 
-      # No web build and no Node here. internal/httpapi/dist/.gitkeep is tracked
-      # and the embed pattern is `all:dist`, which matches dotfiles, so the
-      # package compiles without a bundle and no Go test reads one. This job is
-      # about darwin behaviour, not about the UI.
+      # The package COMPILES without a bundle -- internal/httpapi/dist/.gitkeep is
+      # tracked and the embed pattern is `all:dist`, which matches dotfiles -- but
+      # it does not TEST without one. TestCSPHashMatchesTheServedShell and
+      # TestForeignHostIsRefused both GET "/", and serveIndex answers 404 when
+      # dist/index.html is missing, so the bundle has to be built here as well.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Build the web bundle
+        run: npm --prefix web ci && npm --prefix web run build
+
+      # -count=1 -race matches Taskfile's `test` target. Sessions, a hash-chained
+      # audit log and a concurrent file store are exactly what the race detector
+      # is for, and a CI gate weaker than the local one is not a gate.
       - name: Test Go
-        run: go test ./...
+        run: go test ./... -count=1 -race
 
   release:
     name: Release
