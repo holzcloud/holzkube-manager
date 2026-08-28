@@ -204,3 +204,55 @@ func TestLoginRehashesAnOutdatedHash(t *testing.T) {
 		t.Fatalf("upgraded hash rejects the unchanged password: ok=%v err=%v", ok, err)
 	}
 }
+
+// TestNextIterationsHandlesAFailedProbe covers the divisor. measureHash returns
+// 0 when CreateHash fails, deliberately, so that unusable parameters do not
+// read as instant -- but 0 as a divisor yields +Inf, and uint32(+Inf) is
+// implementation-defined. Silently landing on either 0 or 0xFFFFFFFF is not an
+// acceptable outcome for the code that decides how expensive a stolen password
+// hash is to attack.
+func TestNextIterationsHandlesAFailedProbe(t *testing.T) {
+	const target = 250 * time.Millisecond
+
+	for _, tc := range []struct {
+		name     string
+		current  uint32
+		measured time.Duration
+		want     uint32
+	}{
+		{"failed probe steps by one", 4, 0, 5},
+		{"failed probe at the ceiling stays there", maxCalibrationIterations, 0, maxCalibrationIterations},
+		// 10 * 1.2 (margin) * 250/125 = 24.
+		{"half the target doubles, plus the margin", 10, 125 * time.Millisecond, 24},
+		// 10 * 1.2 * 250/300 = 10, which would not advance, so the floor wins.
+		{"a ratio that would not advance still steps by one", 10, 300 * time.Millisecond, 11},
+		{"an absurdly slow measurement clamps", 10, time.Nanosecond, maxCalibrationIterations},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := nextIterations(tc.current, tc.measured, target)
+			if got != tc.want {
+				t.Errorf("nextIterations(%d, %v, %v) = %d, want %d",
+					tc.current, tc.measured, target, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestNextIterationsAlwaysTerminates is the property the search depends on:
+// every step advances, and nothing exceeds the ceiling.
+func TestNextIterationsAlwaysTerminates(t *testing.T) {
+	measurements := []time.Duration{0, time.Nanosecond, time.Millisecond, 249 * time.Millisecond}
+	for _, m := range measurements {
+		for _, current := range []uint32{1, 4, 100, maxCalibrationIterations - 1, maxCalibrationIterations} {
+			got := nextIterations(current, m, 250*time.Millisecond)
+			if got > maxCalibrationIterations {
+				t.Errorf("nextIterations(%d, %v) = %d, above the ceiling %d",
+					current, m, got, maxCalibrationIterations)
+			}
+			if current < maxCalibrationIterations && got <= current {
+				t.Errorf("nextIterations(%d, %v) = %d, which does not advance the search",
+					current, m, got)
+			}
+		}
+	}
+}
