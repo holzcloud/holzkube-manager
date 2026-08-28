@@ -19,6 +19,7 @@ package audit
 
 import (
 	"encoding/json"
+	"slices"
 	"strings"
 	"unicode/utf8"
 )
@@ -61,14 +62,21 @@ var allowlist = map[string][]string{
 // on purpose: forgetting to extend the allowlist costs a useful record, while
 // the opposite default would cost a secret.
 func Params(action string, raw map[string]any) map[string]any {
-	permitted := make(map[string]struct{}, len(allowlist[action]))
+	// Allowlist entries are authored as dotted paths and are split into
+	// segments here, because a dot in the table means "descend" while a dot in
+	// a JSON key is just a character. Comparing the joined strings conflated
+	// the two: an entry "user.name", meant to permit {"user":{"name":...}},
+	// also permitted a body sending the flat key {"user.name": "..."}. JSON
+	// object keys may contain dots and readBody decodes whatever arrives, so
+	// the two namespaces have to be kept apart.
+	permitted := make([][]string, 0, len(allowlist[action]))
 	for _, f := range allowlist[action] {
-		permitted[f] = struct{}{}
+		permitted = append(permitted, strings.Split(f, "."))
 	}
 
 	out := make(map[string]any, len(raw))
 	for k, v := range raw {
-		out[k] = redactValue(k, permitted, v)
+		out[k] = redactValue([]string{k}, permitted, v)
 	}
 	return out
 }
@@ -78,8 +86,8 @@ func Params(action string, raw map[string]any) map[string]any {
 // There is no branch that returns an unrecognised value unchanged. Everything
 // either matches an allowlisted leaf path and is a scalar, or is a container on
 // the way to one, or becomes the marker.
-func redactValue(path string, permitted map[string]struct{}, v any) any {
-	if _, ok := permitted[path]; ok {
+func redactValue(segments []string, permitted [][]string, v any) any {
+	if isPermittedLeaf(segments, permitted) {
 		if s, ok := permittedScalar(v); ok {
 			return s
 		}
@@ -89,10 +97,14 @@ func redactValue(path string, permitted map[string]struct{}, v any) any {
 		return RedactedMarker
 	}
 
-	if m, ok := v.(map[string]any); ok && leadsToPermitted(path, permitted) {
+	if m, ok := v.(map[string]any); ok && leadsToPermitted(segments, permitted) {
 		out := make(map[string]any, len(m))
 		for k, vv := range m {
-			out[k] = redactValue(path+"."+k, permitted, vv)
+			// Full slice expression: without capping the capacity, every key
+			// of this object would append into the same backing array and
+			// siblings would overwrite each other's segment.
+			child := append(segments[:len(segments):len(segments)], k)
+			out[k] = redactValue(child, permitted, vv)
 		}
 		return out
 	}
@@ -103,11 +115,20 @@ func redactValue(path string, permitted map[string]struct{}, v any) any {
 	return RedactedMarker
 }
 
+// isPermittedLeaf reports whether segments names an allowlisted leaf exactly.
+func isPermittedLeaf(segments []string, permitted [][]string) bool {
+	for _, p := range permitted {
+		if slices.Equal(p, segments) {
+			return true
+		}
+	}
+	return false
+}
+
 // leadsToPermitted reports whether any allowlisted path continues below here.
-func leadsToPermitted(path string, permitted map[string]struct{}) bool {
-	prefix := path + "."
-	for p := range permitted {
-		if strings.HasPrefix(p, prefix) {
+func leadsToPermitted(segments []string, permitted [][]string) bool {
+	for _, p := range permitted {
+		if len(p) > len(segments) && slices.Equal(p[:len(segments)], segments) {
 			return true
 		}
 	}
