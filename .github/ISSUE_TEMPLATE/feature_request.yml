@@ -32,12 +32,13 @@ body:
   - type: input
     id: phase
     attributes:
-      label: Roadmap phase
+      label: Roadmap area
       description: >-
-        If the roadmap in `.planning/ROADMAP.md` already covers this, name the
-        phase. Belonging to a later phase is not a rejection — it is a schedule.
-        "Not sure" is a fine answer.
-      placeholder: Phase 7 — Config-Domain
+        holzkube is built in phases, and the sidebar names them: an area marked
+        "Coming in phase N" is already planned. If your request belongs to one
+        of those, say which. Being scheduled for a later phase is not a
+        rejection. "Not sure" is a fine answer.
+      placeholder: Config — the machine-configuration screen
     validations:
       required: false
 

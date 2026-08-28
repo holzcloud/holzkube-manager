@@ -15,7 +15,7 @@ body:
       description: >-
         Output of `holzkubed --version`. A build from a working tree reports what
         `git describe` said at build time, or `dev` for a plain `go build`.
-      placeholder: holzkubed v0.3.1
+      placeholder: holzkubed 0.1.0
     validations:
       required: true
 
@@ -99,11 +99,12 @@ body:
     attributes:
       label: Log excerpt
       description: >-
-        holzkubed logs to stderr; redirect it with `2> holzkube.log`. If the
-        default output says nothing useful, restart with `--log-level=debug` and
-        reproduce. API errors carry a request id — in the `X-Request-Id` response
-        header and in the body as `instance` — and the server-side line for the
-        same failure is logged under that id, so quote it if you have one.
+        holzkubed logs to stderr; redirect it with `2> holzkube.log`. Every
+        request is already logged at the default level as `msg="http request"`
+        with its method, path, status and request_id, and an internal failure
+        adds `msg="request failed"` under the same id. API errors carry that id
+        too — in the `X-Request-Id` response header and in the body as
+        `instance` — so quote both sides if you have them.
       render: text
     validations:
       required: false
