@@ -1,0 +1,61 @@
+// Package store defines holzkube's persistence seam.
+//
+// The interface is deliberately entity-shaped and never path-shaped:
+// store.Users().Get(ctx, id), never store.ReadFile("users/x.json"). No method
+// here accepts or returns a filesystem path. That is what makes the eventual
+// fsstore -> sqlitestore swap a single new implementation with zero changes
+// above. Any os.ReadFile outside internal/store/fsstore is an architecture bug.
+package store
+
+import (
+	"context"
+	"errors"
+
+	"github.com/holzcloud/holzkube/internal/model"
+)
+
+var (
+	// ErrNotFound is returned when a record does not exist.
+	ErrNotFound = errors.New("store: record not found")
+
+	// ErrConflict is returned when a Put carries a Rev that is not the stored
+	// one. Callers map it to 409 Conflict.
+	ErrConflict = errors.New("store: revision conflict")
+
+	// ErrInvalidKey is returned for a key that cannot address a record.
+	ErrInvalidKey = errors.New("store: invalid key")
+)
+
+// Store is the root of the persistence seam.
+type Store interface {
+	Users() UserStore
+	Settings() SettingsStore
+	Sessions() SessionStore
+	Close() error
+}
+
+// UserStore holds operator accounts.
+type UserStore interface {
+	Get(ctx context.Context, id model.UserID) (model.User, error)
+	List(ctx context.Context) ([]model.User, error)
+	Put(ctx context.Context, rec model.User) (model.User, error)
+	Delete(ctx context.Context, id model.UserID) error
+}
+
+// SettingsStore holds the singleton settings record. It has no List or Delete
+// because there is exactly one, always: a singleton with a List method is an
+// invitation to write code that assumes otherwise.
+type SettingsStore interface {
+	Get(ctx context.Context) (model.Settings, error)
+	Put(ctx context.Context, rec model.Settings) (model.Settings, error)
+}
+
+// SessionStore holds server-side sessions. It backs the session manager, so
+// that session state travels through the same seam as everything else rather
+// than reaching around it to the filesystem.
+type SessionStore interface {
+	Get(ctx context.Context, id string) (model.Session, error)
+	List(ctx context.Context) ([]model.Session, error)
+	Put(ctx context.Context, rec model.Session) (model.Session, error)
+	Delete(ctx context.Context, id string) error
+}
