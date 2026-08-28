@@ -330,3 +330,105 @@ func TestRotateResumesFromACompressedTail(t *testing.T) {
 		t.Errorf("chain broke across a restart at %s line %d", file, line)
 	}
 }
+
+// TestCrashDuringCompressionLeavesBothFilesAndTheReaderCopes reproduces the
+// crash window compressFile documents: the gzip is renamed into place and the
+// directory fsynced, and the process dies before the plain original is removed.
+//
+// The comment claimed the reader tolerates that. It did not. sort.Strings puts
+// audit-D.jsonl immediately before audit-D.jsonl.gz, so both copies of the day
+// were read: Query returned every record twice, and Verify walked the day
+// twice and reported a chain break in a file that is perfectly intact -- a
+// permanent false alarm on a banner D-15 makes non-dismissible.
+func TestCrashDuringCompressionLeavesBothFilesAndTheReaderCopes(t *testing.T) {
+	dir := t.TempDir()
+	clk := newClock(t)
+	l := openAt(t, dir, clk)
+
+	writeDays(t, l, clk, 3, 2)
+	if err := l.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+
+	// Day 1 is compressed by now. Put the plain original back, which is
+	// exactly the state a crash between the rename and the remove leaves.
+	auditDir := filepath.Join(dir, "audit")
+	gz := filepath.Join(auditDir, "audit-2026-03-01.jsonl"+compressedExt)
+	plain := filepath.Join(auditDir, "audit-2026-03-01.jsonl")
+	if _, err := os.Stat(gz); err != nil {
+		t.Fatalf("day 1 was not compressed, so this test is not testing the crash window: %v", err)
+	}
+	recs := readAll(t, gz)
+	var buf strings.Builder
+	for _, rec := range recs {
+		raw, err := json.Marshal(rec)
+		if err != nil {
+			t.Fatal(err)
+		}
+		buf.Write(raw)
+		buf.WriteByte('\n')
+	}
+	if err := os.WriteFile(plain, []byte(buf.String()), filePerm); err != nil {
+		t.Fatalf("recreate the leftover: %v", err)
+	}
+
+	// Both forms are on disk for one day.
+	files, err := allFiles(auditDir)
+	if err != nil {
+		t.Fatalf("allFiles: %v", err)
+	}
+	if len(files) != 3 {
+		t.Fatalf("allFiles = %v, want one file per day for three days", files)
+	}
+	if filepath.Base(files[0]) != "audit-2026-03-01.jsonl"+compressedExt {
+		t.Errorf("day 1 resolved to %q, want the compressed copy the rename made durable",
+			filepath.Base(files[0]))
+	}
+
+	// Verify must not report a break: the archive is intact.
+	ok, file, line, err := Verify(files)
+	if err != nil {
+		t.Fatalf("Verify: %v", err)
+	}
+	if !ok {
+		t.Errorf("Verify reported a break at %s line %d; both files are intact copies of one day",
+			file, line)
+	}
+
+	// Query must not return the day twice.
+	page, err := Query(context.Background(), auditDir, Filter{})
+	if err != nil {
+		t.Fatalf("Query: %v", err)
+	}
+	seen := make(map[uint64]int, len(page.Items))
+	for _, rec := range page.Items {
+		seen[rec.Seq]++
+	}
+	for seq, n := range seen {
+		if n > 1 {
+			t.Errorf("seq %d appears %d times; the audit table keys rows by seq", seq, n)
+		}
+	}
+	if len(page.Items) != 6 {
+		t.Errorf("records = %d, want 6 (three days of two)", len(page.Items))
+	}
+
+	// The leftover is still visible to the compressor, so the next rotation
+	// finishes the job rather than leaving it forever.
+	plains, err := plainFiles(auditDir)
+	if err != nil {
+		t.Fatalf("plainFiles: %v", err)
+	}
+	if !slicesContains(plains, plain) {
+		t.Errorf("plainFiles = %v, want it to still list the leftover %s", plains, plain)
+	}
+}
+
+func slicesContains(haystack []string, needle string) bool {
+	for _, s := range haystack {
+		if s == needle {
+			return true
+		}
+	}
+	return false
+}

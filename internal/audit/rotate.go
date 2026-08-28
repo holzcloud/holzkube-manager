@@ -153,7 +153,8 @@ func compressFile(path string) error {
 
 	// The original goes only after the replacement is durable and named. The
 	// order matters: a crash between the rename and this point leaves both
-	// files, which the reader tolerates, rather than neither.
+	// files rather than neither, and allFiles collapses that day to the
+	// compressed copy so the reader sees one file per day.
 	if err := os.Remove(path); err != nil {
 		return err
 	}
@@ -185,13 +186,53 @@ func plainFiles(dir string) ([]string, error) {
 	})
 }
 
-// allFiles lists every day file, compressed or not, in date order. The date is
-// fixed-width and directly follows the prefix, so a lexicographic sort is a
-// chronological one.
+// allFiles lists every day file, compressed or not, in date order, with at
+// most one file per day. The date is fixed-width and directly follows the
+// prefix, so a lexicographic sort is a chronological one.
 func allFiles(dir string) ([]string, error) {
-	return listFiles(dir, func(name string) bool {
+	files, err := listFiles(dir, func(name string) bool {
 		return strings.HasSuffix(name, fileSuffix) || strings.HasSuffix(name, gzSuffix)
 	})
+	if err != nil {
+		return nil, err
+	}
+	return dedupeByDay(files), nil
+}
+
+// dedupeByDay collapses a day that has both a plain and a compressed file,
+// keeping the compressed one.
+//
+// compressFile renames the gzip into place and fsyncs the directory before it
+// removes the plain original, so a crash in that window leaves both. The
+// compressed file is therefore the one the rename made durable and the plain
+// one is the leftover.
+//
+// Reading both is not a tolerable outcome, which is what the crash window's
+// comment used to claim. sort.Strings puts audit-D.jsonl immediately before
+// audit-D.jsonl.gz, because the former is a byte prefix of the latter, so Query
+// returned every record of that day twice and Verify processed the day twice --
+// the second pass starting from a prev_hash the first pass had already moved
+// past, reporting a chain break in a file that is perfectly intact. D-15 makes
+// that report permanent until an operator deals with the file by hand, on a
+// banner the design deliberately made non-dismissible.
+//
+// plainFiles is deliberately left alone, so CompressOlderThan still finds the
+// leftover and finishes the job on the next rotation.
+func dedupeByDay(paths []string) []string {
+	seen := make(map[string]int, len(paths))
+	out := make([]string, 0, len(paths))
+	for _, p := range paths {
+		day := dayOf(p)
+		if i, ok := seen[day]; ok {
+			if strings.HasSuffix(p, compressedExt) {
+				out[i] = p
+			}
+			continue
+		}
+		seen[day] = len(out)
+		out = append(out, p)
+	}
+	return out
 }
 
 func listFiles(dir string, keep func(string) bool) ([]string, error) {
