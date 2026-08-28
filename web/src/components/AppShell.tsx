@@ -1,4 +1,5 @@
 import { Navigate, Outlet } from '@tanstack/react-router'
+import { ChainBannerContainer } from '@/components/ChainBanner'
 import { Header } from '@/components/Header'
 import { Sidebar } from '@/components/Sidebar'
 import { useSession } from '@/hooks/useSession'
@@ -35,6 +36,10 @@ export function AppShell() {
 
   return (
     <div className="flex h-dvh flex-col">
+      {/* Above the sidebar and the header, so a chain break is visible on
+          every page regardless of where the operator navigated (D-15). */}
+      <ChainBannerContainer />
+
       <div className="flex min-h-0 flex-1">
         <Sidebar />
         <div className="flex min-w-0 flex-1 flex-col">
