@@ -24,6 +24,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -53,12 +54,17 @@ const (
 // hostname is included as a subject alternative name alongside localhost and
 // both loopback addresses, so that reaching the machine by its own name does not
 // produce a second, different warning.
-func Generate(dir, hostname string) (certPath, keyPath, fingerprint string, err error) {
+//
+// extra names the further addresses this instance answers to -- in practice the
+// host part of the bind address. An operator running --listen 192.168.1.5:8443
+// otherwise got a SAN mismatch stacked on top of the self-signed warning, which
+// is the second, differently-worded warning the D-04 rationale exists to avoid.
+func Generate(dir, hostname string, extra ...string) (certPath, keyPath, fingerprint string, err error) {
 	if err := os.MkdirAll(dir, dirPerm); err != nil {
 		return "", "", "", fmt.Errorf("tlsx: create directory %s: %w", dir, err)
 	}
 
-	certPEM, keyPEM, der, err := generate(hostname)
+	certPEM, keyPEM, der, err := generate(hostname, extra...)
 	if err != nil {
 		return "", "", "", err
 	}
@@ -99,7 +105,7 @@ func Fingerprint(der []byte) string {
 	return b.String()
 }
 
-func generate(hostname string) (certPEM, keyPEM, der []byte, err error) {
+func generate(hostname string, extra ...string) (certPEM, keyPEM, der []byte, err error) {
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("tlsx: generate key: %w", err)
@@ -109,6 +115,12 @@ func generate(hostname string) (certPEM, keyPEM, der []byte, err error) {
 	serial, err := rand.Int(rand.Reader, serialLimit)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("tlsx: generate serial: %w", err)
+	}
+
+	names := dnsNames(hostname)
+	ips := []net.IP{net.IPv4(127, 0, 0, 1), net.IPv6loopback}
+	for _, e := range extra {
+		names, ips = addSAN(names, ips, e)
 	}
 
 	now := time.Now()
@@ -126,8 +138,8 @@ func generate(hostname string) (certPEM, keyPEM, der []byte, err error) {
 		BasicConstraintsValid: true,
 		IsCA:                  false,
 
-		DNSNames:    dnsNames(hostname),
-		IPAddresses: []net.IP{net.IPv4(127, 0, 0, 1), net.IPv6loopback},
+		DNSNames:    names,
+		IPAddresses: ips,
 	}
 
 	der, err = x509.CreateCertificate(rand.Reader, tmpl, tmpl, &key.PublicKey, key)
@@ -142,6 +154,29 @@ func generate(hostname string) (certPEM, keyPEM, der []byte, err error) {
 	certPEM = pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})
 	keyPEM = pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: keyDER})
 	return certPEM, keyPEM, der, nil
+}
+
+// addSAN files one more address under whichever SAN list it belongs in,
+// skipping anything already covered. A bind address of 0.0.0.0 or :: is a
+// wildcard rather than an address to be reached at, so it is not a SAN.
+func addSAN(names []string, ips []net.IP, host string) ([]string, []net.IP) {
+	host = strings.Trim(strings.TrimSpace(host), "[]")
+	if host == "" {
+		return names, ips
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		if ip.IsUnspecified() {
+			return names, ips
+		}
+		if slices.ContainsFunc(ips, ip.Equal) {
+			return names, ips
+		}
+		return names, append(ips, ip)
+	}
+	if slices.ContainsFunc(names, func(n string) bool { return strings.EqualFold(n, host) }) {
+		return names, ips
+	}
+	return append(names, host), ips
 }
 
 func dnsNames(hostname string) []string {

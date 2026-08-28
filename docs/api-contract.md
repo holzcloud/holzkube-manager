@@ -181,6 +181,24 @@ CORS "simple request" envelope, so the browser preflights and the request never
 arrives. `SameSite=Lax` on the cookie is necessary but not sufficient by itself.
 No token plumbing is required; a double-submit token can be layered on later.
 
+### Host allowlist
+
+Condition (3) compares the `Origin` against the request `Host`, and both come
+from the caller, so on its own it is self-referential. Under DNS rebinding — the
+standard attack against a loopback-bound admin tool — a victim's browser
+resolving `evil.example` to `127.0.0.1` sends `Host: evil.example`,
+`Origin: https://evil.example` and `Sec-Fetch-Site: same-origin`, because from
+the browser's point of view it *is* same-origin. All three conditions pass.
+
+Every request therefore also has its `Host` checked against the addresses this
+instance answers to — the bind address plus `localhost`, `127.0.0.1`, `::1` and
+the machine's hostname, which is the same set that goes into the generated
+certificate's SANs. A `Host` outside it gives `403` with code `forbidden.host`.
+
+The check covers reads as well as mutations: a rebound `GET /api/v1/audit` is a
+leak of the archive, and only the mutating path goes through the three
+conditions above.
+
 **Client obligation:** set all three on every mutating call. In the web UI
 `web/src/api.ts` is the only place that calls `fetch`, which is what keeps this
 from being forgotten at one call site out of thirty.
