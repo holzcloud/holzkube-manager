@@ -82,18 +82,40 @@ func CalibrateParams(target time.Duration) (*argon2id.Params, time.Duration) {
 			return &p, measured
 		}
 
-		scaled := float64(p.Iterations) * calibrationMargin * float64(target) / float64(measured)
-		next := uint32(math.Ceil(scaled))
-		if next <= p.Iterations {
-			next = p.Iterations + 1
-		}
-		if next > maxCalibrationIterations {
-			next = maxCalibrationIterations
-		}
-		p.Iterations = next
+		p.Iterations = nextIterations(p.Iterations, measured, target)
 		measured = measureHash(&p)
 	}
 	return &p, measured
+}
+
+// nextIterations is one step of the calibration search: the iteration count to
+// try next, given the one just measured.
+//
+// measured == 0 is a failed probe, not an instant one. measureHash returns zero
+// so that unusable parameters do not read as free, but using it as a divisor
+// yields +Inf, and uint32(+Inf) is implementation-defined per the Go spec for
+// an out-of-range float-to-integer conversion: depending on the target and the
+// toolchain it lands on 0 or 0xFFFFFFFF. Neither is intended, both are silent,
+// and this is the code that decides how expensive a stolen password hash is to
+// attack. Without a real measurement the ratio means nothing, so the step is a
+// conservative one.
+//
+// The result always advances by at least one and never exceeds the ceiling, so
+// the search terminates.
+func nextIterations(current uint32, measured, target time.Duration) uint32 {
+	next := current + 1
+	if measured > 0 {
+		scaled := float64(current) * calibrationMargin * float64(target) / float64(measured)
+		if scaled >= float64(maxCalibrationIterations) {
+			next = maxCalibrationIterations
+		} else if n := uint32(math.Ceil(scaled)); n > next {
+			next = n
+		}
+	}
+	if next > maxCalibrationIterations {
+		next = maxCalibrationIterations
+	}
+	return next
 }
 
 // measureHash times hash derivation with the given parameters. Deriving and
