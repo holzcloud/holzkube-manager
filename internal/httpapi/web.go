@@ -23,7 +23,7 @@ const SetupPath = "/setup"
 // While no operator account exists, every UI route redirects to /setup (D-01).
 // The redirect is server-side so the rule holds even if the bundle is stale or
 // the client-side check is bypassed.
-func SPAHandler(setupRequired func() bool) http.Handler {
+func SPAHandler(setupRequired func(*http.Request) bool) http.Handler {
 	sub, err := fs.Sub(distFS, "dist")
 	if err != nil {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -35,7 +35,7 @@ func SPAHandler(setupRequired func() bool) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		clean := path.Clean(r.URL.Path)
 
-		if setupRequired != nil && !isAssetPath(clean) && clean != SetupPath && setupRequired() {
+		if setupRequired != nil && !isAssetPath(clean) && clean != SetupPath && setupRequired(r) {
 			http.Redirect(w, r, SetupPath, http.StatusFound)
 			return
 		}
