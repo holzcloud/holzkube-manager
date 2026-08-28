@@ -181,7 +181,7 @@ func TestResumeContinuesTheChain(t *testing.T) {
 		t.Errorf("sequence after restart = %d, want 2", next)
 	}
 
-	ok, line, err := second.Verify(context.Background())
+	ok, _, line, err := second.Verify(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -197,5 +197,6 @@ func verifyDir(t *testing.T, dir string) (bool, int, error) {
 		return false, 0, err
 	}
 	defer v.Close()
-	return v.Verify(context.Background())
+	ok, _, line, err := v.Verify(context.Background())
+	return ok, line, err
 }

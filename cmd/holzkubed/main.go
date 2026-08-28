@@ -69,16 +69,20 @@ func run(args []string) error {
 	defer auditLog.Close()
 
 	// Verify the chain at startup rather than behind a button: a hash chain
-	// nobody checks is theatre (D-15). The verdict is passed to the handlers as
-	// an immutable snapshot, so plan 03 can widen what Verify covers without
-	// this file changing again.
-	chainOK, brokenLine, err := auditLog.Verify(context.Background())
+	// nobody checks is theatre (D-15). Verify covers the current day's file and
+	// the one rotated before it, and names the file the break is in -- which is
+	// not necessarily today's. The verdict is passed to the handlers as an
+	// immutable snapshot, so a break found here stays reported for the life of
+	// the process instead of disappearing behind a later, luckier check.
+	chainOK, chainFile, brokenLine, err := auditLog.Verify(context.Background())
 	if err != nil {
 		return fmt.Errorf("verify audit chain: %w", err)
 	}
-	if !chainOK {
+	if chainOK {
+		chainFile = auditLog.CurrentFile()
+	} else {
 		logger.Error("audit hash chain does not verify",
-			slog.String("file", auditLog.CurrentFile()),
+			slog.String("file", chainFile),
 			slog.Int("broken_at_line", brokenLine))
 	}
 
@@ -96,7 +100,7 @@ func run(args []string) error {
 		AuditChain: httpapi.ChainStatus{
 			OK:           chainOK,
 			BrokenAtLine: brokenLine,
-			File:         auditLog.CurrentFile(),
+			File:         chainFile,
 		},
 	}
 
