@@ -26,6 +26,21 @@ import (
 const (
 	readHeaderTimeout = 10 * time.Second
 	shutdownGrace     = 10 * time.Second
+
+	// The remaining server timeouts. MaxBytesReader caps how large a body may
+	// be; nothing capped how long a caller could take to send one, so a client
+	// dribbling a valid request a byte at a time held a connection and a
+	// goroutine indefinitely, as did one that never read its response.
+	//
+	// readTimeout covers headers plus body. writeTimeout is generous because it
+	// has to cover the slowest legitimate handler -- an argon2id verification
+	// on a slow host, plus the rate limiter parking a login for up to
+	// maxInlineDelay -- and cutting one of those off would look like a bug in
+	// the login. idleTimeout bounds a kept-alive connection between requests.
+	readTimeout    = 30 * time.Second
+	writeTimeout   = 60 * time.Second
+	idleTimeout    = 120 * time.Second
+	maxHeaderBytes = 1 << 16
 )
 
 // version is the release this binary was built from. goreleaser overwrites it
@@ -148,6 +163,10 @@ func run(args []string) error {
 		Addr:              cfg.Listen,
 		Handler:           httpapi.New(deps),
 		ReadHeaderTimeout: readHeaderTimeout,
+		ReadTimeout:       readTimeout,
+		WriteTimeout:      writeTimeout,
+		IdleTimeout:       idleTimeout,
+		MaxHeaderBytes:    maxHeaderBytes,
 	}
 
 	if cfg.InsecureHTTP {
