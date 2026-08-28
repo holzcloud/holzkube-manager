@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/holzcloud/holzkube/internal/model"
 	"github.com/holzcloud/holzkube/internal/store"
+	"github.com/holzcloud/holzkube/internal/store/migrate"
 )
 
 // openTestStore opens a store over a fresh 0700 directory and closes it when
@@ -291,4 +293,45 @@ func TestConcurrentGetDuringPutNeverSeesAPartialRecord(t *testing.T) {
 	}()
 
 	wg.Wait()
+}
+
+func TestOpenRefusesASchemaVersionNewerThanTheBinary(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.Chmod(dir, 0o700); err != nil {
+		t.Fatalf("chmod: %v", err)
+	}
+	future := strconv.Itoa(migrate.CurrentVersion + 1)
+	if err := os.WriteFile(filepath.Join(dir, migrate.VersionFileName), []byte(future+"\n"), 0o600); err != nil {
+		t.Fatalf("write VERSION: %v", err)
+	}
+
+	s, err := Open(dir)
+	if err == nil {
+		_ = s.Close()
+		t.Fatal("Open accepted a data directory written by a newer holzkube")
+	}
+	if !errors.Is(err, migrate.ErrVersionTooNew) {
+		t.Fatalf("Open error = %v, want migrate.ErrVersionTooNew", err)
+	}
+	if !strings.Contains(err.Error(), future) || !strings.Contains(err.Error(), strconv.Itoa(migrate.CurrentVersion)) {
+		t.Fatalf("error %q must name both versions", err)
+	}
+
+	// A refused start must also release the process lock it took on the way
+	// in, or a fixed VERSION would still not let the operator start.
+	if _, err := os.Stat(filepath.Join(dir, "users")); err == nil {
+		t.Fatal("a refused Open created entity directories")
+	}
+}
+
+func TestOpenWritesTheSchemaVersion(t *testing.T) {
+	_, dir := openTestStore(t)
+
+	raw, err := os.ReadFile(filepath.Join(dir, migrate.VersionFileName))
+	if err != nil {
+		t.Fatalf("Open did not write %s: %v", migrate.VersionFileName, err)
+	}
+	if got := strings.TrimSpace(string(raw)); got != strconv.Itoa(migrate.CurrentVersion) {
+		t.Fatalf("VERSION = %q, want %d", got, migrate.CurrentVersion)
+	}
 }
