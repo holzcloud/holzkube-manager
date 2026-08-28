@@ -172,3 +172,72 @@ func assertNoSecret(t *testing.T, params map[string]any, secret string) {
 		t.Errorf("redacted params still contain %q: %s", secret, raw)
 	}
 }
+
+// TestRedactDoesNotConflateADottedKeyWithANestedPath covers the one mechanism
+// the package describes as "failing the other way" by construction.
+//
+// permitted is keyed by dotted path, and the lookup used to be a direct map hit
+// on the raw JSON key. An entry "user.name", meant to permit
+// {"user":{"name":...}}, therefore also permitted a body sending the flat key
+// {"user.name": "..."}. JSON object keys may contain dots and readBody decodes
+// whatever arrives, so the two namespaces were conflated -- a latent hole in an
+// archive with no deletion path.
+func TestRedactDoesNotConflateADottedKeyWithANestedPath(t *testing.T) {
+	const action = "test.nested"
+	allowlist[action] = []string{"user.name"}
+	t.Cleanup(func() { delete(allowlist, action) })
+
+	t.Run("the nested path it was written for is permitted", func(t *testing.T) {
+		out := Params(action, map[string]any{
+			"user": map[string]any{"name": "holz", "password": "hunter2"},
+		})
+		user, ok := out["user"].(map[string]any)
+		if !ok {
+			t.Fatalf("user = %#v, want the object to be walked", out["user"])
+		}
+		if user["name"] != "holz" {
+			t.Errorf("user.name = %#v, want it permitted in clear", user["name"])
+		}
+		if user["password"] != RedactedMarker {
+			t.Errorf("user.password = %#v, want %q", user["password"], RedactedMarker)
+		}
+	})
+
+	t.Run("a flat key that merely looks like it is not", func(t *testing.T) {
+		out := Params(action, map[string]any{"user.name": "smuggled"})
+		if out["user.name"] != RedactedMarker {
+			t.Errorf(`params["user.name"] = %#v, want %q: a dot in a JSON key is a `+
+				`character, not a descent`, out["user.name"], RedactedMarker)
+		}
+	})
+}
+
+// TestRedactKeepsSiblingSegmentsApart guards the recursion itself: the path is
+// built by appending, and sharing one backing array across an object's keys
+// would let siblings overwrite each other's segment.
+func TestRedactKeepsSiblingSegmentsApart(t *testing.T) {
+	const action = "test.siblings"
+	allowlist[action] = []string{"outer.keep"}
+	t.Cleanup(func() { delete(allowlist, action) })
+
+	out := Params(action, map[string]any{
+		"outer": map[string]any{
+			"keep": "visible",
+			"a":    "secret-a",
+			"b":    "secret-b",
+			"c":    "secret-c",
+		},
+	})
+	outer, ok := out["outer"].(map[string]any)
+	if !ok {
+		t.Fatalf("outer = %#v, want the object to be walked", out["outer"])
+	}
+	if outer["keep"] != "visible" {
+		t.Errorf("outer.keep = %#v, want it permitted regardless of sibling order", outer["keep"])
+	}
+	for _, k := range []string{"a", "b", "c"} {
+		if outer[k] != RedactedMarker {
+			t.Errorf("outer.%s = %#v, want %q", k, outer[k], RedactedMarker)
+		}
+	}
+}
