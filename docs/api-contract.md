@@ -28,7 +28,21 @@ clients may branch on. **Codes never change.** They are the contract.
 | `sudo-required` | 428 | `sudo.required` | destructive route, sudo window expired or never opened |
 | `rate-limited` | 429 | `ratelimit.*` | login delay is in effect; `Retry-After` is set |
 | `internal` | 500 | `internal.*` | unexpected failure; **only `instance`, never a detail** |
+| `upstream` | 502 | `upstream.*` | a dependency outside this process did not answer, or answered with a refusal |
 | `setup-required` | 503 | `setup.required` | no operator account exists yet |
+
+`upstream.node-*` names a Talos node: `upstream.node-unreachable` for a refused,
+dropped or unresolvable connection, `upstream.node-timeout` for a node that
+accepted the connection and then did not answer in time.
+`upstream.factory-*` names the Image Factory at `factory.talos.dev`:
+`upstream.factory-unavailable` when it did not answer or answered 5xx, and
+`upstream.factory-rejected` when it answered and the answer was a refusal —
+the first is retryable, the second is not.
+
+`upstream` exists because `internal` carries no detail by contract. Without it,
+an unreachable node and an unreachable Factory are both anonymous 500s in an
+archive that D-16 never deletes, and the operator is shown a request id for a
+failure that was never holzkube's.
 
 ### Response shape
 
@@ -66,6 +80,11 @@ non-JSON mutating requests are rejected by the CSRF preconditions at 403 before
 any handler inspects the body, and phase 1 has a single operator with no
 permission model. They exist now because the taxonomy is a closed contract that
 wave 2 codes against; adding an entry later would be a contract change.
+
+`upstream` is minted in phase 2 wave 1 for the same reason and is likewise not
+yet emitted: no route reaches a Talos node or the Image Factory until the
+transport handlers (plan 02-05) and the schematics handlers (plan 02-06) land.
+All four codes are reserved now so those two plans reference the same tokens.
 
 ## Routes
 
