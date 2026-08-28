@@ -116,7 +116,7 @@ func (d Deps) wrapRoute(rt Route) http.Handler {
 				WriteProblem(w, r, Unauthenticated())
 			}),
 		middleware.Sudo(rt.Destructive,
-			func(r *http.Request) bool { return d.Auth.HasSudo(r.Context()) },
+			func(r *http.Request) bool { return d.Auth.IsSudoOpen(r.Context(), d.SudoWindow) },
 			func(w http.ResponseWriter, r *http.Request) {
 				WriteProblem(w, r, SudoRequired())
 			}),
