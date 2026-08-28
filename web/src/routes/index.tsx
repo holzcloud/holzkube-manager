@@ -1,7 +1,18 @@
-import { createRoute } from '@tanstack/react-router'
+import { useQuery } from '@tanstack/react-query'
+import { createRoute, Link } from '@tanstack/react-router'
+import { api } from '@/api'
 import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table'
 import { useSystemStatus } from '@/hooks/useSession'
 import { authenticatedRoute } from '@/routes/__root'
 
@@ -12,6 +23,13 @@ import { authenticatedRoute } from '@/routes/__root'
  */
 function Dashboard() {
   const status = useSystemStatus()
+
+  // The only real data flow phase 1 has, and therefore the proof that
+  // store -> API -> UI works on records rather than on placeholders (D-13).
+  const recent = useQuery({
+    queryKey: ['audit', 'recent'],
+    queryFn: () => api.audit({ limit: 3 }),
+  })
 
   return (
     <div className="space-y-6">
@@ -63,6 +81,45 @@ function Dashboard() {
               <dd className="break-all font-mono text-xs">{status.data.audit_chain.file}</dd>
             </dl>
           )}
+        </CardContent>
+      </Card>
+
+      <Card className="max-w-2xl">
+        <CardHeader>
+          <CardTitle>Recent activity</CardTitle>
+          <CardDescription>The three most recent audit records, newest first.</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {recent.isPending && <Skeleton className="h-16 w-full" />}
+
+          {recent.isSuccess && recent.data.items.length === 0 && (
+            <p className="text-sm text-muted-foreground">Nothing has been recorded yet.</p>
+          )}
+
+          {recent.isSuccess && recent.data.items.length > 0 && (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Time</TableHead>
+                  <TableHead>Actor</TableHead>
+                  <TableHead>Action</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {recent.data.items.slice(0, 3).map((record) => (
+                  <TableRow key={record.seq}>
+                    <TableCell className="tabular-nums">{record.ts}</TableCell>
+                    <TableCell>{record.actor === '' ? '—' : record.actor}</TableCell>
+                    <TableCell className="font-mono text-xs">{record.action}</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          )}
+
+          <Button asChild variant="secondary">
+            <Link to="/audit">Open the audit log</Link>
+          </Button>
         </CardContent>
       </Card>
     </div>
