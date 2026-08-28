@@ -301,7 +301,7 @@ func TestEndToEndSetupLoginAudit(t *testing.T) {
 	assertAuditFileHoldsNoSecret(t, h, afterLogin)
 
 	// --- 5. The chain over what was just written verifies, both via the API and directly.
-	resp, raw = h.do(t, http.MethodGet, "/api/v1/system/status", nil)
+	_, raw = h.do(t, http.MethodGet, "/api/v1/system/status", nil)
 	if err := json.Unmarshal(raw, &st); err != nil {
 		t.Fatalf("decode status: %v (body: %s)", err, raw)
 	}
