@@ -1,0 +1,14 @@
+@import "tailwindcss";
+
+/* Dark-first (D-11). The full theme toggle and the design system arrive with
+   the app shell in plan 05; this is only enough to read the tracer path. */
+:root {
+  color-scheme: dark;
+}
+
+body {
+  margin: 0;
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  background-color: #0b0e14;
+  color: #e6e6e6;
+}
