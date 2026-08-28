@@ -33,6 +33,33 @@ const (
 	TypeRateLimited          = "https://holzkube.dev/problems/rate-limited"
 	TypeInternal             = "https://holzkube.dev/problems/internal"
 	TypeSetupRequired        = "https://holzkube.dev/problems/setup-required"
+	TypeUpstream             = "https://holzkube.dev/problems/upstream"
+)
+
+// The reserved code tokens of the upstream family, minted in the same commit as
+// TypeUpstream so that no later plan invents a divergent spelling of a code the
+// contract says never changes. Plan 02-05 emits the node codes and plan 02-06
+// the factory codes; both reference these identifiers rather than string
+// literals, which is what keeps the two halves of the family in step.
+const (
+	// CodeUpstreamNodeUnreachable: the Talos node refused or dropped the
+	// connection, or does not resolve. The operator can act on this -- it is
+	// almost always a wrong address, a firewall or a node that is not up.
+	CodeUpstreamNodeUnreachable = "upstream.node-unreachable"
+
+	// CodeUpstreamNodeTimeout: the node accepted the connection and then did not
+	// answer in time. Distinct from unreachable because it is retryable and
+	// points at load or a wedged service rather than at the address.
+	CodeUpstreamNodeTimeout = "upstream.node-timeout"
+
+	// CodeUpstreamFactoryUnavailable: factory.talos.dev did not answer, answered
+	// 5xx, or answered something holzkube will not decode. Retryable.
+	CodeUpstreamFactoryUnavailable = "upstream.factory-unavailable"
+
+	// CodeUpstreamFactoryRejected: the Factory answered, and the answer was a
+	// refusal of what holzkube asked for. Not retryable: retrying an identical
+	// rejected request produces an identical rejection.
+	CodeUpstreamFactoryRejected = "upstream.factory-rejected"
 )
 
 // FieldError names one failed field inside a validation problem.
@@ -206,6 +233,36 @@ func Internal(err error) *Problem {
 		Status: http.StatusInternalServerError,
 		Detail: "",
 		Code:   "internal.unexpected",
+	}
+}
+
+// Upstream reports that a dependency outside this process did not answer, or
+// answered with a refusal.
+//
+// It exists because Internal discards its error by design. Without this type an
+// unreachable Talos node and an unreachable Image Factory both fall through to
+// internal.unexpected, which by contract carries instance and nothing else --
+// and that detail-free record is what lands, permanently, in an audit archive
+// that D-16 gives no deletion path. The operator would be left with a 500 and a
+// request id for a failure that was never holzkube's to begin with.
+//
+// One type, four codes: the type axis stays a taxonomy of failure kinds rather
+// than a register of dependencies, and the code stays the fine-grained
+// discriminator the contract already promises. A third upstream in a later
+// phase costs a code, not a type.
+//
+// detail is a string and never an error, deliberately. Unlike Internal, this
+// type does put its detail on the wire, so a constructor taking an error would
+// be a constructor somebody eventually hands a wrapped Go error -- filesystem
+// paths, node addresses and package names included. Taking a string means every
+// detail a client sees was typed out by somebody who could read it first.
+func Upstream(code, detail string) *Problem {
+	return &Problem{
+		Type:   TypeUpstream,
+		Title:  "An upstream dependency did not answer",
+		Status: http.StatusBadGateway,
+		Detail: detail,
+		Code:   code,
 	}
 }
 
