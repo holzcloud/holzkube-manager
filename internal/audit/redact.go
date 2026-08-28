@@ -144,3 +144,46 @@ func capLength(s string) string {
 	}
 	return s[:cut] + truncationMarker
 }
+
+// maxCodeLen bounds a taxonomy code. The longest one the taxonomy defines is
+// well under this; the cap is here so that a value which merely happens to be
+// token-shaped still cannot be arbitrarily long.
+const maxCodeLen = 64
+
+// OutcomeCause returns a failure reason as it may be written to the log.
+//
+// An outcome names a stable taxonomy code -- "sudo.required",
+// "validation.failed", "http.500" -- and never free text. This is the door that
+// enforces it, rather than whichever call site happened to remember: Outcome is
+// exported, and the first caller to pass a real error would otherwise write a
+// filesystem path or a store message straight into an archive that is kept
+// forever and has no deletion path.
+//
+// A value that is not code-shaped is redacted rather than truncated. Truncating
+// would keep the first 256 characters of exactly the free text this rejects.
+func OutcomeCause(s string) string {
+	if !isCodeToken(s) {
+		return RedactedMarker
+	}
+	return s
+}
+
+// isCodeToken checks the shape of a taxonomy code before it is copied into a
+// permanent record: lowercase, digits and the three separators the taxonomy
+// uses, and nothing else. It is deliberately a duplicate of the check the audit
+// middleware runs on the way out of a problem response; the invariant belongs
+// to this package, and a check that lives only in the caller is a check the
+// next caller does not have.
+func isCodeToken(s string) bool {
+	if s == "" || len(s) > maxCodeLen {
+		return false
+	}
+	for _, r := range s {
+		switch {
+		case r >= 'a' && r <= 'z', r >= '0' && r <= '9', r == '.', r == '-', r == '_':
+		default:
+			return false
+		}
+	}
+	return true
+}
