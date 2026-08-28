@@ -125,8 +125,26 @@ func New(d Deps) http.Handler {
 	return outer(mux)
 }
 
-// wrapRoute applies the per-route half of the chain: csrf -> authn -> sudo ->
-// audit, outermost first.
+// wrapRoute applies the per-route half of the chain: csrf -> authn -> audit ->
+// sudo, outermost first.
+//
+// Audit sits inside authn but outside sudo, and the position is load-bearing in
+// both directions.
+//
+// Outside sudo, because a 428 sudo.required is the highest-signal event in the
+// phase-1 threat model: somebody holding a session cookie tried a destructive
+// action and could not produce the password (T-01-25). With audit innermost
+// that refusal short-circuited before the audit link ran and was recorded
+// nowhere, in the log the product exists to keep.
+//
+// Inside authn, because the audit archive is append-only and D-16 keeps it
+// forever with no deletion path. Moving this link outside the gates entirely
+// would record the 401 and the 403 too, but it would also hand an
+// unauthenticated caller a way to append to that archive on every mutating
+// route, with no CSRF check and no rate limit in front of it. A denial that
+// only an authenticated caller can provoke is worth recording; one that anyone
+// can provoke is a disk-exhaustion lever. So csrf.precondition-unmet and
+// auth.unauthenticated remain unrecorded here by choice, not by accident.
 func (d Deps) wrapRoute(rt Route) http.Handler {
 	inner := middleware.Chain(
 		middleware.CSRF(func(w http.ResponseWriter, r *http.Request, err error) {
@@ -137,15 +155,15 @@ func (d Deps) wrapRoute(rt Route) http.Handler {
 			func(w http.ResponseWriter, r *http.Request) {
 				WriteProblem(w, r, Unauthenticated())
 			}),
+		middleware.Audit(auditAdapter{deps: d}, rt.Action, middleware.IsMutating(rt.Method),
+			func(w http.ResponseWriter, r *http.Request, err error) {
+				WriteInternal(w, r, d.Logger, err)
+			}),
 		middleware.Sudo(rt.Destructive,
 			func(r *http.Request) bool { return d.Auth.IsSudoOpen(r.Context(), d.SudoWindow) },
 			func(r *http.Request) { d.Auth.TouchSudoWindow(r.Context()) },
 			func(w http.ResponseWriter, r *http.Request) {
 				WriteProblem(w, r, SudoRequired())
-			}),
-		middleware.Audit(auditAdapter{deps: d}, rt.Action, middleware.IsMutating(rt.Method),
-			func(w http.ResponseWriter, r *http.Request, err error) {
-				WriteInternal(w, r, d.Logger, err)
 			}),
 	)
 	return inner(rt.Handler)

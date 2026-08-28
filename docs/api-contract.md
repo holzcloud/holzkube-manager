@@ -100,8 +100,8 @@ A mutating request is checked in this order, and the first failure wins:
 ```
 CSRF preconditions   -> 403 csrf.precondition-unmet
 session required     -> 401 auth.unauthenticated
-sudo window          -> 428 sudo.required
 audit intent durable -> 500 internal.unexpected   (request is refused, not performed)
+sudo window          -> 428 sudo.required
 handler validation   -> 400 validation.failed
 handler conflict     -> 409 store.conflict
 ```
@@ -109,6 +109,22 @@ handler conflict     -> 409 store.conflict
 The audit step is fail-closed on purpose: a mutation that cannot be recorded is
 not performed. An unlogged mutation is the outcome the audit log exists to
 prevent.
+
+The audit step sits **after** the session check and **before** the sudo check,
+and both halves of that placement are deliberate.
+
+It is after the session check because the archive is append-only and kept
+forever (D-16). Recording denials that an anonymous caller can provoke would
+let one grow the archive on any mutating route with no session, no CSRF header
+and no rate limit in front of it. So `403 csrf.precondition-unmet` and
+`401 auth.unauthenticated` are **not** recorded.
+
+It is before the sudo check so that `428 sudo.required` **is** recorded, as an
+`attempt` followed by an `error` outcome carrying the `sudo.required` code. That
+refusal means somebody holding a session cookie tried a destructive action and
+could not produce the password, which is the single highest-signal event in the
+threat model (T-01-25); it is only reachable by an authenticated caller, so
+recording it costs nothing an attacker can spend.
 
 ### The sudo window, as a client sees it
 
