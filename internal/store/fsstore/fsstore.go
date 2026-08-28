@@ -14,6 +14,7 @@ import (
 
 	"github.com/holzcloud/holzkube/internal/model"
 	"github.com/holzcloud/holzkube/internal/store"
+	"github.com/holzcloud/holzkube/internal/store/migrate"
 )
 
 // Store is the filesystem-backed implementation of store.Store.
@@ -68,6 +69,10 @@ func Open(dir string) (s *Store, err error) {
 			_ = release()
 		}
 	}()
+
+	if err := migrate.Run(abs); err != nil {
+		return nil, err
+	}
 
 	s = &Store{dir: abs, release: release, entityMu: store.NewEntityLocks()}
 	s.users = &userStore{dir: filepath.Join(abs, "users"), locks: s.entityMu}

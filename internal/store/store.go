@@ -32,6 +32,15 @@ var (
 	ErrAlreadyRunning = errors.New("store: data directory already in use by another process")
 )
 
+// TempFilePrefix marks a record that is being written and is not yet in place.
+//
+// The prefix is part of the crash contract, not an implementation detail: a
+// process killed between writing the temporary file and renaming it leaves one
+// behind, and the next start must recognise and remove it rather than ever
+// read it as state. It lives here because both fsstore (which creates them)
+// and migrate (which must not back them up) need the same string.
+const TempFilePrefix = ".holzkube-tmp-"
+
 // Store is the root of the persistence seam.
 type Store interface {
 	Users() UserStore
