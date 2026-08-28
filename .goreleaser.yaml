@@ -1,0 +1,69 @@
+# goreleaser v2 configuration.
+#
+# The dependency tree stays pure Go: CGO_ENABLED=0 is what makes one `goreleaser
+# release` cross-compile every target from one machine, and it is the reason no
+# cgo library (a cgo SQLite driver, most obviously) is ever taken as a
+# dependency in this project.
+version: 2
+
+project_name: holzkube
+
+before:
+  hooks:
+    # The frontend is built before the Go compiler runs, here as in the
+    # Taskfile: go:embed reads internal/httpapi/dist at compile time, so a
+    # missing or stale bundle is silently baked into every archive.
+    - npm --prefix web ci
+    - npm --prefix web run build
+
+builds:
+  - id: holzkubed
+    main: ./cmd/holzkubed
+    binary: holzkubed
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w -X main.version={{ .Version }}
+    goos:
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    ignore:
+      # Intel macOS is not a target: holzkube runs beside the cluster, and the
+      # Apple hosts that do so are arm64.
+      - goos: darwin
+        goarch: amd64
+
+archives:
+  - id: default
+    ids:
+      - holzkubed
+    formats:
+      - tar.gz
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - README.md
+      - docs/*
+
+checksum:
+  name_template: checksums.txt
+  algorithm: sha256
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-snapshot"
+
+changelog:
+  use: git
+  sort: asc
+  filters:
+    exclude:
+      - '^docs\('
+      - '^test\('
+      - '^chore\('
+
+release:
+  draft: true
