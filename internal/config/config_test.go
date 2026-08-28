@@ -217,6 +217,24 @@ func TestUnparsableValueAbortsAndNamesOptionAndOrigin(t *testing.T) {
 			contains: []string{"session-lifetime", "flag", `"24"`},
 		},
 		{
+			// An operator setting this to mean "always re-ask" used to get a
+			// five-minute window, with the startup log reporting the 0 that was
+			// not in force.
+			name:     "a sudo window of zero",
+			env:      map[string]string{"HOLZKUBE_SUDO_WINDOW": "0s"},
+			contains: []string{"sudo-window", "HOLZKUBE_SUDO_WINDOW", `"0s"`},
+		},
+		{
+			name:     "a negative sudo window",
+			args:     []string{"--sudo-window=-1m"},
+			contains: []string{"sudo-window", "flag", `"-1m"`},
+		},
+		{
+			name:     "a sudo window longer than a session",
+			args:     []string{"--sudo-window=48h"},
+			contains: []string{"sudo-window", "flag", `"48h"`},
+		},
+		{
 			name:     "unknown log level",
 			env:      map[string]string{"HOLZKUBE_LOG_LEVEL": "chatty"},
 			contains: []string{"log-level", "HOLZKUBE_LOG_LEVEL", `"chatty"`},
