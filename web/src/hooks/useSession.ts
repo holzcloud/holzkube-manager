@@ -30,6 +30,7 @@ export interface Session {
   loading: boolean
   /** True when the server confirmed an authenticated session. */
   authenticated: boolean
+  login: (username: string, password: string) => Promise<void>
   logout: () => Promise<void>
   loggingOut: boolean
 }
@@ -48,6 +49,16 @@ export function useSession(): Session {
     retry: false,
   })
 
+  const login = useMutation({
+    mutationFn: (credentials: { username: string; password: string }) =>
+      api.login(credentials.username, credentials.password),
+    onSuccess: async () => {
+      // The session id rotates on login, so everything read before it was read
+      // by a session that no longer exists.
+      await queryClient.invalidateQueries()
+    },
+  })
+
   const logout = useMutation({
     mutationFn: api.logout,
     onSettled: async () => {
@@ -61,6 +72,9 @@ export function useSession(): Session {
     setupRequired,
     loading: status.isPending || (me.isPending && me.fetchStatus !== 'idle'),
     authenticated: me.isSuccess,
+    login: async (username: string, password: string) => {
+      await login.mutateAsync({ username, password })
+    },
     logout: async () => {
       await logout.mutateAsync()
     },
