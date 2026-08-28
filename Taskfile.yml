@@ -1,0 +1,47 @@
+version: '3'
+
+vars:
+  BINARY: bin/holzkubed
+  WEB_DIST: internal/httpapi/dist
+
+tasks:
+  default:
+    cmds:
+      - task: build
+
+  build:web:
+    desc: Build the web UI into the directory the binary embeds.
+    cmds:
+      # `npm install`, not `npm ci`: plan 06 tightens this to `npm ci` now that
+      # web/package-lock.json is committed and in sync.
+      - npm --prefix web install
+      - npm --prefix web run build
+      # vite empties the output directory, which removes the placeholder that
+      # keeps `go build` working on a fresh clone. Put it back.
+      - touch {{.WEB_DIST}}/.gitkeep
+    sources:
+      - web/package.json
+      - web/package-lock.json
+      - web/index.html
+      - web/vite.config.ts
+      - web/tsconfig.json
+      - web/src/**/*
+    generates:
+      - '{{.WEB_DIST}}/index.html'
+
+  build:go:
+    desc: Compile the binary with the UI embedded.
+    # Hard dependency, not a convention: go:embed reads the dist directory at
+    # compile time, so a stale or missing bundle is baked into the binary.
+    deps: ["build:web"]
+    cmds:
+      - go build -o {{.BINARY}} ./cmd/holzkubed
+
+  build:
+    desc: Build everything.
+    deps: ["build:go"]
+
+  dev:
+    desc: Run the Vite dev server against a locally running holzkubed.
+    cmds:
+      - npm --prefix web run dev
