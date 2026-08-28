@@ -1,9 +1,11 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { createRootRoute, createRoute, Outlet } from '@tanstack/react-router'
-import { useEffect } from 'react'
+import { createRootRoute, createRoute, Outlet, useNavigate } from '@tanstack/react-router'
+import { useCallback, useEffect } from 'react'
 import { AppShell } from '@/components/AppShell'
-import { Toaster } from '@/components/Toaster'
+import { SessionExpiryWatcher, SudoDialog } from '@/components/SudoDialog'
+import { notify, Toaster } from '@/components/Toaster'
 import { applyTheme, resolveTheme } from '@/hooks/useTheme'
+import { messageFor, type Problem, ProblemError } from '@/lib/problem'
 import { ErrorPage } from '@/routes/error'
 
 /**
@@ -24,15 +26,29 @@ export const queryClient = new QueryClient({
 })
 
 function RootLayout() {
+  const navigate = useNavigate()
+
   // The inline script in index.html has already set the class for the first
   // paint. This keeps <html> correct if the module reloads during development.
   useEffect(() => {
     applyTheme(resolveTheme())
   }, [])
 
+  const onExpired = useCallback(
+    (problem: Problem) => {
+      // Everything cached was read with a session that no longer exists.
+      queryClient.clear()
+      notify.info('Your session ended.', messageFor(new ProblemError(problem)))
+      void navigate({ to: '/login', search: { reason: 'expired' }, replace: true })
+    },
+    [navigate],
+  )
+
   return (
     <QueryClientProvider client={queryClient}>
       <Outlet />
+      <SudoDialog />
+      <SessionExpiryWatcher onExpired={onExpired} />
       <Toaster />
     </QueryClientProvider>
   )
