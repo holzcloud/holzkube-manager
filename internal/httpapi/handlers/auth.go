@@ -14,6 +14,10 @@ type loginRequest struct {
 	Password string `json:"password"`
 }
 
+type sudoRequest struct {
+	Password string `json:"password"`
+}
+
 type meResponse struct {
 	ID       model.UserID `json:"id"`
 	Username string       `json:"username"`
@@ -42,6 +46,18 @@ func AuthRoutes(d httpapi.Deps) []httpapi.Route {
 			RequiresSession: true,
 			Action:          "auth.me",
 			Handler:         handler(func(w http.ResponseWriter, r *http.Request) { me(d, w, r) }),
+		},
+		{
+			Method:  http.MethodPost,
+			Pattern: "/api/v1/auth/sudo",
+
+			// Not destructive, deliberately. Gating the re-authentication
+			// behind an open window would be a lock whose key is inside it.
+			Destructive: false,
+
+			RequiresSession: true,
+			Action:          "auth.sudo",
+			Handler:         handler(func(w http.ResponseWriter, r *http.Request) { openSudo(d, w, r) }),
 		},
 	}
 }
@@ -74,6 +90,38 @@ func logout(d httpapi.Deps, w http.ResponseWriter, r *http.Request) {
 		httpapi.WriteInternal(w, r, d.Logger, err)
 		return
 	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// openSudo re-authenticates an already authenticated session, opening the
+// window that destructive routes require (D-05).
+//
+// It answers 401 rather than 428 for a wrong password: the caller is logged in,
+// so the failure is about the credential, not about the window.
+func openSudo(d httpapi.Deps, w http.ResponseWriter, r *http.Request) {
+	var req sudoRequest
+	if err := decodeJSON(w, r, &req); err != nil {
+		httpapi.WriteProblem(w, r, httpapi.Unauthenticated())
+		return
+	}
+
+	u, ok := d.Auth.CurrentUser(r.Context())
+	if !ok {
+		httpapi.WriteProblem(w, r, httpapi.Unauthenticated())
+		return
+	}
+
+	valid, err := auth.Verify(req.Password, u.PasswordHash)
+	if err != nil {
+		httpapi.WriteInternal(w, r, d.Logger, err)
+		return
+	}
+	if !valid {
+		httpapi.WriteProblem(w, r, httpapi.Unauthenticated())
+		return
+	}
+
+	d.Auth.OpenSudoWindow(r.Context())
 	w.WriteHeader(http.StatusNoContent)
 }
 
