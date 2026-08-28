@@ -76,12 +76,16 @@ func VerifyContext(ctx context.Context, paths []string) (ok bool, file string, l
 		if err := ctx.Err(); err != nil {
 			return false, "", 0, err
 		}
-		recs, readErr := readFile(p)
+		recs, readErr := readFileLocated(p)
 		if readErr != nil {
 			return false, p, 0, readErr
 		}
 		for i, rec := range recs {
-			at := i + 1
+			// The file line, not the record index. readFile skips blank lines,
+			// so a single one -- a trailing newline from a partial write, a
+			// manual edit -- used to send the operator to the wrong record
+			// while they were investigating tampering.
+			at := rec.Line
 			if i%cancelCheckEvery == 0 {
 				if err := ctx.Err(); err != nil {
 					return false, "", 0, err
@@ -105,7 +109,7 @@ func VerifyContext(ctx context.Context, paths []string) (ok bool, file string, l
 				return false, p, at, nil
 			}
 
-			want, hashErr := ComputeHash(rec.PrevHash, rec)
+			want, hashErr := ComputeHash(rec.PrevHash, rec.Record)
 			if hashErr != nil {
 				return false, p, at, hashErr
 			}

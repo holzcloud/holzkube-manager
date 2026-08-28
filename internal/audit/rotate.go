@@ -255,9 +255,33 @@ func listFiles(dir string, keep func(string) bool) ([]string, error) {
 	return out, nil
 }
 
-// readFile decodes every line of a day file in write order, transparently for
-// compressed files.
+// located pairs a record with the 1-based line of the file it was decoded from.
+//
+// The line is carried rather than derived from the slice index because blank
+// lines are skipped: any of them desynchronises an index from the real file
+// line, and the number is what an operator is told to go and look at.
+type located struct {
+	Record
+	Line int
+}
+
+// readFile decodes every line of a day file in write order, discarding the
+// line numbers. Callers that report a position want readFileLocated.
 func readFile(path string) ([]Record, error) {
+	recs, err := readFileLocated(path)
+	if err != nil || len(recs) == 0 {
+		return nil, err
+	}
+	out := make([]Record, len(recs))
+	for i, rec := range recs {
+		out[i] = rec.Record
+	}
+	return out, nil
+}
+
+// readFileLocated decodes every line of a day file in write order,
+// transparently for compressed files, keeping the line each record came from.
+func readFileLocated(path string) ([]located, error) {
 	f, err := os.Open(path) //nolint:gosec // audit owns its own log directory
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -277,19 +301,21 @@ func readFile(path string) ([]Record, error) {
 		r = zr
 	}
 
-	var out []Record
+	var out []located
 	sc := bufio.NewScanner(r)
 	sc.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
+	at := 0
 	for sc.Scan() {
+		at++
 		line := strings.TrimSpace(sc.Text())
 		if line == "" {
 			continue
 		}
 		var rec Record
 		if err := json.Unmarshal([]byte(line), &rec); err != nil {
-			return nil, fmt.Errorf("audit: decode %s line %d: %w", filepath.Base(path), len(out)+1, err)
+			return nil, fmt.Errorf("audit: decode %s line %d: %w", filepath.Base(path), at, err)
 		}
-		out = append(out, rec)
+		out = append(out, located{Record: rec, Line: at})
 	}
 	if err := sc.Err(); err != nil {
 		return nil, err
