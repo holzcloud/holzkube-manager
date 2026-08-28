@@ -1,3 +1,4 @@
+import { useNavigate } from '@tanstack/react-router'
 import { LogOut } from 'lucide-react'
 import { ThemeToggle } from '@/components/ThemeToggle'
 import { Button } from '@/components/ui/button'
@@ -10,6 +11,7 @@ import { useSession } from '@/hooks/useSession'
  */
 export function Header() {
   const { me, logout, loggingOut } = useSession()
+  const navigate = useNavigate()
 
   return (
     <header className="flex h-14 shrink-0 items-center justify-end gap-3 border-b border-border px-4">
@@ -29,7 +31,12 @@ export function Header() {
         size="sm"
         disabled={loggingOut}
         onClick={() => {
-          void logout()
+          // Say why the login screen is showing. Without this the shell's own
+          // guard would redirect with "a session is required", which is true
+          // but reads like a failure rather than like the thing just asked for.
+          void logout().then(() =>
+            navigate({ to: '/login', search: { reason: 'signed-out' }, replace: true }),
+          )
         }}
       >
         <LogOut aria-hidden="true" className="size-4" />
