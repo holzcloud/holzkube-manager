@@ -31,6 +31,11 @@ const EnvPrefix = "HOLZKUBE_"
 // redacted replaces the value of an option marked secret.
 const redacted = "<redacted>"
 
+// maxSudoWindow bounds --sudo-window. The window is the only mechanism that
+// limits what a stolen session cookie can do (T-01-25), and one that outlives
+// the session it sits in has stopped being a window.
+const maxSudoWindow = 24 * time.Hour
+
 // Origin records where an effective value came from. It is logged next to the
 // value, because "the option is wrong" and "the option is being read from a
 // place I forgot about" are different problems with the same symptom.
@@ -167,6 +172,21 @@ func optionTable(defaultDataDir string) []option {
 				d, err := time.ParseDuration(raw)
 				if err != nil {
 					return errors.New("not a duration; durations need a unit, for example 5m")
+				}
+				// Validated here rather than left to IsSudoOpen, which
+				// substitutes the default for any value <= 0. That substitution
+				// is right inside the gate -- a zero window would make every
+				// destructive route unreachable -- but as configuration
+				// handling it meant an operator setting 0 to mean "always
+				// re-ask" silently got five minutes, while LogEffective
+				// faithfully printed the value that was not in force. The
+				// startup log D-03 exists to make misconfiguration visible, so
+				// the refusal belongs where the operator can still act on it.
+				if d <= 0 {
+					return errors.New("must be positive; there is no value that disables the sudo gate")
+				}
+				if d > maxSudoWindow {
+					return errors.New("must not exceed 24h; a window longer than a session is not a window")
 				}
 				c.SudoWindow = d
 				return nil
