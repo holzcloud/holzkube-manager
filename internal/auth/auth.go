@@ -189,6 +189,10 @@ func (s *Service) Logout(ctx context.Context) error {
 // operator out of the browser they are fixing things in punishes exactly the
 // right instinct. Every other session goes, because those are the ones that
 // might not be theirs.
+//
+// A non-nil error means the password was not changed. Once the new hash is
+// durable this returns nil even if the invalidation sweep failed, because the
+// alternative tells the operator to retry a change that already succeeded.
 func (s *Service) ChangePassword(ctx context.Context, current, next string) error {
 	u, ok := s.CurrentUser(ctx)
 	if !ok {
@@ -212,7 +216,19 @@ func (s *Service) ChangePassword(ctx context.Context, current, next string) erro
 		return fmt.Errorf("auth: store new password: %w", err)
 	}
 
-	return s.InvalidateAllExcept(ctx, s.sm.Token(ctx))
+	if err := s.InvalidateAllExcept(ctx, s.sm.Token(ctx)); err != nil {
+		// The password write above is the operation, and it is already
+		// durable. Reporting failure here maps to a 500 and tells the operator
+		// the change did not happen -- so they retry with the old current
+		// password, get 401, and conclude they are locked out of the
+		// credential guarding their cluster PKI. The invalidation is
+		// best-effort cleanup, and it fails for reasons as ordinary as one
+		// unparsable session file, so it is logged rather than surfaced. Same
+		// reasoning as rehashIfOutdated.
+		slog.ErrorContext(ctx, "password changed, but other sessions could not all be invalidated",
+			slog.Any("error", err))
+	}
+	return nil
 }
 
 // CurrentUser returns the authenticated account, if any.
