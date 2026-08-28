@@ -279,3 +279,182 @@ func TestAccountPasswordWithoutSessionIs401(t *testing.T) {
 		t.Errorf("code = %q, want auth.unauthenticated", code)
 	}
 }
+
+// TestSudoOpensTheWindowAndTheChangeGoesThrough is the loop the operator
+// actually walks: refused, re-authenticate, done.
+func TestSudoOpensTheWindowAndTheChangeGoesThrough(t *testing.T) {
+	s := newServer(t, 5*time.Minute)
+	owner := s.newClient(t)
+	owner.setup()
+
+	// A second browser, logged in and idle, which the change must throw out.
+	other := s.newClient(t)
+	other.mustLogin()
+
+	if resp, raw := owner.changePassword(testPass, newPass); resp.StatusCode != http.StatusPreconditionRequired {
+		t.Fatalf("before sudo: got %d, want 428 (body: %s)", resp.StatusCode, raw)
+	}
+
+	resp, raw := owner.sudo(testPass)
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("sudo: got %d, want 204 (body: %s)", resp.StatusCode, raw)
+	}
+
+	resp, raw = owner.changePassword(testPass, newPass)
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("after sudo: got %d, want 204 (body: %s)", resp.StatusCode, raw)
+	}
+
+	// The caller keeps working; the parallel session does not.
+	if resp, _ := owner.do(http.MethodGet, "/api/v1/auth/me", nil); resp.StatusCode != http.StatusOK {
+		t.Errorf("the session that changed the password was logged out: %d", resp.StatusCode)
+	}
+	if resp, _ := other.do(http.MethodGet, "/api/v1/auth/me", nil); resp.StatusCode != http.StatusUnauthorized {
+		t.Errorf("a parallel session survived the password change: %d", resp.StatusCode)
+	}
+
+	// The credential really moved.
+	fresh := s.newClient(t)
+	if resp := fresh.login(testPass); resp.StatusCode != http.StatusUnauthorized {
+		t.Errorf("the old password still logs in: %d", resp.StatusCode)
+	}
+	if resp := fresh.login(newPass); resp.StatusCode != http.StatusNoContent {
+		t.Errorf("the new password does not log in: %d", resp.StatusCode)
+	}
+}
+
+// TestSudoWithAWrongPasswordLeavesTheWindowClosed keeps the re-authentication
+// from being a formality.
+func TestSudoWithAWrongPasswordLeavesTheWindowClosed(t *testing.T) {
+	s := newServer(t, 5*time.Minute)
+	c := s.newClient(t)
+	c.setup()
+
+	resp, raw := c.sudo("not-the-password")
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("sudo with a wrong password: got %d, want 401 (body: %s)", resp.StatusCode, raw)
+	}
+	if code := decodeProblem(t, raw).Code; code != "auth.unauthenticated" {
+		t.Errorf("code = %q, want auth.unauthenticated", code)
+	}
+
+	if resp, raw := c.changePassword(testPass, newPass); resp.StatusCode != http.StatusPreconditionRequired {
+		t.Fatalf("after a failed sudo: got %d, want 428 (body: %s)", resp.StatusCode, raw)
+	}
+}
+
+// TestSudoWithoutASessionIs401 keeps the chain order right: someone who is not
+// logged in is told to log in, not asked to re-enter a password.
+func TestSudoWithoutASessionIs401(t *testing.T) {
+	s := newServer(t, 5*time.Minute)
+	owner := s.newClient(t)
+	owner.setup()
+
+	anon := s.newClient(t)
+	resp, raw := anon.sudo(testPass)
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("got %d, want 401 (body: %s)", resp.StatusCode, raw)
+	}
+	if code := decodeProblem(t, raw).Code; code != "auth.unauthenticated" {
+		t.Errorf("code = %q, want auth.unauthenticated", code)
+	}
+}
+
+// TestSudoRouteIsNotItselfDestructive: gating the re-authentication behind an
+// open window would be a lock whose key is inside it.
+func TestSudoRouteIsNotItselfDestructive(t *testing.T) {
+	s := newServer(t, 5*time.Minute)
+
+	routes := handlers.AuthRoutes(s.deps)
+	idx := slices.IndexFunc(routes, func(r httpapi.Route) bool {
+		return r.Method == http.MethodPost && r.Pattern == "/api/v1/auth/sudo"
+	})
+	if idx < 0 {
+		t.Fatalf("POST /api/v1/auth/sudo is not registered")
+	}
+	if routes[idx].Destructive {
+		t.Error("the re-authentication route is marked Destructive; it could never be reached")
+	}
+	if !routes[idx].RequiresSession {
+		t.Error("the re-authentication route does not require a session")
+	}
+	if routes[idx].Action == "" {
+		t.Error("the re-authentication route has no audit action token")
+	}
+}
+
+// TestSudoWindowExpires proves the window is a window. The server runs with a
+// short one so the test measures the real expiry path rather than a mocked one.
+func TestSudoWindowExpires(t *testing.T) {
+	const window = 150 * time.Millisecond
+
+	s := newServer(t, window)
+	c := s.newClient(t)
+	c.setup()
+
+	if resp, raw := c.sudo(testPass); resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("sudo: got %d, want 204 (body: %s)", resp.StatusCode, raw)
+	}
+	time.Sleep(3 * window)
+
+	resp, raw := c.changePassword(testPass, newPass)
+	if resp.StatusCode != http.StatusPreconditionRequired {
+		t.Fatalf("after the window closed: got %d, want 428 (body: %s)", resp.StatusCode, raw)
+	}
+	if code := decodeProblem(t, raw).Code; code != "sudo.required" {
+		t.Errorf("code = %q, want sudo.required", code)
+	}
+}
+
+// TestDestructiveActionRestartsTheWindow is D-05's usability half: a series of
+// destructive actions asks for the password once. The second change happens
+// after the original window would have closed and is carried by the refresh the
+// first one earned.
+func TestDestructiveActionRestartsTheWindow(t *testing.T) {
+	const window = 400 * time.Millisecond
+
+	s := newServer(t, window)
+	c := s.newClient(t)
+	c.setup()
+
+	if resp, raw := c.sudo(testPass); resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("sudo: got %d, want 204 (body: %s)", resp.StatusCode, raw)
+	}
+
+	// Late in the first window, still inside it.
+	time.Sleep(window * 5 / 8)
+	if resp, raw := c.changePassword(testPass, newPass); resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("first change: got %d, want 204 (body: %s)", resp.StatusCode, raw)
+	}
+
+	// Past where the original window ended, inside the one the first change
+	// restarted.
+	time.Sleep(window * 5 / 8)
+	const thirdPass = "yet-another-long-passphrase"
+	if resp, raw := c.changePassword(newPass, thirdPass); resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("second change: got %d, want 204 -- the window was not restarted (body: %s)", resp.StatusCode, raw)
+	}
+}
+
+// TestSudoWindowIsNotSharedBetweenSessions is T-01-25 at the HTTP boundary: the
+// window a stolen cookie would need cannot be borrowed from the real operator.
+func TestSudoWindowIsNotSharedBetweenSessions(t *testing.T) {
+	s := newServer(t, 5*time.Minute)
+	owner := s.newClient(t)
+	owner.setup()
+
+	if resp, raw := owner.sudo(testPass); resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("sudo: got %d, want 204 (body: %s)", resp.StatusCode, raw)
+	}
+
+	other := s.newClient(t)
+	other.mustLogin()
+
+	resp, raw := other.changePassword(testPass, newPass)
+	if resp.StatusCode != http.StatusPreconditionRequired {
+		t.Fatalf("second session: got %d, want 428 (body: %s)", resp.StatusCode, raw)
+	}
+	if code := decodeProblem(t, raw).Code; code != "sudo.required" {
+		t.Errorf("code = %q, want sudo.required", code)
+	}
+}
