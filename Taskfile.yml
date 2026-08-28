@@ -3,6 +3,10 @@ version: '3'
 vars:
   BINARY: bin/holzkubed
   WEB_DIST: internal/httpapi/dist
+  # A working-tree build is honestly called what git calls it; goreleaser passes
+  # the real tag through the same variable. The substitution is plain shell so
+  # that nothing here depends on a go-task version-specific var syntax.
+  LDFLAGS: -s -w -X main.version=$(git describe --tags --always --dirty 2>/dev/null || echo dev)
 
 tasks:
   default:
@@ -12,13 +16,16 @@ tasks:
   build:web:
     desc: Build the web UI into the directory the binary embeds.
     cmds:
-      # `npm install`, not `npm ci`: plan 06 tightens this to `npm ci` now that
-      # web/package-lock.json is committed and in sync.
-      - npm --prefix web install
+      # `npm ci`, not `npm install`: ci installs exactly what web/package-lock.json
+      # pins and fails if the lockfile and the manifest disagree, which is the
+      # difference between a build that succeeds and a build that is reproducible.
+      - npm --prefix web ci
       - npm --prefix web run build
-      # vite empties the output directory, which removes the placeholder that
-      # keeps `go build` working on a fresh clone. Put it back.
-      - touch {{.WEB_DIST}}/.gitkeep
+      # web/vite.config.ts re-emits the placeholder that vite's emptyOutDir would
+      # otherwise delete. This is the belt to that pair of braces: the file is
+      # tracked so `go build` works on a fresh clone, and losing it is a silent
+      # break that only shows up for somebody else.
+      - test -f {{.WEB_DIST}}/.gitkeep || touch {{.WEB_DIST}}/.gitkeep
     sources:
       - web/package.json
       - web/package-lock.json
@@ -33,15 +40,62 @@ tasks:
     desc: Compile the binary with the UI embedded.
     # Hard dependency, not a convention: go:embed reads the dist directory at
     # compile time, so a stale or missing bundle is baked into the binary.
+    # `go generate` is deliberately not used -- it does not run during `go build`
+    # and produces stale-asset bugs that look like frontend bugs.
     deps: ["build:web"]
     cmds:
-      - go build -o {{.BINARY}} ./cmd/holzkubed
+      - go build -ldflags "{{.LDFLAGS}}" -o {{.BINARY}} ./cmd/holzkubed
 
   build:
-    desc: Build everything.
+    desc: Build everything into bin/holzkubed.
     deps: ["build:go"]
+
+  test:
+    desc: Run the Go tests with the race detector.
+    cmds:
+      - go test ./... -count=1 -race
+
+  test:web:
+    desc: Run the frontend tests.
+    cmds:
+      - npm --prefix web run test
+
+  lint:go:
+    desc: Lint the Go sources.
+    cmds:
+      - golangci-lint run
+
+  lint:web:
+    desc: Lint and format-check the frontend sources.
+    cmds:
+      - npm --prefix web run lint
+
+  lint:
+    desc: Lint everything.
+    cmds:
+      - task: lint:go
+      - task: lint:web
+
+  fmt:
+    desc: Format Go and frontend sources in place.
+    cmds:
+      - gofmt -w ./cmd ./internal
+      - npm --prefix web run format
 
   dev:
     desc: Run the Vite dev server against a locally running holzkubed.
     cmds:
       - npm --prefix web run dev
+
+  clean:
+    desc: Remove build output.
+    cmds:
+      - rm -rf bin dist
+      # Everything vite produced, but never the tracked placeholder: without it
+      # go:embed fails outright on a fresh clone.
+      - find {{.WEB_DIST}} -mindepth 1 ! -name .gitkeep -exec rm -rf {} +
+
+  release:snapshot:
+    desc: Build the release archives locally, without tagging or publishing.
+    cmds:
+      - goreleaser release --snapshot --clean

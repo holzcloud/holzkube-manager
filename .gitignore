@@ -18,6 +18,8 @@ web/node_modules/
 
 # Session-scoped tooling state
 .gsd/
+# go-task's staleness cache for the sources:/generates: checks
+/.task/
 .planning/milestone.lock
 
 # OS noise
