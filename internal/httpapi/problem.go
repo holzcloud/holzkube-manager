@@ -21,15 +21,18 @@ const ProblemBaseURI = "https://holzkube.dev/problems/"
 // a public contract: clients may match on them, so they never change.
 // Plan 01 task 4 completes the set and pins it in docs/api-contract.md.
 const (
-	TypeValidation      = "https://holzkube.dev/problems/validation"
-	TypeUnauthenticated = "https://holzkube.dev/problems/unauthenticated"
-	TypeCSRF            = "https://holzkube.dev/problems/csrf"
-	TypeNotFound        = "https://holzkube.dev/problems/not-found"
-	TypeConflict        = "https://holzkube.dev/problems/conflict"
-	TypeSudoRequired    = "https://holzkube.dev/problems/sudo-required"
-	TypeRateLimited     = "https://holzkube.dev/problems/rate-limited"
-	TypeInternal        = "https://holzkube.dev/problems/internal"
-	TypeSetupRequired   = "https://holzkube.dev/problems/setup-required"
+	TypeValidation           = "https://holzkube.dev/problems/validation"
+	TypeUnauthenticated      = "https://holzkube.dev/problems/unauthenticated"
+	TypeCSRF                 = "https://holzkube.dev/problems/csrf"
+	TypeForbidden            = "https://holzkube.dev/problems/forbidden"
+	TypeNotFound             = "https://holzkube.dev/problems/not-found"
+	TypeMethodNotAllowed     = "https://holzkube.dev/problems/method-not-allowed"
+	TypeConflict             = "https://holzkube.dev/problems/conflict"
+	TypeUnsupportedMediaType = "https://holzkube.dev/problems/unsupported-media-type"
+	TypeSudoRequired         = "https://holzkube.dev/problems/sudo-required"
+	TypeRateLimited          = "https://holzkube.dev/problems/rate-limited"
+	TypeInternal             = "https://holzkube.dev/problems/internal"
+	TypeSetupRequired        = "https://holzkube.dev/problems/setup-required"
 )
 
 // FieldError names one failed field inside a validation problem.
@@ -106,6 +109,49 @@ func NotFound(code, detail string) *Problem {
 		Status: http.StatusNotFound,
 		Detail: detail,
 		Code:   code,
+	}
+}
+
+// Forbidden reports a valid session that is not allowed to do this.
+//
+// It is distinct from Unauthenticated on purpose: "who are you" and "you may
+// not" are different answers, and collapsing them makes a permissions bug look
+// like a login bug.
+func Forbidden(code, detail string) *Problem {
+	return &Problem{
+		Type:   TypeForbidden,
+		Title:  "Not permitted",
+		Status: http.StatusForbidden,
+		Detail: detail,
+		Code:   code,
+	}
+}
+
+// MethodNotAllowed reports a known path reached with the wrong method.
+func MethodNotAllowed(detail string) *Problem {
+	return &Problem{
+		Type:   TypeMethodNotAllowed,
+		Title:  "Method not allowed",
+		Status: http.StatusMethodNotAllowed,
+		Detail: detail,
+		Code:   "method.not-allowed",
+	}
+}
+
+// UnsupportedMediaType reports a body holzkube will not parse.
+//
+// Reserved rather than dead: in phase 1 the CSRF preconditions reject a
+// non-JSON mutating request at 403 before a handler ever inspects the body, so
+// nothing emits this yet. It is minted now because the taxonomy is a closed
+// contract that wave 2 codes against, and adding an entry later would mean
+// changing that contract.
+func UnsupportedMediaType(detail string) *Problem {
+	return &Problem{
+		Type:   TypeUnsupportedMediaType,
+		Title:  "Unsupported media type",
+		Status: http.StatusUnsupportedMediaType,
+		Detail: detail,
+		Code:   "media.unsupported",
 	}
 }
 
