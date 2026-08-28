@@ -2,10 +2,10 @@
 
 <!-- One or two sentences. The diff shows how; say what and why. -->
 
-## Which requirement or roadmap phase this serves
+## What this serves
 
-<!-- A requirement id from .planning/REQUIREMENTS.md (FOUND-06, TRANS-02, ...),
-     a phase from .planning/ROADMAP.md, or the issue this fixes. -->
+<!-- The issue this fixes, or the behaviour a user gains. If the change belongs
+     to an area the sidebar still marks "Coming in phase N", say so. -->
 
 ## Gates
 
