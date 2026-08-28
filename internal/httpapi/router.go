@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"path/filepath"
+	"sync/atomic"
 	"time"
 
 	"github.com/holzcloud/holzkube/internal/audit"
@@ -172,7 +173,13 @@ func (d Deps) wrapRoute(rt Route) http.Handler {
 // fallback serves the SPA for UI paths and a problem response for API paths, so
 // an unknown /api path never returns HTML to a client expecting JSON.
 func (d Deps) fallback(known *http.ServeMux) http.Handler {
-	spa := SPAHandler(d.setupRequired)
+	// One latch per handler, created here rather than as a Deps field: Deps is
+	// copied by value throughout, and a latch that copies with it is not a
+	// latch. fallback runs exactly once per New.
+	var configured atomic.Bool
+	spa := SPAHandler(func(r *http.Request) bool {
+		return d.setupRequired(r.Context(), &configured)
+	})
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if isAPIPath(r.URL.Path) {
@@ -189,14 +196,33 @@ func (d Deps) fallback(known *http.ServeMux) http.Handler {
 }
 
 // setupRequired reports whether the instance still has no operator account.
-func (d Deps) setupRequired() bool {
-	users, err := d.Store.Users().List(context.Background())
+//
+// ctx is the request's, so a client that disconnects cancels the store read;
+// it used to be context.Background(), which made the read uncancellable by
+// anything.
+//
+// configured latches the negative. listJSON reads and JSON-decodes every file
+// in users/, and this ran on every non-asset navigation to answer a question
+// whose answer changes exactly once. The latch is only ever set in the
+// direction that is permanent: no route deletes a user, and phase 1's store
+// exposes Users().Delete with no caller. A phase that adds one has to revisit
+// this, because the redirect is D-01's server-side half and is supposed to hold
+// even when the client-side check does not.
+func (d Deps) setupRequired(ctx context.Context, configured *atomic.Bool) bool {
+	if configured.Load() {
+		return false
+	}
+	users, err := d.Store.Users().List(ctx)
 	if err != nil {
 		// Fail towards the setup wizard: an instance whose user list cannot be
 		// read must not present itself as configured.
 		return true
 	}
-	return len(users) == 0
+	if len(users) == 0 {
+		return true
+	}
+	configured.Store(true)
+	return false
 }
 
 func isAPIPath(p string) bool {
