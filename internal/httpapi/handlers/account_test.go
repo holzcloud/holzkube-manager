@@ -2,6 +2,7 @@ package handlers_test
 
 import (
 	"bytes"
+	"context"
 	"crypto/tls"
 	"encoding/json"
 	"io"
@@ -549,5 +550,83 @@ func TestReadingRequestNeedsNoCSRFHeader(t *testing.T) {
 		})
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("got %d, want 200 (body: %s)", resp.StatusCode, raw)
+	}
+}
+
+// TestRefusedSudoIsAudited pins the audit link's position in the chain.
+//
+// A 428 is "somebody holding a session cookie tried a destructive action and
+// could not produce the password" -- the highest-signal event in the phase-1
+// threat model (T-01-25). While the audit link was the innermost of the four,
+// the sudo gate short-circuited before it ran and the refusal was recorded
+// nowhere at all.
+func TestRefusedSudoIsAudited(t *testing.T) {
+	s := newServer(t, 5*time.Minute)
+	c := s.newClient(t)
+	c.setup()
+
+	resp, raw := c.changePassword(testPass, newPass)
+	if resp.StatusCode != http.StatusPreconditionRequired {
+		t.Fatalf("got %d, want 428 (body: %s)", resp.StatusCode, raw)
+	}
+
+	page, err := s.deps.Audit.Query(context.Background(), audit.Filter{Action: "account.password"})
+	if err != nil {
+		t.Fatalf("query audit: %v", err)
+	}
+
+	var attempt, refusal *audit.Record
+	for i, rec := range page.Items {
+		switch rec.Outcome {
+		case audit.OutcomeAttempt:
+			attempt = &page.Items[i]
+		case audit.OutcomeError:
+			refusal = &page.Items[i]
+		}
+	}
+
+	if attempt == nil {
+		t.Error("the refused destructive request wrote no intent record")
+	}
+	if refusal == nil {
+		t.Fatal("a 428 sudo.required left no outcome record; the refusal is invisible in the log")
+	}
+	if got := refusal.Params["error"]; got != "sudo.required" {
+		t.Errorf("outcome error = %v, want the sudo.required taxonomy code", got)
+	}
+	if refusal.Actor == "" {
+		t.Error("the refusal names no actor, so it cannot be attributed to the session that tried it")
+	}
+}
+
+// TestUnauthenticatedDenialIsNotAudited is the other half of that position.
+//
+// The audit link stays inside the authn gate on purpose: the archive is
+// append-only and D-16 keeps it forever with no deletion path, so recording
+// denials that an anonymous caller can provoke would hand them a way to grow it
+// without a session, a CSRF header or a rate limit.
+func TestUnauthenticatedDenialIsNotAudited(t *testing.T) {
+	s := newServer(t, 5*time.Minute)
+	c := s.newClient(t)
+	c.setup()
+
+	before, err := s.deps.Audit.Query(context.Background(), audit.Filter{Action: "account.password"})
+	if err != nil {
+		t.Fatalf("query audit: %v", err)
+	}
+
+	anon := s.newClient(t)
+	resp, raw := anon.changePassword(testPass, newPass)
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("got %d, want 401 (body: %s)", resp.StatusCode, raw)
+	}
+
+	after, err := s.deps.Audit.Query(context.Background(), audit.Filter{Action: "account.password"})
+	if err != nil {
+		t.Fatalf("query audit: %v", err)
+	}
+	if len(after.Items) != len(before.Items) {
+		t.Errorf("an anonymous 401 appended %d record(s) to an archive with no deletion path",
+			len(after.Items)-len(before.Items))
 	}
 }
