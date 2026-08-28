@@ -58,6 +58,11 @@ func run(args []string) error {
 		return err
 	}
 	level.Set(cfg.LogLevel)
+	// Packages that log through the package-level slog functions -- the argon2id
+	// calibration is one -- would otherwise write through a different handler at
+	// a different level, and --log-level would be quietly true only of some of
+	// the output.
+	slog.SetDefault(logger)
 
 	logger.Info("holzkube starting", slog.String("version", version))
 	// Every option, its effective value and where that value came from. A

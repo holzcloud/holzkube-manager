@@ -59,7 +59,10 @@ security value of the warning; clicking through without it accepts anything.
 
 The fingerprint is printed as colon-separated upper-case hex pairs, which is
 what browsers show in their certificate dialog — so the comparison is
-character-by-character with nothing to convert. The same string comes out of:
+character-by-character with nothing to convert.
+
+That line is `INFO` level, so `--log-level=warn` or higher suppresses it. The
+same string comes out of:
 
 ```sh
 openssl x509 -in "$HOLZKUBE_DATA_DIR/cert.pem" -noout -fingerprint -sha256
