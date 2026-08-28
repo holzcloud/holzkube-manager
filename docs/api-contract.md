@@ -276,7 +276,7 @@ GET /api/v1/system/status
 ```json
 {
   "setup_required": true,
-  "audit_chain": { "ok": true, "broken_at_line": 0, "file": "/path/audit/audit-2026-08-28.jsonl" }
+  "audit_chain": { "ok": true, "broken_at_line": 0, "file": "audit-2026-08-28.jsonl" }
 }
 ```
 
@@ -285,11 +285,20 @@ GET /api/v1/system/status
 - `audit_chain.ok` — `false` means the hash chain does not verify.
   `broken_at_line` is the **1-based** line number of the first record that does
   not verify, and is `0` when `ok` is true. `file` names the file checked.
-- A break found at startup stays reported for the life of the process; while
-  startup was clean the endpoint re-verifies live, so damage occurring during
-  the run is not hidden until the next restart (D-15). Startup verification
-  covers the current day's file **and the one rotated before it**, so `file` is
-  not necessarily today's.
+  It is a **file name, never a path**: this endpoint answers before
+  authentication, and the audit directory sits under the XDG-resolved absolute
+  data directory, so a path would disclose the OS user and their home directory
+  layout to an anonymous caller.
+- A break found at startup stays reported for the life of the process (D-15).
+  While startup was clean the endpoint re-verifies live **for authenticated
+  callers**, so damage occurring during the run is not hidden until the next
+  restart. An anonymous caller receives the startup snapshot: re-verification
+  re-reads and re-hashes the window under the audit writer's mutex, and the
+  audit middleware is fail-closed, so serving it unauthenticated would let an
+  anonymous caller stall or fail other people's mutations. The live re-verify
+  is additionally memoised for 30s, so polling clients do not each pay for a
+  full re-read. Startup verification covers the current day's file **and the
+  one rotated before it**, so `file` is not necessarily today's.
 - There is **no** endpoint and no parameter that acknowledges, clears or
   recomputes the verdict. A break disappears only by dealing with the file by
   hand and restarting. A chain that repairs itself is worse than no chain: it
