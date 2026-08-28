@@ -139,9 +139,26 @@ from being forgotten at one call site out of thirty.
 GET /api/v1/audit?from=<RFC3339>&to=<RFC3339>&action=<token>&limit=<n>&cursor=<seq>
 ```
 
-All parameters are optional. Sorting is **newest first**, always. Phase 1
-accepts the parameters and does not yet apply them; plan 03 implements the
-filters against this exact shape.
+All parameters are optional. Sorting is **newest first**, always. The filters
+are implemented and applied.
+
+| Parameter | Form | Meaning |
+|---|---|---|
+| `from` | RFC 3339 | records at or after this instant |
+| `to` | RFC 3339 | records at or before this instant |
+| `action` | dotted token, `[a-z0-9._-]`, ≤ 64 | **exact** match on the action; a prefix does not match |
+| `limit` | positive integer | page size; default `100`, silently capped at `1000` |
+| `cursor` | positive integer | the `next_cursor` of the previous page; `0` is rejected |
+
+A malformed parameter is `400` `validation.failed` with the offending field in
+`errors[]` — never a silently different answer to a question nobody asked. A
+`limit` above the ceiling is served at the ceiling rather than refused; a query
+against an archive that is never shortened (D-16) must not be able to pull a
+year of records into memory.
+
+The cursor is the `seq` of the last record on the previous page, and the next
+page continues strictly below it. A sequence number rather than an offset, so
+pagination neither overlaps nor skips while records are being appended.
 
 ```json
 {
@@ -174,7 +191,36 @@ The field set is closed (D-14) and is part of the hash chain: `seq`, `ts`,
 Every mutating request writes two records: the intent before the action and the
 outcome after. The outcome repeats the intent's identifying fields; its `params`
 carries only `{"error": "..."}` on failure, and is empty on success, because the
-input parameters were already recorded by the intent.
+input parameters were already recorded by the intent. The `error` value is the
+**stable taxonomy `code`**, never a Go error string or a path — this file is
+kept forever, and an internal message in it is free reconnaissance.
+
+`params` on the intent is the request body **after allowlist redaction** (D-14).
+A field that is not explicitly permitted for that action appears as the literal
+`"<redacted>"`; the key survives so the record shows what was sent, the value
+does not. An unknown nested object is replaced whole rather than walked. The
+allowlist lives in `internal/audit/redact.go`; adding a parameter to a later
+action requires adding it there on purpose. There is no list of forbidden
+fields, because such a list forgets the next secret.
+
+`params` also carries `request_id`, the same id as `X-Request-Id` and as the
+`instance` of any problem response — the record's field set is closed, so
+server-side context belongs in `params` rather than in a new column.
+
+`session` is a **truncated** token, not the live one: a log kept forever must
+not be a store of every session that ever existed.
+
+An intent with **no** matching outcome means the process did not survive the
+action. It is a finding and is left standing as one; nothing completes the pair
+after the fact, and the record remains findable through this query API.
+
+Files rotate daily to `audit/audit-<YYYY-MM-DD>.jsonl`. From the second day on
+a rotated file is gzipped in place to `audit-<YYYY-MM-DD>.jsonl.gz`; both forms
+read identically through the query API. No file is ever removed, and there is
+no option that would remove one (D-16). The chain runs **across** the file
+boundary: the first record of a new day carries the last hash of the previous
+day. The first record of a fresh data directory carries a defined genesis
+anchor, not an empty string.
 
 **Adding, removing or renaming a field is not a compatible change.** Rotated
 files are kept indefinitely (D-16), so every record ever written must stay
@@ -205,7 +251,13 @@ GET /api/v1/system/status
   not verify, and is `0` when `ok` is true. `file` names the file checked.
 - A break found at startup stays reported for the life of the process; while
   startup was clean the endpoint re-verifies live, so damage occurring during
-  the run is not hidden until the next restart (D-15).
+  the run is not hidden until the next restart (D-15). Startup verification
+  covers the current day's file **and the one rotated before it**, so `file` is
+  not necessarily today's.
+- There is **no** endpoint and no parameter that acknowledges, clears or
+  recomputes the verdict. A break disappears only by dealing with the file by
+  hand and restarting. A chain that repairs itself is worse than no chain: it
+  destroys the evidence that it was broken.
 - The UI renders a break as a persistent banner. It is not dismissible: a hash
   chain nobody looks at is theatre.
 
