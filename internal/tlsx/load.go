@@ -5,8 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"net"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/holzcloud/holzkube/internal/config"
 )
@@ -67,7 +69,7 @@ func Ensure(cfg config.Config) (*tls.Config, string, error) {
 	if err != nil {
 		hostname = ""
 	}
-	certPath, keyPath, _, err = Generate(cfg.DataDir, hostname)
+	certPath, keyPath, _, err = Generate(cfg.DataDir, hostname, ListenHost(cfg.Listen))
 	if err != nil {
 		return nil, "", err
 	}
@@ -133,4 +135,19 @@ func exists(path string) (bool, error) {
 	default:
 		return false, fmt.Errorf("tlsx: inspect %s: %w", path, err)
 	}
+}
+
+// ListenHost returns the host part of a bind address, or "" if there is none
+// to speak of.
+//
+// It is exported because the same value is both a certificate SAN and an entry
+// in the HTTP Host allowlist, and the two must agree: a host the certificate
+// vouches for but the server refuses, or the reverse, is a confusing failure
+// either way.
+func ListenHost(listen string) string {
+	host, _, err := net.SplitHostPort(listen)
+	if err != nil {
+		host = listen
+	}
+	return strings.Trim(strings.TrimSpace(host), "[]")
 }

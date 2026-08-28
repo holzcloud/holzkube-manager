@@ -90,6 +90,13 @@ type Deps struct {
 	// disappear because a later re-check happened to look at a different file.
 	AuditChain ChainStatus
 
+	// AllowedHosts is every host this instance answers to, and is what closes
+	// DNS rebinding (see middleware.AllowHosts). The composition root fills it
+	// from the bind address plus the loopback names; leaving it empty disables
+	// the check and is intended only for tests, which cannot know the port
+	// httptest will pick.
+	AllowedHosts []string
+
 	Routes []Route
 }
 
@@ -118,6 +125,9 @@ func New(d Deps) http.Handler {
 		// Outermost, so it covers the file server and the problem responses
 		// the links below produce as well as the handlers.
 		middleware.SecurityHeaders(ContentSecurityPolicy()),
+		middleware.AllowHosts(d.AllowedHosts, func(w http.ResponseWriter, r *http.Request, err error) {
+			WriteProblem(w, r, Forbidden("forbidden.host", err.Error()))
+		}),
 		middleware.Recover(d.Logger, func(w http.ResponseWriter, r *http.Request, err error) {
 			WriteInternal(w, r, d.Logger, err)
 		}),

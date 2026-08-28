@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/signal"
 	"slices"
+	"strings"
 	"syscall"
 	"time"
 
@@ -146,6 +147,7 @@ func run(args []string) error {
 			BrokenAtLine: brokenLine,
 			File:         chainFile,
 		}.Public(),
+		AllowedHosts: allowedHosts(cfg.Listen),
 	}
 
 	// The route table is assembled here, from each handler package's own Routes
@@ -214,4 +216,30 @@ func run(args []string) error {
 		defer cancel()
 		return srv.Shutdown(shutdownCtx)
 	}
+}
+
+// allowedHosts is every Host header value this instance answers to.
+//
+// It closes DNS rebinding: without it, the CSRF preconditions are all
+// self-referential, because a victim's browser resolving evil.example to the
+// loopback sends a Host, an Origin and a Sec-Fetch-Site that agree with each
+// other and name the attacker. See middleware.AllowHosts.
+//
+// The set is the bind address plus the loopback names, which is the same set
+// tlsx puts in the certificate's SANs -- the two have to agree, or a host the
+// certificate vouches for is one the server refuses.
+func allowedHosts(listen string) []string {
+	hosts := []string{"localhost", "127.0.0.1", "::1"}
+	if h := tlsx.ListenHost(listen); h != "" {
+		hosts = append(hosts, h)
+	}
+	if hostname, err := os.Hostname(); err == nil && hostname != "" {
+		hosts = append(hosts, hostname)
+		if !strings.Contains(hostname, ".") {
+			// macOS reports a bare hostname while Bonjour resolves it with a
+			// .local suffix, matching what tlsx puts in the SANs.
+			hosts = append(hosts, hostname+".local")
+		}
+	}
+	return hosts
 }

@@ -131,3 +131,68 @@ func TestSecurityHeadersCoverStaticAssets(t *testing.T) {
 		}
 	}
 }
+
+// TestForeignHostIsRefused is the DNS rebinding case. A victim's browser
+// resolving evil.example to the loopback sends Host, Origin and Sec-Fetch-Site
+// that all agree with each other and all name the attacker, so the three CSRF
+// preconditions -- which compare the Origin against the Host -- are satisfied.
+// The Host allowlist is the only thing that says otherwise.
+func TestForeignHostIsRefused(t *testing.T) {
+	deps := minimalDeps(t)
+	deps.AllowedHosts = []string{"localhost", "127.0.0.1", "::1"}
+	srv := httptest.NewServer(httpapi.New(deps))
+	t.Cleanup(srv.Close)
+
+	for _, tc := range []struct {
+		name string
+		host string
+		want int
+	}{
+		{"the loopback it is bound to", "127.0.0.1", http.StatusOK},
+		{"localhost with a port", "localhost:8443", http.StatusOK},
+		{"a rebound attacker domain", "evil.example", http.StatusForbidden},
+		{"a sibling of a permitted name", "notlocalhost", http.StatusForbidden},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			req, err := http.NewRequest(http.MethodGet, srv.URL+"/", nil)
+			if err != nil {
+				t.Fatalf("new request: %v", err)
+			}
+			req.Host = tc.host
+
+			resp, err := http.DefaultClient.Do(req)
+			if err != nil {
+				t.Fatalf("do: %v", err)
+			}
+			defer resp.Body.Close()
+			if resp.StatusCode != tc.want {
+				t.Errorf("Host %q: status = %d, want %d", tc.host, resp.StatusCode, tc.want)
+			}
+		})
+	}
+}
+
+// TestHostCheckCoversReads keeps the link in the outer chain. Putting it inside
+// the CSRF middleware would only cover mutating requests, and a rebound GET of
+// the audit log is a leak of the archive.
+func TestHostCheckCoversReads(t *testing.T) {
+	deps := minimalDeps(t)
+	deps.AllowedHosts = []string{"127.0.0.1"}
+	srv := httptest.NewServer(httpapi.New(deps))
+	t.Cleanup(srv.Close)
+
+	req, err := http.NewRequest(http.MethodGet, srv.URL+"/api/v1/audit", nil)
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	req.Host = "evil.example"
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("do: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusForbidden {
+		t.Errorf("a rebound GET returned %d, want 403", resp.StatusCode)
+	}
+}
