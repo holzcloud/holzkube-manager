@@ -49,8 +49,9 @@ var allowlist = map[string][]string{
 	"auth.login":   {"username"},
 
 	// Listed with nothing permitted, so the table shows the full set of
-	// phase-1 mutations rather than leaving two of them to the default.
+	// phase-1 mutations rather than leaving them to the default.
 	"auth.logout":      {},
+	"auth.sudo":        {},
 	"account.password": {},
 }
 

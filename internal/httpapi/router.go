@@ -117,6 +117,7 @@ func (d Deps) wrapRoute(rt Route) http.Handler {
 			}),
 		middleware.Sudo(rt.Destructive,
 			func(r *http.Request) bool { return d.Auth.IsSudoOpen(r.Context(), d.SudoWindow) },
+			func(r *http.Request) { d.Auth.TouchSudoWindow(r.Context()) },
 			func(w http.ResponseWriter, r *http.Request) {
 				WriteProblem(w, r, SudoRequired())
 			}),
