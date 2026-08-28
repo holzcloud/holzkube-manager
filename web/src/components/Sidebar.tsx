@@ -110,25 +110,37 @@ export function Sidebar() {
         <p className="text-xs text-muted-foreground">Talos cluster management</p>
       </div>
 
+      {/* UAT G-01-5: the active pill alone was a 5/255 step against the sidebar
+          and the active label was neither darker nor heavier than the rest, so
+          nothing reliably said which page was open. Three cues now do: a darker
+          pill, a semibold label, and a left bar that survives greyscale. */}
       {NAV_AREAS.map((area) => (
         <Link
           key={area.path}
           to={area.path}
           activeOptions={{ exact: area.path === '/' }}
           className={cn(
-            'flex items-center gap-2 rounded-md px-2 py-1.5 text-sm text-sidebar-foreground/80',
+            'flex items-center gap-2 rounded-md border-l-2 border-transparent py-1.5 pr-2 pl-1.5 text-sm text-sidebar-foreground/70',
             'hover:bg-sidebar-accent hover:text-sidebar-accent-foreground',
             'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring',
+            // The active styles ride on the router's own data-status rather than
+            // on activeProps: activeProps is concatenated onto className without
+            // tailwind-merge, so `text-sidebar-accent-foreground` and the base
+            // `text-sidebar-foreground/70` both survived and stylesheet order --
+            // not intent -- decided the colour. A variant beats the bare
+            // utility on specificity, so this cannot silently lose again.
+            'data-[status=active]:border-sidebar-accent-foreground data-[status=active]:bg-sidebar-accent',
+            'data-[status=active]:font-semibold data-[status=active]:text-sidebar-accent-foreground',
           )}
-          activeProps={{
-            className: 'bg-sidebar-accent text-sidebar-accent-foreground font-medium',
-          }}
         >
           <area.icon aria-hidden="true" className="size-4 shrink-0" />
           <span className="flex-1">{area.label}</span>
           {area.phase !== null && (
+            /* The chip fill and the active row's highlight were the same
+               token, so the open page's badge lost its pill while every other
+               kept it. The border gives the chip an edge of its own. */
             <span
-              className="rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground"
+              className="rounded border border-sidebar-border bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground"
               title={`This area is built in phase ${area.phase}.`}
             >
               P{area.phase}

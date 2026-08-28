@@ -37,6 +37,12 @@ const Toaster = ({ ...props }: ToasterProps) => {
       toastOptions={{
         classNames: {
           toast: 'cn-toast',
+          // UAT G-01-5: sonner parks its dismiss chip centred on the panel's
+          // top-LEFT corner, so two thirds of it sits outside the toast and it
+          // cuts across the corner radius -- and on a bottom-right toast that
+          // is the edge facing the page. Pull it inside, on the trailing edge.
+          closeButton:
+            'top-3! right-3! left-auto! size-6! translate-x-0! translate-y-0! border-border bg-transparent',
         },
       }}
       {...props}

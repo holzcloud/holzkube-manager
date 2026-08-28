@@ -12,15 +12,22 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
  * against a binary that holds cluster PKI, and the server already refuses to
  * send one.
  */
-export function ErrorPage({ error }: { error: Error }) {
+export function ErrorPage({ error, notFound = false }: { error: Error; notFound?: boolean }) {
   const problem = error instanceof ProblemError ? error.problem : null
 
-  const title = problem?.title ?? 'Something went wrong'
-  const detail =
-    problem?.detail ??
-    (problem === null
-      ? 'holzkube could not complete that request. The details are in the server log.'
-      : undefined)
+  // UAT G-01-5: an unknown URL used to render the generic failure card, which
+  // is indistinguishable from a real 500 and sends an operator who merely
+  // mistyped to a server log with nothing in it. A missing page is a different
+  // fact and says so, including the path that was asked for.
+  const path = notFound && typeof window !== 'undefined' ? window.location.pathname : null
+
+  const title = notFound ? 'That page does not exist' : (problem?.title ?? 'Something went wrong')
+  const detail = notFound
+    ? 'holzkube has no screen at this address. Nothing failed — the link or the typed URL is wrong, and there is nothing in the server log to find.'
+    : (problem?.detail ??
+      (problem === null
+        ? 'holzkube could not complete that request. The details are in the server log.'
+        : undefined))
 
   return (
     <div className="flex min-h-dvh items-center justify-center p-6">
@@ -30,6 +37,14 @@ export function ErrorPage({ error }: { error: Error }) {
           {detail !== undefined && <CardDescription>{detail}</CardDescription>}
         </CardHeader>
         <CardContent className="space-y-4">
+          {path !== null && (
+            <p className="text-sm text-muted-foreground">
+              Requested:{' '}
+              <code className="rounded bg-muted px-1.5 py-0.5 font-mono text-xs text-foreground">
+                {path}
+              </code>
+            </p>
+          )}
           {problem?.instance !== undefined && (
             <p className="text-sm text-muted-foreground">
               Reference:{' '}
