@@ -1,0 +1,50 @@
+name: Feature request
+description: Something holzkube should do that it does not do.
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Describe the problem, not the solution. A problem stated plainly can be
+        met by a design nobody in the thread has thought of yet; a request
+        written as a solution rules those out before the discussion starts.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What are you trying to do, and what stops you?
+      description: >-
+        A concrete situation rather than a category. Say which part of holzkube
+        you were in when you hit it.
+    validations:
+      required: true
+
+  - type: textarea
+    id: today
+    attributes:
+      label: What do you do today instead?
+      description: >-
+        The `talosctl` invocation, the manual step, or "nothing — I gave up".
+        This is the best evidence of what the feature actually has to replace.
+    validations:
+      required: true
+
+  - type: input
+    id: phase
+    attributes:
+      label: Roadmap phase
+      description: >-
+        If the roadmap in `.planning/ROADMAP.md` already covers this, name the
+        phase. Belonging to a later phase is not a rejection — it is a schedule.
+        "Not sure" is a fine answer.
+      placeholder: Phase 7 — Config-Domain
+    validations:
+      required: false
+
+  - type: textarea
+    id: design
+    attributes:
+      label: Design you had in mind
+      description: Optional, and secondary to the problem above.
+    validations:
+      required: false

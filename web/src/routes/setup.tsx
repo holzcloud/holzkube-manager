@@ -4,6 +4,7 @@ import { type FormEvent, useState } from 'react'
 import { api } from '@/api'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { SourceNotice } from '@/components/SourceNotice'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { useSystemStatus } from '@/hooks/useSession'
@@ -172,6 +173,7 @@ function SetupPage() {
           )}
         </CardContent>
       </Card>
+      <SourceNotice className="text-xs text-muted-foreground" />
     </div>
   )
 }
