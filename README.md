@@ -217,3 +217,20 @@ package ever reaches `cmd/holzkubed`.
 
 - [`docs/api-contract.md`](docs/api-contract.md) — error taxonomy, routes, CSRF
   rules and the audit query contract.
+
+## Licence
+
+holzkube is free software under the **GNU Affero General Public License,
+version 3** — see [`LICENSE`](LICENSE).
+
+The Affero clause is the reason for this choice rather than a plain GPL: section
+13 covers the case that matters for a management UI, namely a modified holzkube
+offered to other people over a network. If you run a changed version and let
+anyone else use it, they are entitled to your changes. Running an unmodified
+holzkube on your own cluster obliges you to nothing.
+
+## Contributing
+
+See [`CONTRIBUTING.md`](CONTRIBUTING.md) for the toolchain and the checks a
+change has to pass, and [`SECURITY.md`](SECURITY.md) before reporting anything
+that looks like a vulnerability — please do not open a public issue for those.

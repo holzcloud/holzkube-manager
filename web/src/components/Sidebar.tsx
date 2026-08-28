@@ -10,6 +10,7 @@ import {
   Server,
   Settings,
 } from 'lucide-react'
+import { SourceNotice } from '@/components/SourceNotice'
 import { cn } from '@/lib/utils'
 
 /**
@@ -148,6 +149,9 @@ export function Sidebar() {
           )}
         </Link>
       ))}
+
+      {/* AGPL section 13: the running instance has to offer its own source. */}
+      <SourceNotice className="mt-auto px-2 pt-3 text-xs text-sidebar-foreground/60" />
     </nav>
   )
 }

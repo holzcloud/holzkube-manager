@@ -1,0 +1,124 @@
+name: Bug report
+description: holzkubed or the web UI does not behave the way the documentation says it does.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Not for security vulnerabilities. Report those through the Security tab —
+        a public issue discloses the problem before there is a fix.
+
+  - type: input
+    id: version
+    attributes:
+      label: holzkubed version
+      description: >-
+        Output of `holzkubed --version`. A build from a working tree reports what
+        `git describe` said at build time, or `dev` for a plain `go build`.
+      placeholder: holzkubed v0.3.1
+    validations:
+      required: true
+
+  - type: dropdown
+    id: install
+    attributes:
+      label: How was it installed?
+      options:
+        - Release archive
+        - Built from source
+        - Container image
+        - Other — say which in the steps below
+    validations:
+      required: true
+
+  - type: input
+    id: host
+    attributes:
+      label: Host OS and architecture
+      description: >-
+        The machine holzkubed runs on, which is outside the cluster — not a node.
+      placeholder: Debian 12, linux/amd64
+    validations:
+      required: true
+
+  - type: input
+    id: talos
+    attributes:
+      label: Talos version(s)
+      description: >-
+        Every version involved, if the nodes are not all on the same one. Leave
+        blank if the bug happens before holzkubed contacts a node at all.
+      placeholder: v1.11.2 control plane, v1.11.0 workers
+    validations:
+      required: false
+
+  - type: input
+    id: browser
+    attributes:
+      label: Browser and version
+      description: >-
+        Only if the bug is in the UI. The UI ships as one bundle, so a bug that
+        appears in exactly one browser is a different bug from one that appears
+        in all of them.
+      placeholder: Firefox 141
+    validations:
+      required: false
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected instead
+      description: One sentence is usually enough.
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: >-
+        Start from a state we can reach. Say whether the data directory was fresh,
+        and include the flags and `HOLZKUBE_*` variables you started with — most
+        of holzkube's behaviour is configuration-dependent.
+      placeholder: |
+        1. HOLZKUBE_DATA_DIR=/tmp/hk-bug ./bin/holzkubed
+        2. Complete the setup wizard
+        3. ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Log excerpt
+      description: >-
+        holzkubed logs to stderr; redirect it with `2> holzkube.log`. If the
+        default output says nothing useful, restart with `--log-level=debug` and
+        reproduce. API errors carry a request id — in the `X-Request-Id` response
+        header and in the body as `instance` — and the server-side line for the
+        same failure is logged under that id, so quote it if you have one.
+      render: text
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: no-secrets
+    attributes:
+      label: Before you submit
+      description: >-
+        The holzkube data directory is equivalent to root on every managed node.
+        Anything from it that reaches a public issue has to be treated as
+        compromised from then on, and editing the issue afterwards does not undo
+        that.
+      options:
+        - label: >-
+            This report contains no kubeconfig, no talosconfig, no certificate
+            private key, no session cookie and no password.
+          required: true

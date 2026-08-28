@@ -1,0 +1,136 @@
+# CI runs the same gates that pass on a developer machine, in the same order
+# and with the same pinned tool versions. A check that only exists here is a
+# check nobody can reproduce or fix without pushing a commit, so there are none.
+name: CI
+
+on:
+  push:
+    branches: [main]
+    # Tags are built here as well as on main, so that a release cannot be cut
+    # from a commit that fails the gates below. See the `release` job.
+    tags: ['v*']
+  pull_request:
+
+# A superseded pull request run is cancelled; a run on main or on a tag is not.
+# Cancelling a release halfway through leaves a partly uploaded draft.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  ci:
+    name: Build, lint and test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      # go.mod carries `toolchain go1.26.7` and setup-go honours that line, so
+      # the Go version is pinned in one place and CI cannot drift from a local
+      # build.
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          # Caches the module and build caches. Keyed on the root go.sum only:
+          # sandbox/ is a separate module, deliberately outside this build.
+          cache-dependency-path: go.sum
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - uses: go-task/setup-task@v1
+        with:
+          version: 3.53.1
+
+      # ci, not install: it installs exactly what web/package-lock.json pins and
+      # fails if the lockfile and the manifest disagree. The frontend gates below
+      # run before `task build`, so the install cannot wait for it.
+      - name: Install web dependencies
+        run: npm --prefix web ci
+
+      - name: Lint web
+        run: npm --prefix web run lint
+
+      - name: Test web
+        run: npm --prefix web test
+
+      # Builds the web bundle and then the binary. The ordering is a hard
+      # dependency rather than a convention: go:embed reads
+      # internal/httpapi/dist at compile time, so the two Go steps after this
+      # one are the only ones that see a current bundle.
+      - name: Build
+        run: task build
+
+      # v9, not v6: the v6 action only knows how to install golangci-lint v1,
+      # and .golangci.yml is a v2 config. v7 was the first major to speak v2.
+      - name: Lint Go
+        uses: golangci/golangci-lint-action@v9
+        with:
+          version: v2.13.1
+
+      - name: Test Go
+        run: go test ./...
+
+  test-macos:
+    name: Go tests (macOS)
+    runs-on: macos-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+
+      # No web build and no Node here. internal/httpapi/dist/.gitkeep is tracked
+      # and the embed pattern is `all:dist`, which matches dotfiles, so the
+      # package compiles without a bundle and no Go test reads one. This job is
+      # about darwin behaviour, not about the UI.
+      - name: Test Go
+        run: go test ./...
+
+  release:
+    name: Release
+    # macos-latest is arm64, the only darwin target .goreleaser.yaml builds, so
+    # both gates guard the tag. Drop test-macos from this list if that job goes.
+    needs: [ci, test-macos]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      # Creating the draft release and uploading the archives to it. Nothing
+      # else: this workflow does not publish packages or write to pull requests.
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # goreleaser derives the version from the tag and the changelog from
+          # git history. A shallow clone gives it neither.
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+
+      # .goreleaser.yaml runs `npm --prefix web ci` and `npm --prefix web run
+      # build` in its before hooks, for the same go:embed reason as the Taskfile.
+      # The release job therefore needs Node exactly as much as the build does.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - uses: goreleaser/goreleaser-action@v6
+        with:
+          distribution: goreleaser
+          version: v2.18.0
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
