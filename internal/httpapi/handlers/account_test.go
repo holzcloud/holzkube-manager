@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"net/http/cookiejar"
 	"net/http/httptest"
-	"net/url"
 	"os"
 	"slices"
 	"strconv"
@@ -146,20 +145,6 @@ func (c *client) do(method, path string, body any, opts ...reqOpt) (*http.Respon
 		c.t.Fatalf("read body: %v", err)
 	}
 	return resp, raw
-}
-
-func (c *client) sessionCookie() string {
-	c.t.Helper()
-	u, err := url.Parse(c.s.srv.URL)
-	if err != nil {
-		c.t.Fatalf("parse url: %v", err)
-	}
-	for _, ck := range c.http.Jar.Cookies(u) {
-		if ck.Name == auth.CookieName {
-			return ck.Value
-		}
-	}
-	return ""
 }
 
 // setup runs the first-run wizard, which leaves this client logged in.

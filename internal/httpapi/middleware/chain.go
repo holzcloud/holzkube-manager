@@ -63,6 +63,11 @@ type responseRecorder struct {
 }
 
 // WrapResponseWriter returns a ResponseWriter that records the status code.
+//
+// it as an http.ResponseWriter, and exporting it would invite code that depends
+// on the recorder's internals.
+//
+//nolint:revive // the concrete type stays unexported on purpose: links consume
 func WrapResponseWriter(w http.ResponseWriter) *responseRecorder {
 	return &responseRecorder{ResponseWriter: w, status: http.StatusOK}
 }
