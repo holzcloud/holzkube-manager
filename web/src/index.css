@@ -26,10 +26,26 @@
   --muted-foreground: oklch(0.556 0 0);
   --accent: oklch(0.97 0 0);
   --accent-foreground: oklch(0.205 0 0);
-  --destructive: oklch(0.577 0.245 27.325);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
-  --ring: oklch(0.708 0 0);
+  /* UAT G-01-4: the destructive badge renders text-destructive on
+     bg-destructive/10. At L=0.577 that pair is 4.01:1, under AA for 12px bold,
+     and the `error` outcome was the faintest badge in the audit table when it
+     is the one that has to be caught. L=0.52 takes the pair to 4.72:1 and also
+     strengthens `text-destructive` on white. */
+  --destructive: oklch(0.52 0.245 27.325);
+  /* UAT G-01-2: cards are bg-card on bg-background -- both pure white -- so
+     this border is the ONLY thing separating a card from the page. At L=0.922
+     that was 1.25:1. Dividers should not shout, so this stops short of the 3:1
+     that --input takes. */
+  --border: oklch(0.85 0 0);
+  /* UAT G-01-2: an input's fill is the same white as the card, so its border is
+     the only cue that a control is there -- which puts it squarely under
+     WCAG 1.4.11's 3:1 for component boundaries. L=0.65 is 3.23:1. */
+  --input: oklch(0.65 0 0);
+  /* UAT G-01-3: the focus indicator is `focus-visible:border-ring` plus a
+     ring-ring/50 halo. At L=0.708 the halo lands on #D0D0D0 (1.54:1) and the
+     border barely moved off the resting state. L=0.45 is 7.46:1 solid, so the
+     border carries the indicator and the halo only widens it. */
+  --ring: oklch(0.45 0 0);
   --chart-1: oklch(0.87 0 0);
   --chart-2: oklch(0.556 0 0);
   --chart-3: oklch(0.439 0 0);
@@ -40,10 +56,14 @@
   --sidebar-foreground: oklch(0.145 0 0);
   --sidebar-primary: oklch(0.205 0 0);
   --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.97 0 0);
-  --sidebar-accent-foreground: oklch(0.205 0 0);
-  --sidebar-border: oklch(0.922 0 0);
-  --sidebar-ring: oklch(0.708 0 0);
+  /* UAT G-01-5: the active nav pill was L=0.97 on an L=0.985 sidebar, a 5/255
+     step (1.045:1), and the active label was the same weight and near enough
+     the same colour as the inactive ones -- so the current page had no
+     reliable cue at all. */
+  --sidebar-accent: oklch(0.93 0 0);
+  --sidebar-accent-foreground: oklch(0.145 0 0);
+  --sidebar-border: oklch(0.85 0 0);
+  --sidebar-ring: oklch(0.45 0 0);
 }
 
 @theme inline {
@@ -106,9 +126,11 @@
   --accent: oklch(0.269 0 0);
   --accent-foreground: oklch(0.985 0 0);
   --destructive: oklch(0.704 0.191 22.216);
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.556 0 0);
+  --border: oklch(1 0 0 / 14%);
+  /* Same 1.4.11 reasoning as the light palette; dark inputs also carry a
+     bg-input/30 fill, so they need less border to read as controls. */
+  --input: oklch(1 0 0 / 32%);
+  --ring: oklch(0.75 0 0);
   --chart-1: oklch(0.87 0 0);
   --chart-2: oklch(0.556 0 0);
   --chart-3: oklch(0.439 0 0);
@@ -118,15 +140,19 @@
   --sidebar-foreground: oklch(0.985 0 0);
   --sidebar-primary: oklch(0.488 0.243 264.376);
   --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.269 0 0);
+  --sidebar-accent: oklch(0.32 0 0);
   --sidebar-accent-foreground: oklch(0.985 0 0);
-  --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.556 0 0);
+  --sidebar-border: oklch(1 0 0 / 14%);
+  --sidebar-ring: oklch(0.75 0 0);
 }
 
 @layer base {
   * {
-    @apply border-border outline-ring/50;
+    /* UAT G-01-3: this outline -- not the component's ring -- is what paints
+       when :focus-visible does not match, e.g. a click into a field. At /50 it
+       rendered #AAAAAA (2.32:1), under the 3:1 a focus indicator needs, and it
+       was the ONLY cue in that state. Full strength is 7.46:1. */
+    @apply border-border outline-ring;
   }
   body {
     @apply bg-background text-foreground;

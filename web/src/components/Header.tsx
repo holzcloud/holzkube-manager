@@ -21,7 +21,11 @@ export function Header() {
         </span>
       )}
 
-      <Separator orientation="vertical" className="h-5" />
+      {/* UAT G-01-5: Separator's vertical variant carries `self-stretch`, and a
+          stretched item with an explicit height falls back to flex-start -- so
+          this rule hung off the top edge of the 56px header instead of sitting
+          between the two things it separates. */}
+      <Separator orientation="vertical" className="h-5 data-vertical:self-center" />
 
       <ThemeToggle />
 
