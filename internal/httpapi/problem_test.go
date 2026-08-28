@@ -2,9 +2,11 @@ package httpapi_test
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -36,6 +38,14 @@ var taxonomy = []struct {
 	{"rate-limited", httpapi.RateLimited(30), httpapi.TypeRateLimited, http.StatusTooManyRequests, "ratelimit.delayed"},
 	{"internal", httpapi.Internal(fmt.Errorf("boom")), httpapi.TypeInternal, http.StatusInternalServerError, "internal.unexpected"},
 	{"setup-required", httpapi.SetupRequired(), httpapi.TypeSetupRequired, http.StatusServiceUnavailable, "setup.required"},
+
+	// The upstream family. One type, four reserved codes: the type axis stays a
+	// taxonomy of failure kinds, and the code stays the fine-grained
+	// discriminator the contract already promises.
+	{"upstream-node-unreachable", httpapi.Upstream(httpapi.CodeUpstreamNodeUnreachable, "The node did not answer."), httpapi.TypeUpstream, http.StatusBadGateway, "upstream.node-unreachable"},
+	{"upstream-node-timeout", httpapi.Upstream(httpapi.CodeUpstreamNodeTimeout, "The node did not answer in time."), httpapi.TypeUpstream, http.StatusBadGateway, "upstream.node-timeout"},
+	{"upstream-factory-unavailable", httpapi.Upstream(httpapi.CodeUpstreamFactoryUnavailable, "The Image Factory did not answer."), httpapi.TypeUpstream, http.StatusBadGateway, "upstream.factory-unavailable"},
+	{"upstream-factory-rejected", httpapi.Upstream(httpapi.CodeUpstreamFactoryRejected, "The Image Factory refused the schematic."), httpapi.TypeUpstream, http.StatusBadGateway, "upstream.factory-rejected"},
 }
 
 // TestProblemTaxonomy checks the invariants every entry must hold: the media
@@ -177,5 +187,109 @@ func TestProblemInstancesAreDistinctUnderConcurrency(t *testing.T) {
 	if len(seen) != workers {
 		t.Errorf("got %d distinct instances across %d concurrent requests; ids leaked between requests",
 			len(seen), workers)
+	}
+}
+
+// TestProblemUpstreamCodesAreReserved pins the four code tokens minted with the
+// type. They are reserved in the same commit as the type on purpose: plan 02-05
+// (transport failures) and plan 02-06 (factory failures) are written later and
+// against this list, so neither can invent a divergent spelling of a code the
+// contract says never changes.
+func TestProblemUpstreamCodesAreReserved(t *testing.T) {
+	want := map[string]string{
+		"CodeUpstreamNodeUnreachable":    "upstream.node-unreachable",
+		"CodeUpstreamNodeTimeout":        "upstream.node-timeout",
+		"CodeUpstreamFactoryUnavailable": "upstream.factory-unavailable",
+		"CodeUpstreamFactoryRejected":    "upstream.factory-rejected",
+	}
+	got := map[string]string{
+		"CodeUpstreamNodeUnreachable":    httpapi.CodeUpstreamNodeUnreachable,
+		"CodeUpstreamNodeTimeout":        httpapi.CodeUpstreamNodeTimeout,
+		"CodeUpstreamFactoryUnavailable": httpapi.CodeUpstreamFactoryUnavailable,
+		"CodeUpstreamFactoryRejected":    httpapi.CodeUpstreamFactoryRejected,
+	}
+	for name, wantCode := range want {
+		if got[name] != wantCode {
+			t.Errorf("%s = %q, want %q", name, got[name], wantCode)
+		}
+		if !strings.HasPrefix(got[name], "upstream.") {
+			t.Errorf("%s = %q, which is outside the reserved upstream.* prefix", name, got[name])
+		}
+	}
+}
+
+// TestProblemUpstreamTakesNoError pins the shape of the constructor rather than
+// its output.
+//
+// Internal accepts an error and deliberately drops it. Upstream must not accept
+// one at all: a constructor that takes an error is a constructor somebody
+// eventually passes a wrapped Go error to, and unlike Internal this type does
+// put its detail on the wire. Forcing a string means every detail that reaches
+// a client was typed out by a person who could see what it said.
+func TestProblemUpstreamTakesNoError(t *testing.T) {
+	fn := reflect.TypeOf(httpapi.Upstream)
+	if fn.Kind() != reflect.Func {
+		t.Fatalf("httpapi.Upstream is %s, want a function", fn.Kind())
+	}
+	if fn.NumIn() != 2 {
+		t.Fatalf("Upstream takes %d parameters, want 2 (code, detail)", fn.NumIn())
+	}
+
+	errType := reflect.TypeOf((*error)(nil)).Elem()
+	for i := range fn.NumIn() {
+		in := fn.In(i)
+		if in == errType || in.Implements(errType) {
+			t.Fatalf("Upstream parameter %d is %s; the constructor must never take an error", i, in)
+		}
+		if in.Kind() != reflect.String {
+			t.Errorf("Upstream parameter %d is %s, want string", i, in)
+		}
+	}
+	if fn.NumOut() != 1 || fn.Out(0) != reflect.TypeOf((*httpapi.Problem)(nil)) {
+		t.Errorf("Upstream returns %v, want a single *httpapi.Problem", fn.Out(0))
+	}
+}
+
+// TestProblemUpstreamCarriesADetail is the counterfactual to
+// TestProblemInternalLeaksNothing. internal has no detail by contract, which is
+// exactly why an unreachable upstream must not fall through to it: the whole
+// point of the mint is that the operator is told which dependency failed.
+func TestProblemUpstreamCarriesADetail(t *testing.T) {
+	const detail = "The Image Factory at factory.talos.dev did not answer within the client timeout."
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/schematics", nil)
+	httpapi.WriteProblem(rec, req, httpapi.Upstream(httpapi.CodeUpstreamFactoryUnavailable, detail))
+
+	var body map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode: %v (body: %s)", err, rec.Body.String())
+	}
+	if got, _ := body["detail"].(string); got != detail {
+		t.Errorf("detail = %q, want the caller's prose %q", got, detail)
+	}
+	if got, _ := body["type"].(string); got == httpapi.TypeInternal {
+		t.Errorf("an upstream failure serialised as %s; the mint exists to stop exactly that", httpapi.TypeInternal)
+	}
+}
+
+// TestProblemUpstreamTravelsAsAnError checks that an upstream problem can be
+// returned as an error from a service package and reach a handler unchanged.
+// Without this, a service would have to invent a parallel error type and the
+// handler would have to translate it back, which is where codes drift.
+func TestProblemUpstreamTravelsAsAnError(t *testing.T) {
+	var err error = httpapi.Upstream(httpapi.CodeUpstreamNodeTimeout, "The node did not answer in time.")
+
+	const want = "upstream.node-timeout: An upstream dependency did not answer"
+	if got := err.Error(); got != want {
+		t.Errorf("Error() = %q, want %q", got, want)
+	}
+
+	var p *httpapi.Problem
+	if !errors.As(err, &p) {
+		t.Fatalf("an upstream problem does not survive errors.As into *httpapi.Problem")
+	}
+	if p.Code != httpapi.CodeUpstreamNodeTimeout {
+		t.Errorf("recovered code = %q, want %q", p.Code, httpapi.CodeUpstreamNodeTimeout)
 	}
 }
