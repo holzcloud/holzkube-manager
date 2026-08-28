@@ -68,7 +68,7 @@ func readVersionFile(t *testing.T, dir string) string {
 func listTree(t *testing.T, dir string) []string {
 	t.Helper()
 	var out []string
-	err := filepath.WalkDir(dir, func(p string, d os.DirEntry, err error) error {
+	err := filepath.WalkDir(dir, func(p string, _ os.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}

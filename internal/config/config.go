@@ -37,9 +37,12 @@ const redacted = "<redacted>"
 type Origin string
 
 const (
+	// OriginDefault means nothing set the option; the built-in default applies.
 	OriginDefault Origin = "default"
-	OriginEnv     Origin = "environment"
-	OriginFlag    Origin = "flag"
+	// OriginEnv means a HOLZKUBE_ environment variable set the option.
+	OriginEnv Origin = "environment"
+	// OriginFlag means a command line flag set the option.
+	OriginFlag Origin = "flag"
 )
 
 var (

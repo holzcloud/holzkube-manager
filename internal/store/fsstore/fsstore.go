@@ -99,9 +99,14 @@ func Open(dir string) (s *Store, err error) {
 // callers above the seam have no business with paths.
 func (s *Store) Dir() string { return s.dir }
 
-func (s *Store) Users() store.UserStore        { return s.users }
+// Users returns the operator account entity.
+func (s *Store) Users() store.UserStore { return s.users }
+
+// Settings returns the instance settings entity.
 func (s *Store) Settings() store.SettingsStore { return s.settings }
-func (s *Store) Sessions() store.SessionStore  { return s.sessions }
+
+// Sessions returns the server-side session entity.
+func (s *Store) Sessions() store.SessionStore { return s.sessions }
 
 // Close releases the process lock. After Close another instance may open the
 // same data directory.

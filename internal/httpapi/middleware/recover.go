@@ -13,13 +13,17 @@ import (
 // cluster PKI.
 func Recover(logger *slog.Logger, onPanic func(http.ResponseWriter, *http.Request, error)) Middleware {
 	return func(next http.Handler) http.Handler {
+		//nolint:contextcheck // the deferred closure logs with r.Context() via
+		// ErrorContext; contextcheck cannot see through the recover closure.
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			defer func() {
 				rec := recover()
 				if rec == nil {
 					return
 				}
-				if rec == http.ErrAbortHandler {
+				// rec is a recovered panic value, not a returned error: it is
+				// compared by identity and can never arrive wrapped.
+				if rec == http.ErrAbortHandler { //nolint:errorlint
 					panic(rec)
 				}
 				err := fmt.Errorf("panic: %v", rec)

@@ -362,8 +362,8 @@ func TestBindBeyondLoopbackIsWarned(t *testing.T) {
 	warnings := func(cfg Config) []string {
 		var out []string
 		for _, rec := range logRecords(t, cfg) {
-			if rec["level"] == "WARN" {
-				out = append(out, rec["msg"].(string))
+			if msg, ok := rec["msg"].(string); ok && rec["level"] == "WARN" {
+				out = append(out, msg)
 			}
 		}
 		return out
