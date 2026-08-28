@@ -25,10 +25,14 @@ import (
 )
 
 const (
-	dataDirPerm       = 0o700
 	readHeaderTimeout = 10 * time.Second
 	shutdownGrace     = 10 * time.Second
 )
+
+// version is the release this binary was built from. goreleaser overwrites it
+// through -ldflags -X main.version=...; a build straight from a working tree
+// keeps "dev", which is the honest answer for one.
+var version = "dev"
 
 func main() {
 	if err := run(os.Args[1:]); err != nil {
@@ -38,22 +42,32 @@ func main() {
 }
 
 func run(args []string) error {
-	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
+	// The level is behind a LevelVar because the level itself is configuration:
+	// the logger has to exist before --log-level has been resolved.
+	level := new(slog.LevelVar)
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: level}))
 
 	cfg, err := config.Load(args)
-	if err != nil {
+	switch {
+	case errors.Is(err, config.ErrHelp):
+		config.Usage(os.Stdout)
+		return nil
+	case errors.Is(err, config.ErrVersion):
+		fmt.Println("holzkubed", version)
+		return nil
+	case err != nil:
 		return err
 	}
-	logger.Info("configuration resolved",
-		slog.String("listen", cfg.Listen),
-		slog.String("data_dir", cfg.DataDir),
-		slog.Bool("insecure_http", cfg.InsecureHTTP),
-		slog.Duration("sudo_window", cfg.SudoWindow),
-		slog.Duration("session_lifetime", cfg.SessionLifetime),
-	)
+	level.Set(cfg.LogLevel)
 
-	if err := os.MkdirAll(cfg.DataDir, dataDirPerm); err != nil {
-		return fmt.Errorf("create data directory: %w", err)
+	logger.Info("holzkube starting", slog.String("version", version))
+	// Every option, its effective value and where that value came from. A
+	// misconfigured option is then visible here rather than in the failure it
+	// eventually causes (D-03).
+	cfg.LogEffective(logger)
+
+	if err := config.EnsureDir(cfg.DataDir); err != nil {
+		return err
 	}
 
 	st, err := fsstore.Open(cfg.DataDir)
