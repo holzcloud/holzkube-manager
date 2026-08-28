@@ -40,3 +40,14 @@ func (m *machineService) Version(_ context.Context, _ *emptypb.Empty) (*machine.
 		}},
 	}, nil
 }
+
+// Hostname answers with the hostname the simulator was configured with.
+//
+// It is the second and last RPC this plan needs: talos.Dialer.Probe returns a
+// talos.Identity carrying a hostname, so the plan that declares the Probe
+// contract is the plan that makes the simulated node able to satisfy it.
+func (m *machineService) Hostname(_ context.Context, _ *emptypb.Empty) (*machine.HostnameResponse, error) {
+	return &machine.HostnameResponse{
+		Messages: []*machine.Hostname{{Hostname: m.server.opts.Hostname}},
+	}, nil
+}
