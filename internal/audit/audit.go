@@ -239,9 +239,14 @@ func (l *Logger) Outcome(_ context.Context, seq uint64, outcome string, cause er
 	}
 	delete(l.pending, seq)
 
+	// Through the redactor, like every other value that reaches the archive.
+	// This used to be the one branch in the package that wrote a string
+	// straight into a record, safe only because the single caller happened to
+	// pass a shape-checked taxonomy code -- a validation living in a different
+	// package from the invariant it upheld.
 	params := map[string]any{}
 	if cause != nil {
-		params["error"] = cause.Error()
+		params["error"] = OutcomeCause(cause.Error())
 	}
 
 	_, err := l.append(Record{
