@@ -110,17 +110,53 @@ The audit step is fail-closed on purpose: a mutation that cannot be recorded is
 not performed. An unlogged mutation is the outcome the audit log exists to
 prevent.
 
+### The sudo window, as a client sees it
+
+- **Logging in does not open the window.** A fresh session reaching a
+  destructive route gets `428` `sudo.required`, exactly as an old one does. The
+  window is opened only by `POST /api/v1/auth/sudo`, and it belongs to that one
+  session — a second browser logged in as the same operator is unaffected.
+- The window is **5 minutes** by default (`--sudo-window`, D-05).
+- **Every successful destructive action restarts it**, so a series of them asks
+  for the password once rather than once per action.
+- A failed destructive action does not restart it.
+
+The client flow is therefore: call the action; on `428`, prompt for the
+password; `POST /api/v1/auth/sudo`; on `204`, retry the original call. A wrong
+password there is `401`, not `428` — the session is fine, the credential was
+not.
+
+### Login and re-authentication are rate limited
+
+`POST /api/v1/auth/login` and `POST /api/v1/auth/sudo` share one delay counter
+per source IP (D-08).
+
+- The first failure is not delayed. Each further one doubles the wait, from
+  250 ms, stopping at 30 seconds.
+- A short wait is served by holding the request; anything longer answers `429`
+  `ratelimit.delayed` with `Retry-After` in seconds.
+- A successful attempt clears the counter.
+- **There is no lock and therefore no unlock.** Waiting is always sufficient;
+  no endpoint, flag or recovery path exists to clear the delay, and none may be
+  added. Clients should show the `Retry-After` value and let the operator wait.
+
 ## CSRF Contract
 
 Every mutating request (anything other than `GET`, `HEAD`, `OPTIONS`, `TRACE`)
 must satisfy **all three** conditions simultaneously. Failing any one gives
 `403` with code `csrf.precondition-unmet`.
 
-1. `Content-Type: application/json`
-2. `X-Holzkube-CSRF: 1`
+1. `Content-Type: application/json`, optionally with parameters
+   (`; charset=utf-8` is accepted).
+2. `X-Holzkube-CSRF: 1` — the value is checked, not just the header's presence.
+   Any other value is a refusal, so a client cannot drift to `true` and only
+   discover it later.
 3. An `Origin` / `Sec-Fetch-Site` consistent with our own origin:
-   - if `Sec-Fetch-Site` is present it must be `same-origin` or `none`;
-   - if `Origin` is present its host must equal the request `Host`.
+   - if `Sec-Fetch-Site` is present it must be `same-origin` or `none`
+     (`same-site` is refused: a sibling subdomain is not us);
+   - if `Origin` is present, its host must equal the request `Host` **and** its
+     scheme must match the request's. An `http://` origin on an `https://`
+     request is a refusal.
    - Absence of both is permitted: non-browser clients send neither, and a
      browser cannot reach conditions 1 and 2 cross-origin anyway.
 
