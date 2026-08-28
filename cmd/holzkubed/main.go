@@ -4,7 +4,6 @@ package main
 
 import (
 	"context"
-	"crypto/tls"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -65,6 +64,13 @@ func run(args []string) error {
 	// misconfigured option is then visible here rather than in the failure it
 	// eventually causes (D-03).
 	cfg.LogEffective(logger)
+
+	// Before anything is opened or created: plain HTTP is allowed only where the
+	// listener cannot leave this machine (D-04). A refusal here is a start
+	// failure with nothing written, not a surprise at the first request.
+	if err := tlsx.LoopbackGuard(cfg.Listen, cfg.InsecureHTTP); err != nil {
+		return err
+	}
 
 	if err := config.EnsureDir(cfg.DataDir); err != nil {
 		return err
@@ -135,31 +141,22 @@ func run(args []string) error {
 		ReadHeaderTimeout: readHeaderTimeout,
 	}
 
-	if !cfg.InsecureHTTP {
-		var cert tls.Certificate
-		var fingerprint string
-		if cfg.TLSCert != "" {
-			cert, fingerprint, err = tlsx.Load(cfg.TLSCert, cfg.TLSKey)
-		} else {
-			cert, fingerprint, err = tlsx.EnsureCertificate(cfg.DataDir)
-		}
+	if cfg.InsecureHTTP {
+		logger.Warn("serving plain HTTP on loopback; session cookies are Secure and browsers will not send them",
+			slog.String("url", "http://"+cfg.Listen))
+	} else {
+		tlsConfig, fingerprint, err := tlsx.Ensure(cfg)
 		if err != nil {
 			return err
 		}
-		srv.TLSConfig = &tls.Config{
-			Certificates: []tls.Certificate{cert},
-			MinVersion:   tls.VersionTLS12,
-		}
+		srv.TLSConfig = tlsConfig
 		// The operator will see a browser warning for a self-signed
-		// certificate. Logging the fingerprint is what turns "click through it"
-		// into "compare it", which is the only version of that step worth
-		// asking for (D-04).
+		// certificate. Logging the fingerprint in the browser's own format is
+		// what turns "click through it" into "compare it", which is the only
+		// version of that step worth asking for (D-04).
 		logger.Info("TLS certificate ready",
 			slog.String("sha256_fingerprint", fingerprint),
 			slog.String("url", "https://"+cfg.Listen))
-	} else {
-		logger.Warn("serving plain HTTP; session cookies require TLS and will not be sent by browsers",
-			slog.String("url", "http://"+cfg.Listen))
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
