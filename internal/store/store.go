@@ -37,8 +37,11 @@ var (
 // The prefix is part of the crash contract, not an implementation detail: a
 // process killed between writing the temporary file and renaming it leaves one
 // behind, and the next start must recognise and remove it rather than ever
-// read it as state. It lives here because both fsstore (which creates them)
-// and migrate (which must not back them up) need the same string.
+// read it as state. It lives here because everything that creates such a file
+// (fsstore, migrate, tlsx) and everything that must recognise one (the startup
+// sweeper, the backup exclusion) needs the same string. A package that invents
+// its own prefix writes files nothing sweeps -- which for tlsx meant orphaned
+// private keys.
 const TempFilePrefix = ".holzkube-tmp-"
 
 // Store is the root of the persistence seam.

@@ -26,6 +26,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/holzcloud/holzkube/internal/store"
 )
 
 const (
@@ -167,7 +169,13 @@ func dnsNames(hostname string) []string {
 func writeAtomic(path string, data []byte) (err error) {
 	dir := filepath.Dir(path)
 
-	tmp, err := os.CreateTemp(dir, ".tmp-tlsx-*")
+	// The store's prefix, not a private one. A crash between CreateTemp and
+	// Rename leaves this file behind holding a PEM-encoded EC private key. It
+	// is 0600 so the permission Guard passes it, and under a prefix of its own
+	// neither the startup sweeper nor the backup exclusion recognised it: the
+	// orphans accumulated across restarts and every pre-migration tarball
+	// captured them alongside the live key.
+	tmp, err := os.CreateTemp(dir, store.TempFilePrefix+"tlsx-*")
 	if err != nil {
 		return fmt.Errorf("create temp file in %s: %w", dir, err)
 	}
