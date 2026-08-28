@@ -5,6 +5,27 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="color-scheme" content="dark light" />
     <title>holzkube</title>
+    <script>
+      // Dark-first (D-11), applied before the first paint. React mounts after
+      // this runs, so an operator who chose light never sees a dark flash and
+      // an operator who chose dark never sees a white one. Keep this in sync
+      // with src/hooks/useTheme.ts -- same key, same two values.
+      (function () {
+        try {
+          var stored = localStorage.getItem('holzkube.theme')
+          var theme =
+            stored === 'dark' || stored === 'light'
+              ? stored
+              : window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches
+                ? 'light'
+                : 'dark'
+          document.documentElement.classList.toggle('dark', theme === 'dark')
+          document.documentElement.style.colorScheme = theme
+        } catch (e) {
+          // Storage blocked. The class already on <html> keeps us dark.
+        }
+      })()
+    </script>
   </head>
   <body>
     <div id="root"></div>
