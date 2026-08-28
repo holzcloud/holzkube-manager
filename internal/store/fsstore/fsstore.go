@@ -9,8 +9,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/holzcloud/holzkube/internal/model"
 	"github.com/holzcloud/holzkube/internal/store"
@@ -91,6 +93,18 @@ func Open(dir string) (s *Store, err error) {
 		if err := os.MkdirAll(sub, dirPerm); err != nil {
 			return nil, fmt.Errorf("fsstore: create %s: %w", sub, err)
 		}
+	}
+
+	// Sweep expired sessions here, where the process lock guarantees a single
+	// writer and nothing is serving yet. Logged rather than fatal: this is
+	// housekeeping with no integrity implication, and refusing to start over
+	// one unparsable stale session file would be a worse outcome than the
+	// records it leaves behind.
+	if n, err := s.sessions.reapExpired(context.Background(), time.Now()); err != nil {
+		slog.Warn("could not remove all expired session records",
+			slog.String("dir", s.sessions.dir), slog.Any("error", err))
+	} else if n > 0 {
+		slog.Info("removed expired session records", slog.Int("count", n))
 	}
 	return s, nil
 }
@@ -402,6 +416,35 @@ func (s *sessionStore) Put(_ context.Context, rec model.Session) (model.Session,
 		return model.Session{}, err
 	}
 	return rec, nil
+}
+
+// reapExpired removes session records whose expiry has passed, and reports how
+// many went.
+//
+// scs runs no background cleanup for a user-supplied Store: the built-in stores
+// each start their own goroutine and scsstore starts none. The only deletion
+// paths are Find, which drops a session it is asked about after expiry, and
+// Delete. A session that is never looked up again -- the normal case, because
+// the token left with the browser -- stayed on disk forever, and every login
+// added one. Nothing broke, but the count only grew, and with it the cost of
+// the three places that call List: InvalidateAllExcept on every password
+// change, scsstore.All, and the permission Guard walk at every startup.
+func (s *sessionStore) reapExpired(ctx context.Context, now time.Time) (int, error) {
+	recs, err := s.List(ctx)
+	if err != nil {
+		return 0, err
+	}
+	removed := 0
+	for _, rec := range recs {
+		if now.Before(rec.ExpiresAt) {
+			continue
+		}
+		if err := s.Delete(ctx, rec.ID); err != nil && !errors.Is(err, store.ErrNotFound) {
+			return removed, err
+		}
+		removed++
+	}
+	return removed, nil
 }
 
 func (s *sessionStore) Delete(_ context.Context, id string) error {
