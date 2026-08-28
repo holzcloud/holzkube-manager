@@ -11,6 +11,7 @@ import (
 	"net/http/cookiejar"
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"slices"
 	"strings"
 	"testing"
@@ -42,7 +43,14 @@ type harness struct {
 func newHarness(t *testing.T) *harness {
 	t.Helper()
 
+	// t.TempDir creates its numbered subdirectory with 0777&^umask, which is
+	// 0755 on a normal host. The store's permission guard refuses to open a
+	// data directory that group or other can read (FOUND-10), so the fixture
+	// has to be as tight as a real data directory is.
 	dir := t.TempDir()
+	if err := os.Chmod(dir, 0o700); err != nil {
+		t.Fatalf("chmod data dir: %v", err)
+	}
 
 	st, err := fsstore.Open(dir)
 	if err != nil {
