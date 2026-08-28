@@ -36,7 +36,7 @@ This Code of Conduct applies within all community spaces, and also applies when 
 
 ## Enforcement
 
-Instances of abusive, harassing, or otherwise unacceptable behavior may be reported to the community leaders responsible for enforcement at **CONDUCT-CONTACT-TODO** (see the note at the end of this file). All complaints will be reviewed and investigated promptly and fairly.
+Instances of abusive, harassing, or otherwise unacceptable behavior may be reported to the community leaders responsible for enforcement at <conduct@holzcloud.ch>. All complaints will be reviewed and investigated promptly and fairly.
 
 All community leaders are obligated to respect the privacy and security of the reporter of any incident.
 
@@ -84,14 +84,11 @@ For answers to common questions about this code of conduct, see the FAQ at [http
 
 ---
 
-## Reporting contact — not yet set
+## Reporting
 
-The address above is the one thing in this document that is still a placeholder.
-Contributor Covenant is written around a private channel that is not the public
-issue tracker, and holzkube does not have one yet.
+Conduct concerns go to <conduct@holzcloud.ch>. It reaches the maintainer and
+nobody else.
 
-Until it does, report a conduct concern by opening a
-[private security advisory](https://github.com/holzcloud/holzkube/security/advisories/new).
-That form is meant for vulnerabilities, so it is the wrong label for the job —
-but it is genuinely private, it reaches the maintainer, and a wrong label is
-better than asking someone to raise a conduct complaint in public.
+Security vulnerabilities do **not** belong here — those go through
+[private security advisories](https://github.com/holzcloud/holzkube/security/advisories/new),
+and `SECURITY.md` says why.
