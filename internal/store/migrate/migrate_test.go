@@ -1,6 +1,8 @@
 package migrate
 
 import (
+	"archive/tar"
+	"compress/gzip"
 	"errors"
 	"io"
 	"os"
@@ -345,4 +347,81 @@ func TestMigrateRefusesVersionZero(t *testing.T) {
 	if after := listTree(t, dir); !slices.Equal(before, after) {
 		t.Fatalf("a refused start still wrote to the directory:\nbefore %v\nafter  %v", before, after)
 	}
+}
+
+// TestMigrateVersionOneGainsTheSchematicsDirectory drives the first real
+// migration in the table, with the real Run rather than a synthetic one.
+//
+// The ordering assertion is the point: the tarball must be a copy of the
+// directory as it was found, so it must NOT contain the schematics directory
+// the migration goes on to create. Checking the tarball's contents proves the
+// backup happened first in a way that checking for the tarball's existence
+// afterwards cannot.
+func TestMigrateVersionOneGainsTheSchematicsDirectory(t *testing.T) {
+	dir := copyFixture(t, "version-1")
+
+	if err := Run(dir); err != nil {
+		t.Fatalf("Run on a version-1 directory: %v", err)
+	}
+
+	if got := readVersionFile(t, dir); got != "2" {
+		t.Fatalf("VERSION = %q, want 2", got)
+	}
+
+	info, err := os.Stat(filepath.Join(dir, "schematics"))
+	if err != nil {
+		t.Fatalf("the schematics directory was not created: %v", err)
+	}
+	if !info.IsDir() {
+		t.Fatal("schematics is not a directory")
+	}
+	if perm := info.Mode().Perm(); perm != 0o700 {
+		t.Errorf("schematics is %04o, want 0700: it holds kernel arguments and META values", perm)
+	}
+
+	if _, err := os.Stat(filepath.Join(dir, "users", "alice.json")); err != nil {
+		t.Fatalf("the existing record did not survive the migration: %v", err)
+	}
+
+	files := backupFiles(t, dir)
+	if len(files) != 1 {
+		t.Fatalf("backups = %v, want exactly one pre-migration tarball", files)
+	}
+	names := tarballEntries(t, filepath.Join(dir, BackupsDirName, files[0]))
+	if !slices.ContainsFunc(names, func(n string) bool { return strings.Contains(n, "users/alice.json") }) {
+		t.Errorf("the backup does not contain the record it was taken to protect: %v", names)
+	}
+	if slices.ContainsFunc(names, func(n string) bool { return strings.Contains(n, "schematics") }) {
+		t.Errorf("the backup contains the schematics directory, so it was taken after the migration ran: %v", names)
+	}
+}
+
+// tarballEntries lists the paths inside a pre-migration backup.
+func tarballEntries(t *testing.T, path string) []string {
+	t.Helper()
+	f, err := os.Open(path) //nolint:gosec // a test reading a tarball it just made
+	if err != nil {
+		t.Fatalf("open backup: %v", err)
+	}
+	defer f.Close()
+
+	gz, err := gzip.NewReader(f)
+	if err != nil {
+		t.Fatalf("gunzip backup: %v", err)
+	}
+	defer gz.Close()
+
+	var names []string
+	tr := tar.NewReader(gz)
+	for {
+		hdr, err := tr.Next()
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			t.Fatalf("read backup: %v", err)
+		}
+		names = append(names, hdr.Name)
+	}
+	return names
 }
