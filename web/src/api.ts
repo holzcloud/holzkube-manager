@@ -165,6 +165,13 @@ export const schematicSchema = z.object({
    * refused. The two must not be merged in the UI.
    */
   probed_at: z.string(),
+  /**
+   * What the Factory said when it refused, empty otherwise -- including when
+   * the probe could not reach it at all, which says nothing about the
+   * schematic. A red badge with no stated cause is a verdict an operator
+   * cannot act on.
+   */
+  probe_reason: z.string(),
   created_at: z.string(),
   rev: z.number(),
 })

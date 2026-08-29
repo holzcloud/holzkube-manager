@@ -3,7 +3,8 @@ import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { FactoryExtension, FactoryVersions, Schematic } from '@/api'
-import { ImagesView } from './images'
+import { onSudoRequired, type SudoChallenge } from '@/api'
+import { ARCH_STORAGE_KEY, ImagesView } from './images'
 
 /**
  * FACT-01, FACT-04 and FACT-05 as executed tests. The client is faked at the
@@ -64,6 +65,7 @@ function schematicFixture(overrides: Partial<Schematic> = {}): Schematic {
     meta: [],
     usable: true,
     probed_at: '2026-08-29T10:00:00Z',
+    probe_reason: '',
     created_at: '2026-08-29T10:00:00Z',
     rev: 1,
     ...overrides,
@@ -75,8 +77,32 @@ interface StubOptions {
   catalog?: Catalog
   /** The 201 body for POST /api/v1/schematics, minus the warnings. */
   created?: Schematic
+  /** What GET /api/v1/schematics answers with. */
+  saved?: Schematic[]
   /** Requests whose path matches are answered with this problem instead. */
   fail?: { path: string; status: number; body: unknown }
+  /**
+   * DELETE answers 428 until the sudo window is granted, which is what the
+   * server does for a Destructive route. Nothing in this file grants it.
+   */
+  sudoRequired?: boolean
+}
+
+/**
+ * The asset references, derived from the query the way the server derives them.
+ * Deriving rather than hardcoding is the point of the architecture and
+ * secure-boot cases: an assertion against a fixed string would pass just as
+ * happily if the screen never sent the parameter at all.
+ */
+function assetsFor(id: string, arch: string, version: string, secureboot: boolean) {
+  const segment = `metal-${arch}${secureboot ? '-secureboot' : ''}`
+  return {
+    iso: `https://factory.talos.dev/image/${id}/${version}/${segment}.iso`,
+    pxe: `https://factory.talos.dev/pxe/${id}/${version}/${segment}`,
+    disk_image: `https://factory.talos.dev/image/${id}/${version}/${segment}.raw.zst`,
+    cmdline: `https://factory.talos.dev/image/${id}/${version}/cmdline-${segment}`,
+    installer: `factory.talos.dev/metal-installer/${id}:${version}`,
+  }
 }
 
 /**
@@ -121,7 +147,44 @@ function stubFactory(options: StubOptions = {}) {
       )
     }
     if (url.pathname === '/api/v1/schematics' && method === 'GET') {
-      return json([])
+      return json(options.saved ?? [])
+    }
+
+    const assetMatch = url.pathname.match(/^\/api\/v1\/schematics\/([^/]+)\/assets$/)
+    if (assetMatch !== null && assetMatch[1] !== undefined) {
+      const id = assetMatch[1]
+      const record = (options.saved ?? []).find((each) => each.id === id)
+      return json(
+        assetsFor(
+          id,
+          url.searchParams.get('arch') ?? '',
+          url.searchParams.get('version') ?? record?.talos_version ?? 'v1.13.9',
+          url.searchParams.get('secureboot') === 'true',
+        ),
+      )
+    }
+
+    const idMatch = url.pathname.match(/^\/api\/v1\/schematics\/([^/]+)$/)
+    if (idMatch !== null && idMatch[1] !== undefined) {
+      if (method === 'DELETE') {
+        if (options.sudoRequired === true) {
+          return new Response(
+            JSON.stringify({
+              type: 'https://holzkube.dev/problems/sudo',
+              title: 'Re-authentication required',
+              status: 428,
+              detail: 'This action is destructive.',
+              code: 'sudo.required',
+            }),
+            { status: 428, headers: { 'Content-Type': 'application/problem+json' } },
+          )
+        }
+        return new Response(null, { status: 204 })
+      }
+      const record = (options.saved ?? []).find((each) => each.id === idMatch[1])
+      return record === undefined
+        ? json({ type: 'about:blank', title: 'no such schematic' }, 404)
+        : json(record)
     }
 
     return json({ type: 'about:blank', title: 'unrouted in this test' }, 500)
@@ -337,5 +400,202 @@ describe('ImagesView — the authoring half', () => {
       await screen.findByText(/extension catalog for v1\.13\.9 could not be fetched/),
     ).toBeInTheDocument()
     expect(screen.queryByRole('group', { name: 'System extensions' })).not.toBeInTheDocument()
+  })
+})
+
+/**
+ * The three usability states, one fixture each. They exist as three because
+ * "the Factory refused" and "nobody asked" carry different repairs, and a
+ * screen that showed two would send an operator to fix a schematic nothing has
+ * found fault with.
+ */
+const USABLE = schematicFixture({
+  id: 'a'.repeat(64),
+  name: 'probed-good',
+  usable: true,
+  probed_at: '2026-08-29T10:00:00Z',
+  probe_reason: '',
+  extensions: ['siderolabs/intel-ucode'],
+})
+
+const REFUSED = schematicFixture({
+  id: 'b'.repeat(64),
+  name: 'probed-bad',
+  usable: false,
+  probed_at: '2026-08-29T10:05:00Z',
+  probe_reason: `${'b'.repeat(64)} at v1.13.9/amd64 answered HTTP 400`,
+})
+
+const UNPROBED = schematicFixture({
+  id: 'c'.repeat(64),
+  name: 'never-probed',
+  usable: false,
+  // The zero time. Not the same statement as "probed and refused".
+  probed_at: '0001-01-01T00:00:00Z',
+  probe_reason: '',
+})
+
+/** Opens the detail dialog for one saved schematic. */
+async function openDetail(user: ReturnType<typeof userEvent.setup>, record: Schematic) {
+  await user.click(await screen.findByRole('button', { name: `Schematic ${record.name}` }))
+  return within(await screen.findByRole('dialog'))
+}
+
+describe('ImagesView — the saved schematics', () => {
+  beforeEach(() => {
+    vi.stubGlobal('scrollTo', vi.fn())
+  })
+
+  it('renders three distinguishable usability states and the reason for a refusal', async () => {
+    stubFactory({ saved: [USABLE, REFUSED, UNPROBED] })
+
+    renderImages()
+
+    const table = within(await screen.findByRole('table'))
+    const good = within(table.getByRole('button', { name: 'Schematic probed-good' }))
+    const bad = within(table.getByRole('button', { name: 'Schematic probed-bad' }))
+    const unprobed = within(table.getByRole('button', { name: 'Schematic never-probed' }))
+
+    expect(good.getByText(/Usable — the build probe confirmed it/)).toBeInTheDocument()
+    expect(bad.getByText(/Not usable — the Factory refused to build it/)).toBeInTheDocument()
+    expect(unprobed.getByText(/Not verified — the build probe did not run/)).toBeInTheDocument()
+
+    // The verdict alone is not actionable; the reason is what makes it one.
+    expect(bad.getByText(/answered HTTP 400/)).toBeInTheDocument()
+    // And a schematic nobody probed is not accused of anything.
+    expect(unprobed.queryByText(/answered HTTP/)).not.toBeInTheDocument()
+  })
+
+  it('shows the schematic id in full — it is what a machine config refers to', async () => {
+    stubFactory({ saved: [USABLE] })
+    const user = userEvent.setup()
+
+    renderImages()
+    const detail = await openDetail(user, USABLE)
+
+    expect(detail.getByText(USABLE.id)).toBeInTheDocument()
+    expect(detail.getByText(USABLE.canonical.trim())).toBeInTheDocument()
+  })
+
+  it('renders the installer reference on the same panel as the ISO URL', async () => {
+    stubFactory({ saved: [USABLE] })
+    const user = userEvent.setup()
+
+    renderImages()
+    const detail = await openDetail(user, USABLE)
+
+    const iso = await detail.findByLabelText('ISO reference')
+    const installer = detail.getByLabelText('Installer reference')
+
+    expect(iso).toHaveTextContent(`/image/${USABLE.id}/v1.13.9/metal-amd64.iso`)
+    expect(installer).toHaveTextContent(`metal-installer/${USABLE.id}:v1.13.9`)
+    // PITFALLS P9(b): an ISO from one schematic and an installer from another
+    // is the documented drift, so the sentence saying so is part of the panel.
+    expect(detail.getByText(/must share this schematic/)).toBeInTheDocument()
+  })
+
+  it('changes every asset URL when the architecture control changes', async () => {
+    stubFactory({ saved: [USABLE] })
+    const user = userEvent.setup()
+
+    renderImages()
+    const detail = await openDetail(user, USABLE)
+
+    const labels = ['ISO', 'PXE', 'Disk image', 'Kernel cmdline']
+    for (const label of labels) {
+      expect(await detail.findByLabelText(`${label} reference`)).toHaveTextContent('metal-amd64')
+    }
+
+    await user.click(detail.getByRole('combobox', { name: 'Architecture' }))
+    await user.click(await screen.findByRole('option', { name: 'arm64' }))
+
+    for (const label of labels) {
+      await waitFor(() =>
+        expect(detail.getByLabelText(`${label} reference`)).toHaveTextContent('metal-arm64'),
+      )
+      expect(detail.getByLabelText(`${label} reference`)).not.toHaveTextContent('metal-amd64')
+    }
+  })
+
+  it('remembers the architecture rather than defaulting to the developer machine', async () => {
+    localStorage.setItem(ARCH_STORAGE_KEY, 'arm64')
+    stubFactory({ saved: [USABLE] })
+    const user = userEvent.setup()
+
+    renderImages()
+    const detail = await openDetail(user, USABLE)
+
+    expect(await detail.findByLabelText('ISO reference')).toHaveTextContent('metal-arm64')
+  })
+
+  it('adds the secure-boot suffix to the rendered ISO URL when the toggle is on', async () => {
+    stubFactory({ saved: [USABLE] })
+    const user = userEvent.setup()
+
+    renderImages()
+    const detail = await openDetail(user, USABLE)
+
+    expect(await detail.findByLabelText('ISO reference')).toHaveTextContent('metal-amd64.iso')
+
+    await user.click(detail.getByRole('checkbox', { name: 'SecureBoot' }))
+
+    await waitFor(() =>
+      expect(detail.getByLabelText('ISO reference')).toHaveTextContent(
+        'metal-amd64-secureboot.iso',
+      ),
+    )
+  })
+
+  it('copies a reference to the clipboard', async () => {
+    stubFactory({ saved: [USABLE] })
+    const user = userEvent.setup()
+
+    renderImages()
+    const detail = await openDetail(user, USABLE)
+
+    await detail.findByLabelText('ISO reference')
+    await user.click(detail.getByRole('button', { name: 'Copy ISO' }))
+
+    await waitFor(async () =>
+      expect(await navigator.clipboard.readText()).toBe(
+        `https://factory.talos.dev/image/${USABLE.id}/v1.13.9/metal-amd64.iso`,
+      ),
+    )
+
+    await user.click(detail.getByRole('button', { name: 'Copy Schematic ID' }))
+    await waitFor(async () => expect(await navigator.clipboard.readText()).toBe(USABLE.id))
+  })
+
+  it('deletes through the existing sudo dialog and adds no confirmation of its own', async () => {
+    const fetchMock = stubFactory({ saved: [USABLE], sudoRequired: true })
+    const challenges: SudoChallenge[] = []
+    onSudoRequired((challenge) => {
+      challenges.push(challenge)
+      // Declined, so the request is not replayed. What is under test is that
+      // the ask reached the existing dialog at all.
+      challenge.settle(false)
+    })
+
+    const user = userEvent.setup()
+
+    renderImages()
+    const detail = await openDetail(user, USABLE)
+
+    await user.click(detail.getByRole('button', { name: 'Delete schematic' }))
+
+    await waitFor(() => expect(challenges).toHaveLength(1))
+    // Named, so the prompt says what it is asking about.
+    expect(challenges[0]?.action).toBe('Delete this schematic')
+
+    // Exactly one DELETE was attempted, and no second confirmation of this
+    // screen's own stood in front of it -- a second "are you sure?" trains the
+    // operator to click past the first.
+    const deletes = fetchMock.mock.calls.filter(
+      (call) => (call[1] as RequestInit | undefined)?.method === 'DELETE',
+    )
+    expect(deletes).toHaveLength(1)
+    expect(String(deletes[0]?.[0])).toBe(`/api/v1/schematics/${USABLE.id}`)
+
+    onSudoRequired(null)
   })
 })

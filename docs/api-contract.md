@@ -423,6 +423,7 @@ exactly those bytes.
   "meta": [{"key": 10, "value": "…"}],
   "usable": false,
   "probed_at": "0001-01-01T00:00:00Z",
+  "probe_reason": "",
   "created_at": "2026-08-29T11:00:00Z",
   "rev": 1
 }
@@ -436,6 +437,13 @@ exactly those bytes.
   lying to the operator.
 - **`probed_at` zero means never probed**, which is not the same as "probed and
   refused". Those are different states and the UI must not merge them.
+- **`probe_reason` is what the Factory said when it refused**, and is empty
+  otherwise — including when the probe could not reach the Factory at all, which
+  says nothing about the schematic. It carries the version, the architecture and
+  the status the Factory answered with, because "not usable" with no stated
+  cause is a verdict an operator cannot act on: a schematic naming an extension
+  that does not exist and one asked for at a version that never had it are the
+  same red badge and two different repairs.
 - `rev` is the CAS revision, as on every stored record. A `PUT`-shaped update
   carrying a stale `rev` answers `409` `store.conflict`.
 
