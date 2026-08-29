@@ -650,6 +650,16 @@ func (c *ClusterClient) Probe(ctx context.Context) (string, error) {
 // not a type that travels above it.
 type LogStream struct {
 	s machine.MachineService_LogsClient
+
+	// cancel releases the stream and everything derived beneath it.
+	//
+	// The deadline context the stream interceptor derives is cancelled from
+	// RecvMsg alone, on io.EOF or on an error. A caller that opens a stream and
+	// stops reading -- which is the ordinary shape of "the operator closed the
+	// log panel" -- reaches neither branch, so without this nothing is freed
+	// until the whole ClusterClient is closed. go vet's lostcancel does not see
+	// it either, because the interceptor's cancel lives in a struct field.
+	cancel context.CancelFunc
 }
 
 // Logs opens a follow stream of one service's log output.
@@ -658,12 +668,25 @@ type LogStream struct {
 // StreamFirstByteDeadline and StreamIdleTimeout instead, applied on the call
 // path, because a stream that is still delivering data has not failed and a
 // total deadline would kill it for succeeding.
+//
+// The caller must Close the returned stream. Reading it to io.EOF is not
+// enough on its own to be worth relying on and stopping early frees nothing:
+// the context and the gRPC stream are released by Close and, absent an error,
+// by nothing else.
 func (c *ClusterClient) Logs(ctx context.Context, service string) (*LogStream, error) {
-	s, err := c.conn.c.Logs(ctx, "system", common.ContainerDriver_CONTAINERD, service, true, -1)
+	// The stream's own cancellation, derived from the caller's. Cancelling it
+	// cancels the deadline context the interceptor derives below it, which is
+	// what Close has to reach and cannot reach directly: the generated client
+	// hands back an interface that does not expose the grpc.ClientStream
+	// carrying it.
+	streamCtx, cancel := context.WithCancel(ctx)
+
+	s, err := c.conn.c.Logs(streamCtx, "system", common.ContainerDriver_CONTAINERD, service, true, -1)
 	if err != nil {
+		cancel()
 		return nil, err
 	}
-	return &LogStream{s: s}, nil
+	return &LogStream{s: s, cancel: cancel}, nil
 }
 
 // Recv returns the next chunk of log output. It returns io.EOF at the end of a
@@ -674,6 +697,18 @@ func (l *LogStream) Recv() ([]byte, error) {
 		return nil, err
 	}
 	return data.GetBytes(), nil
+}
+
+// Close releases the stream. A caller that stops reading before the end must
+// call it, and calling it twice is harmless.
+//
+// It returns an error rather than nothing so that the shape is io.Closer's and
+// a later transport that has something to report on teardown does not change
+// the signature every caller is written against. Today it is always nil:
+// cancelling the context is the whole of the release.
+func (l *LogStream) Close() error {
+	l.cancel()
+	return nil
 }
 
 // Close releases the connection.
