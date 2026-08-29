@@ -6,6 +6,7 @@ import (
 	"errors"
 	"log/slog"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -44,6 +45,13 @@ func TestDefaultsWithoutAnyInput(t *testing.T) {
 	}
 	if cfg.InsecureHTTP {
 		t.Error("InsecureHTTP is true by default")
+	}
+	// Dry-run defaults off. A safety mode that is on unless disabled would
+	// make the ordinary case the surprising one, and an operator whose
+	// mutations silently did nothing would blame the product rather than the
+	// flag.
+	if cfg.DryRun {
+		t.Error("DryRun is true by default")
 	}
 	if cfg.TLSCert != "" || cfg.TLSKey != "" {
 		t.Errorf("TLS material defaults to %q/%q, want empty", cfg.TLSCert, cfg.TLSKey)
@@ -90,6 +98,15 @@ func TestPrecedenceFlagBeatsEnvBeatsDefault(t *testing.T) {
 			flagArg: "--log-level=debug",
 			wantEnv: "WARN", want: "DEBUG",
 			get: func(c Config) string { return c.LogLevel.String() },
+		},
+		{
+			// FOUND-12. The safety mode is only worth having if an operator can
+			// be sure which way round it is, so its precedence is asserted like
+			// every other option's rather than assumed to follow.
+			option: "dry-run", env: "HOLZKUBE_DRY_RUN", envVal: "true",
+			flagArg: "--dry-run=false",
+			wantEnv: "true", want: "false",
+			get: func(c Config) string { return strconv.FormatBool(c.DryRun) },
 		},
 	}
 
@@ -149,6 +166,7 @@ func TestEveryOptionIsSettableByFlagAndByEnvironment(t *testing.T) {
 		"tls-cert":         "/tls/cert.pem",
 		"tls-key":          "/tls/key.pem",
 		"insecure-http":    "true",
+		"dry-run":          "true",
 		"sudo-window":      "7m0s",
 		"session-lifetime": "48h0m0s",
 		"log-level":        "debug",
@@ -392,6 +410,16 @@ func TestBindBeyondLoopbackIsWarned(t *testing.T) {
 	}
 	if got := warnings(load(t, []string{"--listen=[::1]:8443"}, nil)); len(got) != 0 {
 		t.Errorf("an IPv6 loopback bind warned: %v", got)
+	}
+
+	// FOUND-12: dry-run is warned about too, and the line says what the mode
+	// does rather than only naming it. An operator who reads "dry-run: true"
+	// and an operator who reads "no mutation will reach any node" are in
+	// different states of knowledge, and only the second one is safe.
+	if got := warnings(load(t, []string{"--dry-run"}, nil)); len(got) == 0 {
+		t.Error("starting with --dry-run produced no warning")
+	} else if !strings.Contains(strings.Join(got, " "), "node") {
+		t.Errorf("the dry-run warning %v does not say what the mode does to node calls", got)
 	}
 
 	for _, listen := range []string{"0.0.0.0:8443", ":8443", "192.168.1.10:8443", "[::]:8443"} {
