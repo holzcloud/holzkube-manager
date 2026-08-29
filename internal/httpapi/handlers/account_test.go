@@ -20,6 +20,7 @@ import (
 	"github.com/holzcloud/holzkube/internal/auth"
 	"github.com/holzcloud/holzkube/internal/httpapi"
 	"github.com/holzcloud/holzkube/internal/httpapi/handlers"
+	"github.com/holzcloud/holzkube/internal/imagefactory"
 	"github.com/holzcloud/holzkube/internal/store/fsstore"
 )
 
@@ -40,6 +41,18 @@ type server struct {
 }
 
 func newServer(t *testing.T, sudoWindow time.Duration) *server {
+	t.Helper()
+	return newServerWithFactory(t, sudoWindow, nil)
+}
+
+// newServerWithFactory is newServer with an Image Factory client wired in.
+//
+// The Factory is a parameter rather than a field assigned afterwards for the
+// reason the composition root states: Deps is copied by value into each
+// …Routes(deps) call, so a field set after the literal is the zero value inside
+// every handler closure, with no compile error. A test harness that got that
+// wrong would prove the routes exist and nothing about whether they work.
+func newServerWithFactory(t *testing.T, sudoWindow time.Duration, factory *imagefactory.Client) *server {
 	t.Helper()
 
 	dir := t.TempDir()
@@ -71,6 +84,7 @@ func newServer(t *testing.T, sudoWindow time.Duration) *server {
 		Logger:     slog.New(slog.NewTextHandler(io.Discard, nil)),
 		SudoWindow: sudoWindow,
 		AuditChain: httpapi.ChainStatus{OK: true},
+		Factory:    factory,
 	}
 	deps.Routes = slices.Concat(
 		handlers.SystemRoutes(deps),
@@ -78,6 +92,7 @@ func newServer(t *testing.T, sudoWindow time.Duration) *server {
 		handlers.AuthRoutes(deps),
 		handlers.AccountRoutes(deps),
 		handlers.AuditRoutes(deps),
+		handlers.SchematicRoutes(deps),
 	)
 
 	ts := httptest.NewTLSServer(httpapi.New(deps))
