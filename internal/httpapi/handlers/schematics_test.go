@@ -723,6 +723,87 @@ func TestCreateAgainstAnOutageIsUpstreamAndNotInternal(t *testing.T) {
 	}
 }
 
+// TestCreateTheSameContentTwiceIs409NotInternal is CR-01.
+//
+// The schematic id is the SHA-256 of the Factory's canonical document, so two
+// authoring attempts carrying the same customisation collide however they are
+// named -- an operator re-submitting after a browser reload lands here, and so
+// does one authoring the same extension set for a second cluster. The record
+// is built with Rev left at zero, which the store reads as a CAS conflict
+// against an existing record and reports as store.ErrConflict. That error is
+// precise; the handler has to be the thing that says so, rather than mapping
+// the one outcome the store described exactly onto the one problem type that
+// carries nothing but an instance id.
+func TestCreateTheSameContentTwiceIs409NotInternal(t *testing.T) {
+	s, _ := schematicServer(t)
+	c := operator(t, s)
+
+	resp, raw := c.do(http.MethodPost, "/api/v1/schematics",
+		createBody("first", []string{"siderolabs/intel-ucode"}, nil))
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("first create: got %d, want 201 (body: %s)", resp.StatusCode, raw)
+	}
+	var first struct {
+		ID   string `json:"id"`
+		Name string `json:"name"`
+		Rev  uint64 `json:"rev"`
+	}
+	decodeInto(t, raw, &first)
+
+	// Identical customisation under a second label. The label is the
+	// operator's own and is not part of the id.
+	resp, raw = c.do(http.MethodPost, "/api/v1/schematics",
+		createBody("second", []string{"siderolabs/intel-ucode"}, nil))
+	if resp.StatusCode == http.StatusInternalServerError {
+		t.Fatalf("the second create answered 500: a conflict the store distinguishes precisely is "+
+			"reported as internal.unexpected, which tells the operator their own installation is "+
+			"broken (body: %s)", raw)
+	}
+	if resp.StatusCode != http.StatusConflict {
+		t.Fatalf("second create: got %d, want 409 (body: %s)", resp.StatusCode, raw)
+	}
+	p := decodeProblemWithErrors(t, raw)
+	if p.Type != httpapi.TypeConflict {
+		t.Errorf("type = %q, want %q", p.Type, httpapi.TypeConflict)
+	}
+	if p.Code != "store.conflict" {
+		t.Errorf("code = %q, want store.conflict", p.Code)
+	}
+
+	// Nothing was overwritten. A POST that replaced the record would be doing
+	// on a route the contract marks Destructive: false what DELETE is behind
+	// the sudo window to do.
+	resp, raw = c.do(http.MethodGet, "/api/v1/schematics/"+first.ID, nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("GET by id: got %d, want 200 (body: %s)", resp.StatusCode, raw)
+	}
+	var stored struct {
+		Name string `json:"name"`
+		Rev  uint64 `json:"rev"`
+	}
+	decodeInto(t, raw, &stored)
+	if stored.Name != "first" {
+		t.Errorf("name = %q after a second create under another label, want %q: the refused create "+
+			"renamed the record it refused", stored.Name, "first")
+	}
+	if stored.Rev != first.Rev {
+		t.Errorf("rev = %d, want %d: the refused create wrote", stored.Rev, first.Rev)
+	}
+
+	// And there is still exactly one record, not two and not none.
+	resp, raw = c.do(http.MethodGet, "/api/v1/schematics", nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("GET list: got %d, want 200 (body: %s)", resp.StatusCode, raw)
+	}
+	var list []struct {
+		ID string `json:"id"`
+	}
+	decodeInto(t, raw, &list)
+	if len(list) != 1 || list[0].ID != first.ID {
+		t.Errorf("list = %+v, want exactly the one schematic that content hashes to", list)
+	}
+}
+
 // TestAssetsReturnsEveryReferenceForTheRequestedArchitecture is FACT-03: the
 // architecture is a parameter, and the installer reference is resolved rather
 // than assembled.
