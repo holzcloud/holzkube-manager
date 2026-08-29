@@ -396,6 +396,24 @@ describe('ImagesView — the authoring half', () => {
     expect(warning).toHaveTextContent('schematic.installer-ignores-meta')
   })
 
+  it('stays quiet about a row that has just been added and holds nothing', async () => {
+    // The live panel predicts on what submit would send, which drops blank
+    // rows. predictWarnings itself asks the server's question -- is there an
+    // entry -- so the filtering has to happen here or adding a row would warn
+    // about a value nobody has typed yet.
+    stubFactory()
+    const user = userEvent.setup()
+
+    renderImages()
+    await catalogLoaded()
+
+    await user.click(screen.getByRole('button', { name: 'Add kernel argument' }))
+    await user.click(screen.getByRole('button', { name: 'Add META value' }))
+
+    expect(await screen.findByLabelText('Kernel argument 1')).toHaveValue('')
+    expect(screen.queryByRole('alert', { name: 'Schematic warnings' })).not.toBeInTheDocument()
+  })
+
   /**
    * G-02-6, the client half. The server refuses these values in its own
    * canonical serialiser before anything crosses the network, so a value that
@@ -721,6 +739,31 @@ describe('ImagesView — the saved schematics', () => {
 
     expect(detail.getByText(/Usable — the build probe confirmed it/)).toBeInTheDocument()
     expect(detail.queryByText(/^architecture:/)).not.toBeInTheDocument()
+  })
+
+  it("warns about a stored record on the server's terms rather than the form's", async () => {
+    // WR-03. The server warns on presence -- len(ExtraKernelArgs) > 0 and
+    // len(Meta) > 0 -- while this panel used to warn only on a non-blank entry.
+    // The two agree only for records this form created, because submit drops
+    // blank rows before sending; a record written through the API keeps them,
+    // and the detail panel then showed nothing for a schematic the server's own
+    // Warnings() warns about. The same schematic warning on the create panel
+    // and not when it is reopened is worse than either alone -- it teaches the
+    // operator that the panel cannot be trusted.
+    const authoredElsewhere = schematicFixture({
+      name: 'api-authored',
+      kernel_args: [''],
+      meta: [{ key: 10, value: '' }],
+    })
+    stubFactory({ saved: [authoredElsewhere] })
+    const user = userEvent.setup()
+
+    renderImages()
+    const detail = await openDetail(user, authoredElsewhere)
+
+    const warning = await detail.findByRole('alert', { name: 'Schematic warnings' })
+    expect(warning).toHaveTextContent('schematic.installer-ignores-kernel-args')
+    expect(warning).toHaveTextContent('schematic.installer-ignores-meta')
   })
 
   it('shows the schematic id in full — it is what a machine config refers to', async () => {

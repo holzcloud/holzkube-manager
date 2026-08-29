@@ -47,26 +47,41 @@ const META_DETAIL =
   'META values are written when the image is built and apply to the ISO, PXE and disk images only. The installer and initramfs images honour system extensions and ignore META, so these values are not reapplied when the node is installed or upgraded. Set anything that must survive an upgrade in the machine configuration, alongside .machine.install.extraKernelArgs, rather than relying on the schematic.'
 
 /**
- * Predicts the warnings the server will return for what is currently typed.
+ * Predicts the warnings the server will return for a schematic's contents.
  *
  * The predicate is client-side on purpose -- there is no request to make while
- * somebody is still filling in a row -- but the *text* is the server's, so the
- * two surfaces cannot drift apart in wording. The predicate itself is the
- * server's, transcribed: a non-empty extra kernel argument, or a META entry
- * with a value.
+ * somebody is still filling in a row -- and the *text* is the server's, so the
+ * two surfaces cannot drift apart in wording. The predicate is the server's
+ * too, stated the way the server states it: `len(ExtraKernelArgs) > 0` and
+ * `len(Meta) > 0` in `internal/imagefactory/warnings.go`, the presence of an
+ * entry and nothing at all about what is in it.
+ *
+ * It used to ask for a *non-blank* entry, which is a different question and
+ * agrees with the server only for records created through this form, because
+ * `submit` drops blank rows before sending. Every other record -- one created
+ * through the API, or written by an earlier build -- is fed to this function
+ * directly by `SchematicDetailBody`, which therefore rendered no warning for a
+ * schematic the server's own `Warnings()` warns about. One schematic then shows
+ * the warning on the create panel and none when it is reopened, which is worse
+ * than either alone: it teaches the operator that the panel is unreliable.
+ *
+ * Blank rows are the live form's problem, and they are filtered where that
+ * already happens -- in `LiveSchematicWarnings`, on the same terms as `submit`.
+ * This function answers exactly one question, "what will the server say about
+ * these contents", so there is one predicate rather than two that can disagree.
  */
 export function predictWarnings(
   kernelArgs: string[],
   meta: { value: string }[],
 ): SchematicWarning[] {
   const warnings: SchematicWarning[] = []
-  if (kernelArgs.some((arg) => arg.trim() !== '')) {
+  if (kernelArgs.length > 0) {
     warnings.push({
       code: WARNING_INSTALLER_IGNORES_KERNEL_ARGS,
       detail: KERNEL_ARGS_DETAIL,
     })
   }
-  if (meta.some((entry) => entry.value.trim() !== '')) {
+  if (meta.length > 0) {
     warnings.push({
       code: WARNING_INSTALLER_IGNORES_META,
       detail: META_DETAIL,
@@ -128,6 +143,13 @@ export function SchematicWarnings({
 
 /**
  * The live half: the same component, fed from the form rather than the server.
+ *
+ * It predicts on what `submit` would actually send rather than on what is on
+ * screen, dropping blank rows exactly as `submit` does, so an empty row the
+ * operator has just added does not raise a warning about a value nobody has
+ * typed yet. The filtering lives here because it is a fact about this form --
+ * that a row exists before it has content -- and not about the server's rule,
+ * which `predictWarnings` states unchanged.
  */
 export function LiveSchematicWarnings({
   kernelArgs,
@@ -136,5 +158,12 @@ export function LiveSchematicWarnings({
   kernelArgs: string[]
   meta: { value: string }[]
 }) {
-  return <SchematicWarnings warnings={predictWarnings(kernelArgs, meta)} />
+  return (
+    <SchematicWarnings
+      warnings={predictWarnings(
+        kernelArgs.filter((arg) => arg.trim() !== ''),
+        meta.filter((entry) => entry.value.trim() !== ''),
+      )}
+    />
+  )
 }
