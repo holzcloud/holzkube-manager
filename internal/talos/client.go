@@ -72,6 +72,11 @@ type conn struct {
 	// actually runs at instead of at durations chosen to keep a test fast --
 	// the same reason auth.Service carries one.
 	now func() time.Time
+
+	// backoff is the jitter draw, for the same reason now is the clock: it is
+	// deliberately random, and a test that means to count what the retry loop
+	// decided cannot count it against a random variable. See conn.nextBackoff.
+	backoff func(attempt int) time.Duration
 }
 
 // dial is the one place either client type reaches a node.
@@ -96,7 +101,7 @@ func dial(ctx context.Context, d Dialer, t Target, c Creds) (*conn, error) {
 		return nil, fmt.Errorf("talos: dial options for %s: %w", t.Machine, err)
 	}
 
-	n := &conn{target: t, dialer: d, now: time.Now}
+	n := &conn{target: t, dialer: d, now: time.Now, backoff: retryBackoff}
 
 	// The policy interceptors are appended after the transport's own options,
 	// so a Dialer cannot displace them: a transport chooses how bytes travel,

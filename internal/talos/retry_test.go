@@ -157,6 +157,14 @@ func TestRetryAttemptsMatchesTheConfirmedPolicy(t *testing.T) {
 // makes the elapsed time a distribution rather than a number, and gRPC's own
 // reconnect backoff means a failed attempt does not necessarily redial. So the
 // counts are asserted here, against the loop itself, where they are exact.
+//
+// Exact, though, only if the draw is pinned. Every row supplies the backoff the
+// loop is to use, because a count asserted against a random delay is not a
+// count: the budget row below spent a while asserting "50 ms buys no retry"
+// against a delay drawn uniformly from [0, 200 ms], which is a statement that
+// is true three times in four. The jitter itself is asserted by
+// TestRetryBackoffIsFullJitterInsideItsBounds; what is asserted here is what
+// the loop does with whatever it drew.
 func TestRetryLoopAttemptCounts(t *testing.T) {
 	t.Parallel()
 
@@ -167,24 +175,32 @@ func TestRetryLoopAttemptCounts(t *testing.T) {
 		name    string
 		method  string
 		budget  time.Duration
+		backoff time.Duration
 		fail    error
 		want    int
 		wantErr error
+
+		// within, when set, bounds how long do may take to reach its verdict.
+		// It is the half of the budget row that an attempt count cannot carry;
+		// see the row for why.
+		within time.Duration
 	}{
 		{
 			name:    "an allowlisted read retries to its budget",
 			method:  MethodVersion,
 			budget:  9 * time.Second,
+			backoff: time.Millisecond,
 			fail:    unreachable,
 			want:    RetryAttempts,
 			wantErr: unreachable,
 		},
 		{
-			name:   "a mutation is never retried",
-			method: MethodApplyConfiguration,
-			budget: 9 * time.Second,
-			fail:   unreachable,
-			want:   1,
+			name:    "a mutation is never retried",
+			method:  MethodApplyConfiguration,
+			budget:  9 * time.Second,
+			backoff: time.Millisecond,
+			fail:    unreachable,
+			want:    1,
 			// Bootstrap is the case this row exists for: a mutation whose
 			// success committed and whose reply was lost would, if retried,
 			// come back AlreadyExists and be reported as a failure of an
@@ -195,6 +211,7 @@ func TestRetryLoopAttemptCounts(t *testing.T) {
 			name:    "a stream is never retried",
 			method:  MethodLogs,
 			budget:  9 * time.Second,
+			backoff: time.Millisecond,
 			fail:    unreachable,
 			want:    1,
 			wantErr: unreachable,
@@ -203,6 +220,7 @@ func TestRetryLoopAttemptCounts(t *testing.T) {
 			name:    "a deliberate read exclusion is never retried",
 			method:  MethodEtcdSnapshot,
 			budget:  9 * time.Second,
+			backoff: time.Millisecond,
 			fail:    unreachable,
 			want:    1,
 			wantErr: unreachable,
@@ -211,17 +229,30 @@ func TestRetryLoopAttemptCounts(t *testing.T) {
 			name:    "an answered refusal is never retried",
 			method:  MethodVersion,
 			budget:  9 * time.Second,
+			backoff: time.Millisecond,
 			fail:    rejected,
 			want:    1,
 			wantErr: rejected,
 		},
 		{
-			name:    "a budget shorter than the first backoff buys no retry",
+			// The budget row, and the one that needs both assertions.
+			//
+			// A count alone does not distinguish budgetAllows from the
+			// cancellation escape one line below it: a loop that slept anyway
+			// would be woken by ctx.Done and would also report one attempt. The
+			// difference is *when* the caller is told. budgetAllows answers at
+			// once because it compares the delay against the remaining budget;
+			// the cancellation escape answers only when the budget runs out. So
+			// the row asserts one attempt and a verdict inside half the budget,
+			// and stubbing budgetAllows to true fails it on the second clause.
+			name:    "a backoff longer than the remaining budget buys no retry, and says so at once",
 			method:  MethodVersion,
-			budget:  50 * time.Millisecond,
+			budget:  500 * time.Millisecond,
+			backoff: RetryBackoffCeiling,
 			fail:    unreachable,
 			want:    1,
 			wantErr: unreachable,
+			within:  250 * time.Millisecond,
 		},
 	}
 
@@ -232,19 +263,26 @@ func TestRetryLoopAttemptCounts(t *testing.T) {
 			ctx, cancel := context.WithTimeout(t.Context(), row.budget)
 			defer cancel()
 
-			n := &conn{now: time.Now}
+			n := &conn{now: time.Now, backoff: func(int) time.Duration { return row.backoff }}
 
 			attempts := 0
+			started := time.Now()
 			err := n.do(ctx, row.method, func(context.Context) error {
 				attempts++
 				return row.fail
 			})
+			elapsed := time.Since(started)
 
 			if attempts != row.want {
 				t.Errorf("the loop made %d attempt(s), want %d", attempts, row.want)
 			}
 			if !errors.Is(err, row.wantErr) {
 				t.Errorf("do returned %v, want the call's own error", err)
+			}
+			if row.within > 0 && elapsed > row.within {
+				t.Errorf("do took %v to give up, want under %v: it waited out the deadline instead of "+
+					"noticing that a %v backoff does not fit in a %v budget",
+					elapsed, row.within, row.backoff, row.budget)
 			}
 		})
 	}
@@ -259,7 +297,7 @@ func TestRetryLoopStopsOnSuccess(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 9*time.Second)
 	defer cancel()
 
-	n := &conn{now: time.Now}
+	n := &conn{now: time.Now, backoff: func(int) time.Duration { return time.Millisecond }}
 
 	attempts := 0
 	err := n.do(ctx, MethodVersion, func(context.Context) error {
