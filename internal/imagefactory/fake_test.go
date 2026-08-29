@@ -36,8 +36,11 @@ const (
 	// installerNoSecureBootVersion resolves under both ordinary names and under
 	// neither SecureBoot name. It is the branch that proves a SecureBoot
 	// request refuses rather than falling back to the ordinary installer, which
-	// is the one substitution installerCandidates must never make.
-	installerNoSecureBootVersion = "v1.12.0"
+	// is the one substitution installerCandidates must never make. Its version
+	// sits outside the supported v1.12-v1.14 range on purpose, like
+	// installerBrokenVersion: this cell is constructed to reach a branch, and
+	// nothing has checked whether any shipped version behaves this way.
+	installerNoSecureBootVersion = "v1.8.0"
 
 	// installerBrokenVersion resolves under no name at all.
 	installerBrokenVersion = "v1.7.0"
