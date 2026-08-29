@@ -1,5 +1,6 @@
 import { Navigate, Outlet } from '@tanstack/react-router'
 import { ChainBannerContainer } from '@/components/ChainBanner'
+import { DryRunBannerContainer } from '@/components/DryRunBanner'
 import { Header } from '@/components/Header'
 import { Sidebar } from '@/components/Sidebar'
 import { useSession } from '@/hooks/useSession'
@@ -39,6 +40,11 @@ export function AppShell() {
       {/* Above the sidebar and the header, so a chain break is visible on
           every page regardless of where the operator navigated (D-15). */}
       <ChainBannerContainer />
+
+      {/* Alongside it, for the same reason and at the same level: which mode
+          the process is in is a fact about every screen, not about one
+          (FOUND-12). Both can apply at once and both are then shown. */}
+      <DryRunBannerContainer />
 
       <div className="flex min-h-0 flex-1">
         <Sidebar />
