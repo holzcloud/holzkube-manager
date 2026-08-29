@@ -140,7 +140,12 @@ func TestMigrateCurrentVersionIsANoOp(t *testing.T) {
 	}
 }
 
-func TestMigrateLegacyDirectoryWithoutVersionIsTreatedAsCurrent(t *testing.T) {
+// TestMigrateLegacyDirectoryWithoutVersionIsTreatedAsVersionOne pins the
+// reading of a directory written before VERSION existed. It is version 1, not
+// version 0 and not "whatever the binary is": phase 1 wrote that layout, and
+// phase 2 is the first release for which that makes it one version behind. So
+// it is migrated, and because it is migrated it is backed up first.
+func TestMigrateLegacyDirectoryWithoutVersionIsTreatedAsVersionOne(t *testing.T) {
 	dir := copyFixture(t, "legacy-no-version")
 
 	if err := Run(dir); err != nil {
@@ -150,11 +155,14 @@ func TestMigrateLegacyDirectoryWithoutVersionIsTreatedAsCurrent(t *testing.T) {
 	if got := readVersionFile(t, dir); got != strconv.Itoa(CurrentVersion) {
 		t.Fatalf("VERSION = %q, want %q", got, strconv.Itoa(CurrentVersion))
 	}
-	if files := backupFiles(t, dir); len(files) != 0 {
-		t.Fatalf("a directory already at the current schema produced backups %v", files)
+	if files := backupFiles(t, dir); len(files) != 1 {
+		t.Fatalf("backups = %v, want the pre-migration tarball for the 1 -> %d step", files, CurrentVersion)
 	}
 	if _, err := os.Stat(filepath.Join(dir, "users", "alice.json")); err != nil {
 		t.Fatalf("the existing record did not survive: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "schematics")); err != nil {
+		t.Fatalf("the migration did not run on a pre-VERSION directory: %v", err)
 	}
 }
 

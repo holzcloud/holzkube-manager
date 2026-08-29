@@ -384,3 +384,183 @@ always.**
 - A mutating route with an empty `Action` is skipped by the audit middleware and
   executes with **no record at all**. Treat a missing `Action` as a defect of
   the same class as a missing `Destructive`.
+
+## Schematics
+
+Contract-first. Every route below is **documented here and implemented in plan
+02-06**; the derivation, filtering, warning and persistence machinery they sit
+on lands in plan 02-04. Nothing in this section is served yet.
+
+A *schematic* is an Image Factory customisation — system extensions, kernel
+arguments, META values — identified by the SHA-256 the Factory assigns to its
+own canonical rendering of the document. holzkube persists the Factory's
+canonical document verbatim, not the input, because the id is the hash of
+exactly those bytes.
+
+### The schematic resource
+
+```json
+{
+  "id": "376567988ad370138ad8b2698212367b8edcb69b5fd68c80be1f2ec7d603b4ba",
+  "cluster": "",
+  "name": "workers with intel microcode",
+  "talos_version": "v1.13.9",
+  "canonical": "customization: {}\n",
+  "extensions": ["siderolabs/intel-ucode"],
+  "kernel_args": ["console=ttyS0"],
+  "meta": [{"key": 10, "value": "…"}],
+  "usable": false,
+  "probed_at": "0001-01-01T00:00:00Z",
+  "created_at": "2026-08-29T11:00:00Z",
+  "rev": 1
+}
+```
+
+- **`usable` is false until the model-build probe agrees.** A successful
+  creation never sets it. The Factory accepts a schematic naming an extension
+  that does not exist, assigns it an ordinary id, and refuses only when an image
+  is requested (FACT-02), so creation and validation are two events and this
+  field records the second. A client that renders "created" as success is
+  lying to the operator.
+- **`probed_at` zero means never probed**, which is not the same as "probed and
+  refused". Those are different states and the UI must not merge them.
+- `rev` is the CAS revision, as on every stored record. A `PUT`-shaped update
+  carrying a stale `rev` answers `409` `store.conflict`.
+
+### Routes
+
+| Method | Path | Destructive | RequiresSession | Action | Request | Response |
+|---|---|---|---|---|---|---|
+| `GET` | `/api/v1/factory/versions` | false | true | — | — | `200` version buckets |
+| `GET` | `/api/v1/factory/extensions` | false | true | — | `?version=` | `200` extension catalog |
+| `POST` | `/api/v1/schematics` | false | true | `schematic.create` | schematic input | `201` schematic + `warnings` |
+| `GET` | `/api/v1/schematics` | false | true | — | — | `200 []` schematic |
+| `GET` | `/api/v1/schematics/{id}` | false | true | — | — | `200` schematic |
+| `GET` | `/api/v1/schematics/{id}/assets` | false | true | — | `?version=&arch=&platform=&secureboot=` | `200` asset references |
+| `DELETE` | `/api/v1/schematics/{id}` | **`Destructive: true`** | true | `schematic.delete` | — | `204` |
+
+`DELETE` is `Destructive: true` and therefore behind the sudo window. The
+Factory provides **no way to list schematics** — they may carry secrets in
+kernel arguments, so it deliberately will not enumerate them — which means a
+schematic id that is neither stored here nor readable from a running node is
+gone. Deleting a record is deleting the only copy of a reference an upgrade
+needs.
+
+### `GET /api/v1/factory/versions`
+
+```json
+{
+  "stable": ["v1.12.0", "…", "v1.13.9"],
+  "prerelease": ["v1.14.0-rc.1", "v1.14.0-rc.2"],
+  "newest_stable": "v1.13.9",
+  "broken": {"vX.Y.Z": "why this version is listed"}
+}
+```
+
+- The split is **structural**: a version is a prerelease because semver says a
+  hyphen introduces one, not because it appears on a list. The upstream list is
+  served ascending and *ends* in the current alpha, beta and rc tags, so
+  `newest_stable` is a comparison and never the last element.
+- `prerelease` is served rather than hidden, so a UI can offer opting in
+  explicitly instead of pretending the versions do not exist.
+- `broken` maps a version to **the reason it is listed**. A version greyed out
+  with no stated cause is a control an operator cannot judge. The map is
+  frequently empty; empty means nothing is currently known broken, not that the
+  server did not check.
+- All three collections encode as `[]` / `{}` when empty, never `null`.
+
+### `GET /api/v1/factory/extensions?version=v1.13.9`
+
+The catalog is **version-scoped and there is no fallback**. An extension valid
+at one Talos version may not exist at another, so a list fetched for the wrong
+version produces a schematic that is un-buildable at the moment it is used. A
+failure to fetch it is a failure to validate and is reported as `upstream`
+`upstream.factory-unavailable`; it is never answered with a cached or unscoped
+list, and never with an empty one.
+
+### `POST /api/v1/schematics`
+
+Extension names are validated against the version-scoped catalog **before** any
+request reaches the Factory. An unknown name is `400` `validation.failed` with
+every unknown name in `errors[]` — all of them at once, not the first.
+
+The `201` body is the schematic resource plus:
+
+```json
+{"warnings": [{"code": "schematic.installer-ignores-kernel-args", "detail": "…"}]}
+```
+
+`warnings` is always present and is `[]` when there is nothing to say. A `null`
+reads to a client as "the server did not check", which is a different and much
+weaker statement.
+
+| Warning code | Raised when |
+|---|---|
+| `schematic.installer-ignores-kernel-args` | the schematic carries extra kernel arguments |
+| `schematic.installer-ignores-meta` | the schematic carries META values |
+
+Both exist because of a restriction stated verbatim upstream: *"`installer` and
+`initramfs` images only support system extensions (kernel args and META are
+ignored)"*. The ISO therefore has them and the installed system does not, and
+the machine boots correctly from the USB stick and then installs a subtly
+different system with nothing reporting it. The detail text names both affected
+images and the remedy — `.machine.install.extraKernelArgs` in the machine
+config. **A client must render these; they are the entire mechanism protecting
+against that divergence (FACT-04).**
+
+### `GET /api/v1/schematics/{id}/assets`
+
+```json
+{
+  "iso": "https://factory.talos.dev/image/<id>/v1.13.9/metal-amd64.iso",
+  "pxe": "https://factory.talos.dev/pxe/<id>/v1.13.9/metal-amd64",
+  "disk_image": "https://factory.talos.dev/image/<id>/v1.13.9/metal-amd64.raw.zst",
+  "cmdline": "https://factory.talos.dev/image/<id>/v1.13.9/cmdline-metal-amd64",
+  "installer": "factory.talos.dev/metal-installer/<id>:v1.13.9"
+}
+```
+
+- `arch` is a **required** parameter with no default. holzkube is developed on
+  `arm64` and targets `amd64`; a defaulted architecture is a bug that only ever
+  appears on someone else's machine (FACT-03).
+- `secureboot=true` suffixes the platform-architecture segment of every URL and
+  nothing else.
+- **`installer` is resolved against the registry, never assembled.** The
+  repository name is version-dependent: for part of the supported range only the
+  legacy `installer` name answers, for the rest the platform-prefixed
+  `metal-installer` does. The reference is consumed by the upgrade RPC, and a
+  wrong one produces an upgrade that reports success while silently dropping
+  every system extension the node was built with. If neither name resolves the
+  route answers `502` `upstream` with `upstream.factory-unavailable` or
+  `upstream.factory-rejected` and **no reference at all** — there is no guessed
+  fallback, because a guess here is the failure it exists to prevent.
+
+### Upstream failures
+
+Every route in this section reaches `factory.talos.dev`. A failure there is
+reported with the `upstream` problem type at `502`, using the tokens reserved in
+the taxonomy above:
+
+| Code | Meaning |
+|---|---|
+| `upstream.factory-unavailable` | the Factory did not answer, answered 5xx, or answered something holzkube will not decode. **Retryable.** |
+| `upstream.factory-rejected` | the Factory answered and the answer was a refusal. **Not retryable**; the request or the schematic is wrong. |
+
+A schematic the Factory refuses to build is `upstream.factory-rejected`; a
+Factory that did not answer while probing is `upstream.factory-unavailable`.
+Merging them would send an operator to fix a schematic that is not broken.
+
+### Audit
+
+The two mutating routes carry the action tokens `schematic.create` and
+`schematic.delete`. As every mutating route, a missing `Action` means no record
+at all, so both are stated here rather than left to the handler.
+
+**The audit allowlist for `schematic.create` permits `name` and
+`talos_version`, and nothing else.** `kernel_args`, `meta`, `extensions` and
+`canonical` are redacted. The Image Factory itself refuses to enumerate
+schematics precisely because kernel arguments may carry secrets, and holzkube's
+archive is append-only and kept forever (D-16) with no deletion path — so one
+kernel argument written in clear is written in clear permanently. The allowlist
+default is redact-everything, which means this entry can only be got wrong by
+adding to it.
