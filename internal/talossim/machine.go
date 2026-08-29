@@ -215,6 +215,19 @@ func (n *nodeState) applyConfig() {
 	n.appliedConfigs++
 }
 
+// setBootstrapped sets the flag directly, without counting a Bootstrap call.
+//
+// Injection is not an RPC. Routing the second_bootstrap scenario's precondition
+// through nodeState.bootstrap would inflate BootstrapCalls, and a test asserting
+// that the client called Bootstrap once would then be reading the scenario's own
+// setup back as evidence about the client.
+func (n *nodeState) setBootstrapped(v bool) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+
+	n.bootstrapped = v
+}
+
 func (n *nodeState) setHostname(hostname string) {
 	n.mu.Lock()
 	defer n.mu.Unlock()
@@ -383,13 +396,24 @@ func (m *machineService) ServiceList(_ context.Context, _ *emptypb.Empty) (*mach
 		etcdMessage = "etcd is a member of the cluster"
 	}
 
+	// k8s_down is a Kubernetes failure on a node that is otherwise healthy, so
+	// only the kubelet stops running: machined, apid and etcd carry on. A
+	// scenario that took the whole service list down would be indistinguishable
+	// from a node that had gone away.
+	kubeletRunning := n.Bootstrapped
+	kubeletMessage := "kubelet is running"
+	if m.server.kubernetesIsDown() {
+		kubeletRunning = false
+		kubeletMessage = "kubelet is not running: failed to start, see logs"
+	}
+
 	return &machine.ServiceListResponse{
 		Messages: []*machine.ServiceList{{
 			Metadata: m.server.node.metadata(),
 			Services: []*machine.ServiceInfo{
 				service("machined", true, "service started"),
 				service("apid", true, "listening on :50000"),
-				service("kubelet", n.Bootstrapped, "kubelet is running"),
+				service("kubelet", kubeletRunning, kubeletMessage),
 				service("etcd", n.Bootstrapped, etcdMessage),
 			},
 		}},
