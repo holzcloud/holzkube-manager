@@ -31,13 +31,12 @@ import (
 	"net"
 	"strconv"
 	"sync"
+	"time"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/peer"
 	"google.golang.org/grpc/test/bufconn"
-
-	"github.com/siderolabs/talos/pkg/machinery/api/machine"
 
 	"github.com/holzcloud/holzkube/internal/talos"
 )
@@ -68,11 +67,23 @@ type Options struct {
 	// Maintenance makes the node report itself as running the maintenance-mode
 	// API surface.
 	Maintenance bool
+
+	// Now is the clock the node stamps its state with. It is a field rather
+	// than a call to time.Now for the same reason auth.Service carries one: a
+	// test that has to assert "the service last changed at the last boot"
+	// should be able to say what time that was.
+	Now func() time.Time
 }
 
 // Server is a running simulated node.
 type Server struct {
 	opts Options
+
+	// node is the mutable state of the simulated machine: what it has been
+	// bootstrapped into, what version it runs, when it last booted. It lives
+	// on the server rather than inside a handler closure because a scenario
+	// mutates it from outside a call.
+	node *nodeState
 
 	pki *pki
 	srv *grpc.Server
@@ -103,13 +114,16 @@ func New(opts Options) (*Server, error) {
 	if opts.NodeIP == "" {
 		opts.NodeIP = "127.0.0.1"
 	}
+	if opts.Now == nil {
+		opts.Now = time.Now
+	}
 
 	p, err := newPKI(opts.Hostname, opts.NodeIP)
 	if err != nil {
 		return nil, err
 	}
 
-	s := &Server{opts: opts, pki: p}
+	s := &Server{opts: opts, pki: p, node: newNodeState(opts)}
 
 	tcp, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -127,7 +141,7 @@ func New(opts Options) (*Server, error) {
 		grpc.Creds(credentials.NewTLS(p.serverTLS())),
 		grpc.UnaryInterceptor(s.recordPeer),
 	)
-	machine.RegisterMachineServiceServer(s.srv, &machineService{server: s})
+	s.registerNodeServices(s.srv)
 
 	s.serve(s.tcp)
 	s.serve(s.pipe)
@@ -223,9 +237,10 @@ func (s *Server) VerifiedClients() []string {
 // Identity is what this node reports about itself. It is the same value the
 // node's own discovery source emits.
 func (s *Server) Identity() talos.Identity {
+	n := s.node.snapshot()
 	return talos.Identity{
-		Hostname:    s.opts.Hostname,
-		Version:     s.opts.TalosVersion,
+		Hostname:    n.Hostname,
+		Version:     n.Version,
 		Maintenance: s.opts.Maintenance,
 	}
 }
