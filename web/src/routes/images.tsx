@@ -1,10 +1,11 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { createRoute } from '@tanstack/react-router'
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   api,
   type CreatedSchematic,
   type MetaValue,
+  ProblemError,
   type Schematic,
   type SchematicInput,
 } from '@/api'
@@ -717,6 +718,34 @@ function SchematicDetail({
     },
   })
 
+  // A detail fetch that answered `notfound.schematic` is the one failure that
+  // says something about the *list*: the row just clicked refers to a record
+  // the server no longer has, so the list is asked again and the stale row
+  // leaves.
+  //
+  // No other code does this. A transport failure or a 500 says nothing about
+  // whether the record still exists, and dropping the row on one would remove
+  // the operator's only recoverable reference to an id -- the Image Factory
+  // will not enumerate schematics -- at exactly the moment the server is
+  // unwell.
+  //
+  // The guard is a ref and the invalidation is `exact`, which together make a
+  // loop impossible: `exact` leaves this dialog's own ['schematics', id] query
+  // untouched, so nothing this effect causes appears in its dependencies, and
+  // the ref bounds it to once per failed id regardless.
+  const invalidatedFor = useRef<string | null>(null)
+  const failure = record.error
+  useEffect(() => {
+    if (id === null || !(failure instanceof ProblemError)) {
+      return
+    }
+    if (failure.code !== 'notfound.schematic' || invalidatedFor.current === id) {
+      return
+    }
+    invalidatedFor.current = id
+    void queryClient.invalidateQueries({ queryKey: ['schematics'], exact: true })
+  }, [id, failure, queryClient])
+
   return (
     <Dialog
       open={id !== null}
@@ -736,6 +765,7 @@ function SchematicDetail({
             deleteError={remove.isError}
           />
         )}
+        {record.isError && id !== null && <SchematicDetailUnavailable error={record.error} />}
         {record.isPending && id !== null && (
           <DialogHeader>
             <DialogTitle>Schematic</DialogTitle>
@@ -744,6 +774,51 @@ function SchematicDetail({
         )}
       </DialogContent>
     </Dialog>
+  )
+}
+
+/**
+ * Why a schematic cannot be shown.
+ *
+ * Two reasons, told apart by the problem `code` and never by the message text,
+ * because they carry different repairs. A record that is gone is finished
+ * business; a store or transport failure is a retry. Conflating them either
+ * sends an operator hunting for a schematic that is still there, or tells them
+ * one was deleted when only the connection to the store failed.
+ *
+ * The alert is inside the dialog's own header so the modal keeps an accessible
+ * name. The failure this replaces opened a dialog whose entire text content was
+ * the word "Close".
+ */
+function SchematicDetailUnavailable({ error }: { error: unknown }) {
+  const gone = error instanceof ProblemError && error.code === 'notfound.schematic'
+
+  return (
+    <>
+      <DialogHeader>
+        <DialogTitle>
+          {gone ? 'This schematic is gone' : 'This schematic could not be loaded'}
+        </DialogTitle>
+        <DialogDescription>
+          {gone
+            ? 'The server has no record with this id.'
+            : 'The server did not answer with the record. It may still exist.'}
+        </DialogDescription>
+      </DialogHeader>
+
+      <p role="alert" className="text-sm text-destructive">
+        {gone
+          ? 'This schematic is no longer stored. It was most likely removed in another tab or by another session, and it has been dropped from the saved list.'
+          : 'The schematic could not be loaded. Nothing here says it is gone — the store or the connection to it failed — so the row has been left in the saved list.'}
+      </p>
+
+      {gone && (
+        <p className="text-sm text-muted-foreground">
+          The id is only recoverable from a stored record: the Image Factory will not list
+          schematics back. If this one is still needed, it has to be created again.
+        </p>
+      )}
+    </>
   )
 }
 
