@@ -109,13 +109,24 @@ type Creds struct {
 }
 
 // Identity is what a cheap probe learns about a machine without configuring it.
+//
+// Machine is holzkube's own identifier and is never the peer's to choose.
+// Everything else on this type is read off the certificate the peer presented
+// on a connection that verified nothing -- maintenance mode has no cluster CA,
+// and Creds.Fingerprint is not yet pinned (T-02-27) -- so it is what something
+// answering on the apid port said about itself, and not a fact holzkube has
+// checked. Hostname is bounded and character-checked where it is harvested;
+// Maintenance is a single bit, which is the whole of what bounds it. Neither
+// is a basis for a trust decision until pinning lands.
 type Identity struct {
 	Machine  model.MachineID
 	Hostname string
 	Version  string
 
 	// Maintenance reports that the node is running the maintenance-mode API
-	// surface rather than the full one.
+	// surface rather than the full one. It is the peer's own claim: a
+	// self-signed certificate is what an unconfigured node presents, and also
+	// what anything at all can present.
 	Maintenance bool
 }
 

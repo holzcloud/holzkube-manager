@@ -132,10 +132,16 @@ func (d *directDialer) Probe(ctx context.Context, t Target) (Identity, error) {
 	}
 	leaf := certs[0]
 
-	id := Identity{Machine: t.Machine, Hostname: leaf.Subject.CommonName}
+	// Sanitised, because the handshake above verified nothing: this path has no
+	// CA and no pinned fingerprint yet (T-02-27), so the length, the character
+	// set and the content of this string are all chosen by whatever answered on
+	// the port. It flows into Candidate and onward to whatever consumes
+	// discovery, which is too far to carry an unchecked value.
+	hostname := leaf.Subject.CommonName
 	if len(leaf.DNSNames) > 0 {
-		id.Hostname = leaf.DNSNames[0]
+		hostname = leaf.DNSNames[0]
 	}
+	id := Identity{Machine: t.Machine, Hostname: sanitiseHostname(hostname)}
 
 	// A node that has not been configured yet has no cluster CA to be signed
 	// by, so it serves a certificate signed by itself. That is the one thing
@@ -143,6 +149,39 @@ func (d *directDialer) Probe(ctx context.Context, t Target) (Identity, error) {
 	id.Maintenance = leaf.Issuer.String() == leaf.Subject.String()
 
 	return id, nil
+}
+
+// maxHostnameLength is the longest a DNS name can be, and therefore the longest
+// anything a certificate offers as one is worth repeating.
+const maxHostnameLength = 253
+
+// sanitiseHostname returns name when it is a hostname and the empty string when
+// it is anything else.
+//
+// The probe reads this value off a certificate nothing verified, so it is the
+// peer's to choose in full. The name is bounded at the length DNS itself
+// permits and restricted to the characters a hostname is made of, which is what
+// keeps a control character, a newline, a NUL or a path separator out of a
+// field that reaches a log line and a screen.
+//
+// A name that fails is dropped rather than truncated or escaped. A truncated
+// name is still the peer's and is now also wrong, and an empty Hostname already
+// means "the certificate said nothing usable" -- which is the honest reading of
+// a certificate that offered 4 KiB of the letter A.
+func sanitiseHostname(name string) string {
+	if name == "" || len(name) > maxHostnameLength {
+		return ""
+	}
+	for i := range len(name) {
+		c := name[i]
+		switch {
+		case c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z', c >= '0' && c <= '9':
+		case c == '.', c == '-':
+		default:
+			return ""
+		}
+	}
+	return name
 }
 
 // handshakeLostTheConnection reports that the TLS handshake failed because the
