@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 // catalogVersion is the Talos version the recorded extension catalog belongs
@@ -134,6 +135,30 @@ type fakeFactory struct {
 	// would need a fake that sleeps past the client timeout, which is a 30s test.
 	unreachable map[string]bool
 
+	// silentRemaining is how many *further* manifest requests for a repository
+	// are answered with silence before it goes back to answering normally, and
+	// silentDelay is how long each of those takes to go quiet.
+	//
+	// unreachable cannot express this and should not be taught to. It is a
+	// steady state -- "this name does not answer" -- and every test that uses it
+	// wants exactly that. This knob is about a *transition* observed by more
+	// than one request at once: the registry has come back, but the request
+	// already in flight when it did has not heard so yet. That is the only shape
+	// in which one goroutine can hold a stale observation while another holds a
+	// fresh one, which is the precondition for a lost update in the repository
+	// cache, and it is unreachable through a knob that changes behaviour for
+	// everyone at once.
+	//
+	// The delay is load-bearing and is not a sleep for its own sake: it is what
+	// makes the interleaving deterministic. The request that gets the silence
+	// finishes last by construction, so it is always the one that writes over an
+	// answer another goroutine has already proven -- the exact ordering the bug
+	// needs, produced on every run rather than on some of them. Without it the
+	// test would pass or fail by scheduling luck, which for a concurrency
+	// regression is the same as not having the test.
+	silentRemaining map[string]int
+	silentDelay     time.Duration
+
 	// forgedID, when non-empty, is the id POST /schematics answers with
 	// instead of the hash of the document. It reproduces the one upstream
 	// state FACT-06 exists to detect: a well-formed 201 carrying an id the
@@ -145,12 +170,13 @@ func newFakeFactory(t *testing.T) *fakeFactory {
 	t.Helper()
 
 	f := &fakeFactory{
-		counts:       map[string]int{},
-		documents:    map[string]string{},
-		known:        map[string]struct{}{},
-		unreachable:  map[string]bool{},
-		versionsJSON: readTestdata(t, "versions.json"),
-		catalogJSON:  readTestdata(t, "extensions-"+catalogVersion+".json"),
+		counts:          map[string]int{},
+		documents:       map[string]string{},
+		known:           map[string]struct{}{},
+		unreachable:     map[string]bool{},
+		silentRemaining: map[string]int{},
+		versionsJSON:    readTestdata(t, "versions.json"),
+		catalogJSON:     readTestdata(t, "extensions-"+catalogVersion+".json"),
 	}
 
 	var catalog []struct {
@@ -230,6 +256,21 @@ func (f *fakeFactory) setRepoReachable(repo string) {
 	delete(f.unreachable, repo)
 }
 
+// setRepoSilentForNext makes the next n manifest requests for repo answer with
+// silence -- each after delay -- and lets every request after those n answer
+// normally again.
+//
+// It is how a test reproduces a registry that has recovered while a request is
+// still in flight against it: the recovery is real and immediate for whoever
+// asks next, and invisible to whoever asked first. See silentRemaining for why
+// setRepoUnreachable cannot stand in for this.
+func (f *fakeFactory) setRepoSilentForNext(repo string, n int, delay time.Duration) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.silentRemaining[repo] = n
+	f.silentDelay = delay
+}
+
 // forgeID makes every subsequent POST /schematics answer with id rather than
 // with the hash of the document it was sent.
 func (f *fakeFactory) forgeID(id string) {
@@ -282,11 +323,22 @@ func (f *fakeFactory) serveManifest(w http.ResponseWriter, repo, version string)
 	f.mu.Lock()
 	forced := f.manifestStatus
 	silent := f.unreachable[repo]
+	var delay time.Duration
+	// Claimed under the mutex, so exactly one of two concurrent requests for
+	// this name gets the silence and the other gets the ordinary answer.
+	if !silent && f.silentRemaining[repo] > 0 {
+		f.silentRemaining[repo]--
+		silent = true
+		delay = f.silentDelay
+	}
 	f.mu.Unlock()
 
 	// Read under the same mutex as every other knob: the connection teardown
 	// below races the next call's read of the map under -race otherwise.
 	if silent {
+		// Outside the mutex: holding it here would serialise the very requests
+		// whose overlap is the thing under test.
+		time.Sleep(delay)
 		hijacker, ok := w.(http.Hijacker)
 		if !ok {
 			// Every httptest.Server over HTTP/1.1 supplies one; if this ever

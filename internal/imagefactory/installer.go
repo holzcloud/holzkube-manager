@@ -265,10 +265,7 @@ func (c *Client) installerRepo(ctx context.Context, r AssetRequest) (installerRe
 		entry.warning = installerFallbackWarning(r, res)
 	}
 
-	c.installerMu.Lock()
-	c.installerRepos[key] = entry
-	c.installerMu.Unlock()
-	return entry, nil
+	return c.storeInstallerRepo(key, entry), nil
 }
 
 // installerRepoKey is the cache key. The SecureBoot flag is formatted rather
@@ -276,6 +273,58 @@ func (c *Client) installerRepo(ctx context.Context, r AssetRequest) (installerRe
 // same key bytes.
 func installerRepoKey(r AssetRequest) string {
 	return fmt.Sprintf("%s/%s/secureboot=%t", r.Platform, r.Version, r.SecureBoot)
+}
+
+// storeInstallerRepo publishes an entry under key unless a concurrent resolver
+// has already published a better one, and returns the entry to serve.
+//
+// Every resolution in this file reads the cache, *releases the lock*, asks the
+// registry for up to DefaultTimeout, and only then writes what it learned. Two
+// requests on one key therefore write from observations made as much as a
+// timeout apart, and an unconditional `c.installerRepos[key] = next` makes the
+// slowest of them authoritative. That is not merely a lost cache update; it is
+// G-02-3 reappearing inside a single process. Concretely: two requests find one
+// stale provisional entry, the first proves the preferred name and stores it,
+// the second times out on the same name and stores its own stale local copy
+// re-stamped fresh -- so the two callers are served two different repository
+// names for one schematic at one version at the same moment, and what is left
+// in the cache is the fallback that had just been shown to be unnecessary.
+// InstallerImage's own doc comment says what a wrong installer reference costs:
+// an upgrade that reports success and silently drops every system extension the
+// node was built with (P9(c)). The reverted entry is provisional, so it expires
+// and can be reverted again; the state does not converge on its own.
+//
+// The rule is therefore one sentence: a proven entry is never overwritten. A
+// proven entry is this cache's end state -- every candidate accounted for, no
+// warning, no expiry -- so nothing a slower resolver can learn improves on it,
+// and anything it would write in its place is strictly less certain. A caller
+// that loses the race is handed the proven entry rather than its own, which is
+// what makes two concurrent callers return the same reference instead of two.
+//
+// Note what this deliberately does not do: it does not compare timestamps. A
+// compare-and-set on entry.at -- "write only if nobody moved the entry since I
+// read it" -- looks like the more careful rule and is the more dangerous one.
+// It makes a resolver that has just *proven* a name discard that proof because
+// some concurrent failed re-question re-stamped the entry first, throwing away
+// the only observation either goroutine made that ends the question. Among
+// unproven entries the last write wins, and that is harmless: on one key they
+// carry the same repository name, because the candidate order is fixed and the
+// first 2xx wins, so all a later write moves is the re-question cadence, which
+// is the one thing it is supposed to move.
+//
+// This does not collapse the concurrent registry calls themselves into one.
+// That is a separate question -- it needs single-flighting around the whole
+// resolution rather than around the write -- and it is the load pattern, not
+// the correctness of the answer.
+func (c *Client) storeInstallerRepo(key string, next installerRepoEntry) installerRepoEntry {
+	c.installerMu.Lock()
+	defer c.installerMu.Unlock()
+
+	if current, ok := c.installerRepos[key]; ok && current.proven() {
+		return current
+	}
+	c.installerRepos[key] = next
+	return next
 }
 
 // requestionInstallerRepo asks again about a provisional entry that has gone
@@ -343,10 +392,7 @@ func (c *Client) requestionInstallerRepo(ctx context.Context, r AssetRequest, ke
 		next.at = time.Now()
 	}
 
-	c.installerMu.Lock()
-	c.installerRepos[key] = next
-	c.installerMu.Unlock()
-	return next
+	return c.storeInstallerRepo(key, next)
 }
 
 // installerFallbackWarning is the operator-facing sentence for a reference

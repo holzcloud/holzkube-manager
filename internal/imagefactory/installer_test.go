@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -728,4 +729,172 @@ func newClientWithRetryInterval(t *testing.T, baseURL string, d time.Duration) *
 		t.Fatalf("New(%q): %v", baseURL, err)
 	}
 	return c
+}
+
+// concurrentProbeDelay is how long the fake takes to go silent in the cases
+// below. It has to outlast an entire competing resolution against the same fake
+// -- a 200 over loopback, plus the cache write -- which is microseconds here, so
+// it is generous by three orders of magnitude and still leaves the test well
+// under a second. It is what turns "these two goroutines might interleave badly"
+// into "this goroutine writes second, every run".
+const concurrentProbeDelay = 250 * time.Millisecond
+
+// installerImageConcurrently calls InstallerImage n times at once for one
+// request and returns the reference each call was served.
+//
+// It asserts on the way out that no call carried a warning, which is not
+// incidental: in both cases below the registry proves the preferred name to at
+// least one goroutine, so a provisional answer coming back to any caller means a
+// proven one was either discarded at the write or not adopted by the caller that
+// lost the race.
+func installerImageConcurrently(
+	t *testing.T,
+	client *imagefactory.Client,
+	r imagefactory.AssetRequest,
+	n int,
+) []string {
+	t.Helper()
+
+	ctx := t.Context()
+	refs := make([]string, n)
+	warningCounts := make([]int, n)
+	errs := make([]error, n)
+
+	// Released all at once rather than being raced from the loop, so the calls
+	// overlap instead of starting a goroutine-creation apart.
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	for i := range n {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			ref, warnings, err := client.InstallerImage(ctx, r)
+			refs[i], warningCounts[i], errs[i] = ref, len(warnings), err
+		}()
+	}
+	close(start)
+	wg.Wait()
+
+	// After the join, never inside the goroutines: t.Fatalf from a goroutine
+	// other than the test's own does not stop the test.
+	for i := range n {
+		if errs[i] != nil {
+			t.Fatalf("concurrent call %d: %v", i, errs[i])
+		}
+		if warningCounts[i] != 0 {
+			t.Errorf("concurrent call %d was served %d warnings, want 0 -- the preferred name "+
+				"was proven during this window, so every caller must end up with the proven "+
+				"answer rather than a provisional one", i, warningCounts[i])
+		}
+	}
+	return refs
+}
+
+// assertProvenInstallerEntry fails unless the cache holds repo as a proven
+// entry: every candidate accounted for, and therefore no warning and no expiry.
+func assertProvenInstallerEntry(
+	t *testing.T,
+	client *imagefactory.Client,
+	r imagefactory.AssetRequest,
+	repo string,
+) {
+	t.Helper()
+
+	entry, ok := client.InstallerRepoEntryForTest(r)
+	if !ok {
+		t.Fatal("the resolved name was not remembered at all")
+	}
+	if entry.Repo != repo {
+		t.Errorf("the cache holds %q, want the proven %q -- a slower resolver overwrote a "+
+			"proven entry with what it had learned before that entry existed", entry.Repo, repo)
+	}
+	if len(entry.Unresolved) != 0 {
+		t.Errorf("the cached entry still lists %v as never ruled out, so it is provisional and "+
+			"will be re-questioned; a proven entry was demoted", entry.Unresolved)
+	}
+	if entry.WarningCode != "" {
+		t.Errorf("the cached entry carries the warning %q after the preferred name was proven",
+			entry.WarningCode)
+	}
+}
+
+// TestInstallerImageNeverRevertsAProvenNameUnderConcurrentResolution is the
+// regression for the lost update storeInstallerRepo exists to prevent, and it is
+// the first concurrency case in this file at all.
+//
+// Both resolution paths hold no lock while they ask the registry, so two
+// requests on one key can be in flight with observations made a full client
+// timeout apart. When the slower one's write is unconditional it lands on top of
+// the faster one's, and because "slower" here means "the one that did not get an
+// answer", the entry left behind is the less certain of the two. The two callers
+// are then served two different repository names for one schematic at one
+// version, in one process, at one moment -- which is G-02-3 verbatim, and
+// InstallerImage's doc comment records what the wrong name costs: an upgrade
+// that reports success and drops every system extension the node was built with.
+//
+// The interleaving is forced rather than hoped for. The fake hands the silence
+// to whichever request arrives first and delays it, so the goroutine holding the
+// stale observation is always the one that writes last. Run under -race, this
+// also covers the map access itself.
+func TestInstallerImageNeverRevertsAProvenNameUnderConcurrentResolution(t *testing.T) {
+	// The cold path: nothing cached, and the resolution that had to fall back
+	// finishes last.
+	t.Run("cold cache", func(t *testing.T) {
+		fake := newFakeFactory(t)
+		// One request finds the preferred name silent -- slowly -- and every
+		// request after it finds the name answering. The silent one resolves
+		// past it to the legacy name and writes a provisional entry last.
+		fake.setRepoSilentForNext("metal-installer", 1, concurrentProbeDelay)
+		client := newClient(t, fake.URL)
+		req := installerRequest(installerModernVersion)
+
+		want := fakeHost(t, fake.URL) + "/metal-installer/" + schematicA + ":" + installerModernVersion
+		for i, ref := range installerImageConcurrently(t, client, req, 2) {
+			if ref != want {
+				t.Errorf("concurrent call %d was served\n  %s\nwant\n  %s\n"+
+					"two concurrent callers must not be handed two repository names for one "+
+					"schematic at one version", i, ref, want)
+			}
+		}
+		assertProvenInstallerEntry(t, client, req, "metal-installer")
+	})
+
+	// The re-question path: a stale provisional entry, one re-question that
+	// proves the preferred name and one that hears nothing.
+	t.Run("stale provisional entry", func(t *testing.T) {
+		fake := newFakeFactory(t)
+		fake.setRepoUnreachable("metal-installer")
+		client := newClientWithRetryInterval(t, fake.URL, 0)
+		req := installerRequest(installerModernVersion)
+
+		if _, warnings, err := client.InstallerImage(t.Context(), req); err != nil || len(warnings) != 1 {
+			t.Fatalf("seeding the provisional entry: err = %v, warnings = %+v", err, warnings)
+		}
+
+		// The registry comes back, but not for the request that is already
+		// asking: that one still hears nothing, and hears it slowly.
+		fake.setRepoReachable("metal-installer")
+		fake.setRepoSilentForNext("metal-installer", 1, concurrentProbeDelay)
+
+		want := fakeHost(t, fake.URL) + "/metal-installer/" + schematicA + ":" + installerModernVersion
+		for i, ref := range installerImageConcurrently(t, client, req, 2) {
+			if ref != want {
+				t.Errorf("concurrent call %d was served\n  %s\nwant\n  %s\n"+
+					"a re-question that learned nothing must not revert the one that proved "+
+					"the preferred name", i, ref, want)
+			}
+		}
+		assertProvenInstallerEntry(t, client, req, "metal-installer")
+
+		// The narrowing gate again, under concurrency: a re-question asks only
+		// the candidate that was never ruled out, so the name that already
+		// answered is asked once in the whole test -- during the seeding call.
+		// Two concurrent re-questions walking the full list would read 3 here,
+		// and each would cost 2 x DefaultTimeout.
+		if n := fake.count("GET /v2/installer/manifests/" + installerModernVersion); n != 1 {
+			t.Errorf("the candidate that already answered was asked %d times, want 1 -- "+
+				"a re-question must ask only the candidates that were never ruled out", n)
+		}
+	})
 }
