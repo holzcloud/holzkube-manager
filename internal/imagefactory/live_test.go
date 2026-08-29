@@ -204,7 +204,7 @@ func installerNameMatrixSubtests(ctx context.Context, t *testing.T, client *imag
 		// a throttle would train a reader to ignore this test. There is no
 		// retry and no raised timeout here: every budget in this package is
 		// 02-DECISION-probe-budget.md's.
-		plain, err := client.InstallerImage(ctx, base)
+		plain, _, err := client.InstallerImage(ctx, base)
 		if errors.Is(err, imagefactory.ErrUpstreamUnavailable) {
 			t.Skipf("NOT OBSERVED: the ordinary installer did not resolve at %s, so the "+
 				"SecureBoot pairing went unverified in this run: %v", catalogVersion, err)
@@ -213,7 +213,7 @@ func installerNameMatrixSubtests(ctx context.Context, t *testing.T, client *imag
 			t.Fatalf("InstallerImage without SecureBoot: %v", err)
 		}
 		base.SecureBoot = true
-		secure, err := client.InstallerImage(ctx, base)
+		secure, _, err := client.InstallerImage(ctx, base)
 		if errors.Is(err, imagefactory.ErrUpstreamUnavailable) {
 			t.Skipf("NOT OBSERVED: the SecureBoot installer did not resolve at %s, so the "+
 				"pairing went unverified in this run (the ordinary one resolved to %s): %v",
