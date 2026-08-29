@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/holzcloud/holzkube/internal/httpapi"
@@ -238,8 +239,12 @@ func createSchematic(d httpapi.Deps) http.HandlerFunc {
 		// ProbedAt zero is what keeps "never probed" distinguishable from "probed
 		// and refused" -- two states the contract requires a UI not to merge.
 		var probedAt time.Time
+		var probeReason string
 		if err == nil || errors.Is(err, imagefactory.ErrSchematicNotBuildable) {
 			probedAt = time.Now().UTC()
+		}
+		if errors.Is(err, imagefactory.ErrSchematicNotBuildable) {
+			probeReason = probeDetail(err)
 		}
 
 		rec := model.Schematic{
@@ -253,6 +258,7 @@ func createSchematic(d httpapi.Deps) http.HandlerFunc {
 			Meta:         in.meta(),
 			Usable:       authored.Usable,
 			ProbedAt:     probedAt,
+			ProbeReason:  probeReason,
 			CreatedAt:    time.Now().UTC(),
 		}
 		stored, storeErr := d.Store.Schematics().Put(r.Context(), rec)
@@ -516,6 +522,23 @@ func assetRequest(r *http.Request, rec model.Schematic) (imagefactory.AssetReque
 		Platform:    platform,
 		SecureBoot:  secureBoot,
 	}, nil
+}
+
+// probeDetail is the probe's own sentence without the sentinel prefix.
+//
+// The prefix is the package's, and an operator reading "imagefactory:" learns
+// nothing except that Go wrapped an error. What is left is what they can act
+// on: the schematic, the version and architecture it was asked for, and the
+// status the Factory answered with.
+func probeDetail(err error) string {
+	detail := strings.TrimPrefix(err.Error(),
+		imagefactory.ErrSchematicNotBuildable.Error()+": ")
+	if detail == "" {
+		// A bare sentinel with nothing wrapped around it. Saying so is better
+		// than storing an empty reason, which reads as "never probed".
+		return imagefactory.ErrSchematicNotBuildable.Error()
+	}
+	return detail
 }
 
 // createProblem maps a failure from the authoring path.

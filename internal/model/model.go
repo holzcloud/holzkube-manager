@@ -113,6 +113,26 @@ type Schematic struct {
 	// it never has, which is not the same as "it answered no".
 	ProbedAt time.Time `json:"probed_at"`
 
+	// ProbeReason is what the Factory said when it refused, empty otherwise.
+	//
+	// "Not usable" without a reason is a verdict an operator cannot act on:
+	// they cannot tell a schematic naming an extension that does not exist
+	// from one asked for at a version that never had it. The probe already
+	// produces the sentence -- the version, the architecture and the status the
+	// Factory answered with -- and this is where it is kept so the screen can
+	// show it next to the verdict it explains.
+	//
+	// It is set only for ErrSchematicNotBuildable. A probe that could not reach
+	// the Factory says nothing about the schematic, and a reason recorded for
+	// it would read as one.
+	//
+	// Additive and unversioned on purpose: a record written before this field
+	// existed decodes with an empty reason, which is exactly what it means, so
+	// there is nothing for a migration to do. Bumping the schema version would
+	// force a backup and a rewrite of every data directory for a field whose
+	// absence is already correct.
+	ProbeReason string `json:"probe_reason"`
+
 	CreatedAt time.Time `json:"created_at"`
 
 	// Rev is the compare-and-swap revision. Every stored record carries one.

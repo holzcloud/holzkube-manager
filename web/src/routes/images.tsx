@@ -1,10 +1,27 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { createRoute } from '@tanstack/react-router'
 import { useCallback, useEffect, useState } from 'react'
-import { api, type CreatedSchematic, type MetaValue, type SchematicInput } from '@/api'
-import { LiveSchematicWarnings, SchematicWarnings } from '@/components/SchematicWarnings'
+import {
+  api,
+  type CreatedSchematic,
+  type MetaValue,
+  type Schematic,
+  type SchematicInput,
+} from '@/api'
+import {
+  LiveSchematicWarnings,
+  predictWarnings,
+  SchematicWarnings,
+} from '@/components/SchematicWarnings'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import {
@@ -14,6 +31,14 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table'
 import { authenticatedRoute } from '@/routes/__root'
 
 /**
@@ -52,13 +77,14 @@ function ImagesView() {
   const [name, setName] = useState('')
   const [chosenVersion, setChosenVersion] = useState<string | null>(null)
   const [showPrerelease, setShowPrerelease] = useState(false)
-  const [arch, setArch] = useState<Architecture>('amd64')
+  const [arch, setArch] = useRememberedArch()
   const [secureBoot, setSecureBoot] = useState(false)
   const [extensions, setExtensions] = useState<string[]>([])
   const [kernelArgs, setKernelArgs] = useState<string[]>([])
   const [meta, setMeta] = useState<MetaRow[]>([])
   const [dropped, setDropped] = useState<string[]>([])
   const [created, setCreated] = useState<CreatedSchematic | null>(null)
+  const [selected, setSelected] = useState<string | null>(null)
 
   const versions = useQuery({
     queryKey: ['factory', 'versions'],
@@ -321,7 +347,18 @@ function ImagesView() {
         </Button>
       </form>
 
-      {created !== null && <CreatedPanel created={created} />}
+      {created !== null && (
+        <CreatedPanel created={created} onOpen={() => setSelected(created.id)} />
+      )}
+
+      <SavedSchematics onOpen={setSelected} />
+
+      <SchematicDetail
+        id={selected}
+        arch={arch}
+        onArchChange={setArch}
+        onClose={() => setSelected(null)}
+      />
     </div>
   )
 }
@@ -466,15 +503,22 @@ function MetaRows({ meta, onChange }: { meta: MetaRow[]; onChange: (next: MetaRo
  * not exist; the refusal arrives only when an image is requested. A panel that
  * merged the two would be the exact lie the probe exists to prevent.
  */
-function CreatedPanel({ created }: { created: CreatedSchematic }) {
+function CreatedPanel({ created, onOpen }: { created: CreatedSchematic; onOpen: () => void }) {
   return (
     <section className="space-y-3 rounded-md border border-border p-4">
       <div className="flex flex-wrap items-center gap-3">
         <p className="text-sm font-medium">Schematic created.</p>
-        <UsabilityBadge usable={created.usable} probedAt={created.probed_at} />
+        <UsabilityBadge
+          usable={created.usable}
+          probedAt={created.probed_at}
+          reason={created.probe_reason}
+        />
       </div>
       <p className="break-all font-mono text-xs">{created.id}</p>
       <SchematicWarnings warnings={created.warnings} />
+      <Button type="button" variant="secondary" onClick={onOpen}>
+        Open this schematic
+      </Button>
     </section>
   )
 }
@@ -484,14 +528,420 @@ export function isProbed(probedAt: string): boolean {
   return probedAt !== '' && !probedAt.startsWith('0001-01-01')
 }
 
-export function UsabilityBadge({ usable, probedAt }: { usable: boolean; probedAt: string }) {
+/**
+ * Three states, never two.
+ *
+ * "Usable", "the Factory refused" and "nobody asked" are three different
+ * situations with three different repairs, and collapsing the last two would
+ * recreate the exact lie FACT-02 exists to prevent: an unverified schematic
+ * shown as a broken one sends an operator to fix something nothing has found
+ * fault with, and shown as a good one sends them to install from it.
+ */
+export function UsabilityBadge({
+  usable,
+  probedAt,
+  reason,
+}: {
+  usable: boolean
+  probedAt: string
+  reason?: string
+}) {
   if (usable) {
     return <Badge variant="secondary">Usable — the build probe confirmed it</Badge>
   }
   if (!isProbed(probedAt)) {
     return <Badge variant="outline">Not verified — the build probe did not run</Badge>
   }
-  return <Badge variant="destructive">Not usable — the Factory refused to build it</Badge>
+  return (
+    <span className="flex flex-col gap-1">
+      <Badge variant="destructive">Not usable — the Factory refused to build it</Badge>
+      {reason !== undefined && reason !== '' && (
+        <span className="text-xs text-muted-foreground">{reason}</span>
+      )}
+    </span>
+  )
+}
+
+/**
+ * The architecture last used on this screen.
+ *
+ * There is no sensible default. holzkube is developed on arm64 and targets
+ * amd64, so a hardcoded one is a bug that only ever appears on someone else's
+ * machine -- and asking again on every visit is a control an operator has
+ * already answered. The last answer is the least wrong starting point, and it
+ * is a preference rather than a secret: nothing security-relevant is stored.
+ */
+export const ARCH_STORAGE_KEY = 'holzkube.images.arch'
+
+function isArchitecture(value: unknown): value is Architecture {
+  return value === 'amd64' || value === 'arm64'
+}
+
+function useRememberedArch(): [Architecture, (next: Architecture) => void] {
+  const [arch, setArchState] = useState<Architecture>(() => {
+    try {
+      const raw = localStorage.getItem(ARCH_STORAGE_KEY)
+      return isArchitecture(raw) ? raw : 'amd64'
+    } catch {
+      // A browser with storage disabled still gets a working screen; it just
+      // cannot remember the choice across a reload.
+      return 'amd64'
+    }
+  })
+
+  const setArch = useCallback((next: Architecture) => {
+    setArchState(next)
+    try {
+      localStorage.setItem(ARCH_STORAGE_KEY, next)
+    } catch {
+      // Same as above: remembering is a convenience, not a requirement.
+    }
+  }, [])
+
+  return [arch, setArch]
+}
+
+/**
+ * The saved schematics, in the dense-table register D-13 says later phases
+ * inherit from the audit screen.
+ *
+ * The usability column is the reason this table is worth having at all. A list
+ * that showed only names and versions would let an operator pick the one
+ * schematic in it that will not build.
+ */
+function SavedSchematics({ onOpen }: { onOpen: (id: string) => void }) {
+  const saved = useQuery({
+    queryKey: ['schematics'],
+    queryFn: () => api.schematics.list(),
+  })
+
+  return (
+    <section className="space-y-2">
+      <h2 className="font-heading text-lg font-semibold tracking-tight">Saved schematics</h2>
+
+      {saved.isPending && <p className="text-sm text-muted-foreground">Loading…</p>}
+
+      {saved.isError && (
+        <p role="alert" className="text-sm text-destructive">
+          The saved schematics could not be loaded.
+        </p>
+      )}
+
+      {saved.isSuccess && saved.data.length === 0 && (
+        <p className="text-sm text-muted-foreground">
+          No schematics yet. The Image Factory offers no way to list them back, so a schematic that
+          is not saved here is a reference nothing can recover.
+        </p>
+      )}
+
+      {saved.isSuccess && saved.data.length > 0 && (
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Name</TableHead>
+              <TableHead>Talos version</TableHead>
+              <TableHead>Extensions</TableHead>
+              <TableHead>Created</TableHead>
+              <TableHead>Usability</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {saved.data.map((record) => (
+              <TableRow
+                key={record.id}
+                onClick={() => onOpen(record.id)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter' || event.key === ' ') {
+                    event.preventDefault()
+                    onOpen(record.id)
+                  }
+                }}
+                tabIndex={0}
+                role="button"
+                aria-label={`Schematic ${record.name}`}
+                className="cursor-pointer"
+              >
+                <TableCell>{record.name}</TableCell>
+                <TableCell className="tabular-nums">{record.talos_version}</TableCell>
+                <TableCell className="tabular-nums">{record.extensions.length}</TableCell>
+                <TableCell className="tabular-nums">{record.created_at}</TableCell>
+                <TableCell>
+                  <UsabilityBadge
+                    usable={record.usable}
+                    probedAt={record.probed_at}
+                    reason={record.probe_reason}
+                  />
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      )}
+    </section>
+  )
+}
+
+/**
+ * One saved schematic in full.
+ *
+ * The id is shown complete and unabbreviated: it is the value an operator
+ * pastes into a machine config, and a truncated one is worse than none because
+ * it looks copyable.
+ */
+function SchematicDetail({
+  id,
+  arch,
+  onArchChange,
+  onClose,
+}: {
+  id: string | null
+  arch: Architecture
+  onArchChange: (next: Architecture) => void
+  onClose: () => void
+}) {
+  const queryClient = useQueryClient()
+
+  const record = useQuery({
+    queryKey: ['schematics', id],
+    queryFn: () => api.schematics.get(id ?? ''),
+    enabled: id !== null,
+  })
+
+  const remove = useMutation({
+    mutationFn: () => api.schematics.remove(id ?? ''),
+    onSuccess: async () => {
+      onClose()
+      await queryClient.invalidateQueries({ queryKey: ['schematics'] })
+    },
+  })
+
+  return (
+    <Dialog
+      open={id !== null}
+      onOpenChange={(open) => {
+        if (!open) {
+          onClose()
+        }
+      }}
+    >
+      <DialogContent className="max-h-[85vh] max-w-3xl overflow-y-auto">
+        {record.isSuccess && (
+          <SchematicDetailBody
+            record={record.data}
+            arch={arch}
+            onArchChange={onArchChange}
+            onDelete={() => remove.mutate()}
+            deleting={remove.isPending}
+            deleteError={remove.isError}
+          />
+        )}
+        {record.isPending && id !== null && (
+          <DialogHeader>
+            <DialogTitle>Schematic</DialogTitle>
+            <DialogDescription>Loading…</DialogDescription>
+          </DialogHeader>
+        )}
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+function SchematicDetailBody({
+  record,
+  arch,
+  onArchChange,
+  onDelete,
+  deleting,
+  deleteError,
+}: {
+  record: Schematic
+  arch: Architecture
+  onArchChange: (next: Architecture) => void
+  onDelete: () => void
+  deleting: boolean
+  deleteError: boolean
+}) {
+  return (
+    <>
+      <DialogHeader>
+        <DialogTitle>{record.name}</DialogTitle>
+        <DialogDescription>
+          Authored against {record.talos_version}. The id below is the SHA-256 of the Factory's own
+          canonical document, and it is what a machine config refers to.
+        </DialogDescription>
+      </DialogHeader>
+
+      <div className="flex flex-wrap items-center gap-3">
+        <UsabilityBadge
+          usable={record.usable}
+          probedAt={record.probed_at}
+          reason={record.probe_reason}
+        />
+      </div>
+
+      <div>
+        <h3 className="mb-1 text-sm font-medium">Schematic ID</h3>
+        <div className="flex items-start gap-2">
+          <p className="break-all font-mono text-xs">{record.id}</p>
+          <CopyButton label="Schematic ID" value={record.id} />
+        </div>
+      </div>
+
+      <SchematicWarnings warnings={predictWarnings(record.kernel_args, record.meta)} />
+
+      <AssetPanel record={record} arch={arch} onArchChange={onArchChange} />
+
+      <div>
+        <h3 className="mb-1 text-sm font-medium">Factory-canonical document</h3>
+        <pre className="overflow-x-auto rounded-md bg-muted p-3 font-mono text-xs">
+          {record.canonical}
+        </pre>
+      </div>
+
+      {deleteError && (
+        <p role="alert" className="text-sm text-destructive">
+          The schematic was not deleted.
+        </p>
+      )}
+
+      {/*
+        No confirmation of this screen's own. DELETE is Destructive, so the
+        server answers 428 without an open sudo window and the existing sudo
+        dialog replays the request. A second "are you sure?" in front of it
+        would train the operator to click past the first one.
+      */}
+      <Button type="button" variant="destructive" disabled={deleting} onClick={onDelete}>
+        {deleting ? 'Deleting…' : 'Delete schematic'}
+      </Button>
+    </>
+  )
+}
+
+/**
+ * The asset references for a chosen architecture.
+ *
+ * The installer reference sits next to the ISO URL on purpose. An ISO built
+ * from one schematic and an installer taken from another is the documented
+ * drift (PITFALLS P9): the machine boots with every extension and then installs
+ * a system without them, and nothing reports it.
+ */
+function AssetPanel({
+  record,
+  arch,
+  onArchChange,
+}: {
+  record: Schematic
+  arch: Architecture
+  onArchChange: (next: Architecture) => void
+}) {
+  const [secureBoot, setSecureBoot] = useState(false)
+
+  const assets = useQuery({
+    queryKey: ['schematics', record.id, 'assets', arch, secureBoot],
+    queryFn: () => api.schematics.assets(record.id, { arch, secureboot: secureBoot }),
+  })
+
+  return (
+    <section className="space-y-3">
+      <h3 className="text-sm font-medium">Assets</h3>
+
+      <div className="flex flex-wrap items-end gap-3">
+        <div className="flex flex-col gap-1">
+          <Label htmlFor="asset-arch">Architecture</Label>
+          <Select value={arch} onValueChange={(value) => onArchChange(value as Architecture)}>
+            <SelectTrigger id="asset-arch" className="h-8 w-32">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {ARCHITECTURES.map((entry) => (
+                <SelectItem key={entry} value={entry}>
+                  {entry}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+
+        <label className="flex items-center gap-2 pb-1 text-sm">
+          <input
+            type="checkbox"
+            checked={secureBoot}
+            onChange={(event) => setSecureBoot(event.target.checked)}
+          />
+          SecureBoot
+        </label>
+      </div>
+
+      {assets.isPending && <p className="text-sm text-muted-foreground">Resolving…</p>}
+
+      {assets.isError && (
+        <p role="alert" className="text-sm text-destructive">
+          The asset references could not be resolved. The installer reference in particular is
+          resolved against the registry and never assembled, so nothing is shown rather than a
+          plausible string — a guessed installer is the failure this avoids.
+        </p>
+      )}
+
+      {assets.isSuccess && (
+        <>
+          <div className="grid gap-2">
+            <AssetRow label="ISO" value={assets.data.iso} />
+            <AssetRow label="Installer" value={assets.data.installer} />
+            <AssetRow label="PXE" value={assets.data.pxe} />
+            <AssetRow label="Disk image" value={assets.data.disk_image} />
+            <AssetRow label="Kernel cmdline" value={assets.data.cmdline} />
+          </div>
+          <p className="text-xs text-muted-foreground">
+            The ISO and the installer must share this schematic. Booting from this ISO and
+            installing with a different installer produces a machine that boots with these
+            extensions and runs without them, and nothing reports the difference.
+          </p>
+        </>
+      )}
+    </section>
+  )
+}
+
+/**
+ * One labelled reference with its copy control.
+ *
+ * A named group rather than a dt/dd pair: the row carries an accessible name so
+ * a screen reader and a test can both address "the ISO reference" as one thing.
+ * A dd is name-prohibited, so labelling one would be markup that validates and
+ * does not work.
+ */
+function AssetRow({ label, value }: { label: string; value: string }) {
+  return (
+    <fieldset
+      aria-label={`${label} reference`}
+      className="grid grid-cols-[minmax(0,8rem)_1fr_auto] items-start gap-2"
+    >
+      <span className="text-sm text-muted-foreground">{label}</span>
+      <span className="break-all font-mono text-xs">{value}</span>
+      <CopyButton label={label} value={value} />
+    </fieldset>
+  )
+}
+
+/** Copies one reference. Nothing here is secret; it is a URL an operator needs. */
+function CopyButton({ label, value }: { label: string; value: string }) {
+  const [copied, setCopied] = useState(false)
+
+  return (
+    <Button
+      type="button"
+      variant="ghost"
+      aria-label={`Copy ${label}`}
+      onClick={() => {
+        void navigator.clipboard?.writeText(value).then(
+          () => setCopied(true),
+          () => setCopied(false),
+        )
+      }}
+    >
+      {copied ? 'Copied' : 'Copy'}
+    </Button>
+  )
 }
 
 export const imagesRoute = createRoute({
