@@ -14,6 +14,7 @@ import (
 	"github.com/holzcloud/holzkube/internal/audit"
 	"github.com/holzcloud/holzkube/internal/auth"
 	"github.com/holzcloud/holzkube/internal/httpapi/middleware"
+	"github.com/holzcloud/holzkube/internal/imagefactory"
 	"github.com/holzcloud/holzkube/internal/store"
 )
 
@@ -84,6 +85,11 @@ type Deps struct {
 	Auth       *auth.Service
 	Logger     *slog.Logger
 	SudoWindow time.Duration
+
+	// Factory is the Talos Image Factory client the schematic routes speak
+	// through. It is nil in a deployment that serves no schematic routes, and
+	// those handlers answer 502 rather than panicking if it ever is.
+	Factory *imagefactory.Client
 
 	// AuditChain is the startup verification verdict (D-15). It is a snapshot
 	// on purpose: a break found at startup must stay visible in the UI, not
