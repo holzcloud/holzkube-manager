@@ -32,9 +32,10 @@ type Store struct {
 	// are distinct keys.
 	entityMu *store.EntityLocks
 
-	users    *userStore
-	settings *settingsStore
-	sessions *sessionStore
+	users      *userStore
+	settings   *settingsStore
+	sessions   *sessionStore
+	schematics *schematicStore
 }
 
 // Open prepares dir as a holzkube data directory and returns a Store over it.
@@ -88,8 +89,9 @@ func Open(dir string) (s *Store, err error) {
 	s.users = &userStore{dir: filepath.Join(abs, "users"), locks: s.entityMu}
 	s.settings = &settingsStore{path: filepath.Join(abs, "settings.json"), locks: s.entityMu}
 	s.sessions = &sessionStore{dir: filepath.Join(abs, "sessions"), locks: s.entityMu}
+	s.schematics = &schematicStore{dir: filepath.Join(abs, kindSchematics), locks: s.entityMu}
 
-	for _, sub := range []string{s.users.dir, s.sessions.dir} {
+	for _, sub := range []string{s.users.dir, s.sessions.dir, s.schematics.dir} {
 		if err := os.MkdirAll(sub, dirPerm); err != nil {
 			return nil, fmt.Errorf("fsstore: create %s: %w", sub, err)
 		}
@@ -122,6 +124,9 @@ func (s *Store) Settings() store.SettingsStore { return s.settings }
 // Sessions returns the server-side session entity.
 func (s *Store) Sessions() store.SessionStore { return s.sessions }
 
+// Schematics returns the Image Factory schematic entity.
+func (s *Store) Schematics() store.SchematicStore { return s.schematics }
+
 // Close releases the process lock. After Close another instance may open the
 // same data directory.
 func (s *Store) Close() error {
@@ -136,9 +141,10 @@ func (s *Store) Close() error {
 // Entity kinds. They are the first half of every per-entity lock key, which is
 // what keeps users/a and sessions/a from contending.
 const (
-	kindUsers    = "users"
-	kindSettings = "settings"
-	kindSessions = "sessions"
+	kindUsers      = "users"
+	kindSettings   = "settings"
+	kindSessions   = "sessions"
+	kindSchematics = "schematics"
 
 	// settingsKey is the id half of the lock key for the settings singleton.
 	settingsKey = "singleton"
@@ -296,6 +302,108 @@ func (u *userStore) Delete(_ context.Context, id model.UserID) error {
 		return err
 	}
 	defer u.locks.LockEntity(kindUsers, string(id))()
+	if err := removeAndSync(p); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return store.ErrNotFound
+		}
+		return err
+	}
+	return nil
+}
+
+// --- schematics ------------------------------------------------------------
+
+// schematicStore is userStore with the types swapped, deliberately rather than
+// generically. The CAS branch structure -- exists, does not exist, unreadable
+// -- is the part that must be identical between entities, and a shared generic
+// implementation would make it identical by construction at the cost of making
+// each entity's key rules and lock kind implicit. Two readable copies with a
+// test each is the trade this package already made for sessions.
+type schematicStore struct {
+	locks *store.EntityLocks
+	dir   string
+}
+
+// path derives a record path from an id through safeKey, which is what keeps a
+// caller-supplied identifier from escaping the entity directory (T-02-19). A
+// Factory schematic id is 64 lowercase hex characters and passes unchanged; an
+// operator-chosen name never reaches a path at all.
+func (sc *schematicStore) path(id model.SchematicID) (string, error) {
+	if err := safeKey(string(id)); err != nil {
+		return "", err
+	}
+	return filepath.Join(sc.dir, string(id)+".json"), nil
+}
+
+func (sc *schematicStore) Get(_ context.Context, id model.SchematicID) (model.Schematic, error) {
+	p, err := sc.path(id)
+	if err != nil {
+		return model.Schematic{}, err
+	}
+	var rec model.Schematic
+	if err := readJSON(p, &rec); err != nil {
+		return model.Schematic{}, err
+	}
+	return rec, nil
+}
+
+func (sc *schematicStore) List(_ context.Context) ([]model.Schematic, error) {
+	out := make([]model.Schematic, 0, 1)
+	err := listJSON(sc.dir, func(raw []byte) error {
+		var rec model.Schematic
+		if err := json.Unmarshal(raw, &rec); err != nil {
+			return err
+		}
+		out = append(out, rec)
+		return nil
+	})
+	return out, err
+}
+
+func (sc *schematicStore) Put(_ context.Context, rec model.Schematic) (model.Schematic, error) {
+	p, err := sc.path(rec.ID)
+	if err != nil {
+		return model.Schematic{}, err
+	}
+
+	defer sc.locks.LockEntity(kindSchematics, string(rec.ID))()
+
+	var current model.Schematic
+	switch err := readJSON(p, &current); {
+	case err == nil:
+		if rec.Rev != current.Rev {
+			return model.Schematic{}, fmt.Errorf("%w: schematic %s is at rev %d, put carried %d",
+				store.ErrConflict, rec.ID, current.Rev, rec.Rev)
+		}
+	case errors.Is(err, store.ErrNotFound):
+		// A non-zero rev for a record that is not there is a conflict rather
+		// than a create: it means the caller read a record that has since been
+		// deleted, and silently recreating it would undo the deletion.
+		if rec.Rev != 0 {
+			return model.Schematic{}, fmt.Errorf("%w: schematic %s does not exist but put carried rev %d",
+				store.ErrConflict, rec.ID, rec.Rev)
+		}
+	default:
+		return model.Schematic{}, err
+	}
+
+	rec.Rev++
+	raw, err := marshalRecord(rec)
+	if err != nil {
+		return model.Schematic{}, err
+	}
+	if err := writeAtomic(p, raw); err != nil {
+		return model.Schematic{}, err
+	}
+	return rec, nil
+}
+
+func (sc *schematicStore) Delete(_ context.Context, id model.SchematicID) error {
+	p, err := sc.path(id)
+	if err != nil {
+		return err
+	}
+	defer sc.locks.LockEntity(kindSchematics, string(id))()
 	if err := removeAndSync(p); err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return store.ErrNotFound
