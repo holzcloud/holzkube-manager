@@ -125,6 +125,26 @@ func retryBackoff(attempt int) time.Duration {
 	return time.Duration(n.Int64())
 }
 
+// nextBackoff draws the delay before the next attempt.
+//
+// It goes through a field for the same reason conn.now does. The draw is
+// deliberately random -- full jitter is the entire point of it -- and a test
+// that means to assert what the loop *decided* cannot assert it against a
+// random variable: with the draw uniform over [0, 200 ms], "a 50 ms budget
+// buys no retry" is true three times in four and false the fourth time, which
+// is a flaky test rather than a wrong loop. So the draw is pinned where the
+// decision is counted, and the draw itself is asserted separately against
+// retryBackoff by TestRetryBackoffIsFullJitterInsideItsBounds.
+//
+// A nil field means the policy's own draw, so a conn built without one -- which
+// is every conn outside dial -- still backs off exactly as production does.
+func (n *conn) nextBackoff(attempt int) time.Duration {
+	if n.backoff == nil {
+		return retryBackoff(attempt)
+	}
+	return n.backoff(attempt)
+}
+
 // do runs a call under the confirmed retry policy.
 //
 // Three properties, in the order they matter:
@@ -164,7 +184,7 @@ func (n *conn) do(ctx context.Context, method string, call func(context.Context)
 			return err
 		}
 
-		delay := retryBackoff(attempt)
+		delay := n.nextBackoff(attempt)
 		if !n.budgetAllows(ctx, delay) {
 			return err
 		}
