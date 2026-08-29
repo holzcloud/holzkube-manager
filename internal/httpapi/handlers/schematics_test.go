@@ -1061,6 +1061,53 @@ func TestAssetsReturnsEveryReferenceForTheRequestedArchitecture(t *testing.T) {
 	}
 }
 
+// TestAssetsCarriesTheWarningsFieldOnTheHappyPath pins the shape rather than a
+// value. The field is deliberately named `warnings`, the same name the 201 body
+// uses, so a client has one shape to learn rather than two -- and it is present
+// and empty rather than absent when there is nothing to say, for the reason this
+// file already states about every other collection: a null reads as "the server
+// did not check".
+//
+// The non-empty case is not asserted here and that is deliberate. It requires a
+// candidate repository that fails at the *transport* level, which this package's
+// handler fake cannot produce without hijacking its connection too. The
+// package-level test in internal/imagefactory owns that assertion
+// (TestInstallerImageWarnsWhenThePreferredNameWasNeverRuledOut); do not add a
+// duplicate here by reflex, because a second fake would be a second thing to
+// keep in step with the registry's behaviour.
+func TestAssetsCarriesTheWarningsFieldOnTheHappyPath(t *testing.T) {
+	s, _ := schematicServer(t)
+	c := operator(t, s)
+	id := mustCreate(t, c, "assets-warnings", []string{"siderolabs/intel-ucode"})
+
+	resp, raw := c.do(http.MethodGet, "/api/v1/schematics/"+id+"/assets?arch=amd64", nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("got %d, want 200 (body: %s)", resp.StatusCode, raw)
+	}
+
+	var got struct {
+		Installer string `json:"installer"`
+		Warnings  []struct {
+			Code   string `json:"code"`
+			Detail string `json:"detail"`
+		} `json:"warnings"`
+	}
+	decodeInto(t, raw, &got)
+
+	if got.Installer == "" {
+		t.Fatal("the happy path produced no installer reference")
+	}
+	if len(got.Warnings) != 0 {
+		t.Errorf("a proven installer name produced warnings: %+v", got.Warnings)
+	}
+	if !strings.Contains(string(raw), `"warnings"`) {
+		t.Errorf("the assets response carries no warnings field at all: %s", raw)
+	}
+	if strings.Contains(string(raw), `"warnings":null`) {
+		t.Errorf("warnings encoded as null, which reads as \"the server did not check\": %s", raw)
+	}
+}
+
 func TestAssetsWithAnUnknownArchitectureIsAValidationProblem(t *testing.T) {
 	s, _ := schematicServer(t)
 	c := operator(t, s)
