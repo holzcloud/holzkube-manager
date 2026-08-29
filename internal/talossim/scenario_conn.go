@@ -190,26 +190,57 @@ func (s *Server) startVersionOutOfSupportedRange(sc Scenario) (func(), error) {
 // rebind moves the node to a fresh loopback address and leaves the old one
 // refusing connections.
 //
-// It goes through closeListener, so the connections already established on the
-// old address are severed along with it. A machine that is rebooting has gone
-// away, and a client holding a connection that kept working across the reboot
-// would never observe the address change at all -- the scenario would be inert
-// against exactly the caller it exists to test.
+// The connections established on the old address are severed with it. A machine
+// that is rebooting has gone away, and a client holding a connection that kept
+// working across the reboot would never observe the address change at all --
+// the scenario would be inert against exactly the caller it exists to test.
 //
-// The cost is that the Reboot RPC's own reply may not reach the caller: the
-// node disappears while the reply is in flight. That makes the simulator harder
-// to satisfy than hardware rather than easier, which is the permitted direction
-// (docs/talossim.md rule 2), and it is why plan 02-05's contract assertion
-// accepts either a delivered reply or a transport failure for the Reboot call
-// itself while insisting on the rebind having happened.
+// The order is the load-bearing part, and it is the reverse of the obvious one.
+// The new listener is opened first and the old one severed afterwards, because
+// severing is the event the client sees: the instant the connection dies the
+// caller is released with a transport failure and goes looking at Addr(). Doing
+// it the other way round left a window between the sever and the re-listen in
+// which the node's published address was still the one it was about to leave,
+// and a caller that got there first read the old port and concluded the rebind
+// had not happened. That window was the whole of a contract-suite failure of
+// roughly one full-suite run in eight; with a 50 ms sleep dropped into it, it
+// failed five runs in five.
+//
+// Opening first also settles the port. A fresh :0 bind taken while the old
+// listener is still held cannot be given the old port, so "the node came back
+// somewhere else" is now a property of the code rather than of the kernel's
+// mood about recycling a port it was handed back a microsecond ago.
+//
+// The two listeners overlap for as long as it takes to sever, which is not a
+// relaxation: the only connection on the old address is the one carrying the
+// Reboot call, and it is severed before that call returns. A machine handing
+// back a DHCP lease overlaps in the same direction on real hardware.
+//
+// The cost that remains is that the Reboot RPC's own reply may not reach the
+// caller: the node disappears while the reply is in flight. That makes the
+// simulator harder to satisfy than hardware rather than easier, which is the
+// permitted direction (docs/talossim.md rule 2), and it is why plan 02-05's
+// contract assertion accepts either a delivered reply or a transport failure
+// for the Reboot call itself while insisting on the rebind having happened.
 //
 // The old address refuses rather than times out, which is the client-observable
 // difference between a released port and a black hole -- and only the refusing
 // one models a machine that gave its address back.
 func (s *Server) rebind() error {
-	s.closeListener()
+	s.lmu.Lock()
+	old := s.tcp
+	s.lmu.Unlock()
 
-	return s.openListener("127.0.0.1:0")
+	if err := s.openListener("127.0.0.1:0"); err != nil {
+		// The node is still on its old address and still serving, which is the
+		// safe direction: a rebind that failed halfway would otherwise leave a
+		// node that had gone away and never come back.
+		return err
+	}
+
+	s.severListener(old)
+
+	return nil
 }
 
 // closeListener stops the node accepting, and severs the connections already
@@ -223,14 +254,25 @@ func (s *Server) closeListener() {
 	s.lmu.Lock()
 	l := s.tcp
 	s.tcp = nil
-	if l != nil {
-		s.transitions++
-	}
 	s.lmu.Unlock()
 
+	s.severListener(l)
+}
+
+// severListener stops l accepting and severs the connections it accepted.
+//
+// It is split out of closeListener because rebind sheds a listener that is no
+// longer the node's: by the time the old address is severed the new one is
+// already installed and serving, and clearing s.tcp there would take the node
+// straight back off the wire it had just been put on.
+func (s *Server) severListener(l net.Listener) {
 	if l == nil {
 		return
 	}
+
+	s.lmu.Lock()
+	s.transitions++
+	s.lmu.Unlock()
 
 	// Errors are dropped on purpose: Close on a listener the gRPC server has
 	// already stopped returns net.ErrClosed, and there is nothing a scenario
