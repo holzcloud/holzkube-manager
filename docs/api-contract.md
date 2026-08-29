@@ -700,6 +700,25 @@ id can ever be read back from. So the record is written, `usable` is `false` and
 than a `201` — drift in the mechanism that lets holzkube know a schematic's id
 without a round trip is not something to report as success.
 
+**A value holzkube's own serialiser will not render is a `400`, not a `502`.**
+This is the exception the paragraph opening this section swallows. Before any
+request is made, `POST /api/v1/schematics` computes the schematic id locally, and
+that computation refuses a scalar that is not valid UTF-8 or that contains a rune
+below `U+0020` or `U+007F` — the set the canonical serialiser was pinned against.
+No request reaches `factory.talos.dev`, nothing is known about the Factory, and
+no retry can succeed, so the answer is the `validation` problem type at `400`
+with code `validation.failed` and a single field error. The fields that can
+produce it are `kernel_args`, `meta` and `extensions`; a document path this
+handler does not recognise still answers `400`, with no field named, rather than
+falling back to a `502`.
+
+**The reason names the entry and the character class and never the value.**
+`kernel_args` and `meta` can carry secrets — which is why the Factory offers no
+way to enumerate schematics at all — and a problem body is rendered in a browser,
+may be logged by a proxy, and outlives the form that produced it. A reason reads
+`entry 2 contains the control character U+0007`, one-based, matching the row an
+operator counts in the form.
+
 ### Audit
 
 The two mutating routes carry the action tokens `schematic.create` and
