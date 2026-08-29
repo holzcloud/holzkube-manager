@@ -25,6 +25,52 @@ import (
 // the Factory -- they just lose the round-trip saving.
 var ErrSchematicNotRepresentable = errors.New("imagefactory: schematic contains a value the canonical serialiser will not render")
 
+// NotRepresentableError names which value in which field the canonical
+// serialiser refused.
+//
+// The sentinel says that something was refused; this says what and where, which
+// is the difference between an HTTP 400 naming a request field and an HTTP 502
+// blaming factory.talos.dev for a failure that never left this process. The
+// refusal is raised by Schematic.ID() before the extension catalog is fetched
+// and before any POST, so there is no upstream involved and no retry that can
+// help -- and telling an operator otherwise is the specific harm this type
+// exists to prevent (G-02-6).
+//
+// It follows UnknownExtensionsError: a struct carrying the specifics, an
+// Error() that reads as a sentence, and Unwrap() so the sentinel stays reachable
+// through errors.Is.
+type NotRepresentableError struct {
+	// Path is the canonical document path of the offending scalar, e.g.
+	// customization.extraKernelArgs. It is the document's vocabulary, not the
+	// HTTP request's; mapping one onto the other belongs to the layer that
+	// knows the request shape.
+	Path string
+
+	// Index is the zero-based position within a sequence, or -1 for a scalar
+	// field that has no position. Error() renders it one-based, because an
+	// operator counting rows in a form starts at one.
+	Index int
+
+	// Reason names the character class and never the value. Kernel arguments
+	// can carry secrets -- that is why the Factory offers no way to enumerate
+	// schematics -- and this string ends up in a problem body, which is
+	// rendered in a browser, may be logged by a proxy, and outlives the form
+	// that produced it (T-02-64).
+	Reason string
+}
+
+func (e *NotRepresentableError) Error() string {
+	where := e.Path
+	if e.Index >= 0 {
+		where = fmt.Sprintf("%s entry %d", e.Path, e.Index+1)
+	}
+	return fmt.Sprintf("%s: %s %s", ErrSchematicNotRepresentable.Error(), where, e.Reason)
+}
+
+// Unwrap makes errors.Is(err, ErrSchematicNotRepresentable) true, so this type
+// is an addition to the sentinel rather than a replacement for it.
+func (e *NotRepresentableError) Unwrap() error { return ErrSchematicNotRepresentable }
+
 // canonicalIndent is the number of spaces per nesting level in the Factory's
 // canonical form. Four, not two: verified against the live Factory, which
 // re-serialises a two-space document into a four-space one and hashes that.
@@ -80,13 +126,13 @@ func (s Schematic) Canonical() ([]byte, error) {
 	var w canonWriter
 
 	if s.Owner != "" {
-		w.field(0, "owner", s.Owner)
+		w.field(0, "owner", s.Owner, "owner")
 	}
 
 	if !s.Overlay.IsZero() {
 		w.key(0, "overlay")
-		w.field(1, "image", s.Overlay.Image)
-		w.field(1, "name", s.Overlay.Name)
+		w.field(1, "image", s.Overlay.Image, "overlay.image")
+		w.field(1, "name", s.Overlay.Name, "overlay.name")
 	}
 
 	if s.Customization.IsZero() {
@@ -97,24 +143,24 @@ func (s Schematic) Canonical() ([]byte, error) {
 
 		if len(c.ExtraKernelArgs) > 0 {
 			w.key(1, "extraKernelArgs")
-			for _, arg := range c.ExtraKernelArgs {
-				w.item(2, arg)
+			for i, arg := range c.ExtraKernelArgs {
+				w.item(2, arg, "customization.extraKernelArgs", i)
 			}
 		}
 		if len(c.Meta) > 0 {
 			w.key(1, "meta")
-			for _, m := range c.Meta {
+			for i, m := range c.Meta {
 				// A sequence item that is a mapping puts its first key on the
 				// dash line and aligns the rest two columns further in.
 				w.raw(2, "- key: "+strconv.FormatUint(uint64(m.Key), 10))
-				w.continuationField(2, "value", m.Value)
+				w.continuationField(2, "value", m.Value, "customization.meta.value", i)
 			}
 		}
 		if !c.SystemExtensions.IsZero() {
 			w.key(1, "systemExtensions")
 			w.key(2, "officialExtensions")
-			for _, name := range c.SystemExtensions.OfficialExtensions {
-				w.item(3, name)
+			for i, name := range c.SystemExtensions.OfficialExtensions {
+				w.item(3, name, "customization.systemExtensions.officialExtensions", i)
 			}
 		}
 		if !c.SecureBoot.IsZero() {
@@ -161,10 +207,9 @@ func (w *canonWriter) emptyMapping(level int, name string) {
 }
 
 // field writes a scalar-valued mapping entry.
-func (w *canonWriter) field(level int, name, value string) {
-	rendered, err := renderScalar(value)
-	if err != nil {
-		w.fail(fmt.Errorf("%s: %w", name, err))
+func (w *canonWriter) field(level int, name, value, path string) {
+	rendered, ok := w.render(value, path, -1)
+	if !ok {
 		return
 	}
 	w.raw(level, name+": "+rendered)
@@ -172,10 +217,9 @@ func (w *canonWriter) field(level int, name, value string) {
 
 // continuationField writes a mapping entry that belongs to a sequence item
 // whose dash line was already written, so it sits two columns past the dash.
-func (w *canonWriter) continuationField(level int, name, value string) {
-	rendered, err := renderScalar(value)
-	if err != nil {
-		w.fail(fmt.Errorf("%s: %w", name, err))
+func (w *canonWriter) continuationField(level int, name, value, path string, index int) {
+	rendered, ok := w.render(value, path, index)
+	if !ok {
 		return
 	}
 	w.pad(level)
@@ -183,13 +227,24 @@ func (w *canonWriter) continuationField(level int, name, value string) {
 }
 
 // item writes a scalar sequence entry.
-func (w *canonWriter) item(level int, value string) {
-	rendered, err := renderScalar(value)
-	if err != nil {
-		w.fail(err)
+func (w *canonWriter) item(level int, value, path string, index int) {
+	rendered, ok := w.render(value, path, index)
+	if !ok {
 		return
 	}
 	w.raw(level, "- "+rendered)
+}
+
+// render is where a refusal acquires its location. The path is supplied by the
+// call site rather than carried as writer state, so Canonical stays readable as
+// a description of the format and every path is visible in the place the format
+// puts it.
+func (w *canonWriter) render(value, path string, index int) (string, bool) {
+	if reason := representable(value); reason != "" {
+		w.fail(&NotRepresentableError{Path: path, Index: index, Reason: reason})
+		return "", false
+	}
+	return renderScalar(value), true
 }
 
 func (w *canonWriter) fail(err error) {
@@ -204,17 +259,17 @@ func (w *canonWriter) fail(err error) {
 // something other than a string is double-quoted, so that reading the document
 // returns the string that was written. Otherwise plain is preferred, and single
 // quotes are used when plain would be ambiguous.
-func renderScalar(s string) (string, error) {
-	if err := representable(s); err != nil {
-		return "", err
-	}
+//
+// It is only ever reached for a scalar representable has already cleared; the
+// writer checks that first, because that is where the document path is known.
+func renderScalar(s string) string {
 	if resolvesToNonString(s) {
-		return doubleQuote(s), nil
+		return doubleQuote(s)
 	}
 	if plainAllowed(s) {
-		return s, nil
+		return s
 	}
-	return "'" + strings.ReplaceAll(s, "'", "''") + "'", nil
+	return "'" + strings.ReplaceAll(s, "'", "''") + "'"
 }
 
 // representable rejects the scalars whose rendering this package deliberately
@@ -226,16 +281,24 @@ func renderScalar(s string) (string, error) {
 // a META value, and implementing them from memory rather than from a pinned
 // observation is how a serialiser acquires a bug that only shows up as a
 // mismatched id.
-func representable(s string) error {
+// The refused set is unchanged from the observation it was pinned against: not
+// valid UTF-8, any rune below U+0020, or U+007F. Which scalars this renders
+// decides the locally precomputed id, and the id is what FACT-06 rests on, so
+// widening or narrowing it here is a change to what holzkube believes a
+// schematic hashes to. Only the reporting changed.
+//
+// The returned reason is written for an operator and names the character class,
+// never the value (T-02-64). An empty string means the scalar is representable.
+func representable(s string) string {
 	if !utf8.ValidString(s) {
-		return fmt.Errorf("%w: value is not valid UTF-8", ErrSchematicNotRepresentable)
+		return "is not valid UTF-8"
 	}
 	for _, r := range s {
 		if r < 0x20 || r == 0x7F {
-			return fmt.Errorf("%w: value contains the control character %U", ErrSchematicNotRepresentable, r)
+			return fmt.Sprintf("contains the control character %U", r)
 		}
 	}
-	return nil
+	return ""
 }
 
 // doubleQuote renders the double-quoted form. Only reachable for scalars that
