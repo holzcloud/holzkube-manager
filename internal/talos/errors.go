@@ -195,6 +195,18 @@ func classify(ctx context.Context, op string, machine model.MachineID, answered 
 		return err
 	}
 
+	// A refusal this package made before the call reached the wire is not a
+	// fact about the node, so it is returned as it came. Classified, ErrDryRun
+	// would arrive as KindUnreachable -- there are no response trailers,
+	// because nothing was sent -- and a process started with --dry-run would
+	// then open the circuit breaker of every node it declined to mutate, on
+	// the strength of calls that never happened. ErrorKindOf's doc already
+	// promises that a refusal from this package before the wire is not a
+	// classified transport failure; this is where that is true.
+	if errors.Is(err, ErrDryRun) {
+		return err
+	}
+
 	if ctx != nil && errors.Is(ctx.Err(), context.Canceled) {
 		return err
 	}

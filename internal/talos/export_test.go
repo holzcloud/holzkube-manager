@@ -34,13 +34,12 @@ func (c *ClusterClient) RawStream(ctx context.Context, desc *grpc.StreamDesc, me
 	return c.conn.c.Conn().NewStream(ctx, desc, method)
 }
 
-// RawInvoke is the maintenance client's half, so the enumeration can prove the
-// gate applies on both paths rather than on the one it happened to test.
-func (m *MaintenanceClient) RawInvoke(ctx context.Context, method string, req, reply any) error {
-	return m.conn.c.Conn().Invoke(ctx, method, req, reply)
-}
-
-// RawStream is the maintenance client's half of RawStream.
-func (m *MaintenanceClient) RawStream(ctx context.Context, desc *grpc.StreamDesc, method string) (grpc.ClientStream, error) {
-	return m.conn.c.Conn().NewStream(ctx, desc, method)
-}
+// MaintenanceClient deliberately gets no such window.
+//
+// TestMaintenanceClientMethodSetIsClosed asserts its exported method set whole,
+// by reflection, in this same test binary -- so a test-only method on it is
+// still a method on it, and adding one here would have meant editing the guard
+// that D-06 exists to hold. It also is not needed: the one mutation that path
+// serves is ApplyConfiguration, which has a real wrapper, and the gate it hits
+// is installed in dial, which is the same function the cluster path goes
+// through. Proving it there proves it for both.
