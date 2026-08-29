@@ -592,7 +592,7 @@ func TestScenarioVersionOutOfRange(t *testing.T) {
 		Addr:    sim.Host(),
 	}
 
-	cc, err := talos.NewClusterClient(testContext(t), sim.Dialer(), target, sim.ClientCreds())
+	cc, err := talos.NewClusterClient(testContext(t), sim.Dialer(), target, sim.ClientCreds(), talos.Mode{})
 	if err == nil {
 		_ = cc.Close()
 		t.Fatal("NewClusterClient accepted a node reporting a version outside the supported range")
@@ -610,7 +610,7 @@ func TestScenarioVersionOutOfRange(t *testing.T) {
 	// version and not about the node.
 	restore()
 
-	cc, err = talos.NewClusterClient(testContext(t), sim.Dialer(), target, sim.ClientCreds())
+	cc, err = talos.NewClusterClient(testContext(t), sim.Dialer(), target, sim.ClientCreds(), talos.Mode{})
 	if err != nil {
 		t.Fatalf("NewClusterClient after the scenario was cleared: %v", err)
 	}

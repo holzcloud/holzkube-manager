@@ -214,3 +214,200 @@ func f(ctx context.Context) error { return ctx.Err() }
 		})
 	}
 }
+
+// machineryClientConstructor is the call that turns dial options into a live
+// connection. Everything the dry-run gate and the deadline policy do is
+// installed in the options handed to it, so a second call site is a second
+// connection with a different policy on it.
+const machineryClientConstructor = "New"
+
+// TestEveryClientConstructionRoutesThroughTheSharedPath is the bypass proof for
+// D-03, and the half of it that TestNoAddressAboveTheSeam cannot make.
+//
+// That guard proves no package outside internal/talos can construct a machinery
+// client at all -- it cannot even import the package. This one proves the
+// remaining case: that inside internal/talos, where the import is legal, there
+// is still exactly one place a connection is made. Both halves are needed,
+// because "no mutation reaches a node" is only true if every connection to a
+// node carries the interceptors, and an interceptor chain is a property of the
+// options passed at construction rather than of the type that comes back.
+//
+// It also pins where the two client types are built, so a future constructor
+// that skipped dial -- and therefore skipped the gate, the deadline policy and
+// the retry loop -- fails here rather than in production.
+func TestEveryClientConstructionRoutesThroughTheSharedPath(t *testing.T) {
+	t.Parallel()
+
+	files, sites := inspectConstruction(t, filepath.Join("..", "..", "internal", "talos"))
+
+	// A walk that reached nothing passes for the wrong reason. The negative
+	// control below proves this threshold is doing work rather than being
+	// trivially satisfied.
+	if files < 8 {
+		t.Fatalf("inspected only %d production file(s) in internal/talos; the guard is not reaching the package", files)
+	}
+	t.Logf("inspected %d production files and %d construction site(s) in internal/talos", files, len(sites))
+
+	want := map[string]string{
+		"client.New":         "dial",
+		"&ClusterClient":     "NewClusterClient",
+		"&MaintenanceClient": "NewMaintenanceClient",
+	}
+
+	seen := map[string]int{}
+	for _, s := range sites {
+		seen[s.what]++
+		allowed, known := want[s.what]
+		if !known {
+			continue
+		}
+		if s.fn != allowed {
+			t.Errorf("%s constructs %s inside %s, not inside %s; "+
+				"a connection made anywhere but dial does not carry the dry-run gate, "+
+				"the deadline policy or the retry loop", s.where, s.what, s.fn, allowed)
+		}
+	}
+
+	for what := range want {
+		if seen[what] != 1 {
+			t.Errorf("found %d construction site(s) for %s, want exactly 1; "+
+				"a second one is a second policy", seen[what], what)
+		}
+	}
+}
+
+// TestConstructionGuardIsNotVacuous is the negative control the plan asks for:
+// point the walk at an empty tree and confirm it reports nothing, which is what
+// makes the file threshold above a real assertion rather than decoration.
+func TestConstructionGuardIsNotVacuous(t *testing.T) {
+	t.Parallel()
+
+	files, sites := inspectConstruction(t, t.TempDir())
+	if files != 0 || len(sites) != 0 {
+		t.Fatalf("an empty tree reported %d file(s) and %d site(s); the walk is not reading what it is pointed at",
+			files, len(sites))
+	}
+
+	// And a tree with a violation in it is seen. Without this, a walk that
+	// silently classified nothing would satisfy the case above too.
+	dir := t.TempDir()
+	source := `package talos
+
+import "github.com/siderolabs/talos/pkg/machinery/client"
+
+func somewhereElse() (*ClusterClient, error) {
+	c, err := client.New(nil)
+	if err != nil {
+		return nil, err
+	}
+	return &ClusterClient{conn: &conn{c: c}}, nil
+}
+`
+	if err := os.WriteFile(filepath.Join(dir, "sample.go"), []byte(source), 0o600); err != nil {
+		t.Fatalf("write sample: %v", err)
+	}
+
+	files, sites = inspectConstruction(t, dir)
+	if files != 1 {
+		t.Fatalf("inspected %d file(s), want 1", files)
+	}
+	found := map[string]string{}
+	for _, s := range sites {
+		found[s.what] = s.fn
+	}
+	if found["client.New"] != "somewhereElse" || found["&ClusterClient"] != "somewhereElse" {
+		t.Errorf("the guard did not attribute the violations to their function: %v", found)
+	}
+}
+
+// constructionSite is one place a connection or a client value is built.
+type constructionSite struct {
+	what  string // "client.New", "&ClusterClient", "&MaintenanceClient"
+	fn    string // the enclosing function's name
+	where string // file:line
+}
+
+// inspectConstruction walks a directory's production Go files and reports every
+// place a machinery client or one of the two client types is constructed,
+// together with the function that does it.
+func inspectConstruction(t *testing.T, dir string) (int, []constructionSite) {
+	t.Helper()
+
+	files := 0
+	var sites []constructionSite
+
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("read %s: %v", dir, err)
+	}
+
+	for _, e := range entries {
+		name := e.Name()
+		if e.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+		path := filepath.Join(dir, name)
+
+		fset := token.NewFileSet()
+		file, err := parser.ParseFile(fset, path, nil, parser.SkipObjectResolution)
+		if err != nil {
+			t.Fatalf("parse %s: %v", path, err)
+		}
+
+		// A file excluded from every ordinary build -- the compile-failure
+		// fixture -- is not production code and does not construct anything at
+		// runtime.
+		if hasBuildConstraint(file) {
+			continue
+		}
+		files++
+
+		for _, decl := range file.Decls {
+			fn, ok := decl.(*ast.FuncDecl)
+			if !ok {
+				continue
+			}
+			ast.Inspect(fn, func(n ast.Node) bool {
+				at := func() string {
+					return fmt.Sprintf("%s:%d", name, fset.Position(n.Pos()).Line)
+				}
+				switch node := n.(type) {
+				case *ast.CallExpr:
+					sel, ok := node.Fun.(*ast.SelectorExpr)
+					if !ok {
+						return true
+					}
+					pkg, ok := sel.X.(*ast.Ident)
+					if !ok || pkg.Name != "client" || sel.Sel.Name != machineryClientConstructor {
+						return true
+					}
+					sites = append(sites, constructionSite{what: "client.New", fn: fn.Name.Name, where: at()})
+				case *ast.CompositeLit:
+					ident, ok := node.Type.(*ast.Ident)
+					if !ok {
+						return true
+					}
+					if ident.Name == "ClusterClient" || ident.Name == "MaintenanceClient" {
+						sites = append(sites, constructionSite{what: "&" + ident.Name, fn: fn.Name.Name, where: at()})
+					}
+				}
+				return true
+			})
+		}
+	}
+
+	return files, sites
+}
+
+// hasBuildConstraint reports whether a file carries a //go:build line, which is
+// how clusteronly_fixture.go excludes itself from every ordinary build.
+func hasBuildConstraint(file *ast.File) bool {
+	for _, group := range file.Comments {
+		for _, c := range group.List {
+			if strings.HasPrefix(c.Text, "//go:build") {
+				return true
+			}
+		}
+	}
+	return false
+}
