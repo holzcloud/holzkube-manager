@@ -132,6 +132,21 @@ func (f *fakeFactory) forgeID(id string) {
 	f.forgedID = id
 }
 
+// fakeInstallerRepos is the whitelist of registry repository names this fake
+// answers a manifest for: the platform-prefixed and legacy installer names, and
+// their SecureBoot counterparts.
+//
+// A whitelist rather than an unconditional 200 on purpose. The resolver's whole
+// job is to ask the registry which name resolves, and a fake that says yes to
+// every name proves nothing about it -- including that a SecureBoot request
+// asks for a SecureBoot name at all, which is what G-02-4 found missing.
+var fakeInstallerRepos = map[string]bool{
+	string(imagefactory.PlatformMetal) + "-installer":            true,
+	string(imagefactory.PlatformMetal) + "-installer-secureboot": true,
+	"installer":            true,
+	"installer-secureboot": true,
+}
+
 func (f *fakeFactory) serve(w http.ResponseWriter, r *http.Request) {
 	parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
 
@@ -176,7 +191,7 @@ func (f *fakeFactory) serve(w http.ResponseWriter, r *http.Request) {
 
 	case (r.Method == http.MethodGet || r.Method == http.MethodHead) && len(parts) == 5 &&
 		parts[0] == "v2" && parts[3] == "manifests":
-		if parts[1] != string(imagefactory.PlatformMetal)+"-installer" {
+		if !fakeInstallerRepos[parts[1]] {
 			http.Error(w, "manifest unknown", http.StatusNotFound)
 			return
 		}
@@ -940,6 +955,12 @@ func TestAssetsWithAnUnknownArchitectureIsAValidationProblem(t *testing.T) {
 	}
 }
 
+// TestAssetsSecureBootSuffixesTheURLs is where G-02-4 was found and where it
+// stays closed. The gap was not that the ISO lacked the suffix -- it had it --
+// but that the installer reference in the same answer did not change at all, so
+// the route handed an operator a SecureBoot ISO paired with the ordinary
+// installer. Asserting the ISO alone is what let that ship, so both are
+// asserted here, in one response.
 func TestAssetsSecureBootSuffixesTheURLs(t *testing.T) {
 	s, _ := schematicServer(t)
 	c := operator(t, s)
@@ -950,11 +971,31 @@ func TestAssetsSecureBootSuffixesTheURLs(t *testing.T) {
 		t.Fatalf("got %d, want 200 (body: %s)", resp.StatusCode, raw)
 	}
 	var got struct {
-		ISO string `json:"iso"`
+		ISO       string `json:"iso"`
+		Installer string `json:"installer"`
 	}
 	decodeInto(t, raw, &got)
 	if !strings.Contains(got.ISO, "metal-amd64-secureboot") {
 		t.Errorf("iso = %q, want the secureboot suffix", got.ISO)
+	}
+	if !strings.Contains(got.Installer, "/metal-installer-secureboot/") {
+		t.Errorf("installer = %q, want the SecureBoot installer repository -- a SecureBoot ISO "+
+			"paired with the ordinary installer is the drift this assertion exists to stop", got.Installer)
+	}
+
+	// And the ordinary request is unchanged, so the two answers are a pair
+	// rather than one value that happens to carry a suffix.
+	resp, raw = c.do(http.MethodGet, "/api/v1/schematics/"+id+"/assets?arch=amd64", nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("without secureboot: got %d, want 200 (body: %s)", resp.StatusCode, raw)
+	}
+	var plain struct {
+		ISO       string `json:"iso"`
+		Installer string `json:"installer"`
+	}
+	decodeInto(t, raw, &plain)
+	if strings.Contains(plain.ISO, "secureboot") || strings.Contains(plain.Installer, "secureboot") {
+		t.Errorf("an ordinary request answered with SecureBoot assets: iso=%q installer=%q", plain.ISO, plain.Installer)
 	}
 }
 

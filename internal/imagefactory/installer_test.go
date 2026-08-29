@@ -189,3 +189,131 @@ func TestInstallerImageValidatesItsRequest(t *testing.T) {
 		t.Errorf("an invalid request still reached the registry %d times", n)
 	}
 }
+
+// secureBootInstallerRequest is installerRequest with the SecureBoot flag set,
+// so the two variants differ in exactly the field under test and nothing else.
+func secureBootInstallerRequest(version string) imagefactory.AssetRequest {
+	r := installerRequest(version)
+	r.SecureBoot = true
+	return r
+}
+
+// TestInstallerImageResolvesTheSecureBootName closes G-02-4. SecureBoot is not
+// a property the schematic carries into its installer: the repository name is
+// the switch, and at v1.13.9 the same schematic resolves to two different image
+// digests under the SecureBoot and the ordinary name.
+func TestInstallerImageResolvesTheSecureBootName(t *testing.T) {
+	fake := newFakeFactory(t)
+	client := newClient(t, fake.URL)
+
+	ref, err := client.InstallerImage(t.Context(), secureBootInstallerRequest(installerModernVersion))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	want := fakeHost(t, fake.URL) + "/metal-installer-secureboot/" + schematicA + ":" + installerModernVersion
+	if ref != want {
+		t.Errorf("ref  = %s\nwant = %s", ref, want)
+	}
+	if n := fake.count("GET /v2/metal-installer-secureboot/manifests/" + installerModernVersion); n != 1 {
+		t.Errorf("platform-prefixed SecureBoot manifest requests = %d, want 1", n)
+	}
+	if n := fake.count("GET /v2/metal-installer/manifests/" + installerModernVersion); n != 0 {
+		t.Errorf("a SecureBoot request asked the ordinary repository %d times, want 0", n)
+	}
+}
+
+// TestInstallerImageFallsBackToTheLegacySecureBootName gives the SecureBoot
+// pair the same ordered fallback the ordinary pair already has: upstream's
+// registry frontend parses installer-secureboot as the legacy form of
+// metal-installer-secureboot.
+func TestInstallerImageFallsBackToTheLegacySecureBootName(t *testing.T) {
+	fake := newFakeFactory(t)
+	client := newClient(t, fake.URL)
+
+	ref, err := client.InstallerImage(t.Context(), secureBootInstallerRequest(installerLegacyVersion))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	want := fakeHost(t, fake.URL) + "/installer-secureboot/" + schematicA + ":" + installerLegacyVersion
+	if ref != want {
+		t.Errorf("ref  = %s\nwant = %s", ref, want)
+	}
+	if n := fake.count("GET /v2/metal-installer-secureboot/manifests/" + installerLegacyVersion); n != 1 {
+		t.Errorf("the platform-prefixed SecureBoot name was tried %d times, want 1 -- it must be tried first", n)
+	}
+	if n := fake.count("GET /v2/installer-secureboot/manifests/" + installerLegacyVersion); n != 1 {
+		t.Errorf("legacy SecureBoot manifest requests = %d, want 1", n)
+	}
+}
+
+// TestInstallerImageRefusesRatherThanSubstitutingTheOrdinaryInstaller is the
+// behaviour change this plan makes deliberately. At a version where neither
+// SecureBoot name answers the request is refused with no reference, because
+// handing back the ordinary installer is exactly the ISO/installer drift
+// G-02-4 exists to stop -- the ordinary installer does not produce a SecureBoot
+// node.
+func TestInstallerImageRefusesRatherThanSubstitutingTheOrdinaryInstaller(t *testing.T) {
+	fake := newFakeFactory(t)
+	client := newClient(t, fake.URL)
+
+	ref, err := client.InstallerImage(t.Context(), secureBootInstallerRequest(installerNoSecureBootVersion))
+	if err == nil {
+		t.Fatalf("no error, and it produced the reference %q", ref)
+	}
+	if ref != "" {
+		t.Errorf("a refusal still returned a reference: %q", ref)
+	}
+	if !errors.Is(err, imagefactory.ErrSchematicNotBuildable) {
+		t.Errorf("error = %v, want ErrSchematicNotBuildable -- the registry answered and refused", err)
+	}
+	if !strings.Contains(err.Error(), "metal-installer-secureboot") || !strings.Contains(err.Error(), "installer-secureboot") {
+		t.Errorf("the refusal does not name the SecureBoot repositories it tried: %v", err)
+	}
+	// The load-bearing half: the ordinary names were never even asked about, so
+	// no later change can quietly reintroduce the substitution.
+	for _, repo := range []string{"metal-installer", "installer"} {
+		if n := fake.count("GET /v2/" + repo + "/manifests/" + installerNoSecureBootVersion); n != 0 {
+			t.Errorf("a SecureBoot request fell back to %q %d times, want 0", repo, n)
+		}
+	}
+}
+
+// TestInstallerImageCachesSecureBootSeparately pins T-02-43. The cache key is
+// what makes a second request a second question; without the SecureBoot
+// selection in it, the second resolution returns the first one's answer and
+// nothing else in the codebase would notice.
+func TestInstallerImageCachesSecureBootSeparately(t *testing.T) {
+	fake := newFakeFactory(t)
+	client := newClient(t, fake.URL)
+
+	plain, err := client.InstallerImage(t.Context(), installerRequest(installerModernVersion))
+	if err != nil {
+		t.Fatalf("without SecureBoot: %v", err)
+	}
+	secure, err := client.InstallerImage(t.Context(), secureBootInstallerRequest(installerModernVersion))
+	if err != nil {
+		t.Fatalf("with SecureBoot: %v", err)
+	}
+
+	if plain == secure {
+		t.Fatalf("both requests resolved to %s; the SecureBoot flag is not in the cache key", plain)
+	}
+	if n := fake.count("GET /v2/metal-installer/manifests/" + installerModernVersion); n != 1 {
+		t.Errorf("ordinary manifest resolutions = %d, want 1", n)
+	}
+	if n := fake.count("GET /v2/metal-installer-secureboot/manifests/" + installerModernVersion); n != 1 {
+		t.Errorf("SecureBoot manifest resolutions = %d, want 1", n)
+	}
+
+	// And each variant still costs one resolution, not one per call.
+	for range 2 {
+		if _, err := client.InstallerImage(t.Context(), secureBootInstallerRequest(installerModernVersion)); err != nil {
+			t.Fatalf("repeat SecureBoot resolution: %v", err)
+		}
+	}
+	if n := fake.count("GET /v2/metal-installer-secureboot/manifests/" + installerModernVersion); n != 1 {
+		t.Errorf("repeated SecureBoot requests issued %d manifest requests, want 1", n)
+	}
+}
