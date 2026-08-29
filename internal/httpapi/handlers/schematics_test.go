@@ -191,9 +191,23 @@ func (f *fakeFactory) serveImage(w http.ResponseWriter, id string) {
 		http.Error(w, "unknown schematic", http.StatusNotFound)
 		return
 	}
+	// Only the officialExtensions block names extensions. Kernel arguments are
+	// also emitted as a YAML sequence, and reading those as extension names
+	// would make every schematic carrying one un-buildable in the fake and
+	// nowhere else.
+	inExtensions := false
 	for _, line := range strings.Split(doc, "\n") {
 		trimmed := strings.TrimSpace(line)
-		if !strings.HasPrefix(trimmed, "- ") {
+		switch {
+		case trimmed == "officialExtensions:":
+			inExtensions = true
+			continue
+		case trimmed == "":
+			continue
+		case !strings.HasPrefix(trimmed, "- "):
+			inExtensions = false
+			continue
+		case !inExtensions:
 			continue
 		}
 		name := strings.Trim(strings.TrimPrefix(trimmed, "- "), `"'`)

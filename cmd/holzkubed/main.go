@@ -20,6 +20,7 @@ import (
 	"github.com/holzcloud/holzkube/internal/config"
 	"github.com/holzcloud/holzkube/internal/httpapi"
 	"github.com/holzcloud/holzkube/internal/httpapi/handlers"
+	"github.com/holzcloud/holzkube/internal/imagefactory"
 	"github.com/holzcloud/holzkube/internal/store/fsstore"
 	"github.com/holzcloud/holzkube/internal/tlsx"
 )
@@ -132,12 +133,26 @@ func run(args []string) error {
 		return err
 	}
 
+	// The Image Factory client. It holds no credentials and opens no
+	// connection until a route asks it to, so constructing it here costs
+	// nothing and a bad base URL is a start failure rather than a 502 the first
+	// time an operator opens the images screen.
+	factory, err := imagefactory.New(imagefactory.DefaultBaseURL)
+	if err != nil {
+		return err
+	}
+
 	deps := httpapi.Deps{
 		Store:      st,
 		Audit:      auditLog,
 		Auth:       authSvc,
 		Logger:     logger,
 		SudoWindow: cfg.SudoWindow,
+		// Inside the literal, deliberately. Deps is copied by value into each
+		// …Routes(deps) call below, so a field assigned after this literal is
+		// the zero value inside every handler closure -- a nil dependency with
+		// no compile error and no failure until a request arrives.
+		Factory: factory,
 		// Public strips the directory: this verdict is served by an endpoint
 		// that answers before authentication, and chainFile is absolute. The
 		// operator-facing copy of the path is the log line above, which stays
@@ -159,6 +174,7 @@ func run(args []string) error {
 		handlers.AuthRoutes(deps),
 		handlers.AccountRoutes(deps),
 		handlers.AuditRoutes(deps),
+		handlers.SchematicRoutes(deps),
 	)
 
 	srv := &http.Server{

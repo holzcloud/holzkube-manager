@@ -48,9 +48,36 @@ func ValidateExtensions(catalog []Extension, wanted []string) error {
 	if len(unknown) == 0 {
 		return nil
 	}
-	return fmt.Errorf("%w: %s (the catalog for this Talos version lists %d extensions)",
-		ErrExtensionUnknown, strings.Join(unknown, ", "), len(catalog))
+	return &UnknownExtensionsError{Names: unknown, CatalogSize: len(catalog)}
 }
+
+// UnknownExtensionsError carries every name the catalog did not contain.
+//
+// The names are a field rather than only a formatted string because a caller
+// that has to report them per field -- an HTTP handler building an RFC 9457
+// validation problem with one entry per bad name -- would otherwise have to
+// re-derive them, which means a second implementation of the comparison this
+// function already made. It satisfies errors.Is(err, ErrExtensionUnknown), so
+// callers that only care about the class are unaffected.
+type UnknownExtensionsError struct {
+	// Names are the unknown extension names, in the order they were requested,
+	// deduplicated.
+	Names []string
+
+	// CatalogSize is how many extensions the version-scoped catalog did list.
+	// It is the difference between "your name is wrong" and "this version has
+	// almost nothing", which are different things to tell an operator.
+	CatalogSize int
+}
+
+func (e *UnknownExtensionsError) Error() string {
+	return fmt.Sprintf("%s: %s (the catalog for this Talos version lists %d extensions)",
+		ErrExtensionUnknown.Error(), strings.Join(e.Names, ", "), e.CatalogSize)
+}
+
+// Unwrap makes errors.Is(err, ErrExtensionUnknown) true, so this type is an
+// addition to the sentinel rather than a replacement for it.
+func (e *UnknownExtensionsError) Unwrap() error { return ErrExtensionUnknown }
 
 // ExtensionNames projects a catalog onto its names, in catalog order, for a
 // caller building a picker.
