@@ -580,6 +580,7 @@ const USABLE = schematicFixture({
   probed_at: '2026-08-29T10:00:00Z',
   probe_reason: '',
   extensions: ['siderolabs/intel-ucode'],
+  arch: 'amd64',
 })
 
 const REFUSED = schematicFixture({
@@ -588,6 +589,9 @@ const REFUSED = schematicFixture({
   usable: false,
   probed_at: '2026-08-29T10:05:00Z',
   probe_reason: `${'b'.repeat(64)} at v1.13.9/amd64 answered HTTP 400`,
+  // arm64, so the row assertions below cannot pass against a hardcoded amd64
+  // or against a qualifier read from anything but this record.
+  arch: 'arm64',
 })
 
 const UNPROBED = schematicFixture({
@@ -597,6 +601,22 @@ const UNPROBED = schematicFixture({
   // The zero time. Not the same statement as "probed and refused".
   probed_at: '0001-01-01T00:00:00Z',
   probe_reason: '',
+  // A record with no verdict still has an architecture it was asked about.
+  arch: 'arm64',
+})
+
+/**
+ * A record written before model.Schematic.Arch existed. Its architecture is
+ * empty forever -- there is nothing on the record to recover it from -- and
+ * those are precisely the records the G-02-8 leak produced.
+ */
+const PRE_ARCH = schematicFixture({
+  id: 'd'.repeat(64),
+  name: 'pre-arch',
+  usable: true,
+  probed_at: '2026-08-29T10:10:00Z',
+  probe_reason: '',
+  arch: '',
 })
 
 /** Opens the detail dialog for one saved schematic. */
@@ -611,7 +631,7 @@ describe('ImagesView — the saved schematics', () => {
   })
 
   it('renders three distinguishable usability states and the reason for a refusal', async () => {
-    stubFactory({ saved: [USABLE, REFUSED, UNPROBED] })
+    stubFactory({ saved: [USABLE, REFUSED, UNPROBED, PRE_ARCH] })
 
     renderImages()
 
@@ -619,6 +639,7 @@ describe('ImagesView — the saved schematics', () => {
     const good = within(table.getByRole('button', { name: 'Schematic probed-good' }))
     const bad = within(table.getByRole('button', { name: 'Schematic probed-bad' }))
     const unprobed = within(table.getByRole('button', { name: 'Schematic never-probed' }))
+    const preArch = within(table.getByRole('button', { name: 'Schematic pre-arch' }))
 
     expect(good.getByText(/Usable — the build probe confirmed it/)).toBeInTheDocument()
     expect(bad.getByText(/Not usable — the Factory refused to build it/)).toBeInTheDocument()
@@ -638,6 +659,36 @@ describe('ImagesView — the saved schematics', () => {
     expect(bad.getByText(/answered HTTP 400/)).toBeInTheDocument()
     // And a schematic nobody probed is not accused of anything.
     expect(unprobed.queryByText(/answered HTTP/)).not.toBeInTheDocument()
+
+    // G-02-8: each row's verdict names the architecture it is about, read from
+    // that row's own record. The three fixtures do not share an architecture, so
+    // a qualifier taken from anywhere else fails here.
+    expect(good.getByText('architecture: amd64')).toBeInTheDocument()
+    expect(bad.getByText('architecture: arm64')).toBeInTheDocument()
+    expect(unprobed.getByText('architecture: arm64')).toBeInTheDocument()
+
+    // The regression guard for every record that exists today: written before
+    // the field did, unqualified forever, and not dressed up with a guess.
+    expect(preArch.getByText(/Usable — the build probe confirmed it/)).toBeInTheDocument()
+    expect(preArch.queryByText(/^architecture:/)).not.toBeInTheDocument()
+  })
+
+  it('names the architecture the new schematic was created at on the result panel', async () => {
+    // The creation result is where an operator sees the verdict first, and it is
+    // the one place the architecture was chosen rather than read back.
+    stubFactory({ saved: [], created: schematicFixture({ name: 'fresh', arch: 'arm64' }) })
+    const user = userEvent.setup()
+
+    renderImages()
+    await catalogLoaded()
+
+    await user.type(screen.getByLabelText('Name'), 'fresh')
+    await user.click(screen.getByRole('button', { name: 'Create schematic' }))
+
+    const panel = await screen.findByText('Schematic created.')
+    const row = within(panel.parentElement as HTMLElement)
+    expect(row.getByText(/Usable — the build probe confirmed it/)).toBeInTheDocument()
+    expect(row.getByText('architecture: arm64')).toBeInTheDocument()
   })
 
   it('names the architecture the verdict is about, beside the verdict', async () => {
