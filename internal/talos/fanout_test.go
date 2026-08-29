@@ -53,7 +53,7 @@ func TestFanOutOneSilentNodeCostsOneNode(t *testing.T) {
 	// is not what is being timed. The silent node was injected before its
 	// client was built, so it gets its client the only way it can: it does not.
 	healthyClient, err := talos.NewClusterClient(t.Context(), dialers[healthyTarget.Machine],
-		healthyTarget, creds[healthyTarget.Machine])
+		healthyTarget, creds[healthyTarget.Machine], talos.Mode{})
 	if err != nil {
 		t.Fatalf("NewClusterClient for the healthy node: %v", err)
 	}
@@ -87,7 +87,7 @@ func TestFanOutOneSilentNodeCostsOneNode(t *testing.T) {
 				// The silent node cannot even be constructed: the D-05 probe is
 				// the first thing that goes silent. That is the realistic shape
 				// and it is still bounded by this target's own budget.
-				_, err = talos.NewClusterClient(callCtx, dialers[target.Machine], target, creds[target.Machine])
+				_, err = talos.NewClusterClient(callCtx, dialers[target.Machine], target, creds[target.Machine], talos.Mode{})
 			}
 
 			mu.Lock()
