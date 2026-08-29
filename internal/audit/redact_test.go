@@ -241,3 +241,56 @@ func TestRedactKeepsSiblingSegmentsApart(t *testing.T) {
 		}
 	}
 }
+
+// TestRedactSchematicCreateKeepsOnlyTheNameAndTheVersion is the live half of
+// plan 02-04's first prohibition, and it is the one entry in this table whose
+// mistake would be permanent.
+//
+// The Image Factory itself refuses to enumerate schematics on the grounds that
+// kernel arguments may carry secrets, and holzkube's archive is append-only and
+// kept forever (D-16) with no deletion path. So a kernel argument written in
+// clear here is written in clear for good: there is no migration, no redaction
+// pass and no delete that could take it back without breaking the hash chain.
+// Everything except the operator's own label and the Talos version is redacted.
+func TestRedactSchematicCreateKeepsOnlyTheNameAndTheVersion(t *testing.T) {
+	const secretArg = "talos.secret=hunter2"
+
+	got := Params("schematic.create", map[string]any{
+		"name":          "workers with intel microcode",
+		"talos_version": "v1.13.9",
+		"extensions":    []any{"siderolabs/intel-ucode"},
+		"kernel_args":   []any{secretArg},
+		"meta":          []any{map[string]any{"key": 10, "value": "also secret"}},
+		"canonical":     "customization: {}\n",
+		"cluster":       "homelab",
+		"arch":          "amd64",
+	})
+
+	if got["name"] != "workers with intel microcode" {
+		t.Errorf("name = %v, want it passed through", got["name"])
+	}
+	if got["talos_version"] != "v1.13.9" {
+		t.Errorf("talos_version = %v, want it passed through", got["talos_version"])
+	}
+	for _, field := range []string{"extensions", "kernel_args", "meta", "canonical", "cluster", "arch"} {
+		if got[field] != RedactedMarker {
+			t.Errorf("%s = %v, want %q", field, got[field], RedactedMarker)
+		}
+	}
+	assertNoSecret(t, got, secretArg)
+	assertNoSecret(t, got, "also secret")
+}
+
+// TestRedactSchematicDeleteIsListedWithNothingPermitted keeps the table honest
+// about the full set of mutations rather than leaving one to the default. A
+// deletion carries an id in its path, not in its body, so there is nothing here
+// that is worth writing in clear.
+func TestRedactSchematicDeleteIsListedWithNothingPermitted(t *testing.T) {
+	fields, listed := allowlist["schematic.delete"]
+	if !listed {
+		t.Fatal("schematic.delete has no allowlist entry; the table must show every mutation")
+	}
+	if len(fields) != 0 {
+		t.Errorf("schematic.delete permits %v, want nothing permitted", fields)
+	}
+}
