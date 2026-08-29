@@ -12,10 +12,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/cosi-project/runtime/pkg/safe"
+	"github.com/cosi-project/runtime/pkg/state"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
 	"github.com/siderolabs/talos/pkg/machinery/api/common"
+	"github.com/siderolabs/talos/pkg/machinery/api/machine"
+	"github.com/siderolabs/talos/pkg/machinery/resources/k8s"
 
 	"github.com/holzcloud/holzkube/internal/model"
 	"github.com/holzcloud/holzkube/internal/talos"
@@ -642,5 +646,424 @@ func assertRefused(t *testing.T, addr string) {
 	if !errors.Is(err, syscall.ECONNREFUSED) {
 		t.Errorf("dial to %s failed with %v after %s, want a connection refused: a released port "+
 			"refuses, and only a black hole times out", addr, err, time.Since(started))
+	}
+}
+
+// TestScenarioRejectApply asserts the refusal and, more importantly, the call
+// count.
+//
+// The status code alone would be satisfied by a client that retried three
+// times and reported the last refusal. ApplyConfiguration is in the mutation
+// class and is never retried, and the only place that is observable is at the
+// node.
+func TestScenarioRejectApply(t *testing.T) {
+	t.Parallel()
+
+	sim := newSim(t, talossim.Options{Hostname: "rejecting-node"})
+	cl := newMachineryClient(t, sim)
+
+	restore, err := sim.Inject(talossim.Scenario{Name: talossim.ScenarioRejectApply})
+	if err != nil {
+		t.Fatalf("Inject reject_apply: %v", err)
+	}
+	defer restore()
+
+	before := sim.Calls("ApplyConfiguration")
+
+	_, err = cl.ApplyConfiguration(testContext(t), &machine.ApplyConfigurationRequest{
+		Data: []byte("version: v1alpha1\n"),
+		Mode: machine.ApplyConfigurationRequest_AUTO,
+	})
+	if status.Code(err) != codes.InvalidArgument {
+		t.Fatalf("ApplyConfiguration = %v (code %s), want InvalidArgument", err, status.Code(err))
+	}
+	if !strings.Contains(err.Error(), "block device") {
+		t.Errorf("error %q does not carry the upstream validation message", err)
+	}
+
+	if got := sim.Calls("ApplyConfiguration") - before; got != 1 {
+		t.Errorf("the node saw %d ApplyConfiguration calls for one client call: a mutation was retried", got)
+	}
+
+	// Refused, not applied. PITFALLS.md P11 records that Talos rejects an
+	// invalid configuration before writing anything, and a simulator that
+	// counted the refusal as an apply would let the product ship a UI saying
+	// the opposite.
+	if got := sim.Node().AppliedConfigs; got != 0 {
+		t.Errorf("AppliedConfigs = %d after a refused apply, want 0", got)
+	}
+}
+
+// TestScenarioSecondBootstrap asserts both halves: the node's own refusal of a
+// repeated bootstrap, and the scenario's precondition.
+func TestScenarioSecondBootstrap(t *testing.T) {
+	t.Parallel()
+
+	t.Run("uninjected, the first succeeds and the second is refused", func(t *testing.T) {
+		t.Parallel()
+
+		sim := newSim(t, talossim.Options{Hostname: "bootstrap-node"})
+		cl := newMachineryClient(t, sim)
+		ctx := testContext(t)
+
+		if err := cl.Bootstrap(ctx, &machine.BootstrapRequest{}); err != nil {
+			t.Fatalf("the first Bootstrap: %v", err)
+		}
+		if err := cl.Bootstrap(ctx, &machine.BootstrapRequest{}); status.Code(err) != codes.AlreadyExists {
+			t.Fatalf("the second Bootstrap = %v (code %s), want AlreadyExists", err, status.Code(err))
+		}
+		if got := sim.Node().BootstrapCalls; got != 2 {
+			t.Errorf("BootstrapCalls = %d, want 2: a refusal is still a call", got)
+		}
+	})
+
+	t.Run("injected, the client's own first call is already the second", func(t *testing.T) {
+		t.Parallel()
+
+		sim := newSim(t, talossim.Options{Hostname: "prebootstrapped-node"})
+		cl := newMachineryClient(t, sim)
+
+		restore, err := sim.Inject(talossim.Scenario{Name: talossim.ScenarioSecondBootstrapAlreadyExists})
+		if err != nil {
+			t.Fatalf("Inject second_bootstrap_returns_AlreadyExists: %v", err)
+		}
+		defer restore()
+
+		if !sim.Node().Bootstrapped {
+			t.Fatal("the scenario did not leave the node bootstrapped")
+		}
+		if got := sim.Node().BootstrapCalls; got != 0 {
+			t.Errorf("BootstrapCalls = %d after injection alone, want 0: injection is not an RPC", got)
+		}
+
+		err = cl.Bootstrap(testContext(t), &machine.BootstrapRequest{})
+		if status.Code(err) != codes.AlreadyExists {
+			t.Fatalf("Bootstrap against an already-bootstrapped node = %v (code %s), want AlreadyExists",
+				err, status.Code(err))
+		}
+	})
+}
+
+// TestScenarioEtcdDown asserts the asymmetry.
+//
+// A test that only showed the etcd call failing would pass against a node that
+// had gone away entirely, which is the opposite diagnosis and the opposite fix.
+// The Version call on the same connection is what makes the scenario mean "one
+// subsystem is down".
+func TestScenarioEtcdDown(t *testing.T) {
+	t.Parallel()
+
+	sim := newSim(t, talossim.Options{Hostname: "etcd-down-node"})
+	cl := newMachineryClient(t, sim)
+	ctx := testContext(t)
+
+	// Bootstrapped first, so that the failure below is the scenario and not
+	// the FailedPrecondition an un-bootstrapped node answers with.
+	if err := cl.Bootstrap(ctx, &machine.BootstrapRequest{}); err != nil {
+		t.Fatalf("Bootstrap: %v", err)
+	}
+	if _, err := cl.EtcdMemberList(ctx, &machine.EtcdMemberListRequest{}); err != nil {
+		t.Fatalf("EtcdMemberList before injection: %v", err)
+	}
+
+	restore, err := sim.Inject(talossim.Scenario{Name: talossim.ScenarioEtcdDown})
+	if err != nil {
+		t.Fatalf("Inject etcd_down: %v", err)
+	}
+	defer restore()
+
+	if _, err := cl.EtcdMemberList(ctx, &machine.EtcdMemberListRequest{}); status.Code(err) != codes.Unavailable {
+		t.Errorf("EtcdMemberList = %v (code %s), want Unavailable", err, status.Code(err))
+	}
+	if _, err := cl.EtcdStatus(ctx); status.Code(err) != codes.Unavailable {
+		t.Errorf("EtcdStatus = %v (code %s), want Unavailable", err, status.Code(err))
+	}
+
+	// The same connection, unchanged. The node is reachable; only etcd is not.
+	if _, err := cl.Version(ctx); err != nil {
+		t.Errorf("Version on the same connection: %v; etcd_down took the whole node down", err)
+	}
+	if _, err := cl.ServiceList(ctx); err != nil {
+		t.Errorf("ServiceList on the same connection: %v", err)
+	}
+}
+
+// TestScenarioK8sDown asserts a not-found-shaped result rather than an error,
+// and a node that is still answering.
+//
+// Those two together are the diagnosis the scenario exists to make possible:
+// Kubernetes is not running on a machine that is otherwise fine. A transport
+// error would send an operator to look at the network.
+func TestScenarioK8sDown(t *testing.T) {
+	t.Parallel()
+
+	sim := newSim(t, talossim.Options{Hostname: "k8s-down-node"})
+	cl := newMachineryClient(t, sim)
+	ctx := testContext(t)
+
+	if _, err := safe.StateGetByID[*k8s.Nodename](ctx, cl.COSI, k8s.NodenameID); err != nil {
+		t.Fatalf("read %s before injection: %v", k8s.NodenameType, err)
+	}
+
+	restore, err := sim.Inject(talossim.Scenario{Name: talossim.ScenarioK8sDown})
+	if err != nil {
+		t.Fatalf("Inject k8s_down: %v", err)
+	}
+
+	_, err = safe.StateGetByID[*k8s.Nodename](ctx, cl.COSI, k8s.NodenameID)
+	if err == nil {
+		t.Fatal("the k8s resource is still readable with k8s_down injected")
+	}
+	if !state.IsNotFoundError(err) {
+		t.Errorf("reading %s returned %v, want a not-found: a transport-shaped failure would "+
+			"attribute a Kubernetes outage to the network", k8s.NodenameType, err)
+	}
+
+	// The connection is still usable, and the service view agrees with the
+	// resource view.
+	if _, err := cl.Version(ctx); err != nil {
+		t.Errorf("Version with k8s_down injected: %v; the node is supposed to stay reachable", err)
+	}
+
+	services, err := cl.ServiceList(ctx)
+	if err != nil {
+		t.Fatalf("ServiceList: %v", err)
+	}
+	if kubelet := serviceByID(services.GetMessages()[0].GetServices(), "kubelet"); kubelet == nil {
+		t.Error("ServiceList reports no kubelet at all")
+	} else if kubelet.GetState() == "Running" {
+		t.Error("ServiceList still reports the kubelet as Running while its resources are gone")
+	}
+
+	restore()
+
+	if _, err := safe.StateGetByID[*k8s.Nodename](ctx, cl.COSI, k8s.NodenameID); err != nil {
+		t.Errorf("read %s after the scenario was cleared: %v; k8s_down is a one-way door",
+			k8s.NodenameType, err)
+	}
+}
+
+func serviceByID(services []*machine.ServiceInfo, id string) *machine.ServiceInfo {
+	for _, s := range services {
+		if s.GetId() == id {
+			return s
+		}
+	}
+	return nil
+}
+
+// gateProbe exercises the RPC or the connection one scenario's Sim column
+// names, and reduces what it saw to a comparable string.
+type gateProbe struct {
+	inject  talossim.Scenario
+	options talossim.Options
+	observe func(t *testing.T, sim *talossim.Server) string
+}
+
+// TestEveryScenarioIsImplemented is the completeness gate.
+//
+// It compares each scenario's injected behaviour against the same node's
+// un-injected baseline, and fails when the two are indistinguishable. Asserting
+// that Inject returned no error, or that nothing panicked, would not do: a
+// scenario that is registered, documented and inert is the worst outcome
+// available here, because it makes plan 02-05's contract suite pass against
+// nothing at all while looking exactly like a suite that passed against
+// something.
+//
+// The gate is also what keeps the registry from growing entries nobody
+// implemented: a registry key with no probe below is a failure, not a skip.
+func TestEveryScenarioIsImplemented(t *testing.T) {
+	t.Parallel()
+
+	probes := gateProbes()
+
+	for name := range talossim.Registry {
+		probe, ok := probes[name]
+		if !ok {
+			t.Errorf("scenario %q is in the registry and has no probe in the completeness gate; "+
+				"an unprobed scenario is one nothing would notice had stopped working", name)
+			continue
+		}
+
+		t.Run(string(name), func(t *testing.T) {
+			t.Parallel()
+
+			baseline := probe.observe(t, newSim(t, probe.options))
+
+			sim := newSim(t, probe.options)
+			restore, err := sim.Inject(probe.inject)
+			if err != nil {
+				t.Fatalf("Inject %s: %v", name, err)
+			}
+			defer restore()
+
+			injected := probe.observe(t, sim)
+
+			if injected == baseline {
+				t.Errorf("scenario %q is indistinguishable from the un-injected baseline "+
+					"(both observed %q): it is registered, documented and inert",
+					name, injected)
+			}
+		})
+	}
+
+	for name := range probes {
+		if _, ok := talossim.Registry[name]; !ok {
+			t.Errorf("the completeness gate probes %q, which is not in the registry", name)
+		}
+	}
+}
+
+// gateProbes is one probe per registry entry.
+//
+// Each observation is deliberately coarse -- a status code, "moved" against
+// "stable" -- because the gate's question is only whether the scenario changed
+// anything. What it changed is the individual scenario tests' business.
+func gateProbes() map[talossim.ScenarioName]gateProbe {
+	return map[talossim.ScenarioName]gateProbe{
+		talossim.ScenarioGoSilent: {
+			inject: talossim.Scenario{Name: talossim.ScenarioGoSilent, Duration: 5 * time.Second},
+			observe: func(t *testing.T, sim *talossim.Server) string {
+				t.Helper()
+
+				ctx, cancel := shortContext(t, 300*time.Millisecond)
+				defer cancel()
+
+				_, err := newMachineryClient(t, sim).Version(ctx)
+				return status.Code(err).String()
+			},
+		},
+
+		talossim.ScenarioRejectApply: {
+			inject: talossim.Scenario{Name: talossim.ScenarioRejectApply},
+			observe: func(t *testing.T, sim *talossim.Server) string {
+				t.Helper()
+
+				_, err := newMachineryClient(t, sim).ApplyConfiguration(testContext(t),
+					&machine.ApplyConfigurationRequest{Data: []byte("version: v1alpha1\n")})
+				return status.Code(err).String()
+			},
+		},
+
+		talossim.ScenarioSecondBootstrapAlreadyExists: {
+			inject: talossim.Scenario{Name: talossim.ScenarioSecondBootstrapAlreadyExists},
+			observe: func(t *testing.T, sim *talossim.Server) string {
+				t.Helper()
+
+				err := newMachineryClient(t, sim).Bootstrap(testContext(t), &machine.BootstrapRequest{})
+				return status.Code(err).String()
+			},
+		},
+
+		talossim.ScenarioFlapConnection: {
+			inject: talossim.Scenario{Name: talossim.ScenarioFlapConnection, Cycle: 30 * time.Millisecond},
+			observe: func(t *testing.T, sim *talossim.Server) string {
+				t.Helper()
+
+				// Short: the injected cycle is 30 ms, so a listener that is
+				// going to flap has flapped many times over by now, and the
+				// baseline pays this wait in full on every run.
+				deadline := time.Now().Add(time.Second)
+				for sim.ListenerTransitions() == 0 && time.Now().Before(deadline) {
+					time.Sleep(20 * time.Millisecond)
+				}
+				if sim.ListenerTransitions() > 0 {
+					return "listener flapped"
+				}
+				return "listener stable"
+			},
+		},
+
+		talossim.ScenarioSlowLogConsumer: {
+			options: talossim.Options{StreamMessages: 3},
+			inject:  talossim.Scenario{Name: talossim.ScenarioSlowLogConsumer},
+			observe: func(t *testing.T, sim *talossim.Server) string {
+				t.Helper()
+
+				ctx, cancel := context.WithCancel(t.Context())
+				defer cancel()
+
+				stream, err := newMachineryClient(t, sim).Logs(ctx, "system",
+					common.ContainerDriver_CONTAINERD, "apid", true, -1)
+				if err != nil {
+					t.Fatalf("Logs: %v", err)
+				}
+
+				for range 6 {
+					if _, err := stream.Recv(); err != nil {
+						return "production is bounded"
+					}
+				}
+				return "production is endless"
+			},
+		},
+
+		talossim.ScenarioIPChangesOnReboot: {
+			inject: talossim.Scenario{Name: talossim.ScenarioIPChangesOnReboot},
+			observe: func(t *testing.T, sim *talossim.Server) string {
+				t.Helper()
+
+				before := sim.Addr()
+				if _, err := newMachineryClient(t, sim).RebootWithResponse(testContext(t)); err != nil {
+					t.Fatalf("Reboot: %v", err)
+				}
+				if sim.Addr() != before {
+					return "the node moved"
+				}
+				return "the node stayed"
+			},
+		},
+
+		talossim.ScenarioEtcdDown: {
+			inject: talossim.Scenario{Name: talossim.ScenarioEtcdDown},
+			observe: func(t *testing.T, sim *talossim.Server) string {
+				t.Helper()
+
+				cl := newMachineryClient(t, sim)
+				ctx := testContext(t)
+
+				// Bootstrapped first: an un-bootstrapped node answers
+				// FailedPrecondition, and a baseline that already failed would
+				// hide a scenario that changed nothing.
+				if err := cl.Bootstrap(ctx, &machine.BootstrapRequest{}); err != nil {
+					t.Fatalf("Bootstrap: %v", err)
+				}
+				_, err := cl.EtcdMemberList(ctx, &machine.EtcdMemberListRequest{})
+				return status.Code(err).String()
+			},
+		},
+
+		talossim.ScenarioK8sDown: {
+			inject: talossim.Scenario{Name: talossim.ScenarioK8sDown},
+			observe: func(t *testing.T, sim *talossim.Server) string {
+				t.Helper()
+
+				cl := newMachineryClient(t, sim)
+				if _, err := safe.StateGetByID[*k8s.Nodename](testContext(t), cl.COSI, k8s.NodenameID); err != nil {
+					return "kubernetes resources absent"
+				}
+				return "kubernetes resources present"
+			},
+		},
+
+		talossim.ScenarioVersionOutOfSupportedRange: {
+			inject: talossim.Scenario{
+				Name:    talossim.ScenarioVersionOutOfSupportedRange,
+				Version: "v1.15.0",
+			},
+			observe: func(t *testing.T, sim *talossim.Server) string {
+				t.Helper()
+
+				resp, err := newMachineryClient(t, sim).Version(testContext(t))
+				if err != nil {
+					t.Fatalf("Version: %v", err)
+				}
+				tag := resp.GetMessages()[0].GetVersion().GetTag()
+				if err := talos.CheckSupportedVersion(tag); err != nil {
+					return "outside the supported range"
+				}
+				return "inside the supported range"
+			},
+		},
 	}
 }

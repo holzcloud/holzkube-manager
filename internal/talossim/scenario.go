@@ -311,6 +311,14 @@ func (s *Server) startScenario(sc Scenario) (func(), error) {
 		return s.startSlowLogConsumer(sc)
 	case ScenarioVersionOutOfSupportedRange:
 		return s.startVersionOutOfSupportedRange(sc)
+	case ScenarioSecondBootstrapAlreadyExists:
+		return s.startSecondBootstrapAlreadyExists(sc)
+	case ScenarioK8sDown:
+		return s.startK8sDown(sc)
+	case ScenarioRejectApply, ScenarioEtcdDown:
+		// Both are answered by rpcScenarioGate on the method they name; there
+		// is no state to set up and nothing to undo.
+		return func() {}, nil
 	case ScenarioIPChangesOnReboot:
 		// The fault fires on the next Reboot rather than at injection: the
 		// scenario TRANS-07 names is an address that changes across a reboot,
@@ -390,9 +398,11 @@ func (s *Server) scenarioStream(srv any, ss grpc.ServerStream, info *grpc.Stream
 // k8s_down's service list, ip_changes_on_reboot's rebind -- are consulted
 // inside the handler through activeScenario instead. The split is between "the
 // call does not happen" and "the call happens and says something different".
-func (s *Server) scenarioGate(ctx context.Context, _ string) error {
+func (s *Server) scenarioGate(ctx context.Context, fullMethod string) error {
 	if sc, ok := s.activeScenario(ScenarioGoSilent); ok {
-		return s.goSilent(ctx, sc)
+		if err := s.goSilent(ctx, sc); err != nil {
+			return err
+		}
 	}
-	return nil
+	return s.rpcScenarioGate(fullMethod)
 }
