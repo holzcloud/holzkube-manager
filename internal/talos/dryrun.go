@@ -22,6 +22,7 @@ package talos
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"google.golang.org/grpc"
 )
@@ -106,8 +107,19 @@ func dryRunInterceptor(enabled bool) (grpc.UnaryClientInterceptor, grpc.StreamCl
 // refuseIfMutating is the whole decision, in one place, so the unary and stream
 // halves cannot drift.
 func refuseIfMutating(enabled bool, method string) error {
-	// RED: the gate is not implemented yet. The tests below it are what decide
-	// what "implemented" means.
-	_, _ = enabled, method
-	return nil
+	if !enabled {
+		return nil
+	}
+	if class, ok := ClassOf(method); !ok || class != ClassMutation {
+		return nil
+	}
+
+	// The refusal follows tlsx.LoopbackGuard's shape: what was refused, why,
+	// and what would have to change. An operator reading this line should not
+	// have to go and find out which flag they are in.
+	return fmt.Errorf(
+		"talos: refusing %s: it is a mutating RPC and this process was started with --dry-run, "+
+			"so it is not issued and no node is changed; restart holzkubed without --dry-run "+
+			"(or with HOLZKUBE_DRY_RUN=false) to issue it: %w",
+		shortMethod(method), ErrDryRun)
 }
