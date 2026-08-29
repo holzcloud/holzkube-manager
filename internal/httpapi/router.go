@@ -16,6 +16,7 @@ import (
 	"github.com/holzcloud/holzkube/internal/httpapi/middleware"
 	"github.com/holzcloud/holzkube/internal/imagefactory"
 	"github.com/holzcloud/holzkube/internal/store"
+	"github.com/holzcloud/holzkube/internal/talos"
 )
 
 // Route is one entry in the route table.
@@ -90,6 +91,16 @@ type Deps struct {
 	// through. It is nil in a deployment that serves no schematic routes, and
 	// those handlers answer 502 rather than panicking if it ever is.
 	Factory *imagefactory.Client
+
+	// TalosMode carries the process's transport-level operating decisions to
+	// the handlers -- today only whether it was started with --dry-run.
+	//
+	// It is the mode value itself rather than a bare boolean because it is the
+	// value a handler has to hand to talos.NewClusterClient in order to make a
+	// node call at all: one field answers both "may this instance mutate" and
+	// "what do I pass to the constructor", and there is no second copy of the
+	// answer to disagree with the first.
+	TalosMode talos.Mode
 
 	// AuditChain is the startup verification verdict (D-15). It is a snapshot
 	// on purpose: a break found at startup must stay visible in the UI, not

@@ -41,6 +41,26 @@ func SetupRoutes(d httpapi.Deps) []httpapi.Route {
 	}
 }
 
+// reservedActors are the audit `actor` tokens no operator account may take.
+//
+// Only the flat token needs a rule. `job:<id>`, the other reserved shape,
+// cannot collide with anything: the prefix and its colon are what make it
+// unmistakable, which is half of why that shape was chosen.
+var reservedActors = []string{"system"}
+
+// isReservedActor reports whether a username would collide with a reserved
+// audit actor. The comparison is case-insensitive, because two records reading
+// "system" and "System" are not distinguishable to the person reading them a
+// year later, which is the only reader the archive has.
+func isReservedActor(username string) bool {
+	for _, r := range reservedActors {
+		if strings.EqualFold(username, r) {
+			return true
+		}
+	}
+	return false
+}
+
 func createFirstUser(d httpapi.Deps, w http.ResponseWriter, r *http.Request) {
 	var req setupRequest
 	if err := decodeJSON(w, r, &req); err != nil {
@@ -54,6 +74,18 @@ func createFirstUser(d httpapi.Deps, w http.ResponseWriter, r *http.Request) {
 		fieldErrs = append(fieldErrs, httpapi.FieldError{
 			Field:  "username",
 			Reason: "must be between 3 and 64 characters",
+		})
+	}
+	if isReservedActor(username) {
+		// T-02-47. `system` is a reserved audit actor (docs/api-contract.md,
+		// "Actor vocabulary"), and `actor` is part of the hash chain in an
+		// archive with unlimited retention. A record whose actor is ambiguous
+		// between the process and a person cannot be disambiguated later, so
+		// the collision is closed at the only moment it is cheap: before the
+		// account exists.
+		fieldErrs = append(fieldErrs, httpapi.FieldError{
+			Field:  "username",
+			Reason: "is reserved: the audit log uses it to mean a mutation the process itself initiated",
 		})
 	}
 	if len(req.Password) < minPasswordLen {
