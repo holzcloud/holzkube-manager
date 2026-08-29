@@ -60,7 +60,15 @@ type AssetRequest struct {
 	Platform Platform
 
 	// SecureBoot selects the SecureBoot variant of the asset. It suffixes the
-	// platform-architecture segment and nothing else.
+	// platform-architecture segment of every asset URL -- see variant -- and it
+	// selects the installer repository name -- see installerCandidates.
+	//
+	// The second half is not a detail. The SecureBoot installer is a different
+	// image, chosen by repository name alone, and Talos requires it for a
+	// SecureBoot install. This comment said "and nothing else" until
+	// 02-UAT.md G-02-4, which is how the installer came to be the one asset the
+	// flag never reached: the sentence read as a closed statement of the flag's
+	// whole effect, so nobody looked for a second place it belonged.
 	SecureBoot bool
 }
 

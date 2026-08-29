@@ -13,6 +13,13 @@ import (
 // version range.
 const legacyInstallerRepo = "installer"
 
+// secureBootRepoSuffix is what upstream's registry frontend reads as "this is
+// the SecureBoot installer". siderolabs/image-factory's getRequestedImage
+// parses the repository name into an image name, a platform and a secureboot
+// flag, cutting "-installer-secureboot" before "-installer"; the suffix is the
+// switch and there is nothing else that sets it.
+const secureBootRepoSuffix = "-secureboot"
+
 // manifestAccept is the media-type set an OCI registry expects on a manifest
 // request. A registry that receives none of these may answer 404 for a manifest
 // that exists, which would look exactly like a repository name that does not
@@ -65,22 +72,64 @@ func (c *Client) InstallerImage(ctx context.Context, r AssetRequest) (string, er
 	return ref + "/" + repo + "/" + r.SchematicID + ":" + r.Version, nil
 }
 
+// installerCandidates is the ordered list of repository names that may carry
+// this request's installer: the platform-prefixed name first, the legacy name
+// second, each carrying the SecureBoot suffix when the request asks for it.
+//
+// SecureBoot is in here because the repository name is the only thing that
+// selects it. A schematic does not carry SecureBoot into its installer -- at
+// v1.13.9 the same schematic id resolves to sha256:f960382f... under
+// metal-installer and to sha256:878b171c... under metal-installer-secureboot,
+// two different images picked by name alone (02-UAT.md G-02-4). Talos requires
+// the SecureBoot installer for a SecureBoot install: it carries the signed UKI
+// and systemd-boot, there is no machine-config flag that substitutes for it,
+// and the ordinary installer does not produce a SecureBoot node. Pairing a
+// SecureBoot ISO with the ordinary installer is the ISO/installer drift this
+// file's own comments warn about, arriving from the one direction nothing
+// checked.
+//
+// So a SecureBoot request asks only about SecureBoot names, and when neither
+// answers the caller is refused with no reference rather than handed the
+// ordinary installer. That refusal is deliberate and the trade-off is real: at
+// a Talos version where only the ordinary names resolve, an asset panel that
+// renders five references today would answer 502 with none. Substituting is
+// still not an option -- it reintroduces exactly the drift this function exists
+// to stop, silently, in the one place an operator cannot see it. Whether such a
+// version exists inside the supported range is settled by TestLiveFactory's
+// installer-name matrix subtest, not by anything the fakes can tell you.
+func installerCandidates(r AssetRequest) []string {
+	suffix := ""
+	if r.SecureBoot {
+		suffix = secureBootRepoSuffix
+	}
+	return []string{
+		string(r.Platform) + "-" + legacyInstallerRepo + suffix,
+		legacyInstallerRepo + suffix,
+	}
+}
+
 // installerRepo returns the repository name that resolves for this request,
 // consulting the cache first.
 //
-// The cache is keyed on platform and Talos version because that is what the
-// name depends on -- not on the schematic. Every schematic at a version shares
-// one answer, so a wizard that derives assets for several schematics at one
-// version costs one manifest request rather than one per schematic (T-02-22).
-// The platform is in the key because the modern name is the platform prefixed
-// one, so two platforms at one version are two different questions.
+// The cache is keyed on platform, Talos version and the SecureBoot selection,
+// because that is what the name depends on -- not on the schematic. Every
+// schematic at that combination shares one answer, so a wizard that derives
+// assets for several schematics at one version costs one manifest request
+// rather than one per schematic (T-02-22); SecureBoot at worst doubles the
+// number of combinations, it does not make the saving per-schematic. The
+// platform is in the key because the modern name is the platform-prefixed one,
+// so two platforms at one version are two different questions, and SecureBoot
+// is in it for the same reason: a shared entry would answer a SecureBoot
+// request with the ordinary installer it never asked about (T-02-43). The flag
+// is formatted rather than conditionally concatenated so two different requests
+// cannot produce the same key bytes.
 //
 // A failed resolution is deliberately not cached. The cache exists to spare
 // requests, not to freeze an answer that was never obtained: remembering a
 // transient registry outage as "no installer exists" would block upgrades long
 // after the registry recovered.
 func (c *Client) installerRepo(ctx context.Context, r AssetRequest) (string, error) {
-	key := fmt.Sprintf("%s/%s", r.Platform, r.Version)
+	key := fmt.Sprintf("%s/%s/secureboot=%t", r.Platform, r.Version, r.SecureBoot)
 
 	c.installerMu.Lock()
 	repo, ok := c.installerRepos[key]
@@ -89,7 +138,7 @@ func (c *Client) installerRepo(ctx context.Context, r AssetRequest) (string, err
 		return repo, nil
 	}
 
-	repo, err := c.resolveInstallerRepo(ctx, r, string(r.Platform)+"-"+legacyInstallerRepo, legacyInstallerRepo)
+	repo, err := c.resolveInstallerRepo(ctx, r, installerCandidates(r)...)
 	if err != nil {
 		return "", err
 	}
