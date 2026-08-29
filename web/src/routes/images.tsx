@@ -73,19 +73,34 @@ export type MetaRow = { key: number; value: string }
  * Whether a value carries a character holzkube's canonical serialiser refuses.
  *
  * The original rule lives in `internal/imagefactory/schematicid.go`'s
- * `representable`: not valid UTF-8, any rune below U+0020, or U+007F. This is
- * the control-character half of it, transcribed. A lone surrogate — the invalid
- * UTF-8 half — is unreachable from a normal input event and is left to the
- * server's 400.
+ * `representable`: not valid UTF-8, any rune below U+0020, or U+007F. Both
+ * halves are transcribed here, and the second half is the one that has to be.
  *
- * The server's 400 is the backstop here, not the fallback. Refusing at the input
- * is what tells an operator *which row* is wrong while they are still looking at
- * it; the server answering afterwards is the guarantee that a value which slips
- * past this never reaches the Factory.
+ * A lone surrogate is the only way a browser produces something that is not
+ * valid UTF-8, and the server does *not* answer 400 for one. `JSON.stringify`
+ * emits it as a well-formed `\udXXX` escape, and Go's `encoding/json` decodes an
+ * unpaired surrogate escape to U+FFFD — so by the time `representable` sees the
+ * string it is valid UTF-8 with no control character in it. The value is
+ * accepted, the schematic is created, and its id is computed over a character
+ * the operator never typed. That also makes `representable`'s `utf8.ValidString`
+ * branch unreachable from the HTTP route altogether; only an in-process caller
+ * can reach it.
  *
- * It reports rather than strips. An operator who pasted a value from somewhere
- * is better served by being told than by having their input quietly rewritten
- * into something they did not type (T-02-67).
+ * Having their input silently rewritten into something they did not type is
+ * precisely what T-02-67 says an operator must not get, so the refusal happens
+ * here, where the offending row can still be named. It stays on this side
+ * deliberately: widening `representable`'s refused set would change which
+ * scalars the canonical serialiser renders, and that decides the locally
+ * precomputed schematic id FACT-06 rests on.
+ *
+ * For every class the server can still see, its 400 is the backstop and not the
+ * fallback. Refusing at the input is what tells an operator *which row* is wrong
+ * while they are still looking at it; the server answering afterwards is the
+ * guarantee that such a value never reaches the Factory. The lone surrogate is
+ * the exception stated above, and the reason this carries both halves of the
+ * rule rather than one.
+ *
+ * It reports rather than strips, for the same T-02-67 reason.
  */
 /**
  * The row-level message. It names the character class and never the value, for
@@ -93,12 +108,15 @@ export type MetaRow = { key: number; value: string }
  * values can carry secrets (T-02-64).
  */
 const CONTROL_CHARACTER_MESSAGE =
-  'This contains a control character. The Image Factory schematic cannot carry one, so remove it before creating.'
+  'This contains a control character or an unpaired surrogate — half of a character whose other half never arrived. The Image Factory schematic cannot carry either, so remove it before creating.'
 
 export function hasControlCharacter(value: string): boolean {
   for (const character of value) {
     const code = character.codePointAt(0) ?? 0
-    if (code < 0x20 || code === 0x7f) {
+    // for...of iterates code points, so a well-formed pair yields the astral
+    // character it encodes and never a surrogate. A code in this range is
+    // therefore an unpaired one, which is the invalid-UTF-8 half of the rule.
+    if (code < 0x20 || code === 0x7f || (code >= 0xd800 && code <= 0xdfff)) {
       return true
     }
   }
