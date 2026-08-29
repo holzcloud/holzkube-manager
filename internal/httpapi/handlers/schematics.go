@@ -576,11 +576,69 @@ func probeDetail(err error) string {
 	return detail
 }
 
+// refusalReason renders the operator-facing half of a serialiser refusal.
+//
+// It carries the entry position and the character class and never the value.
+// This is the string that actually leaves the process: it is rendered in a
+// browser, may be logged by a proxy, and outlives the form that produced it,
+// and a kernel argument can carry a secret (T-02-64). The position is
+// one-based, matching what an operator counting rows in a form sees.
+func refusalReason(e *imagefactory.NotRepresentableError) string {
+	if e.Index >= 0 {
+		return "entry " + strconv.Itoa(e.Index+1) + " " + e.Reason
+	}
+	return e.Reason
+}
+
+// requestFieldForPath maps a canonical document path onto the request's own
+// field vocabulary -- the same names schematicInput.validate reports, because
+// an operator reading two problems from one route should not have to learn two
+// spellings of the same field.
+//
+// The table is explicit rather than derived. A derived mapping would silently
+// invent a field name for a path that gains a new spelling upstream, and a
+// wrong field name points the operator at the wrong input.
+var requestFieldForPath = map[string]string{
+	"customization.extraKernelArgs":                     "kernel_args",
+	"customization.meta.value":                          "meta",
+	"customization.systemExtensions.officialExtensions": "extensions",
+}
+
 // createProblem maps a failure from the authoring path.
 //
-// An unknown extension name is the operator's mistake and is reported per name,
-// so three typos are one round trip rather than three.
+// That path has two kinds of failure with two different owners, and the split is
+// the whole point of this function.
+//
+// A value holzkube's own canonical serialiser will not render is the operator's
+// input. It is raised by Schematic.ID() before the catalog is fetched and before
+// any POST, so no request was made, nothing is known about the Factory, and no
+// retry can help: it is a 400 naming the field. The 18ms 502 recorded in
+// 02-UAT.md as G-02-6 is exactly what a missing branch here looks like from a
+// browser -- a sentence blaming a third party for a refusal that never left this
+// process.
+//
+// An unknown extension name is likewise the operator's mistake and is reported
+// per name, so three typos are one round trip rather than three.
+//
+// Anything else came from the Factory and belongs to factoryProblem's upstream
+// family.
 func createProblem(err error) *httpapi.Problem {
+	var refused *imagefactory.NotRepresentableError
+	if errors.As(err, &refused) {
+		fieldErr := httpapi.FieldError{Reason: refusalReason(refused)}
+		// A path this handler does not recognise is still not the Factory's
+		// fault. Falling back to a 502 would tell the operator to retry
+		// something that can never succeed, which is the specific harm G-02-6
+		// is about; falling back to a 400 with no field name says less, and
+		// says it truthfully.
+		if field, ok := requestFieldForPath[refused.Path]; ok {
+			fieldErr.Field = field
+		}
+		return httpapi.Validation(
+			"The schematic carries a value holzkube cannot serialise, so it was never sent to the Image Factory.",
+			fieldErr)
+	}
+
 	var unknown *imagefactory.UnknownExtensionsError
 	if errors.As(err, &unknown) {
 		errs := make([]httpapi.FieldError, 0, len(unknown.Names))
