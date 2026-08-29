@@ -190,10 +190,19 @@ func (s *Server) startVersionOutOfSupportedRange(sc Scenario) (func(), error) {
 // rebind moves the node to a fresh loopback address and leaves the old one
 // refusing connections.
 //
-// Closing a listener stops it accepting; it does not sever the connections
-// already established on it. That is the honest sequence for a reboot as a
-// client observes it: the reply to the Reboot RPC is delivered over the
-// connection that asked for it, and the node then comes back somewhere else.
+// It goes through closeListener, so the connections already established on the
+// old address are severed along with it. A machine that is rebooting has gone
+// away, and a client holding a connection that kept working across the reboot
+// would never observe the address change at all -- the scenario would be inert
+// against exactly the caller it exists to test.
+//
+// The cost is that the Reboot RPC's own reply may not reach the caller: the
+// node disappears while the reply is in flight. That makes the simulator harder
+// to satisfy than hardware rather than easier, which is the permitted direction
+// (docs/talossim.md rule 2), and it is why plan 02-05's contract assertion
+// accepts either a delivered reply or a transport failure for the Reboot call
+// itself while insisting on the rebind having happened.
+//
 // The old address refuses rather than times out, which is the client-observable
 // difference between a released port and a black hole -- and only the refusing
 // one models a machine that gave its address back.

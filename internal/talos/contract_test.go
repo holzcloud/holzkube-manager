@@ -464,11 +464,15 @@ func assertIPChangesOnReboot(t *testing.T, tr contractTransport) {
 	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 	defer cancel()
 
-	// The reboot's reply is delivered over the connection that asked for it,
-	// which is what a client observes on hardware; the node comes back
-	// somewhere else afterwards.
+	// Either outcome is honest for a node that is going away: the reply may
+	// reach the caller, or the connection may die while it is in flight. What
+	// must not happen is a wrong answer, and what must have happened is the
+	// rebind -- both of which are asserted below rather than here. An assertion
+	// that insisted on the reply would be asserting the simulator's shutdown
+	// timing rather than the client's behaviour.
 	if err := cc.Reboot(ctx); err != nil {
-		t.Fatalf("Reboot: %v", err)
+		te := requireTalosError(t, err)
+		t.Logf("the reboot reply did not survive the node going away: %v (%v)", err, te.Kind)
 	}
 
 	if node.Sim.Port() == oldPort {
