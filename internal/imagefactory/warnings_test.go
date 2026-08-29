@@ -119,14 +119,50 @@ func TestWarningsNameInstallerAndInitramfs(t *testing.T) {
 }
 
 // TestWarningsCodesAreNamespaced keeps the identifiers plan 02-06 renders and
-// the audit allowlist references stable and recognisable as one family.
+// the audit allowlist references stable and recognisable as belonging to a
+// stated family.
+//
+// It used to assert a single "schematic." prefix over a hardcoded list of two
+// constants, which is a shape that fails silently: a third code outside the
+// prefix would not turn it red, it would simply not be iterated, and the
+// convention would fork with nothing saying so. That is the worse of the two
+// failures, so the question is decided here explicitly rather than inherited.
+//
+// There are two families and the prefix says which:
+//
+//   - "schematic." is a statement about a stored schematic. Warnings recomputes
+//     these from the record at any time, so they are properties of the thing
+//     itself and survive the request that produced them.
+//   - "installer." is a statement about one installer-repository resolution
+//     attempt -- how a name was obtained on this request. No record holds it and
+//     nothing can recompute it later. Filing it under "schematic." would blame
+//     the schematic for something the registry did.
+//
+// Every code the package exports must be in this list and must choose one of
+// those prefixes, so the next code added has to pick a family rather than
+// inherit one.
 func TestWarningsCodesAreNamespaced(t *testing.T) {
+	prefixes := map[string]string{
+		"schematic.": "a property of the stored schematic, recomputable from the record",
+		"installer.": "a fact about one installer-repository resolution attempt",
+	}
+
 	for _, code := range []string{
 		imagefactory.WarningInstallerIgnoresKernelArgs,
 		imagefactory.WarningInstallerIgnoresMeta,
+		imagefactory.WarningInstallerRepoFallbackUnverified,
 	} {
-		if !strings.HasPrefix(code, "schematic.") {
-			t.Errorf("%q is not in the schematic. namespace", code)
+		matched := false
+		for prefix := range prefixes {
+			if strings.HasPrefix(code, prefix) {
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			t.Errorf("%q is in none of the declared warning-code families %v. "+
+				"Pick one and say why, or add a family here with its meaning beside it",
+				code, prefixes)
 		}
 	}
 }
@@ -175,6 +211,19 @@ func TestWarningDetailsMatchTheUI(t *testing.T) {
 		if !strings.Contains(apiModule, w.Code) {
 			t.Errorf("%s: %s declares no constant for this code", w.Code, apiPath)
 		}
+	}
+
+	// The installer fallback code is checked differently, and deliberately: only
+	// the code, never a sentence. The other two details are static text authored
+	// once in Warnings, so they can be transcribed and compared byte for byte.
+	// This one is built per incident -- it names the repository that answered,
+	// the repository that did not, the version and the transport error as the
+	// client reported it -- so there is no sentence to transcribe. The UI renders
+	// the server's detail as it arrives; what has to stay in step is the
+	// identifier the component keys on.
+	if !strings.Contains(apiModule, imagefactory.WarningInstallerRepoFallbackUnverified) {
+		t.Errorf("%s: %s declares no constant for this code",
+			imagefactory.WarningInstallerRepoFallbackUnverified, apiPath)
 	}
 }
 

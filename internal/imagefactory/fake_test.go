@@ -111,6 +111,29 @@ type fakeFactory struct {
 	// did not answer", which are different statements about a schematic.
 	manifestStatus int
 
+	// unreachable is the set of repository names whose manifest requests are
+	// answered with silence rather than with a status.
+	//
+	// A status code would not do, and that is the whole point of the knob. The
+	// distinction under test is between the registry answering and the registry
+	// not answering: a 503 is an answer, classified by registryRefused as the
+	// upstream declining, and a fake that can only produce answers cannot
+	// express "this candidate was never ruled out" at all. That is why the
+	// matrix cell this knob reaches -- candidate 1 silent, candidate 2 2xx --
+	// had never been testable (02-UAT.md G-02-3, third `missing` bullet).
+	//
+	// Be exact about which silence this is. Two shapes are on record and they
+	// are not the same event. 02-04-SUMMARY.md:387 has a throttling Factory
+	// accepting the connection and producing no HTTP response at all (curl exit
+	// code 000); G-02-3's own evidence is the other one, a client timeout
+	// ("resolved in 43.42s -- 30s timeout plus 13.4s"). This knob reproduces the
+	// first. Both surface identically as a non-nil error from probeStatus
+	// (probe.go:80-84) and take the same branch of resolveInstallerRepo, so the
+	// code path under test is the right one and the classification is shared --
+	// but the measured incident is not reproduced here. A timeout-shaped variant
+	// would need a fake that sleeps past the client timeout, which is a 30s test.
+	unreachable map[string]bool
+
 	// forgedID, when non-empty, is the id POST /schematics answers with
 	// instead of the hash of the document. It reproduces the one upstream
 	// state FACT-06 exists to detect: a well-formed 201 carrying an id the
@@ -125,6 +148,7 @@ func newFakeFactory(t *testing.T) *fakeFactory {
 		counts:       map[string]int{},
 		documents:    map[string]string{},
 		known:        map[string]struct{}{},
+		unreachable:  map[string]bool{},
 		versionsJSON: readTestdata(t, "versions.json"),
 		catalogJSON:  readTestdata(t, "extensions-"+catalogVersion+".json"),
 	}
@@ -184,6 +208,28 @@ func (f *fakeFactory) setManifestStatus(status int) {
 	f.manifestStatus = status
 }
 
+// setRepoUnreachable makes every subsequent manifest request for repo be
+// answered with silence: the connection is hijacked and closed with no HTTP
+// response at all.
+//
+// Settable and clearable per repository, and settable mid-test, because that is
+// the only way a re-question can be observed: the cases that matter change one
+// repository's behaviour between two calls to InstallerImage against one fake,
+// in both directions. A constructor argument could express neither.
+func (f *fakeFactory) setRepoUnreachable(repo string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.unreachable[repo] = true
+}
+
+// setRepoReachable undoes setRepoUnreachable, so a repository can go from
+// silent back to answering within one test.
+func (f *fakeFactory) setRepoReachable(repo string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	delete(f.unreachable, repo)
+}
+
 // forgeID makes every subsequent POST /schematics answer with id rather than
 // with the hash of the document it was sent.
 func (f *fakeFactory) forgeID(id string) {
@@ -235,7 +281,27 @@ func (f *fakeFactory) serve(w http.ResponseWriter, r *http.Request) {
 func (f *fakeFactory) serveManifest(w http.ResponseWriter, repo, version string) {
 	f.mu.Lock()
 	forced := f.manifestStatus
+	silent := f.unreachable[repo]
 	f.mu.Unlock()
+
+	// Read under the same mutex as every other knob: the connection teardown
+	// below races the next call's read of the map under -race otherwise.
+	if silent {
+		hijacker, ok := w.(http.Hijacker)
+		if !ok {
+			// Every httptest.Server over HTTP/1.1 supplies one; if this ever
+			// fires, the knob is silently answering instead of staying silent,
+			// which would invert every assertion that depends on it.
+			http.Error(w, "the fake cannot hijack this connection", http.StatusInternalServerError)
+			return
+		}
+		conn, _, err := hijacker.Hijack()
+		if err != nil {
+			return
+		}
+		_ = conn.Close()
+		return
+	}
 
 	if forced != 0 {
 		w.WriteHeader(forced)
