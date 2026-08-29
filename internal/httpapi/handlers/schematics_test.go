@@ -857,6 +857,123 @@ func TestUnreachableProbeRecordsNoReason(t *testing.T) {
 	}
 }
 
+// TestCreateStoresTheArchitectureTheProbeUsed is the second half of G-02-8.
+//
+// The probe verdict is scoped to one architecture -- probe_reason already names
+// it inside its own sentence -- so a record that stores usable without storing
+// the architecture stores a claim whose subject is missing. The UAT names the
+// consequence: an operator cannot detect after the fact that a schematic was
+// probed at an architecture they never chose.
+//
+// arm64 and not amd64 on purpose: createBody posts amd64, so an assertion
+// against amd64 would pass against a hardcoded value or a defaulted one.
+func TestCreateStoresTheArchitectureTheProbeUsed(t *testing.T) {
+	s, _ := schematicServer(t)
+	c := operator(t, s)
+
+	body := createBody("arm-workers", []string{"siderolabs/intel-ucode"}, nil)
+	body["arch"] = string(imagefactory.ArchARM64)
+
+	resp, raw := c.do(http.MethodPost, "/api/v1/schematics", body)
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("got %d, want 201 (body: %s)", resp.StatusCode, raw)
+	}
+
+	var created struct {
+		ID   string `json:"id"`
+		Arch string `json:"arch"`
+	}
+	decodeInto(t, raw, &created)
+	if created.Arch != string(imagefactory.ArchARM64) {
+		t.Errorf("201 body arch = %q, want %q", created.Arch, imagefactory.ArchARM64)
+	}
+
+	resp, raw = c.do(http.MethodGet, "/api/v1/schematics/"+created.ID, nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("GET by id: got %d, want 200 (body: %s)", resp.StatusCode, raw)
+	}
+	var readBack struct {
+		Arch string `json:"arch"`
+	}
+	decodeInto(t, raw, &readBack)
+	if readBack.Arch != string(imagefactory.ArchARM64) {
+		t.Errorf("stored arch = %q, want %q; the record did not keep what the probe used",
+			readBack.Arch, imagefactory.ArchARM64)
+	}
+}
+
+// TestUnansweredProbeStillStoresTheArchitecture separates the two statements
+// that the ProbedAt conditional three lines above the stamp invites merging.
+//
+// ProbedAt records whether an answer arrived; Arch records what the question
+// was about. A probe that could not reach the Factory still asked about an
+// architecture, and withholding it would recreate in miniature the ambiguity
+// G-02-8 is about.
+func TestUnansweredProbeStillStoresTheArchitecture(t *testing.T) {
+	s, f := schematicServer(t)
+	c := operator(t, s)
+
+	f.listButFailToProbe("siderolabs/probe-unreachable")
+
+	body := createBody("probe-unreachable-arm", []string{"siderolabs/probe-unreachable"}, nil)
+	body["arch"] = string(imagefactory.ArchARM64)
+
+	resp, raw := c.do(http.MethodPost, "/api/v1/schematics", body)
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("got %d, want 201 (body: %s)", resp.StatusCode, raw)
+	}
+
+	var got struct {
+		Arch     string    `json:"arch"`
+		ProbedAt time.Time `json:"probed_at"`
+	}
+	decodeInto(t, raw, &got)
+	if !got.ProbedAt.IsZero() {
+		t.Errorf("probed_at = %s; a probe that did not answer has not probed", got.ProbedAt)
+	}
+	if got.Arch != string(imagefactory.ArchARM64) {
+		t.Errorf("arch = %q, want %q; what the probe was asked about is a fact whether or not it answered",
+			got.Arch, imagefactory.ArchARM64)
+	}
+}
+
+// TestTheStoredArchitectureDoesNotDefaultTheAssetsQuery pins FACT-03 against
+// the obvious next thought.
+//
+// Reading rec.Arch as a default for a missing ?arch= is wrong for the reason
+// assetRequest's own comment gives: holzkube is developed on arm64 and targets
+// amd64, so a defaulted architecture is a bug that only ever appears on someone
+// else's machine. The record describes what was probed; the parameter asks what
+// to build. This test is the difference between a comment and a rule.
+func TestTheStoredArchitectureDoesNotDefaultTheAssetsQuery(t *testing.T) {
+	s, _ := schematicServer(t)
+	c := operator(t, s)
+
+	body := createBody("arm-assets", []string{"siderolabs/intel-ucode"}, nil)
+	body["arch"] = string(imagefactory.ArchARM64)
+	resp, raw := c.do(http.MethodPost, "/api/v1/schematics", body)
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("create: got %d, want 201 (body: %s)", resp.StatusCode, raw)
+	}
+	var created struct {
+		ID   string `json:"id"`
+		Arch string `json:"arch"`
+	}
+	decodeInto(t, raw, &created)
+	if created.Arch != string(imagefactory.ArchARM64) {
+		t.Fatalf("arch = %q, want %q -- the premise of this test", created.Arch, imagefactory.ArchARM64)
+	}
+
+	resp, raw = c.do(http.MethodGet, "/api/v1/schematics/"+created.ID+"/assets", nil)
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("assets with no arch: got %d, want 400 (body: %s)", resp.StatusCode, raw)
+	}
+	p := decodeProblemWithErrors(t, raw)
+	if len(p.Errors) == 0 || p.Errors[0].Field != "arch" {
+		t.Errorf("the problem does not name the arch field: %s", raw)
+	}
+}
+
 // TestCreateAgainstAnOutageIsUpstreamAndNotInternal: an Image Factory failure
 // is reported as what it is. internal.unexpected would tell the operator their
 // own installation is broken.
