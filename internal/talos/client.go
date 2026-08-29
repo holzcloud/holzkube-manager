@@ -110,6 +110,15 @@ func NewClusterClient(ctx context.Context, d Dialer, t Target, c Creds) (*Cluste
 		return nil, fmt.Errorf("talos: %s did not answer the liveness probe: %w", t.Machine, err)
 	}
 
+	// The range check rides on the liveness probe rather than on a second RPC:
+	// the probe already had to ask for the version, and a client that proved a
+	// node is answering and then proceeded against an API surface nobody has
+	// tested has spent the probe and learned only half of what it cost.
+	if err := CheckSupportedVersion(version); err != nil {
+		_ = cl.Close()
+		return nil, fmt.Errorf("talos: refusing to build a client for %s: %w", t.Machine, err)
+	}
+
 	slog.Debug("talos node reachable",
 		slog.String("machine", string(t.Machine)),
 		slog.String("transport", d.Kind()),

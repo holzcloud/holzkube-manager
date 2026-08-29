@@ -3,7 +3,9 @@ package talossim
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"sync"
+	"time"
 
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/types/known/anypb"
@@ -38,6 +40,20 @@ type Streamer struct {
 	mu       sync.Mutex
 	messages int
 	produced int
+
+	// unbounded is set by the slow_log_consumer scenario. The emitter already
+	// blocks rather than buffers unconditionally; what the scenario adds is a
+	// sequence that never ends, so a consumer that stops reading is stalling a
+	// producer that would otherwise have finished and closed the stream.
+	unbounded bool
+
+	// blocked counts sends that had to wait for a consumer, and blockedFor
+	// accumulates how long they waited. They are recorded when the wait
+	// begins, not when it ends, because the assertion slow_log_consumer needs
+	// is about a send that is blocked right now -- a record written only on
+	// release would read zero for exactly as long as the stall lasted.
+	blocked    int
+	blockedFor time.Duration
 }
 
 func newStreamer(count int) *Streamer {
@@ -67,6 +83,51 @@ func (e *Streamer) SetMessages(n int) {
 	e.messages = n
 }
 
+// setUnbounded switches the emitter between the bounded default and the
+// endless production slow_log_consumer needs.
+func (e *Streamer) setUnbounded(v bool) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	e.unbounded = v
+}
+
+// BlockedSends reports how many sends have had to wait for a consumer.
+//
+// It is the observation slow_log_consumer is proven by. client.EventsWatch
+// returns nil on Canceled and DeadlineExceeded, so a stalled stream torn down
+// by its caller reads as clean success at the client; the simulator saying "I
+// was blocked" is the evidence that survives that.
+func (e *Streamer) BlockedSends() int {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	return e.blocked
+}
+
+// BlockedFor is how long sends have waited for a consumer in total, counting
+// only waits that have ended.
+func (e *Streamer) BlockedFor() time.Duration {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	return e.blockedFor
+}
+
+func (e *Streamer) beginBlocked() {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	e.blocked++
+}
+
+func (e *Streamer) endBlocked(waited time.Duration) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	e.blockedFor += waited
+}
+
 // Produced reports how many messages the emitter has taken off its generator
 // across every stream opened so far, counting the one currently offered to a
 // consumer that has not taken it yet.
@@ -89,8 +150,21 @@ func (e *Streamer) Produced() int {
 // because a simulated node that streamed forever could only be consumed by a
 // test that already knew when to stop, and that test would be asserting on its
 // own timeout rather than on the node.
+//
+// The slow_log_consumer scenario is the single, deliberate exception, and it
+// is what makes that scenario distinguishable from the baseline at all: a
+// bounded stream against a stalled consumer also blocks, but it blocks having
+// promised to end.
 func (e *Streamer) Open(ctx context.Context, prefix string) <-chan []byte {
-	count := e.Messages()
+	e.mu.Lock()
+	count := e.messages
+	if e.unbounded {
+		// Zero means no bound. The loop below reads it that way rather than
+		// counting to a large number, so "endless" is a property of the code
+		// and not of an arithmetic limit a slow test could reach.
+		count = 0
+	}
+	e.mu.Unlock()
 
 	// Unbuffered. A buffered channel here would let the producer run ahead of
 	// a stalled consumer, which is exactly the unbounded growth this type
@@ -100,7 +174,7 @@ func (e *Streamer) Open(ctx context.Context, prefix string) <-chan []byte {
 	go func() {
 		defer close(ch)
 
-		for i := 1; i <= count; i++ {
+		for i := 1; count == 0 || i <= count; i++ {
 			// Checked before the send as well as inside it. Once the context
 			// is done both arms of the select below are ready and Go picks
 			// between them at random, so without this the emitter could keep
@@ -114,16 +188,36 @@ func (e *Streamer) Open(ctx context.Context, prefix string) <-chan []byte {
 			default:
 			}
 
-			msg := []byte(fmt.Sprintf("%s: message %d of %d\n", prefix, i, count))
+			total := strconv.Itoa(count)
+			if count == 0 {
+				total = "unbounded"
+			}
+			msg := []byte(fmt.Sprintf("%s: message %d of %s\n", prefix, i, total))
 
 			e.mu.Lock()
 			e.produced++
 			e.mu.Unlock()
 
+			// The non-blocking attempt first, so that a send which did not
+			// have to wait is not recorded as a stall. Only when it fails is
+			// the wait entered, and the record is written before the wait
+			// rather than after it -- a stalled stream has to be observable
+			// while it is stalled.
+			select {
+			case ch <- msg:
+				continue
+			default:
+			}
+
+			e.beginBlocked()
+			started := time.Now()
+
 			select {
 			case <-ctx.Done():
+				e.endBlocked(time.Since(started))
 				return
 			case ch <- msg:
+				e.endBlocked(time.Since(started))
 			}
 		}
 	}()

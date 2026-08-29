@@ -305,6 +305,18 @@ func (s *Server) startScenario(sc Scenario) (func(), error) {
 	switch sc.Name {
 	case ScenarioGoSilent:
 		return s.startGoSilent(sc)
+	case ScenarioFlapConnection:
+		return s.startFlapConnection(sc)
+	case ScenarioSlowLogConsumer:
+		return s.startSlowLogConsumer(sc)
+	case ScenarioVersionOutOfSupportedRange:
+		return s.startVersionOutOfSupportedRange(sc)
+	case ScenarioIPChangesOnReboot:
+		// The fault fires on the next Reboot rather than at injection: the
+		// scenario TRANS-07 names is an address that changes across a reboot,
+		// not an address that changes when a test asks it to. The Reboot
+		// handler consults activeScenario.
+		return func() {}, nil
 	default:
 		return func() {}, nil
 	}
