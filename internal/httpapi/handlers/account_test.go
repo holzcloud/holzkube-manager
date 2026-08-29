@@ -22,6 +22,7 @@ import (
 	"github.com/holzcloud/holzkube/internal/httpapi/handlers"
 	"github.com/holzcloud/holzkube/internal/imagefactory"
 	"github.com/holzcloud/holzkube/internal/store/fsstore"
+	"github.com/holzcloud/holzkube/internal/talos"
 )
 
 const (
@@ -42,17 +43,31 @@ type server struct {
 
 func newServer(t *testing.T, sudoWindow time.Duration) *server {
 	t.Helper()
-	return newServerWithFactory(t, sudoWindow, nil)
+	return newServerWith(t, sudoWindow, nil, talos.Mode{})
 }
 
 // newServerWithFactory is newServer with an Image Factory client wired in.
+func newServerWithFactory(t *testing.T, sudoWindow time.Duration, factory *imagefactory.Client) *server {
+	t.Helper()
+	return newServerWith(t, sudoWindow, factory, talos.Mode{})
+}
+
+// newServerInMode is newServer with the process's transport mode set, so the
+// endpoint that reports dry-run can be asserted in both states rather than in
+// the one the harness happened to build.
+func newServerInMode(t *testing.T, mode talos.Mode) *server {
+	t.Helper()
+	return newServerWith(t, 5*time.Minute, nil, mode)
+}
+
+// newServerWith builds the whole API surface.
 //
-// The Factory is a parameter rather than a field assigned afterwards for the
-// reason the composition root states: Deps is copied by value into each
+// Every dependency is a parameter rather than a field assigned afterwards, for
+// the reason the composition root states: Deps is copied by value into each
 // …Routes(deps) call, so a field set after the literal is the zero value inside
 // every handler closure, with no compile error. A test harness that got that
 // wrong would prove the routes exist and nothing about whether they work.
-func newServerWithFactory(t *testing.T, sudoWindow time.Duration, factory *imagefactory.Client) *server {
+func newServerWith(t *testing.T, sudoWindow time.Duration, factory *imagefactory.Client, mode talos.Mode) *server {
 	t.Helper()
 
 	dir := t.TempDir()
@@ -85,6 +100,7 @@ func newServerWithFactory(t *testing.T, sudoWindow time.Duration, factory *image
 		SudoWindow: sudoWindow,
 		AuditChain: httpapi.ChainStatus{OK: true},
 		Factory:    factory,
+		TalosMode:  mode,
 	}
 	deps.Routes = slices.Concat(
 		handlers.SystemRoutes(deps),
