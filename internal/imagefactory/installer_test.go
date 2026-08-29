@@ -827,17 +827,33 @@ func assertProvenInstallerEntry(
 // Both resolution paths hold no lock while they ask the registry, so two
 // requests on one key can be in flight with observations made a full client
 // timeout apart. When the slower one's write is unconditional it lands on top of
-// the faster one's, and because "slower" here means "the one that did not get an
-// answer", the entry left behind is the less certain of the two. The two callers
-// are then served two different repository names for one schematic at one
-// version, in one process, at one moment -- which is G-02-3 verbatim, and
-// InstallerImage's doc comment records what the wrong name costs: an upgrade
-// that reports success and drops every system extension the node was built with.
+// the faster one's, and the entry left behind is the less certain of the two --
+// so the cache itself ends up holding a provisional name after a concurrent
+// resolution had already proven the preferred one. That is the lost update this
+// test pins, and InstallerImage's doc comment records what a wrong name costs:
+// an upgrade that reports success and drops every system extension the node was
+// built with.
 //
 // The interleaving is forced rather than hoped for. The fake hands the silence
 // to whichever request arrives first and delays it, so the goroutine holding the
 // stale observation is always the one that writes last. Run under -race, this
 // also covers the map access itself.
+//
+// Two things this test does NOT establish, stated here so nobody reads more into
+// a green run than it earns:
+//
+// First, it forces exactly one of the two orderings. The mirror -- provisional
+// writes first and is served its own entry, proven overwrites afterwards -- is
+// untested here and does hand two concurrent callers two different references.
+// storeInstallerRepo's doc comment argues why that is disclosed rather than
+// silent, and why closing it needs single-flight (WR-02) rather than a write
+// guard.
+//
+// Second, "slower" here is the fake's doing, not a property of the code. A
+// provisional resolution is not generally the slow one: resolveInstallerRepo
+// pushes a candidate into unresolved on any transport error and on any non-2xx
+// that is not a refusal, so a reset, a 429 or a 503 all produce a provisional
+// answer instantly.
 func TestInstallerImageNeverRevertsAProvenNameUnderConcurrentResolution(t *testing.T) {
 	// The cold path: nothing cached, and the resolution that had to fall back
 	// finishes last.
