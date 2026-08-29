@@ -620,8 +620,30 @@ against that divergence (FACT-04).**
 - `arch` is a **required** parameter with no default. holzkube is developed on
   `arm64` and targets `amd64`; a defaulted architecture is a bug that only ever
   appears on someone else's machine (FACT-03).
-- `secureboot=true` suffixes the platform-architecture segment of every URL and
-  nothing else.
+- `secureboot=true` suffixes the platform-architecture segment of every URL
+  **and selects the installer repository**. The SecureBoot installer is a
+  different image — same schematic, same version, different digest — chosen by
+  repository name alone, and Talos requires it for a SecureBoot install: it
+  carries the signed UKI and systemd-boot, and there is no machine-config flag
+  that substitutes for it. A SecureBoot request therefore answers with
+  `metal-installer-secureboot` (or the legacy `installer-secureboot`), and the
+  five references in one response are all SecureBoot or all not:
+
+  ```json
+  {
+    "iso": "https://factory.talos.dev/image/<id>/v1.13.9/metal-amd64-secureboot.iso",
+    "pxe": "https://factory.talos.dev/pxe/<id>/v1.13.9/metal-amd64-secureboot",
+    "disk_image": "https://factory.talos.dev/image/<id>/v1.13.9/metal-amd64-secureboot.raw.zst",
+    "cmdline": "https://factory.talos.dev/image/<id>/v1.13.9/cmdline-metal-amd64-secureboot",
+    "installer": "factory.talos.dev/metal-installer-secureboot/<id>:v1.13.9"
+  }
+  ```
+
+  If neither SecureBoot name resolves the route answers `502` with **no
+  installer reference**, exactly as it does when neither ordinary name resolves.
+  It does **not** fall back to the ordinary installer: a SecureBoot ISO paired
+  with an installer that does not produce a SecureBoot node is the drift the
+  resolution exists to prevent.
 - **`installer` is resolved against the registry, never assembled.** The
   repository name is version-dependent: for part of the supported range only the
   legacy `installer` name answers, for the rest the platform-prefixed
@@ -646,6 +668,24 @@ the taxonomy above:
 A schematic the Factory refuses to build is `upstream.factory-rejected`; a
 Factory that did not answer while probing is `upstream.factory-unavailable`.
 Merging them would send an operator to fix a schematic that is not broken.
+
+**Which status is which is fixed, and it is the same rule everywhere holzkube
+reads a Factory or registry answer** — the ISO probe and the installer manifest
+resolution included:
+
+| Status | Code | Why |
+|---|---|---|
+| `400`, `404` | `upstream.factory-rejected` | The Factory answered *about this schematic*. `404` is "no manifest under that name"; `400` is what it returns when an extension the schematic names is not available at the requested version. Both are reproducible and neither changes on a retry. |
+| `401`, `403`, `429`, every `5xx`, no answer at all | `upstream.factory-unavailable` | The Factory declined to answer *us*, or failed to. An authentication challenge, a policy refusal, a rate limit and an outage say nothing about the schematic. |
+
+**A rate limit is deliberately on the retryable side.** `factory.talos.dev`
+throttles, and has been observed doing so without an HTTP response at all. The
+probe verdict is written once, when the schematic is created, and there is no
+re-probe path — so a `429` recorded as a refusal becomes a permanent,
+unclearable accusation against a schematic nothing ever found fault with. The
+cost of the other side of that trade is that more records finish creation with
+`probed_at` unset, which is `never probed` and is what the contract already
+requires a client not to merge with `probed and refused`.
 
 **A Factory that assigns an id holzkube did not compute is also
 `upstream.factory-rejected`, and `POST /api/v1/schematics` still stores the
