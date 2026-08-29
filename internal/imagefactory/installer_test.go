@@ -1,6 +1,7 @@
 package imagefactory_test
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"strings"
@@ -897,4 +898,64 @@ func TestInstallerImageNeverRevertsAProvenNameUnderConcurrentResolution(t *testi
 				"a re-question must ask only the candidates that were never ruled out", n)
 		}
 	})
+}
+
+// TestInstallerImageDoesNotReStampAReQuestionItsCallerAbandoned separates the
+// registry being silent from nobody having listened.
+//
+// Every error out of probeStatus is wrapped as ErrUpstreamUnavailable, so a
+// cancelled inbound request -- the operator closed the asset panel, the browser
+// aborted the fetch -- arrives at the re-question's default branch looking
+// exactly like a throttled registry. Re-stamping there moves the next
+// re-question a full interval out for a question that was never asked, and a UI
+// that retries can keep a provisional entry from ever being promoted. The whole
+// point of the entry is that the preferred name gets asked again.
+func TestInstallerImageDoesNotReStampAReQuestionItsCallerAbandoned(t *testing.T) {
+	fake := newFakeFactory(t)
+	fake.setRepoUnreachable("metal-installer")
+	client := newClientWithRetryInterval(t, fake.URL, 0)
+	req := installerRequest(installerModernVersion)
+
+	if _, warnings, err := client.InstallerImage(t.Context(), req); err != nil || len(warnings) != 1 {
+		t.Fatalf("seeding the provisional entry: err = %v, warnings = %+v", err, warnings)
+	}
+	before, ok := client.InstallerRepoEntryForTest(req)
+	if !ok {
+		t.Fatal("the provisional answer was not remembered at all")
+	}
+	asked := fake.count("GET /v2/metal-installer/manifests/" + installerModernVersion)
+
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+
+	// Prohibition #3 still holds for a cancelled caller: the retained answer is
+	// served with its warning rather than becoming an error.
+	ref, warnings, err := client.InstallerImage(ctx, req)
+	if err != nil {
+		t.Fatalf("a cancelled re-question returned an error rather than the answer already in "+
+			"hand: %v", err)
+	}
+	if !strings.Contains(ref, "/installer/") {
+		t.Errorf("ref = %q, want the retained legacy reference", ref)
+	}
+	if len(warnings) != 1 || warnings[0].Code != imagefactory.WarningInstallerRepoFallbackUnverified {
+		t.Errorf("the retained answer lost its warning: %+v", warnings)
+	}
+
+	after, ok := client.InstallerRepoEntryForTest(req)
+	if !ok {
+		t.Fatal("the cancelled re-question evicted the entry")
+	}
+	if !after.WrittenAt.Equal(before.WrittenAt) {
+		t.Errorf("the entry was re-stamped from %s to %s by a request that was cancelled before "+
+			"the registry answered; the cadence must only move when something was actually "+
+			"learned, or a retrying UI can hold a provisional entry away from promotion",
+			before.WrittenAt, after.WrittenAt)
+	}
+	// The other half of the same statement: the registry was not asked, so
+	// there is nothing for the timestamp to have recorded.
+	if n := fake.count("GET /v2/metal-installer/manifests/" + installerModernVersion); n != asked {
+		t.Errorf("the never-ruled-out candidate was asked %d times, want %d -- a cancelled "+
+			"context does not reach the registry", n, asked)
+	}
 }

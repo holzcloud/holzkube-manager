@@ -372,6 +372,33 @@ func (c *Client) requestionInstallerRepo(ctx context.Context, r AssetRequest, ke
 		next = installerRepoEntry{repo: entry.repo, at: time.Now()}
 
 	default:
+		// Nothing was heard. Before reading that as the registry's silence,
+		// rule out the one case where it is nobody's silence but our caller's.
+		//
+		// probeStatus wraps every error from http.Client.Do as
+		// ErrUpstreamUnavailable, including the one produced when the inbound
+		// request's context is cancelled -- an operator closing the asset
+		// panel, a browser aborting the fetch, the handler returning while this
+		// was still in flight. Re-stamping on that resets the cadence by a full
+		// interval on the strength of a question the registry was never asked,
+		// and a UI that retries or an operator who reopens the dialog can hold
+		// a provisional entry away from promotion indefinitely -- which defeats
+		// the mechanism the entry exists for. Nothing was learned, so nothing
+		// is re-stamped and nothing is written, and the next request asks again
+		// immediately. The answer already in hand is still served: a caller
+		// going away is not a reason to refuse the one that is still here.
+		//
+		// The discriminator is the caller's context and deliberately not the
+		// error. This client's own budget is http.Client.Timeout, whose expiry
+		// satisfies errors.Is(err, context.DeadlineExceeded) exactly as a
+		// cancelled caller does -- and that expiry is a real observation of a
+		// silent registry, which is the observation this branch exists to
+		// record. ctx.Err() is non-nil only when the caller went away, so it
+		// tells the two apart where the error cannot.
+		if ctx.Err() != nil {
+			return entry
+		}
+
 		// Silent again, which is exactly what a throttling factory.talos.dev
 		// produces. Keep the entry, keep its warning, and re-stamp it.
 		//
