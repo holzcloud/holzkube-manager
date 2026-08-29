@@ -45,15 +45,36 @@ const (
 // chose for themselves and neither of them a credential. Everything else --
 // passwords on setup, login and password change, and every field of every
 // action added later -- is redacted until listed here on purpose.
+//
+// The test for whether a field belongs here is not "is it interesting" but "is
+// it an identifier the operator chose, and is it certainly not a credential".
+// schematic.create is the case that makes the difference concrete. Its body
+// carries kernel arguments and META values, and the Image Factory itself
+// refuses to enumerate schematics precisely because those may hold secrets. D-16
+// keeps every rotated audit file forever and defines no deletion path, so a
+// kernel argument written in clear here is written in clear permanently -- there
+// is no migration and no redaction pass that could take it back without breaking
+// the hash chain. So schematic.create permits the operator's own label and the
+// Talos version, and the two fields that could carry a secret are left to the
+// fail-closed default along with everything else.
 var allowlist = map[string][]string{
 	"setup.create": {"username"},
 	"auth.login":   {"username"},
 
+	// The schematic's label and the version it targets: an operator-chosen
+	// name and a public version string. Deliberately NOT kernel_args, meta,
+	// extensions or canonical -- see the paragraph above.
+	"schematic.create": {"name", "talos_version"},
+
 	// Listed with nothing permitted, so the table shows the full set of
-	// phase-1 mutations rather than leaving them to the default.
+	// mutations rather than leaving any of them to the default.
 	"auth.logout":      {},
 	"auth.sudo":        {},
 	"account.password": {},
+
+	// A deletion carries its id in the path, not in the body: there is nothing
+	// here worth writing in clear.
+	"schematic.delete": {},
 }
 
 // Params returns the parameters as they may be written to the log.

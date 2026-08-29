@@ -48,3 +48,22 @@ func brokenReason(table map[string]string, version string) (string, bool) {
 	reason, ok := table[version]
 	return reason, ok
 }
+
+// BrokenIn returns the subset of versions that are known broken, each mapped to
+// the reason it is listed.
+//
+// The result is never nil, so a JSON encoding of "nothing is currently known
+// broken" is {} rather than null -- an empty object says the server checked and
+// found nothing, a null says nothing at all. The projection lives here rather
+// than in the caller because it is a statement about the curated table, and a
+// handler that looped over versions itself would be a second place that has to
+// be found when the table's shape changes.
+func BrokenIn(versions []string) map[string]string {
+	broken := make(map[string]string, 0)
+	for _, v := range versions {
+		if reason, ok := BrokenReason(v); ok {
+			broken[v] = reason
+		}
+	}
+	return broken
+}

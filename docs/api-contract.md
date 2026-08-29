@@ -368,10 +368,22 @@ A wave-2 plan adds a route **without touching `router.go`**:
    function.
 2. If the file is new, add its `…Routes(deps)` call to the `slices.Concat` in
    `cmd/holzkubed/main.go` — one line.
+3. If the handler needs a dependency the composition root already builds, add
+   **one field** to `Deps` in `router.go`, with a doc comment in the style every
+   other field there has. That field is the third and last permitted `router.go`
+   edit. A `Route` entry still belongs in the handler file and never in
+   `router.go`.
 
-`router.go` owns the `Route` type, the mounting and the middleware wiring, and
-is not edited again by phase-1 plans. Two plans adding routes never touch the
-same lines.
+Set the new dependency **inside** the `httpapi.Deps{…}` literal in
+`cmd/holzkubed/main.go`, never afterwards. `Deps` is copied by value into every
+`…Routes(deps)` call, so a field assigned after the literal is the zero value
+inside each handler closure — a nil dependency with no compile error and no
+failure until the first request.
+
+`router.go` owns the `Route` type, the mounting and the middleware wiring. After
+phase 1 it is edited only to add a `Deps` field: nothing adds a `Route` literal,
+a mounting change or a middleware change there. Two plans adding routes never
+touch the same lines.
 
 **Every mutating route must set `Destructive` deliberately, and `Action`
 always.**
