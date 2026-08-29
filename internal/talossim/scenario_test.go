@@ -2,16 +2,23 @@ package talossim_test
 
 import (
 	"context"
+	"errors"
+	"net"
 	"os"
 	"regexp"
 	"slices"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
+	"github.com/siderolabs/talos/pkg/machinery/api/common"
+
+	"github.com/holzcloud/holzkube/internal/model"
+	"github.com/holzcloud/holzkube/internal/talos"
 	"github.com/holzcloud/holzkube/internal/talossim"
 )
 
@@ -286,4 +293,354 @@ func difference(a, b []string) []string {
 	}
 	slices.Sort(out)
 	return out
+}
+
+// TestScenarioGoSilent asserts the client's own deadline is what fires.
+//
+// The property is not "the call fails" -- a call against a silent node fails
+// either way, eventually. It is that the failure arrives at the caller's
+// deadline and not at the node's silence duration, which is the difference
+// between a bounded transport and one that inherits whatever the far end feels
+// like. The assertion is therefore a timing bound, not an error check, which is
+// also the only kind of assertion the EventsWatch nil-on-EOF behaviour leaves
+// available.
+func TestScenarioGoSilent(t *testing.T) {
+	t.Parallel()
+
+	const silence = 8 * time.Second
+	const callDeadline = 400 * time.Millisecond
+
+	sim := newSim(t, talossim.Options{Hostname: "silent-node"})
+	cl := newMachineryClient(t, sim)
+
+	// A second node, never injected. The expected-client column says a
+	// concurrent call to another target is unaffected; a silent node that took
+	// the whole process down with it would satisfy every other assertion here.
+	other := newSim(t, talossim.Options{Hostname: "talkative-node"})
+	otherClient := newMachineryClient(t, other)
+
+	restore, err := sim.Inject(talossim.Scenario{Name: talossim.ScenarioGoSilent, Duration: silence})
+	if err != nil {
+		t.Fatalf("Inject go_silent: %v", err)
+	}
+	defer restore()
+
+	ctx, cancel := shortContext(t, callDeadline)
+	defer cancel()
+
+	started := time.Now()
+	_, err = cl.Version(ctx)
+	elapsed := time.Since(started)
+
+	if status.Code(err) != codes.DeadlineExceeded {
+		t.Fatalf("Version against a silent node = %v (code %s), want DeadlineExceeded", err, status.Code(err))
+	}
+	if elapsed >= silence {
+		t.Errorf("the call took %s: it waited out the node's %s of silence instead of its own deadline",
+			elapsed, silence)
+	}
+	if elapsed > callDeadline+2*time.Second {
+		t.Errorf("the call took %s, want its own %s deadline plus a tolerance", elapsed, callDeadline)
+	}
+
+	if _, err := otherClient.Version(testContext(t)); err != nil {
+		t.Errorf("a concurrent call to a second, uninjected node failed: %v", err)
+	}
+}
+
+// TestScenarioFlapConnection asserts on the simulator's transition counter.
+//
+// Asserting that a call failed would be asserting on a race between the
+// client's timing and the flap cycle, and it would pass just as happily
+// against a scenario that did nothing but was slow. The counter is a fact
+// about the listener.
+func TestScenarioFlapConnection(t *testing.T) {
+	t.Parallel()
+
+	sim := newSim(t, talossim.Options{Hostname: "flapping-node"})
+
+	if got := sim.ListenerTransitions(); got != 0 {
+		t.Fatalf("ListenerTransitions() = %d before injection, want 0", got)
+	}
+
+	before := sim.Addr()
+
+	restore, err := sim.Inject(talossim.Scenario{
+		Name:  talossim.ScenarioFlapConnection,
+		Cycle: 50 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatalf("Inject flap_connection: %v", err)
+	}
+
+	deadline := time.Now().Add(5 * time.Second)
+	for sim.ListenerTransitions() < 4 && time.Now().Before(deadline) {
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	if got := sim.ListenerTransitions(); got < 4 {
+		t.Errorf("ListenerTransitions() = %d after two cycles, want at least 4 "+
+			"(two closes and two reopens)", got)
+	}
+
+	restore()
+
+	// The node comes back on the address it had. A flap that moved the node
+	// would be ip_changes_on_reboot, which is a different scenario with a
+	// different expected client behaviour.
+	if got := sim.Addr(); got != before {
+		t.Errorf("Addr() = %q after flapping, want the unchanged %q", got, before)
+	}
+	if _, err := newMachineryClient(t, sim).Version(testContext(t)); err != nil {
+		t.Errorf("Version after the flap was cleared: %v; the node did not come back", err)
+	}
+}
+
+// TestFlappingNodeClosesCleanly is the T-02-16 half: a flapper must not
+// outlive the node it flaps.
+//
+// The listener is opened and closed from a goroutine the injection owns. If
+// Close did not drain it, the goroutine could re-listen after the gRPC server
+// had stopped and hold the port for the rest of the test binary -- a leak that
+// only shows up as an unrelated test failing to bind.
+func TestFlappingNodeClosesCleanly(t *testing.T) {
+	t.Parallel()
+
+	sim, err := talossim.New(talossim.Options{Hostname: "leaky-node"})
+	if err != nil {
+		t.Fatalf("talossim.New: %v", err)
+	}
+
+	if _, err := sim.Inject(talossim.Scenario{
+		Name:  talossim.ScenarioFlapConnection,
+		Cycle: 20 * time.Millisecond,
+	}); err != nil {
+		t.Fatalf("Inject flap_connection: %v", err)
+	}
+
+	addr := sim.Addr()
+	time.Sleep(100 * time.Millisecond)
+
+	// Closed without clearing the scenario first, which is the case that
+	// matters: a test that fails mid-flap runs its deferred Close and nothing
+	// else.
+	if err := sim.Close(); err != nil {
+		t.Fatalf("Close with a flap still injected: %v", err)
+	}
+
+	// Whatever the flapper was doing, nothing is listening now. Given time for
+	// any in-flight reopen, the address must refuse.
+	time.Sleep(100 * time.Millisecond)
+	assertRefused(t, addr)
+}
+
+// TestScenarioSlowLogConsumer asserts the simulator observed a blocked send,
+// that the production it is blocking never ends, and that cancelling the
+// caller tears the stream down promptly.
+//
+// The blocked-send record alone is not enough, and finding that out was the
+// point of running this test against a deliberately disabled implementation: a
+// bounded stream against a consumer that stops reading blocks too, so the
+// record is green with or without the scenario. What the scenario adds is that
+// the sequence has no end -- the consumer is not merely slow, it is behind a
+// producer that will never finish -- and that is what the message count below
+// pins. The client's error is deliberately not the assertion: the stream ends
+// in Canceled, which machinery's own EventsWatch reports as a nil error.
+func TestScenarioSlowLogConsumer(t *testing.T) {
+	t.Parallel()
+
+	const configured = 4
+
+	sim := newSim(t, talossim.Options{Hostname: "slow-consumer-node", StreamMessages: configured})
+	cl := newMachineryClient(t, sim)
+
+	restore, err := sim.Inject(talossim.Scenario{Name: talossim.ScenarioSlowLogConsumer})
+	if err != nil {
+		t.Fatalf("Inject slow_log_consumer: %v", err)
+	}
+	defer restore()
+
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+
+	stream, err := cl.Logs(ctx, "system", common.ContainerDriver_CONTAINERD, "apid", true, -1)
+	if err != nil {
+		t.Fatalf("Logs: %v", err)
+	}
+
+	// Consume a little, then stop. The emitter keeps producing, so the next
+	// send has nobody to hand its message to.
+	for i := range 2 {
+		if _, err := stream.Recv(); err != nil {
+			t.Fatalf("Recv %d: %v", i, err)
+		}
+	}
+
+	deadline := time.Now().Add(5 * time.Second)
+	for sim.Streams().BlockedSends() == 0 && time.Now().Before(deadline) {
+		time.Sleep(20 * time.Millisecond)
+	}
+	if got := sim.Streams().BlockedSends(); got == 0 {
+		t.Fatal("the simulator never observed a blocked send against a consumer that stopped reading")
+	}
+
+	// Past the configured bound. Without the scenario the stream would have
+	// ended at message four; a Recv that returns io.EOF here is a
+	// slow_log_consumer that is registered, documented and inert.
+	for received := 2; received < configured+4; received++ {
+		if _, err := stream.Recv(); err != nil {
+			t.Fatalf("the stream ended after %d messages (%v); slow_log_consumer did not make "+
+				"production endless, so it is indistinguishable from an ordinary bounded stream",
+				received, err)
+		}
+	}
+
+	// Teardown within a second of the caller giving up. A stream that outlived
+	// its caller would hold the emitter goroutine for the life of the process.
+	torn := make(chan error, 1)
+	go func() {
+		for {
+			if _, err := stream.Recv(); err != nil {
+				torn <- err
+				return
+			}
+		}
+	}()
+
+	cancel()
+
+	select {
+	case <-torn:
+	case <-time.After(time.Second):
+		t.Fatal("the stream was still open a second after the caller cancelled")
+	}
+}
+
+// TestScenarioIPChangesOnReboot asserts the node moved and left the old
+// address refusing.
+//
+// Refusing rather than timing out is the whole point: they are different
+// client-observable outcomes, and only the refusing one models a machine that
+// gave its address back. A black hole would be go_silent, which has a
+// different expected client behaviour.
+func TestScenarioIPChangesOnReboot(t *testing.T) {
+	t.Parallel()
+
+	sim := newSim(t, talossim.Options{Hostname: "moving-node"})
+	cl := newMachineryClient(t, sim)
+
+	restore, err := sim.Inject(talossim.Scenario{Name: talossim.ScenarioIPChangesOnReboot})
+	if err != nil {
+		t.Fatalf("Inject ip_changes_on_reboot: %v", err)
+	}
+	defer restore()
+
+	before := sim.Addr()
+
+	if _, err := cl.RebootWithResponse(testContext(t)); err != nil {
+		t.Fatalf("Reboot: %v", err)
+	}
+
+	after := sim.Addr()
+	if after == before {
+		t.Fatalf("Addr() is still %q after a reboot under ip_changes_on_reboot", after)
+	}
+
+	history := sim.AddressHistory()
+	if len(history) < 2 || history[0] != before || history[len(history)-1] != after {
+		t.Errorf("AddressHistory() = %v, want it to record %q then %q", history, before, after)
+	}
+
+	assertRefused(t, before)
+
+	// The node is listening at its new address, so the change is a move and
+	// not an outage. The assertion is a TCP accept rather than an RPC because
+	// the in-process dialer these tests use bypasses the loopback socket
+	// entirely -- asking it for a Version would answer from the pipe and prove
+	// nothing about where the node is bound.
+	assertAccepts(t, after)
+}
+
+// TestScenarioVersionOutOfRange asserts NewClusterClient refuses a node
+// outside the supported window, and names both halves of the reason.
+//
+// An error that says only "unsupported" leaves an operator with a node that
+// will not connect and no way to tell whether to upgrade it, downgrade it or
+// upgrade holzkube.
+func TestScenarioVersionOutOfRange(t *testing.T) {
+	t.Parallel()
+
+	const reported = "v1.15.0"
+
+	sim := newSim(t, talossim.Options{Hostname: "future-node", TalosVersion: "v1.13.9"})
+
+	restore, err := sim.Inject(talossim.Scenario{
+		Name:    talossim.ScenarioVersionOutOfSupportedRange,
+		Version: reported,
+	})
+	if err != nil {
+		t.Fatalf("Inject version_out_of_supported_range: %v", err)
+	}
+
+	target := talos.Target{
+		Cluster: model.ClusterID("sim"),
+		Machine: model.MachineID("00000000-0000-0000-0000-0000000000cc"),
+		Addr:    sim.Host(),
+	}
+
+	cc, err := talos.NewClusterClient(testContext(t), sim.Dialer(), target, sim.ClientCreds())
+	if err == nil {
+		_ = cc.Close()
+		t.Fatal("NewClusterClient accepted a node reporting a version outside the supported range")
+	}
+	if !errors.Is(err, talos.ErrUnsupportedVersion) {
+		t.Errorf("error %v does not satisfy errors.Is(err, talos.ErrUnsupportedVersion)", err)
+	}
+	for _, want := range []string{reported, talos.MinSupportedVersion, talos.MaxSupportedVersion} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q does not name %q", err, want)
+		}
+	}
+
+	// Cleared, the same node is acceptable again -- the refusal was about the
+	// version and not about the node.
+	restore()
+
+	cc, err = talos.NewClusterClient(testContext(t), sim.Dialer(), target, sim.ClientCreds())
+	if err != nil {
+		t.Fatalf("NewClusterClient after the scenario was cleared: %v", err)
+	}
+	if err := cc.Close(); err != nil {
+		t.Errorf("Close: %v", err)
+	}
+}
+
+// assertAccepts asserts that something is listening at addr.
+func assertAccepts(t *testing.T, addr string) {
+	t.Helper()
+
+	conn, err := net.DialTimeout("tcp", addr, 3*time.Second)
+	if err != nil {
+		t.Fatalf("dial to %s: %v; the node is not listening where it says it is", addr, err)
+	}
+	if err := conn.Close(); err != nil {
+		t.Errorf("close the probe connection: %v", err)
+	}
+}
+
+// assertRefused asserts that a dial to addr is actively refused rather than
+// hanging until a timeout.
+func assertRefused(t *testing.T, addr string) {
+	t.Helper()
+
+	started := time.Now()
+	conn, err := net.DialTimeout("tcp", addr, 3*time.Second)
+	if err == nil {
+		_ = conn.Close()
+		t.Fatalf("a dial to the abandoned address %s succeeded", addr)
+	}
+	if !errors.Is(err, syscall.ECONNREFUSED) {
+		t.Errorf("dial to %s failed with %v after %s, want a connection refused: a released port "+
+			"refuses, and only a black hole times out", addr, err, time.Since(started))
+	}
 }
