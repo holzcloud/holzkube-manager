@@ -236,9 +236,24 @@ export interface AssetQuery {
   secureboot?: boolean
 }
 
-/** The warning codes the server emits, as constants a component can key on. */
+/**
+ * The warning codes the server emits, as constants a component can key on.
+ *
+ * Two families, and the prefix says which. A `schematic.` code is a property of
+ * the stored schematic and can be recomputed from the record at any time. An
+ * `installer.` code is a fact about one resolution attempt on one request —
+ * nothing persists it, so it only ever arrives on the response it describes.
+ */
 export const WARNING_INSTALLER_IGNORES_KERNEL_ARGS = 'schematic.installer-ignores-kernel-args'
 export const WARNING_INSTALLER_IGNORES_META = 'schematic.installer-ignores-meta'
+
+/**
+ * The installer reference was reached past a candidate repository that never
+ * answered, so the preferred name was unheard rather than ruled out. The
+ * reference is usable but provisional, and asking again may produce a different
+ * one.
+ */
+export const WARNING_INSTALLER_REPO_FALLBACK_UNVERIFIED = 'installer.repo-fallback-unverified'
 
 export interface AuditQuery {
   from?: string

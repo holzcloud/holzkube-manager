@@ -102,7 +102,20 @@ type Client struct {
 	// installerRepos caches the resolved installer repository name, keyed by
 	// platform, Talos version and the SecureBoot selection. Populated and read
 	// only by installer.go, where the reasoning for the key lives.
-	installerRepos map[string]string
+	//
+	// The value carries provenance, not just a name. An entry whose preferred
+	// candidate answered is proven and is served forever; an entry reached past
+	// a candidate that never answered is provisional, carries the warning that
+	// says so, remembers which candidates were never ruled out, and is
+	// re-questioned once it is older than installerRetry. installer.go owns
+	// every one of those rules.
+	installerRepos map[string]installerRepoEntry
+
+	// installerRetry is how long a *provisional* installer-repo entry is served
+	// before the candidates it never ruled out are asked again. Zero means
+	// re-question on every call. It bounds no request and moves no deadline;
+	// see installerRepoRetryInterval in installer.go.
+	installerRetry time.Duration
 }
 
 // Option configures a Client. Options are applied in the order given.
@@ -138,6 +151,27 @@ func WithTimeout(d time.Duration) Option {
 	}
 }
 
+// WithInstallerRepoRetryInterval sets how long a provisional installer
+// repository answer -- one reached past a candidate that never answered -- is
+// served before that candidate is asked again.
+//
+// Zero is legal here and means "re-question on every call", which is what lets
+// a test drive both branches deterministically without a fake clock. That is
+// the one difference from WithTimeout, where zero would mean "no timeout" and
+// is therefore refused. A negative interval is not a shorter one; it is a
+// mistake, and it is rejected in the register WithTimeout already uses.
+//
+// Production passes nothing and gets installerRepoRetryInterval.
+func WithInstallerRepoRetryInterval(d time.Duration) Option {
+	return func(c *Client) error {
+		if d < 0 {
+			return fmt.Errorf("imagefactory: the installer repository retry interval must not be negative, got %s", d)
+		}
+		c.installerRetry = d
+		return nil
+	}
+}
+
 // New returns a client for the Factory at baseURL.
 //
 // TLS verification is never disabled and there is no option to disable it: the
@@ -162,7 +196,8 @@ func New(baseURL string, opts ...Option) (*Client, error) {
 			Timeout:       DefaultTimeout,
 			CheckRedirect: refuseCrossHostRedirect,
 		},
-		installerRepos: map[string]string{},
+		installerRepos: map[string]installerRepoEntry{},
+		installerRetry: installerRepoRetryInterval,
 	}
 	for _, opt := range opts {
 		if err := opt(c); err != nil {

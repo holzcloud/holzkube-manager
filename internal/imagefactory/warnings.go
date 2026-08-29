@@ -6,6 +6,23 @@ package imagefactory
 // because they are identifiers other components key on: plan 02-06 renders
 // them, and the audit allowlist references them. A literal repeated at three
 // call sites is a typo waiting to make one of them silently stop matching.
+//
+// There are two families and the prefix says which, because the two make
+// different kinds of statement:
+//
+//   - "schematic." is a statement about a stored schematic. Warnings, below,
+//     recomputes these from the record at any time -- they are properties of
+//     the thing itself and outlive the request that produced them.
+//   - "installer." is a statement about one installer-repository resolution
+//     attempt: how a name was obtained on this request. No record holds it and
+//     nothing can recompute it later, which is exactly why it has to ride on
+//     the response that carries the name.
+//
+// Do not go looking for the second family in Warnings. It is not there and it
+// cannot be: Warnings takes a Schematic and this fact is not about one.
+// installer.go emits it, alongside the reference the fact is about.
+// TestWarningsCodesAreNamespaced holds the prefix set, so a code added later
+// has to choose a family rather than inherit one.
 const (
 	// WarningInstallerIgnoresKernelArgs reports that a schematic's kernel
 	// arguments reach the ISO and the disk image but not the installed system.
@@ -13,6 +30,26 @@ const (
 
 	// WarningInstallerIgnoresMeta reports the same asymmetry for META values.
 	WarningInstallerIgnoresMeta = "schematic.installer-ignores-meta"
+
+	// WarningInstallerRepoFallbackUnverified reports that the installer
+	// repository name in a reference was reached past a candidate that never
+	// answered, so the preferred name was unheard rather than ruled out.
+	//
+	// This is a warning and not an error, and the distinction is the whole of
+	// G-02-3. The fallback is deliberate: 02-04-PLAN.md:157-161 specifies it for
+	// a connection failure, and 02-04-SUMMARY.md:385 records factory.talos.dev
+	// throttling without producing an HTTP response at all. Refusing to answer
+	// here would leave an operator unable to read their own asset URLs because a
+	// third party was busy -- a worse outcome than a labelled answer, and one
+	// nothing on screen would explain.
+	//
+	// What was wrong before was not the fallback. It was that the fully formed
+	// transport error was discarded at the moment a later candidate answered,
+	// and the resulting name was then cached with no provenance and no expiry.
+	// Two processes disagreed about one schematic at one version, split exactly
+	// at a restart, with nothing anywhere saying the preferred name had never
+	// been ruled out. This code is that missing sentence.
+	WarningInstallerRepoFallbackUnverified = "installer.repo-fallback-unverified"
 )
 
 // Warning is one thing an operator should know about a schematic before they
