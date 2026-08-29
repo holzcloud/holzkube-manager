@@ -182,6 +182,122 @@ func TestProbeReadsIdentityWithoutClusterPKI(t *testing.T) {
 	}
 }
 
+// TestAnAbandonedLogStreamIsReleasedByClose is WR-03.
+//
+// streamPolicy stores the deadline context's cancel on policyStream and invokes
+// it from RecvMsg alone, on io.EOF or on an error. A caller that opens a stream
+// and stops reading -- the operator closing the log panel -- reaches neither
+// branch, so the context and the gRPC stream were held until the whole
+// ClusterClient was closed. LogStream made that unavoidable rather than merely
+// possible: it exposed Recv and nothing else, with no Close, no Context and no
+// way to say "I am done with this".
+//
+// The assertion is the simulator's rather than an error return, for the reason
+// every case in the contract suite is: a torn-down stream reads as clean
+// success at the client. A stalled emitter records a wait when it begins and
+// records how long it waited only when it ends, so "parked right now" and "was
+// parked and has been released" are two different observations rather than one
+// counter read twice.
+//
+// slow_log_consumer is injected because a bounded emitter finishes into the
+// gRPC flow-control window without ever parking, and a stream that ended on its
+// own is not an abandoned one.
+func TestAnAbandonedLogStreamIsReleasedByClose(t *testing.T) {
+	t.Parallel()
+
+	sim := newSim(t, talossim.Options{Hostname: "abandoned"})
+	restore, err := sim.Inject(talossim.Scenario{Name: talossim.ScenarioSlowLogConsumer})
+	if err != nil {
+		t.Fatalf("Inject %s: %v", talossim.ScenarioSlowLogConsumer, err)
+	}
+	t.Cleanup(restore)
+
+	cc := clientFor(t, nodeUnderTest{
+		Dialer: talos.NewDirectDialer(sim.Port()),
+		Creds:  sim.ClientCreds(),
+		Target: talos.Target{
+			Machine: model.MachineID("00000000-0000-0000-0000-0000000000e2"),
+			Addr:    sim.Host(),
+		},
+	})
+
+	// The caller's context stays alive for the whole test. Cancelling it is the
+	// escape hatch this test exists to show is not the only one.
+	stream, err := cc.Logs(t.Context(), "kubelet")
+	if err != nil {
+		t.Fatalf("Logs: %v", err)
+	}
+
+	for range 4 {
+		if _, err := stream.Recv(); err != nil {
+			t.Fatalf("Recv while the stream should still be producing: %v", err)
+		}
+	}
+
+	// From here nothing reads. The node fills the flow-control window and then
+	// parks on a send that nobody will ever take.
+	streams := sim.Streams()
+	parked, ok := waitUntilParked(streams)
+	if !ok {
+		t.Fatal("the node never settled on a parked send after the caller stopped reading, so this " +
+			"test is not exercising an abandoned stream")
+	}
+
+	if err := stream.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	released := func() bool { return streams.BlockedFor() != parked }
+	if !eventually(released) {
+		t.Fatal("the node is still parked on a send after the caller closed the stream: Close did " +
+			"not reach the gRPC stream, so the context and the stream are held until the whole " +
+			"client is closed")
+	}
+
+	// Closing twice is what a defer alongside an explicit close does, and it
+	// must not be a way to break the client.
+	if err := stream.Close(); err != nil {
+		t.Fatalf("the second Close returned %v", err)
+	}
+}
+
+// waitUntilParked waits for the emitter to be blocked on a send and to stay
+// blocked, and returns the accumulated wait at that point.
+//
+// Staying blocked is the load-bearing half. A send that parks and is released a
+// moment later is the flow-control window draining, not an abandoned stream,
+// and a test that took the first BlockedSends it saw as the signal would be
+// measuring the window rather than the leak.
+func waitUntilParked(streams *talossim.Streamer) (time.Duration, bool) {
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		if streams.BlockedSends() == 0 {
+			time.Sleep(5 * time.Millisecond)
+			continue
+		}
+		before := streams.BlockedFor()
+		time.Sleep(250 * time.Millisecond)
+		if streams.BlockedFor() == before {
+			return before, true
+		}
+	}
+	return 0, false
+}
+
+// eventually polls cond for up to three seconds. The bound is generous because
+// a false negative here is a flake, while a false positive is not reachable:
+// the counters it reads only ever move forward.
+func eventually(cond func() bool) bool {
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		if cond() {
+			return true
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	return cond()
+}
+
 // TestDiscoverySourcesShareOneCallSite is the DiscoverySource half of the same
 // argument as TestDialerSwap: an outward-pushing source and an inward-pushing
 // one feed one fan-in, and the fan-in is written once.
