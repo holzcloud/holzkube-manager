@@ -69,6 +69,42 @@ import { authenticatedRoute } from '@/routes/__root'
 
 export type MetaRow = { key: number; value: string }
 
+/**
+ * Whether a value carries a character holzkube's canonical serialiser refuses.
+ *
+ * The original rule lives in `internal/imagefactory/schematicid.go`'s
+ * `representable`: not valid UTF-8, any rune below U+0020, or U+007F. This is
+ * the control-character half of it, transcribed. A lone surrogate — the invalid
+ * UTF-8 half — is unreachable from a normal input event and is left to the
+ * server's 400.
+ *
+ * The server's 400 is the backstop here, not the fallback. Refusing at the input
+ * is what tells an operator *which row* is wrong while they are still looking at
+ * it; the server answering afterwards is the guarantee that a value which slips
+ * past this never reaches the Factory.
+ *
+ * It reports rather than strips. An operator who pasted a value from somewhere
+ * is better served by being told than by having their input quietly rewritten
+ * into something they did not type (T-02-67).
+ */
+/**
+ * The row-level message. It names the character class and never the value, for
+ * the same reason the server's problem body does not: kernel arguments and META
+ * values can carry secrets (T-02-64).
+ */
+const CONTROL_CHARACTER_MESSAGE =
+  'This contains a control character. The Image Factory schematic cannot carry one, so remove it before creating.'
+
+export function hasControlCharacter(value: string): boolean {
+  for (const character of value) {
+    const code = character.codePointAt(0) ?? 0
+    if (code < 0x20 || code === 0x7f) {
+      return true
+    }
+  }
+  return false
+}
+
 const ARCHITECTURES = ['amd64', 'arm64'] as const
 export type Architecture = (typeof ARCHITECTURES)[number]
 
@@ -140,6 +176,36 @@ function ImagesView() {
     },
   })
 
+  // A create error belongs to the request it came from. G-02-6 watched one stay
+  // on screen through subsequent unrelated interactions, so an operator editing
+  // the form was reading a sentence about a submission they had already
+  // replaced.
+  //
+  // The fingerprint is exactly the fields the request is built from, and the
+  // mutation's own state is deliberately not among them: an effect that
+  // depended on it would be its own cause. The reset itself goes through a ref
+  // for the same reason -- the mutation object is re-created on every state
+  // change it makes.
+  const requestFingerprint = JSON.stringify([
+    name,
+    version,
+    arch,
+    extensions,
+    kernelArgs,
+    meta,
+    secureBoot,
+  ])
+  const submittedFingerprint = useRef(requestFingerprint)
+  const resetCreate = useRef(create.reset)
+  resetCreate.current = create.reset
+  useEffect(() => {
+    if (submittedFingerprint.current === requestFingerprint) {
+      return
+    }
+    submittedFingerprint.current = requestFingerprint
+    resetCreate.current()
+  }, [requestFingerprint])
+
   const toggleExtension = useCallback((extensionName: string) => {
     setExtensions((previous) =>
       previous.includes(extensionName)
@@ -147,6 +213,18 @@ function ImagesView() {
         : [...previous, extensionName],
     )
   }, [])
+
+  // Computed once here and passed down, rather than duplicated inside both row
+  // components: the rule has one home, and "is anything offending" is one
+  // question rather than two that could disagree.
+  const kernelArgErrors = kernelArgs.map((value) =>
+    hasControlCharacter(value) ? CONTROL_CHARACTER_MESSAGE : null,
+  )
+  const metaErrors = meta.map((row) =>
+    hasControlCharacter(row.value) ? CONTROL_CHARACTER_MESSAGE : null,
+  )
+  const hasUnusableValue =
+    kernelArgErrors.some((each) => each !== null) || metaErrors.some((each) => each !== null)
 
   const submit = useCallback(() => {
     create.mutate({
@@ -329,21 +407,25 @@ function ImagesView() {
           onChange={setKernelArgs}
           placeholder="console=ttyS0"
           inputLabel="Kernel argument"
+          errors={kernelArgErrors}
         />
 
-        <MetaRows meta={meta} onChange={setMeta} />
+        <MetaRows meta={meta} onChange={setMeta} errors={metaErrors} />
 
         <LiveSchematicWarnings kernelArgs={kernelArgs} meta={meta} />
 
         {create.isError && (
-          <p role="alert" className="text-sm text-destructive">
+          <p role="alert" aria-label="Create failed" className="text-sm text-destructive">
             {create.error instanceof Error
               ? create.error.message
               : 'The schematic was not created.'}
           </p>
         )}
 
-        <Button type="submit" disabled={create.isPending || name === '' || version === ''}>
+        <Button
+          type="submit"
+          disabled={create.isPending || name === '' || version === '' || hasUnusableValue}
+        >
           {create.isPending ? 'Creating…' : 'Create schematic'}
         </Button>
       </form>
@@ -403,6 +485,7 @@ function RepeatableRows({
   onChange,
   placeholder,
   inputLabel,
+  errors,
 }: {
   title: string
   addLabel: string
@@ -410,6 +493,9 @@ function RepeatableRows({
   onChange: (next: string[]) => void
   placeholder: string
   inputLabel: string
+  /** Per-row message, or null for a row with nothing wrong. Computed by the
+   * caller so the rule that produces it has exactly one home. */
+  errors?: (string | null)[]
 }) {
   return (
     <section className="space-y-2">
@@ -418,25 +504,28 @@ function RepeatableRows({
         // The index is the identity here: these rows have no key of their own
         // and reordering is not offered, so nothing can go stale.
         // biome-ignore lint/suspicious/noArrayIndexKey: rows are positional
-        <div key={index} className="flex items-center gap-2">
-          <Input
-            aria-label={`${inputLabel} ${index + 1}`}
-            value={value}
-            placeholder={placeholder}
-            className="w-96"
-            onChange={(event) => {
-              const next = [...values]
-              next[index] = event.target.value
-              onChange(next)
-            }}
-          />
-          <Button
-            type="button"
-            variant="ghost"
-            onClick={() => onChange(values.filter((_, each) => each !== index))}
-          >
-            Remove
-          </Button>
+        <div key={index} className="space-y-1">
+          <div className="flex items-center gap-2">
+            <Input
+              aria-label={`${inputLabel} ${index + 1}`}
+              value={value}
+              placeholder={placeholder}
+              className="w-96"
+              onChange={(event) => {
+                const next = [...values]
+                next[index] = event.target.value
+                onChange(next)
+              }}
+            />
+            <Button
+              type="button"
+              variant="ghost"
+              onClick={() => onChange(values.filter((_, each) => each !== index))}
+            >
+              Remove
+            </Button>
+          </div>
+          <RowProblem label={`${inputLabel} ${index + 1}`} message={errors?.[index] ?? null} />
         </div>
       ))}
       <Button type="button" variant="secondary" onClick={() => onChange([...values, ''])}>
@@ -446,43 +535,70 @@ function RepeatableRows({
   )
 }
 
-function MetaRows({ meta, onChange }: { meta: MetaRow[]; onChange: (next: MetaRow[]) => void }) {
+/**
+ * A row-level refusal, in the register the rest of the screen uses for one: an
+ * alert next to the row it belongs to, named after that row so a screen reader
+ * and a test both address the same thing.
+ */
+function RowProblem({ label, message }: { label: string; message: string | null }) {
+  if (message === null) {
+    return null
+  }
+  return (
+    <p role="alert" aria-label={`${label} is not usable`} className="text-sm text-destructive">
+      {message}
+    </p>
+  )
+}
+
+function MetaRows({
+  meta,
+  onChange,
+  errors,
+}: {
+  meta: MetaRow[]
+  onChange: (next: MetaRow[]) => void
+  errors?: (string | null)[]
+}) {
   return (
     <section className="space-y-2">
       <h2 className="text-sm font-medium">META values</h2>
       {meta.map((row, index) => (
         // biome-ignore lint/suspicious/noArrayIndexKey: rows are positional
-        <div key={index} className="flex items-center gap-2">
-          <Input
-            aria-label={`META key ${index + 1}`}
-            type="number"
-            min={0}
-            max={255}
-            value={row.key}
-            className="w-24"
-            onChange={(event) => {
-              const next = [...meta]
-              next[index] = { ...row, key: Number(event.target.value) }
-              onChange(next)
-            }}
-          />
-          <Input
-            aria-label={`META value ${index + 1}`}
-            value={row.value}
-            className="w-96"
-            onChange={(event) => {
-              const next = [...meta]
-              next[index] = { ...row, value: event.target.value }
-              onChange(next)
-            }}
-          />
-          <Button
-            type="button"
-            variant="ghost"
-            onClick={() => onChange(meta.filter((_, each) => each !== index))}
-          >
-            Remove
-          </Button>
+        <div key={index} className="space-y-1">
+          <div className="flex items-center gap-2">
+            <Input
+              aria-label={`META key ${index + 1}`}
+              type="number"
+              min={0}
+              max={255}
+              value={row.key}
+              className="w-24"
+              onChange={(event) => {
+                const next = [...meta]
+                next[index] = { ...row, key: Number(event.target.value) }
+                onChange(next)
+              }}
+            />
+            <Input
+              aria-label={`META value ${index + 1}`}
+              value={row.value}
+              className="w-96"
+              onChange={(event) => {
+                const next = [...meta]
+                next[index] = { ...row, value: event.target.value }
+                onChange(next)
+              }}
+            />
+            <Button
+              type="button"
+              variant="ghost"
+              onClick={() => onChange(meta.filter((_, each) => each !== index))}
+            >
+              Remove
+            </Button>
+          </div>
+          <RowProblem label={`META value ${index + 1}`} message={errors?.[index] ?? null} />
         </div>
       ))}
       <Button
