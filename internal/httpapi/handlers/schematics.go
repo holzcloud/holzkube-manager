@@ -265,14 +265,25 @@ func createSchematic(d httpapi.Deps) http.HandlerFunc {
 			Cluster:      model.ClusterID(in.Cluster),
 			Name:         in.Name,
 			TalosVersion: in.TalosVersion,
-			Canonical:    authored.Canonical,
-			Extensions:   in.Extensions,
-			KernelArgs:   in.KernelArgs,
-			Meta:         in.meta(),
-			Usable:       authored.Usable,
-			ProbedAt:     probedAt,
-			ProbeReason:  probeReason,
-			CreatedAt:    time.Now().UTC(),
+			// Arch is stamped unconditionally, unlike ProbedAt three lines
+			// above. The two are different statements and the difference
+			// matters: ProbedAt records whether an answer arrived, Arch records
+			// what the question was about. A record whose probe never answered
+			// still has an architecture it was asked about, and withholding it
+			// would recreate in miniature the ambiguity G-02-8 is about.
+			//
+			// The value is in.Arch and not something read back from authored,
+			// because in.Arch is exactly what was handed to Author and
+			// therefore exactly what the probe used.
+			Arch:        in.Arch,
+			Canonical:   authored.Canonical,
+			Extensions:  in.Extensions,
+			KernelArgs:  in.KernelArgs,
+			Meta:        in.meta(),
+			Usable:      authored.Usable,
+			ProbedAt:    probedAt,
+			ProbeReason: probeReason,
+			CreatedAt:   time.Now().UTC(),
 		}
 		stored, storeErr := d.Store.Schematics().Put(r.Context(), rec)
 		switch {
@@ -538,9 +549,14 @@ func (in schematicInput) meta() []model.MetaValue {
 //
 // arch is required and has no default. holzkube is developed on arm64 and
 // targets amd64, so a defaulted architecture is a bug that only ever appears on
-// someone else's machine (FACT-03). version defaults to the version the record
-// was authored and probed against, which is the only version this installation
-// has any evidence about; platform defaults to the sole member of a closed type.
+// someone else's machine (FACT-03). The record now carries an architecture of
+// its own (model.Schematic.Arch) and it is deliberately not read here: that
+// field describes what was probed, and this parameter asks what to build. Using
+// the description as the default is the FACT-03 bug wearing a record's clothes.
+//
+// version defaults to the version the record was authored and probed against,
+// which is the only version this installation has any evidence about; platform
+// defaults to the sole member of a closed type.
 func assetRequest(r *http.Request, rec model.Schematic) (imagefactory.AssetRequest, *httpapi.Problem) {
 	q := r.URL.Query()
 
