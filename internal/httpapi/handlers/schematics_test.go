@@ -48,6 +48,11 @@ type fakeFactory struct {
 	// nevertheless refuses. This is the upstream asymmetry itself: the catalog
 	// check passes, the POST succeeds, and only the probe finds out.
 	unbuildable map[string]bool
+	// probeUnavailable names extensions the catalog lists and whose image
+	// endpoint answers 5xx rather than refusing. That is the other not-usable
+	// state: the Factory did not answer, which says nothing about the
+	// schematic and must not be recorded as if it had.
+	probeUnavailable map[string]bool
 	// down forces every endpoint to answer 503, which is how a test says "the
 	// Factory did not answer" rather than "the Factory refused".
 	down bool
@@ -56,10 +61,11 @@ type fakeFactory struct {
 func newFakeFactory(t *testing.T) *fakeFactory {
 	t.Helper()
 	f := &fakeFactory{
-		counts:      map[string]int{},
-		documents:   map[string]string{},
-		catalog:     slices.Clone(baseCatalog),
-		unbuildable: map[string]bool{},
+		counts:           map[string]int{},
+		documents:        map[string]string{},
+		catalog:          slices.Clone(baseCatalog),
+		unbuildable:      map[string]bool{},
+		probeUnavailable: map[string]bool{},
 	}
 	f.Server = httptest.NewServer(http.HandlerFunc(f.serve))
 	t.Cleanup(f.Close)
@@ -73,6 +79,16 @@ func (f *fakeFactory) listButRefuse(name string) {
 	defer f.mu.Unlock()
 	f.catalog = append(f.catalog, name)
 	f.unbuildable[name] = true
+}
+
+// listButFailToProbe adds an extension the catalog lists and whose image
+// endpoint answers 503. The schematic is created upstream and the probe learns
+// nothing about it -- not a refusal, an outage.
+func (f *fakeFactory) listButFailToProbe(name string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.catalog = append(f.catalog, name)
+	f.probeUnavailable[name] = true
 }
 
 // newFactoryClient wires a client to this fake, with a short timeout so a
@@ -185,6 +201,10 @@ func (f *fakeFactory) serveImage(w http.ResponseWriter, id string) {
 	for k, v := range f.unbuildable {
 		unbuildable[k] = v
 	}
+	unavailable := make(map[string]bool, len(f.probeUnavailable))
+	for k, v := range f.probeUnavailable {
+		unavailable[k] = v
+	}
 	f.mu.Unlock()
 
 	if !seen {
@@ -211,6 +231,10 @@ func (f *fakeFactory) serveImage(w http.ResponseWriter, id string) {
 			continue
 		}
 		name := strings.Trim(strings.TrimPrefix(trimmed, "- "), `"'`)
+		if unavailable[name] {
+			http.Error(w, "unavailable", http.StatusServiceUnavailable)
+			return
+		}
 		if !slices.Contains(catalog, name) || unbuildable[name] {
 			http.Error(w, "extension not found", http.StatusBadRequest)
 			return
@@ -612,13 +636,22 @@ func TestCreateWithAFailingProbeIsStoredNotUsable(t *testing.T) {
 	}
 
 	var got struct {
-		ID       string    `json:"id"`
-		Usable   bool      `json:"usable"`
-		ProbedAt time.Time `json:"probed_at"`
+		ID          string    `json:"id"`
+		Usable      bool      `json:"usable"`
+		ProbedAt    time.Time `json:"probed_at"`
+		ProbeReason string    `json:"probe_reason"`
 	}
 	decodeInto(t, raw, &got)
 	if got.Usable {
 		t.Error("usable = true although the probe refused; creation is not validation")
+	}
+	// A red badge with no stated cause is a verdict the operator cannot act on.
+	if got.ProbeReason == "" {
+		t.Error("the probe refused and said nothing; probe_reason is empty")
+	}
+	// The package prefix is Go's, not the operator's.
+	if strings.HasPrefix(got.ProbeReason, "imagefactory:") {
+		t.Errorf("probe_reason carries the package prefix: %q", got.ProbeReason)
 	}
 
 	// And it is still false when read back, not only in the create response.
@@ -629,6 +662,42 @@ func TestCreateWithAFailingProbeIsStoredNotUsable(t *testing.T) {
 	decodeInto(t, raw, &got)
 	if got.Usable {
 		t.Error("the stored record says usable although the probe refused")
+	}
+	if got.ProbeReason == "" {
+		t.Error("the stored record kept the verdict and dropped the reason for it")
+	}
+}
+
+// TestUnreachableProbeRecordsNoReason keeps the two not-usable states apart at
+// the field level. A probe that could not reach the Factory says nothing about
+// the schematic, so a reason recorded for it would read as one -- and would send
+// an operator to repair something that was never shown to be broken.
+func TestUnreachableProbeRecordsNoReason(t *testing.T) {
+	s, f := schematicServer(t)
+	c := operator(t, s)
+
+	f.listButFailToProbe("siderolabs/probe-unreachable")
+
+	resp, raw := c.do(http.MethodPost, "/api/v1/schematics",
+		createBody("probe-unreachable", []string{"siderolabs/probe-unreachable"}, nil))
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("got %d, want 201 (body: %s)", resp.StatusCode, raw)
+	}
+
+	var got struct {
+		Usable      bool      `json:"usable"`
+		ProbedAt    time.Time `json:"probed_at"`
+		ProbeReason string    `json:"probe_reason"`
+	}
+	decodeInto(t, raw, &got)
+	if got.Usable {
+		t.Error("usable = true although the probe never answered")
+	}
+	if !got.ProbedAt.IsZero() {
+		t.Errorf("probed_at = %s; a probe that did not answer has not probed", got.ProbedAt)
+	}
+	if got.ProbeReason != "" {
+		t.Errorf("probe_reason = %q; the Factory said nothing about this schematic", got.ProbeReason)
 	}
 }
 

@@ -14,9 +14,11 @@ import { useSyncExternalStore } from 'react'
  * getting the stored choice back -- would then be proven by the cache instead
  * of by localStorage.
  *
- * Nothing security-relevant lives here. localStorage holds the theme and
- * nothing else (threat T-01-32); the session and the sudo window live on the
- * server and the UI only reflects them.
+ * Nothing security-relevant lives here. localStorage holds the theme and, since
+ * phase 2, the Images screen's last-used architecture -- preferences, and
+ * nothing a session or a credential could be reconstructed from (threat
+ * T-01-32). The session and the sudo window live on the server and the UI only
+ * reflects them.
  */
 
 export const THEME_STORAGE_KEY = 'holzkube.theme'
