@@ -2,6 +2,7 @@ package imagefactory_test
 
 import (
 	"encoding/json"
+	"os"
 	"strings"
 	"testing"
 
@@ -128,4 +129,60 @@ func TestWarningsCodesAreNamespaced(t *testing.T) {
 			t.Errorf("%q is not in the schematic. namespace", code)
 		}
 	}
+}
+
+// TestWarningDetailsMatchTheUI is the drift guard behind a claim plan 02-06
+// makes: the live warning shown while an operator is still typing carries the
+// server's own wording, so the sentence read before submitting and the sentence
+// read afterwards cannot describe one condition as two problems.
+//
+// The UI cannot import a Go constant, so the strings are transcribed there. A
+// transcription that nothing checks is a comment, not a guarantee -- this test
+// is what makes it a guarantee. It reads from the Go side because that is where
+// the text is authored: vitest is rooted at web/ and refuses to read outside it
+// without loosening the bundler's filesystem allowlist, which is a real cost to
+// pay for a test-only convenience.
+//
+// If this fails, the fix is to copy the Go detail into
+// web/src/components/SchematicWarnings.tsx, never the other way round.
+func TestWarningDetailsMatchTheUI(t *testing.T) {
+	// The sentences are transcribed in the component; the codes are declared
+	// once in the API module the component imports them from, which is why the
+	// two halves are checked against two different files.
+	const (
+		uiPath  = "../../web/src/components/SchematicWarnings.tsx"
+		apiPath = "../../web/src/api.ts"
+	)
+
+	ui := readUTF8(t, uiPath)
+	apiModule := readUTF8(t, apiPath)
+
+	full := imagefactory.Warnings(imagefactory.Schematic{
+		Customization: imagefactory.Customization{
+			ExtraKernelArgs: []string{"console=ttyS0"},
+			Meta:            []imagefactory.MetaValue{{Key: 10, Value: "x"}},
+		},
+	})
+	if len(full) != 2 {
+		t.Fatalf("got %d warnings, want both of them", len(full))
+	}
+
+	for _, w := range full {
+		if !strings.Contains(ui, w.Detail) {
+			t.Errorf("%s: the UI does not carry this sentence verbatim.\n"+
+				"Go:  %q\nCopy it into %s.", w.Code, w.Detail, uiPath)
+		}
+		if !strings.Contains(apiModule, w.Code) {
+			t.Errorf("%s: %s declares no constant for this code", w.Code, apiPath)
+		}
+	}
+}
+
+func readUTF8(t *testing.T, path string) string {
+	t.Helper()
+	source, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("reading %s: %v", path, err)
+	}
+	return string(source)
 }

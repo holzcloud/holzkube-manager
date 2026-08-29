@@ -1,6 +1,7 @@
 import { createRouter, RouterProvider } from '@tanstack/react-router'
 import { authenticatedRoute, rootRoute } from '@/routes/__root'
 import { auditRoute } from '@/routes/audit'
+import { imagesRoute } from '@/routes/images'
 import { indexRoute } from '@/routes/index'
 import { loginRoute } from '@/routes/login'
 import { placeholderRoutes } from '@/routes/placeholders'
@@ -18,7 +19,7 @@ import { setupRoute } from '@/routes/setup'
 const routeTree = rootRoute.addChildren([
   setupRoute,
   loginRoute,
-  authenticatedRoute.addChildren([indexRoute, auditRoute, ...placeholderRoutes]),
+  authenticatedRoute.addChildren([indexRoute, auditRoute, imagesRoute, ...placeholderRoutes]),
 ])
 
 const router = createRouter({

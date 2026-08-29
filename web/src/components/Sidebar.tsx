@@ -2,6 +2,7 @@ import { Link } from '@tanstack/react-router'
 import {
   ArrowUpCircle,
   Boxes,
+  Disc3,
   FileCog,
   LayoutDashboard,
   ListChecks,
@@ -16,10 +17,16 @@ import { cn } from '@/lib/utils'
 /**
  * The permanent navigation (D-10).
  *
- * Every area this product will ever have is listed here from phase 1 on. Later
- * phases replace a placeholder page with a real one; none of them has to touch
- * the navigation, which is exactly the point -- nobody rebuilds the shell under
- * time pressure in the middle of the inventory phase.
+ * Every area this product has is listed here, and phase 1 listed every area
+ * that was known then. Later phases replace a placeholder page with a real one
+ * and normally do not touch the navigation, which is the point -- nobody
+ * rebuilds the shell under time pressure in the middle of the inventory phase.
+ *
+ * The list is not closed, and phase 2 proved it: Images was not among the eight
+ * phase-1 areas, because the Image Factory work had not been scoped as an
+ * operator-facing screen yet. A requirement that names a screen ("der Betreiber
+ * stellt zusammen", "die UI warnt") wins over a claim that the navigation was
+ * already complete. Adding an area is one entry here plus one route in App.tsx.
  *
  * `phase` is null for an area that exists now. Anything else names the phase
  * that builds it, and the placeholder page says so in plain English (D-09).
@@ -82,6 +89,14 @@ export const NAV_AREAS: NavArea[] = [
     phase: 9,
     description:
       'Rolling Talos and Kubernetes upgrades behind a health gate that would rather refuse than strand a cluster.',
+  },
+  {
+    path: '/images',
+    label: 'Images',
+    icon: Disc3,
+    phase: null,
+    description:
+      'Image Factory schematics: the system extensions, kernel arguments and META values a machine boots with, and the exact ISO, PXE and installer references they produce.',
   },
   {
     path: '/audit',
