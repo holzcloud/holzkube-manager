@@ -2,7 +2,11 @@ package imagefactory_test
 
 import (
 	"encoding/json"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"os"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -138,20 +142,45 @@ func TestWarningsNameInstallerAndInitramfs(t *testing.T) {
 //     nothing can recompute it later. Filing it under "schematic." would blame
 //     the schematic for something the registry did.
 //
-// Every code the package exports must be in this list and must choose one of
-// those prefixes, so the next code added has to pick a family rather than
-// inherit one.
+// Every code the package exports has to choose one of those prefixes, and
+// "every" is enumerated rather than listed. The rewrite that widened the prefix
+// set left the hand-written []string of three constants in place, which is the
+// same silent failure in a new coat: a fourth exported code was still simply not
+// iterated, so the sentence promising it was checked was the only thing
+// enforcing it. exportedWarningCodes reads the package's own source instead, so
+// a constant added tomorrow is covered by this test without anyone remembering
+// it exists.
 func TestWarningsCodesAreNamespaced(t *testing.T) {
 	prefixes := map[string]string{
 		"schematic.": "a property of the stored schematic, recomputable from the record",
 		"installer.": "a fact about one installer-repository resolution attempt",
 	}
 
-	for _, code := range []string{
+	codes := exportedWarningCodes(t)
+
+	// A scan is only a guard while it is finding things: one that matched
+	// nothing -- a moved file, a renamed prefix, a constant expressed as
+	// something other than a string literal -- would pass this test in silence,
+	// which is precisely the shape being removed. These three are named so the
+	// compiler checks the reference, and their presence proves the scan read the
+	// file it thinks it read.
+	found := map[string]bool{}
+	for _, code := range codes {
+		found[code] = true
+	}
+	for _, known := range []string{
 		imagefactory.WarningInstallerIgnoresKernelArgs,
 		imagefactory.WarningInstallerIgnoresMeta,
 		imagefactory.WarningInstallerRepoFallbackUnverified,
 	} {
+		if !found[known] {
+			t.Fatalf("scanning this package's source found %d exported warning codes and %q was "+
+				"not among them, so the scan is not reading what it is meant to read and "+
+				"nothing below is being enforced", len(codes), known)
+		}
+	}
+
+	for name, code := range codes {
 		matched := false
 		for prefix := range prefixes {
 			if strings.HasPrefix(code, prefix) {
@@ -160,11 +189,79 @@ func TestWarningsCodesAreNamespaced(t *testing.T) {
 			}
 		}
 		if !matched {
-			t.Errorf("%q is in none of the declared warning-code families %v. "+
+			t.Errorf("%s = %q is in none of the declared warning-code families %v. "+
 				"Pick one and say why, or add a family here with its meaning beside it",
-				code, prefixes)
+				name, code, prefixes)
 		}
 	}
+}
+
+// exportedWarningCodes reads this package's own non-test source and returns
+// every exported constant whose name begins with "Warning", keyed by that name.
+//
+// It parses rather than greps because a grep over the same files would match the
+// word in a doc comment and in TestWarningDetailsMatchTheUI's own expectations,
+// and would have to be taught the difference. go/ast already knows it. The whole
+// directory is walked rather than warnings.go alone: the constants live there
+// today, and a guard that only looks where they currently are is the guard that
+// misses the one added somewhere else.
+//
+// Anything it cannot read is a failure and not a skip -- an exported Warning
+// constant expressed as something other than a string literal would otherwise
+// drop silently out of the check that is the entire point of this file.
+func exportedWarningCodes(t *testing.T) map[string]string {
+	t.Helper()
+
+	entries, err := os.ReadDir(".")
+	if err != nil {
+		t.Fatalf("reading the package directory: %v", err)
+	}
+
+	codes := map[string]string{}
+	fset := token.NewFileSet()
+	for _, entry := range entries {
+		name := entry.Name()
+		if entry.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+
+		file, err := parser.ParseFile(fset, name, nil, 0)
+		if err != nil {
+			t.Fatalf("parsing %s: %v", name, err)
+		}
+		for _, decl := range file.Decls {
+			gen, ok := decl.(*ast.GenDecl)
+			if !ok || gen.Tok != token.CONST {
+				continue
+			}
+			for _, spec := range gen.Specs {
+				value, ok := spec.(*ast.ValueSpec)
+				if !ok {
+					continue
+				}
+				for i, ident := range value.Names {
+					if !ident.IsExported() || !strings.HasPrefix(ident.Name, "Warning") {
+						continue
+					}
+					if i >= len(value.Values) {
+						t.Fatalf("%s: %s has no value of its own, so this guard cannot read it",
+							name, ident.Name)
+					}
+					lit, ok := value.Values[i].(*ast.BasicLit)
+					if !ok || lit.Kind != token.STRING {
+						t.Fatalf("%s: %s is not a string literal, so this guard cannot read it",
+							name, ident.Name)
+					}
+					unquoted, err := strconv.Unquote(lit.Value)
+					if err != nil {
+						t.Fatalf("%s: unquoting %s: %v", name, ident.Name, err)
+					}
+					codes[ident.Name] = unquoted
+				}
+			}
+		}
+	}
+	return codes
 }
 
 // TestWarningDetailsMatchTheUI is the drift guard behind a claim plan 02-06
