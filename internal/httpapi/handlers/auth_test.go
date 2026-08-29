@@ -3,7 +3,9 @@ package handlers_test
 import (
 	"encoding/json"
 	"net/http"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/holzcloud/holzkube/internal/talos"
 )
@@ -54,5 +56,46 @@ func TestMeReportsTheDryRunMode(t *testing.T) {
 				t.Errorf("dry_run = %v, want %v (body %s)", got.DryRun, tc.want, body)
 			}
 		})
+	}
+}
+
+// TestSetupRefusesTheReservedActorUsername is T-02-47.
+//
+// `system` is a reserved audit actor, `actor` is part of the hash chain, and
+// the archive is never shortened (D-16). An operator account by that name would
+// make every record it writes permanently ambiguous between the process and a
+// person, so the collision is closed before the account can exist.
+func TestSetupRefusesTheReservedActorUsername(t *testing.T) {
+	t.Parallel()
+
+	for _, name := range []string{"system", "System", "SYSTEM"} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			s := newServer(t, 5*time.Minute)
+			c := s.newClient(t)
+
+			resp, body := c.do(http.MethodPost, "/api/v1/setup", map[string]string{
+				"username": name,
+				"password": "correct-horse-battery-staple",
+			})
+			if resp.StatusCode != http.StatusBadRequest {
+				t.Fatalf("setup as %q = %d, want 400 (body %s)", name, resp.StatusCode, body)
+			}
+			if !strings.Contains(string(body), "reserved") {
+				t.Errorf("the refusal does not say the name is reserved: %s", body)
+			}
+		})
+	}
+
+	// And the reservation is narrow: a name that merely contains it is fine.
+	s := newServer(t, 5*time.Minute)
+	c := s.newClient(t)
+	resp, body := c.do(http.MethodPost, "/api/v1/setup", map[string]string{
+		"username": "systems-admin",
+		"password": "correct-horse-battery-staple",
+	})
+	if resp.StatusCode != http.StatusCreated {
+		t.Errorf("setup as %q = %d, want 201 (body %s)", "systems-admin", resp.StatusCode, body)
 	}
 }

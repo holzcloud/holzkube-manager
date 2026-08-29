@@ -98,7 +98,7 @@ matches on the URL.
 | `POST` | `/api/v1/setup` | false | false | `{"username","password"}` | `201 {"id","username"}`, sets session cookie |
 | `POST` | `/api/v1/auth/login` | false | false | `{"username","password"}` | `204`, rotates the session |
 | `POST` | `/api/v1/auth/logout` | false | true | `{}` | `204` |
-| `GET` | `/api/v1/auth/me` | false | true | — | `200 {"id","username"}` |
+| `GET` | `/api/v1/auth/me` | false | true | — | `200 {"id","username","dry_run"}` |
 | `GET` | `/api/v1/audit` | false | true | query, see below | `200` audit page |
 
 Added by plan 04, listed here so wave 2 can code against them today:
@@ -299,6 +299,37 @@ server-side context belongs in `params` rather than in a new column.
 `session` is a **truncated** token, not the live one: a log kept forever must
 not be a store of every session that ever existed.
 
+### Actor vocabulary
+
+`actor` is normally the signed-in operator's username, or the literal
+`anonymous` for a request that carried no session. Those are the only two shapes
+any Phase 1–5 record has, because the audit middleware fills the field from the
+request context and every writer so far is an HTTP request.
+
+Two further tokens are **reserved now and written by nothing yet**:
+
+| Token | Meaning |
+|---|---|
+| `system` | a mutation the process itself initiated, with no request and no signed-in operator behind it |
+| `job:<id>` | a mutation the jobs engine performed, where `<id>` is the job's identifier |
+
+They are fixed here rather than when the first non-HTTP writer arrives, and the
+reason is the hash chain. `actor` is one of the canonical fields, so its value
+is hashed into every record that follows it. Changing the vocabulary once a
+second writer already disagrees with the first forces either a break in the
+chain at the seam or a rewrite of the whole archive — and the archive has
+unlimited retention and no deletion path (D-16). Deciding while exactly one
+writer exists costs nothing; deciding later costs the archive.
+
+`job:<id>` carries the identifier deliberately. "A job did this" is not enough
+for a post-mortem; "which job did this" is, and the prefix is what keeps the
+value distinguishable from a username without changing the field's type.
+
+**`system` is refused as an operator username.** It is the one token whose flat
+shape could collide with a real account, and a record whose `actor` is ambiguous
+between "the process" and "a person" is a repudiation risk in a log that is kept
+forever. `job:<id>` needs no such rule: `:` is not a legal username character.
+
 An intent with **no** matching outcome means the process did not survive the
 action. It is a finding and is left standing as one; nothing completes the pair
 after the fact, and the record remains findable through this query API.
@@ -358,6 +389,41 @@ GET /api/v1/system/status
   destroys the evidence that it was broken.
 - The UI renders a break as a persistent banner. It is not dismissible: a hash
   chain nobody looks at is theatre.
+
+## Dry-run
+
+```
+GET /api/v1/auth/me
+```
+
+```json
+{ "id": "...", "username": "holz", "dry_run": false }
+```
+
+`dry_run` reports whether this process was started with `--dry-run` (or
+`HOLZKUBE_DRY_RUN=true`). It is a statement about the transport, not about the
+UI: while it is `true`, every RPC the deadline class table classifies as a
+mutation is refused by a gRPC client interceptor on the one connect path both
+Talos client types are built on, before the call reaches the wire. Nothing is
+hidden and nothing is merely disabled in the interface — no mutation reaches a
+node, and a test enumerates the whole mutation class and asserts a zero
+server-side call counter for every method in it (FOUND-12, D-03).
+
+Reads and streams are unaffected: the mode disables mutations, not the product.
+Maintenance mode is not an exemption — `ApplyConfiguration` on an unconfigured
+node is refused like everything else, because it is the most consequential
+mutation the product performs.
+
+The scope is deliberately the Talos wire and nothing else. A schematic created
+while dry-run is on still writes a record to the store and to the audit archive,
+and still contacts the Image Factory. `--dry-run` is about what reaches a
+**node**.
+
+The field is on this endpoint and **not** on `GET /api/v1/system/status`, which
+answers before authentication. Whether an instance can currently change anything
+is not something an anonymous caller is owed, and the operator this field exists
+for is signed in by definition. The UI renders it as a banner with no dismiss
+control, for the same reason the audit-chain banner has none.
 
 ## Route Registration Rule
 

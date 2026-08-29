@@ -65,6 +65,7 @@ type Config struct {
 	TLSCert         string
 	TLSKey          string
 	InsecureHTTP    bool
+	DryRun          bool
 	SudoWindow      time.Duration
 	SessionLifetime time.Duration
 	LogLevel        slog.Level
@@ -164,6 +165,25 @@ func optionTable(defaultDataDir string) []option {
 				return nil
 			},
 			render: func(c Config) string { return strconv.FormatBool(c.InsecureHTTP) },
+		},
+		{
+			// FOUND-12 / D-03. The refusal itself is not here: it is a gRPC
+			// client interceptor on internal/talos's single shared connect
+			// path, so that "no mutation reaches a node" is enforced at the
+			// last layer before the wire rather than at the HTTP boundary,
+			// which would not see anything the jobs engine drives. This entry
+			// is only how the operator says so.
+			name: "dry-run", env: "DRY_RUN", def: "false", boolean: true,
+			usage: "refuse every mutating node call at the transport (env " + EnvPrefix + "DRY_RUN)",
+			apply: func(c *Config, raw string) error {
+				v, err := strconv.ParseBool(raw)
+				if err != nil {
+					return errors.New("not a boolean")
+				}
+				c.DryRun = v
+				return nil
+			},
+			render: func(c Config) string { return strconv.FormatBool(c.DryRun) },
 		},
 		{
 			name: "sudo-window", env: "SUDO_WINDOW", def: "5m0s",
@@ -338,6 +358,15 @@ func (c Config) LogEffective(logger *slog.Logger) {
 	if loopback, err := IsLoopback(c.Listen); err != nil || !loopback {
 		logger.Warn("listening beyond loopback: holzkube is reachable from every device on this network",
 			slog.String("listen", c.Listen))
+	}
+
+	// Dry-run gets a warning of its own, above the option line, and the line
+	// states the consequence rather than the setting. "dry-run: true" is a
+	// label; an operator who reads it still has to know what the mode does, and
+	// the whole failure this mode exists to prevent is an operator who is
+	// mistaken about which way round it is (T-02-44).
+	if c.DryRun {
+		logger.Warn("dry-run is on: every mutating call is refused at the transport and no mutation will reach any node")
 	}
 }
 

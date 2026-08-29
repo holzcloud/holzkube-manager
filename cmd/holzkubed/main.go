@@ -22,6 +22,7 @@ import (
 	"github.com/holzcloud/holzkube/internal/httpapi/handlers"
 	"github.com/holzcloud/holzkube/internal/imagefactory"
 	"github.com/holzcloud/holzkube/internal/store/fsstore"
+	"github.com/holzcloud/holzkube/internal/talos"
 	"github.com/holzcloud/holzkube/internal/tlsx"
 )
 
@@ -142,6 +143,13 @@ func run(args []string) error {
 		return err
 	}
 
+	// The transport mode. It is built here, at the composition root, because
+	// this is the only place that has read the configuration -- and it is
+	// carried into the handlers rather than consulted from a package variable,
+	// so every future node call has to be handed the mode explicitly and none
+	// of them can inherit the wrong one (D-03, FOUND-12).
+	talosMode := talos.Mode{DryRun: cfg.DryRun}
+
 	deps := httpapi.Deps{
 		Store:      st,
 		Audit:      auditLog,
@@ -151,8 +159,12 @@ func run(args []string) error {
 		// Inside the literal, deliberately. Deps is copied by value into each
 		// …Routes(deps) call below, so a field assigned after this literal is
 		// the zero value inside every handler closure -- a nil dependency with
-		// no compile error and no failure until a request arrives.
-		Factory: factory,
+		// no compile error and no failure until a request arrives. A dry-run
+		// flag lost that way would be the worst instance of it: the endpoint
+		// would report "live" while the transport refused everything, or the
+		// reverse.
+		Factory:   factory,
+		TalosMode: talosMode,
 		// Public strips the directory: this verdict is served by an endpoint
 		// that answers before authentication, and chainFile is absolute. The
 		// operator-facing copy of the path is the log line above, which stays
