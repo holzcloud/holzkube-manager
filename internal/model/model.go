@@ -80,6 +80,23 @@ type Schematic struct {
 	// un-buildable at a different version.
 	TalosVersion string `json:"talos_version"`
 
+	// Arch is the architecture the schematic was authored and probed against.
+	// The probe verdict is scoped to it -- ProbeReason already carries the
+	// architecture inside its own sentence, which is the evidence that the
+	// verdict was never architecture-neutral -- so Usable without it is a claim
+	// whose subject is missing.
+	//
+	// It is part of the record rather than a query parameter for the same
+	// reason TalosVersion is: the answer differs per architecture, so a stored
+	// verdict that does not name one cannot be read back.
+	//
+	// Additive and unversioned for the reason ProbeReason states at length
+	// below. A record written before this field existed decodes with an empty
+	// architecture, and an empty architecture is a true statement about such a
+	// record: the architecture a past probe used is not derivable from anything
+	// the record holds, so there is nothing for a migration to write.
+	Arch string `json:"arch"`
+
 	// Canonical is the Factory's own normalised schematic document, stored
 	// verbatim. It is the authoritative form (D-01): the id is the SHA-256 of
 	// exactly these bytes, so storing the input instead would store something

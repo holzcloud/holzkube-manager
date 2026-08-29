@@ -185,6 +185,21 @@ export const schematicSchema = z.object({
    * cannot act on.
    */
   probe_reason: z.string(),
+  /**
+   * The architecture the schematic was authored and probed against -- what
+   * `usable` and `probe_reason` are statements about.
+   *
+   * Required rather than optional: the Go struct carries no `omitempty`, so the
+   * field is always on the wire, including as `''`. A server that stopped
+   * sending it is a regression this schema should surface as a decode failure
+   * rather than as a silently missing qualifier.
+   *
+   * An empty value means a record written before the field existed. Its verdict
+   * cannot be qualified after the fact -- the architecture a past probe used is
+   * not recoverable from the record -- so it is rendered unqualified rather than
+   * guessed at.
+   */
+  arch: z.string(),
   created_at: z.string(),
   rev: z.number(),
 })
