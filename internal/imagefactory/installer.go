@@ -152,14 +152,20 @@ func (c *Client) installerRepo(ctx context.Context, r AssetRequest) (string, err
 // resolveInstallerRepo asks the registry, in order, which of the candidate
 // repository names carries a manifest for this schematic at this version.
 //
-// It keeps two verdicts apart, for the reason ProbeBuildable does. A 404 is the
-// registry answering that the name does not resolve, and only when every
-// candidate answers that way is this a statement about the schematic
+// It keeps two verdicts apart on exactly the terms ProbeBuildable does, because
+// both ask registryRefused rather than each deciding for itself. Only when every
+// candidate answers with a refusal is this a statement about the schematic
 // (ErrSchematicNotBuildable). Anything else -- a transport failure, a 5xx, an
-// authentication challenge -- is the registry not answering the question, which
-// says nothing about the schematic and must stay retryable
+// authentication challenge, a rate limit -- is the registry not answering the
+// question, which says nothing about the schematic and must stay retryable
 // (ErrUpstreamUnavailable). Reporting an outage as "this schematic has no
 // installer" would send an operator to rebuild something that is not broken.
+//
+// This comment claimed that parity before G-02-5 while the switch below tested
+// status == http.StatusNotFound alone, which made ErrSchematicNotBuildable
+// nearly unreachable here: a single 400 anywhere in the candidate loop cleared
+// refusedAll for good, and 400 is precisely what the Factory answers for a
+// schematic whose extension is unavailable at the requested version.
 func (c *Client) resolveInstallerRepo(ctx context.Context, r AssetRequest, candidates ...string) (string, error) {
 	var (
 		refused     []string
@@ -183,7 +189,7 @@ func (c *Client) resolveInstallerRepo(ctx context.Context, r AssetRequest, candi
 		switch {
 		case status/100 == 2:
 			return repo, nil
-		case status == http.StatusNotFound:
+		case registryRefused(status):
 			refused = append(refused, fmt.Sprintf("%s (HTTP %d)", repo, status))
 		default:
 			refusedAll = false

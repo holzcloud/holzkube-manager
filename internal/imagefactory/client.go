@@ -21,10 +21,25 @@ const (
 	// Named and justified rather than inherited: http.DefaultClient has no
 	// timeout at all, so a Factory that accepts a connection and then stops
 	// talking would hold a goroutine and a connection for as long as the
-	// process runs. Thirty seconds is generous for the three JSON endpoints
-	// this package calls -- the largest answer is the extension catalog at a
-	// few tens of kilobytes -- and short enough that an operator watching a
-	// wizard sees a failure rather than a hang.
+	// process runs.
+	//
+	// What it governs is three different workloads, not one. The three JSON
+	// endpoints -- versions, the version-scoped extension catalog, and schematic
+	// creation -- are the small ones; the largest answer among them is the
+	// catalog at a few tens of kilobytes. It also bounds ProbeBuildable's HEAD
+	// of the ISO URL, which makes the Factory build a ~335MB image
+	// synchronously, and both installer manifest GETs in installer.go, which a
+	// cold resolution issues in series.
+	//
+	// The value has never been sized against those last two. It was chosen
+	// against the JSON endpoints, and the measured cold ISO probe lands in the
+	// 30.5-32.7s band -- one to three seconds past this constant, every time.
+	// The value is deliberately left alone here: what it should be is the open
+	// question in
+	// .planning/phases/02-transport-seam-talossim-image-factory/02-DECISION-probe-budget.md,
+	// together with how a per-route deadline composes with it. Whoever reads
+	// this constant next should find that question rather than a justification
+	// that was never about them.
 	DefaultTimeout = 30 * time.Second
 
 	// maxResponseBytes caps a response body before it is decoded, for the
