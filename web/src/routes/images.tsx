@@ -658,6 +658,48 @@ export function UsabilityBadge({
   usable,
   probedAt,
   reason,
+  arch,
+}: {
+  usable: boolean
+  probedAt: string
+  reason?: string
+  /**
+   * The architecture the verdict is about (model.Schematic.arch). Empty or
+   * absent means a record written before the field existed, and such a record
+   * renders exactly the verdict below with nothing added: the architecture a
+   * past probe used is not recoverable, and a qualifier nobody measured would
+   * be the same lie G-02-8 is about, in a new place.
+   */
+  arch?: string
+}) {
+  const verdict = <UsabilityVerdict usable={usable} probedAt={probedAt} reason={reason} />
+  if (arch === undefined || arch === '') {
+    return verdict
+  }
+  return (
+    <span className="flex flex-wrap items-center gap-2">
+      {verdict}
+      <span className="text-xs text-muted-foreground">architecture: {arch}</span>
+    </span>
+  )
+}
+
+/**
+ * The verdict itself, unqualified.
+ *
+ * The architecture is rendered beside this by UsabilityBadge rather than spliced
+ * into any of the three sentences, for three reasons. Three sentences would
+ * otherwise become six. ProbeReason already names the architecture inside the
+ * refusal text, so the refused branch would say it twice. And
+ * 02-DECISION-probe-budget.md Option 1 would rewrite these sentences again -- a
+ * qualifier that composes with whatever they say survives that rewrite
+ * untouched, which is also why plan 02-13 runs after 02-12 rather than editing
+ * the same copy twice.
+ */
+function UsabilityVerdict({
+  usable,
+  probedAt,
+  reason,
 }: {
   usable: boolean
   probedAt: string
@@ -988,6 +1030,7 @@ function SchematicDetailBody({
           usable={record.usable}
           probedAt={record.probed_at}
           reason={record.probe_reason}
+          arch={record.arch}
         />
       </div>
 
