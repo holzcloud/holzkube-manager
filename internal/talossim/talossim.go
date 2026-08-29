@@ -38,6 +38,8 @@ import (
 	"google.golang.org/grpc/peer"
 	"google.golang.org/grpc/test/bufconn"
 
+	"github.com/cosi-project/runtime/pkg/state"
+
 	"github.com/holzcloud/holzkube/internal/talos"
 )
 
@@ -68,6 +70,11 @@ type Options struct {
 	// API surface.
 	Maintenance bool
 
+	// StreamMessages is how many messages Logs, Dmesg and Events each emit
+	// before completing. Defaults to DefaultStreamMessages. It is bounded on
+	// purpose -- see Streamer.
+	StreamMessages int
+
 	// Now is the clock the node stamps its state with. It is a field rather
 	// than a call to time.Now for the same reason auth.Service carries one: a
 	// test that has to assert "the service last changed at the last boot"
@@ -84,6 +91,14 @@ type Server struct {
 	// on the server rather than inside a handler closure because a scenario
 	// mutates it from outside a call.
 	node *nodeState
+
+	// cosi is the node's resource state. It is the read surface the product
+	// uses, served over the same gRPC server as MachineService because that is
+	// the one connection the production client's COSI adapter dials.
+	cosi state.State
+
+	// streams is the per-server emitter behind Logs, Dmesg and Events.
+	streams *Streamer
 
 	pki *pki
 	srv *grpc.Server
@@ -123,7 +138,12 @@ func New(opts Options) (*Server, error) {
 		return nil, err
 	}
 
-	s := &Server{opts: opts, pki: p, node: newNodeState(opts)}
+	s := &Server{
+		opts:    opts,
+		pki:     p,
+		node:    newNodeState(opts),
+		streams: newStreamer(opts.StreamMessages),
+	}
 
 	tcp, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -142,6 +162,14 @@ func New(opts Options) (*Server, error) {
 		grpc.UnaryInterceptor(s.recordPeer),
 	)
 	s.registerNodeServices(s.srv)
+	s.registerCOSI(s.srv)
+
+	// Seeding happens before the listeners are served, so no caller can
+	// observe the node in the half-populated state between construction and
+	// the first resource being written.
+	if err := s.seedCOSI(context.Background()); err != nil {
+		return nil, err
+	}
 
 	s.serve(s.tcp)
 	s.serve(s.pipe)
