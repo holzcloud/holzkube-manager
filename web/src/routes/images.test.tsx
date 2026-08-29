@@ -2,8 +2,17 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type { FactoryExtension, FactoryVersions, Schematic } from '@/api'
-import { onSudoRequired, type SudoChallenge } from '@/api'
+import type {
+  FactoryExtension,
+  FactoryVersions,
+  Schematic,
+  SchematicWarning,
+} from '@/api'
+import {
+  onSudoRequired,
+  type SudoChallenge,
+  WARNING_INSTALLER_REPO_FALLBACK_UNVERIFIED,
+} from '@/api'
 import { ARCH_STORAGE_KEY, hasControlCharacter, ImagesView } from './images'
 
 /**
@@ -79,6 +88,12 @@ interface StubOptions {
   created?: Schematic
   /** What GET /api/v1/schematics answers with. */
   saved?: Schematic[]
+  /**
+   * Warnings the assets route answers with. They are about *this resolution* —
+   * how the installer repository name was obtained — rather than about the
+   * schematic, so they are a property of the answer and not of the record.
+   */
+  assetWarnings?: SchematicWarning[]
   /** Requests whose path matches are answered with this problem instead. */
   fail?: { path: string; status: number; body: unknown }
   /**
@@ -94,14 +109,26 @@ interface StubOptions {
  * secure-boot cases: an assertion against a fixed string would pass just as
  * happily if the screen never sent the parameter at all.
  */
-function assetsFor(id: string, arch: string, version: string, secureboot: boolean) {
+function assetsFor(
+  id: string,
+  arch: string,
+  version: string,
+  secureboot: boolean,
+  warnings: SchematicWarning[] = [],
+) {
   const segment = `metal-${arch}${secureboot ? '-secureboot' : ''}`
+  // The installer repository name carries the SecureBoot selection too, because
+  // that is the only thing that selects it — plan 02-09 made the server
+  // SecureBoot-aware here, and a stub that kept handing back the ordinary name
+  // would be telling a different story than the server does.
+  const installerRepo = `metal-installer${secureboot ? '-secureboot' : ''}`
   return {
     iso: `https://factory.talos.dev/image/${id}/${version}/${segment}.iso`,
     pxe: `https://factory.talos.dev/pxe/${id}/${version}/${segment}`,
     disk_image: `https://factory.talos.dev/image/${id}/${version}/${segment}.raw.zst`,
     cmdline: `https://factory.talos.dev/image/${id}/${version}/cmdline-${segment}`,
-    installer: `factory.talos.dev/metal-installer/${id}:${version}`,
+    installer: `factory.talos.dev/${installerRepo}/${id}:${version}`,
+    warnings,
   }
 }
 
@@ -160,6 +187,7 @@ function stubFactory(options: StubOptions = {}) {
           url.searchParams.get('arch') ?? '',
           url.searchParams.get('version') ?? record?.talos_version ?? 'v1.13.9',
           url.searchParams.get('secureboot') === 'true',
+          options.assetWarnings ?? [],
         ),
       )
     }
@@ -598,7 +626,16 @@ describe('ImagesView — the saved schematics', () => {
 
     expect(good.getByText(/Usable — the build probe confirmed it/)).toBeInTheDocument()
     expect(bad.getByText(/Not usable — the Factory refused to build it/)).toBeInTheDocument()
-    expect(unprobed.getByText(/Not verified — the build probe did not run/)).toBeInTheDocument()
+    // G-02-1: the old copy asserted the probe "did not run". On the measured
+    // common case it ran for a full thirty seconds and gave up, so the badge was
+    // stating as fact something the record cannot support. The new wording
+    // asserts neither, and the muted line below it states the disjunction.
+    expect(unprobed.getByText(/Not verified — the build probe has no verdict/)).toBeInTheDocument()
+    expect(unprobed.queryByText(/did not run/)).not.toBeInTheDocument()
+    expect(
+      unprobed.getByText(/either did not run or did not answer in time/),
+    ).toBeInTheDocument()
+    expect(unprobed.getByText(/may still be buildable/)).toBeInTheDocument()
 
     // The verdict alone is not actionable; the reason is what makes it one.
     expect(bad.getByText(/answered HTTP 400/)).toBeInTheDocument()
@@ -632,6 +669,72 @@ describe('ImagesView — the saved schematics', () => {
     // PITFALLS P9(b): an ISO from one schematic and an installer from another
     // is the documented drift, so the sentence saying so is part of the panel.
     expect(detail.getByText(/must share this schematic/)).toBeInTheDocument()
+  })
+
+  it('shows the operator what was not proven about the installer reference', async () => {
+    // G-02-3. The reference is usable, so it is still rendered; what was missing
+    // was any statement that the preferred repository name had never actually
+    // been ruled out. A warning that only reaches a log is not a warning to the
+    // person reading the reference.
+    const detailText =
+      'This installer reference names the repository "installer", which answered for v1.13.9. ' +
+      'The preferred repository metal-installer did not answer at all, so it was never ruled out.'
+    stubFactory({
+      saved: [USABLE],
+      assetWarnings: [
+        { code: WARNING_INSTALLER_REPO_FALLBACK_UNVERIFIED, detail: detailText },
+      ],
+    })
+    const user = userEvent.setup()
+
+    renderImages()
+    const detail = await openDetail(user, USABLE)
+
+    await detail.findByLabelText('Installer reference')
+
+    const box = await detail.findByRole('alert', { name: 'Installer reference warnings' })
+    expect(within(box).getByText(WARNING_INSTALLER_REPO_FALLBACK_UNVERIFIED)).toBeInTheDocument()
+    expect(within(box).getByText(detailText)).toBeInTheDocument()
+
+    // The heading must describe the reference, not the schematic: this warning
+    // says nothing about an ISO diverging from an installed system.
+    expect(within(box).queryByText(/produce an ISO and an installed system that differ/)).toBeNull()
+  })
+
+  it('renders no warning box when the installer repository name was proven', async () => {
+    stubFactory({ saved: [USABLE] })
+    const user = userEvent.setup()
+
+    renderImages()
+    const detail = await openDetail(user, USABLE)
+
+    await detail.findByLabelText('Installer reference')
+    expect(detail.queryByRole('alert', { name: 'Installer reference warnings' })).toBeNull()
+  })
+
+  it('cannot split a repository name across a line break', async () => {
+    // G-02-3's second artifact. `break-all` permits a break at any character, so
+    // `metal-installer` could wrap into something a reader — or a DOM-scraping
+    // verifier, as happened during this UAT — takes for `installer`. Breaks are
+    // now permitted only at path separators.
+    stubFactory({ saved: [USABLE] })
+    const user = userEvent.setup()
+
+    renderImages()
+    const detail = await openDetail(user, USABLE)
+
+    const installer = await detail.findByLabelText('Installer reference')
+    const reference = `factory.talos.dev/metal-installer/${USABLE.id}:v1.13.9`
+
+    // The whole reference is still one string: the Copy control and every other
+    // assertion in this file read the element's text content.
+    expect(installer).toHaveTextContent(reference)
+
+    const value = installer.querySelector('[data-reference]')
+    expect(value).not.toBeNull()
+    expect(value?.textContent).toBe(reference)
+    expect(value?.className ?? '').not.toContain('break-all')
+    expect(value?.className ?? '').not.toContain('break-words')
   })
 
   it('changes every asset URL when the architecture control changes', async () => {
