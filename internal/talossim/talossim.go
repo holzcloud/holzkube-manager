@@ -180,10 +180,15 @@ func New(opts Options) (*Server, error) {
 		calls:     make(map[string]int),
 	}
 
-	tcp, err := net.Listen("tcp", "127.0.0.1:0")
+	raw, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		return nil, fmt.Errorf("talossim: listen on loopback: %w", err)
 	}
+
+	// Wrapped from the start rather than only while a scenario is active: the
+	// connections flap_connection has to sever are the ones accepted before it
+	// was injected, and a listener swapped in later would not know about them.
+	tcp := newTrackingListener(raw)
 
 	s.tcp = tcp
 	s.tcpAddr = tcp.Addr().String()
@@ -375,6 +380,11 @@ func (s *Server) Close() error {
 
 	s.srv.Stop()
 	s.wg.Wait()
+
+	// A listener a scenario opened after the gRPC server stopped serving it is
+	// nobody else's to close, and a leaked one holds a port for the rest of the
+	// test binary (T-02-16).
+	s.closeListener()
 
 	err := s.pipe.Close()
 	if err != nil && !errors.Is(err, net.ErrClosed) {

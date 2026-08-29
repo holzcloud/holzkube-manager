@@ -520,6 +520,18 @@ func (m *machineService) Reboot(_ context.Context, _ *machine.RebootRequest) (*m
 
 	m.server.node.reboot()
 
+	// ip_changes_on_reboot models a DHCP lease that did not survive the reboot.
+	// The rebind happens before the reply is written and deliberately does not
+	// sever this connection: closing a listener stops new accepts and leaves
+	// established connections alone, which is the sequence a client observes on
+	// hardware -- the answer arrives, and the node then comes back somewhere
+	// else. The address it left behind refuses connections from here on.
+	if _, ok := m.server.activeScenario(ScenarioIPChangesOnReboot); ok {
+		if err := m.server.rebind(); err != nil {
+			return nil, status.Errorf(codes.Internal, "talossim: rebind after reboot: %v", err)
+		}
+	}
+
 	return &machine.RebootResponse{
 		Messages: []*machine.Reboot{{
 			Metadata: m.server.node.metadata(),
