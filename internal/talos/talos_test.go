@@ -2,11 +2,19 @@ package talos_test
 
 import (
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/tls"
+	"crypto/x509"
+	"crypto/x509/pkix"
 	"errors"
 	"io"
-	"math/rand/v2"
+	"math/big"
+	mathrand "math/rand/v2"
 	"net"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -298,6 +306,160 @@ func eventually(cond func() bool) bool {
 	return cond()
 }
 
+// TestProbeDoesNotPropagateAnUnverifiedPeersHostname is WR-04.
+//
+// directDialer.Probe completes its handshake with InsecureSkipVerify -- correct
+// on this path, because maintenance mode has no cluster PKI to verify against
+// -- and then reads the hostname out of the peer's leaf certificate.
+// Creds.Fingerprint exists as the trust anchor for that read but no pinning is
+// performed yet (T-02-27), so until it is, whatever answers on the apid port
+// chooses those bytes: their length, their character set and their content.
+// Identity.Hostname flows into Candidate and onward to whatever consumes
+// discovery, so it has to be bounded and checked where it is harvested.
+//
+// The 4 KiB name is the reported case. The rest are the shapes that get past a
+// length check alone -- a terminal escape, a newline that splits a log line in
+// two, a NUL, a path separator -- because the field is a string a UI and a log
+// both render.
+func TestProbeDoesNotPropagateAnUnverifiedPeersHostname(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name       string
+		commonName string
+		dnsNames   []string
+		want       string
+	}{
+		{
+			name:       "an ordinary hostname is kept",
+			commonName: "node-01.cluster.example",
+			want:       "node-01.cluster.example",
+		},
+		{
+			name:       "a subject alternative name wins, as before",
+			commonName: "node-01.cluster.example",
+			dnsNames:   []string{"talos-a1b-2c3"},
+			want:       "talos-a1b-2c3",
+		},
+		{
+			name:       "four kilobytes of common name",
+			commonName: strings.Repeat("A", 4096),
+		},
+		{
+			name:       "a name one byte past the longest a DNS name can be",
+			commonName: strings.Repeat("a", 254),
+		},
+		{
+			name:       "a terminal escape",
+			commonName: "node\x1b[2Jcluster",
+		},
+		{
+			name:       "a newline, which splits one log line into two",
+			commonName: "node\nlevel=INFO msg=\"nothing to see\"",
+		},
+		{
+			name:       "a NUL",
+			commonName: "node\x00.cluster.example",
+		},
+		{
+			name:       "a path separator",
+			commonName: "../../etc/hostname",
+		},
+		{
+			name:       "a hostile subject alternative name over an innocent common name",
+			commonName: "node-01.cluster.example",
+			dnsNames:   []string{strings.Repeat("b", 4096)},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			port := hostileTLSPort(t, tc.commonName, tc.dnsNames)
+			d := talos.NewDirectDialer(port)
+
+			id, err := d.Probe(t.Context(), talos.Target{Machine: "hostile", Addr: "127.0.0.1"})
+			if err != nil {
+				t.Fatalf("Probe: %v", err)
+			}
+			if id.Hostname != tc.want {
+				t.Errorf("Identity.Hostname = %q (%d bytes), want %q", id.Hostname, len(id.Hostname), tc.want)
+			}
+			// Machine is holzkube's own identifier and is never the peer's to
+			// choose. Stated here because it is the field a hostname that got
+			// through would be mistaken for.
+			if id.Machine != "hostile" {
+				t.Errorf("Identity.Machine = %q, want the probed target's own %q", id.Machine, "hostile")
+			}
+			// The certificate is self-signed, which is what an unconfigured
+			// node looks like -- and, being unverified, what anything can look
+			// like. The verdict is unchanged by this commit and is asserted so
+			// that a later pinning change has to come past it.
+			if !id.Maintenance {
+				t.Error("Identity.Maintenance is false for a self-signed peer")
+			}
+		})
+	}
+}
+
+// hostileTLSPort serves a real TLS handshake with a self-signed certificate
+// carrying exactly the subject the caller asks for.
+//
+// It is a whole listener rather than a unit test of the sanitiser because the
+// question is whether the bytes survive the round trip: a name that crypto/x509
+// refuses to marshal, or that the handshake drops, would make a unit test pass
+// against a case that cannot happen, and a name that arrives intact is the case
+// that can.
+func hostileTLSPort(t *testing.T, commonName string, dnsNames []string) int {
+	t.Helper()
+
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("generate key: %v", err)
+	}
+	template := &x509.Certificate{
+		SerialNumber:          big.NewInt(1),
+		Subject:               pkix.Name{CommonName: commonName},
+		DNSNames:              dnsNames,
+		IPAddresses:           []net.IP{net.IPv4(127, 0, 0, 1)},
+		NotBefore:             time.Now().Add(-time.Hour),
+		NotAfter:              time.Now().Add(time.Hour),
+		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign,
+		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+		BasicConstraintsValid: true,
+		IsCA:                  true,
+	}
+	der, err := x509.CreateCertificate(rand.Reader, template, template, &key.PublicKey, key)
+	if err != nil {
+		t.Fatalf("create certificate with common name of %d bytes: %v", len(commonName), err)
+	}
+
+	l, err := tls.Listen("tcp", "127.0.0.1:0", &tls.Config{
+		MinVersion:   tls.VersionTLS12,
+		Certificates: []tls.Certificate{{Certificate: [][]byte{der}, PrivateKey: key}},
+	})
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	t.Cleanup(func() { _ = l.Close() })
+
+	go func() {
+		for {
+			c, err := l.Accept()
+			if err != nil {
+				return
+			}
+			go func() {
+				defer c.Close() //nolint:errcheck // the fixture owns this connection
+				_, _ = io.Copy(io.Discard, c)
+			}()
+		}
+	}()
+
+	return portOf(t, l)
+}
+
 // TestDiscoverySourcesShareOneCallSite is the DiscoverySource half of the same
 // argument as TestDialerSwap: an outward-pushing source and an inward-pushing
 // one feed one fan-in, and the fan-in is written once.
@@ -363,7 +525,7 @@ func closedPort(t *testing.T) int {
 	t.Helper()
 
 	for range 64 {
-		port := 20000 + rand.IntN(10000)
+		port := 20000 + mathrand.IntN(10000)
 
 		l, err := net.Listen("tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(port)))
 		if err != nil {
