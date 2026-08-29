@@ -70,6 +70,7 @@ function schematicFixture(overrides: Partial<Schematic> = {}): Schematic {
     usable: true,
     probed_at: '2026-08-29T10:00:00Z',
     probe_reason: '',
+    arch: 'amd64',
     created_at: '2026-08-29T10:00:00Z',
     rev: 1,
     ...overrides,
@@ -637,6 +638,38 @@ describe('ImagesView — the saved schematics', () => {
     expect(bad.getByText(/answered HTTP 400/)).toBeInTheDocument()
     // And a schematic nobody probed is not accused of anything.
     expect(unprobed.queryByText(/answered HTTP/)).not.toBeInTheDocument()
+  })
+
+  it('names the architecture the verdict is about, beside the verdict', async () => {
+    // G-02-8's second half. "Usable — the build probe confirmed it" is a claim
+    // whose subject is missing until the record says which architecture was
+    // probed. arm64 and not amd64 on purpose: the fixture default is amd64, so
+    // an amd64 assertion would pass against a hardcoded qualifier.
+    const arm = schematicFixture({ name: 'arm-workers', arch: 'arm64' })
+    stubFactory({ saved: [arm] })
+    const user = userEvent.setup()
+
+    renderImages()
+    const detail = await openDetail(user, arm)
+
+    expect(detail.getByText(/Usable — the build probe confirmed it/)).toBeInTheDocument()
+    expect(detail.getByText('architecture: arm64')).toBeInTheDocument()
+  })
+
+  it('leaves a record written before the architecture existed unqualified', async () => {
+    // Every schematic stored before model.Schematic.Arch existed decodes with an
+    // empty architecture -- and those are precisely the records the G-02-8 leak
+    // produced. Dressing one up with a qualifier nobody measured would be the
+    // same lie in a new place, so the badge is exactly what plan 02-12 leaves.
+    const old = schematicFixture({ name: 'pre-arch', arch: '' })
+    stubFactory({ saved: [old] })
+    const user = userEvent.setup()
+
+    renderImages()
+    const detail = await openDetail(user, old)
+
+    expect(detail.getByText(/Usable — the build probe confirmed it/)).toBeInTheDocument()
+    expect(detail.queryByText(/^architecture:/)).not.toBeInTheDocument()
   })
 
   it('shows the schematic id in full — it is what a machine config refers to', async () => {
