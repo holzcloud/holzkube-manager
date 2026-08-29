@@ -532,7 +532,8 @@ describe('ImagesView — the authoring half', () => {
   })
 
   it('hasControlCharacter transcribes the server rule and nothing wider', () => {
-    // The server's representable() refuses any rune below U+0020 and U+007F.
+    // The server's representable() refuses a string that is not valid UTF-8,
+    // any rune below U+0020, and U+007F. All three, and nothing else.
     expect(hasControlCharacter('console=ttyS0')).toBe(false)
     expect(hasControlCharacter('')).toBe(false)
     expect(hasControlCharacter('ümlaut — dash')).toBe(false)
@@ -544,6 +545,18 @@ describe('ImagesView — the authoring half', () => {
     // U+0080 is not in the server's set, and a client that refused it would
     // reject input the server accepts.
     expect(hasControlCharacter('a\u0080b')).toBe(false)
+
+    // The other half of representable: not valid UTF-8. A lone surrogate is
+    // the only way a browser produces one, and it is the half the server
+    // cannot enforce -- JSON.stringify emits it as a well-formed \udXXX
+    // escape and Go decodes an unpaired escape to U+FFFD, so representable is
+    // handed a clean string and the id is computed over a character the
+    // operator never typed.
+    expect(hasControlCharacter('a\ud800b')).toBe(true)
+    expect(hasControlCharacter('a\udfffb')).toBe(true)
+    // A well-formed pair is an ordinary character and must stay accepted, or
+    // this would refuse input the server takes.
+    expect(hasControlCharacter('a\ud83d\ude00b')).toBe(false)
   })
 
   it('keeps "created" and "usable" apart on the create result', async () => {
