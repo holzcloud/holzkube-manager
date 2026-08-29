@@ -51,19 +51,49 @@ func (c *Client) ProbeBuildable(ctx context.Context, id, talosVersion string, ar
 		}
 	}
 
-	switch status / 100 {
-	case 2:
+	switch {
+	case status/100 == 2:
 		return nil
-	case 4:
+	case registryRefused(status):
 		// The Factory answered and refused. That is a statement about the
 		// schematic, and it is the only thing that may be reported as one.
 		return fmt.Errorf("%w: %s at %s/%s answered HTTP %d", ErrSchematicNotBuildable, id, talosVersion, arch, status)
 	default:
-		// The Factory did not answer usably. That says nothing about the
-		// schematic, and showing it as a bad schematic would send an operator
-		// to fix something that is not broken.
+		// The Factory did not answer the question that was asked. That says
+		// nothing about the schematic, and showing it as a bad schematic would
+		// send an operator to fix something that is not broken.
 		return fmt.Errorf("%w: probing %s at %s/%s answered HTTP %d", ErrUpstreamUnavailable, id, talosVersion, arch, status)
 	}
+}
+
+// registryRefused reports whether a status is the Factory or the registry
+// answering *about this schematic* rather than declining to answer *us*. It is
+// this package's only statement of that taxonomy; both classification sites
+// call it rather than restating it, which is what G-02-5 found them doing
+// differently.
+//
+// 400 and 404 are answers. A 404 is "no manifest under that name", and a 400 is
+// what the Factory returns when an extension the schematic names is not
+// available at the requested version -- observed live against factory.talos.dev
+// for both an all-zeros schematic id (404) and a nonsense repository name (400).
+// Both are reproducible and neither is changed by asking again, so they are the
+// only two statuses that may be reported to an operator as a bad schematic.
+//
+// Everything else is the upstream declining. A 401 is an authentication
+// challenge, a 403 a policy refusal and a 429 a rate limit; all three are about
+// the caller, and 5xx is about the upstream. factory.talos.dev is known to
+// throttle -- 02-04-SUMMARY.md:385 records it doing so without an HTTP response
+// at all -- and the probe verdict is written once at creation with no re-probe
+// path, so a 429 filed as ErrSchematicNotBuildable becomes a permanent,
+// unclearable accusation against a schematic nothing found fault with.
+//
+// The cost of putting those statuses on the retryable side is that fewer
+// answers stamp a verdict, so more records end creation unprobed. That is the
+// correct classification, and the size of the resulting unprobed population is
+// the open question 02-DECISION-probe-budget.md owns -- not a reason to widen
+// what counts as a refusal.
+func registryRefused(status int) bool {
+	return status == http.StatusBadRequest || status == http.StatusNotFound
 }
 
 // probeStatus issues one request and returns its status code, discarding the
