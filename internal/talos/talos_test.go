@@ -53,7 +53,7 @@ func TestDialerSwap(t *testing.T) {
 				Addr:    sim.Host(),
 			}
 
-			cc, err := talos.NewClusterClient(ctx, row.dialer, target, sim.ClientCreds())
+			cc, err := talos.NewClusterClient(ctx, row.dialer, target, sim.ClientCreds(), talos.Mode{})
 			if err != nil {
 				t.Fatalf("NewClusterClient: %v", err)
 			}

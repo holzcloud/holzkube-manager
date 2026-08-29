@@ -34,7 +34,7 @@ func TestTracerRealClientReachesFakeNode(t *testing.T) {
 		Addr:    sim.Host(),
 	}
 
-	cc, err := talos.NewClusterClient(ctx, sim.Dialer(), target, sim.ClientCreds())
+	cc, err := talos.NewClusterClient(ctx, sim.Dialer(), target, sim.ClientCreds(), talos.Mode{})
 	if err != nil {
 		t.Fatalf("NewClusterClient through the in-process dialer: %v", err)
 	}
@@ -90,7 +90,7 @@ func TestTracerRefusesUnverifiableClientCertificate(t *testing.T) {
 
 	target := talos.Target{Machine: model.MachineID("00000000-0000-0000-0000-00000000beef")}
 
-	cc, err := talos.NewClusterClient(ctx, sim.Dialer(), target, creds)
+	cc, err := talos.NewClusterClient(ctx, sim.Dialer(), target, creds, talos.Mode{})
 	if err == nil {
 		_ = cc.Close()
 		t.Fatal("a client certificate the node cannot verify was accepted; ClientAuth is not RequireAndVerifyClientCert")
@@ -119,14 +119,14 @@ func TestTracerRefusesMaintenanceCredentialsOnTheClusterPath(t *testing.T) {
 
 	target := talos.Target{Machine: model.MachineID("00000000-0000-0000-0000-00000000cafe")}
 
-	if cc, err := talos.NewClusterClient(ctx, sim.Dialer(), target, creds); err == nil {
+	if cc, err := talos.NewClusterClient(ctx, sim.Dialer(), target, creds, talos.Mode{}); err == nil {
 		_ = cc.Close()
 		t.Fatal("maintenance credentials built a cluster client")
 	}
 
 	insecure := sim.ClientCreds()
 	insecure.TLS.InsecureSkipVerify = true
-	if cc, err := talos.NewClusterClient(ctx, sim.Dialer(), target, insecure); err == nil {
+	if cc, err := talos.NewClusterClient(ctx, sim.Dialer(), target, insecure, talos.Mode{}); err == nil {
 		_ = cc.Close()
 		t.Fatal("InsecureSkipVerify was accepted on the cluster path (T-02-01)")
 	}

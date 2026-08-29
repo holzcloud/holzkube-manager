@@ -118,7 +118,7 @@ func TestConstructorsRefuseTheWrongCredentialKind(t *testing.T) {
 		{
 			name: "maintenance constructor, cluster credentials",
 			build: func(ctx context.Context, c talos.Creds) error {
-				_, err := talos.NewMaintenanceClient(ctx, sim.Dialer(), target, c)
+				_, err := talos.NewMaintenanceClient(ctx, sim.Dialer(), target, c, talos.Mode{})
 				return err
 			},
 			creds: talos.Creds{Kind: talos.CredCluster, TLS: sim.ClientCreds().TLS},
@@ -126,7 +126,7 @@ func TestConstructorsRefuseTheWrongCredentialKind(t *testing.T) {
 		{
 			name: "cluster constructor, maintenance credentials",
 			build: func(ctx context.Context, c talos.Creds) error {
-				_, err := talos.NewClusterClient(ctx, sim.Dialer(), target, c)
+				_, err := talos.NewClusterClient(ctx, sim.Dialer(), target, c, talos.Mode{})
 				return err
 			},
 			creds: talos.Creds{Kind: talos.CredMaintenance, TLS: sim.ClientCreds().TLS},
@@ -169,7 +169,7 @@ func TestMaintenanceClientAnswersItsMethods(t *testing.T) {
 
 	mc, err := talos.NewMaintenanceClient(ctx, sim.Dialer(),
 		simTarget(sim, "00000000-0000-0000-0000-0000000000c2"),
-		talos.Creds{Kind: talos.CredMaintenance, TLS: sim.ClientCreds().TLS})
+		talos.Creds{Kind: talos.CredMaintenance, TLS: sim.ClientCreds().TLS}, talos.Mode{})
 	if err != nil {
 		t.Fatalf("NewMaintenanceClient: %v", err)
 	}
@@ -239,7 +239,7 @@ func newClusterClient(t *testing.T, sim *talossim.Server) *talos.ClusterClient {
 	defer cancel()
 
 	cc, err := talos.NewClusterClient(ctx, sim.Dialer(),
-		simTarget(sim, "00000000-0000-0000-0000-0000000000cc"), sim.ClientCreds())
+		simTarget(sim, "00000000-0000-0000-0000-0000000000cc"), sim.ClientCreds(), talos.Mode{})
 	if err != nil {
 		t.Fatalf("NewClusterClient: %v", err)
 	}

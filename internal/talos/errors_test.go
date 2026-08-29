@@ -166,7 +166,7 @@ func TestErrorNamesTheMachineAndNeverTheAddress(t *testing.T) {
 
 	sim := newSim(t, talossim.Options{Hostname: "unused"})
 
-	_, err := talos.NewClusterClient(ctx, talos.NewDirectDialer(1), target, sim.ClientCreds())
+	_, err := talos.NewClusterClient(ctx, talos.NewDirectDialer(1), target, sim.ClientCreds(), talos.Mode{})
 	if err == nil {
 		t.Fatal("NewClusterClient reached a node at an address that does not resolve")
 	}

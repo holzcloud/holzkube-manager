@@ -502,7 +502,7 @@ func assertIPChangesOnReboot(t *testing.T, tr contractTransport) {
 		// Identity is unchanged; only the address hint moved. That is the whole
 		// claim: a node whose address changed is the same node.
 		fresh, err := talos.NewClusterClient(t.Context(), talos.NewDirectDialer(node.Sim.Port()),
-			node.Target, node.Creds)
+			node.Target, node.Creds, talos.Mode{})
 		if err != nil {
 			t.Fatalf("NewClusterClient after the rebind: %v", err)
 		}
@@ -641,7 +641,7 @@ func assertVersionOutOfSupportedRange(t *testing.T, tr contractTransport) {
 	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 	defer cancel()
 
-	cc, err := talos.NewClusterClient(ctx, node.Dialer, node.Target, node.Creds)
+	cc, err := talos.NewClusterClient(ctx, node.Dialer, node.Target, node.Creds, talos.Mode{})
 	if err == nil {
 		_ = cc.Close()
 		t.Fatal("NewClusterClient built a client for a node outside the supported version range")
@@ -668,7 +668,7 @@ func clientFor(t *testing.T, node nodeUnderTest) *talos.ClusterClient {
 	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 	defer cancel()
 
-	cc, err := talos.NewClusterClient(ctx, node.Dialer, node.Target, node.Creds)
+	cc, err := talos.NewClusterClient(ctx, node.Dialer, node.Target, node.Creds, talos.Mode{})
 	if err != nil {
 		t.Fatalf("NewClusterClient: %v", err)
 	}

@@ -80,7 +80,7 @@ type conn struct {
 }
 
 // dial is the one place either client type reaches a node.
-func dial(ctx context.Context, d Dialer, t Target, c Creds) (*conn, error) {
+func dial(ctx context.Context, d Dialer, t Target, c Creds, m Mode) (*conn, error) {
 	if d == nil {
 		return nil, errors.New("talos: nil dialer")
 	}
@@ -106,9 +106,17 @@ func dial(ctx context.Context, d Dialer, t Target, c Creds) (*conn, error) {
 	// The policy interceptors are appended after the transport's own options,
 	// so a Dialer cannot displace them: a transport chooses how bytes travel,
 	// not whether a call carries a deadline.
+	//
+	// The dry-run gate is chained *after* the policy, which makes it the
+	// innermost frame and therefore the last thing that runs before the
+	// invoker hands the call to gRPC (D-03). Installing it here rather than in
+	// either constructor is the structural half of the decision: this is the
+	// one function both client types reach a node through, so there is no
+	// constructor that can forget it and no method that can opt out.
+	dryUnary, dryStream := dryRunInterceptor(m.DryRun)
 	opts = append(opts,
-		grpc.WithChainUnaryInterceptor(n.unaryPolicy),
-		grpc.WithChainStreamInterceptor(n.streamPolicy),
+		grpc.WithChainUnaryInterceptor(n.unaryPolicy, dryUnary),
+		grpc.WithChainStreamInterceptor(n.streamPolicy, dryStream),
 	)
 
 	// client.WithNodes / client.WithNode are context decorators returning a
@@ -344,7 +352,11 @@ func shortMethod(fullMethod string) string {
 // The cost of that probe is reported the way auth reports its argon2id
 // calibration -- at debug level, because unlike calibration it is paid per
 // connection and would otherwise be the noisiest line in the log.
-func NewClusterClient(ctx context.Context, d Dialer, t Target, c Creds) (*ClusterClient, error) {
+//
+// Mode is required rather than optional. Every caller states whether this
+// client may mutate a node, because the alternative is a caller that inherits
+// the answer and a --dry-run that silently does not apply to one call path.
+func NewClusterClient(ctx context.Context, d Dialer, t Target, c Creds, m Mode) (*ClusterClient, error) {
 	if c.Kind != CredCluster {
 		return nil, fmt.Errorf(
 			"talos: refusing to build a cluster client with %q credentials: it requires %q. "+
@@ -361,7 +373,7 @@ func NewClusterClient(ctx context.Context, d Dialer, t Target, c Creds) (*Cluste
 				"an unverifiable node belongs on the maintenance path with a pinned fingerprint")
 	}
 
-	n, err := dial(ctx, d, t, c)
+	n, err := dial(ctx, d, t, c, m)
 	if err != nil {
 		return nil, err
 	}
@@ -385,7 +397,12 @@ func NewClusterClient(ctx context.Context, d Dialer, t Target, c Creds) (*Cluste
 // never invents trust. Creds.Fingerprint is the seam on which a later phase
 // pins the maintenance certificate without a signature change (T-02-27); no
 // pinning is performed here yet.
-func NewMaintenanceClient(ctx context.Context, d Dialer, t Target, c Creds) (*MaintenanceClient, error) {
+//
+// Mode applies here exactly as it does on the cluster path: maintenance mode is
+// not an exemption from dry-run. ApplyConfiguration is the one thing this
+// client exists for and it is the most consequential mutation in the product,
+// so a dry-run that spared it would spare the call it matters most for.
+func NewMaintenanceClient(ctx context.Context, d Dialer, t Target, c Creds, m Mode) (*MaintenanceClient, error) {
 	if c.Kind != CredMaintenance {
 		return nil, fmt.Errorf(
 			"talos: refusing to build a maintenance client with %q credentials: it requires %q. "+
@@ -393,7 +410,7 @@ func NewMaintenanceClient(ctx context.Context, d Dialer, t Target, c Creds) (*Ma
 			c.Kind, CredMaintenance)
 	}
 
-	n, err := dial(ctx, d, t, c)
+	n, err := dial(ctx, d, t, c, m)
 	if err != nil {
 		return nil, err
 	}
