@@ -85,8 +85,8 @@ type Client struct {
 	installerMu sync.Mutex
 
 	// installerRepos caches the resolved installer repository name, keyed by
-	// platform and Talos version. Populated and read only by installer.go,
-	// where the reasoning for the key lives.
+	// platform, Talos version and the SecureBoot selection. Populated and read
+	// only by installer.go, where the reasoning for the key lives.
 	installerRepos map[string]string
 }
 
