@@ -3,7 +3,10 @@ package talos_test
 import (
 	"context"
 	"errors"
+	"io"
+	"math/rand/v2"
 	"net"
+	"strconv"
 	"testing"
 	"time"
 
@@ -92,18 +95,66 @@ func TestDirectDialerRefusesATargetWithNoAddress(t *testing.T) {
 // cannot probe a node that is still booting. Both must be representable as a
 // state rather than as an error, or the contact-direction reversal shows up in
 // the UI as a fleet of broken machines.
+//
+// The second row is the booting node, and it is not a hypothetical: the TCP
+// accept comes out of the kernel's listen backlog whether or not apid is
+// serving behind it, so a node coming up completes the TCP handshake and then
+// drops the connection before a byte of TLS. It reaches the probe as a broken
+// pipe or a reset, and it is "not yet" rather than "broken".
+//
+// The row this test deliberately does not contain is a peer that spoke TLS and
+// spoke it wrongly; that one is an error, and it is asserted as an error by
+// TestProbeReportsATLSFaultAsAFailure. Without that companion this test would
+// pass just as happily against a probe that called every failure a state.
 func TestProbeReportsNotReachableYet(t *testing.T) {
 	t.Parallel()
 
-	port := closedPort(t)
-	d := talos.NewDirectDialer(port)
-
-	_, err := d.Probe(t.Context(), talos.Target{Machine: "absent", Addr: "127.0.0.1"})
-	if err == nil {
-		t.Fatal("probing a closed port succeeded")
+	rows := []struct {
+		name string
+		port func(*testing.T) int
+	}{
+		{name: "nothing is listening", port: closedPort},
+		{name: "the connection dies before the TLS handshake", port: acceptThenClosePort},
 	}
-	if !errors.Is(err, talos.ErrNotReachableYet) {
-		t.Fatalf("Probe of an unreachable target returned %v, which does not satisfy errors.Is(err, ErrNotReachableYet)", err)
+
+	for _, row := range rows {
+		t.Run(row.name, func(t *testing.T) {
+			t.Parallel()
+
+			d := talos.NewDirectDialer(row.port(t))
+
+			_, err := d.Probe(t.Context(), talos.Target{Machine: "absent", Addr: "127.0.0.1"})
+			if err == nil {
+				t.Fatal("probing a target nothing is serving succeeded")
+			}
+			if !errors.Is(err, talos.ErrNotReachableYet) {
+				t.Fatalf("Probe of an unreachable target returned %v, which does not satisfy errors.Is(err, ErrNotReachableYet)", err)
+			}
+		})
+	}
+}
+
+// TestProbeReportsATLSFaultAsAFailure is the other side of the same line, and
+// it is what keeps the test above from being satisfiable by a probe that
+// reports everything as a state.
+//
+// A peer that answered the ClientHello with bytes that are not TLS has been
+// heard from. Something is serving that port and it is not a Talos node, which
+// an operator needs told -- reporting it as "not reachable yet" would leave a
+// machine sitting in a pending state forever with nothing to look at.
+func TestProbeReportsATLSFaultAsAFailure(t *testing.T) {
+	t.Parallel()
+
+	d := talos.NewDirectDialer(garbageTLSPort(t))
+
+	_, err := d.Probe(t.Context(), talos.Target{Machine: "impostor", Addr: "127.0.0.1"})
+	if err == nil {
+		t.Fatal("probing a port serving something that is not TLS succeeded")
+	}
+	if errors.Is(err, talos.ErrNotReachableYet) {
+		t.Fatalf("Probe of a peer that answered with non-TLS bytes returned %v, which satisfies "+
+			"errors.Is(err, ErrNotReachableYet): a node that answered is reachable, and calling it a "+
+			"state leaves it pending forever", err)
 	}
 }
 
@@ -175,22 +226,113 @@ func TestDiscoverySourcesShareOneCallSite(t *testing.T) {
 	}
 }
 
-// closedPort returns a loopback port that nothing is listening on, by opening a
-// listener and closing it. Picking a number would be a race against whatever
-// else runs on the machine.
+// closedPort returns a loopback port that nothing is listening on and that
+// nothing in this test binary will start listening on either.
+//
+// The obvious implementation -- listen on :0, read the port back, close --
+// returns a port the kernel has just put back in the ephemeral pool, and this
+// package opens dozens of :0 listeners in parallel: every talossim node, and
+// every rebind and flap a scenario performs. One of them takes the returned
+// port often enough to matter. It was the cause of a probe test that failed
+// roughly one run in eight with a connection that was accepted and then died,
+// which is a squatter's listener closing and not the absence this helper is
+// asked for.
+//
+// So the port is drawn from below the ephemeral range instead -- which starts
+// at 49152 on macOS and 32768 on Linux -- where a :0 bind never lands. It is
+// still bound and released rather than merely picked, so the number returned is
+// one the kernel agreed to hand out and not one an unrelated process is already
+// using.
 func closedPort(t *testing.T) int {
+	t.Helper()
+
+	for range 64 {
+		port := 20000 + rand.IntN(10000)
+
+		l, err := net.Listen("tcp", net.JoinHostPort("127.0.0.1", strconv.Itoa(port)))
+		if err != nil {
+			continue
+		}
+		if err := l.Close(); err != nil {
+			t.Fatalf("close: %v", err)
+		}
+		return port
+	}
+
+	t.Fatal("no free loopback port below the ephemeral range after 64 attempts")
+	return 0
+}
+
+// acceptThenClosePort serves a port that completes the TCP handshake and then
+// drops the connection without speaking TLS.
+//
+// That is a node whose kernel has the socket and whose apid does not yet: the
+// accept comes out of the listen backlog, and the client's ClientHello meets a
+// closed socket. It reaches the probe as a broken pipe, a reset or an EOF
+// depending on which side moved first, and all three are the same event.
+func acceptThenClosePort(t *testing.T) int {
 	t.Helper()
 
 	l, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatalf("listen: %v", err)
 	}
+	t.Cleanup(func() { _ = l.Close() })
+
+	go func() {
+		for {
+			c, err := l.Accept()
+			if err != nil {
+				return
+			}
+			_ = c.Close()
+		}
+	}()
+
+	return portOf(t, l)
+}
+
+// garbageTLSPort serves a port that answers the ClientHello with bytes that are
+// not a TLS record. It is the peer that did speak, and spoke wrongly.
+func garbageTLSPort(t *testing.T) int {
+	t.Helper()
+
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	t.Cleanup(func() { _ = l.Close() })
+
+	go func() {
+		for {
+			c, err := l.Accept()
+			if err != nil {
+				return
+			}
+			go func() {
+				defer c.Close() //nolint:errcheck // the fixture owns this connection
+
+				// Read the ClientHello off the wire first, so the answer is an
+				// answer rather than a race with the client's own write.
+				_, _ = c.Read(make([]byte, 1024))
+				_, _ = c.Write([]byte("HTTP/1.1 400 Bad Request\r\n\r\n"))
+
+				// Hold the connection open until the client hangs up, so the
+				// probe classifies the reply and not the close that follows it.
+				_, _ = io.Copy(io.Discard, c)
+			}()
+		}
+	}()
+
+	return portOf(t, l)
+}
+
+func portOf(t *testing.T, l net.Listener) int {
+	t.Helper()
+
 	addr, ok := l.Addr().(*net.TCPAddr)
 	if !ok {
 		t.Fatalf("a TCP listener reported a %T address", l.Addr())
-	}
-	if err := l.Close(); err != nil {
-		t.Fatalf("close: %v", err)
 	}
 	return addr.Port
 }

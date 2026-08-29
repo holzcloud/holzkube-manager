@@ -5,6 +5,7 @@ import (
 	"crypto/tls"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"strconv"
 	"time"
@@ -78,8 +79,19 @@ func (d *directDialer) DialOptions(_ context.Context, _ Target, c Creds) ([]grpc
 //
 // The distinction it does draw is the one callers need: a target that cannot be
 // reached at all reports ErrNotReachableYet, which is a state. A target that
-// answers the TCP connection but not the handshake is reachable and broken,
-// which is an error.
+// answered -- meaning it spoke TLS, and the TLS was wrong -- is reachable and
+// broken, which is an error.
+//
+// The line is drawn at "spoke TLS" and not at "accepted the connection",
+// because the TCP accept is the kernel's and not the node's: a socket comes out
+// of the listen backlog whether or not apid is serving behind it yet. A node
+// that is still booting therefore completes the TCP handshake and then dies
+// before a byte of TLS -- ECONNRESET, EPIPE or a clean EOF -- which is exactly
+// the "not yet" this probe exists to report. Classifying that as a fault would
+// paint a booting fleet broken, which is the failure ErrNotReachableYet was
+// introduced to prevent. It is the same distinction errors.go draws between
+// KindUnreachable and KindRejected, one layer down: what separates them is
+// whether anything answered, not whether a socket opened.
 func (d *directDialer) Probe(ctx context.Context, t Target) (Identity, error) {
 	addr, err := d.Resolve(ctx, t)
 	if err != nil {
@@ -107,6 +119,10 @@ func (d *directDialer) Probe(ctx context.Context, t Target) (Identity, error) {
 		MinVersion:         tls.VersionTLS12,
 	})
 	if err := tlsConn.HandshakeContext(dialCtx); err != nil {
+		if handshakeLostTheConnection(err) {
+			return Identity{}, fmt.Errorf("talos: %s at %s: %w: the connection died before the TLS "+
+				"handshake produced anything: %w", t.Machine, addr, ErrNotReachableYet, err)
+		}
 		return Identity{}, fmt.Errorf("talos: %s at %s accepted a connection but not a TLS handshake: %w", t.Machine, addr, err)
 	}
 
@@ -127,4 +143,24 @@ func (d *directDialer) Probe(ctx context.Context, t Target) (Identity, error) {
 	id.Maintenance = leaf.Issuer.String() == leaf.Subject.String()
 
 	return id, nil
+}
+
+// handshakeLostTheConnection reports that the TLS handshake failed because the
+// connection went away rather than because the peer disagreed about TLS.
+//
+// The two are told apart by the shape of the error and not by a list of errno
+// values, which would be a list that is wrong on the next platform. Everything
+// crypto/tls reports from a socket operation arrives as a *net.OpError -- a
+// reset, a broken pipe, a connection the kernel aborted, the handshake deadline
+// expiring -- and a peer that closed cleanly with nothing said arrives as io.EOF
+// or io.ErrUnexpectedEOF. Everything else crypto/tls returns is a statement
+// about TLS: a record that is not a record, an alert, a certificate that does
+// not verify. Those mean a node answered, and a node that answered is reachable.
+func handshakeLostTheConnection(err error) bool {
+	if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
+		return true
+	}
+
+	var opErr *net.OpError
+	return errors.As(err, &opErr)
 }
