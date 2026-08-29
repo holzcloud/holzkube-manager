@@ -20,9 +20,9 @@ import (
 // and a version it does not know is not an empty catalog.
 const catalogVersion = "v1.13.9"
 
-// The three Talos versions the fake answers registry manifest requests for.
-// They exist because the installer repository name is version-dependent
-// (PITFALLS P9(d)) and all three branches have to be exercisable offline.
+// The Talos versions the fake answers registry manifest requests for. They
+// exist because the installer repository name is version-dependent
+// (PITFALLS P9(d)) and every resolution branch has to be exercisable offline.
 const (
 	// installerModernVersion resolves under the platform-prefixed repository.
 	installerModernVersion = "v1.13.9"
@@ -33,16 +33,46 @@ const (
 	// dropping every system extension.
 	installerLegacyVersion = "v1.9.0"
 
-	// installerBrokenVersion resolves under neither name.
+	// installerNoSecureBootVersion resolves under both ordinary names and under
+	// neither SecureBoot name. It is the branch that proves a SecureBoot
+	// request refuses rather than falling back to the ordinary installer, which
+	// is the one substitution installerCandidates must never make.
+	installerNoSecureBootVersion = "v1.12.0"
+
+	// installerBrokenVersion resolves under no name at all.
 	installerBrokenVersion = "v1.7.0"
 )
 
 // installerRepos maps a Talos version to the repository names that answer for
-// it. A version absent from this map answers for neither.
+// it. A version absent from this map answers for none of them.
+//
+// This is a branch-coverage fixture, not a transcript of the registry. Each
+// version here exists to make one resolution branch reachable offline, and the
+// names under it were chosen for that -- not read off factory.talos.dev. The
+// installerLegacyVersion row is the demonstration: it pins v1.9.0 to
+// "installer" alone so TestInstallerImageFallsBackToTheLegacyName has a version
+// where the fallback is the only path, while 02-04-SUMMARY.md:387 records
+// metal-installer@v1.9.0 answering 200 confirmed live. Both statements are
+// correct and they are about different things, so do not "fix" this map against
+// the registry: doing so deletes the premise a passing test rests on. The
+// registry's actual matrix is recorded by TestLiveFactory's installer-name
+// subtest in live_test.go and in the plan summary, which is where an
+// observation belongs.
+//
+// The modern row is the one cell that is also an observation: at v1.13.9 all
+// four names answer, measured against the live registry, with the two SecureBoot
+// names carrying a different image digest than the two ordinary ones (02-UAT.md
+// G-02-4). The SecureBoot cell under installerLegacyVersion is an assumption --
+// nothing has checked whether installer-secureboot answers at v1.9.0 -- and
+// TestLiveFactory's matrix subtest is what settles it.
 var installerRepos = map[string]map[string]bool{
-	installerModernVersion: {"metal-installer": true, "installer": true},
-	installerLegacyVersion: {"installer": true},
-	installerBrokenVersion: {},
+	installerModernVersion: {
+		"metal-installer": true, "installer": true,
+		"metal-installer-secureboot": true, "installer-secureboot": true,
+	},
+	installerLegacyVersion:       {"installer": true, "installer-secureboot": true},
+	installerNoSecureBootVersion: {"metal-installer": true, "installer": true},
+	installerBrokenVersion:       {},
 }
 
 // fakeFactory is an Image Factory that reproduces the documented upstream
