@@ -529,6 +529,132 @@ func TestCreateRejectsUnknownExtensionsBeforeAnyPOST(t *testing.T) {
 	}
 }
 
+// TestCreateRefusesALocallyUnrenderableValueAsAnInputProblem closes G-02-6.
+//
+// A control character in a kernel argument is refused by holzkube's own
+// canonical serialiser, in Schematic.ID(), before the catalog is fetched and
+// before any POST. The UAT saw that answered as HTTP 502 "The Image Factory did
+// not answer usably" after 18.658ms -- a sentence that blames a third party,
+// invites a retry that can never succeed, and never names the field.
+//
+// The counters are the load-bearing assertion: zero upstream requests is what
+// makes "this is your input, not their outage" a fact rather than a claim.
+func TestCreateRefusesALocallyUnrenderableValueAsAnInputProblem(t *testing.T) {
+	// Written as an escape rather than as a literal byte, so the test source
+	// stays readable and greppable. U+0007 is a bell.
+	const bad = "console=ttyS0\x07"
+
+	cases := map[string]struct {
+		body      map[string]any
+		wantField string
+	}{
+		"kernel argument": {
+			body: map[string]any{
+				"name": "bell", "talos_version": catalogVersion,
+				"arch": string(imagefactory.ArchAMD64), "extensions": []string{},
+				"kernel_args": []string{"quiet", bad},
+			},
+			wantField: "kernel_args",
+		},
+		"meta value": {
+			body: map[string]any{
+				"name": "bell", "talos_version": catalogVersion,
+				"arch": string(imagefactory.ArchAMD64), "extensions": []string{},
+				"meta": []map[string]any{{"key": 10, "value": bad}},
+			},
+			wantField: "meta",
+		},
+		"extension name": {
+			body: map[string]any{
+				"name": "bell", "talos_version": catalogVersion,
+				"arch": string(imagefactory.ArchAMD64), "extensions": []string{bad},
+			},
+			wantField: "extensions",
+		},
+	}
+
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			s, f := schematicServer(t)
+			c := operator(t, s)
+
+			resp, raw := c.do(http.MethodPost, "/api/v1/schematics", tc.body)
+			if resp.StatusCode != http.StatusBadRequest {
+				t.Fatalf("got %d, want 400 (body: %s)", resp.StatusCode, raw)
+			}
+			p := decodeProblemWithErrors(t, raw)
+			if p.Code != "validation.failed" {
+				t.Errorf("code = %q, want validation.failed (body: %s)", p.Code, raw)
+			}
+			if p.Type != httpapi.ProblemBaseURI+"validation" {
+				t.Errorf("type = %q, want the validation problem type", p.Type)
+			}
+			if len(p.Errors) != 1 {
+				t.Fatalf("errors has %d entries, want exactly one: %s", len(p.Errors), raw)
+			}
+			if p.Errors[0].Field != tc.wantField {
+				t.Errorf("field = %q, want %q", p.Errors[0].Field, tc.wantField)
+			}
+			if p.Errors[0].Reason == "" {
+				t.Error("the field error carries no reason")
+			}
+
+			// The whole claim of this route's 400: nothing crossed the network,
+			// so nothing about the Image Factory is being asserted (T-02-65).
+			if n := f.count("POST /schematics"); n != 0 {
+				t.Errorf("the Factory recorded %d schematic POSTs; this refusal is local", n)
+			}
+			if n := f.count("GET /version"); n != 0 {
+				t.Errorf("the Factory recorded %d catalog fetches; this refusal is local", n)
+			}
+		})
+	}
+}
+
+// TestCreateRefusalDoesNotEchoTheOffendingValue is T-02-64, asserted on the
+// bytes that actually leave the process. Kernel arguments can carry secrets --
+// that is why the Factory offers no way to enumerate schematics -- and a problem
+// body is rendered in a browser, may be logged by a proxy, and outlives the form
+// that produced it.
+func TestCreateRefusalDoesNotEchoTheOffendingValue(t *testing.T) {
+	const secret = "talos.config=https://example.invalid/?token=s3cr3t\x07"
+
+	s, _ := schematicServer(t)
+	c := operator(t, s)
+
+	resp, raw := c.do(http.MethodPost, "/api/v1/schematics", map[string]any{
+		"name": "secret", "talos_version": catalogVersion,
+		"arch": string(imagefactory.ArchAMD64), "extensions": []string{},
+		"kernel_args": []string{secret},
+	})
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("got %d, want 400 (body: %s)", resp.StatusCode, raw)
+	}
+	if strings.Contains(string(raw), "s3cr3t") {
+		t.Errorf("the response body echoed the offending value: %s", raw)
+	}
+}
+
+// TestCreateSplitsALocalRefusalFromAFactoryOutage pins the split from both
+// sides. The 400 above is only correct if the 502 is still reachable: an
+// unreachable Factory is not the operator's input problem, and reporting it as
+// one would send them to edit a schematic that is fine.
+func TestCreateSplitsALocalRefusalFromAFactoryOutage(t *testing.T) {
+	s, f := schematicServer(t)
+	c := operator(t, s)
+	f.setDown(true)
+
+	resp, raw := c.do(http.MethodPost, "/api/v1/schematics",
+		createBody("fine", []string{"siderolabs/intel-ucode"}, []string{"console=ttyS0"}))
+	if resp.StatusCode != http.StatusBadGateway {
+		t.Fatalf("got %d, want 502 (body: %s)", resp.StatusCode, raw)
+	}
+	p := decodeProblemWithErrors(t, raw)
+	if p.Code != httpapi.CodeUpstreamFactoryUnavailable {
+		t.Errorf("code = %q, want %q", p.Code, httpapi.CodeUpstreamFactoryUnavailable)
+	}
+}
+
 // TestCreateReturns201WithWarningsAndAProbedVerdict is the happy path, and the
 // warning is FACT-04: kernel arguments reach the ISO and not the installed
 // system, and the operator has to be told while they are authoring.
