@@ -157,16 +157,34 @@ func New(baseURL string, opts ...Option) (*Client, error) {
 	return c, nil
 }
 
-// refuseCrossHostRedirect stops a redirect that leaves the host the caller
-// named. A Factory that can bounce this client to an arbitrary host is a
-// Factory that can have schematic contents -- kernel arguments and META values
-// among them -- delivered somewhere the operator never configured.
+// refuseCrossHostRedirect stops a redirect that leaves the origin the caller
+// named -- its host or its scheme. A Factory that can bounce this client to an
+// arbitrary host is a Factory that can have schematic contents -- kernel
+// arguments and META values among them -- delivered somewhere the operator
+// never configured, and the same sentence is true of a Factory that can bounce
+// it to plaintext.
 func refuseCrossHostRedirect(req *http.Request, via []*http.Request) error {
 	if len(via) == 0 {
 		return nil
 	}
-	if req.URL.Host != via[0].URL.Host {
-		return fmt.Errorf("imagefactory: refusing a redirect from %s to %s", via[0].URL.Host, req.URL.Host)
+	origin := via[0].URL
+	if req.URL.Host != origin.Host {
+		return fmt.Errorf("imagefactory: refusing a redirect from %s to %s", origin.Host, req.URL.Host)
+	}
+	// Go re-sends the request body on a 307 and a 308, and the body on the one
+	// POST this package makes is the canonical schematic document. A single hop
+	// to http therefore puts kernel arguments and META values on the wire in
+	// clear, with New's promise that verification is never disabled intact and
+	// no option set. The host being unchanged does not make that acceptable.
+	//
+	// An upgrade is refused on the same terms rather than waved through. The
+	// scheme this client speaks is the one the operator configured and New
+	// validated; a Factory redirecting it to another one is answering a
+	// question nobody asked, and a rule with an exception is a rule with a hole
+	// to find.
+	if req.URL.Scheme != origin.Scheme {
+		return fmt.Errorf("imagefactory: refusing a redirect that changes the scheme from %s to %s",
+			origin.Scheme, req.URL.Scheme)
 	}
 	if len(via) >= maxRedirects {
 		return fmt.Errorf("imagefactory: refusing to follow more than %d redirects", maxRedirects)
