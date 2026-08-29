@@ -542,6 +542,41 @@ func TestCreateReturns201WithWarningsAndAProbedVerdict(t *testing.T) {
 	}
 }
 
+// TestSchematicCollectionsAreArraysNeverNull: a nil slice encodes as null, and
+// a null reads to a client as "the server did not say" rather than "there are
+// none". The zod schemas on the other side of this contract expect arrays.
+func TestSchematicCollectionsAreArraysNeverNull(t *testing.T) {
+	s, _ := schematicServer(t)
+	c := operator(t, s)
+
+	// No kernel arguments and no META, so both would be nil in the record.
+	resp, raw := c.do(http.MethodPost, "/api/v1/schematics",
+		createBody("no-collections", []string{"siderolabs/intel-ucode"}, nil))
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("got %d, want 201 (body: %s)", resp.StatusCode, raw)
+	}
+	for _, want := range []string{`"kernel_args":[]`, `"meta":[]`} {
+		if !strings.Contains(string(raw), want) {
+			t.Errorf("create response does not contain %s: %s", want, raw)
+		}
+	}
+
+	var created struct {
+		ID string `json:"id"`
+	}
+	decodeInto(t, raw, &created)
+
+	resp, raw = c.do(http.MethodGet, "/api/v1/schematics/"+created.ID, nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("GET: got %d, want 200 (body: %s)", resp.StatusCode, raw)
+	}
+	for _, want := range []string{`"kernel_args":[]`, `"meta":[]`} {
+		if !strings.Contains(string(raw), want) {
+			t.Errorf("stored record does not contain %s: %s", want, raw)
+		}
+	}
+}
+
 // TestCreateWithNothingToWarnAboutReturnsAnEmptyArray: [] and null are
 // different statements and only one of them is true here.
 func TestCreateWithNothingToWarnAboutReturnsAnEmptyArray(t *testing.T) {
