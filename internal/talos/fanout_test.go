@@ -269,6 +269,6 @@ func TestTransportTakesNoAuditOrHTTPDependency(t *testing.T) {
 // fanoutMachineID is a distinct identity per simulated node. Identity is what a
 // fan-out is keyed on, so two nodes sharing one would make the whole test
 // vacuous rather than merely wrong.
-func fanoutMachineID(i int) model.MachineID {
-	return model.MachineID("00000000-0000-0000-0000-00000000000" + string(rune('a'+i)))
+func fanoutMachineID(i int) string {
+	return "00000000-0000-0000-0000-00000000000" + string(rune('a'+i))
 }
