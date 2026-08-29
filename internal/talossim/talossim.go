@@ -103,17 +103,49 @@ type Server struct {
 	pki *pki
 	srv *grpc.Server
 
-	tcp  net.Listener
 	pipe *bufconn.Listener
 
+	// done is closed by Close, before the gRPC server is stopped. It is what
+	// releases a handler parked by the go_silent scenario: grpc.Server.Stop
+	// blocks until every pending RPC returns, so a blocking scenario without a
+	// shutdown signal would deadlock Close and hang the whole test binary
+	// (T-02-15).
+	done chan struct{}
+
+	// wg tracks the Serve goroutines; sg tracks the goroutines a scenario owns,
+	// which have to be gone before the server is stopped so that none of them
+	// can re-listen behind Close's back (T-02-16).
 	wg sync.WaitGroup
+	sg sync.WaitGroup
+
+	// lmu guards the TCP listener and its history. It is separate from mu
+	// because flap_connection closes and reopens the listener from its own
+	// goroutine while calls guarded by mu are in flight, and the two locks are
+	// never held at the same time.
+	lmu         sync.Mutex
+	tcp         net.Listener
+	tcpAddr     string
+	transitions int
+	addrHistory []string
 
 	mu sync.Mutex
 	// verified records the common name of every client certificate the TLS
 	// stack verified against ClientCAs. It is what lets a test assert that mTLS
 	// actually happened rather than that a request merely succeeded.
 	verified []string
-	closed   bool
+
+	// scenarios are the faults currently injected, keyed by name so that
+	// activeScenario is one map lookup and two scenarios can be active at once.
+	scenarios map[ScenarioName]Scenario
+
+	// calls counts RPCs by short method name. It is the observation that
+	// proves a client did not retry.
+	calls map[string]int
+
+	// silence is the live go_silent injection, if any.
+	silence *silence
+
+	closed bool
 }
 
 // New builds and starts a simulated node. It returns a running server or an
@@ -139,10 +171,13 @@ func New(opts Options) (*Server, error) {
 	}
 
 	s := &Server{
-		opts:    opts,
-		pki:     p,
-		node:    newNodeState(opts),
-		streams: newStreamer(opts.StreamMessages),
+		opts:      opts,
+		pki:       p,
+		node:      newNodeState(opts),
+		streams:   newStreamer(opts.StreamMessages),
+		done:      make(chan struct{}),
+		scenarios: make(map[ScenarioName]Scenario),
+		calls:     make(map[string]int),
 	}
 
 	tcp, err := net.Listen("tcp", "127.0.0.1:0")
@@ -151,15 +186,25 @@ func New(opts Options) (*Server, error) {
 	}
 
 	s.tcp = tcp
+	s.tcpAddr = tcp.Addr().String()
+	s.addrHistory = []string{s.tcpAddr}
 	s.pipe = bufconn.Listen(bufSize)
 
 	// TLS is configured once, on the server, rather than by wrapping each
 	// listener: grpc.Creds then performs exactly one handshake per connection on
 	// either path, and both paths get the identical client-certificate
 	// requirement.
+	// The scenario gate is chained after recordPeer rather than folded into it:
+	// recordPeer answers "did mTLS happen", the gate answers "does this call
+	// happen at all", and a scenario that refuses a call must still have had
+	// its certificate verified -- otherwise go_silent would be
+	// indistinguishable from a handshake failure. The stream interceptor exists
+	// for the same reason the unary one does: a node that has gone silent has
+	// gone silent for Logs too.
 	s.srv = grpc.NewServer(
 		grpc.Creds(credentials.NewTLS(p.serverTLS())),
-		grpc.UnaryInterceptor(s.recordPeer),
+		grpc.ChainUnaryInterceptor(s.recordPeer, s.scenarioUnary),
+		grpc.ChainStreamInterceptor(s.scenarioStream),
 	)
 	s.registerNodeServices(s.srv)
 	s.registerCOSI(s.srv)
@@ -206,7 +251,42 @@ func (s *Server) recordPeer(ctx context.Context, req any, _ *grpc.UnaryServerInf
 
 // Addr is the loopback TCP address the node listens on. It is what a direct
 // dialer resolves a Target to.
-func (s *Server) Addr() string { return s.tcp.Addr().String() }
+//
+// It reads the address the node is bound to rather than the listener, because
+// flap_connection leaves the node with no listener for part of its cycle and
+// the address is still the address it will come back on. ip_changes_on_reboot
+// is the one scenario that changes what this answers.
+func (s *Server) Addr() string {
+	s.lmu.Lock()
+	defer s.lmu.Unlock()
+
+	return s.tcpAddr
+}
+
+// AddressHistory is every address this node has listened on, oldest first.
+//
+// ip_changes_on_reboot is only assertable if a test can name the address the
+// node left behind; guessing it from a captured Addr() would work but would
+// not survive a second rebind.
+func (s *Server) AddressHistory() []string {
+	s.lmu.Lock()
+	defer s.lmu.Unlock()
+
+	return append([]string(nil), s.addrHistory...)
+}
+
+// ListenerTransitions counts every close and every reopen of the TCP listener.
+//
+// It is the observation flap_connection is proven by. A test that only checked
+// for a failed call would be asserting on a race between the client and the
+// cycle, and would pass just as happily against a scenario that did nothing at
+// all but was slow.
+func (s *Server) ListenerTransitions() int {
+	s.lmu.Lock()
+	defer s.lmu.Unlock()
+
+	return s.transitions
+}
 
 // Host is the address without the port, in the shape a talos.Target carries it.
 func (s *Server) Host() string {
@@ -284,6 +364,14 @@ func (s *Server) Close() error {
 	}
 	s.closed = true
 	s.mu.Unlock()
+
+	// Order matters and is the T-02-15/T-02-16 mitigation. done is closed
+	// first so a handler parked by go_silent returns; the scenario goroutines
+	// are drained next so flap_connection cannot re-listen after the server is
+	// stopped; only then is the gRPC server stopped, because Stop blocks until
+	// every pending RPC has returned.
+	close(s.done)
+	s.sg.Wait()
 
 	s.srv.Stop()
 	s.wg.Wait()
