@@ -48,12 +48,25 @@ type createdSchematic struct {
 }
 
 // assetReferences is the answer to GET /api/v1/schematics/{id}/assets.
+//
+// Warnings carries the JSON name the 201 body already uses, deliberately: a
+// client has one warning shape to learn rather than two, and the same component
+// renders both.
+//
+// Note where the boundary is, because the two are not the same kind of
+// statement. The 201 body's warnings are about the *schematic* and are
+// recomputable from the record at any time. These are about *this resolution* --
+// how the installer repository name was obtained on this request -- and nothing
+// holds them. That is why they ride on the response and are not persisted: there
+// is no record to put them in and no later moment at which they could be
+// derived again.
 type assetReferences struct {
-	ISO       string `json:"iso"`
-	PXE       string `json:"pxe"`
-	DiskImage string `json:"disk_image"`
-	Cmdline   string `json:"cmdline"`
-	Installer string `json:"installer"`
+	ISO       string                 `json:"iso"`
+	PXE       string                 `json:"pxe"`
+	DiskImage string                 `json:"disk_image"`
+	Cmdline   string                 `json:"cmdline"`
+	Installer string                 `json:"installer"`
+	Warnings  []imagefactory.Warning `json:"warnings"`
 }
 
 // schematicInput is the POST body.
@@ -400,11 +413,22 @@ func schematicAssets(d httpapi.Deps) http.HandlerFunc {
 		// an upgrade that reports success while silently dropping every system
 		// extension the node was built with. If it cannot be resolved this route
 		// answers with no reference at all rather than a plausible string.
-		installer, err := d.Factory.InstallerImage(r.Context(), req)
+		//
+		// The warnings say how sure of the name we are. A reference reached past
+		// a candidate that never answered is usable but provisional, and the
+		// operator has to be able to see that on the panel that shows it --
+		// which is the whole of G-02-3.
+		installer, warnings, err := d.Factory.InstallerImage(r.Context(), req)
 		if err != nil {
 			httpapi.WriteProblem(w, r, factoryProblem(err,
 				"resolving the installer image reference for "+req.Version))
 			return
+		}
+		// Normalised the way schematicOut normalises the record's nil
+		// collections, for the reason this file already gives: a null reads as
+		// "the server did not check".
+		if warnings == nil {
+			warnings = []imagefactory.Warning{}
 		}
 
 		writeJSON(w, http.StatusOK, assetReferences{
@@ -413,6 +437,7 @@ func schematicAssets(d httpapi.Deps) http.HandlerFunc {
 			DiskImage: disk,
 			Cmdline:   cmdline,
 			Installer: installer,
+			Warnings:  warnings,
 		})
 	}
 }
