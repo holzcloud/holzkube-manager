@@ -629,6 +629,7 @@ function CreatedPanel({ created, onOpen }: { created: CreatedSchematic; onOpen: 
           usable={created.usable}
           probedAt={created.probed_at}
           reason={created.probe_reason}
+          arch={created.arch}
         />
       </div>
       <p className="break-all font-mono text-xs">{created.id}</p>
@@ -855,6 +856,7 @@ function SavedSchematics({ onOpen }: { onOpen: (id: string) => void }) {
                     usable={record.usable}
                     probedAt={record.probed_at}
                     reason={record.probe_reason}
+                    arch={record.arch}
                   />
                 </TableCell>
               </TableRow>

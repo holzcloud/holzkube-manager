@@ -483,6 +483,7 @@ exactly those bytes.
   "cluster": "",
   "name": "workers with intel microcode",
   "talos_version": "v1.13.9",
+  "arch": "amd64",
   "canonical": "customization: {}\n",
   "extensions": ["siderolabs/intel-ucode"],
   "kernel_args": ["console=ttyS0"],
@@ -510,6 +511,13 @@ exactly those bytes.
   cause is a verdict an operator cannot act on: a schematic naming an extension
   that does not exist and one asked for at a version that never had it are the
   same red badge and two different repairs.
+- **`arch` is the architecture the schematic was authored and probed against.**
+  It is what `usable` and `probe_reason` are statements about — the probe asks
+  the Factory for one architecture's image, so a stored verdict that does not
+  name one cannot be read back. An **empty value means a record written before
+  the field existed**; its verdict cannot be qualified after the fact, because
+  the architecture a past probe used is not recoverable from anything else the
+  record holds. It is **not a default for the assets query**: see below.
 - `rev` is the CAS revision, as on every stored record. A `PUT`-shaped update
   carrying a stale `rev` answers `409` `store.conflict`.
 
@@ -621,7 +629,10 @@ against that divergence (FACT-04).**
 
 - `arch` is a **required** parameter with no default. holzkube is developed on
   `arm64` and targets `amd64`; a defaulted architecture is a bug that only ever
-  appears on someone else's machine (FACT-03).
+  appears on someone else's machine (FACT-03). The record carrying an `arch` of
+  its own does not change this: the record describes what was *probed*, the
+  parameter asks what to *build*, and using the description as the default is
+  the same FACT-03 bug wearing a record's clothes.
 - `secureboot=true` suffixes the platform-architecture segment of every URL
   **and selects the installer repository**. The SecureBoot installer is a
   different image — same schematic, same version, different digest — chosen by
