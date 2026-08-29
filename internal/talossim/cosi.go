@@ -14,6 +14,7 @@ import (
 
 	"github.com/siderolabs/talos/pkg/machinery/nethelpers"
 	"github.com/siderolabs/talos/pkg/machinery/resources/hardware"
+	"github.com/siderolabs/talos/pkg/machinery/resources/k8s"
 	"github.com/siderolabs/talos/pkg/machinery/resources/network"
 )
 
@@ -79,6 +80,24 @@ func (s *Server) seedCOSI(ctx context.Context) error {
 
 	if err := s.COSI().Create(ctx, nodeAddr); err != nil {
 		return fmt.Errorf("talossim: seed %s: %w", network.NodeAddressType, err)
+	}
+
+	return s.seedKubernetes(ctx)
+}
+
+// seedKubernetes puts the node's Kubernetes-side resources into the state.
+//
+// It is separate from the rest of the seeding because it is also the restore
+// path for the k8s_down scenario, which removes exactly these. A scenario that
+// removed a resource nothing could put back would be a one-way door: the first
+// test to inject it would leave every later test on that node looking at a
+// cluster with no Kubernetes.
+func (s *Server) seedKubernetes(ctx context.Context) error {
+	nodename := k8s.NewNodename(k8s.NamespaceName, k8s.NodenameID)
+	nodename.TypedSpec().Nodename = s.opts.Hostname
+
+	if err := s.COSI().Create(ctx, nodename); err != nil {
+		return fmt.Errorf("talossim: seed %s: %w", k8s.NodenameType, err)
 	}
 
 	return nil
