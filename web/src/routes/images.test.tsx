@@ -2,12 +2,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type {
-  FactoryExtension,
-  FactoryVersions,
-  Schematic,
-  SchematicWarning,
-} from '@/api'
+import type { FactoryExtension, FactoryVersions, Schematic, SchematicWarning } from '@/api'
 import {
   onSudoRequired,
   type SudoChallenge,
@@ -631,10 +626,11 @@ describe('ImagesView — the saved schematics', () => {
     // stating as fact something the record cannot support. The new wording
     // asserts neither, and the muted line below it states the disjunction.
     expect(unprobed.getByText(/Not verified — the build probe has no verdict/)).toBeInTheDocument()
-    expect(unprobed.queryByText(/did not run/)).not.toBeInTheDocument()
-    expect(
-      unprobed.getByText(/either did not run or did not answer in time/),
-    ).toBeInTheDocument()
+    // The old copy asserted it as fact. The disjunction below still contains the
+    // words "did not run", and must: it is one of the two possibilities. What
+    // must be gone is the badge stating it as the answer.
+    expect(unprobed.queryByText(/the build probe did not run/)).not.toBeInTheDocument()
+    expect(unprobed.getByText(/either did not run or did not answer in time/)).toBeInTheDocument()
     expect(unprobed.getByText(/may still be buildable/)).toBeInTheDocument()
 
     // The verdict alone is not actionable; the reason is what makes it one.
@@ -681,9 +677,7 @@ describe('ImagesView — the saved schematics', () => {
       'The preferred repository metal-installer did not answer at all, so it was never ruled out.'
     stubFactory({
       saved: [USABLE],
-      assetWarnings: [
-        { code: WARNING_INSTALLER_REPO_FALLBACK_UNVERIFIED, detail: detailText },
-      ],
+      assetWarnings: [{ code: WARNING_INSTALLER_REPO_FALLBACK_UNVERIFIED, detail: detailText }],
     })
     const user = userEvent.setup()
 
