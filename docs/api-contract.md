@@ -570,6 +570,17 @@ Extension names are validated against the version-scoped catalog **before** any
 request reaches the Factory. An unknown name is `400` `validation.failed` with
 every unknown name in `errors[]` — all of them at once, not the first.
 
+**Creating the same schematic twice answers `409` `store.conflict`.** The id is
+the SHA-256 of the canonical document, so two authoring attempts that share a
+customisation are the same schematic however they are named — a second name, a
+second cluster and a second Talos version all collide, and so does a browser
+reload that re-submits the form. The stored record is not replaced: it is the
+only copy of a reference the Factory will not list back, which is why `DELETE`
+is `Destructive` and behind the sudo window, and a `POST` marked
+`Destructive: false` does not get to overwrite the label, the version and the
+probe verdict of a record that already exists. Read it back with `GET
+/api/v1/schematics/{id}`, or delete it and author it again.
+
 The `201` body is the schematic resource plus:
 
 ```json

@@ -262,7 +262,30 @@ func createSchematic(d httpapi.Deps) http.HandlerFunc {
 			CreatedAt:    time.Now().UTC(),
 		}
 		stored, storeErr := d.Store.Schematics().Put(r.Context(), rec)
-		if storeErr != nil {
+		switch {
+		case errors.Is(storeErr, store.ErrConflict):
+			// rec carries no Rev, so the store reads a Put against an existing
+			// record as a compare-and-swap clash. It is not a lost update: the
+			// id is the SHA-256 of the Factory's canonical document, so this is
+			// the same schematic already stored under whatever label it was
+			// first given, and any two authoring attempts sharing a
+			// customisation land here regardless of name, cluster or the
+			// version they were authored against.
+			//
+			// Refusing rather than overwriting is the conservative half of that
+			// symmetry. The record is the only copy of a reference the Factory
+			// will not list back, which is why DELETE is Destructive and behind
+			// the sudo window; a POST that replaced the label, the version and
+			// the probe verdict of an existing record would do most of that
+			// same damage on a route the contract marks Destructive: false.
+			// The operator can read the record back by id, or delete it and
+			// author again.
+			httpapi.WriteProblem(w, r, httpapi.Conflict("store.conflict",
+				"This schematic already exists. Its id is the hash of its contents, so the same "+
+					"customisation is the same schematic however it is named. Read it back by id, "+
+					"or delete it and author it again."))
+			return
+		case storeErr != nil:
 			httpapi.WriteInternal(w, r, d.Logger, storeErr)
 			return
 		}
