@@ -135,6 +135,48 @@ func TestTracerAuthorsAUsableSchematic(t *testing.T) {
 	}
 }
 
+// TestTracerKeepsAFactoryIDItDidNotPredict is CR-02.
+//
+// CreateSchematic deliberately returns a populated Created next to
+// ErrSchematicIDMismatch, because the schematic *was* created and the Factory
+// offers no way to list schematics back: an id its caller never sees is an id
+// nobody can ever recover. Author is that caller, so a mismatch has to come
+// back carrying the Factory's authoritative answer rather than a zero value.
+//
+// Usable stays false and the probe is never issued. A schematic whose id the
+// local computation disagrees with has been created and nothing more than
+// that; running a probe against it would only add a second unreliable fact.
+func TestTracerKeepsAFactoryIDItDidNotPredict(t *testing.T) {
+	fake := newFakeFactory(t)
+	client := newClient(t, fake.URL)
+
+	const forged = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+	fake.forgeID(forged)
+
+	authored, err := imagefactory.Author(t.Context(), client, imagefactory.AuthorRequest{
+		TalosVersion: catalogVersion,
+		Arch:         imagefactory.ArchAMD64,
+		Schematic:    goodSchematic(),
+	})
+	if !errors.Is(err, imagefactory.ErrSchematicIDMismatch) {
+		t.Fatalf("Author error = %v, want ErrSchematicIDMismatch", err)
+	}
+	if authored.ID != forged {
+		t.Errorf("Authored.ID = %q, want the Factory's own %q: the id was created upstream and "+
+			"discarding it here makes it unrecoverable", authored.ID, forged)
+	}
+	if authored.Canonical == "" {
+		t.Error("Authored.Canonical is empty; the Factory's document is what a caller persists, and " +
+			"a record filed under this id without it hashes to nothing")
+	}
+	if authored.Usable {
+		t.Error("Authored.Usable is true although no probe ran")
+	}
+	if got := fake.count("* /image/*"); got != 0 {
+		t.Errorf("the probe was issued %d times after the id mismatch, want 0", got)
+	}
+}
+
 // TestTracerRejectsAnUnknownExtensionBeforePosting is the first half of P9: the
 // extension name is checked against the version-scoped catalog, and a name that
 // is not in it never reaches a POST at all.

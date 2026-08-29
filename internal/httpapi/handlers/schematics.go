@@ -290,6 +290,18 @@ func createSchematic(d httpapi.Deps) http.HandlerFunc {
 			return
 		}
 
+		// The record is stored first and the problem written second, in that
+		// order and never the other way round. An id the local computation did
+		// not predict means the canonical serialisers have drifted, so every
+		// id computed here without a round trip is suspect -- but the schematic
+		// exists upstream under the Factory's id, and that id is only ever
+		// recoverable from this record. Answering 201 would report drift in the
+		// one mechanism FACT-06 rests on as success.
+		if errors.Is(err, imagefactory.ErrSchematicIDMismatch) {
+			httpapi.WriteProblem(w, r, createProblem(err))
+			return
+		}
+
 		writeJSON(w, http.StatusCreated, createdSchematic{
 			Schematic: schematicOut(stored),
 			Warnings:  imagefactory.Warnings(in.schematic()),
@@ -597,6 +609,15 @@ func factoryProblem(err error, doing string) *httpapi.Problem {
 	if errors.Is(err, imagefactory.ErrSchematicNotBuildable) {
 		return httpapi.Upstream(httpapi.CodeUpstreamFactoryRejected,
 			"The Image Factory refused: "+doing+".")
+	}
+	if errors.Is(err, imagefactory.ErrSchematicIDMismatch) {
+		// The Factory answered, and a retry reproduces the identical mismatch:
+		// the canonical serialisers have drifted and nothing about asking
+		// again changes that. Reporting it as factory-unavailable would tell
+		// the operator to retry, and every retry orphans another schematic.
+		return httpapi.Upstream(httpapi.CodeUpstreamFactoryRejected,
+			"The Image Factory assigned a different id than the one computed here: "+doing+
+				". The schematic was created and has been recorded; do not retry.")
 	}
 	return httpapi.Upstream(httpapi.CodeUpstreamFactoryUnavailable,
 		"The Image Factory did not answer usably: "+doing+".")
