@@ -77,6 +77,12 @@ type fakeFactory struct {
 	// It is how a test distinguishes "the registry refused" from "the registry
 	// did not answer", which are different statements about a schematic.
 	manifestStatus int
+
+	// forgedID, when non-empty, is the id POST /schematics answers with
+	// instead of the hash of the document. It reproduces the one upstream
+	// state FACT-06 exists to detect: a well-formed 201 carrying an id the
+	// local canonical serialiser did not predict.
+	forgedID string
 }
 
 func newFakeFactory(t *testing.T) *fakeFactory {
@@ -143,6 +149,14 @@ func (f *fakeFactory) setManifestStatus(status int) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.manifestStatus = status
+}
+
+// forgeID makes every subsequent POST /schematics answer with id rather than
+// with the hash of the document it was sent.
+func (f *fakeFactory) forgeID(id string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.forgedID = id
 }
 
 func (f *fakeFactory) serve(w http.ResponseWriter, r *http.Request) {
@@ -221,6 +235,9 @@ func (f *fakeFactory) createSchematic(w http.ResponseWriter, r *http.Request) {
 	id := hex.EncodeToString(sum[:])
 
 	f.mu.Lock()
+	if f.forgedID != "" {
+		id = f.forgedID
+	}
 	f.documents[id] = string(body)
 	f.mu.Unlock()
 

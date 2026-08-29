@@ -647,6 +647,19 @@ A schematic the Factory refuses to build is `upstream.factory-rejected`; a
 Factory that did not answer while probing is `upstream.factory-unavailable`.
 Merging them would send an operator to fix a schematic that is not broken.
 
+**A Factory that assigns an id holzkube did not compute is also
+`upstream.factory-rejected`, and `POST /api/v1/schematics` still stores the
+record before answering it.** The two halves are one rule. The Factory answered
+and a retry reproduces the identical mismatch — the canonical serialisations
+have drifted, and nothing about asking again changes that — so calling it
+retryable would have the operator orphan a second schematic on every attempt.
+And the schematic does exist upstream, under an id the Factory chose; since the
+Factory will not enumerate schematics, the stored record is the only place that
+id can ever be read back from. So the record is written, `usable` is `false` and
+`probed_at` is zero because no probe ran, and the response is the `502` rather
+than a `201` — drift in the mechanism that lets holzkube know a schematic's id
+without a round trip is not something to report as success.
+
 ### Audit
 
 The two mutating routes carry the action tokens `schematic.create` and

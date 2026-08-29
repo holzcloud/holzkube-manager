@@ -45,6 +45,12 @@ type Authored struct {
 //     probe comes back with its id, its document and Usable false, together
 //     with ErrSchematicNotBuildable -- the record is kept, because the
 //     schematic does exist upstream, but nothing in it reads as success.
+//
+// The same rule governs every failure after the POST, ErrSchematicIDMismatch
+// included: once the Factory has created the schematic, the returned Authored
+// carries its id and its document alongside the error. A caller that ignores
+// the error still stores a record that exists upstream; a caller that ignores
+// the Authored loses the only reference to it.
 func Author(ctx context.Context, c *Client, req AuthorRequest) (Authored, error) {
 	if c == nil {
 		return Authored{}, fmt.Errorf("imagefactory: Author was given no client")
@@ -72,11 +78,28 @@ func Author(ctx context.Context, c *Client, req AuthorRequest) (Authored, error)
 	}
 
 	created, err := c.CreateSchematic(ctx, req.Schematic)
-	if err != nil {
+	if created.ID == "" {
+		// Nothing exists upstream, so err is the whole answer.
 		return Authored{}, err
 	}
 
+	// From here the schematic exists upstream whatever else went wrong, and the
+	// caller has to be able to record it: the Factory offers no way to list
+	// schematics back, so an id its caller never sees is an id nobody can
+	// recover. CreateSchematic returns a populated Created next to
+	// ErrSchematicIDMismatch for exactly this reason -- the Factory's id and
+	// document are authoritative even when the local computation disagreed
+	// about the id -- and dropping it here would make that deliberate design a
+	// dead branch.
+	//
+	// Usable stays false. No probe has run, and a mismatch is not a reason to
+	// run one: the schematic has been created and nothing more than that is
+	// known about it.
 	out := Authored{ID: created.ID, Canonical: created.Canonical}
+	if err != nil {
+		return out, err
+	}
+
 	if err := c.ProbeBuildable(ctx, created.ID, req.TalosVersion, req.Arch); err != nil {
 		return out, err
 	}

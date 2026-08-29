@@ -56,6 +56,10 @@ type fakeFactory struct {
 	// down forces every endpoint to answer 503, which is how a test says "the
 	// Factory did not answer" rather than "the Factory refused".
 	down bool
+	// forgedID, when non-empty, is the id POST /schematics answers with
+	// instead of the hash of the document. It is the FACT-06 state: a
+	// well-formed 201 carrying an id the local serialiser did not predict.
+	forgedID string
 }
 
 func newFakeFactory(t *testing.T) *fakeFactory {
@@ -118,6 +122,14 @@ func (f *fakeFactory) isDown() bool {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.down
+}
+
+// forgeID makes every subsequent POST /schematics answer with id rather than
+// with the hash of the document it was sent.
+func (f *fakeFactory) forgeID(id string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.forgedID = id
 }
 
 func (f *fakeFactory) serve(w http.ResponseWriter, r *http.Request) {
@@ -185,6 +197,9 @@ func (f *fakeFactory) createSchematic(w http.ResponseWriter, r *http.Request) {
 	id := hex.EncodeToString(sum[:])
 
 	f.mu.Lock()
+	if f.forgedID != "" {
+		id = f.forgedID
+	}
 	f.documents[id] = string(body)
 	f.mu.Unlock()
 
@@ -720,6 +735,69 @@ func TestCreateAgainstAnOutageIsUpstreamAndNotInternal(t *testing.T) {
 	}
 	if p.Code == "internal.unexpected" {
 		t.Error("an upstream outage was reported as an internal error")
+	}
+}
+
+// TestCreateStoresASchematicWhoseIDWasNotPredicted is CR-02.
+//
+// A Factory answer carrying an id the local canonical serialiser did not
+// predict means the schematic exists upstream under an id holzkube did not
+// choose. The Factory offers no way to list schematics back, so a record
+// dropped here is a reference an operator cannot recover — which is the whole
+// reason the handler keeps the record whatever the probe said.
+//
+// The reporting has to be non-retryable too. The Factory answered, and
+// retrying reproduces the identical mismatch, so upstream.factory-unavailable
+// — documented as "the Factory did not answer" and Retryable — sends the
+// operator to orphan a second schematic.
+func TestCreateStoresASchematicWhoseIDWasNotPredicted(t *testing.T) {
+	s, f := schematicServer(t)
+	c := operator(t, s)
+
+	const forged = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+	f.forgeID(forged)
+
+	resp, raw := c.do(http.MethodPost, "/api/v1/schematics",
+		createBody("mismatched", []string{"siderolabs/intel-ucode"}, nil))
+	if resp.StatusCode != http.StatusBadGateway {
+		t.Fatalf("got %d, want 502 (body: %s)", resp.StatusCode, raw)
+	}
+	p := decodeProblemWithErrors(t, raw)
+	if p.Code == httpapi.CodeUpstreamFactoryUnavailable {
+		t.Error("an id mismatch is reported as upstream.factory-unavailable, which the contract " +
+			"documents as retryable: the Factory did answer, and a retry reproduces the mismatch " +
+			"while orphaning a second schematic")
+	}
+	if p.Code != httpapi.CodeUpstreamFactoryRejected {
+		t.Errorf("code = %q, want %q", p.Code, httpapi.CodeUpstreamFactoryRejected)
+	}
+
+	// The record exists. This is the half the operator cannot reconstruct: the
+	// Factory will not enumerate schematics, so an id that never reached the
+	// store is gone.
+	resp, raw = c.do(http.MethodGet, "/api/v1/schematics/"+forged, nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("GET the schematic the Factory created: got %d, want 200 (body: %s)", resp.StatusCode, raw)
+	}
+	var stored struct {
+		ID        string    `json:"id"`
+		Canonical string    `json:"canonical"`
+		Usable    bool      `json:"usable"`
+		ProbedAt  time.Time `json:"probed_at"`
+	}
+	decodeInto(t, raw, &stored)
+	if stored.ID != forged {
+		t.Errorf("id = %q, want the Factory's own %q", stored.ID, forged)
+	}
+	if stored.Canonical == "" {
+		t.Error("canonical is empty; a record filed under the Factory's id without the Factory's " +
+			"document hashes to nothing")
+	}
+	if stored.Usable {
+		t.Error("usable = true although no probe ran")
+	}
+	if !stored.ProbedAt.IsZero() {
+		t.Errorf("probed_at = %s; the probe never ran", stored.ProbedAt)
 	}
 }
 
