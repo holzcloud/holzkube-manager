@@ -317,3 +317,67 @@ func TestInstallerImageCachesSecureBootSeparately(t *testing.T) {
 		t.Errorf("repeated SecureBoot requests issued %d manifest requests, want 1", n)
 	}
 }
+
+// TestResolveInstallerRepoClassifiesEveryRegistryAnswer is the mirror of
+// TestProbeBuildableClassifiesEveryRegistryAnswer, driven through the manifest
+// answer rather than the ISO answer and asserted against the same table. The
+// two are what closes G-02-5: one taxonomy, stated once in probe.go, reached
+// from both classification sites.
+func TestResolveInstallerRepoClassifiesEveryRegistryAnswer(t *testing.T) {
+	for _, answer := range registryAnswerTable {
+		t.Run(answer.name(), func(t *testing.T) {
+			fake := newFakeFactory(t)
+			fake.setManifestStatus(answer.status)
+			client := newClient(t, fake.URL)
+
+			ref, err := client.InstallerImage(t.Context(), installerRequest(installerModernVersion))
+
+			want := answer.wantErr()
+			if want == nil {
+				if err != nil {
+					t.Fatalf("HTTP %d produced %v, want a resolved reference (%s)", answer.status, err, answer.why)
+				}
+				return
+			}
+			if !errors.Is(err, want) {
+				t.Fatalf("HTTP %d produced %v, want %v (%s) -- the two classification sites disagree",
+					answer.status, err, want, answer.why)
+			}
+			if ref != "" {
+				t.Errorf("HTTP %d still produced the reference %q", answer.status, ref)
+			}
+			other := imagefactory.ErrUpstreamUnavailable
+			if errors.Is(want, imagefactory.ErrUpstreamUnavailable) {
+				other = imagefactory.ErrSchematicNotBuildable
+			}
+			if errors.Is(err, other) {
+				t.Errorf("HTTP %d produced an error that is also %v", answer.status, other)
+			}
+			if !strings.Contains(err.Error(), answer.name()) {
+				t.Errorf("the error does not carry the status the registry answered (%d): %v", answer.status, err)
+			}
+		})
+	}
+}
+
+// TestInstallerImageTreatsAnAllBadRequestCandidateSetAsARefusal is the row
+// G-02-5 made unreachable. Before the shared predicate, one non-404 4xx set
+// refusedAll to false permanently, so a candidate set answering 400 throughout
+// produced ErrUpstreamUnavailable and told the operator to retry something that
+// would never succeed.
+func TestInstallerImageTreatsAnAllBadRequestCandidateSetAsARefusal(t *testing.T) {
+	fake := newFakeFactory(t)
+	fake.setManifestStatus(400)
+	client := newClient(t, fake.URL)
+
+	ref, err := client.InstallerImage(t.Context(), installerRequest(installerModernVersion))
+	if !errors.Is(err, imagefactory.ErrSchematicNotBuildable) {
+		t.Fatalf("err = %v, want ErrSchematicNotBuildable", err)
+	}
+	if ref != "" {
+		t.Errorf("a refusal still returned a reference: %q", ref)
+	}
+	if !strings.Contains(err.Error(), "400") {
+		t.Errorf("the refusal does not name what the candidates answered: %v", err)
+	}
+}
