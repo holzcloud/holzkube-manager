@@ -748,7 +748,13 @@ describe('ImagesView — the saved schematics', () => {
 
     // T-02-51: dropping the row on a 500 would remove the operator's only
     // recoverable reference to the id at the moment the server is unwell.
-    await new Promise((resolve) => setTimeout(resolve, 50))
+    //
+    // Closed first, for the same reason as the architecture regression above:
+    // an open modal marks the rest of the app aria-hidden, so a role query for
+    // the table row finds nothing while it is up.
+    await user.click(detail.getByRole('button', { name: 'Close' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+
     expect(listFetchCount(fetchMock)).toBe(before)
     expect(screen.getByRole('button', { name: `Schematic ${USABLE.name}` })).toBeInTheDocument()
   })
