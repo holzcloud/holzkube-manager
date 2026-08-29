@@ -262,7 +262,7 @@ func createSchematic(d httpapi.Deps) http.HandlerFunc {
 		}
 
 		writeJSON(w, http.StatusCreated, createdSchematic{
-			Schematic: stored,
+			Schematic: schematicOut(stored),
 			Warnings:  imagefactory.Warnings(in.schematic()),
 		})
 	}
@@ -275,10 +275,11 @@ func listSchematics(d httpapi.Deps) http.HandlerFunc {
 			httpapi.WriteInternal(w, r, d.Logger, err)
 			return
 		}
-		if records == nil {
-			records = []model.Schematic{}
+		out := make([]model.Schematic, 0, len(records))
+		for _, rec := range records {
+			out = append(out, schematicOut(rec))
 		}
-		writeJSON(w, http.StatusOK, records)
+		writeJSON(w, http.StatusOK, out)
 	}
 }
 
@@ -289,8 +290,27 @@ func getSchematic(d httpapi.Deps) http.HandlerFunc {
 			httpapi.WriteProblem(w, r, problem)
 			return
 		}
-		writeJSON(w, http.StatusOK, rec)
+		writeJSON(w, http.StatusOK, schematicOut(rec))
 	}
+}
+
+// schematicOut replaces the nil collections of a record with empty ones.
+//
+// A nil slice encodes as null, and a null reads to a client as "the server did
+// not say", which is a different statement from "there are none". The record
+// itself keeps whatever the store holds; only the wire form is normalised, so
+// nothing here changes what is persisted or what the id was computed over.
+func schematicOut(rec model.Schematic) model.Schematic {
+	if rec.Extensions == nil {
+		rec.Extensions = []string{}
+	}
+	if rec.KernelArgs == nil {
+		rec.KernelArgs = []string{}
+	}
+	if rec.Meta == nil {
+		rec.Meta = []model.MetaValue{}
+	}
+	return rec
 }
 
 func schematicAssets(d httpapi.Deps) http.HandlerFunc {
