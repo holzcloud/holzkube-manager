@@ -1,9 +1,11 @@
 package imagefactory_test
 
 import (
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/holzcloud/holzkube/internal/imagefactory"
 )
@@ -37,7 +39,7 @@ func TestInstallerImageResolvesThePlatformPrefixedName(t *testing.T) {
 	fake := newFakeFactory(t)
 	client := newClient(t, fake.URL)
 
-	ref, err := client.InstallerImage(t.Context(), installerRequest(installerModernVersion))
+	ref, _, err := client.InstallerImage(t.Context(), installerRequest(installerModernVersion))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -58,7 +60,7 @@ func TestInstallerImageFallsBackToTheLegacyName(t *testing.T) {
 	fake := newFakeFactory(t)
 	client := newClient(t, fake.URL)
 
-	ref, err := client.InstallerImage(t.Context(), installerRequest(installerLegacyVersion))
+	ref, _, err := client.InstallerImage(t.Context(), installerRequest(installerLegacyVersion))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -83,7 +85,7 @@ func TestInstallerImageRefusesWhenNeitherAnswers(t *testing.T) {
 	fake := newFakeFactory(t)
 	client := newClient(t, fake.URL)
 
-	ref, err := client.InstallerImage(t.Context(), installerRequest(installerBrokenVersion))
+	ref, _, err := client.InstallerImage(t.Context(), installerRequest(installerBrokenVersion))
 	if err == nil {
 		t.Fatalf("no error, and it produced the reference %q", ref)
 	}
@@ -107,7 +109,7 @@ func TestInstallerImageSeparatesAnUnreachableRegistryFromARefusal(t *testing.T) 
 	fake.setManifestStatus(500)
 	client := newClient(t, fake.URL)
 
-	_, err := client.InstallerImage(t.Context(), installerRequest(installerModernVersion))
+	_, _, err := client.InstallerImage(t.Context(), installerRequest(installerModernVersion))
 	if !errors.Is(err, imagefactory.ErrUpstreamUnavailable) {
 		t.Fatalf("error = %v, want ErrUpstreamUnavailable", err)
 	}
@@ -125,7 +127,7 @@ func TestInstallerImageCachesPerTalosVersion(t *testing.T) {
 	client := newClient(t, fake.URL)
 
 	for range 2 {
-		if _, err := client.InstallerImage(t.Context(), installerRequest(installerModernVersion)); err != nil {
+		if _, _, err := client.InstallerImage(t.Context(), installerRequest(installerModernVersion)); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
 	}
@@ -133,7 +135,7 @@ func TestInstallerImageCachesPerTalosVersion(t *testing.T) {
 		t.Errorf("two calls at one version issued %d manifest requests, want 1", n)
 	}
 
-	if _, err := client.InstallerImage(t.Context(), installerRequest(installerLegacyVersion)); err != nil {
+	if _, _, err := client.InstallerImage(t.Context(), installerRequest(installerLegacyVersion)); err != nil {
 		t.Fatalf("second version: %v", err)
 	}
 	if n := fake.count("GET /v2/metal-installer/manifests/" + installerLegacyVersion); n != 1 {
@@ -149,12 +151,12 @@ func TestInstallerImageDoesNotCacheAFailure(t *testing.T) {
 	fake.setManifestStatus(503)
 	client := newClient(t, fake.URL)
 
-	if _, err := client.InstallerImage(t.Context(), installerRequest(installerModernVersion)); err == nil {
+	if _, _, err := client.InstallerImage(t.Context(), installerRequest(installerModernVersion)); err == nil {
 		t.Fatal("the unreachable registry produced no error")
 	}
 
 	fake.setManifestStatus(0)
-	ref, err := client.InstallerImage(t.Context(), installerRequest(installerModernVersion))
+	ref, _, err := client.InstallerImage(t.Context(), installerRequest(installerModernVersion))
 	if err != nil {
 		t.Fatalf("after the registry recovered: %v", err)
 	}
@@ -180,7 +182,7 @@ func TestInstallerImageValidatesItsRequest(t *testing.T) {
 
 	for name, req := range cases {
 		t.Run(name, func(t *testing.T) {
-			if ref, err := client.InstallerImage(t.Context(), req); err == nil {
+			if ref, _, err := client.InstallerImage(t.Context(), req); err == nil {
 				t.Fatalf("accepted and produced %q", ref)
 			}
 		})
@@ -206,7 +208,7 @@ func TestInstallerImageResolvesTheSecureBootName(t *testing.T) {
 	fake := newFakeFactory(t)
 	client := newClient(t, fake.URL)
 
-	ref, err := client.InstallerImage(t.Context(), secureBootInstallerRequest(installerModernVersion))
+	ref, _, err := client.InstallerImage(t.Context(), secureBootInstallerRequest(installerModernVersion))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -231,7 +233,7 @@ func TestInstallerImageFallsBackToTheLegacySecureBootName(t *testing.T) {
 	fake := newFakeFactory(t)
 	client := newClient(t, fake.URL)
 
-	ref, err := client.InstallerImage(t.Context(), secureBootInstallerRequest(installerLegacyVersion))
+	ref, _, err := client.InstallerImage(t.Context(), secureBootInstallerRequest(installerLegacyVersion))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -258,7 +260,7 @@ func TestInstallerImageRefusesRatherThanSubstitutingTheOrdinaryInstaller(t *test
 	fake := newFakeFactory(t)
 	client := newClient(t, fake.URL)
 
-	ref, err := client.InstallerImage(t.Context(), secureBootInstallerRequest(installerNoSecureBootVersion))
+	ref, _, err := client.InstallerImage(t.Context(), secureBootInstallerRequest(installerNoSecureBootVersion))
 	if err == nil {
 		t.Fatalf("no error, and it produced the reference %q", ref)
 	}
@@ -288,11 +290,11 @@ func TestInstallerImageCachesSecureBootSeparately(t *testing.T) {
 	fake := newFakeFactory(t)
 	client := newClient(t, fake.URL)
 
-	plain, err := client.InstallerImage(t.Context(), installerRequest(installerModernVersion))
+	plain, _, err := client.InstallerImage(t.Context(), installerRequest(installerModernVersion))
 	if err != nil {
 		t.Fatalf("without SecureBoot: %v", err)
 	}
-	secure, err := client.InstallerImage(t.Context(), secureBootInstallerRequest(installerModernVersion))
+	secure, _, err := client.InstallerImage(t.Context(), secureBootInstallerRequest(installerModernVersion))
 	if err != nil {
 		t.Fatalf("with SecureBoot: %v", err)
 	}
@@ -309,7 +311,7 @@ func TestInstallerImageCachesSecureBootSeparately(t *testing.T) {
 
 	// And each variant still costs one resolution, not one per call.
 	for range 2 {
-		if _, err := client.InstallerImage(t.Context(), secureBootInstallerRequest(installerModernVersion)); err != nil {
+		if _, _, err := client.InstallerImage(t.Context(), secureBootInstallerRequest(installerModernVersion)); err != nil {
 			t.Fatalf("repeat SecureBoot resolution: %v", err)
 		}
 	}
@@ -330,7 +332,7 @@ func TestResolveInstallerRepoClassifiesEveryRegistryAnswer(t *testing.T) {
 			fake.setManifestStatus(answer.status)
 			client := newClient(t, fake.URL)
 
-			ref, err := client.InstallerImage(t.Context(), installerRequest(installerModernVersion))
+			ref, _, err := client.InstallerImage(t.Context(), installerRequest(installerModernVersion))
 
 			want := answer.wantErr()
 			if want == nil {
@@ -370,7 +372,7 @@ func TestInstallerImageTreatsAnAllBadRequestCandidateSetAsARefusal(t *testing.T)
 	fake.setManifestStatus(400)
 	client := newClient(t, fake.URL)
 
-	ref, err := client.InstallerImage(t.Context(), installerRequest(installerModernVersion))
+	ref, _, err := client.InstallerImage(t.Context(), installerRequest(installerModernVersion))
 	if !errors.Is(err, imagefactory.ErrSchematicNotBuildable) {
 		t.Fatalf("err = %v, want ErrSchematicNotBuildable", err)
 	}
@@ -380,4 +382,350 @@ func TestInstallerImageTreatsAnAllBadRequestCandidateSetAsARefusal(t *testing.T)
 	if !strings.Contains(err.Error(), "400") {
 		t.Errorf("the refusal does not name what the candidates answered: %v", err)
 	}
+}
+
+// The cases below cover the matrix cell that had never been coverable: the
+// platform-prefixed candidate is silent at the transport level and the legacy
+// candidate answers 2xx. Before fake_test.go's setRepoUnreachable knob the fake
+// could only produce answers, and "the registry did not answer" is precisely
+// the state this whole group is about (02-UAT.md G-02-3).
+
+// TestInstallerImageWarnsWhenThePreferredNameWasNeverRuledOut is G-02-3's core
+// case. A transport failure on the preferred candidate is not a refusal: the
+// name was unheard, not ruled out, so the reference reached past it is usable
+// but provisional and must say so on the answer that carries it.
+func TestInstallerImageWarnsWhenThePreferredNameWasNeverRuledOut(t *testing.T) {
+	fake := newFakeFactory(t)
+	fake.setRepoUnreachable("metal-installer")
+	client := newClient(t, fake.URL)
+
+	ref, warnings, err := client.InstallerImage(t.Context(), installerRequest(installerModernVersion))
+	if err != nil {
+		t.Fatalf("the fallback produced an error rather than a warning: %v", err)
+	}
+
+	want := fakeHost(t, fake.URL) + "/installer/" + schematicA + ":" + installerModernVersion
+	if ref != want {
+		t.Errorf("ref  = %s\nwant = %s", ref, want)
+	}
+	if len(warnings) != 1 {
+		t.Fatalf("got %d warnings, want exactly 1: %+v", len(warnings), warnings)
+	}
+
+	w := warnings[0]
+	if w.Code != imagefactory.WarningInstallerRepoFallbackUnverified {
+		t.Errorf("code = %q, want %q", w.Code, imagefactory.WarningInstallerRepoFallbackUnverified)
+	}
+	if !strings.Contains(w.Detail, "metal-installer") {
+		t.Errorf("the warning does not name the repository that never answered: %q", w.Detail)
+	}
+	if !strings.Contains(w.Detail, installerModernVersion) {
+		t.Errorf("the warning does not name the version: %q", w.Detail)
+	}
+	// The transport error as the client reported it. Without it an operator
+	// reading the warning cannot tell a throttled registry from a broken one.
+	if !strings.Contains(w.Detail, "EOF") && !strings.Contains(w.Detail, "connection") {
+		t.Errorf("the warning does not carry the transport error: %q", w.Detail)
+	}
+}
+
+// TestInstallerImageReQuestionsAProvisionalAnswer is the assertion that the
+// answer is not frozen for the life of the process, which is the divergence
+// G-02-3 observed across two processes.
+//
+// Its second half is the load-bearing one: the re-question asks *only* the
+// candidate that was never ruled out. The candidate that answered is already in
+// hand, so re-asking it learns nothing -- and asking it anyway would put the
+// 2 x DefaultTimeout = 60.000s composition that equals writeTimeout onto the
+// warm path once per interval, on a route that was answering from cache in
+// 218us. That is the exact shape G-02-2 recorded a 502 at.
+func TestInstallerImageReQuestionsAProvisionalAnswer(t *testing.T) {
+	fake := newFakeFactory(t)
+	fake.setRepoUnreachable("metal-installer")
+	client := newClientWithRetryInterval(t, fake.URL, 0)
+	req := installerRequest(installerModernVersion)
+
+	if _, warnings, err := client.InstallerImage(t.Context(), req); err != nil || len(warnings) != 1 {
+		t.Fatalf("first call: err = %v, warnings = %+v", err, warnings)
+	}
+
+	ref, warnings, err := client.InstallerImage(t.Context(), req)
+	if err != nil {
+		t.Fatalf("second call: %v", err)
+	}
+	if !strings.Contains(ref, "/installer/") {
+		t.Errorf("ref = %s, want the legacy repository", ref)
+	}
+	if len(warnings) != 1 || warnings[0].Code != imagefactory.WarningInstallerRepoFallbackUnverified {
+		t.Errorf("the answer served after a re-question dropped its warning: %+v", warnings)
+	}
+
+	if n := fake.count("GET /v2/metal-installer/manifests/" + installerModernVersion); n != 2 {
+		t.Errorf("the never-ruled-out candidate was asked %d times across two calls, want 2 -- "+
+			"a stale provisional entry must be re-questioned", n)
+	}
+	// The narrowing gate. If this reads 2 the re-question is walking the whole
+	// candidate list and costs 2 x DefaultTimeout rather than 1.
+	if n := fake.count("GET /v2/installer/manifests/" + installerModernVersion); n != 1 {
+		t.Errorf("the candidate that already answered was asked %d times, want 1 -- "+
+			"a re-question must ask only the candidates that were never ruled out, or it "+
+			"composes to 2 x DefaultTimeout = 60.000s against a 60s writeTimeout", n)
+	}
+}
+
+// TestInstallerImageServesAProvisionalAnswerFromTheCacheWithinTheInterval is
+// the other half of the trade-off. The UAT's literal remedy -- never remember a
+// name reached past silence -- makes every subsequent request re-pay the silent
+// candidate's client timeout on the one route whose worst case already equals
+// the response budget, so the operator would see neither the reference nor the
+// warning this plan exists to show them.
+func TestInstallerImageServesAProvisionalAnswerFromTheCacheWithinTheInterval(t *testing.T) {
+	fake := newFakeFactory(t)
+	fake.setRepoUnreachable("metal-installer")
+	client := newClient(t, fake.URL) // production interval
+	req := installerRequest(installerModernVersion)
+
+	for i := range 2 {
+		_, warnings, err := client.InstallerImage(t.Context(), req)
+		if err != nil {
+			t.Fatalf("call %d: %v", i+1, err)
+		}
+		if len(warnings) != 1 {
+			t.Fatalf("call %d served %d warnings, want 1 -- being remembered must not make a "+
+				"provisional answer silent", i+1, len(warnings))
+		}
+	}
+
+	if n := fake.count("GET /v2/metal-installer/manifests/" + installerModernVersion); n != 1 {
+		t.Errorf("the silent candidate was asked %d times, want 1 -- inside the interval its "+
+			"client timeout is paid once, not once per request", n)
+	}
+	if n := fake.count("GET /v2/installer/manifests/" + installerModernVersion); n != 1 {
+		t.Errorf("the answering candidate was asked %d times, want 1", n)
+	}
+}
+
+// TestInstallerImageRetainsAProvisionalAnswerWhenTheReQuestionFails is the case
+// this plan exists to protect, and the obvious implementation regresses it.
+// Evicting a provisional entry whose re-question fails turns a throttled
+// registry into a 502 on the assets route one interval after the throttling
+// starts, for an operator who was being served a usable reference a moment
+// earlier -- the hard-error behaviour 02-04-PLAN.md:157-161 deliberately ruled
+// out.
+func TestInstallerImageRetainsAProvisionalAnswerWhenTheReQuestionFails(t *testing.T) {
+	fake := newFakeFactory(t)
+	fake.setRepoUnreachable("metal-installer")
+	client := newClientWithRetryInterval(t, fake.URL, 0)
+	req := installerRequest(installerModernVersion)
+
+	if _, _, err := client.InstallerImage(t.Context(), req); err != nil {
+		t.Fatalf("first call: %v", err)
+	}
+	before, ok := client.InstallerRepoEntryForTest(req)
+	if !ok {
+		t.Fatal("the provisional answer was not remembered at all")
+	}
+
+	// Over-provocation: the candidate that answered goes silent too. It must
+	// not matter, because it is not asked.
+	fake.setRepoUnreachable("installer")
+
+	ref, warnings, err := client.InstallerImage(t.Context(), req)
+	if err != nil {
+		t.Fatalf("a failed re-question returned an error rather than the answer already in "+
+			"hand: %v", err)
+	}
+	if !strings.Contains(ref, "/installer/") {
+		t.Errorf("ref = %q, want the retained legacy reference", ref)
+	}
+	if len(warnings) != 1 || warnings[0].Code != imagefactory.WarningInstallerRepoFallbackUnverified {
+		t.Errorf("the retained answer lost its warning: %+v", warnings)
+	}
+	if n := fake.count("GET /v2/installer/manifests/" + installerModernVersion); n != 1 {
+		t.Errorf("the candidate that answered was asked %d times, want 1 -- it is not part of "+
+			"a re-question", n)
+	}
+
+	// Re-stamped, not left stale: the cadence is one interval after the failed
+	// re-question, not one interval after the original resolution. Asserted
+	// through the entry itself, because at interval zero the re-stamped entry is
+	// stale again immediately -- a third call re-questions candidate 1 by design
+	// and its counter reads 3. The property under test is the cadence, not the
+	// clock, and not a suppressed call.
+	after, ok := client.InstallerRepoEntryForTest(req)
+	if !ok {
+		t.Fatal("the failed re-question evicted the entry")
+	}
+	if !after.WrittenAt.After(before.WrittenAt) {
+		t.Errorf("the entry's timestamp was left at %s after a failed re-question completed; "+
+			"leaving it stale makes every subsequent call re-question and re-pays the silent "+
+			"candidate's timeout per request", before.WrittenAt)
+	}
+	if after.Repo != before.Repo {
+		t.Errorf("repo = %q, want the retained %q", after.Repo, before.Repo)
+	}
+	if len(after.Unresolved) != 1 || after.Unresolved[0] != "metal-installer" {
+		t.Errorf("unresolved = %v, want the same single name so the next re-question asks it "+
+			"and nothing else", after.Unresolved)
+	}
+	if after.WarningCode != imagefactory.WarningInstallerRepoFallbackUnverified {
+		t.Errorf("warning code = %q, want the original warning unchanged", after.WarningCode)
+	}
+}
+
+// TestInstallerImagePromotesAProvisionalAnswerWhenTheReQuestionIsRefused is the
+// question the warning asked, finally answered. A refusal rules the preferred
+// name out, which is the one thing the warning ever claimed had not happened,
+// so the entry keeps its name, drops its warning and stops expiring.
+func TestInstallerImagePromotesAProvisionalAnswerWhenTheReQuestionIsRefused(t *testing.T) {
+	fake := newFakeFactory(t)
+	fake.setRepoUnreachable("metal-installer")
+	client := newClientWithRetryInterval(t, fake.URL, 0)
+	req := installerRequest(installerLegacyVersion)
+
+	if _, warnings, err := client.InstallerImage(t.Context(), req); err != nil || len(warnings) != 1 {
+		t.Fatalf("first call: err = %v, warnings = %+v", err, warnings)
+	}
+
+	// The registry comes back and says no: at installerLegacyVersion the
+	// platform-prefixed name does not resolve, so it answers 404.
+	fake.setRepoReachable("metal-installer")
+
+	ref, warnings, err := client.InstallerImage(t.Context(), req)
+	if err != nil {
+		t.Fatalf("second call: %v", err)
+	}
+	want := fakeHost(t, fake.URL) + "/installer/" + schematicA + ":" + installerLegacyVersion
+	if ref != want {
+		t.Errorf("ref  = %s\nwant = %s", ref, want)
+	}
+	if len(warnings) != 0 {
+		t.Errorf("the preferred name is now ruled out and the warning should be gone: %+v", warnings)
+	}
+	if warnings == nil {
+		t.Error("warnings is nil, which encodes as null")
+	}
+
+	metal := fake.count("GET /v2/metal-installer/manifests/" + installerLegacyVersion)
+	legacy := fake.count("GET /v2/installer/manifests/" + installerLegacyVersion)
+
+	// A proven entry never expires, so a third call asks nothing at all -- even
+	// at interval zero. This is the contrast with the retained-provisional case.
+	if _, _, err := client.InstallerImage(t.Context(), req); err != nil {
+		t.Fatalf("third call: %v", err)
+	}
+	if n := fake.count("GET /v2/metal-installer/manifests/" + installerLegacyVersion); n != metal {
+		t.Errorf("a promoted entry was re-questioned: %d manifest requests, want %d", n, metal)
+	}
+	if n := fake.count("GET /v2/installer/manifests/" + installerLegacyVersion); n != legacy {
+		t.Errorf("a promoted entry re-asked the answering candidate: %d requests, want %d", n, legacy)
+	}
+}
+
+// TestInstallerImageDoesNotCacheAResolutionWithNothingToFallBackOn keeps the
+// retention rule narrow. Retaining applies to an entry that already exists; a
+// first resolution that finds every candidate silent has no usable answer to
+// keep, so it still fails and still caches nothing.
+func TestInstallerImageDoesNotCacheAResolutionWithNothingToFallBackOn(t *testing.T) {
+	fake := newFakeFactory(t)
+	fake.setRepoUnreachable("metal-installer")
+	fake.setRepoUnreachable("installer")
+	client := newClient(t, fake.URL)
+	req := installerRequest(installerModernVersion)
+
+	ref, warnings, err := client.InstallerImage(t.Context(), req)
+	if err == nil {
+		t.Fatalf("no error, and it produced the reference %q", ref)
+	}
+	if !errors.Is(err, imagefactory.ErrUpstreamUnavailable) {
+		t.Errorf("err = %v, want ErrUpstreamUnavailable -- nothing answered", err)
+	}
+	if ref != "" {
+		t.Errorf("a failed resolution still returned a reference: %q", ref)
+	}
+	if warnings == nil {
+		t.Error("warnings is nil, which encodes as null")
+	}
+	if _, ok := client.InstallerRepoEntryForTest(req); ok {
+		t.Error("a failed first resolution was cached")
+	}
+
+	// And the recovery path is unchanged: the registry comes back, the answer
+	// is proven, and nothing was frozen in between.
+	fake.setRepoReachable("metal-installer")
+	fake.setRepoReachable("installer")
+	ref, warnings, err = client.InstallerImage(t.Context(), req)
+	if err != nil {
+		t.Fatalf("after the registry recovered: %v", err)
+	}
+	if !strings.Contains(ref, "/metal-installer/") {
+		t.Errorf("ref = %s, want the platform-prefixed repository", ref)
+	}
+	if len(warnings) != 0 {
+		t.Errorf("a proven resolution carried warnings: %+v", warnings)
+	}
+}
+
+// TestInstallerImageProvenNameCarriesNoWarning is the mirror: when the
+// preferred candidate answers, nothing was left unheard, so there is nothing to
+// say and the slice is empty rather than nil.
+func TestInstallerImageProvenNameCarriesNoWarning(t *testing.T) {
+	fake := newFakeFactory(t)
+	client := newClient(t, fake.URL)
+	req := installerRequest(installerModernVersion)
+
+	_, warnings, err := client.InstallerImage(t.Context(), req)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if warnings == nil {
+		t.Fatal("warnings is nil, which encodes as null -- that reads as 'the server did not check'")
+	}
+	if len(warnings) != 0 {
+		t.Fatalf("a proven name produced %+v", warnings)
+	}
+
+	encoded, err := json.Marshal(warnings)
+	if err != nil {
+		t.Fatalf("encode: %v", err)
+	}
+	if string(encoded) != "[]" {
+		t.Errorf("encoded as %s, want []", encoded)
+	}
+
+	entry, ok := client.InstallerRepoEntryForTest(req)
+	if !ok {
+		t.Fatal("the proven answer was not cached")
+	}
+	if len(entry.Unresolved) != 0 {
+		t.Errorf("a proven entry records unresolved candidates %v, so it would expire", entry.Unresolved)
+	}
+}
+
+// TestWithInstallerRepoRetryIntervalRejectsANegativeValue follows the register
+// WithTimeout already uses. Zero is legal here and means "re-question on every
+// call", which is what makes both branches drivable without a fake clock; a
+// negative interval is not a shorter one, it is a mistake.
+func TestWithInstallerRepoRetryIntervalRejectsANegativeValue(t *testing.T) {
+	if _, err := imagefactory.New("https://factory.example",
+		imagefactory.WithInstallerRepoRetryInterval(-time.Second)); err == nil {
+		t.Fatal("a negative re-question interval was accepted")
+	}
+	if _, err := imagefactory.New("https://factory.example",
+		imagefactory.WithInstallerRepoRetryInterval(0)); err != nil {
+		t.Fatalf("zero must be legal: %v", err)
+	}
+}
+
+// newClientWithRetryInterval builds a client whose provisional installer-repo
+// entries expire after d. Options apply at construction, so a test that needs
+// two different intervals needs two clients -- and a second client has a cold
+// cache and cannot see the first one's entries.
+func newClientWithRetryInterval(t *testing.T, baseURL string, d time.Duration) *imagefactory.Client {
+	t.Helper()
+	c, err := imagefactory.New(baseURL, imagefactory.WithInstallerRepoRetryInterval(d))
+	if err != nil {
+		t.Fatalf("New(%q): %v", baseURL, err)
+	}
+	return c
 }
