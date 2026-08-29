@@ -595,6 +595,7 @@ weaker statement.
 |---|---|
 | `schematic.installer-ignores-kernel-args` | the schematic carries extra kernel arguments |
 | `schematic.installer-ignores-meta` | the schematic carries META values |
+| `installer.repo-fallback-unverified` | the installer repository name was reached past a candidate that never answered, so the preferred name was unheard rather than ruled out. Raised on `GET .../assets`, not on this route. |
 
 Both exist because of a restriction stated verbatim upstream: *"`installer` and
 `initramfs` images only support system extensions (kernel args and META are
@@ -613,7 +614,8 @@ against that divergence (FACT-04).**
   "pxe": "https://factory.talos.dev/pxe/<id>/v1.13.9/metal-amd64",
   "disk_image": "https://factory.talos.dev/image/<id>/v1.13.9/metal-amd64.raw.zst",
   "cmdline": "https://factory.talos.dev/image/<id>/v1.13.9/cmdline-metal-amd64",
-  "installer": "factory.talos.dev/metal-installer/<id>:v1.13.9"
+  "installer": "factory.talos.dev/metal-installer/<id>:v1.13.9",
+  "warnings": []
 }
 ```
 
@@ -644,15 +646,38 @@ against that divergence (FACT-04).**
   It does **not** fall back to the ordinary installer: a SecureBoot ISO paired
   with an installer that does not produce a SecureBoot node is the drift the
   resolution exists to prevent.
+- `warnings` is always present and is `[]` when there is nothing to say, in the
+  same shape and under the same name as the `201` body's — a client has one
+  warning shape to learn rather than two. An empty array means the installer
+  repository name was **proven**. A non-empty one means the reference is usable
+  but **provisional**, and the detail says what was not ruled out. Unlike the
+  `201` body's warnings, these are about *this resolution* rather than about the
+  schematic: nothing persists them, and they cannot be recomputed from the
+  record later.
 - **`installer` is resolved against the registry, never assembled.** The
   repository name is version-dependent: for part of the supported range only the
   legacy `installer` name answers, for the rest the platform-prefixed
   `metal-installer` does. The reference is consumed by the upgrade RPC, and a
   wrong one produces an upgrade that reports success while silently dropping
-  every system extension the node was built with. If neither name resolves the
-  route answers `502` `upstream` with `upstream.factory-unavailable` or
-  `upstream.factory-rejected` and **no reference at all** — there is no guessed
-  fallback, because a guess here is the failure it exists to prevent.
+  every system extension the node was built with.
+
+  There are three outcomes, not two:
+
+  1. **Proven** — the preferred candidate answered. The reference is returned
+     with `warnings: []`.
+  2. **Provisional** — a candidate failed at the transport level and a later one
+     answered, so the preferred name was never actually ruled out. The reference
+     is returned *and* carries `installer.repo-fallback-unverified` naming the
+     repository that did not answer, the version and the transport error. It is
+     usable; asking again once the registry is reachable may produce a different
+     reference. The fallback is deliberate — `factory.talos.dev` is known to
+     throttle without producing an HTTP response at all, and refusing here would
+     leave an operator unable to read their own asset URLs because a third party
+     was busy.
+  3. **Refused** — every candidate answered and none carries a manifest. The
+     route answers `502` `upstream` with `upstream.factory-unavailable` or
+     `upstream.factory-rejected` and **no reference at all** — there is no
+     guessed fallback, because a guess here is the failure it exists to prevent.
 
 ### Upstream failures
 

@@ -216,6 +216,18 @@ export const schematicAssetsSchema = z.object({
    * silently dropping every system extension the node was built with.
    */
   installer: z.string(),
+  /**
+   * How sure the server is of the installer repository name above. Empty means
+   * proven; a `installer.repo-fallback-unverified` entry means the reference is
+   * usable but provisional — the preferred repository never answered and was
+   * never ruled out.
+   *
+   * Required rather than optional, deliberately. A schema that tolerated the
+   * field's absence would let a server regression reach the screen as "no
+   * warnings", which is the silence G-02-3 was about: the reference would still
+   * render and nothing would say it had not been proven.
+   */
+  warnings: z.array(schematicWarningSchema),
 })
 
 export type SchematicAssets = z.infer<typeof schematicAssetsSchema>
