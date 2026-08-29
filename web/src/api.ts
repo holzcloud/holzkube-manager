@@ -95,6 +95,131 @@ export const meSchema = z.object({
 
 export type Me = z.infer<typeof meSchema>
 
+/* ---------------------------------------------------------------------- */
+/* Image Factory                                                           */
+/* ---------------------------------------------------------------------- */
+
+export const factoryVersionsSchema = z.object({
+  stable: z.array(z.string()),
+  prerelease: z.array(z.string()),
+  /**
+   * A comparison, never the last element of the upstream list. The upstream
+   * list is served ascending and ends in the current alpha, beta and rc tags,
+   * so "the newest" and "the last" are different answers and only one of them
+   * is safe to preselect.
+   */
+  newest_stable: z.string(),
+  /** Version -> the reason it is listed. Frequently empty; never null. */
+  broken: z.record(z.string(), z.string()),
+})
+
+export type FactoryVersions = z.infer<typeof factoryVersionsSchema>
+
+export const factoryExtensionSchema = z.object({
+  name: z.string(),
+  ref: z.string(),
+  digest: z.string(),
+  author: z.string(),
+  description: z.string(),
+})
+
+export type FactoryExtension = z.infer<typeof factoryExtensionSchema>
+
+export const factoryExtensionsSchema = z.object({
+  /**
+   * Echoed back by the server. The catalog is version-scoped and there is no
+   * fallback, so a list that does not say which version it belongs to is a list
+   * that can be used against the wrong one.
+   */
+  version: z.string(),
+  extensions: z.array(factoryExtensionSchema),
+})
+
+export type FactoryExtensionCatalog = z.infer<typeof factoryExtensionsSchema>
+
+export const metaValueSchema = z.object({
+  key: z.number(),
+  value: z.string(),
+})
+
+export type MetaValue = z.infer<typeof metaValueSchema>
+
+export const schematicSchema = z.object({
+  id: z.string(),
+  cluster: z.string(),
+  name: z.string(),
+  talos_version: z.string(),
+  canonical: z.string(),
+  extensions: z.array(z.string()),
+  kernel_args: z.array(z.string()),
+  meta: z.array(metaValueSchema),
+  /**
+   * False until the model-build probe agreed. A successful creation never sets
+   * it: the Factory accepts a schematic naming an extension that does not
+   * exist, assigns it an ordinary id, and refuses only when an image is asked
+   * for. Rendering "created" as success is the lie this field exists to stop.
+   */
+  usable: z.boolean(),
+  /**
+   * The zero time means never probed, which is not the same as probed and
+   * refused. The two must not be merged in the UI.
+   */
+  probed_at: z.string(),
+  created_at: z.string(),
+  rev: z.number(),
+})
+
+export type Schematic = z.infer<typeof schematicSchema>
+
+export const schematicWarningSchema = z.object({
+  code: z.string(),
+  detail: z.string(),
+})
+
+export type SchematicWarning = z.infer<typeof schematicWarningSchema>
+
+/** The 201 body: the stored record plus the warnings for this attempt. */
+export const createdSchematicSchema = schematicSchema.extend({
+  warnings: z.array(schematicWarningSchema),
+})
+
+export type CreatedSchematic = z.infer<typeof createdSchematicSchema>
+
+export const schematicAssetsSchema = z.object({
+  iso: z.string(),
+  pxe: z.string(),
+  disk_image: z.string(),
+  cmdline: z.string(),
+  /**
+   * Resolved against the registry, never assembled. It is consumed by the
+   * upgrade RPC, and a wrong one produces an upgrade that reports success while
+   * silently dropping every system extension the node was built with.
+   */
+  installer: z.string(),
+})
+
+export type SchematicAssets = z.infer<typeof schematicAssetsSchema>
+
+export interface SchematicInput {
+  name: string
+  talos_version: string
+  arch: string
+  extensions: string[]
+  kernel_args: string[]
+  meta: MetaValue[]
+  secureboot: boolean
+}
+
+export interface AssetQuery {
+  arch: string
+  version?: string
+  secureboot?: boolean
+}
+
+/** The warning codes the server emits, as constants a component can key on. */
+export const WARNING_INSTALLER_IGNORES_KERNEL_ARGS = 'schematic.installer-ignores-kernel-args'
+export const WARNING_INSTALLER_IGNORES_META = 'schematic.installer-ignores-meta'
+
 export interface AuditQuery {
   from?: string
   to?: string
@@ -134,6 +259,7 @@ export function onSessionExpired(handler: SessionExpiredHandler | null): void {
 /** Names the pending action for the sudo prompt, in English (D-09). */
 const ACTION_LABELS: ReadonlyArray<readonly [string, string]> = [
   ['/api/v1/account/password', 'Change the operator password'],
+  ['/api/v1/schematics/', 'Delete this schematic'],
 ]
 
 function labelFor(path: string): string {
@@ -237,6 +363,22 @@ async function sendJSON<T>(
   return schema.parse(await response.json())
 }
 
+/**
+ * The asset query. `arch` is always sent and is never defaulted here or on the
+ * server: holzkube is developed on arm64 and targets amd64, so a defaulted
+ * architecture is a bug that only ever appears on someone else's machine.
+ */
+function assetQueryString(query: AssetQuery): string {
+  const params = new URLSearchParams({ arch: query.arch })
+  if (query.version !== undefined && query.version !== '') {
+    params.set('version', query.version)
+  }
+  if (query.secureboot === true) {
+    params.set('secureboot', 'true')
+  }
+  return `?${params.toString()}`
+}
+
 function auditQueryString(query: AuditQuery): string {
   const params = new URLSearchParams()
   if (query.from !== undefined && query.from !== '') {
@@ -326,4 +468,49 @@ export const api = {
 
   audit: (query: AuditQuery = {}): Promise<AuditPage> =>
     sendJSON('GET', `/api/v1/audit${auditQueryString(query)}`, auditPageSchema),
+
+  factory: {
+    versions: (): Promise<FactoryVersions> =>
+      sendJSON('GET', '/api/v1/factory/versions', factoryVersionsSchema),
+
+    /**
+     * The catalog for exactly this version. There is no unscoped call and no
+     * cached fallback, because an extension list from the wrong version
+     * validates successfully and produces an image that will not build.
+     */
+    extensions: (version: string): Promise<FactoryExtensionCatalog> =>
+      sendJSON(
+        'GET',
+        `/api/v1/factory/extensions?version=${encodeURIComponent(version)}`,
+        factoryExtensionsSchema,
+      ),
+  },
+
+  schematics: {
+    list: (): Promise<Schematic[]> =>
+      sendJSON('GET', '/api/v1/schematics', z.array(schematicSchema)),
+
+    get: (id: string): Promise<Schematic> =>
+      sendJSON('GET', `/api/v1/schematics/${encodeURIComponent(id)}`, schematicSchema),
+
+    create: (input: SchematicInput): Promise<CreatedSchematic> =>
+      sendJSON('POST', '/api/v1/schematics', createdSchematicSchema, input),
+
+    assets: (id: string, query: AssetQuery): Promise<SchematicAssets> =>
+      sendJSON(
+        'GET',
+        `/api/v1/schematics/${encodeURIComponent(id)}/assets${assetQueryString(query)}`,
+        schematicAssetsSchema,
+      ),
+
+    /**
+     * Destructive, so the 428 interceptor above opens the sudo dialog and
+     * replays this exact request once the window is open. This screen therefore
+     * has no confirmation of its own -- a second one would train the operator
+     * to click past the first.
+     */
+    remove: async (id: string): Promise<void> => {
+      await send('DELETE', `/api/v1/schematics/${encodeURIComponent(id)}`)
+    },
+  },
 }
