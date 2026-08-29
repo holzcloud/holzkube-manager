@@ -76,10 +76,33 @@ export function predictWarnings(
 }
 
 /**
+ * The heading for the schematic-authoring warnings, which is what this
+ * component was written for and stays its default.
+ *
+ * It is a specific claim -- the ISO and the installed system will differ -- and
+ * it is the right claim for the two `schematic.` codes and wrong for anything
+ * else. An installer reference reached past a repository that never answered
+ * says nothing about an ISO diverging from an installed system, so it is shown
+ * through this component with a different heading rather than through a forked
+ * copy of it. The two transcribed detail sentences above are read byte for byte
+ * by TestWarningDetailsMatchTheUI on the Go side, which is the reason not to
+ * fork: a second component is a second thing for that guard to miss.
+ */
+const DEFAULT_HEADING = 'This schematic will produce an ISO and an installed system that differ.'
+
+/**
  * Renders a warning list. Nothing to say renders nothing at all -- an empty
  * alert box would train the operator to ignore the box.
  */
-export function SchematicWarnings({ warnings }: { warnings: SchematicWarning[] }) {
+export function SchematicWarnings({
+  warnings,
+  heading = DEFAULT_HEADING,
+  label = 'Schematic warnings',
+}: {
+  warnings: SchematicWarning[]
+  heading?: string
+  label?: string
+}) {
   if (warnings.length === 0) {
     return null
   }
@@ -87,12 +110,10 @@ export function SchematicWarnings({ warnings }: { warnings: SchematicWarning[] }
   return (
     <div
       role="alert"
-      aria-label="Schematic warnings"
+      aria-label={label}
       className="rounded-md border border-amber-500/50 bg-amber-500/10 px-4 py-3 text-sm"
     >
-      <p className="font-semibold">
-        This schematic will produce an ISO and an installed system that differ.
-      </p>
+      <p className="font-semibold">{heading}</p>
       <ul className="mt-2 space-y-2">
         {warnings.map((warning) => (
           <li key={warning.code}>

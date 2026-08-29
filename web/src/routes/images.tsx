@@ -667,7 +667,29 @@ export function UsabilityBadge({
     return <Badge variant="secondary">Usable — the build probe confirmed it</Badge>
   }
   if (!isProbed(probedAt)) {
-    return <Badge variant="outline">Not verified — the build probe did not run</Badge>
+    // G-02-1. This used to read "the build probe did not run", which is a claim
+    // the record cannot support: on the measured common case the probe ran for a
+    // full thirty seconds and gave up, and the record looks identical either
+    // way. The badge now asserts only what is true in both cases -- there is no
+    // verdict -- and the muted line states the disjunction rather than picking
+    // one.
+    //
+    // This is a copy change and only a copy change. No new field, no third
+    // state, no change to the probed-or-not predicate above, and no change to
+    // what the server stores.
+    // 02-DECISION-probe-budget.md owns the state question and is still open;
+    // this item is on its unconditional list precisely because it needs none of
+    // that. If closing it ever seems to need a third probe state, stop — the
+    // boundary has been crossed and the decision has to land first.
+    return (
+      <span className="flex flex-col gap-1">
+        <Badge variant="outline">Not verified — the build probe has no verdict</Badge>
+        <span className="text-xs text-muted-foreground">
+          The probe either did not run or did not answer in time. The schematic may still be
+          buildable.
+        </span>
+      </span>
+    )
   }
   return (
     <span className="flex flex-col gap-1">
@@ -1086,6 +1108,21 @@ function AssetPanel({ record, archSeed }: { record: Schematic; archSeed: Archite
 
       {assets.isSuccess && (
         <>
+          {/*
+           * Above the grid, not below it. An operator who has already copied the
+           * reference has stopped reading, and this is the sentence that says
+           * the reference they just copied is provisional.
+           *
+           * The heading names the reference rather than the schematic: this
+           * warning is about how one repository name was obtained on this
+           * request, and the component's default heading would claim something
+           * about the ISO and the installed system that is not being claimed.
+           */}
+          <SchematicWarnings
+            warnings={assets.data.warnings}
+            label="Installer reference warnings"
+            heading="The installer reference below is usable but was not fully proven."
+          />
           <div className="grid gap-2">
             <AssetRow label="ISO" value={assets.data.iso} />
             <AssetRow label="Installer" value={assets.data.installer} />
@@ -1119,9 +1156,49 @@ function AssetRow({ label, value }: { label: string; value: string }) {
       className="grid grid-cols-[minmax(0,8rem)_1fr_auto] items-start gap-2"
     >
       <span className="text-sm text-muted-foreground">{label}</span>
-      <span className="break-all font-mono text-xs">{value}</span>
+      <ReferenceValue value={value} />
       <CopyButton label={label} value={value} />
     </fieldset>
+  )
+}
+
+/**
+ * A reference that may wrap, but never inside a token.
+ *
+ * This carried `break-all`, which permits a break at any character — so
+ * `metal-installer` could wrap into something a reader takes for `installer`,
+ * and during this phase's UAT a DOM-scraping verifier did exactly that and
+ * reported a real gap as refuted. The repository name is the one part of the
+ * string where a misreading changes its meaning: the two names are different
+ * images, and the reference is consumed by the upgrade RPC.
+ *
+ * So breaks are offered only at path separators. `<wbr />` marks the permitted
+ * points and `break-normal` refuses the rest, which means a 64-character
+ * schematic id — one segment longer than any row — still overflows rather than
+ * breaking. That is acceptable and unavoidable; a fifteen-character repository
+ * name never can, which is the property that matters.
+ *
+ * The element's text content stays the complete reference, because `<wbr />`
+ * contributes nothing to it. The Copy control and every `toHaveTextContent`
+ * assertion keep working on the exact string.
+ */
+function ReferenceValue({ value }: { value: string }) {
+  const segments = value.split('/')
+
+  return (
+    <span data-reference className="min-w-0 overflow-x-auto break-normal font-mono text-xs">
+      {segments.map((segment, index) => (
+        // The index is the key because a reference can repeat a segment
+        // (`installer` appears in both the host path and the repository name on
+        // some references) and the list is never reordered.
+        // biome-ignore lint/suspicious/noArrayIndexKey: positional by nature
+        <span key={index}>
+          {index > 0 && '/'}
+          {segment}
+          {index < segments.length - 1 && <wbr />}
+        </span>
+      ))}
+    </span>
   )
 }
 
