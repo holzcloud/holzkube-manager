@@ -144,22 +144,22 @@ func TestClassTable(t *testing.T) {
 func TestClassTableNamesOnlyRealRPCs(t *testing.T) {
 	t.Parallel()
 
-	real := map[string]bool{}
+	known := map[string]bool{}
 
 	mSvc := "/" + machine.MachineService_ServiceDesc.ServiceName + "/"
 	for _, md := range machine.MachineService_ServiceDesc.Methods {
-		real[mSvc+md.MethodName] = true
+		known[mSvc+md.MethodName] = true
 	}
 	for _, sd := range machine.MachineService_ServiceDesc.Streams {
-		real[mSvc+sd.StreamName] = true
+		known[mSvc+sd.StreamName] = true
 	}
 
 	sSvc := "/" + storage.StorageService_ServiceDesc.ServiceName + "/"
 	for _, md := range storage.StorageService_ServiceDesc.Methods {
-		real[sSvc+md.MethodName] = true
+		known[sSvc+md.MethodName] = true
 	}
 	for _, sd := range storage.StorageService_ServiceDesc.Streams {
-		real[sSvc+sd.StreamName] = true
+		known[sSvc+sd.StreamName] = true
 	}
 
 	checked := 0
@@ -171,7 +171,7 @@ func TestClassTableNamesOnlyRealRPCs(t *testing.T) {
 			continue
 		}
 		checked++
-		if !real[method] {
+		if !known[method] {
 			t.Errorf("%s is in the class table and is not an RPC of either Talos service; a misspelt "+
 				"entry leaves the real method unclassified while looking like coverage", method)
 		}

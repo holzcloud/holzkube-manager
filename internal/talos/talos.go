@@ -49,12 +49,8 @@ var (
 	// regression.
 	ErrNotReachableYet = errors.New("talos: target not reachable yet")
 
-	// ErrNoDeadline is returned when a call would go to the wire on a context
-	// with no deadline. It is a refusal, never retryable: a Talos RPC that can
-	// block forever holds a connection and an operator's attention for as long
-	// as the process lives, and the fix is a deadline at the call site rather
-	// than a retry here.
-	ErrNoDeadline = errors.New("talos: refusing a call with no deadline")
+	// ErrNoDeadline and ErrUnclassifiedMethod live in deadline.go, next to the
+	// class table they refuse against.
 
 	// ErrUnsupportedInMaintenance is returned for an operation a node in
 	// maintenance mode cannot serve. It is not retryable: maintenance mode is a

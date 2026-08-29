@@ -9,6 +9,8 @@ package talos
 // deadline_test.go and contract_test.go.
 
 import (
+	"context"
+	"errors"
 	"testing"
 	"time"
 )
@@ -145,5 +147,133 @@ func TestRetryAttemptsMatchesTheConfirmedPolicy(t *testing.T) {
 	}
 	if RetryBackoffCeiling != 800*time.Millisecond {
 		t.Errorf("RetryBackoffCeiling = %v, want 800ms", RetryBackoffCeiling)
+	}
+}
+
+// TestRetryLoopAttemptCounts is the precise half of the retry proof.
+//
+// The end-to-end tests in deadline_test.go and contract_test.go show the loop
+// behaving correctly at the wire, but they cannot count attempts: full jitter
+// makes the elapsed time a distribution rather than a number, and gRPC's own
+// reconnect backoff means a failed attempt does not necessarily redial. So the
+// counts are asserted here, against the loop itself, where they are exact.
+func TestRetryLoopAttemptCounts(t *testing.T) {
+	t.Parallel()
+
+	unreachable := &Error{Op: "Version", Kind: KindUnreachable}
+	rejected := &Error{Op: "ApplyConfiguration", Kind: KindRejected}
+
+	rows := []struct {
+		name    string
+		method  string
+		budget  time.Duration
+		fail    error
+		want    int
+		wantErr error
+	}{
+		{
+			name:    "an allowlisted read retries to its budget",
+			method:  MethodVersion,
+			budget:  9 * time.Second,
+			fail:    unreachable,
+			want:    RetryAttempts,
+			wantErr: unreachable,
+		},
+		{
+			name:   "a mutation is never retried",
+			method: MethodApplyConfiguration,
+			budget: 9 * time.Second,
+			fail:   unreachable,
+			want:   1,
+			// Bootstrap is the case this row exists for: a mutation whose
+			// success committed and whose reply was lost would, if retried,
+			// come back AlreadyExists and be reported as a failure of an
+			// operation that in fact succeeded.
+			wantErr: unreachable,
+		},
+		{
+			name:    "a stream is never retried",
+			method:  MethodLogs,
+			budget:  9 * time.Second,
+			fail:    unreachable,
+			want:    1,
+			wantErr: unreachable,
+		},
+		{
+			name:    "a deliberate read exclusion is never retried",
+			method:  MethodEtcdSnapshot,
+			budget:  9 * time.Second,
+			fail:    unreachable,
+			want:    1,
+			wantErr: unreachable,
+		},
+		{
+			name:    "an answered refusal is never retried",
+			method:  MethodVersion,
+			budget:  9 * time.Second,
+			fail:    rejected,
+			want:    1,
+			wantErr: rejected,
+		},
+		{
+			name:    "a budget shorter than the first backoff buys no retry",
+			method:  MethodVersion,
+			budget:  50 * time.Millisecond,
+			fail:    unreachable,
+			want:    1,
+			wantErr: unreachable,
+		},
+	}
+
+	for _, row := range rows {
+		t.Run(row.name, func(t *testing.T) {
+			t.Parallel()
+
+			ctx, cancel := context.WithTimeout(t.Context(), row.budget)
+			defer cancel()
+
+			n := &conn{now: time.Now}
+
+			attempts := 0
+			err := n.do(ctx, row.method, func(context.Context) error {
+				attempts++
+				return row.fail
+			})
+
+			if attempts != row.want {
+				t.Errorf("the loop made %d attempt(s), want %d", attempts, row.want)
+			}
+			if !errors.Is(err, row.wantErr) {
+				t.Errorf("do returned %v, want the call's own error", err)
+			}
+		})
+	}
+}
+
+// TestRetryLoopStopsOnSuccess covers the one path the table above cannot: a
+// call that fails and then works. Without it the loop could return the first
+// error unconditionally and every row above would still pass.
+func TestRetryLoopStopsOnSuccess(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithTimeout(t.Context(), 9*time.Second)
+	defer cancel()
+
+	n := &conn{now: time.Now}
+
+	attempts := 0
+	err := n.do(ctx, MethodVersion, func(context.Context) error {
+		attempts++
+		if attempts == 1 {
+			return &Error{Op: "Version", Kind: KindUnreachable}
+		}
+		return nil
+	})
+
+	if err != nil {
+		t.Errorf("do returned %v after the second attempt succeeded", err)
+	}
+	if attempts != 2 {
+		t.Errorf("the loop made %d attempt(s), want 2: it kept going after a success", attempts)
 	}
 }

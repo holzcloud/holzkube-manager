@@ -7,6 +7,7 @@ import (
 	"io"
 	"log/slog"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/cosi-project/runtime/pkg/state"
@@ -14,16 +15,10 @@ import (
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/protobuf/types/known/emptypb"
 
+	"github.com/siderolabs/talos/pkg/machinery/api/common"
 	"github.com/siderolabs/talos/pkg/machinery/api/machine"
 	"github.com/siderolabs/talos/pkg/machinery/client"
 )
-
-// probeDeadline bounds the liveness probe both constructors perform.
-//
-// It is the probe class deadline: deliberately short, because the probe exists
-// to turn "constructed" into "reachable", and a caller that waits a minute to
-// be told a node is down has been given the worst of both answers.
-const probeDeadline = 5 * time.Second
 
 // ClusterClient is a connection to a configured Talos node, using full cluster
 // mTLS.
@@ -151,14 +146,53 @@ func (n *conn) unaryPolicy(
 	invoker grpc.UnaryInvoker,
 	opts ...grpc.CallOption,
 ) error {
-	var trailer metadata.MD
-
-	err := invoker(ctx, method, req, reply, cc, append(opts, grpc.Trailer(&trailer))...)
-	if err == nil {
-		return nil
+	class, err := n.classOf(ctx, method)
+	if err != nil {
+		return err
 	}
 
-	return classify(ctx, shortMethod(method), n.target.Machine, len(trailer) > 0, err)
+	// The gate runs before the class deadline is applied, not after. Applying
+	// it first would mean every call had a deadline by the time anybody looked,
+	// which is the default-less path D-04 forbids in the shape that is hardest
+	// to notice.
+	if err := requireDeadline(ctx); err != nil {
+		return fmt.Errorf("talos: %s on %s: %w", shortMethod(method), n.target.Machine, err)
+	}
+
+	// context.WithTimeout takes the earlier of the two deadlines, so the class
+	// is a ceiling on the caller's budget and never an extension of it.
+	callCtx, cancel := context.WithTimeout(ctx, class.Deadline())
+	defer cancel()
+
+	return n.do(callCtx, method, func(attemptCtx context.Context) error {
+		// Fresh per attempt: trailers from a previous attempt would make an
+		// unreachable retry look like a node that answered.
+		var trailer metadata.MD
+
+		err := invoker(attemptCtx, method, req, reply, cc, append(opts, grpc.Trailer(&trailer))...)
+		if err == nil {
+			return nil
+		}
+		return classify(attemptCtx, shortMethod(method), n.target.Machine, len(trailer) > 0, err)
+	})
+}
+
+// classOf resolves the deadline class for one call.
+//
+// The probe is the single case where a method's class is not derivable from its
+// name: Version is a fast read at ten seconds and the D-05 liveness check at
+// five, and it is the same RPC either way. The caller that means the liveness
+// check says so on the context rather than the table carrying the method twice.
+func (n *conn) classOf(ctx context.Context, method string) (DeadlineClass, error) {
+	if method == MethodVersion && isProbeClass(ctx) {
+		return ClassProbe, nil
+	}
+
+	class, ok := ClassOf(method)
+	if !ok {
+		return 0, fmt.Errorf("talos: %s on %s: %w", shortMethod(method), n.target.Machine, ErrUnclassifiedMethod)
+	}
+	return class, nil
 }
 
 // streamPolicy classifies a failure to open a server stream.
@@ -174,31 +208,110 @@ func (n *conn) streamPolicy(
 	streamer grpc.Streamer,
 	opts ...grpc.CallOption,
 ) (grpc.ClientStream, error) {
-	cs, err := streamer(ctx, desc, cc, method, opts...)
+	class, ok := ClassOf(method)
+	if !ok {
+		return nil, fmt.Errorf("talos: %s on %s: %w", shortMethod(method), n.target.Machine, ErrUnclassifiedMethod)
+	}
+
+	streamCtx, cancel := context.WithCancel(ctx)
+
+	// A method that is a stream in the protocol but a bounded read in meaning
+	// -- COSI List, EtcdRecover -- takes its class deadline as a total one. It
+	// is only the stream class that gets no total deadline, because it is only
+	// the stream class that may legitimately run for hours.
+	if class != ClassStream {
+		if err := requireDeadline(ctx); err != nil {
+			cancel()
+			return nil, fmt.Errorf("talos: %s on %s: %w", shortMethod(method), n.target.Machine, err)
+		}
+		cancel()
+		streamCtx, cancel = context.WithTimeout(ctx, class.Deadline())
+	}
+
+	// A stream is never retried, whatever the allowlist says about its class: a
+	// retry restarts a partially consumed stream and silently duplicates or
+	// drops data, and the caller cannot tell which.
+	cs, err := streamer(streamCtx, desc, cc, method, opts...)
 	if err != nil {
+		cancel()
 		return nil, classify(ctx, shortMethod(method), n.target.Machine, false, err)
 	}
-	return &policyStream{ClientStream: cs, conn: n, op: shortMethod(method)}, nil
+
+	return &policyStream{
+		ClientStream: cs,
+		conn:         n,
+		op:           shortMethod(method),
+		cancel:       cancel,
+		unbounded:    class == ClassStream,
+	}, nil
 }
 
-// policyStream classifies the errors a running stream produces.
+// policyStream applies the stream half of the deadline policy and classifies
+// the errors a running stream produces.
 type policyStream struct {
 	grpc.ClientStream
 
-	conn *conn
-	op   string
+	conn   *conn
+	op     string
+	cancel context.CancelFunc
+
+	// unbounded marks a stream of the stream class: no total deadline, bounded
+	// instead by a first-byte deadline and an idle timeout.
+	unbounded bool
+
+	gotData bool
+	starved atomic.Bool
 }
 
+// RecvMsg bounds the wait for the next message.
+//
+// The timer runs only while the caller is blocked here, which is what makes the
+// idle timeout mean "the node is sending nothing" rather than "the caller has
+// stopped reading". Those are different facts and only the first is a fault:
+// under slow_log_consumer the caller's backpressure blocks the node's send, and
+// a timer that ran on wall-clock time regardless of whether anybody was waiting
+// would tear down a stream that was working exactly as designed.
 func (s *policyStream) RecvMsg(m any) error {
-	err := s.ClientStream.RecvMsg(m)
-	if err == nil {
-		return nil
+	if s.unbounded {
+		window := StreamIdleTimeout
+		if !s.gotData {
+			window = StreamFirstByteDeadline
+		}
+
+		timer := time.AfterFunc(window, func() {
+			s.starved.Store(true)
+			s.cancel()
+		})
+		defer timer.Stop()
 	}
-	// io.EOF is the ordinary end of a stream and is not a failure; it is
-	// returned untouched so a caller's errors.Is(err, io.EOF) keeps working.
-	if errors.Is(err, io.EOF) {
+
+	err := s.ClientStream.RecvMsg(m)
+	switch {
+	case err == nil:
+		s.gotData = true
+		return nil
+	case errors.Is(err, io.EOF):
+		// The ordinary end of a stream, and not a failure. It is returned
+		// untouched so a caller's errors.Is(err, io.EOF) keeps working.
+		s.cancel()
 		return err
 	}
+
+	s.cancel()
+
+	if s.starved.Load() {
+		window := StreamIdleTimeout
+		if !s.gotData {
+			window = StreamFirstByteDeadline
+		}
+		return &Error{
+			Op:      s.op,
+			Machine: s.conn.target.Machine,
+			Kind:    KindTimeout,
+			Err:     fmt.Errorf("no data for %v: %w", window, context.DeadlineExceeded),
+		}
+	}
+
 	return classify(s.Context(), s.op, s.conn.target.Machine, len(s.Trailer()) > 0, err)
 }
 
@@ -298,7 +411,13 @@ func NewMaintenanceClient(ctx context.Context, d Dialer, t Target, c Creds) (*Ma
 // maintenance path too -- that path exists in order to apply a configuration,
 // and applying one to an untested version is the more expensive mistake.
 func (n *conn) proveAnswering(ctx context.Context, version func(context.Context) (string, error)) error {
-	probeCtx, cancel := context.WithTimeout(ctx, probeDeadline)
+	// The constructor is the one caller that knows this Version call is the
+	// liveness check rather than a fast read, so it is the one caller that says
+	// so. It also supplies the deadline itself: requireDeadline refuses a call
+	// without one, and a caller who has not thought about a budget for building
+	// a client should still get a client that fails in five seconds rather than
+	// one that fails to build.
+	probeCtx, cancel := context.WithTimeout(withProbeClass(ctx), ProbeDeadline)
 	defer cancel()
 
 	started := n.now()
@@ -446,6 +565,53 @@ func (c *ClusterClient) Reboot(ctx context.Context) error {
 	// stop covering the one Reboot call the product makes. The response carries
 	// nothing this caller reads.
 	return c.conn.c.Reboot(ctx)
+}
+
+// Probe is the D-05 liveness check: the same Version RPC under the probe class
+// budget rather than the fast read one.
+//
+// It exists as its own method because "is this node answering" and "what
+// version is this node" are different questions with different tolerances for
+// waiting, and a caller checking liveness across an inventory should not spend
+// ten seconds per unreachable node to find out.
+func (c *ClusterClient) Probe(ctx context.Context) (string, error) {
+	probeCtx, cancel := context.WithTimeout(withProbeClass(ctx), ProbeDeadline)
+	defer cancel()
+
+	return c.Version(probeCtx)
+}
+
+// LogStream is a running log stream from one node.
+//
+// It is holzkube's own shape rather than machinery's generated client, for the
+// seam's reason: the machinery client is the implementation of this package,
+// not a type that travels above it.
+type LogStream struct {
+	s machine.MachineService_LogsClient
+}
+
+// Logs opens a follow stream of one service's log output.
+//
+// The stream carries no total deadline. It is bounded by
+// StreamFirstByteDeadline and StreamIdleTimeout instead, applied on the call
+// path, because a stream that is still delivering data has not failed and a
+// total deadline would kill it for succeeding.
+func (c *ClusterClient) Logs(ctx context.Context, service string) (*LogStream, error) {
+	s, err := c.conn.c.Logs(ctx, "system", common.ContainerDriver_CONTAINERD, service, true, -1)
+	if err != nil {
+		return nil, err
+	}
+	return &LogStream{s: s}, nil
+}
+
+// Recv returns the next chunk of log output. It returns io.EOF at the end of a
+// bounded stream, which is not a failure.
+func (l *LogStream) Recv() ([]byte, error) {
+	data, err := l.s.Recv()
+	if err != nil {
+		return nil, err
+	}
+	return data.GetBytes(), nil
 }
 
 // Close releases the connection.
