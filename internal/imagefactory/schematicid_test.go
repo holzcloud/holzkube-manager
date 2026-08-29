@@ -161,6 +161,156 @@ func TestSchematicIDRefusesRatherThanGuesses(t *testing.T) {
 			if id != "" {
 				t.Errorf("a refused schematic still produced an id: %q", id)
 			}
+
+			// The sentinel says that something was refused. The typed error
+			// says what and where, which is what a 400 needs in order to name a
+			// field instead of blaming the Factory (G-02-6).
+			var typed *imagefactory.NotRepresentableError
+			if !errors.As(err, &typed) {
+				t.Fatalf("ID() error is not a *NotRepresentableError: %v", err)
+			}
+			if typed.Path != "customization.extraKernelArgs" {
+				t.Errorf("Path = %q; want customization.extraKernelArgs", typed.Path)
+			}
+			if typed.Index != 0 {
+				t.Errorf("Index = %d; want 0", typed.Index)
+			}
+		})
+	}
+}
+
+// TestSchematicRefusalNamesTheFieldAndEntry pins the document path each refusal
+// reports. The path is what the HTTP layer maps onto a request field name, so a
+// path that drifts turns a 400 naming kernel_args back into the 502 blaming the
+// Image Factory that G-02-6 recorded.
+func TestSchematicRefusalNamesTheFieldAndEntry(t *testing.T) {
+	const bad = "console\x07"
+
+	cases := map[string]struct {
+		schematic imagefactory.Schematic
+		wantPath  string
+		wantIndex int
+	}{
+		"kernel argument": {
+			schematic: imagefactory.Schematic{Customization: imagefactory.Customization{
+				ExtraKernelArgs: []string{"console=ttyS0", "quiet", bad},
+			}},
+			wantPath:  "customization.extraKernelArgs",
+			wantIndex: 2,
+		},
+		"meta value": {
+			schematic: imagefactory.Schematic{Customization: imagefactory.Customization{
+				Meta: []imagefactory.MetaValue{
+					{Key: 10, Value: "fine"},
+					{Key: 11, Value: bad},
+				},
+			}},
+			wantPath:  "customization.meta.value",
+			wantIndex: 1,
+		},
+		"official extension": {
+			schematic: imagefactory.Schematic{Customization: imagefactory.Customization{
+				SystemExtensions: imagefactory.SystemExtensions{
+					OfficialExtensions: []string{"siderolabs/intel-ucode", bad},
+				},
+			}},
+			wantPath:  "customization.systemExtensions.officialExtensions",
+			wantIndex: 1,
+		},
+		"owner": {
+			schematic: imagefactory.Schematic{Owner: bad},
+			wantPath:  "owner",
+			// A scalar field has no position within a sequence.
+			wantIndex: -1,
+		},
+		"overlay image": {
+			schematic: imagefactory.Schematic{
+				Overlay: imagefactory.Overlay{Image: bad, Name: "turingrk1"},
+			},
+			wantPath:  "overlay.image",
+			wantIndex: -1,
+		},
+		"overlay name": {
+			schematic: imagefactory.Schematic{
+				Overlay: imagefactory.Overlay{Image: "siderolabs/sbc-rockchip", Name: bad},
+			},
+			wantPath:  "overlay.name",
+			wantIndex: -1,
+		},
+	}
+
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			_, err := tc.schematic.ID()
+			var typed *imagefactory.NotRepresentableError
+			if !errors.As(err, &typed) {
+				t.Fatalf("ID() error is not a *NotRepresentableError: %v", err)
+			}
+			if !errors.Is(err, imagefactory.ErrSchematicNotRepresentable) {
+				t.Error("the typed error no longer satisfies errors.Is against the sentinel")
+			}
+			if typed.Path != tc.wantPath {
+				t.Errorf("Path = %q; want %q", typed.Path, tc.wantPath)
+			}
+			if typed.Index != tc.wantIndex {
+				t.Errorf("Index = %d; want %d", typed.Index, tc.wantIndex)
+			}
+			if typed.Reason == "" {
+				t.Error("Reason is empty; the operator is told nothing about what was wrong")
+			}
+		})
+	}
+}
+
+// TestSchematicRefusalReportsTheFirstBadValueInDocumentOrder: two bad values in
+// one schematic report the first, as they always have. The collection is
+// first-failure-wins and this plan did not change it.
+func TestSchematicRefusalReportsTheFirstBadValueInDocumentOrder(t *testing.T) {
+	s := imagefactory.Schematic{Customization: imagefactory.Customization{
+		ExtraKernelArgs: []string{"ok", "first\x07", "second\x08"},
+	}}
+	_, err := s.ID()
+	var typed *imagefactory.NotRepresentableError
+	if !errors.As(err, &typed) {
+		t.Fatalf("ID() error is not a *NotRepresentableError: %v", err)
+	}
+	if typed.Index != 1 {
+		t.Errorf("Index = %d; want 1 (the first bad entry in document order)", typed.Index)
+	}
+}
+
+// TestSchematicRefusalDoesNotEchoTheValue is a constraint, not a nicety
+// (T-02-64). This message becomes a problem+json body: it is rendered in a
+// browser, may be logged by a proxy, and outlives the form it came from. Kernel
+// arguments can carry secrets -- that is precisely why the Factory refuses to
+// enumerate schematics at all.
+func TestSchematicRefusalDoesNotEchoTheValue(t *testing.T) {
+	const secret = "talos.config=https://example.invalid/?token=s3cr3t\x07"
+
+	for name, s := range map[string]imagefactory.Schematic{
+		"kernel argument": {Customization: imagefactory.Customization{
+			ExtraKernelArgs: []string{secret},
+		}},
+		"meta value": {Customization: imagefactory.Customization{
+			Meta: []imagefactory.MetaValue{{Key: 10, Value: secret}},
+		}},
+		"owner": {Owner: secret},
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := s.ID()
+			if err == nil {
+				t.Fatal("ID() accepted a value carrying a control character")
+			}
+			if strings.Contains(err.Error(), "s3cr3t") {
+				t.Errorf("the refusal echoed the offending value: %q", err.Error())
+			}
+			var typed *imagefactory.NotRepresentableError
+			if !errors.As(err, &typed) {
+				t.Fatalf("ID() error is not a *NotRepresentableError: %v", err)
+			}
+			if strings.Contains(typed.Reason, "s3cr3t") {
+				t.Errorf("Reason echoed the offending value: %q", typed.Reason)
+			}
 		})
 	}
 }
