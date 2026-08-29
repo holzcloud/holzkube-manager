@@ -6,19 +6,6 @@ import (
 	"net/http"
 )
 
-// Arch is a machine architecture the Factory builds for.
-type Arch string
-
-// The architectures the Factory publishes assets for.
-const (
-	ArchAMD64 Arch = "amd64"
-	ArchARM64 Arch = "arm64"
-)
-
-// Valid reports whether the architecture is one the Factory serves. It is
-// checked before the value reaches a URL path.
-func (a Arch) Valid() bool { return a == ArchAMD64 || a == ArchARM64 }
-
 // ProbeBuildable reports whether a created schematic can actually be built for
 // a specific Talos version and architecture.
 //
@@ -34,21 +21,21 @@ func (a Arch) Valid() bool { return a == ArchAMD64 || a == ArchARM64 }
 // ErrUpstreamUnavailable means it did not answer, which is not the same
 // statement and must not be shown as a bad schematic.
 func (c *Client) ProbeBuildable(ctx context.Context, id, talosVersion string, arch Arch) error {
-	if !schematicIDPattern.MatchString(id) {
-		return fmt.Errorf("imagefactory: %q is not a schematic id", id)
-	}
-	if !talosVersionPattern.MatchString(talosVersion) {
-		return fmt.Errorf("imagefactory: %q is not a Talos version", talosVersion)
-	}
-	if !arch.Valid() {
-		return fmt.Errorf("imagefactory: %q is not an architecture the Factory builds for", arch)
-	}
-
 	// The ISO is probed rather than the installer because the ISO receives the
 	// full customization -- kernel arguments and META included -- so it is the
-	// asset whose failure covers the most of a schematic.
-	asset := fmt.Sprintf("metal-%s.iso", arch)
-	u := c.base.JoinPath("image", id, talosVersion, asset).String()
+	// asset whose failure covers the most of a schematic. The URL comes from
+	// ISOURL rather than being built here, so the probe cannot address a
+	// different asset than the one the operator is later handed, and the
+	// request validation is the same one in both places.
+	u, err := ISOURL(c.BaseURL(), AssetRequest{
+		SchematicID: id,
+		Version:     talosVersion,
+		Arch:        arch,
+		Platform:    PlatformMetal,
+	})
+	if err != nil {
+		return err
+	}
 
 	status, err := c.probeStatus(ctx, http.MethodHead, u, nil)
 	if err != nil {
