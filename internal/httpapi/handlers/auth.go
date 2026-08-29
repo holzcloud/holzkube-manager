@@ -30,6 +30,12 @@ type sudoRequest struct {
 type meResponse struct {
 	ID       model.UserID `json:"id"`
 	Username string       `json:"username"`
+
+	// DryRun is the process's transport mode, not a UI preference. It is on
+	// this endpoint rather than on GET /api/v1/system/status because that one
+	// answers before authentication and Phase 1 declined to extend it for that
+	// reason; the operator asking here is signed in by definition.
+	DryRun bool `json:"dry_run"`
 }
 
 // AuthRoutes serves login, logout, re-authentication and the identity probe.
@@ -188,5 +194,5 @@ func me(d httpapi.Deps, w http.ResponseWriter, r *http.Request) {
 		httpapi.WriteProblem(w, r, httpapi.Unauthenticated())
 		return
 	}
-	writeJSON(w, http.StatusOK, meResponse{ID: u.ID, Username: u.Username})
+	writeJSON(w, http.StatusOK, meResponse{ID: u.ID, Username: u.Username, DryRun: d.TalosMode.DryRun})
 }
