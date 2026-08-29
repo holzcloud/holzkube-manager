@@ -1,10 +1,10 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { render, screen, waitFor, within } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { FactoryExtension, FactoryVersions, Schematic } from '@/api'
 import { onSudoRequired, type SudoChallenge } from '@/api'
-import { ARCH_STORAGE_KEY, ImagesView } from './images'
+import { ARCH_STORAGE_KEY, hasControlCharacter, ImagesView } from './images'
 
 /**
  * FACT-01, FACT-04 and FACT-05 as executed tests. The client is faked at the
@@ -370,6 +370,138 @@ describe('ImagesView — the authoring half', () => {
 
     const warning = await screen.findByRole('alert', { name: 'Schematic warnings' })
     expect(warning).toHaveTextContent('schematic.installer-ignores-meta')
+  })
+
+  /**
+   * G-02-6, the client half. The server refuses these values in its own
+   * canonical serialiser before anything crosses the network, so a value that
+   * reaches the request can only ever come back as an error. Refusing it here
+   * means the operator is told which row is wrong while they are still looking
+   * at it, and the server's 400 is a backstop rather than the first line of
+   * defence.
+   *
+   * userEvent.type cannot produce a control character -- it models keystrokes,
+   * and there is no key for U+0007. fireEvent.change sets the value the way a
+   * paste does, which is how such a character actually arrives in a form.
+   */
+  it('refuses a kernel argument carrying a control character before any request', async () => {
+    const fetchMock = stubFactory()
+    const user = userEvent.setup()
+
+    renderImages()
+    await catalogLoaded()
+
+    await user.type(screen.getByLabelText('Name'), 'bell')
+    await user.click(screen.getByRole('button', { name: 'Add kernel argument' }))
+    fireEvent.change(screen.getByLabelText('Kernel argument 1'), {
+      target: { value: 'console=ttyS0\u0007' },
+    })
+
+    const alert = await screen.findByRole('alert', { name: 'Kernel argument 1 is not usable' })
+    expect(alert).toHaveTextContent(/control character/i)
+    expect(screen.getByRole('button', { name: 'Create schematic' })).toBeDisabled()
+
+    // The button being disabled is not the claim; the claim is that nothing was
+    // sent. A submit path that bypassed the button would still be caught here.
+    await user.click(screen.getByRole('button', { name: 'Create schematic' }))
+    expect(bodiesPostedTo(fetchMock, '/api/v1/schematics')).toHaveLength(0)
+  })
+
+  it('re-enables Create once the control character is removed', async () => {
+    const fetchMock = stubFactory()
+    const user = userEvent.setup()
+
+    renderImages()
+    await catalogLoaded()
+
+    await user.type(screen.getByLabelText('Name'), 'bell')
+    await user.click(screen.getByRole('button', { name: 'Add kernel argument' }))
+    const row = screen.getByLabelText('Kernel argument 1')
+    fireEvent.change(row, { target: { value: 'console=ttyS0\u0007' } })
+
+    await screen.findByRole('alert', { name: 'Kernel argument 1 is not usable' })
+
+    fireEvent.change(row, { target: { value: 'console=ttyS0' } })
+
+    await waitFor(() =>
+      expect(
+        screen.queryByRole('alert', { name: 'Kernel argument 1 is not usable' }),
+      ).not.toBeInTheDocument(),
+    )
+    expect(screen.getByRole('button', { name: 'Create schematic' })).toBeEnabled()
+
+    await user.click(screen.getByRole('button', { name: 'Create schematic' }))
+    await waitFor(() => expect(bodiesPostedTo(fetchMock, '/api/v1/schematics')).toHaveLength(1))
+  })
+
+  it('refuses a META value carrying a control character before any request', async () => {
+    const fetchMock = stubFactory()
+    const user = userEvent.setup()
+
+    renderImages()
+    await catalogLoaded()
+
+    await user.type(screen.getByLabelText('Name'), 'bell')
+    await user.click(screen.getByRole('button', { name: 'Add META value' }))
+    fireEvent.change(screen.getByLabelText('META value 1'), {
+      target: { value: 'something\u0007' },
+    })
+
+    const alert = await screen.findByRole('alert', { name: 'META value 1 is not usable' })
+    expect(alert).toHaveTextContent(/control character/i)
+    expect(screen.getByRole('button', { name: 'Create schematic' })).toBeDisabled()
+    expect(bodiesPostedTo(fetchMock, '/api/v1/schematics')).toHaveLength(0)
+  })
+
+  /**
+   * The second half of G-02-6's artifacts note: the create error stayed on
+   * screen through subsequent unrelated interactions, so an operator editing
+   * the form was reading a sentence about a request they had already replaced.
+   */
+  it('clears a create error as soon as the form it belongs to changes', async () => {
+    stubFactory({
+      fail: {
+        path: '/api/v1/schematics',
+        status: 502,
+        body: {
+          type: 'https://holzkube.dev/problems/upstream',
+          title: 'The Image Factory did not answer usably.',
+          status: 502,
+          detail: 'The Image Factory did not answer usably: creating the schematic.',
+          code: 'upstream.factory-unavailable',
+        },
+      },
+    })
+    const user = userEvent.setup()
+
+    renderImages()
+
+    await user.type(screen.getByLabelText('Name'), 'workers')
+    await user.click(screen.getByRole('button', { name: 'Create schematic' }))
+
+    const failure = await screen.findByRole('alert', { name: 'Create failed' })
+    expect(failure).toBeInTheDocument()
+
+    await user.type(screen.getByLabelText('Name'), '-2')
+
+    await waitFor(() =>
+      expect(screen.queryByRole('alert', { name: 'Create failed' })).not.toBeInTheDocument(),
+    )
+  })
+
+  it('hasControlCharacter transcribes the server rule and nothing wider', () => {
+    // The server's representable() refuses any rune below U+0020 and U+007F.
+    expect(hasControlCharacter('console=ttyS0')).toBe(false)
+    expect(hasControlCharacter('')).toBe(false)
+    expect(hasControlCharacter('ümlaut — dash')).toBe(false)
+    expect(hasControlCharacter('a\u0000b')).toBe(true)
+    expect(hasControlCharacter('a\tb')).toBe(true)
+    expect(hasControlCharacter('a\nb')).toBe(true)
+    expect(hasControlCharacter('a\u001fb')).toBe(true)
+    expect(hasControlCharacter('a\u007fb')).toBe(true)
+    // U+0080 is not in the server's set, and a client that refused it would
+    // reject input the server accepts.
+    expect(hasControlCharacter('a\u0080b')).toBe(false)
   })
 
   it('keeps "created" and "usable" apart on the create result', async () => {
