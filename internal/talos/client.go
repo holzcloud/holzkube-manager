@@ -256,6 +256,8 @@ func (n *conn) streamPolicy(
 		op:           shortMethod(method),
 		cancel:       cancel,
 		unbounded:    class == ClassStream,
+		firstByte:    StreamFirstByteDeadline,
+		idle:         StreamIdleTimeout,
 	}, nil
 }
 
@@ -272,8 +274,28 @@ type policyStream struct {
 	// instead by a first-byte deadline and an idle timeout.
 	unbounded bool
 
+	// firstByte and idle are the two halves of that bound, carried on the
+	// stream rather than read from the package constants at the point of use.
+	// There is one producer of these values -- the constructor above, from
+	// StreamFirstByteDeadline and StreamIdleTimeout -- so the deadline policy
+	// is unchanged; what the fields buy is a test that can run this logic at
+	// durations that fit inside a test, which is the only way the window
+	// between a receive completing and its timer being stopped can be staged
+	// deterministically rather than met once in a million streams.
+	firstByte time.Duration
+	idle      time.Duration
+
 	gotData bool
 	starved atomic.Bool
+}
+
+// window is what the next receive is bounded by: the first-byte deadline until
+// something has arrived on this stream, the idle timeout from then on.
+func (s *policyStream) window() time.Duration {
+	if s.gotData {
+		return s.idle
+	}
+	return s.firstByte
 }
 
 // RecvMsg bounds the wait for the next message.
@@ -285,13 +307,28 @@ type policyStream struct {
 // a timer that ran on wall-clock time regardless of whether anybody was waiting
 // would tear down a stream that was working exactly as designed.
 func (s *policyStream) RecvMsg(m any) error {
-	if s.unbounded {
-		window := StreamIdleTimeout
-		if !s.gotData {
-			window = StreamFirstByteDeadline
-		}
+	// settled is claimed by whichever of the timer and the receive reaches it
+	// first, and the compare-and-swap is what makes the two mutually exclusive
+	// rather than merely unlikely to coincide. A bare timer.Stop() does not:
+	// the callback can already be running when the receive returns, so a
+	// message that arrived on time is followed by a cancel of the stream that
+	// delivered it, and starved is left set with nothing that resets it -- the
+	// next failure is then reported as "no data for 60s" about a stream that
+	// had just produced. Log streams are long-lived and the first-byte deadline
+	// is 10 s, so that is a rare unreproducible bug report rather than a race
+	// nobody ever meets.
+	//
+	// After the swap, starved set means exactly one thing: at the moment the
+	// window expired, no message had arrived. That is the sentence the error
+	// below claims, so it is now always true.
+	var settled atomic.Bool
 
+	if s.unbounded {
+		window := s.window()
 		timer := time.AfterFunc(window, func() {
+			if !settled.CompareAndSwap(false, true) {
+				return
+			}
 			s.starved.Store(true)
 			s.cancel()
 		})
@@ -299,9 +336,16 @@ func (s *policyStream) RecvMsg(m any) error {
 	}
 
 	err := s.ClientStream.RecvMsg(m)
+	settled.Store(true)
+
 	switch {
 	case err == nil:
 		s.gotData = true
+		// Starvation is a statement about the wait that just ended, not a
+		// property the stream keeps. Leaving it set would let a message the
+		// transport had already buffered be followed by a cancellation
+		// reported as a timeout that did not happen.
+		s.starved.Store(false)
 		return nil
 	case errors.Is(err, io.EOF):
 		// The ordinary end of a stream, and not a failure. It is returned
@@ -313,15 +357,11 @@ func (s *policyStream) RecvMsg(m any) error {
 	s.cancel()
 
 	if s.starved.Load() {
-		window := StreamIdleTimeout
-		if !s.gotData {
-			window = StreamFirstByteDeadline
-		}
 		return &Error{
 			Op:      s.op,
 			Machine: s.conn.target.Machine,
 			Kind:    KindTimeout,
-			Err:     fmt.Errorf("no data for %v: %w", window, context.DeadlineExceeded),
+			Err:     fmt.Errorf("no data for %v: %w", s.window(), context.DeadlineExceeded),
 		}
 	}
 
