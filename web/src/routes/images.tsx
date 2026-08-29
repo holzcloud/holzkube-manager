@@ -353,12 +353,12 @@ function ImagesView() {
 
       <SavedSchematics onOpen={setSelected} />
 
-      <SchematicDetail
-        id={selected}
-        arch={arch}
-        onArchChange={setArch}
-        onClose={() => setSelected(null)}
-      />
+      {/*
+        The remembered architecture goes down as a starting value and nothing
+        comes back up. See AssetPanel for why that direction is the whole
+        point.
+      */}
+      <SchematicDetail id={selected} archSeed={arch} onClose={() => setSelected(null)} />
     </div>
   )
 }
@@ -563,7 +563,11 @@ export function UsabilityBadge({
 }
 
 /**
- * The architecture last used on this screen.
+ * The architecture the operator last chose to *build for*.
+ *
+ * This belongs to the creation form alone. The asset panel keeps its own, so
+ * that inspecting a saved schematic at another architecture cannot change what
+ * the next schematic is created and probed against.
  *
  * There is no sensible default. holzkube is developed on arm64 and targets
  * amd64, so a hardcoded one is a bug that only ever appears on someone else's
@@ -690,13 +694,11 @@ function SavedSchematics({ onOpen }: { onOpen: (id: string) => void }) {
  */
 function SchematicDetail({
   id,
-  arch,
-  onArchChange,
+  archSeed,
   onClose,
 }: {
   id: string | null
-  arch: Architecture
-  onArchChange: (next: Architecture) => void
+  archSeed: Architecture
   onClose: () => void
 }) {
   const queryClient = useQueryClient()
@@ -728,8 +730,7 @@ function SchematicDetail({
         {record.isSuccess && (
           <SchematicDetailBody
             record={record.data}
-            arch={arch}
-            onArchChange={onArchChange}
+            archSeed={archSeed}
             onDelete={() => remove.mutate()}
             deleting={remove.isPending}
             deleteError={remove.isError}
@@ -748,15 +749,13 @@ function SchematicDetail({
 
 function SchematicDetailBody({
   record,
-  arch,
-  onArchChange,
+  archSeed,
   onDelete,
   deleting,
   deleteError,
 }: {
   record: Schematic
-  arch: Architecture
-  onArchChange: (next: Architecture) => void
+  archSeed: Architecture
   onDelete: () => void
   deleting: boolean
   deleteError: boolean
@@ -789,7 +788,7 @@ function SchematicDetailBody({
 
       <SchematicWarnings warnings={predictWarnings(record.kernel_args, record.meta)} />
 
-      <AssetPanel record={record} arch={arch} onArchChange={onArchChange} />
+      <AssetPanel record={record} archSeed={archSeed} />
 
       <div>
         <h3 className="mb-1 text-sm font-medium">Factory-canonical document</h3>
@@ -825,15 +824,27 @@ function SchematicDetailBody({
  * drift (PITFALLS P9): the machine boots with every extension and then installs
  * a system without them, and nothing reports it.
  */
-function AssetPanel({
-  record,
-  arch,
-  onArchChange,
-}: {
-  record: Schematic
-  arch: Architecture
-  onArchChange: (next: Architecture) => void
-}) {
+function AssetPanel({ record, archSeed }: { record: Schematic; archSeed: Architecture }) {
+  // The architecture lives here, beside SecureBoot, and is seeded from the
+  // remembered value rather than bound to it.
+  //
+  // The next control added to this panel will face the same temptation, so:
+  // the remembered architecture is a preference about what the operator
+  // *builds*, and reading somebody else's saved schematic at another
+  // architecture is a *question*. Letting the answer to a question rewrite a
+  // preference is how an operator ends up probing amd64 hardware against an
+  // arm64 image without ever having chosen it -- and the record carries no
+  // architecture, so nothing downstream can detect the mismatch.
+  //
+  // That last clause is the boundary of this change. Persisting the probed
+  // architecture on the record and rendering the verdict as arch-qualified is
+  // planned in phase 02 plan 13, after plan 12 has rewritten the verdict
+  // sentence an architecture would qualify. It is sequenced, not dropped.
+  //
+  // No reset effect is needed: Radix unmounts dialog content on close, so
+  // reopening a schematic re-seeds this from the remembered value. The
+  // regression test in images.test.tsx asserts exactly that.
+  const [arch, setArch] = useState<Architecture>(archSeed)
   const [secureBoot, setSecureBoot] = useState(false)
 
   const assets = useQuery({
@@ -848,7 +859,7 @@ function AssetPanel({
       <div className="flex flex-wrap items-end gap-3">
         <div className="flex flex-col gap-1">
           <Label htmlFor="asset-arch">Architecture</Label>
-          <Select value={arch} onValueChange={(value) => onArchChange(value as Architecture)}>
+          <Select value={arch} onValueChange={(value) => setArch(value as Architecture)}>
             <SelectTrigger id="asset-arch" className="h-8 w-32">
               <SelectValue />
             </SelectTrigger>
