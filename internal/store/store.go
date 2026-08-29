@@ -49,6 +49,7 @@ type Store interface {
 	Users() UserStore
 	Settings() SettingsStore
 	Sessions() SessionStore
+	Schematics() SchematicStore
 	Close() error
 }
 
@@ -66,6 +67,22 @@ type UserStore interface {
 type SettingsStore interface {
 	Get(ctx context.Context) (model.Settings, error)
 	Put(ctx context.Context, rec model.Settings) (model.Settings, error)
+}
+
+// SchematicStore holds Image Factory schematics (D-09).
+//
+// Schematics are persisted through this seam rather than as an ad-hoc file or
+// a column bolted onto something else, so that reshaping the record later costs
+// a migration and not an edit. It carries the same fixed method set as
+// UserStore for the same reason: what it must not become is a query interface.
+// The moment a caller can ask for "the schematics for cluster X, usable only,
+// newest first", the filter lives in the store and the swap to another backend
+// stops being a single new implementation.
+type SchematicStore interface {
+	Get(ctx context.Context, id model.SchematicID) (model.Schematic, error)
+	List(ctx context.Context) ([]model.Schematic, error)
+	Put(ctx context.Context, rec model.Schematic) (model.Schematic, error)
+	Delete(ctx context.Context, id model.SchematicID) error
 }
 
 // SessionStore holds server-side sessions. It backs the session manager, so

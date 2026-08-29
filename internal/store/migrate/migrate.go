@@ -23,7 +23,7 @@ import (
 )
 
 // CurrentVersion is the schema version this binary understands.
-const CurrentVersion = 1
+const CurrentVersion = 2
 
 const (
 	// VersionFileName holds the schema version of a data directory.
@@ -34,6 +34,13 @@ const (
 	BackupsDirName = backup.DirName
 
 	filePerm = 0o600
+
+	// dirPerm is the mode of a directory a migration creates. It matches the
+	// mode fsstore uses for every entity directory: a schematic record carries
+	// kernel arguments and META values, which may be secrets, and a directory
+	// created one mode wider than the rest would be found by the permission
+	// guard on the next start rather than here.
+	dirPerm = 0o700
 )
 
 var (
@@ -55,12 +62,34 @@ type Migration struct {
 	Apply func(dir string) error
 }
 
-// migrations is the ordered, forward-only list. Phase 1 defines exactly one
-// schema version, so the list is empty: every version-1 directory is already
-// current and there is nothing to apply. The surrounding machinery is
-// exercised by tests against fixtures anyway, so that phase 3 only appends an
-// entry to a path that has already been proven.
-var migrations = []Migration{}
+// migrations is the ordered, forward-only list.
+//
+// Phase 1 defined exactly one schema version and left this list empty, on the
+// understanding that a later phase would append the first entry to machinery
+// that had already been proven against fixtures. Phase 2 is that phase: the
+// 1 -> 2 step below is the first real migration, and it runs the same backup,
+// ordered application and deferred VERSION write the fixture tests exercised.
+// Every later phase appends; nothing here is ever edited in place, because a
+// migration that has run on someone's data directory is history rather than
+// code.
+var migrations = []Migration{
+	{
+		// Schematics gain their own entity directory (D-09). Creating it here
+		// rather than relying on Open's MkdirAll means a directory that fails
+		// to migrate is left at version 1 with no half-made layout, and the
+		// pre-migration tarball is a copy of a directory this step had not yet
+		// touched.
+		From: 1,
+		To:   2,
+		Apply: func(dir string) error {
+			path := filepath.Join(dir, "schematics")
+			if err := os.MkdirAll(path, dirPerm); err != nil {
+				return fmt.Errorf("create %s: %w", path, err)
+			}
+			return nil
+		},
+	},
+}
 
 // Run brings dir up to CurrentVersion, or refuses to start.
 func Run(dir string) error {
@@ -70,9 +99,11 @@ func Run(dir string) error {
 // run advances dir to target using migs. target is a parameter rather than
 // CurrentVersion directly so that the whole upgrade path — backup, ordered
 // application, deferred VERSION write, failure handling — can be exercised
-// against a real forward step while the binary still defines only one schema
-// version. Tests drive a 1 -> 2 path, which is the shape phase 3 will add,
-// rather than a synthetic 0 -> 1 one that readVersion rejects as impossible.
+// against a forward step the shipped table does not contain. That is how the
+// path was proven before any real migration existed, and it is still how the
+// failure branches are driven: a test supplies a table advancing the current
+// version to the next one, rather than a synthetic 0 -> 1 step that readVersion
+// rejects as impossible.
 func run(dir string, migs []Migration, target int) error {
 	from, err := readVersion(dir, target)
 	if err != nil {
