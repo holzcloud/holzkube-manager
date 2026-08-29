@@ -298,8 +298,25 @@ func installerRepoKey(r AssetRequest) string {
 // proven entry is this cache's end state -- every candidate accounted for, no
 // warning, no expiry -- so nothing a slower resolver can learn improves on it,
 // and anything it would write in its place is strictly less certain. A caller
-// that loses the race is handed the proven entry rather than its own, which is
-// what makes two concurrent callers return the same reference instead of two.
+// that loses to a proven entry is handed that entry rather than its own.
+//
+// Be precise about what that does and does not buy, because the obvious
+// stronger claim is false. It makes the *cache* converge on the proven name in
+// every ordering. It does not make two concurrent callers agree. In the mirror
+// ordering -- the provisional resolver reaches this mutex first, finds an empty
+// slot, writes and is served its own entry, and the proven resolver arrives
+// afterwards and overwrites -- two callers on one key are served two different
+// references milliseconds apart. That ordering is not exotic: resolveInstallerRepo
+// pushes a candidate into unresolved on any transport error and on any non-2xx
+// that is not a refusal, so a reset, a 429 or a 503 all produce a provisional
+// answer instantly, and provisional routinely finishes first.
+//
+// It is nevertheless not the defect G-02-3 filed. That defect was a silent,
+// permanent divergence; this one is disclosed at the moment it happens, because
+// the reference the early caller is served carries the fallback warning that
+// says in words that it is provisional rather than proven and would change.
+// Making the two callers agree needs single-flighting the whole resolution, not
+// a guard on the write -- see the closing paragraph.
 //
 // Note what this deliberately does not do: it does not compare timestamps. A
 // compare-and-set on entry.at -- "write only if nobody moved the entry since I
@@ -393,9 +410,26 @@ func (c *Client) requestionInstallerRepo(ctx context.Context, r AssetRequest, ke
 		// satisfies errors.Is(err, context.DeadlineExceeded) exactly as a
 		// cancelled caller does -- and that expiry is a real observation of a
 		// silent registry, which is the observation this branch exists to
-		// record. ctx.Err() is non-nil only when the caller went away, so it
-		// tells the two apart where the error cannot.
-		if ctx.Err() != nil {
+		// record. The context tells the two apart where the error cannot.
+		//
+		// Match Canceled specifically rather than any non-nil ctx.Err(). Today
+		// the two spellings behave identically, because nothing wraps the
+		// inbound request context in a deadline -- there is no
+		// context.WithTimeout under internal/httpapi and no http.TimeoutHandler
+		// anywhere. But adding exactly that is G-02-2's first missing bullet,
+		// still open in 02-DECISION-probe-budget.md. The moment a per-route
+		// deadline shorter than DefaultTimeout lands, a genuine registry
+		// timeout would satisfy a bare ctx.Err() != nil, skip the re-stamp
+		// below, leave entry.at stale forever, and make every subsequent
+		// request re-question and pay the silent candidate's full budget --
+		// which is the cost installerRepoRetryInterval exists to amortise, and
+		// plan 02-12's must_have #4. Canceled is what "the caller went away"
+		// actually means; DeadlineExceeded is a budget expiring, and a budget
+		// expiring against a silent registry must keep re-stamping.
+		//
+		// This decides nothing about cluster A. It only stops this line from
+		// depending on cluster A staying undone.
+		if errors.Is(ctx.Err(), context.Canceled) {
 			return entry
 		}
 
