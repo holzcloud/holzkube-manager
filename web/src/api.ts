@@ -91,6 +91,19 @@ export interface AuditPage {
 export const meSchema = z.object({
   id: z.string(),
   username: z.string(),
+
+  /**
+   * Whether the process was started with `--dry-run`.
+   *
+   * It rides on the identity response rather than on `system/status`, which
+   * answers before authentication: whether this instance can currently change
+   * anything is not something an anonymous caller is owed, and the operator
+   * this field exists for is signed in by definition.
+   *
+   * It reports the transport's behaviour, not the UI's. While it is true, every
+   * mutating Talos RPC is refused by an interceptor before it reaches the wire.
+   */
+  dry_run: z.boolean(),
 })
 
 export type Me = z.infer<typeof meSchema>
