@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -79,6 +80,14 @@ type Created struct {
 type Client struct {
 	base *url.URL
 	http *http.Client
+
+	// installerMu guards installerRepos.
+	installerMu sync.Mutex
+
+	// installerRepos caches the resolved installer repository name, keyed by
+	// platform and Talos version. Populated and read only by installer.go,
+	// where the reasoning for the key lives.
+	installerRepos map[string]string
 }
 
 // Option configures a Client. Options are applied in the order given.
@@ -138,6 +147,7 @@ func New(baseURL string, opts ...Option) (*Client, error) {
 			Timeout:       DefaultTimeout,
 			CheckRedirect: refuseCrossHostRedirect,
 		},
+		installerRepos: map[string]string{},
 	}
 	for _, opt := range opts {
 		if err := opt(c); err != nil {
