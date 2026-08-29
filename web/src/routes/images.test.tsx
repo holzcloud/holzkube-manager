@@ -203,6 +203,14 @@ function bodiesPostedTo(fetchMock: { mock: { calls: unknown[][] } }, path: strin
     .map((call) => JSON.parse(String((call[1] as RequestInit).body)))
 }
 
+/** How many times the saved-schematics list itself was fetched. */
+function listFetchCount(fetchMock: { mock: { calls: unknown[][] } }): number {
+  return fetchMock.mock.calls.filter((call) => {
+    const init = call[1] as RequestInit | undefined
+    return String(call[0]) === '/api/v1/schematics' && (init?.method ?? 'GET') === 'GET'
+  }).length
+}
+
 function renderImages() {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false, gcTime: 0 }, mutations: { retry: false } },
@@ -662,5 +670,86 @@ describe('ImagesView — the saved schematics', () => {
     expect(String(deletes[0]?.[0])).toBe(`/api/v1/schematics/${USABLE.id}`)
 
     onSudoRequired(null)
+  })
+
+  /**
+   * G-02-7. The measured failure was a modal whose entire text content was the
+   * word "Close" -- visibleTextLength: 5. These two assert the sentence rather
+   * than a length, and assert that the two reasons are told apart: a record
+   * that is gone and a fetch that failed carry different repairs.
+   *
+   * `fail` matches on a path prefix, so scoping it to `/api/v1/schematics/`
+   * also catches the assets request for the same id. That is deliberate and
+   * not a leak in the fixture: the error branch renders no asset panel, so
+   * nothing asks for them.
+   */
+  const NOT_FOUND_PROBLEM = {
+    type: 'https://holzkube.dev/problems/not-found',
+    title: 'Not found',
+    status: 404,
+    detail: 'No such schematic.',
+    code: 'notfound.schematic',
+  }
+
+  const STORE_FAILURE_PROBLEM = {
+    type: 'https://holzkube.dev/problems/internal',
+    title: 'Internal error',
+    status: 500,
+    code: 'internal.unexpected',
+  }
+
+  it('says a schematic is no longer stored instead of opening an empty dialog', async () => {
+    const fetchMock = stubFactory({
+      saved: [USABLE],
+      fail: { path: '/api/v1/schematics/', status: 404, body: NOT_FOUND_PROBLEM },
+    })
+    const user = userEvent.setup()
+
+    renderImages()
+    await screen.findByRole('button', { name: `Schematic ${USABLE.name}` })
+    const before = listFetchCount(fetchMock)
+
+    const detail = await openDetail(user, USABLE)
+
+    expect(await detail.findByRole('alert')).toHaveTextContent(/no longer stored/i)
+    // The id is only recoverable from a stored record; the Factory will not
+    // enumerate schematics. The dialog has to say so.
+    expect(detail.getByText(/will not list schematics back/i)).toBeInTheDocument()
+    expect(detail.getByRole('button', { name: 'Close' })).toBeInTheDocument()
+
+    // Nothing that acts on a record that is not there.
+    expect(detail.queryByRole('button', { name: 'Delete schematic' })).not.toBeInTheDocument()
+    expect(detail.queryByText(/Factory-canonical document/)).not.toBeInTheDocument()
+    expect(detail.queryByText('Assets')).not.toBeInTheDocument()
+
+    // And the stale row is asked about again, so it leaves the list.
+    await waitFor(() => expect(listFetchCount(fetchMock)).toBeGreaterThan(before))
+  })
+
+  it('distinguishes a failed fetch from a deleted schematic and keeps the row', async () => {
+    const fetchMock = stubFactory({
+      saved: [USABLE],
+      fail: { path: '/api/v1/schematics/', status: 500, body: STORE_FAILURE_PROBLEM },
+    })
+    const user = userEvent.setup()
+
+    renderImages()
+    await screen.findByRole('button', { name: `Schematic ${USABLE.name}` })
+    const before = listFetchCount(fetchMock)
+
+    const detail = await openDetail(user, USABLE)
+
+    expect(await detail.findByRole('alert')).toHaveTextContent(/could not be loaded/i)
+    // Explicitly not the deletion sentence: a transport or store failure says
+    // nothing about whether the record still exists.
+    expect(detail.queryByText(/no longer stored/i)).not.toBeInTheDocument()
+    expect(detail.queryByText(/deleted/i)).not.toBeInTheDocument()
+    expect(detail.queryByRole('button', { name: 'Delete schematic' })).not.toBeInTheDocument()
+
+    // T-02-51: dropping the row on a 500 would remove the operator's only
+    // recoverable reference to the id at the moment the server is unwell.
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    expect(listFetchCount(fetchMock)).toBe(before)
+    expect(screen.getByRole('button', { name: `Schematic ${USABLE.name}` })).toBeInTheDocument()
   })
 })
