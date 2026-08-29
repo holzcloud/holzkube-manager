@@ -528,6 +528,71 @@ describe('ImagesView — the saved schematics', () => {
     expect(await detail.findByLabelText('ISO reference')).toHaveTextContent('metal-arm64')
   })
 
+  /**
+   * The G-02-8 regression, and the reason the two architectures were split.
+   *
+   * Reading somebody else's saved schematic at another architecture is a
+   * question. What the operator builds is a preference. This asserts that the
+   * answer to the question never rewrites the preference -- neither the
+   * control the next schematic is created from, nor the value that outlives
+   * the session.
+   */
+  it('does not let the asset panel rewrite the remembered architecture', async () => {
+    localStorage.setItem(ARCH_STORAGE_KEY, 'amd64')
+    stubFactory({ saved: [USABLE] })
+    const user = userEvent.setup()
+
+    renderImages()
+    const detail = await openDetail(user, USABLE)
+    expect(await detail.findByLabelText('ISO reference')).toHaveTextContent('metal-amd64')
+
+    await user.click(detail.getByRole('combobox', { name: 'Architecture' }))
+    await user.click(await screen.findByRole('option', { name: 'arm64' }))
+    await waitFor(() =>
+      expect(detail.getByLabelText('ISO reference')).toHaveTextContent('metal-arm64'),
+    )
+
+    // Close first. While the modal is open Radix marks the rest of the app
+    // aria-hidden, so a role query for the form's control finds nothing and
+    // the assertion below would pass for the wrong reason.
+    await user.click(detail.getByRole('button', { name: 'Close' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+
+    expect(screen.getByRole('combobox', { name: 'Architecture' })).toHaveTextContent('amd64')
+    expect(localStorage.getItem(ARCH_STORAGE_KEY)).toBe('amd64')
+
+    // And reopening starts the panel from the remembered value again rather
+    // than from the last thing the panel happened to be asked.
+    const reopened = await openDetail(user, USABLE)
+    expect(await reopened.findByLabelText('ISO reference')).toHaveTextContent('metal-amd64')
+  })
+
+  it('creates the next schematic for the architecture the form shows, not the one just inspected', async () => {
+    localStorage.setItem(ARCH_STORAGE_KEY, 'amd64')
+    const fetchMock = stubFactory({ saved: [USABLE] })
+    const user = userEvent.setup()
+
+    renderImages()
+    const detail = await openDetail(user, USABLE)
+    await detail.findByLabelText('ISO reference')
+
+    await user.click(detail.getByRole('combobox', { name: 'Architecture' }))
+    await user.click(await screen.findByRole('option', { name: 'arm64' }))
+    await waitFor(() =>
+      expect(detail.getByLabelText('ISO reference')).toHaveTextContent('metal-arm64'),
+    )
+
+    await user.click(detail.getByRole('button', { name: 'Close' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+
+    await user.type(screen.getByLabelText('Name'), 'workers')
+    await user.click(screen.getByRole('button', { name: 'Create schematic' }))
+
+    await waitFor(() => expect(bodiesPostedTo(fetchMock, '/api/v1/schematics')).toHaveLength(1))
+    const posted = bodiesPostedTo(fetchMock, '/api/v1/schematics')[0] as { arch: string }
+    expect(posted.arch).toBe('amd64')
+  })
+
   it('adds the secure-boot suffix to the rendered ISO URL when the toggle is on', async () => {
     stubFactory({ saved: [USABLE] })
     const user = userEvent.setup()
