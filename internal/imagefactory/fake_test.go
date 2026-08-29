@@ -20,6 +20,31 @@ import (
 // and a version it does not know is not an empty catalog.
 const catalogVersion = "v1.13.9"
 
+// The three Talos versions the fake answers registry manifest requests for.
+// They exist because the installer repository name is version-dependent
+// (PITFALLS P9(d)) and all three branches have to be exercisable offline.
+const (
+	// installerModernVersion resolves under the platform-prefixed repository.
+	installerModernVersion = "v1.13.9"
+
+	// installerLegacyVersion resolves only under the legacy "installer"
+	// repository. This is the branch a resolver that hardcodes the modern name
+	// gets wrong, and the failure is an upgrade that reports success while
+	// dropping every system extension.
+	installerLegacyVersion = "v1.9.0"
+
+	// installerBrokenVersion resolves under neither name.
+	installerBrokenVersion = "v1.7.0"
+)
+
+// installerRepos maps a Talos version to the repository names that answer for
+// it. A version absent from this map answers for neither.
+var installerRepos = map[string]map[string]bool{
+	installerModernVersion: {"metal-installer": true, "installer": true},
+	installerLegacyVersion: {"installer": true},
+	installerBrokenVersion: {},
+}
+
 // fakeFactory is an Image Factory that reproduces the documented upstream
 // behaviours, including the one that makes this whole package necessary: a POST
 // naming an extension that does not exist succeeds, and the failure only
@@ -47,6 +72,11 @@ type fakeFactory struct {
 
 	// isoStatus, when non-zero, overrides the ISO answer.
 	isoStatus int
+
+	// manifestStatus, when non-zero, overrides every registry manifest answer.
+	// It is how a test distinguishes "the registry refused" from "the registry
+	// did not answer", which are different statements about a schematic.
+	manifestStatus int
 }
 
 func newFakeFactory(t *testing.T) *fakeFactory {
@@ -107,6 +137,14 @@ func (f *fakeFactory) setISOStatus(status int) {
 	f.isoStatus = status
 }
 
+// setManifestStatus forces every subsequent registry manifest request to answer
+// with status. Zero restores the per-version behaviour.
+func (f *fakeFactory) setManifestStatus(status int) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.manifestStatus = status
+}
+
 func (f *fakeFactory) serve(w http.ResponseWriter, r *http.Request) {
 	parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
 
@@ -133,9 +171,36 @@ func (f *fakeFactory) serve(w http.ResponseWriter, r *http.Request) {
 		f.record("* /image/*")
 		f.serveImage(w, parts[1])
 
+	case (r.Method == http.MethodGet || r.Method == http.MethodHead) && len(parts) == 5 &&
+		parts[0] == "v2" && parts[3] == "manifests":
+		f.record("GET /v2/" + parts[1] + "/manifests/" + parts[4])
+		f.serveManifest(w, parts[1], parts[4])
+
 	default:
 		http.Error(w, "not found", http.StatusNotFound)
 	}
+}
+
+// serveManifest answers a registry manifest request the way factory.talos.dev
+// does: the platform-prefixed and the legacy repository names resolve for
+// different, version-dependent subsets of the supported range, and a name that
+// does not resolve is a 404 rather than an empty manifest.
+func (f *fakeFactory) serveManifest(w http.ResponseWriter, repo, version string) {
+	f.mu.Lock()
+	forced := f.manifestStatus
+	f.mu.Unlock()
+
+	if forced != 0 {
+		w.WriteHeader(forced)
+		return
+	}
+	if !installerRepos[version][repo] {
+		http.Error(w, "manifest unknown", http.StatusNotFound)
+		return
+	}
+	w.Header().Set("Content-Type", "application/vnd.oci.image.index.v1+json")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(mustJSON(map[string]any{"schemaVersion": 2}))
 }
 
 // createSchematic reproduces the trap: the document is accepted whatever it
