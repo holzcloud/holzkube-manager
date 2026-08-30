@@ -739,14 +739,52 @@ without a round trip is not something to report as success.
 **A value holzkube's own serialiser will not render is a `400`, not a `502`.**
 This is the exception the paragraph opening this section swallows. Before any
 request is made, `POST /api/v1/schematics` computes the schematic id locally, and
-that computation refuses a scalar that is not valid UTF-8 or that contains a rune
-below `U+0020` or `U+007F` — the set the canonical serialiser was pinned against.
+that computation refuses a scalar it cannot render the way the Factory would.
 No request reaches `factory.talos.dev`, nothing is known about the Factory, and
 no retry can succeed, so the answer is the `validation` problem type at `400`
 with code `validation.failed` and a single field error. The fields that can
 produce it are `kernel_args`, `meta` and `extensions`; a document path this
 handler does not recognise still answers `400`, with no field named, rather than
 falling back to a `502`.
+
+**What is refused, stated as rules rather than as a list of characters:**
+
+| Rule | Refused | Why |
+|---|---|---|
+| not valid UTF-8 | any byte sequence that is not | the document is UTF-8; an unpaired surrogate has no encoding |
+| control characters | `U+0000`–`U+001F`, `U+007F`–`U+009F` | the Factory does not write them literally. It escapes most of them, which moves the id; `U+0085` it also *folds*, replacing it with a space inside a quoted scalar and eating it at the end of a plain one |
+| line separators | `U+2028`, `U+2029` | both are printable to YAML and both are read as line breaks by the Factory. A plain scalar carrying one becomes a document the Factory answers `400` to; a quoted one comes back with the break folded and spaces inserted |
+| byte order mark | `U+FEFF` | inside YAML's printable range and excluded from it by name; the Factory escapes it and every character after it |
+| above the printable ceiling | anything above `U+FFFD` | the Factory writes nothing above `U+FFFD` literally. `U+FFFE` and `U+FFFF` make the document unparseable; everything above the BMP, emoji included, comes back escaped as `\U0001F600` |
+
+`U+FFFD` itself is accepted, and so is `U+FDD0` — a non-character below the
+ceiling round-trips, so the rule is the ceiling and not "non-characters".
+
+**The refusal set is a floor, not a ceiling, and it is derived from a
+measurement rather than from a reading of the upstream emitter.** The
+measurement is an opt-in test in the repository —
+`HOLZKUBE_FACTORY_LIVE=1 go test ./internal/imagefactory/ -run TestLiveCanonical` —
+which builds each candidate scalar into a schematic, POSTs it, and compares
+holzkube's canonical document and id against the ones `factory.talos.dev`
+returns. The rules above are the classes it observed diverging; every one of
+them cites the rows that proved it.
+
+What it reached: `U+0000`, `U+0009`, `U+000A`, `U+000D`, `U+001F`, `U+007F`,
+six points in `U+0080`–`U+009F` (`U+0080`, `U+0081`, `U+0085`, `U+008D`,
+`U+0094`, `U+009F`), `U+2028`, `U+2029`, `U+FEFF`, `U+FDD0`, `U+FFFE`,
+`U+FFFF`, the boundaries `U+D7FF`, `U+E000`, `U+FFFD` and `U+10FFFF`, and the
+accepted controls `U+00A0`, `U+00E4`, `U+200B`, `U+202E`, `U+4E2D`, `U+1F600`
+— each at up to three positions in a scalar and in both quoting styles, through
+both `kernel_args` and `meta`.
+
+What it did not reach: the other twenty-six codepoints of `U+0080`–`U+009F`, the
+rest of `U+FDD0`–`U+FDEF`, and the interior of the range above `U+FFFF`, which
+is refused on the strength of `U+1F600` and `U+10FFFF` alone. A client should
+read this section as *these classes were measured to diverge and are refused*,
+not as *every divergent codepoint is refused*. No finite sweep can promise the
+second, and a value outside the refused set that nonetheless diverges upstream
+surfaces as `upstream.factory-rejected` with an id mismatch, which is the
+paragraph above this one.
 
 **The reason names the entry and the character class and never the value.**
 `kernel_args` and `meta` can carry secrets — which is why the Factory offers no
