@@ -4,9 +4,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -74,7 +78,7 @@ func TestProblemTaxonomy(t *testing.T) {
 				t.Errorf("type = %q, want %q", gotType, tc.wantType)
 			}
 			if !strings.HasPrefix(gotType, httpapi.ProblemBaseURI) {
-				t.Errorf("type %q is not an absolute URI under %s", gotType, httpapi.ProblemBaseURI)
+				t.Errorf("type %q is not rooted at the taxonomy base %s", gotType, httpapi.ProblemBaseURI)
 			}
 			if gotType == "about:blank" {
 				t.Errorf("about:blank is never a valid holzkube problem type")
@@ -291,5 +295,124 @@ func TestProblemUpstreamTravelsAsAnError(t *testing.T) {
 	}
 	if p.Code != httpapi.CodeUpstreamNodeTimeout {
 		t.Errorf("recovered code = %q, want %q", p.Code, httpapi.CodeUpstreamNodeTimeout)
+	}
+}
+
+// typeTaxonomy is the taxonomy spelled out as (constant, suffix) pairs. It is
+// the second opinion on problem.go: the constants there are derived from
+// ProblemBaseURI, which is what stops a re-rooting from landing on twelve of
+// thirteen, and this table is what stops the derivation itself from drifting.
+//
+// The suffixes are the parts clients may already match on. They do not change
+// when the base does -- that is the whole point of separating them.
+var typeTaxonomy = []struct {
+	name   string
+	suffix string
+	got    string
+}{
+	{"TypeValidation", "validation", httpapi.TypeValidation},
+	{"TypeUnauthenticated", "unauthenticated", httpapi.TypeUnauthenticated},
+	{"TypeCSRF", "csrf", httpapi.TypeCSRF},
+	{"TypeForbidden", "forbidden", httpapi.TypeForbidden},
+	{"TypeNotFound", "not-found", httpapi.TypeNotFound},
+	{"TypeMethodNotAllowed", "method-not-allowed", httpapi.TypeMethodNotAllowed},
+	{"TypeConflict", "conflict", httpapi.TypeConflict},
+	{"TypeUnsupportedMediaType", "unsupported-media-type", httpapi.TypeUnsupportedMediaType},
+	{"TypeSudoRequired", "sudo-required", httpapi.TypeSudoRequired},
+	{"TypeRateLimited", "rate-limited", httpapi.TypeRateLimited},
+	{"TypeInternal", "internal", httpapi.TypeInternal},
+	{"TypeSetupRequired", "setup-required", httpapi.TypeSetupRequired},
+	{"TypeUpstream", "upstream", httpapi.TypeUpstream},
+}
+
+// TestProblemTaxonomyIsRootedAtTheURN pins the base itself.
+//
+// The taxonomy is deployment-independent by construction: there is no flag, no
+// environment variable and no build tag that moves it, so this literal is the
+// value every installation of holzkube emits. Asserting it here means a
+// re-rooting is a decision someone takes deliberately in two places, not a
+// character someone changes in one.
+func TestProblemTaxonomyIsRootedAtTheURN(t *testing.T) {
+	const wantBase = "urn:holzkube-manager:problem:"
+
+	if httpapi.ProblemBaseURI != wantBase {
+		t.Fatalf("ProblemBaseURI = %q, want %q", httpapi.ProblemBaseURI, wantBase)
+	}
+	if len(typeTaxonomy) != 13 {
+		t.Fatalf("taxonomy has %d entries, want 13", len(typeTaxonomy))
+	}
+
+	for _, tc := range typeTaxonomy {
+		if want := wantBase + tc.suffix; tc.got != want {
+			t.Errorf("%s = %q, want %q", tc.name, tc.got, want)
+		}
+	}
+}
+
+// TestProblemTaxonomyIsClosed reads problem.go itself, because "closed" is a
+// claim about the source and not about the values a test happens to name.
+//
+// A test that only walked the table above would pass while a fourteenth type
+// was minted quietly beside it; the point of a closed taxonomy is that adding
+// to it is a decision rather than an edit. This also asserts the shape of each
+// declaration -- base plus suffix, never a repeated literal -- because that
+// shape is what makes a partial re-rooting impossible to express.
+func TestProblemTaxonomyIsClosed(t *testing.T) {
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, "problem.go", nil, parser.SkipObjectResolution)
+	if err != nil {
+		t.Fatalf("parse problem.go: %v", err)
+	}
+
+	declared := map[string]ast.Expr{}
+	ast.Inspect(file, func(n ast.Node) bool {
+		spec, ok := n.(*ast.ValueSpec)
+		if !ok {
+			return true
+		}
+		for i, name := range spec.Names {
+			if !strings.HasPrefix(name.Name, "Type") || i >= len(spec.Values) {
+				continue
+			}
+			declared[name.Name] = spec.Values[i]
+		}
+		return true
+	})
+
+	want := map[string]string{}
+	for _, tc := range typeTaxonomy {
+		want[tc.name] = tc.suffix
+	}
+
+	for name := range declared {
+		if _, ok := want[name]; !ok {
+			t.Errorf("problem.go declares %s, which is not in the closed taxonomy; adding a type is a contract decision, not an edit", name)
+		}
+	}
+	for name := range want {
+		if _, ok := declared[name]; !ok {
+			t.Errorf("%s is in the taxonomy table but no longer declared in problem.go", name)
+		}
+	}
+
+	for name, expr := range declared {
+		suffix, ok := want[name]
+		if !ok {
+			continue
+		}
+		bin, ok := expr.(*ast.BinaryExpr)
+		if !ok {
+			t.Errorf("%s is not declared as ProblemBaseURI + suffix; a repeated literal is how a re-rooting lands on twelve of thirteen", name)
+			continue
+		}
+		base, ok := bin.X.(*ast.Ident)
+		if !ok || base.Name != "ProblemBaseURI" {
+			t.Errorf("%s does not derive from ProblemBaseURI", name)
+			continue
+		}
+		lit, ok := bin.Y.(*ast.BasicLit)
+		if !ok || lit.Value != strconv.Quote(suffix) {
+			t.Errorf("%s composes %v, want the suffix %q", name, bin.Y, suffix)
+		}
 	}
 }
