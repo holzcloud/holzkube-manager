@@ -15,25 +15,50 @@ const ProblemContentType = "application/problem+json"
 // ProblemBaseURI roots the taxonomy. Every type is an absolute URI under it;
 // about:blank is never used, because a client that wants to branch on the kind
 // of failure needs something stable to branch on.
-const ProblemBaseURI = "https://holzkube.dev/problems/"
+//
+// It is a URN and not a URL, and that is a decision rather than a detail. A
+// problem type here is an identifier: nothing dereferences it, the interface
+// branches on Code (web/src/lib/problem.ts), and no comparison against a type
+// URI exists anywhere in this repository. An https base bought none of that and
+// cost two things -- it hardcoded a vendor domain into a contract every AGPL
+// redistributor has to ship unchanged, and it read as a promise that a page
+// exists at that address. A URN makes the absence of that page obvious.
+//
+// The base is deployment-independent and deliberately not configurable: no
+// flag, no environment variable, no build tag moves it. A per-install base was
+// considered and rejected, because two installations emitting different types
+// for the same error would force a per-install special case into every
+// third-party client -- solving a problem nobody has at the cost of the one
+// property the field has.
+//
+// The namespace identifier is not registered with IANA. RFC 9457 asks for a
+// URI, not a registered namespace, and the value is an opaque identifier
+// either way.
+const ProblemBaseURI = "urn:holzkube-manager:problem:"
 
 // The taxonomy is closed and stable. These URIs and the code tokens below are
-// a public contract: clients may match on them, so they never change.
+// a public contract: clients may match on them, so they never change -- and
+// now they name a value no deployment can move.
 // Plan 01 task 4 completes the set and pins it in docs/api-contract.md.
+//
+// Each entry is composed from ProblemBaseURI rather than written out beside it.
+// The failure mode of a re-rooting is landing on twelve of thirteen, and a
+// constant expression makes that impossible to express. The suffixes are the
+// parts clients may already match on and do not move with the base.
 const (
-	TypeValidation           = "https://holzkube.dev/problems/validation"
-	TypeUnauthenticated      = "https://holzkube.dev/problems/unauthenticated"
-	TypeCSRF                 = "https://holzkube.dev/problems/csrf"
-	TypeForbidden            = "https://holzkube.dev/problems/forbidden"
-	TypeNotFound             = "https://holzkube.dev/problems/not-found"
-	TypeMethodNotAllowed     = "https://holzkube.dev/problems/method-not-allowed"
-	TypeConflict             = "https://holzkube.dev/problems/conflict"
-	TypeUnsupportedMediaType = "https://holzkube.dev/problems/unsupported-media-type"
-	TypeSudoRequired         = "https://holzkube.dev/problems/sudo-required"
-	TypeRateLimited          = "https://holzkube.dev/problems/rate-limited"
-	TypeInternal             = "https://holzkube.dev/problems/internal"
-	TypeSetupRequired        = "https://holzkube.dev/problems/setup-required"
-	TypeUpstream             = "https://holzkube.dev/problems/upstream"
+	TypeValidation           = ProblemBaseURI + "validation"
+	TypeUnauthenticated      = ProblemBaseURI + "unauthenticated"
+	TypeCSRF                 = ProblemBaseURI + "csrf"
+	TypeForbidden            = ProblemBaseURI + "forbidden"
+	TypeNotFound             = ProblemBaseURI + "not-found"
+	TypeMethodNotAllowed     = ProblemBaseURI + "method-not-allowed"
+	TypeConflict             = ProblemBaseURI + "conflict"
+	TypeUnsupportedMediaType = ProblemBaseURI + "unsupported-media-type"
+	TypeSudoRequired         = ProblemBaseURI + "sudo-required"
+	TypeRateLimited          = ProblemBaseURI + "rate-limited"
+	TypeInternal             = ProblemBaseURI + "internal"
+	TypeSetupRequired        = ProblemBaseURI + "setup-required"
+	TypeUpstream             = ProblemBaseURI + "upstream"
 )
 
 // The reserved code tokens of the upstream family, minted in the same commit as

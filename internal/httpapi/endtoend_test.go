@@ -186,8 +186,8 @@ func decodeProblem(t *testing.T, resp *http.Response, raw []byte) problemBody {
 	if err := json.Unmarshal(raw, &p); err != nil {
 		t.Fatalf("decode problem: %v (body: %s)", err, raw)
 	}
-	if !strings.HasPrefix(p.Type, "https://holzkube.dev/problems/") {
-		t.Errorf("problem type = %q, want an absolute holzkube.dev URI", p.Type)
+	if !strings.HasPrefix(p.Type, httpapi.ProblemBaseURI) {
+		t.Errorf("problem type = %q, want a URI rooted at %s", p.Type, httpapi.ProblemBaseURI)
 	}
 	if p.Code == "" {
 		t.Errorf("problem code is empty (body: %s)", raw)
@@ -335,8 +335,8 @@ func TestEndToEndSetupLoginAudit(t *testing.T) {
 		t.Fatalf("second setup: got %d, want 409 (body: %s)", resp.StatusCode, raw)
 	}
 	p := decodeProblem(t, resp, raw)
-	if p.Type != "https://holzkube.dev/problems/conflict" {
-		t.Errorf("second setup type = %q, want .../problems/conflict", p.Type)
+	if want := httpapi.ProblemBaseURI + "conflict"; p.Type != want {
+		t.Errorf("second setup type = %q, want %q", p.Type, want)
 	}
 	if p.Code != "setup.already-completed" {
 		t.Errorf("second setup code = %q, want setup.already-completed", p.Code)
@@ -351,8 +351,8 @@ func TestEndToEndSetupLoginAudit(t *testing.T) {
 		t.Fatalf("bad password: got %d, want 401 (body: %s)", resp.StatusCode, raw)
 	}
 	badPass := decodeProblem(t, resp, raw)
-	if badPass.Type != "https://holzkube.dev/problems/unauthenticated" {
-		t.Errorf("bad password type = %q, want .../problems/unauthenticated", badPass.Type)
+	if want := httpapi.ProblemBaseURI + "unauthenticated"; badPass.Type != want {
+		t.Errorf("bad password type = %q, want %q", badPass.Type, want)
 	}
 	if strings.Contains(strings.ToLower(badPass.Detail+badPass.Title), "password") &&
 		strings.Contains(badPass.Detail, testUser) {

@@ -275,8 +275,8 @@ func TestAccountPasswordWithoutSudoIs428(t *testing.T) {
 	if p.Code != "sudo.required" {
 		t.Errorf("code = %q, want sudo.required", p.Code)
 	}
-	if p.Type != "https://holzkube.dev/problems/sudo-required" {
-		t.Errorf("type = %q, want the sudo-required problem type", p.Type)
+	if want := httpapi.ProblemBaseURI + "sudo-required"; p.Type != want {
+		t.Errorf("type = %q, want %q", p.Type, want)
 	}
 }
 
