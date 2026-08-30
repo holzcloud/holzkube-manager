@@ -27,6 +27,22 @@ export const problemSchema = z.object({
 
 export type Problem = z.infer<typeof problemSchema>
 
+/**
+ * The two upstream codes a client has to tell apart, as constants rather than
+ * as literals scattered across call sites.
+ *
+ * They are the only pair in the taxonomy whose remedies are opposite, so the
+ * difference is worth naming. Unavailable means the upstream did not answer,
+ * which says nothing about what was asked and may succeed on a retry. Rejected
+ * means it answered and refused, which an identical retry reproduces exactly.
+ *
+ * They are reachable outside a `ProblemError` too: `GET .../assets` carries one
+ * of them inside a successful body, as `installer_error.code`, when four of its
+ * five references resolved and the fifth did not.
+ */
+export const CODE_UPSTREAM_FACTORY_UNAVAILABLE = 'upstream.factory-unavailable'
+export const CODE_UPSTREAM_FACTORY_REJECTED = 'upstream.factory-rejected'
+
 /** A typed error carrying the decoded problem+json body. */
 export class ProblemError extends Error {
   readonly problem: Problem

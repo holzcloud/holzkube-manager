@@ -8,6 +8,7 @@ import {
   type SudoChallenge,
   WARNING_INSTALLER_REPO_FALLBACK_UNVERIFIED,
 } from '@/api'
+import { CODE_UPSTREAM_FACTORY_REJECTED, CODE_UPSTREAM_FACTORY_UNAVAILABLE } from '@/lib/problem'
 import { problemType } from '@/test/problem-fixtures'
 import { ARCH_STORAGE_KEY, hasControlCharacter, ImagesView } from './images'
 
@@ -91,6 +92,16 @@ interface StubOptions {
    * schematic, so they are a property of the answer and not of the record.
    */
   assetWarnings?: SchematicWarning[]
+  /**
+   * The unresolved-installer outcome: a `200` whose four registry-free
+   * references are present and whose `installer` is null, carrying the code and
+   * detail of the problem the route would otherwise have answered with.
+   *
+   * A separate option rather than an override of `assetWarnings`, because the
+   * two are different statements. A warning is about a reference that exists;
+   * this is about one that does not.
+   */
+  installerError?: { code: string; detail: string }
   /** Requests whose path matches are answered with this problem instead. */
   fail?: { path: string; status: number; body: unknown }
   /**
@@ -112,6 +123,7 @@ function assetsFor(
   version: string,
   secureboot: boolean,
   warnings: SchematicWarning[] = [],
+  installerError?: { code: string; detail: string },
 ) {
   const segment = `metal-${arch}${secureboot ? '-secureboot' : ''}`
   // The installer repository name carries the SecureBoot selection too, because
@@ -119,11 +131,21 @@ function assetsFor(
   // SecureBoot-aware here, and a stub that kept handing back the ordinary name
   // would be telling a different story than the server does.
   const installerRepo = `metal-installer${secureboot ? '-secureboot' : ''}`
-  return {
+  const references = {
     iso: `https://factory.talos.dev/image/${id}/${version}/${segment}.iso`,
     pxe: `https://factory.talos.dev/pxe/${id}/${version}/${segment}`,
     disk_image: `https://factory.talos.dev/image/${id}/${version}/${segment}.raw.zst`,
     cmdline: `https://factory.talos.dev/image/${id}/${version}/cmdline-${segment}`,
+  }
+  // The four references are unchanged in the unresolved case, and that is the
+  // point of the outcome rather than an incidental property of the stub: they
+  // are functions of the request and never touched the registry, so a stub that
+  // dropped them here would be reproducing the bug instead of the server.
+  if (installerError !== undefined) {
+    return { ...references, installer: null, installer_error: installerError, warnings }
+  }
+  return {
+    ...references,
     installer: `factory.talos.dev/${installerRepo}/${id}:${version}`,
     warnings,
   }
@@ -185,6 +207,7 @@ function stubFactory(options: StubOptions = {}) {
           url.searchParams.get('version') ?? record?.talos_version ?? 'v1.13.9',
           url.searchParams.get('secureboot') === 'true',
           options.assetWarnings ?? [],
+          options.installerError,
         ),
       )
     }
@@ -979,6 +1002,135 @@ describe('ImagesView — the saved schematics', () => {
 
     await detail.findByLabelText('Installer reference')
     expect(detail.queryByRole('alert', { name: 'Installer reference warnings' })).toBeNull()
+  })
+
+  /*
+   * G-02-15's client half. The server used to answer `502` with nothing at all
+   * when the installer could not be resolved, and this panel rendered one
+   * hardcoded sentence for it — a sentence that never read `assets.error`, never
+   * named SecureBoot, and never said which of the two opposite remedies applied.
+   * No test covered that branch at all, which is how it stayed that way.
+   */
+
+  const UNAVAILABLE_DETAIL =
+    'The Image Factory did not answer usably: resolving the installer image reference for v1.13.9.'
+  const REJECTED_DETAIL =
+    'The Image Factory refused: resolving the installer image reference for v1.13.9.'
+
+  it('renders the four references it did receive when the installer could not be resolved', async () => {
+    stubFactory({
+      saved: [USABLE],
+      installerError: { code: CODE_UPSTREAM_FACTORY_UNAVAILABLE, detail: UNAVAILABLE_DETAIL },
+    })
+    const user = userEvent.setup()
+
+    renderImages()
+    const detail = await openDetail(user, USABLE)
+
+    // All four, with their exact values. They never touched the registry, so a
+    // registry that would not answer cannot have made any of them wrong.
+    expect(await detail.findByLabelText('ISO reference')).toHaveTextContent(
+      `https://factory.talos.dev/image/${USABLE.id}/v1.13.9/metal-amd64.iso`,
+    )
+    expect(detail.getByLabelText('PXE reference')).toHaveTextContent(
+      `https://factory.talos.dev/pxe/${USABLE.id}/v1.13.9/metal-amd64`,
+    )
+    expect(detail.getByLabelText('Disk image reference')).toHaveTextContent(
+      `https://factory.talos.dev/image/${USABLE.id}/v1.13.9/metal-amd64.raw.zst`,
+    )
+    expect(detail.getByLabelText('Kernel cmdline reference')).toHaveTextContent(
+      `https://factory.talos.dev/image/${USABLE.id}/v1.13.9/cmdline-metal-amd64`,
+    )
+
+    // The installer row is present and says why it is empty. Omitting it would
+    // leave a grid of four rows that reads as complete.
+    const installer = detail.getByLabelText('Installer reference')
+    const reason = within(installer).getByRole('alert')
+
+    // The sentence is the server's, not a third one written here.
+    expect(reason).toHaveTextContent(UNAVAILABLE_DETAIL)
+    // ... and the remedy is the retryable one.
+    expect(reason).toHaveTextContent(/again/i)
+    expect(reason).not.toHaveTextContent(/no installer/i)
+  })
+
+  it('separates a refused installer from a registry that did not answer', async () => {
+    stubFactory({
+      saved: [USABLE],
+      installerError: { code: CODE_UPSTREAM_FACTORY_REJECTED, detail: REJECTED_DETAIL },
+    })
+    const user = userEvent.setup()
+
+    renderImages()
+    const detail = await openDetail(user, USABLE)
+
+    await detail.findByLabelText('ISO reference')
+    const reason = within(detail.getByLabelText('Installer reference')).getByRole('alert')
+
+    expect(reason).toHaveTextContent(REJECTED_DETAIL)
+    // The two remedies are opposite, so the two sentences must be too. A refusal
+    // is a verdict about this version: asking again reproduces it exactly.
+    expect(reason).toHaveTextContent(/no installer/i)
+    expect(reason).not.toHaveTextContent(/asking again may/i)
+  })
+
+  it('names SecureBoot, and what unticking it would ask instead, only when it was ticked', async () => {
+    stubFactory({
+      saved: [USABLE],
+      installerError: { code: CODE_UPSTREAM_FACTORY_REJECTED, detail: REJECTED_DETAIL },
+    })
+    const user = userEvent.setup()
+
+    renderImages()
+    const detail = await openDetail(user, USABLE)
+
+    // The flag is a query parameter and never reaches the stored record, so the
+    // client is the only place that knows this request asked for it. Before the
+    // box is ticked, nothing may claim it did.
+    const before = within(detail.getByLabelText('Installer reference'))
+    expect(before.queryByText(/SecureBoot/)).toBeNull()
+
+    await user.click(detail.getByRole('checkbox', { name: 'SecureBoot' }))
+
+    await waitFor(() => {
+      const row = within(detail.getByLabelText('Installer reference'))
+      expect(row.getByText(/SecureBoot/)).toBeInTheDocument()
+      // It must say what unticking asks — a different image — and must not read
+      // as an offer to use the ordinary installer for a SecureBoot ISO, which is
+      // the drift the whole resolution exists to prevent.
+      expect(row.getByText(/does not produce a SecureBoot node/)).toBeInTheDocument()
+    })
+  })
+
+  it('shows one error and no reference grid when the assets request itself fails', async () => {
+    stubFactory({
+      saved: [USABLE],
+      fail: {
+        path: `/api/v1/schematics/${USABLE.id}/assets`,
+        status: 400,
+        body: {
+          type: problemType('validation'),
+          title: 'Request is not valid',
+          status: 400,
+          detail: '"riscv64" is not an architecture the Factory builds for.',
+          code: 'validation.failed',
+        },
+      },
+    })
+    const user = userEvent.setup()
+
+    renderImages()
+    const detail = await openDetail(user, USABLE)
+
+    // The server's own sentence, rather than the sentence this panel used to
+    // hardcode for every failure it could have.
+    expect(await detail.findByRole('alert', { name: 'Asset references failed' })).toHaveTextContent(
+      '"riscv64" is not an architecture the Factory builds for.',
+    )
+    // Nothing was computed, so nothing is shown. A request that fails before the
+    // URL builders is not a partial answer.
+    expect(detail.queryByLabelText('ISO reference')).toBeNull()
+    expect(detail.queryByLabelText('Installer reference')).toBeNull()
   })
 
   it('renders each path segment as its own element and the reference as one string', async () => {
