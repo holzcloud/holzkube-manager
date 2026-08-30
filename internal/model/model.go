@@ -63,6 +63,23 @@ type Session struct {
 // It follows model.User's shape -- snake_case JSON tags, a CreatedAt, and a
 // trailing Rev -- because every stored record in holzkube does.
 type Schematic struct {
+	// ID is the Factory's own schematic id, which is the SHA-256 of Canonical.
+	//
+	// That has a consequence for Arch that is easy to miss and expensive to
+	// meet by surprise: the canonical document does not contain the
+	// architecture. Upstream leaves it out by design -- a schematic describes
+	// what goes *into* an image, and the architecture is a path segment on the
+	// asset URL rather than a field of the document. So two records that differ
+	// only in architecture hash to the same id and collide, and POSTing the
+	// same customisation at a second architecture answers 409 store.conflict.
+	// Verified live.
+	//
+	// **One stored customisation therefore holds exactly one architecture's
+	// verdict.** Probing the other architecture means deleting this record and
+	// authoring it again; there is no route that adds a second verdict, and a
+	// second POST is refused rather than merged. That is the sentence an
+	// operator who meets the 409 needs, and 02-DECISION-schematic-identity.md
+	// is where the reasoning and the decided direction live.
 	ID SchematicID `json:"id"`
 
 	// Cluster is the cluster this schematic belongs to, empty when it is not
@@ -89,6 +106,13 @@ type Schematic struct {
 	// It is part of the record rather than a query parameter for the same
 	// reason TalosVersion is: the answer differs per architecture, so a stored
 	// verdict that does not name one cannot be read back.
+	//
+	// It is also a field whose value this record's own identity cannot vary.
+	// ID is the SHA-256 of a document with no architecture in it, so the two
+	// architectures of one customisation are one record and not two -- see
+	// ID's comment above for the mechanism and for what an operator has to do
+	// about it. Arch names which of the two this record's verdict is about; it
+	// does not make room for the other one.
 	//
 	// Additive and unversioned for the reason ProbeReason states at length
 	// below. A record written before this field existed decodes with an empty
