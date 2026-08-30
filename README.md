@@ -192,13 +192,34 @@ only real answer and is not in this version.
 
 ```sh
 task test              # go test ./... -race
-task test:web          # vitest
+task test:web          # vitest, both projects
+task test:web:browser  # only the tests that measure layout in a real browser
 task lint              # golangci-lint and Biome
 task fmt               # gofmt and Biome, in place
 task dev               # Vite dev server, proxying /api to :8443
 task clean             # build output, never the tracked dist placeholder
 task release:snapshot  # cross-compiled archives locally, without publishing
 ```
+
+### The frontend tests need a browser
+
+`task test:web` runs two vitest projects. Most tests run under jsdom, which is
+fast and lays nothing out. A small second project opens the UI in a headless
+Chromium, because two of the things this app has to get right — that an installer
+repository name never wraps into a different image's name, and that the schematic
+detail dialog is not clamped narrow — are facts about layout, and no assertion
+available in jsdom can distinguish them.
+
+Install the browser once:
+
+```sh
+npm --prefix web exec -- playwright install chromium
+```
+
+Roughly 150MB, cached afterwards. Run through the project's own playwright so the
+browser matches the pinned version. If it is missing, the test run says so and
+repeats this command. CI installs it the same way, so the gate is not one that
+only exists there.
 
 Run `./bin/holzkubed` in one terminal and `task dev` in another; the dev server
 proxies `/api` to `https://127.0.0.1:8443` and accepts the self-signed

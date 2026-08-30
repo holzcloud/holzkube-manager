@@ -14,8 +14,8 @@ import { ImagesView, ReferenceValue } from './images'
  * The layout suite. This is the first thing in this repository that opens the UI
  * in a real browser at all.
  *
- * It exists because jsdom performs no layout. The 108 tests in `images.test.tsx`
- * can read a class attribute and a text node; they cannot see a line box or a
+ * It exists because jsdom performs no layout. The jsdom project's 111 tests can
+ * read a class attribute and a text node; they cannot see a line box or a
  * rendered width, and during this phase's UAT that gap produced a real defect
  * reported as refuted — a test named `cannot split a repository name across a
  * line break` asserted the absence of two class names and passed while
