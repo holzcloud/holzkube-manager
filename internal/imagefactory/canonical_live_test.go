@@ -647,4 +647,25 @@ func reportCanonResults(t *testing.T, results []canonResult) {
 		t.Logf("%s %d of %d rows went unmeasured in this run; the ranges no run reaches at all are %s",
 			notObservedMarker, counts[notObserved], len(results), canonicalUnreachedRanges)
 	}
+
+	// A run that measured nothing must not be reported as a pass.
+	//
+	// The errors above stand on their own: a DIVERGES row or an over-refused
+	// control is a real finding whether or not the rest of the corpus was
+	// reached, so this check comes after them and defers to t.Failed().
+	//
+	// What it closes is the quiet case. factory.talos.dev throttles without an
+	// HTTP response (WINDOWS entry 5), so a throttled run produces zero DIVERGES
+	// rows and exited 0 here -- indistinguishable, to anything reading the exit
+	// code, from a run that reached every row and found the serialiser correct.
+	// The marker was visible only under -v.
+	//
+	// live_test.go:425-431 already made exactly this change for the installer
+	// drift guard, in this same gap-closure round, and for this same reason. The
+	// principle was applied there and not here; this is the other half of it.
+	// Skip, not fail: a throttle is not a defect, it is an absence of evidence.
+	if !t.Failed() && counts[notObserved] > 0 {
+		t.Skipf("%s %d of %d rows went unmeasured, so this run proves nothing about them",
+			notObservedMarker, counts[notObserved], len(results))
+	}
 }
