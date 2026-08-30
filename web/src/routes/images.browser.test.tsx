@@ -8,7 +8,7 @@ import type { Schematic } from '@/api'
 // the elements below are unstyled and every measurement is a measurement of
 // nothing that happens to pass.
 import '@/index.css'
-import { ImagesView } from './images'
+import { ImagesView, ReferenceValue } from './images'
 
 /**
  * The layout suite. This is the first thing in this repository that opens the UI
@@ -193,5 +193,237 @@ describe('the schematic detail dialog, measured', () => {
     // class set measures 768px at this viewport, so 768 is an observation here
     // and not a restatement of the token table.
     expect(width).toBe(768)
+  })
+})
+
+/*
+ * ─── The repository name occupies one line box ────────────────────────────────
+ *
+ * 02-UAT.md G-02-10. `ReferenceValue` offers breaks at path separators with
+ * `<wbr />` and refuses the rest with `break-normal`, and the doc comment argued
+ * that this stops `metal-installer` wrapping into something a reader takes for
+ * `installer`. It does not. UAX #14 gives a break opportunity after U+002D
+ * HYPHEN-MINUS — line-break class HY — independently of `overflow-wrap` and
+ * `word-break`, and neither `normal` value removes it.
+ *
+ * The test that was supposed to catch this asserted that the class string lacked
+ * two utilities and that the text content was intact. Both remained true while
+ * the name split, so it passed. This is the replacement, and it measures.
+ */
+
+/**
+ * The four repository names that may carry an installer.
+ *
+ * Derived, not typed out: `installerCandidates` in
+ * `internal/imagefactory/installer.go` builds the platform-prefixed name and the
+ * legacy name, each carrying the SecureBoot suffix when the request asks for it.
+ * Enumerating the four by hand is precisely how three of them went unexamined
+ * when this property was first checked — only `metal-installer` was ever looked
+ * at, and `metal-installer-secureboot` is the one that splits at the default
+ * viewport.
+ *
+ * Exported because nothing in TypeScript can pin this to the Go list that is its
+ * authority. A fifth candidate added to `installerCandidates` would leave this
+ * sweep measuring four stale strings and still passing — a smaller instance of
+ * exactly the defect this file exists to close. Plan 02-20 owns
+ * `guard_drift_test.go` in `package imagefactory` and pins the two together
+ * there, in wave 5; until it lands, this comment is the whole of the link.
+ *
+ * `INSTALLER_REPOSITORY_NAMES_LITERAL` below is what that Go test reads —
+ * `strings.Contains` over this source, the way `TestWarningDetailsMatchTheUI`
+ * reads `SchematicWarnings.tsx` — and the derivation above is what stops the
+ * literals being an unchecked transcription. `agrees with the derivation` holds
+ * the two together from this side.
+ */
+const INSTALLER_PLATFORM = 'metal'
+const LEGACY_INSTALLER_REPO = 'installer'
+const SECUREBOOT_REPO_SUFFIX = '-secureboot'
+
+// biome-ignore lint/suspicious/noExportsInTest: plan 02-20's guard_drift_test.go binds this array to installerCandidates -- the export is that seam.
+export const INSTALLER_REPOSITORY_NAMES: readonly string[] = [false, true].flatMap((secureBoot) => {
+  const suffix = secureBoot ? SECUREBOOT_REPO_SUFFIX : ''
+  return [
+    `${INSTALLER_PLATFORM}-${LEGACY_INSTALLER_REPO}${suffix}`,
+    `${LEGACY_INSTALLER_REPO}${suffix}`,
+  ]
+})
+
+/** The same four names as literals, for a Go test to read out of this source. */
+// biome-ignore lint/suspicious/noExportsInTest: read as source text by Go, not imported.
+export const INSTALLER_REPOSITORY_NAMES_LITERAL: readonly string[] = [
+  'metal-installer',
+  'installer',
+  'metal-installer-secureboot',
+  'installer-secureboot',
+]
+
+/**
+ * The swept range, in single-pixel steps.
+ *
+ * The audit measured the name splitting at column widths 40-115px and again at
+ * 174-238px, with a safe gap between them — break windows are NOT monotonic in
+ * width. That is why this sweeps rather than samples: the 400px viewport the
+ * property was originally checked at produced a 152-168px column, sitting in
+ * that gap, so "narrow until it looks cramped" passes through a safe window and
+ * can never establish this.
+ */
+const SWEEP_FROM = 30
+const SWEEP_TO = 280
+
+/** A realistic reference: host, repository name, 64-hex schematic id, version. */
+function referenceFor(repository: string): string {
+  return `factory.talos.dev/${repository}/${'a'.repeat(64)}:${TALOS_VERSION}`
+}
+
+/** The text node holding exactly `text`, searched depth-first. */
+function textNodeFor(root: Node, text: string): Text {
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT)
+  let node = walker.nextNode()
+  while (node !== null) {
+    if ((node as Text).data === text) {
+      return node as Text
+    }
+    node = walker.nextNode()
+  }
+  throw new Error(`no text node holds ${JSON.stringify(text)}`)
+}
+
+/** Rounded so that sub-pixel noise cannot read as a second line. */
+function lineTop(rect: DOMRect): number {
+  return Math.round(rect.top * 100) / 100
+}
+
+/**
+ * How many line boxes a text node occupies.
+ *
+ * A `Range` over the node yields one rect per line box it is laid out on, so
+ * counting distinct `top` values counts lines. This is the measurement the class
+ * assertions could not make: it is a fact about layout, and it exists only in an
+ * engine that performs layout.
+ */
+function lineBoxCount(node: Text): number {
+  const range = document.createRange()
+  range.selectNodeContents(node)
+  const tops = new Set<number>()
+  for (const rect of Array.from(range.getClientRects())) {
+    if (rect.width === 0 && rect.height === 0) {
+      continue
+    }
+    tops.add(lineTop(rect))
+  }
+  return tops.size
+}
+
+/**
+ * What each line actually reads, for the failure message.
+ *
+ * Character by character, so it is only ever run on the failure path. Knowing
+ * *where* a name splits is the entire finding — `metal-installer-secureboot`
+ * breaking after the first hyphen puts `metal-installer` on a line of its own,
+ * and that first line is a different image's name.
+ */
+function lineContents(node: Text): string[] {
+  const range = document.createRange()
+  const lines = new Map<number, string>()
+  for (let index = 0; index < node.data.length; index += 1) {
+    range.setStart(node, index)
+    range.setEnd(node, index + 1)
+    const rect = range.getClientRects()[0]
+    if (rect === undefined) {
+      continue
+    }
+    const key = lineTop(rect)
+    lines.set(key, (lines.get(key) ?? '') + node.data.charAt(index))
+  }
+  return [...lines.entries()].sort(([a], [b]) => a - b).map(([, text]) => text)
+}
+
+/**
+ * One reference in a column whose width the test drives.
+ *
+ * A grid with a single explicit column, because that is what the reference sits
+ * in for real: `AssetRow` is a `grid-cols-[minmax(0,8rem)_1fr_auto]` and the
+ * value is a grid item. That matters — `overflow-x-auto` and `min-w-0` only do
+ * anything to a grid item, and they are what let the 64-character id overflow
+ * into a horizontal scroll instead of forcing the column wide.
+ */
+function mountReference(repository: string) {
+  const value = referenceFor(repository)
+  const { container } = render(
+    <div data-column style={{ display: 'grid', gridTemplateColumns: `${SWEEP_FROM}px` }}>
+      <ReferenceValue value={value} />
+    </div>,
+  )
+  const column = container.querySelector<HTMLElement>('[data-column]')
+  const reference = container.querySelector<HTMLElement>('[data-reference]')
+  if (column === null || reference === null) {
+    throw new Error('the reference did not mount')
+  }
+  return { column, reference, value }
+}
+
+describe('a repository name in an asset reference', () => {
+  // The names are derived from the same construction the resolver uses, so this
+  // is the check that the derivation still produces what everyone thinks it
+  // does -- and it is what keeps the literals below honest, since those are the
+  // form plan 02-20's Go guard reads out of this file.
+  it('agrees with the derivation about which four names there are', () => {
+    expect([...INSTALLER_REPOSITORY_NAMES]).toEqual([...INSTALLER_REPOSITORY_NAMES_LITERAL])
+    expect(INSTALLER_REPOSITORY_NAMES).toHaveLength(4)
+  })
+
+  for (const repository of INSTALLER_REPOSITORY_NAMES) {
+    it(`occupies one line box at every width from ${SWEEP_FROM}px to ${SWEEP_TO}px: ${repository}`, () => {
+      const { column, reference, value } = mountReference(repository)
+
+      // Mounted once and re-measured, not remounted per step. 251 remounts per
+      // name is slow enough that the next person narrows the range, and a
+      // narrowed range is how this property went unmeasured in the first place.
+      const split: { width: number; lines: string[] }[] = []
+
+      for (let width = SWEEP_FROM; width <= SWEEP_TO; width += 1) {
+        column.style.gridTemplateColumns = `${width}px`
+
+        // The fix must not change one character of the reference. The Copy
+        // control writes this value and an operator who drags a selection over
+        // it gets the rendered text, so a mitigation that swapped the hyphen for
+        // a look-alike would satisfy the line-box assertion and hand out an
+        // invalid OCI reference. Asserted at every width, not once.
+        expect(reference.textContent).toBe(value)
+
+        const name = textNodeFor(reference, repository)
+        if (lineBoxCount(name) !== 1) {
+          split.push({ width, lines: lineContents(name) })
+        }
+      }
+
+      expect(
+        split.map((each) => `${each.width}px: ${each.lines.join(' ⏎ ')}`).join('\n'),
+        `${repository} split across a line break at ${split.length} of the swept widths`,
+      ).toBe('')
+    })
+  }
+
+  it('still offers a break between path segments', () => {
+    // The narrow guarantee is about what is INSIDE a segment. Breaking between
+    // segments is wanted and is what `<wbr />` is there for, so this is here to
+    // stop the fix being over-tightened into `nowrap` on the whole reference.
+    const { column, reference } = mountReference('metal-installer')
+    column.style.gridTemplateColumns = '120px'
+
+    const host = textNodeFor(reference, 'factory.talos.dev')
+    const name = textNodeFor(reference, 'metal-installer')
+
+    const hostRange = document.createRange()
+    hostRange.selectNodeContents(host)
+    const nameRange = document.createRange()
+    nameRange.selectNodeContents(name)
+
+    const hostRect = hostRange.getClientRects()[0]
+    const nameRect = nameRange.getClientRects()[0]
+    if (hostRect === undefined || nameRect === undefined) {
+      throw new Error('the reference measured as nothing')
+    }
+    expect(lineTop(nameRect)).toBeGreaterThan(lineTop(hostRect))
   })
 })
