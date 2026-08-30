@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/holzcloud/holzkube/internal/imagefactory"
+	"github.com/holzcloud/holzkube/internal/talos"
 )
 
 // liveEnv opts a run in to the contract test against the real Image Factory.
@@ -32,6 +33,28 @@ const liveEnv = "HOLZKUBE_FACTORY_LIVE"
 // It skips loudly, in the idiom internal/depguard_test.go uses for the same
 // reason: a skipped upstream check that prints nothing is indistinguishable
 // from a check that passed, and a guard nobody can see is a guard nobody runs.
+//
+// # The two installer tables, and a check that was quietly replaced
+//
+// This file's liveInstallerMatrix and fake_test.go's installerRepos are two
+// different kinds of thing and are allowed to disagree. installerRepos is a
+// branch-coverage fixture -- each version in it exists to make one resolution
+// branch reachable offline -- while the matrix below is a recording of what the
+// registry answered. Where they differ, the fixture is not wrong: transcribing
+// the registry into it would delete the premise
+// TestInstallerImageFallsBackToTheLegacyName rests on. Each file says so and
+// each names the other.
+//
+// That is worth stating precisely, because a check on exactly this point was
+// substituted for one that cannot fail. 02-09-PLAN.md:459 asked whether the
+// recorded live matrix agrees with the table in fake_test.go -- a comparison
+// across two files written for two purposes, which can disagree and therefore
+// means something. 02-UAT.md:113 restated it as agreement with live_test.go,
+// which is this file: written in the same commit, by the same author, from the
+// same run that produced the numbers. Comparing a recording against its own
+// transcript is a transcription check, and it passed because it could not do
+// anything else. The meaningful comparison is the first one, and its expected
+// answer is "they differ, for the reasons above" -- not "they match".
 func TestLiveFactory(t *testing.T) {
 	if os.Getenv(liveEnv) != "1" {
 		t.Skipf("skipping the live Image Factory contract test: %s is not set to 1. "+
@@ -165,26 +188,50 @@ const (
 // and only fails where it contradicts the expectations written here. Recording
 // the observation is this test's job; rewriting the fixture is nobody's.
 var liveInstallerMatrix = map[string]map[string]liveExpect{
-	// Measured 2026-08-29 against factory.talos.dev for the recorded schematic:
-	// all four names answer, and the two SecureBoot names carry a different
-	// image digest than the two ordinary ones (02-UAT.md G-02-4).
+	// Measured 2026-08-29 against factory.talos.dev for the recorded schematic
+	// and re-measured 2026-08-30: all four names answer, and the two SecureBoot
+	// names carry a different image digest than the two ordinary ones
+	// (02-UAT.md G-02-4).
+	//
+	// The 2026-08-30 run added the digests, and they say more than the previous
+	// one recorded. At this version the two *ordinary* names resolve to one
+	// image, so "legacy alias" is true of that pair -- and the two SecureBoot
+	// names resolve to two different images, so it is false of that one
+	// (02-UAT.md G-02-13, correcting round 1's G-02-4 evidence). The digests
+	// themselves are logged by the subtest below rather than written here, for
+	// the reason installer.go's previous pair demonstrates: a digest in a
+	// comment is a fact with an expiry date that nothing in the build checks.
 	catalogVersion: {
 		"metal-installer": liveAnswers, "installer": liveAnswers,
 		"metal-installer-secureboot": liveAnswers, "installer-secureboot": liveAnswers,
 	},
 	// Measured 2026-08-29 at the oldest supported version, in the run that
-	// closed G-02-4: all four names answer here too. This is what settles the
-	// question T-02-53 asks -- at both ends of the supported range a SecureBoot
-	// request resolves, so the "502 with no installer reference" path
-	// installerCandidates argues for is not reachable at v1.12.0 or v1.13.9.
+	// closed G-02-4, and re-measured 2026-08-30: all four names answer here
+	// too, so a SecureBoot request resolves at this version and the "502 with
+	// no installer reference" path installerCandidates argues for is not
+	// reachable at v1.12.0 or at the pin.
+	//
+	// Say what that settles and no more. It settles two versions. It is not a
+	// statement about "both ends of the supported range": talos.MaxSupportedVersion
+	// is v1.14, which this subtest has never probed and cannot probe as a bound
+	// -- a range bound is not a concrete tag -- and no v1.13.x below the pin has
+	// been probed either. The subtest now also probes the newest concrete
+	// stable version the Factory offers inside the range at run time, which
+	// converts part of that gap into a measurement rather than a caveat; what
+	// remains unprobed remains unknown rather than ruled out.
+	//
+	// The 2026-08-30 digests show this version behaving unlike the pin: here
+	// the two ordinary names resolve to one image *and* the two SecureBoot
+	// names resolve to one image. Whether the legacy SecureBoot name is another
+	// name for the preferred one is therefore version-dependent, which is why
+	// installer.go labels the fallback per resolution instead of settling it
+	// once.
 	//
 	// It took two runs to get this row. The first exceeded the 60s client
 	// timeout on both metal-prefixed names without answering, which is
 	// factory.talos.dev throttling (WINDOWS entry 5) and not a verdict -- the
 	// reason this test logs a transport failure as "not observed" rather than
 	// recording it as a name that does not resolve.
-	//
-	// Still unprobed: v1.13.x below the pin and all of v1.14.
 	liveOlderVersion: {
 		"metal-installer": liveAnswers, "installer": liveAnswers,
 		"metal-installer-secureboot": liveAnswers, "installer-secureboot": liveAnswers,
@@ -402,7 +449,10 @@ func installerNameMatrixSubtests(ctx context.Context, t *testing.T, client *imag
 	})
 
 	t.Run("the installer-name matrix is what this file records", func(t *testing.T) {
-		for _, version := range []string{catalogVersion, liveOlderVersion} {
+		versions := []string{catalogVersion, liveOlderVersion}
+		versions = append(versions, liveNewestSupportedRow(ctx, t, client)...)
+
+		for _, version := range versions {
 			for _, repo := range liveInstallerRepos {
 				m, err := liveManifestProbe(ctx, repo, consoleSchematicID, version)
 				if err != nil {
@@ -437,6 +487,78 @@ func installerNameMatrixSubtests(ctx context.Context, t *testing.T, client *imag
 			}
 		}
 	})
+}
+
+// liveNewestSupportedRow returns the extra version the matrix should probe: the
+// newest concrete stable release the Factory offers inside holzkube's supported
+// range, when that is newer than the pin and not already a row.
+//
+// It exists because installer.go used to claim the matrix settled the question
+// "at both ends of the supported range", which two versions cannot settle
+// (02-UAT.md G-02-12). Part of that overclaim is unfixable by measurement:
+// talos.MaxSupportedVersion is v1.14, a range bound rather than a tag, and
+// nothing can resolve a manifest for a bound. But the newest concrete version
+// inside the range can be probed, and probing it converts one sentence of
+// caveat into an observation that moves on its own as upstream ships.
+//
+// The list is asked at run time rather than pinned, deliberately: a constant
+// here would be the same kind of fact-with-an-expiry-date as the digests this
+// plan removed from installer.go. When nothing qualifies it says so and returns
+// nothing, because "there is no such version today" is itself the finding.
+//
+// It never fails the run. A version list that cannot be fetched is the registry
+// not answering, which this file records as a non-observation everywhere else
+// too.
+//
+// Run 2026-08-30 it returned nothing, and that is a finding rather than a
+// failure: the newest stable version the Factory offered inside v1.12..v1.14
+// was v1.13.9, the pin itself. There is currently no concrete version inside
+// the range newer than the pin to probe, so what stays unprobed today is
+// v1.13.x below the pin and whatever v1.14.x eventually ships -- at which point
+// this row starts probing it without anyone editing the test.
+func liveNewestSupportedRow(ctx context.Context, t *testing.T, client *imagefactory.Client) []string {
+	t.Helper()
+
+	versions, err := client.Versions(ctx)
+	if err != nil {
+		t.Logf("MATRIX third row -> not observed: the version list did not answer: %v", err)
+		return nil
+	}
+
+	inRange := make([]string, 0, len(versions))
+	for _, v := range versions {
+		// CheckSupportedVersion is the product's own range predicate, named
+		// here so this test cannot drift from the bound it is talking about.
+		// The prerelease filter is separate because that predicate admits
+		// v1.14.0-rc.2, and a release candidate is not what "the newest
+		// version inside the range" should mean to an operator.
+		if talos.CheckSupportedVersion(v) == nil && !imagefactory.IsPrerelease(v) {
+			inRange = append(inRange, v)
+		}
+	}
+
+	newest, err := imagefactory.NewestStable(inRange)
+	if err != nil {
+		t.Logf("MATRIX third row -> none: the Factory offers no stable version inside %s..%s: %v",
+			talos.MinSupportedVersion, talos.MaxSupportedVersion, err)
+		return nil
+	}
+	if newest == catalogVersion || newest == liveOlderVersion {
+		t.Logf("MATRIX third row -> none: the newest stable version inside %s..%s is %s, which is "+
+			"already a row above; nothing inside the range is newer than the pin today",
+			talos.MinSupportedVersion, talos.MaxSupportedVersion, newest)
+		return nil
+	}
+	if higher, err := imagefactory.NewestStable([]string{newest, catalogVersion}); err == nil && higher != newest {
+		t.Logf("MATRIX third row -> none: the newest stable version inside %s..%s is %s, which is "+
+			"older than the pinned %s; v1.13.x below the pin stays unprobed",
+			talos.MinSupportedVersion, talos.MaxSupportedVersion, newest, catalogVersion)
+		return nil
+	}
+
+	t.Logf("MATRIX third row -> %s: the newest stable version inside %s..%s, probed because it is "+
+		"newer than the pinned %s", newest, talos.MinSupportedVersion, talos.MaxSupportedVersion, catalogVersion)
+	return []string{newest}
 }
 
 // liveManifest is one registry answer about one (repository, version) cell.

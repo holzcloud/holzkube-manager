@@ -13,6 +13,12 @@ import (
 // platform-prefixed one existed, documented upstream as the "Legacy installer
 // Image". It is still the only name that resolves for part of the supported
 // version range.
+//
+// "Legacy name" describes the ordinary pair, where the two names were measured
+// resolving to one image. It does not carry over to the SecureBoot pair the
+// secureBootRepoSuffix builds from this constant: at the pinned version
+// installer-secureboot and metal-installer-secureboot are two different images
+// (02-UAT.md G-02-13). See installerCandidates.
 const legacyInstallerRepo = "installer"
 
 // installerRepoRetryInterval is how long a *provisional* installer repository
@@ -176,10 +182,16 @@ func (c *Client) InstallerImage(ctx context.Context, r AssetRequest) (string, []
 // second, each carrying the SecureBoot suffix when the request asks for it.
 //
 // SecureBoot is in here because the repository name is the only thing that
-// selects it. A schematic does not carry SecureBoot into its installer -- at
-// v1.13.9 the same schematic id resolves to sha256:f960382f... under
-// metal-installer and to sha256:878b171c... under metal-installer-secureboot,
-// two different images picked by name alone (02-UAT.md G-02-4). Talos requires
+// selects it. A schematic does not carry SecureBoot into its installer: one
+// schematic id resolves under metal-installer and under
+// metal-installer-secureboot to two different images, picked by name alone
+// (02-UAT.md G-02-4). That is a property and not a number on purpose. This
+// comment used to carry the two digest literals it was measured from, and they
+// stopped reproducing without anything going red -- a digest in a comment is a
+// fact with an expiry date that nothing in the build checks. The measurement
+// lives in TestLiveFactory's installer-name matrix, which logs each name's
+// manifest digest on every run, so the next reader re-measures it in one
+// command instead of trusting a line nobody re-read. Talos requires
 // the SecureBoot installer for a SecureBoot install: it carries the signed UKI
 // and systemd-boot, there is no machine-config flag that substitutes for it,
 // and the ordinary installer does not produce a SecureBoot node. Pairing a
@@ -193,9 +205,29 @@ func (c *Client) InstallerImage(ctx context.Context, r AssetRequest) (string, []
 // a Talos version where only the ordinary names resolve, an asset panel that
 // renders five references today would answer 502 with none. Substituting is
 // still not an option -- it reintroduces exactly the drift this function exists
-// to stop, silently, in the one place an operator cannot see it. Whether such a
-// version exists inside the supported range is settled by TestLiveFactory's
-// installer-name matrix subtest, not by anything the fakes can tell you.
+// to stop, silently, in the one place an operator cannot see it.
+//
+// The two SecureBoot names are also not interchangeable, which round 1 recorded
+// the other way round. installer-secureboot is not reliably a legacy alias of
+// metal-installer-secureboot: at the pinned version the two resolve to two
+// different images, measured 2026-08-30 (02-UAT.md G-02-13), while at the
+// oldest supported version they resolve to the same one. So a SecureBoot
+// request that falls back to the legacy name may be handed an image the
+// preferred name would not have selected. That is why the fallback is kept but
+// labelled -- see WarningInstallerSecureBootRepoFallbackUnverified -- rather
+// than either dropped or passed off as equivalent.
+//
+// Be careful about what has actually been probed, because the answer is smaller
+// than the question. TestLiveFactory's installer-name matrix probes the pinned
+// version, the oldest supported version and, at run time, the newest concrete
+// stable version the Factory offers inside the supported range; all four names
+// answered at each version it has reached so far. It does not probe
+// talos.MaxSupportedVersion itself -- v1.14 is a range bound and never a
+// concrete tag, so nothing can resolve it -- and it does not probe any v1.13.x
+// below the pin. Whether a version inside the supported range resolves only the
+// ordinary names, which is the version at which this function's refusal turns
+// an asset panel into a 502, is therefore unknown rather than ruled out. The
+// matrix records what it saw; it does not certify the range, and no fake can.
 func installerCandidates(r AssetRequest) []string {
 	suffix := ""
 	if r.SecureBoot {
@@ -464,16 +496,36 @@ func (c *Client) requestionInstallerRepo(ctx context.Context, r AssetRequest, ke
 // asking again may produce a different reference. That last clause is the
 // point: it is the sentence that would have made the two-process divergence
 // self-explanatory instead of a five-line UAT investigation.
+//
+// A SecureBoot request gets its own code and one extra sentence, because the
+// generic wording says "the preferred name was unheard" and stops there --
+// which for this pair is the smaller half of the truth. The legacy SecureBoot
+// name is not reliably another name for the platform-prefixed one, so the
+// operator has not merely been handed an unproven answer, they may have been
+// handed a different image. See WarningInstallerSecureBootRepoFallbackUnverified
+// for the measurement and for why the property is stated rather than a digest.
 func installerFallbackWarning(r AssetRequest, res installerResolution) Warning {
+	detail := fmt.Sprintf(
+		"This installer reference names the repository %q, which answered for %s. "+
+			"The preferred repository %s did not answer at all, so it was never ruled out: %v. "+
+			"The reference is usable, but it is provisional rather than proven: "+
+			"once the registry is reachable again the preferred name may answer, "+
+			"and the reference shown here would then change.",
+		res.repo, r.Version, strings.Join(res.unresolved, " or "), res.unanswered)
+
+	if !r.SecureBoot {
+		return Warning{Code: WarningInstallerRepoFallbackUnverified, Detail: detail}
+	}
+
 	return Warning{
-		Code: WarningInstallerRepoFallbackUnverified,
-		Detail: fmt.Sprintf(
-			"This installer reference names the repository %q, which answered for %s. "+
-				"The preferred repository %s did not answer at all, so it was never ruled out: %v. "+
-				"The reference is usable, but it is provisional rather than proven: "+
-				"once the registry is reachable again the preferred name may answer, "+
-				"and the reference shown here would then change.",
-			res.repo, r.Version, strings.Join(res.unresolved, " or "), res.unanswered),
+		Code: WarningInstallerSecureBootRepoFallbackUnverified,
+		Detail: detail + " Both names carry a SecureBoot installer, so this is not the " +
+			"ISO/installer drift a SecureBoot request refuses -- but the legacy SecureBoot " +
+			"repository is not reliably another name for the preferred one. At the pinned Talos " +
+			"version the two resolve to two different images, measured 2026-08-30; at the oldest " +
+			"supported version they resolve to the same one. So the image behind this reference " +
+			"may not be the image the preferred name selects, and an operator who copied that " +
+			"reference earlier is not necessarily holding the same thing.",
 	}
 }
 
