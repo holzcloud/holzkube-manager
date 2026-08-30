@@ -570,3 +570,83 @@ func TestTheWellKnownIDsDidNotMove(t *testing.T) {
 		t.Errorf("console schematic id = %s, want %s", got, consoleSchematicID)
 	}
 }
+
+// TestNotRepresentableReasonIsTheOneStatementOfTheRule pins the shape plan
+// 02-20 needed and this package already had a precedent for: one predicate,
+// call sites that reference it rather than restate it.
+//
+// Before it, the rule which decides what holzkube will carry lived in an
+// unexported function reachable only through Schematic.ID(), so the HTTP layer
+// -- which has to answer the same question about a request field before it has
+// a document at all -- had no way to ask it. The alternative was a second copy
+// of the rule in internal/httpapi, and two copies of one rule is how a request
+// validator and a serialiser end up disagreeing about which values exist.
+//
+// The binding is the second half of this test: for every diverging codepoint,
+// the reason NotRepresentableReason returns and the reason the canonical writer
+// puts on its NotRepresentableError are the same string. They cannot drift
+// because the writer calls this function.
+func TestNotRepresentableReasonIsTheOneStatementOfTheRule(t *testing.T) {
+	for _, class := range divergingClasses {
+		t.Run(class.class, func(t *testing.T) {
+			for _, cp := range class.cps {
+				t.Run(fmt.Sprintf("%U", cp), func(t *testing.T) {
+					bad := "console=" + string(cp) + "ttyS0"
+
+					reason := imagefactory.NotRepresentableReason(bad)
+					if reason == "" {
+						t.Fatalf("NotRepresentableReason accepted %U, which the "+
+							"differential measured as DIVERGES", cp)
+					}
+					if !strings.Contains(reason, class.reason) {
+						t.Errorf("reason = %q; want it to name the class %q", reason, class.reason)
+					}
+					if !strings.Contains(reason, fmt.Sprintf("%U", cp)) {
+						t.Errorf("reason = %q; want the %%U rendering of the codepoint", reason)
+					}
+					// The exported form names the class and never the value, for
+					// the reason the unexported one already did: this string
+					// now reaches an operator through two routes rather than
+					// one (T-02-64).
+					if strings.Contains(reason, "ttyS0") {
+						t.Errorf("reason echoed the offending value: %q", reason)
+					}
+
+					// The canonical writer's own refusal carries this exact
+					// string. One rule, two call sites.
+					s := imagefactory.Schematic{Customization: imagefactory.Customization{
+						ExtraKernelArgs: []string{bad},
+					}}
+					_, err := s.ID()
+					var typed *imagefactory.NotRepresentableError
+					if !errors.As(err, &typed) {
+						t.Fatalf("ID() = %v; want a *NotRepresentableError", err)
+					}
+					if typed.Reason != reason {
+						t.Errorf("the serialiser's reason %q and the predicate's %q differ; "+
+							"the rule has acquired a second statement", typed.Reason, reason)
+					}
+				})
+			}
+		})
+	}
+
+	// The over-refusal half. Widening the set on a guess moves the precomputed
+	// id FACT-06 rests on, so the codepoints the differential measured as
+	// AGREES are asserted accepted here as explicitly as the diverging ones are
+	// asserted refused. U+00A0, U+200B and U+202E are three of the nine the UAT
+	// named; all three round-trip.
+	for _, cp := range []rune{0x00A0, 0x00E4, 0x200B, 0x202E, 0x4E2D, 0xFDD0, 0xFFFD, 0xD7FF, 0xE000} {
+		if reason := imagefactory.NotRepresentableReason("console=" + string(cp) + "ttyS0"); reason != "" {
+			t.Errorf("%U is refused (%q) although the differential measured it AGREES", cp, reason)
+		}
+	}
+
+	// The other half of the rule, which is not a codepoint range at all.
+	if reason := imagefactory.NotRepresentableReason("console=\xffttyS0"); !strings.Contains(reason, "valid UTF-8") {
+		t.Errorf("reason = %q; want the not-valid-UTF-8 clause", reason)
+	}
+	if reason := imagefactory.NotRepresentableReason("console=ttyS0"); reason != "" {
+		t.Errorf("an ordinary kernel argument was refused: %q", reason)
+	}
+}

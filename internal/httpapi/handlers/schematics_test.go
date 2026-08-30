@@ -1,6 +1,7 @@
 package handlers_test
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -1771,4 +1772,392 @@ func TestCreateRefusesAMeasuredDivergenceWithAFieldNamed400(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestCreateRefusesARefusedCodepointInTheName is the first of G-02-17's two
+// missing bullets, asserted at the route.
+//
+// name and cluster arrive in the same request body as kernel_args and meta and
+// were the only two scalars in it that passed through no character check at
+// all: validate asked whether name was empty and nothing else, and cluster was
+// not read at all (WINDOWS entry 13). A POST carrying NUL and a right-to-left
+// override in the name answered 201, stored both verbatim, and rendered the
+// override raw in the saved table. Two doors in one wall, one of them locked.
+//
+// The table is refusedCodepoints, the same one the kernel_args cases are driven
+// from, and each subtest re-asserts the serialiser's own verdict first. A
+// codepoint this layer claims is refused but Schematic.ID() accepts would
+// otherwise reach the Factory and be reported as somebody else's outage.
+func TestCreateRefusesARefusedCodepointInTheName(t *testing.T) {
+	for _, tc := range refusedCodepoints {
+		t.Run(fmt.Sprintf("%s %U", tc.class, tc.cp), func(t *testing.T) {
+			const label = "workers with intel microcode"
+			bad := label + string(tc.cp)
+
+			assertSerialiserRefuses(t, bad, tc.cp)
+
+			s, f := schematicServer(t)
+			c := operator(t, s)
+
+			resp, raw := c.do(http.MethodPost, "/api/v1/schematics", map[string]any{
+				"name": bad, "talos_version": catalogVersion,
+				"arch": string(imagefactory.ArchAMD64), "extensions": []string{},
+			})
+
+			assertRefusedField(t, resp, raw, refusalExpectation{
+				field: "name", class: tc.reason, cp: tc.cp, value: label,
+			})
+			assertNothingCreated(t, c, f, raw)
+		})
+	}
+}
+
+// TestCreateRefusesARefusedCodepointInTheCluster is the same claim for the
+// field that was not read at all.
+//
+// cluster is stored on the record and rendered wherever a schematic is
+// attributed to a cluster, so it is the same kind of text as name and it gets
+// the same test. That it is not yet sent anywhere is no reason to leave it
+// unchecked: the value outlives this route, and the check has to exist before
+// the first consumer of it does rather than after.
+func TestCreateRefusesARefusedCodepointInTheCluster(t *testing.T) {
+	for _, tc := range refusedCodepoints {
+		t.Run(fmt.Sprintf("%s %U", tc.class, tc.cp), func(t *testing.T) {
+			const label = "production"
+			bad := label + string(tc.cp)
+
+			assertSerialiserRefuses(t, bad, tc.cp)
+
+			s, f := schematicServer(t)
+			c := operator(t, s)
+
+			resp, raw := c.do(http.MethodPost, "/api/v1/schematics", map[string]any{
+				"name": "workers", "cluster": bad, "talos_version": catalogVersion,
+				"arch": string(imagefactory.ArchAMD64), "extensions": []string{},
+			})
+
+			assertRefusedField(t, resp, raw, refusalExpectation{
+				field: "cluster", class: tc.reason, cp: tc.cp, value: label,
+			})
+			assertNothingCreated(t, c, f, raw)
+		})
+	}
+}
+
+// TestCreateReportsEveryRefusedFieldAtOnce is the property validate already had
+// for the three fields it knew about, extended to the ones it did not.
+//
+// An operator fixing a form should not discover their mistakes one round trip
+// at a time. Reporting the first bad field and returning is how a three-mistake
+// paste becomes three submissions, and it is why validate appends rather than
+// returns -- a property this test exists to keep.
+func TestCreateReportsEveryRefusedFieldAtOnce(t *testing.T) {
+	s, f := schematicServer(t)
+	c := operator(t, s)
+
+	resp, raw := c.do(http.MethodPost, "/api/v1/schematics", map[string]any{
+		"name":          "workersone",
+		"cluster":       "production \u2028 one",
+		"talos_version": catalogVersion,
+		"arch":          string(imagefactory.ArchAMD64),
+		"extensions":    []string{},
+		"kernel_args":   []string{"quiet", "console=\ufeffttyS0"},
+	})
+
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("got %d, want 400 (body: %s)", resp.StatusCode, raw)
+	}
+	p := decodeProblemWithErrors(t, raw)
+
+	byField := map[string]string{}
+	for _, e := range p.Errors {
+		byField[e.Field] = e.Reason
+	}
+	for field, want := range map[string]string{
+		"name":        "control character",
+		"cluster":     "line separator",
+		"kernel_args": "byte order mark",
+	} {
+		reason, ok := byField[field]
+		if !ok {
+			t.Errorf("no field error named %q; the response reported %d of the three: %s",
+				field, len(p.Errors), raw)
+			continue
+		}
+		if !strings.Contains(reason, want) {
+			t.Errorf("%s: reason = %q, want it to name %q", field, reason, want)
+		}
+	}
+	if reason := byField["kernel_args"]; reason != "" && !strings.Contains(reason, "entry 2") {
+		t.Errorf("kernel_args reason = %q, want the one-based entry position", reason)
+	}
+	assertNothingCreated(t, c, f, raw)
+}
+
+// TestCreateRefusesAnUnpairedSurrogateInTheRawBody closes the API-client half
+// of T-02-67, recorded as WINDOWS entry 29.
+//
+// The body is posted as raw bytes and not as a marshalled struct, and that is
+// the whole point: encoding/json rewrites an escaped unpaired surrogate to
+// U+FFFD while decoding, so by the time validate sees the string it is valid
+// UTF-8 with nothing wrong in it. The schematic was created and its id computed
+// over a character the caller never sent. A test that marshals a Go string
+// cannot reach this case at all, which is why it went unnoticed: commit ec10e08
+// refused it at the browser input, and every test written afterwards went
+// through that input.
+func TestCreateRefusesAnUnpairedSurrogateInTheRawBody(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		body  string
+		field string
+	}{
+		{
+			name:  "a high surrogate with no low one after it",
+			body:  `{"name":"workers \ud800 half","talos_version":"v1.13.9","arch":"amd64","extensions":[]}`,
+			field: "name",
+		},
+		{
+			name:  "a low surrogate standing alone",
+			body:  `{"name":"workers","cluster":"prod \udc00","talos_version":"v1.13.9","arch":"amd64","extensions":[]}`,
+			field: "cluster",
+		},
+		{
+			name:  "a high surrogate followed by an ordinary character",
+			body:  `{"name":"workers","talos_version":"v1.13.9","arch":"amd64","extensions":[],"kernel_args":["console=\ud83dAttyS0"]}`,
+			field: "kernel_args",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s, f := schematicServer(t)
+			c := operator(t, s)
+
+			resp, raw := c.doRaw(http.MethodPost, "/api/v1/schematics", []byte(tc.body))
+
+			if resp.StatusCode != http.StatusBadRequest {
+				t.Fatalf("got %d, want 400 (body: %s)", resp.StatusCode, raw)
+			}
+			p := decodeProblemWithErrors(t, raw)
+			if p.Code != "validation.failed" {
+				t.Errorf("code = %q, want validation.failed (body: %s)", p.Code, raw)
+			}
+			if len(p.Errors) != 1 {
+				t.Fatalf("errors has %d entries, want exactly one: %s", len(p.Errors), raw)
+			}
+			if p.Errors[0].Field != tc.field {
+				t.Errorf("field = %q, want %q (body: %s)", p.Errors[0].Field, tc.field, raw)
+			}
+			if !strings.Contains(p.Errors[0].Reason, "unpaired surrogate") {
+				t.Errorf("reason = %q, want it to name the class", p.Errors[0].Reason)
+			}
+			// The reason names the class and never the value, exactly as every
+			// other refusal on this route does (T-02-64).
+			for _, leak := range []string{"workers", "prod", "ttyS0"} {
+				if strings.Contains(p.Errors[0].Reason, leak) {
+					t.Errorf("reason echoed the offending value: %q", p.Errors[0].Reason)
+				}
+			}
+			assertNothingCreated(t, c, f, raw)
+		})
+	}
+}
+
+// TestCreateReadsAWellFormedEscapeAsTheCharacterItEncodes is the over-refusal
+// half of the surrogate contract. The check reads raw bytes, so it is the one
+// place on this route that could refuse an ordinary escape by accident.
+func TestCreateReadsAWellFormedEscapeAsTheCharacterItEncodes(t *testing.T) {
+	s, _ := schematicServer(t)
+	c := operator(t, s)
+
+	// A literal backslash followed by the text "ud800" -- not an escape at all
+	// -- and, separately, a well-formed pair encoding U+1F600.
+	body := []byte(`{"name":"not an escape: \\ud800, and a pair: 😀",` +
+		`"talos_version":"v1.13.9","arch":"amd64","extensions":[]}`)
+	resp, raw := c.doRaw(http.MethodPost, "/api/v1/schematics", body)
+
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("got %d, want 400 (body: %s)", resp.StatusCode, raw)
+	}
+	// It is refused, but for being above U+FFFD and never for its encoding.
+	p := decodeProblemWithErrors(t, raw)
+	if len(p.Errors) != 1 {
+		t.Fatalf("errors has %d entries, want exactly one: %s", len(p.Errors), raw)
+	}
+	if strings.Contains(p.Errors[0].Reason, "unpaired surrogate") {
+		t.Errorf("a well-formed pair was read as an unpaired surrogate: %q", p.Errors[0].Reason)
+	}
+	if !strings.Contains(p.Errors[0].Reason, "U+1F600") {
+		t.Errorf("reason = %q, want the astral codepoint the pair encodes", p.Errors[0].Reason)
+	}
+}
+
+// TestCreateRefusesRawInvalidUTF8InTheBody is the other half of the same
+// rewrite. A raw byte that is not valid UTF-8 is replaced by encoding/json with
+// U+FFFD just as an unpaired escape is, so representable's own utf8.ValidString
+// branch is unreachable from this route and the caller gets a 201 over a
+// character it never sent.
+func TestCreateRefusesRawInvalidUTF8InTheBody(t *testing.T) {
+	s, f := schematicServer(t)
+	c := operator(t, s)
+
+	body := []byte(`{"name":"workers ` + "\xff" + `","talos_version":"v1.13.9","arch":"amd64","extensions":[]}`)
+	resp, raw := c.doRaw(http.MethodPost, "/api/v1/schematics", body)
+
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("got %d, want 400 (body: %s)", resp.StatusCode, raw)
+	}
+	p := decodeProblemWithErrors(t, raw)
+	if len(p.Errors) != 1 {
+		t.Fatalf("errors has %d entries, want exactly one: %s", len(p.Errors), raw)
+	}
+	if p.Errors[0].Field != "name" {
+		t.Errorf("field = %q, want name (body: %s)", p.Errors[0].Field, raw)
+	}
+	if !strings.Contains(p.Errors[0].Reason, "valid UTF-8") {
+		t.Errorf("reason = %q, want it to name the class", p.Errors[0].Reason)
+	}
+	assertNothingCreated(t, c, f, raw)
+}
+
+// TestCreateAcceptsTextTheRefusalSetAccepts is the over-refusal guard, and it
+// is the case nobody writes.
+//
+// An operator naming a cluster in their own language is not an attack. The
+// refusal set is four measured classes and not "anything unusual", and the
+// three codepoints the UAT named which turned out to round-trip -- U+00A0,
+// U+200B and U+202E -- are accepted here for the same reason plan 02-14 left
+// them out of representable: the differential proved the Factory carries them.
+func TestCreateAcceptsTextTheRefusalSetAccepts(t *testing.T) {
+	s, _ := schematicServer(t)
+	c := operator(t, s)
+
+	const name = "Arbeiter mit Intel-Mikrocode äöü 中文"
+	const cluster = "produktion\u00a0eins\u200b\u202e"
+
+	resp, raw := c.do(http.MethodPost, "/api/v1/schematics", map[string]any{
+		"name": name, "cluster": cluster, "talos_version": catalogVersion,
+		"arch": string(imagefactory.ArchAMD64), "extensions": []string{},
+	})
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("got %d, want 201 -- the guard refused text the serialiser accepts (body: %s)",
+			resp.StatusCode, raw)
+	}
+
+	var created struct {
+		Name    string `json:"name"`
+		Cluster string `json:"cluster"`
+	}
+	decodeInto(t, raw, &created)
+	if created.Name != name {
+		t.Errorf("name = %q, want it stored verbatim: nothing on this route normalises", created.Name)
+	}
+	if created.Cluster != cluster {
+		t.Errorf("cluster = %q, want it stored verbatim", created.Cluster)
+	}
+}
+
+// refusalExpectation is what a single-field refusal has to say.
+type refusalExpectation struct {
+	field string
+	class string
+	cp    rune
+	// value is the harmless part of the submitted string. It must not appear in
+	// the reason: name and cluster are as capable of carrying a secret as a
+	// kernel argument, and a problem body outlives the form (T-02-64).
+	value string
+}
+
+func assertRefusedField(t *testing.T, resp *http.Response, raw []byte, want refusalExpectation) {
+	t.Helper()
+
+	// The sentence factoryProblem produces when the Factory did not answer. A
+	// refusal that never left this process must not carry it.
+	const unreachableFactorySentence = "The Image Factory did not answer usably"
+
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("got %d, want 400 (body: %s)", resp.StatusCode, raw)
+	}
+	if strings.Contains(string(raw), unreachableFactorySentence) {
+		t.Errorf("the response blamed the Image Factory for a local refusal: %s", raw)
+	}
+	p := decodeProblemWithErrors(t, raw)
+	if p.Code != "validation.failed" {
+		t.Errorf("code = %q, want validation.failed (body: %s)", p.Code, raw)
+	}
+	if len(p.Errors) != 1 {
+		t.Fatalf("errors has %d entries, want exactly one: %s", len(p.Errors), raw)
+	}
+	if p.Errors[0].Field != want.field {
+		t.Errorf("field = %q, want %q", p.Errors[0].Field, want.field)
+	}
+	if !strings.Contains(p.Errors[0].Reason, want.class) {
+		t.Errorf("reason = %q, want it to name the class %q", p.Errors[0].Reason, want.class)
+	}
+	if !strings.Contains(p.Errors[0].Reason, fmt.Sprintf("%U", want.cp)) {
+		t.Errorf("reason = %q, want the %%U rendering of the codepoint", p.Errors[0].Reason)
+	}
+	if want.value != "" && strings.Contains(p.Errors[0].Reason, want.value) {
+		t.Errorf("reason echoed the offending value: %q", p.Errors[0].Reason)
+	}
+}
+
+// assertSerialiserRefuses is the binding between this layer's table and
+// internal/imagefactory's. One rule, two call sites: a codepoint this file
+// claims is refused but the canonical serialiser accepts means the two have
+// drifted, and the test says so at the drift rather than at the symptom.
+func assertSerialiserRefuses(t *testing.T, value string, cp rune) {
+	t.Helper()
+	probe := imagefactory.Schematic{Customization: imagefactory.Customization{
+		ExtraKernelArgs: []string{value},
+	}}
+	if _, err := probe.ID(); !errors.Is(err, imagefactory.ErrSchematicNotRepresentable) {
+		t.Fatalf("the serialiser no longer refuses %U (%v); this table and "+
+			"internal/imagefactory's divergingClasses have drifted", cp, err)
+	}
+}
+
+// assertNothingCreated is the half of a refusal the status code does not state:
+// no request crossed the network (T-02-65) and no record was stored.
+func assertNothingCreated(t *testing.T, c *client, f *fakeFactory, raw []byte) {
+	t.Helper()
+	if n := f.count("POST /schematics"); n != 0 {
+		t.Errorf("the Factory recorded %d schematic POSTs; this refusal is local (body: %s)", n, raw)
+	}
+	resp, listed := c.do(http.MethodGet, "/api/v1/schematics", nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("listing schematics: got %d (body: %s)", resp.StatusCode, listed)
+	}
+	var records []map[string]any
+	decodeInto(t, listed, &records)
+	if len(records) != 0 {
+		t.Errorf("a refused POST stored %d record(s): %s", len(records), listed)
+	}
+}
+
+// doRaw posts a body byte for byte, with no marshalling in between.
+//
+// client.do marshals a Go value, which cannot express an unpaired surrogate
+// escape or a raw invalid UTF-8 byte -- Go strings are the wrong shape for
+// both, and json.Marshal would repair them on the way out. Any test about what
+// the server does before its decoder runs has to write the bytes itself.
+func (c *client) doRaw(method, path string, body []byte) (*http.Response, []byte) {
+	c.t.Helper()
+
+	req, err := http.NewRequest(method, c.s.srv.URL+path, bytes.NewReader(body))
+	if err != nil {
+		c.t.Fatalf("new request: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Holzkube-CSRF", "1")
+
+	resp, err := c.http.Do(req)
+	if err != nil {
+		c.t.Fatalf("%s %s: %v", method, path, err)
+	}
+	defer resp.Body.Close()
+
+	raw, err := io.ReadAll(resp.Body)
+	if err != nil {
+		c.t.Fatalf("read body: %v", err)
+	}
+	return resp, raw
 }
