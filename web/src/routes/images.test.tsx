@@ -555,32 +555,102 @@ describe('ImagesView — the authoring half', () => {
     )
   })
 
-  it('hasControlCharacter transcribes the server rule and nothing wider', () => {
-    // The server's representable() refuses a string that is not valid UTF-8,
-    // any rune below U+0020, and U+007F. All three, and nothing else.
-    expect(hasControlCharacter('console=ttyS0')).toBe(false)
-    expect(hasControlCharacter('')).toBe(false)
-    expect(hasControlCharacter('ümlaut — dash')).toBe(false)
-    expect(hasControlCharacter('a\u0000b')).toBe(true)
-    expect(hasControlCharacter('a\tb')).toBe(true)
-    expect(hasControlCharacter('a\nb')).toBe(true)
-    expect(hasControlCharacter('a\u001fb')).toBe(true)
-    expect(hasControlCharacter('a\u007fb')).toBe(true)
-    // U+0080 is not in the server's set, and a client that refused it would
-    // reject input the server accepts.
-    expect(hasControlCharacter('a\u0080b')).toBe(false)
+  /**
+   * The refusal set, in both directions and one case per measured class.
+   *
+   * The Go-side drift guard (`internal/imagefactory/guard_drift_test.go`) is
+   * what makes this set equal to the server's; this is the readable statement
+   * of what that set *is*, in the vocabulary of the classes the live
+   * differential measured.
+   *
+   * The accepted half is the part nobody writes and the part that matters
+   * most. A client that refuses a value the API takes is a false refusal an
+   * operator cannot work around, and three of the nine codepoints the UAT
+   * named turned out to round-trip: U+00A0, U+200B and U+202E are accepted
+   * here because `factory.talos.dev` carries them.
+   */
+  it('refuses exactly the classes the server refuses', () => {
+    const refused: [string, string][] = [
+      ['NUL', 'a\u0000b'],
+      ['tab', 'a\tb'],
+      ['newline', 'a\nb'],
+      ['U+001F, the top of C0', 'a\u001fb'],
+      ['DEL', 'a\u007fb'],
+      ['U+0080, the bottom of C1', 'a\u0080b'],
+      ['U+0085, the C1 next line the Factory folds', 'a\u0085b'],
+      ['U+009F, the top of C1', 'a\u009fb'],
+      ['U+2028, the line separator behind G-02-11', 'a\u2028b'],
+      ['U+2029, the paragraph separator', 'a\u2029b'],
+      ['U+FEFF, the byte order mark', 'a\ufeffb'],
+      ['U+FFFE, above the printable ceiling', 'a\ufffeb'],
+      ['an emoji, which the Factory escapes rather than writes', 'a\ud83d\ude00b'],
+      ['a lone high surrogate', 'a\ud800b'],
+      ['a lone low surrogate', 'a\udfffb'],
+    ]
+    for (const [label, value] of refused) {
+      expect(hasControlCharacter(value), label).toBe(true)
+    }
 
-    // The other half of representable: not valid UTF-8. A lone surrogate is
-    // the only way a browser produces one, and it is the half the server
-    // cannot enforce -- JSON.stringify emits it as a well-formed \udXXX
-    // escape and Go decodes an unpaired escape to U+FFFD, so representable is
-    // handed a clean string and the id is computed over a character the
-    // operator never typed.
-    expect(hasControlCharacter('a\ud800b')).toBe(true)
-    expect(hasControlCharacter('a\udfffb')).toBe(true)
-    // A well-formed pair is an ordinary character and must stay accepted, or
-    // this would refuse input the server takes.
-    expect(hasControlCharacter('a\ud83d\ude00b')).toBe(false)
+    const accepted: [string, string][] = [
+      ['an ordinary kernel argument', 'console=ttyS0'],
+      ['the empty string', ''],
+      ['non-ASCII letters', 'ümlaut — dash 中文'],
+      ['U+00A0, which closes the C1 range at the top', 'a\u00a0b'],
+      ['U+200B, measured as round-tripping', 'a\u200bb'],
+      ['U+202E, the override, measured as round-tripping', 'a\u202eb'],
+      ['U+FDD0, a non-character below the ceiling', 'a\ufdd0b'],
+      ['U+FFFD itself, which fixes the boundary exactly', 'a\ufffdb'],
+    ]
+    for (const [label, value] of accepted) {
+      expect(hasControlCharacter(value), label).toBe(false)
+    }
+  })
+
+  /**
+   * G-02-17, the client half. `name` reaches the same server-side guard as
+   * `kernel_args` and `meta` now, and the argument for refusing at the input
+   * applies to it identically: an operator should be told which field is wrong
+   * while they are still looking at it.
+   */
+  it('refuses a name carrying a refused character before any request', async () => {
+    const fetchMock = stubFactory()
+    const user = userEvent.setup()
+
+    renderImages()
+    await catalogLoaded()
+
+    // A right-to-left override is accepted; the NUL beside it is not. This is
+    // the pair the UAT posted, which answered 201.
+    fireEvent.change(screen.getByLabelText('Name'), {
+      target: { value: 'pwn\u0000NUL\u202eRLO' },
+    })
+
+    const alert = await screen.findByRole('alert', { name: 'Name is not usable' })
+    expect(alert).toHaveTextContent(/control character/i)
+    expect(screen.getByRole('button', { name: 'Create schematic' })).toBeDisabled()
+
+    await user.click(screen.getByRole('button', { name: 'Create schematic' }))
+    expect(bodiesPostedTo(fetchMock, '/api/v1/schematics')).toHaveLength(0)
+  })
+
+  it('accepts a name the server accepts, override and all', async () => {
+    const fetchMock = stubFactory()
+    const user = userEvent.setup()
+
+    renderImages()
+    await catalogLoaded()
+
+    // Every one of these round-trips through the Factory, so refusing them
+    // here would block an operator from a name the API would have stored.
+    fireEvent.change(screen.getByLabelText('Name'), {
+      target: { value: 'Arbeiter äöü 中文 \u200b\u202e' },
+    })
+
+    expect(screen.queryByRole('alert', { name: 'Name is not usable' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Create schematic' })).toBeEnabled()
+
+    await user.click(screen.getByRole('button', { name: 'Create schematic' }))
+    await waitFor(() => expect(bodiesPostedTo(fetchMock, '/api/v1/schematics')).toHaveLength(1))
   })
 
   it('keeps "created" and "usable" apart on the create result', async () => {
