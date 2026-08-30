@@ -650,6 +650,39 @@ const PRE_ARCH = schematicFixture({
   arch: '',
 })
 
+/**
+ * G-02-14. A record that claims usability while carrying no probe timestamp.
+ *
+ * No request path produces one today -- the POST handler writes `usable` and
+ * `probed_at` together -- which is exactly why the two of these are here. A
+ * migration, an import or a hand-edited store file is not bound by what the
+ * handler happens to do, and the badge is what an operator reads either way.
+ *
+ * Two fixtures rather than one parameterised fixture, because the two zero
+ * forms arrive from different places: the empty string is what a hand-written
+ * or partially-migrated JSON record carries, the `0001-01-01` timestamp is what
+ * a decoded zero `time.Time` serialises to. `isProbed` accepts both, and a test
+ * that covered one while claiming both is how it would quietly lose half its
+ * job.
+ */
+const CLAIMED_UNPROBED_EMPTY = schematicFixture({
+  id: 'e'.repeat(64),
+  name: 'claims-no-timestamp',
+  usable: true,
+  probed_at: '',
+  probe_reason: '',
+  arch: 'arm64',
+})
+
+const CLAIMED_UNPROBED_ZERO_TIME = schematicFixture({
+  id: 'f'.repeat(64),
+  name: 'claims-zero-time',
+  usable: true,
+  probed_at: '0001-01-01T00:00:00Z',
+  probe_reason: '',
+  arch: 'amd64',
+})
+
 /** Opens the detail dialog for one saved schematic. */
 async function openDetail(user: ReturnType<typeof userEvent.setup>, record: Schematic) {
   await user.click(await screen.findByRole('button', { name: `Schematic ${record.name}` }))
@@ -736,6 +769,59 @@ describe('ImagesView — the saved schematics', () => {
 
     expect(detail.getByText(/Usable — the build probe confirmed it/)).toBeInTheDocument()
     expect(detail.getByText('architecture: arm64')).toBeInTheDocument()
+  })
+
+  it('refuses a usable claim from a record with an empty probe timestamp', async () => {
+    // G-02-14, first zero form. `usable: true` with `probed_at: ''` is a record
+    // asserting a confirmation nothing gave it, and the badge used to repeat the
+    // assertion verbatim: `UsabilityVerdict` tested `usable` before it tested
+    // whether the record held a verdict at all, so `isProbed` was never reached
+    // on the one branch where an overclaim does damage -- it sends an operator
+    // to install from an image no probe ever built.
+    //
+    // T-02-62: no state may make a stronger claim than the record supports.
+    stubFactory({ saved: [CLAIMED_UNPROBED_EMPTY] })
+    const user = userEvent.setup()
+
+    renderImages()
+
+    const table = within(await screen.findByRole('table'))
+    const row = within(table.getByRole('button', { name: 'Schematic claims-no-timestamp' }))
+    expect(row.getByText(/Not verified — the build probe has no verdict/)).toBeInTheDocument()
+    expect(row.queryByText(/Usable — the build probe confirmed it/)).not.toBeInTheDocument()
+    expect(row.getByText(/either did not run or did not answer in time/)).toBeInTheDocument()
+    // The architecture qualifier is a property of the record, not of the
+    // verdict, and reordering the verdict must not have taken it with it.
+    expect(row.getByText('architecture: arm64')).toBeInTheDocument()
+
+    // And the same record in the dialog: the badge is rendered in two places,
+    // and a fix in one of them is not a fix.
+    const detail = await openDetail(user, CLAIMED_UNPROBED_EMPTY)
+    expect(detail.getByText(/Not verified — the build probe has no verdict/)).toBeInTheDocument()
+    expect(detail.queryByText(/Usable — the build probe confirmed it/)).not.toBeInTheDocument()
+    expect(detail.getByText('architecture: arm64')).toBeInTheDocument()
+  })
+
+  it('refuses a usable claim from a record carrying the zero timestamp', async () => {
+    // G-02-14, second zero form, and its own test rather than a parameter of
+    // the one above. `0001-01-01T00:00:00Z` is a decoded zero `time.Time`; the
+    // empty string is a hand-written or partially-migrated record. `isProbed`
+    // answers for both, and only a case each keeps it answering for both.
+    stubFactory({ saved: [CLAIMED_UNPROBED_ZERO_TIME] })
+    const user = userEvent.setup()
+
+    renderImages()
+
+    const table = within(await screen.findByRole('table'))
+    const row = within(table.getByRole('button', { name: 'Schematic claims-zero-time' }))
+    expect(row.getByText(/Not verified — the build probe has no verdict/)).toBeInTheDocument()
+    expect(row.queryByText(/Usable — the build probe confirmed it/)).not.toBeInTheDocument()
+    expect(row.getByText('architecture: amd64')).toBeInTheDocument()
+
+    const detail = await openDetail(user, CLAIMED_UNPROBED_ZERO_TIME)
+    expect(detail.getByText(/Not verified — the build probe has no verdict/)).toBeInTheDocument()
+    expect(detail.queryByText(/Usable — the build probe confirmed it/)).not.toBeInTheDocument()
+    expect(detail.getByText('architecture: amd64')).toBeInTheDocument()
   })
 
   it("keeps the detail dialog's width class through the class merge", async () => {
