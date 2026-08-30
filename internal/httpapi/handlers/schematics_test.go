@@ -62,6 +62,17 @@ type fakeFactory struct {
 	// instead of the hash of the document. It is the FACT-06 state: a
 	// well-formed 201 carrying an id the local serialiser did not predict.
 	forgedID string
+	// manifestStatus, when non-zero, is what every registry manifest request
+	// answers with, whatever the repository name. It is how a test says "no
+	// candidate carries a manifest" (404, a refusal about this schematic) or
+	// "the registry did not answer the question" (503, an outage) without
+	// touching the Factory endpoints the same fake serves.
+	manifestStatus int
+	// hijackRepo names a repository whose manifest request has its connection
+	// closed with no response at all. That is the *transport* failure the
+	// provisional branch needs, and it is the one shape a status code cannot
+	// express -- factory.talos.dev is known to throttle exactly this way.
+	hijackRepo string
 }
 
 func newFakeFactory(t *testing.T) *fakeFactory {
@@ -134,6 +145,33 @@ func (f *fakeFactory) forgeID(id string) {
 	f.forgedID = id
 }
 
+// answerEveryManifestWith makes every registry manifest request answer with
+// status, whatever repository name it asks about.
+//
+// Called after the schematic exists, never before: the create path does not
+// touch the registry, and setting this first would only obscure which request
+// the status belongs to.
+func (f *fakeFactory) answerEveryManifestWith(status int) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.manifestStatus = status
+}
+
+// dropTheConnectionFor closes the connection, with no response, on a manifest
+// request for repo. The resolver reads that as "this candidate was never ruled
+// out" rather than as a refusal, which is the whole of the provisional branch.
+func (f *fakeFactory) dropTheConnectionFor(repo string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.hijackRepo = repo
+}
+
+func (f *fakeFactory) manifestBehaviour() (status int, hijack string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.manifestStatus, f.hijackRepo
+}
+
 // fakeInstallerRepos is the whitelist of registry repository names this fake
 // answers a manifest for: the platform-prefixed and legacy installer names, and
 // their SecureBoot counterparts.
@@ -193,6 +231,22 @@ func (f *fakeFactory) serve(w http.ResponseWriter, r *http.Request) {
 
 	case (r.Method == http.MethodGet || r.Method == http.MethodHead) && len(parts) == 5 &&
 		parts[0] == "v2" && parts[3] == "manifests":
+		status, hijack := f.manifestBehaviour()
+		if hijack != "" && parts[1] == hijack {
+			// No status, no body, no clean close: the client sees a transport
+			// error, which is a different verdict from any HTTP answer.
+			if hj, ok := w.(http.Hijacker); ok {
+				conn, _, err := hj.Hijack()
+				if err == nil {
+					_ = conn.Close()
+				}
+			}
+			return
+		}
+		if status != 0 {
+			http.Error(w, "manifest: forced", status)
+			return
+		}
 		if !fakeInstallerRepos[parts[1]] {
 			http.Error(w, "manifest unknown", http.StatusNotFound)
 			return
@@ -1187,13 +1241,16 @@ func TestAssetsReturnsEveryReferenceForTheRequestedArchitecture(t *testing.T) {
 // file already states about every other collection: a null reads as "the server
 // did not check".
 //
-// The non-empty case is not asserted here and that is deliberate. It requires a
-// candidate repository that fails at the *transport* level, which this package's
-// handler fake cannot produce without hijacking its connection too. The
-// package-level test in internal/imagefactory owns that assertion
-// (TestInstallerImageWarnsWhenThePreferredNameWasNeverRuledOut); do not add a
-// duplicate here by reflex, because a second fake would be a second thing to
-// keep in step with the registry's behaviour.
+// The non-empty case is asserted by TestAssetsProvenAndProvisionalAnswersAreUnchanged,
+// not here. This comment used to say it could not be: the branch requires a
+// candidate repository that fails at the *transport* level, "which this
+// package's handler fake cannot produce without hijacking its connection too".
+// The premise was true and the conclusion did not follow -- hijacking is six
+// lines (dropTheConnectionFor), and WINDOWS entry 23 recorded the resulting hole
+// for two plans. The package-level test in internal/imagefactory still owns the
+// resolver's own behaviour (TestInstallerImageWarnsWhenThePreferredNameWasNeverRuledOut);
+// what the handler test owns is the wire shape that behaviour produces, which is
+// a different claim and is the one a client depends on.
 func TestAssetsCarriesTheWarningsFieldOnTheHappyPath(t *testing.T) {
 	s, _ := schematicServer(t)
 	c := operator(t, s)
@@ -1227,6 +1284,250 @@ func TestAssetsCarriesTheWarningsFieldOnTheHappyPath(t *testing.T) {
 	}
 }
 
+// assetsBody is the assets response as a client that knows about the
+// unresolved-installer outcome decodes it.
+//
+// Installer is a pointer because the field is null and never absent when the
+// reference could not be resolved. That is the whole of the shape decision: a
+// client written before this outcome existed fails to decode a null into a
+// string rather than reading an empty string as a proven reference.
+type assetsBody struct {
+	ISO            string  `json:"iso"`
+	PXE            string  `json:"pxe"`
+	DiskImage      string  `json:"disk_image"`
+	Cmdline        string  `json:"cmdline"`
+	Installer      *string `json:"installer"`
+	InstallerError *struct {
+		Code   string `json:"code"`
+		Detail string `json:"detail"`
+	} `json:"installer_error"`
+	Warnings []struct {
+		Code   string `json:"code"`
+		Detail string `json:"detail"`
+	} `json:"warnings"`
+}
+
+// wantAssetURLs is the four registry-free references for a request, built the
+// way the handler builds them.
+//
+// Derived rather than transcribed, and derived through the same package the
+// handler calls. Nothing in ISOURL, PXEURL, DiskImageURL or CmdlineURL reaches
+// the registry -- their only error is a validation error about the request --
+// which is the fact the whole partial-answer outcome rests on. An expectation of
+// "not empty" would pass on four strings assembled out of nothing, so the exact
+// values are the assertion.
+func wantAssetURLs(t *testing.T, base, id string, secureBoot bool) (iso, pxe, disk, cmdline string) {
+	t.Helper()
+	r := imagefactory.AssetRequest{
+		SchematicID: id,
+		Version:     catalogVersion,
+		Arch:        imagefactory.ArchAMD64,
+		Platform:    imagefactory.PlatformMetal,
+		SecureBoot:  secureBoot,
+	}
+	build := func(name string, fn func(string, imagefactory.AssetRequest) (string, error)) string {
+		u, err := fn(base, r)
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		return u
+	}
+	return build("iso", imagefactory.ISOURL),
+		build("pxe", imagefactory.PXEURL),
+		build("disk_image", imagefactory.DiskImageURL),
+		build("cmdline", imagefactory.CmdlineURL)
+}
+
+// assertFourReferences checks the registry-free four against their exact values.
+func assertFourReferences(t *testing.T, got assetsBody, base, id string, secureBoot bool) {
+	t.Helper()
+	iso, pxe, disk, cmdline := wantAssetURLs(t, base, id, secureBoot)
+	for _, pair := range []struct{ name, got, want string }{
+		{"iso", got.ISO, iso},
+		{"pxe", got.PXE, pxe},
+		{"disk_image", got.DiskImage, disk},
+		{"cmdline", got.Cmdline, cmdline},
+	} {
+		if pair.got != pair.want {
+			t.Errorf("%s = %q, want %q", pair.name, pair.got, pair.want)
+		}
+	}
+}
+
+// TestAssetsWithARefusedInstallerStillReturnsTheOtherFourReferences is G-02-15's
+// first half, in the shape an operator actually meets it: a SecureBoot request
+// at a version where no SecureBoot repository carries a manifest.
+//
+// The ratified half of T-02-53 is asserted here too and is not what changed: no
+// ordinary installer is substituted, and `installer` is null rather than a
+// plausible string. What changed is that the four references built at
+// schematics.go's URL block -- pure string assembly over the request, never a
+// registry call -- are no longer discarded because a fifth value could not be
+// resolved.
+func TestAssetsWithARefusedInstallerStillReturnsTheOtherFourReferences(t *testing.T) {
+	s, f := schematicServer(t)
+	c := operator(t, s)
+	id := mustCreate(t, c, "installer-refused", []string{"siderolabs/intel-ucode"})
+
+	// Every candidate answers 404: the registry answered, about this schematic,
+	// and none of the names carries a manifest. That is a refusal and not an
+	// outage, and the code has to say which.
+	f.answerEveryManifestWith(http.StatusNotFound)
+
+	resp, raw := c.do(http.MethodGet, "/api/v1/schematics/"+id+"/assets?arch=amd64&secureboot=true", nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("got %d, want 200 -- four references that never touched the registry were discarded "+
+			"because a fifth could not be resolved (body: %s)", resp.StatusCode, raw)
+	}
+
+	var got assetsBody
+	decodeInto(t, raw, &got)
+	assertFourReferences(t, got, f.URL, id, true)
+
+	if got.Installer != nil {
+		t.Fatalf("installer = %q, want null: no reference resolved and none is ever assembled", *got.Installer)
+	}
+	if !strings.Contains(string(raw), `"installer":null`) {
+		t.Errorf("installer is absent rather than null; absence is the signal a client forgets to check: %s", raw)
+	}
+	if got.InstallerError == nil {
+		t.Fatalf("no installer_error member, so a client cannot tell an unresolved reference from a proven one: %s", raw)
+	}
+	if got.InstallerError.Code != httpapi.CodeUpstreamFactoryRejected {
+		t.Errorf("installer_error.code = %q, want %q -- the registry answered and refused, which no retry changes",
+			got.InstallerError.Code, httpapi.CodeUpstreamFactoryRejected)
+	}
+	if !strings.Contains(got.InstallerError.Detail, catalogVersion) {
+		t.Errorf("installer_error.detail = %q, want the version named in it", got.InstallerError.Detail)
+	}
+	if len(got.Warnings) != 0 {
+		t.Errorf("an unresolved installer produced warnings: %+v", got.Warnings)
+	}
+	// The one thing that must not have happened.
+	if strings.Contains(string(raw), `"installer":"`) {
+		t.Errorf("a reference was substituted for a SecureBoot request: %s", raw)
+	}
+}
+
+// TestAssetsWithAnUnreachableRegistryStillReturnsTheOtherFourReferences is the
+// same outcome from the other cause, and the reason the two have to be told
+// apart: this one is retryable and the refusal is not. It is also the common
+// one -- the branch is reached far more often by a registry that did not answer
+// in time than by a version that genuinely has no installer.
+func TestAssetsWithAnUnreachableRegistryStillReturnsTheOtherFourReferences(t *testing.T) {
+	s, f := schematicServer(t)
+	c := operator(t, s)
+	id := mustCreate(t, c, "installer-unreachable", []string{"siderolabs/intel-ucode"})
+
+	f.answerEveryManifestWith(http.StatusServiceUnavailable)
+
+	resp, raw := c.do(http.MethodGet, "/api/v1/schematics/"+id+"/assets?arch=amd64", nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("got %d, want 200 (body: %s)", resp.StatusCode, raw)
+	}
+
+	var got assetsBody
+	decodeInto(t, raw, &got)
+	assertFourReferences(t, got, f.URL, id, false)
+
+	if got.Installer != nil {
+		t.Fatalf("installer = %q, want null", *got.Installer)
+	}
+	if got.InstallerError == nil {
+		t.Fatalf("no installer_error member: %s", raw)
+	}
+	if got.InstallerError.Code != httpapi.CodeUpstreamFactoryUnavailable {
+		t.Errorf("installer_error.code = %q, want %q -- the registry did not answer, which says nothing "+
+			"about the schematic and is retryable",
+			got.InstallerError.Code, httpapi.CodeUpstreamFactoryUnavailable)
+	}
+	if got.InstallerError.Detail == "" {
+		t.Error("installer_error carries no detail, so the client has nothing to show but a code")
+	}
+}
+
+// TestAssetsProvenAndProvisionalAnswersAreUnchanged pins the two outcomes that
+// existed before this change, field by field, including the members that must
+// stay *absent*.
+//
+// The provisional subtest also closes WINDOWS entry 23, which recorded that the
+// provisional branch had no handler-level test at all. The note that used to sit
+// on TestAssetsCarriesTheWarningsFieldOnTheHappyPath said this package's fake
+// could not produce a transport-level failure without hijacking its connection.
+// It can: dropTheConnectionFor does exactly that, in six lines, and it is the
+// only way to reach a branch whose entire definition is "no HTTP answer at all".
+func TestAssetsProvenAndProvisionalAnswersAreUnchanged(t *testing.T) {
+	t.Run("proven", func(t *testing.T) {
+		s, f := schematicServer(t)
+		c := operator(t, s)
+		id := mustCreate(t, c, "installer-proven", []string{"siderolabs/intel-ucode"})
+
+		resp, raw := c.do(http.MethodGet, "/api/v1/schematics/"+id+"/assets?arch=amd64", nil)
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("got %d, want 200 (body: %s)", resp.StatusCode, raw)
+		}
+
+		var got assetsBody
+		decodeInto(t, raw, &got)
+		assertFourReferences(t, got, f.URL, id, false)
+
+		if got.Installer == nil {
+			t.Fatal("installer is null on a proven answer")
+		}
+		if !strings.Contains(*got.Installer, "metal-installer/"+id+":"+catalogVersion) {
+			t.Errorf("installer = %q, want the resolved reference for this schematic", *got.Installer)
+		}
+		if len(got.Warnings) != 0 {
+			t.Errorf("a proven name produced warnings: %+v", got.Warnings)
+		}
+		// Absent, not null and not empty. A proven answer that carried the
+		// member at all would make it something a client has to inspect rather
+		// than something whose presence is the signal.
+		if strings.Contains(string(raw), "installer_error") {
+			t.Errorf("a proven answer carries an installer_error member: %s", raw)
+		}
+	})
+
+	t.Run("provisional", func(t *testing.T) {
+		s, f := schematicServer(t)
+		c := operator(t, s)
+		id := mustCreate(t, c, "installer-provisional", []string{"siderolabs/intel-ucode"})
+
+		// The preferred name is never ruled out: the connection is dropped with
+		// no answer, and the legacy name answers. Usable, but provisional.
+		f.dropTheConnectionFor(string(imagefactory.PlatformMetal) + "-installer")
+
+		resp, raw := c.do(http.MethodGet, "/api/v1/schematics/"+id+"/assets?arch=amd64", nil)
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("got %d, want 200 (body: %s)", resp.StatusCode, raw)
+		}
+
+		var got assetsBody
+		decodeInto(t, raw, &got)
+		assertFourReferences(t, got, f.URL, id, false)
+
+		if got.Installer == nil {
+			t.Fatal("installer is null on a provisional answer; the reference is usable and is returned")
+		}
+		if !strings.Contains(*got.Installer, "/installer/"+id+":"+catalogVersion) {
+			t.Errorf("installer = %q, want the legacy name that answered", *got.Installer)
+		}
+		if len(got.Warnings) != 1 {
+			t.Fatalf("warnings = %+v, want exactly the fallback warning", got.Warnings)
+		}
+		if got.Warnings[0].Code != imagefactory.WarningInstallerRepoFallbackUnverified {
+			t.Errorf("warnings[0].code = %q, want %q",
+				got.Warnings[0].Code, imagefactory.WarningInstallerRepoFallbackUnverified)
+		}
+		if got.Warnings[0].Detail == "" {
+			t.Error("the fallback warning carries no detail, so it says nothing to the operator reading it")
+		}
+		if strings.Contains(string(raw), "installer_error") {
+			t.Errorf("a provisional answer carries an installer_error member: %s", raw)
+		}
+	})
+}
+
 func TestAssetsWithAnUnknownArchitectureIsAValidationProblem(t *testing.T) {
 	s, _ := schematicServer(t)
 	c := operator(t, s)
@@ -1243,6 +1544,13 @@ func TestAssetsWithAnUnknownArchitectureIsAValidationProblem(t *testing.T) {
 		}
 		if len(p.Errors) == 0 || p.Errors[0].Field != "arch" {
 			t.Errorf("%q: the problem does not name the arch field: %s", query, raw)
+		}
+		// A request that fails before the URL builders returns no references at
+		// all, and that is not the same thing as an unresolved installer. There
+		// is nothing to return: the four references are functions of a request
+		// this one never became.
+		if strings.Contains(string(raw), `"iso"`) {
+			t.Errorf("%q: a refused request answered with asset references: %s", query, raw)
 		}
 	}
 }

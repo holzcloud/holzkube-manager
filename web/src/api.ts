@@ -229,8 +229,34 @@ export const schematicAssetsSchema = z.object({
    * Resolved against the registry, never assembled. It is consumed by the
    * upgrade RPC, and a wrong one produces an upgrade that reports success while
    * silently dropping every system extension the node was built with.
+   *
+   * `null` means the registry could not be made to answer for it, and
+   * `installer_error` says which of the two reasons it was. Null rather than an
+   * empty string, and never absent: `warnings: []` on this route is an
+   * affirmative claim that the repository name was *proven*, so an empty string
+   * would carry that claim about a reference that does not exist. A null is a
+   * decode-time fact — the other four references are still here and still
+   * correct, and this is the one field an upstream can withhold.
    */
-  installer: z.string(),
+  installer: z.string().nullable(),
+  /**
+   * Why `installer` is null, in the server's own words. Absent — not null —
+   * whenever the reference resolved, so its presence is the signal rather than
+   * something a reader has to inspect.
+   *
+   * `code` is what to branch on: `upstream.factory-rejected` is a verdict about
+   * this version and this repository name that no retry changes, and
+   * `upstream.factory-unavailable` is a registry that did not answer, where
+   * asking again may work. `detail` is the sentence to show; it already names
+   * the schematic, the version and the repository names that were asked, so the
+   * client never invents a second account of one failure.
+   */
+  installer_error: z
+    .object({
+      code: z.string(),
+      detail: z.string(),
+    })
+    .optional(),
   /**
    * How sure the server is of the installer repository name above. Empty means
    * proven; a `installer.repo-fallback-unverified` entry means the reference is
@@ -241,6 +267,9 @@ export const schematicAssetsSchema = z.object({
    * field's absence would let a server regression reach the screen as "no
    * warnings", which is the silence G-02-3 was about: the reference would still
    * render and nothing would say it had not been proven.
+   *
+   * It says nothing at all when `installer` is null: there is no name to be sure
+   * of, and `[]` there means "nothing to warn about", not "proven".
    */
   warnings: z.array(schematicWarningSchema),
 })
