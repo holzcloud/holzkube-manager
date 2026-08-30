@@ -40,9 +40,9 @@ import (
 	"github.com/siderolabs/talos/pkg/machinery/resources/k8s"
 	"google.golang.org/grpc/codes"
 
-	"github.com/holzcloud/holzkube/internal/model"
-	"github.com/holzcloud/holzkube/internal/talos"
-	"github.com/holzcloud/holzkube/internal/talossim"
+	"github.com/holzcloud/holzkube-manager/internal/model"
+	"github.com/holzcloud/holzkube-manager/internal/talos"
+	"github.com/holzcloud/holzkube-manager/internal/talossim"
 )
 
 // nodeUnderTest is one addressable node plus the sim-side observations that

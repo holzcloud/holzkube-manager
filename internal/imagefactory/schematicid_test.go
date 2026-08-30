@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/holzcloud/holzkube/internal/imagefactory"
+	"github.com/holzcloud/holzkube-manager/internal/imagefactory"
 )
 
 // mustID fails the test rather than returning an error, so the property tests
@@ -28,12 +28,12 @@ func TestSchematicIDIgnoresTheOrderFieldsWereSet(t *testing.T) {
 	var a imagefactory.Schematic
 	a.Customization.ExtraKernelArgs = []string{"console=ttyS0"}
 	a.Customization.SystemExtensions.OfficialExtensions = []string{"siderolabs/intel-ucode"}
-	a.Owner = "holzkube"
+	a.Owner = "holzkube-manager"
 	a.Overlay = imagefactory.Overlay{Image: "siderolabs/sbc-rockchip", Name: "turingrk1"}
 
 	var b imagefactory.Schematic
 	b.Overlay = imagefactory.Overlay{Image: "siderolabs/sbc-rockchip", Name: "turingrk1"}
-	b.Owner = "holzkube"
+	b.Owner = "holzkube-manager"
 	b.Customization.SystemExtensions.OfficialExtensions = []string{"siderolabs/intel-ucode"}
 	b.Customization.ExtraKernelArgs = []string{"console=ttyS0"}
 
@@ -108,7 +108,7 @@ func TestSchematicIDOfTheEmptyCustomization(t *testing.T) {
 // would stop matching the schematic stored beside it.
 func TestSchematicIDSurvivesARoundTrip(t *testing.T) {
 	original := imagefactory.Schematic{
-		Owner:   "holzkube",
+		Owner:   "holzkube-manager",
 		Overlay: imagefactory.Overlay{Image: "siderolabs/sbc-rockchip", Name: "turingrk1"},
 		Customization: imagefactory.Customization{
 			ExtraKernelArgs:  []string{"console=ttyS0", "--x=1"},
@@ -140,7 +140,7 @@ func TestSchematicIDSurvivesARoundTrip(t *testing.T) {
 
 // TestSchematicIDRefusesRatherThanGuesses: a value this serialiser was not
 // pinned against produces a refusal, not an id. A wrong id is worse than no id
-// -- FACT-06 exists so holzkube can recognise a schematic without a round trip,
+// -- FACT-06 exists so holzkube-manager can recognise a schematic without a round trip,
 // and a value that silently disagrees with the Factory turns that into a lie.
 func TestSchematicIDRefusesRatherThanGuesses(t *testing.T) {
 	for name, arg := range map[string]string{
@@ -522,7 +522,7 @@ func TestSchematicIDRefusesAMeasuredDivergenceInAMetaValue(t *testing.T) {
 // control, and it is the half that keeps the widening honest.
 //
 // Every codepoint here was measured AGREES in both quoting styles on both
-// document paths: the Factory's own canonical document carried holzkube's line
+// document paths: the Factory's own canonical document carried holzkube-manager's line
 // back byte for byte. So each of these ids is the hash of a rendering upstream
 // confirmed, and asserting the literal rather than merely "no error" is what
 // makes this a stability test -- a test that only checked for a nil error would
@@ -575,7 +575,7 @@ func TestTheWellKnownIDsDidNotMove(t *testing.T) {
 // 02-20 needed and this package already had a precedent for: one predicate,
 // call sites that reference it rather than restate it.
 //
-// Before it, the rule which decides what holzkube will carry lived in an
+// Before it, the rule which decides what holzkube-manager will carry lived in an
 // unexported function reachable only through Schematic.ID(), so the HTTP layer
 // -- which has to answer the same question about a request field before it has
 // a document at all -- had no way to ask it. The alternative was a second copy

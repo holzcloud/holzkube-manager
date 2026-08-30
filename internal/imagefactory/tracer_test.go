@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/holzcloud/holzkube/internal/imagefactory"
+	"github.com/holzcloud/holzkube-manager/internal/imagefactory"
 )
 
 // The two (payload, id) pairs recorded against the live Factory. They are the

@@ -24,9 +24,9 @@ import (
 	"github.com/siderolabs/talos/pkg/machinery/api/machine"
 	"github.com/siderolabs/talos/pkg/machinery/api/storage"
 
-	"github.com/holzcloud/holzkube/internal/model"
-	"github.com/holzcloud/holzkube/internal/talos"
-	"github.com/holzcloud/holzkube/internal/talossim"
+	"github.com/holzcloud/holzkube-manager/internal/model"
+	"github.com/holzcloud/holzkube-manager/internal/talos"
+	"github.com/holzcloud/holzkube-manager/internal/talossim"
 )
 
 // machineryClientImport is the import path of the client the seam contains. It
@@ -60,7 +60,7 @@ const scannedFileFloor = 4
 // sync is not a mechanism.
 //
 // So the enumeration is derived, not written down: the walk finds every method
-// holzkube's own packages call on a machinery client, and each one is then
+// holzkube-manager's own packages call on a machinery client, and each one is then
 // called against a running simulator. The check is behavioural rather than
 // structural on purpose. A reflection check on the server type would pass for
 // a method that exists and panics, and a hand-maintained list of "methods we
@@ -105,7 +105,7 @@ func TestMethodCoverage(t *testing.T) {
 	}
 
 	if len(missing) > 0 {
-		t.Fatalf("holzkube calls %d MachineService/StorageService method(s) that talossim does not implement:\n  %s\n\n"+
+		t.Fatalf("holzkube-manager calls %d MachineService/StorageService method(s) that talossim does not implement:\n  %s\n\n"+
 			"The simulator has drifted behind the production client. The fix is to implement the method "+
 			"in internal/talossim -- not to remove the call site. Deleting the call is the cheaper way to "+
 			"make this test green and it inverts the guard: the product would keep needing the method and "+
@@ -123,7 +123,7 @@ func TestMethodCoverage(t *testing.T) {
 // day someone adds one -- and if it were broken, that day it would report a
 // working method as missing, or a missing one as working. The four cases below
 // pin both call shapes in both directions against methods chosen for what they
-// demonstrate rather than for what holzkube calls.
+// demonstrate rather than for what holzkube-manager calls.
 func TestMethodCoverageProbeRecognisesBothCallShapes(t *testing.T) {
 	t.Parallel()
 

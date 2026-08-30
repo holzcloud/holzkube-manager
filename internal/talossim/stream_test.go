@@ -17,7 +17,7 @@ import (
 	"github.com/siderolabs/talos/pkg/machinery/resources/hardware"
 	"github.com/siderolabs/talos/pkg/machinery/resources/network"
 
-	"github.com/holzcloud/holzkube/internal/talossim"
+	"github.com/holzcloud/holzkube-manager/internal/talossim"
 )
 
 // TestProductionClientReadsSeededCOSIState is the COSI half of TRANS-06.

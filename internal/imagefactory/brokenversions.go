@@ -1,6 +1,6 @@
 package imagefactory
 
-// brokenVersions lists Talos versions holzkube greys out, mapped to the reason
+// brokenVersions lists Talos versions holzkube-manager greys out, mapped to the reason
 // each one is listed.
 //
 // Curated and embedded rather than fetched or UI-editable (D-08). A list an
@@ -24,7 +24,7 @@ package imagefactory
 // make checkable, and inventing plausible-looking entries to make the feature
 // look populated is the failure mode this design is meant to avoid.
 //
-// What belongs here, when it is found: a version where holzkube has *observed*
+// What belongs here, when it is found: a version where holzkube-manager has *observed*
 // a reproducible failure -- an asset that does not build, an installer
 // reference that does not resolve across the supported range, an upgrade path
 // that is known to strand a node. Add the version, the reason, and the date

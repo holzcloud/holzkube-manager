@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/holzcloud/holzkube/internal/imagefactory"
+	"github.com/holzcloud/holzkube-manager/internal/imagefactory"
 )
 
 // assetBase is a Factory base URL. The tests derive URLs rather than fetch

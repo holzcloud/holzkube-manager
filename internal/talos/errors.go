@@ -8,7 +8,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	"github.com/holzcloud/holzkube/internal/model"
+	"github.com/holzcloud/holzkube-manager/internal/model"
 )
 
 // ErrorKind is what went wrong at the transport, in the three shapes that call
@@ -144,7 +144,7 @@ func (e *Error) Error() string {
 		// The node's own words. They are what makes a refusal actionable --
 		// reject_apply is only useful if the operator can read why the
 		// configuration was refused -- and they cannot contain the address
-		// holzkube dialled, because they were written on the other side of it.
+		// holzkube-manager dialled, because they were written on the other side of it.
 		return fmt.Sprintf("talos: %s on %s was rejected by the node (%s): %s",
 			e.Op, e.Machine, e.Status, upstreamMessage(e.Err))
 	case KindTimeout:

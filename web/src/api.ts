@@ -5,7 +5,7 @@ import { type Problem, presentationFor, toProblemError } from '@/lib/problem'
  * The single place in the frontend that calls fetch.
  *
  * Everything the CSRF contract requires is applied here, once, on every
- * mutating request: `Content-Type: application/json`, `X-Holzkube-CSRF: 1`
+ * mutating request: `Content-Type: application/json`, `X-Holzkube-Manager-CSRF: 1`
  * with that exact value, and same-origin credentials. All three are checked
  * simultaneously by the server and a miss is a 403 `csrf.precondition-unmet`
  * (threat T-01-36). Spreading fetch calls across components is how one of them
@@ -32,7 +32,7 @@ export {
   problemSchema,
 } from '@/lib/problem'
 
-const CSRF_HEADER = 'X-Holzkube-CSRF'
+const CSRF_HEADER = 'X-Holzkube-Manager-CSRF'
 /** Checked by value on the server, not merely for presence. Never 'true'. */
 const CSRF_HEADER_VALUE = '1'
 
@@ -489,7 +489,7 @@ async function sendJSON<T>(
 
 /**
  * The asset query. `arch` is always sent and is never defaulted here or on the
- * server: holzkube is developed on arm64 and targets amd64, so a defaulted
+ * server: holzkube-manager is developed on arm64 and targets amd64, so a defaulted
  * architecture is a bug that only ever appears on someone else's machine.
  */
 function assetQueryString(query: AssetQuery): string {

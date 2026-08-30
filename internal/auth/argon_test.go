@@ -9,7 +9,7 @@ import (
 	"github.com/alexedwards/argon2id"
 )
 
-// weakParams are deliberately far below anything holzkube would ship. They
+// weakParams are deliberately far below anything holzkube-manager would ship. They
 // stand in for "a hash written by an older, cheaper release" and they keep the
 // tests that are not about cost from paying a quarter second per verification.
 var weakParams = &argon2id.Params{

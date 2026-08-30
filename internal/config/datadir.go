@@ -23,13 +23,13 @@ const (
 	// which are shared with other applications and are not ours to restrict.
 	parentPerm = 0o755
 
-	appDir = "holzkube"
+	appDir = "holzkube-manager"
 )
 
 // Resolve returns the data directory (D-02): an explicit override wins, then
-// $XDG_DATA_HOME/holzkube, then ~/.local/share/holzkube.
+// $XDG_DATA_HOME/holzkube-manager, then ~/.local/share/holzkube-manager.
 //
-// The override is what --data-dir and HOLZKUBE_DATA_DIR fill in, and it is also
+// The override is what --data-dir and HOLZKUBE_MANAGER_DATA_DIR fill in, and it is also
 // the container's mounted volume path -- which is why it has to beat an
 // XDG_DATA_HOME that some base image happened to set.
 func Resolve(env Lookup, home, override string) (string, error) {

@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	// MinSupportedVersion is the oldest Talos release holzkube is tested
+	// MinSupportedVersion is the oldest Talos release holzkube-manager is tested
 	// against, as a major.minor tag.
 	MinSupportedVersion = "v1.12"
 
@@ -35,7 +35,7 @@ const (
 var ErrUnsupportedVersion = errors.New("talos: unsupported Talos version")
 
 // CheckSupportedVersion reports whether a node's reported version tag is one
-// holzkube supports.
+// holzkube-manager supports.
 //
 // The comparison is major.minor only and is implemented here rather than by
 // importing golang.org/x/mod/semver, for the reason plan 02-04 gives for the
@@ -48,7 +48,7 @@ var ErrUnsupportedVersion = errors.New("talos: unsupported Talos version")
 func CheckSupportedVersion(version string) error {
 	major, minor, err := parseMajorMinor(version)
 	if err != nil {
-		return fmt.Errorf("%w: cannot read a version from %q; holzkube supports %s to %s",
+		return fmt.Errorf("%w: cannot read a version from %q; holzkube-manager supports %s to %s",
 			ErrUnsupportedVersion, version, MinSupportedVersion, MaxSupportedVersion)
 	}
 
@@ -64,7 +64,7 @@ func CheckSupportedVersion(version string) error {
 	}
 
 	if before(major, minor, minMajor, minMinor) || before(maxMajor, maxMinor, major, minor) {
-		return fmt.Errorf("%w: the node reports %s and holzkube supports %s to %s",
+		return fmt.Errorf("%w: the node reports %s and holzkube-manager supports %s to %s",
 			ErrUnsupportedVersion, version, MinSupportedVersion, MaxSupportedVersion)
 	}
 	return nil

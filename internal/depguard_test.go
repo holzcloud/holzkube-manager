@@ -21,7 +21,7 @@ const (
 	// dependency tree.
 	talosMachinery = "github.com/siderolabs/talos/pkg/machinery"
 
-	rootModule = "github.com/holzcloud/holzkube"
+	rootModule = "github.com/holzcloud/holzkube-manager"
 
 	// simulatorPackage is the in-process fake Talos node. It is a normal
 	// package in the product module rather than a separate one (D-07), which is
@@ -35,7 +35,7 @@ const (
 	cosiRuntime = "github.com/cosi-project/runtime"
 
 	// The pinned upstream versions. Changing either of these numbers is a
-	// decision about which Talos API surface holzkube speaks, so it must be a
+	// decision about which Talos API surface holzkube-manager speaks, so it must be a
 	// visible edit here and not a side effect of somebody running `go get -u`.
 	machineryVersion = "v1.13.9"
 	cosiVersion      = "v1.14.1"
@@ -50,10 +50,10 @@ const (
 // Getting it wrong yields a ~200 MB binary whose supply-chain surface includes
 // every dependency of a container runtime, in a tool that holds cluster PKI.
 func TestBinaryDependencyWeight(t *testing.T) {
-	offenders := offendingPackages(goList(t, "-deps", "./cmd/holzkubed"))
+	offenders := offendingPackages(goList(t, "-deps", "./cmd/holzkube-managerd"))
 
 	if len(offenders) > 0 {
-		t.Fatalf("cmd/holzkubed depends on %d package(s) of the Talos root module:\n  %s\n\n"+
+		t.Fatalf("cmd/holzkube-managerd depends on %d package(s) of the Talos root module:\n  %s\n\n"+
 			"Only %s may be imported by the product. Anything that needs the root module "+
 			"belongs in the separate module under sandbox/ -- see sandbox/README.md.",
 			len(offenders), strings.Join(offenders, "\n  "), talosMachinery)
@@ -94,15 +94,15 @@ func TestGuardRecognisesTheRootModule(t *testing.T) {
 		// pinned the classification against paths nobody imported yet; these
 		// are the real ones, so a future change to offendingPackages is
 		// measured against what the product compiles.
-		"github.com/siderolabs/talos/pkg/machinery/api/machine": false,
-		"github.com/siderolabs/talos/pkg/machinery/constants":   false,
-		"github.com/cosi-project/runtime/pkg/state":             false,
-		"google.golang.org/grpc/test/bufconn":                   false,
-		"github.com/holzcloud/holzkube/internal/talos":          false,
-		"github.com/holzcloud/holzkube/internal/talossim":       false,
+		"github.com/siderolabs/talos/pkg/machinery/api/machine":   false,
+		"github.com/siderolabs/talos/pkg/machinery/constants":     false,
+		"github.com/cosi-project/runtime/pkg/state":               false,
+		"google.golang.org/grpc/test/bufconn":                     false,
+		"github.com/holzcloud/holzkube-manager/internal/talos":    false,
+		"github.com/holzcloud/holzkube-manager/internal/talossim": false,
 
-		"github.com/holzcloud/holzkube/internal/store":      false,
-		"github.com/siderolabs/talos-metal-agent/pkg/thing": false,
+		"github.com/holzcloud/holzkube-manager/internal/store": false,
+		"github.com/siderolabs/talos-metal-agent/pkg/thing":    false,
 		"net/http": false,
 	}
 
@@ -191,7 +191,7 @@ func repoRoot(t *testing.T) string {
 // TestModuleGraphExcludesTalosRoot closes the gap TestBinaryDependencyWeight
 // leaves open.
 //
-// That guard walks `go list -deps ./cmd/holzkubed`, which is package-level: it
+// That guard walks `go list -deps ./cmd/holzkube-managerd`, which is package-level: it
 // stays green while a test-only package under internal/ pulls the Talos root
 // module into go.mod, into go.sum, and into the compile of every `go test
 // ./...`. The module graph is the level at which "we do not depend on that"
@@ -213,7 +213,7 @@ func TestModuleGraphExcludesTalosRoot(t *testing.T) {
 // Reading go.mod would prove nothing: minimal version selection can raise a
 // requirement above the written one when some other dependency asks for more,
 // and that is exactly the drift worth catching -- machinery and the COSI
-// runtime define the wire surface holzkube speaks to a cluster.
+// runtime define the wire surface holzkube-manager speaks to a cluster.
 func TestPinnedUpstreamVersions(t *testing.T) {
 	want := map[string]string{
 		talosMachinery: machineryVersion,
@@ -253,9 +253,9 @@ func TestPinnedUpstreamVersions(t *testing.T) {
 // tests can import it without crossing a module boundary; this test is the
 // price of that choice.
 func TestSimulatorIsNotInTheProduct(t *testing.T) {
-	for _, pkg := range goList(t, "-deps", "./cmd/holzkubed") {
+	for _, pkg := range goList(t, "-deps", "./cmd/holzkube-managerd") {
 		if pkg == simulatorPackage || strings.HasPrefix(pkg, simulatorPackage+"/") {
-			t.Fatalf("cmd/holzkubed depends on %s.\n\n"+
+			t.Fatalf("cmd/holzkube-managerd depends on %s.\n\n"+
 				"The simulated Talos node must never be reachable from the product binary: "+
 				"in a real deployment it is indistinguishable from a real machine. "+
 				"It belongs in _test.go files and in packages the binary does not import.", pkg)

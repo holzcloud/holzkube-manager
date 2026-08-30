@@ -10,7 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/holzcloud/holzkube/internal/config"
+	"github.com/holzcloud/holzkube-manager/internal/config"
 )
 
 // Ensure returns the TLS configuration the server should serve with, and the

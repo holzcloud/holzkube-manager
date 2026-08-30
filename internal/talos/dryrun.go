@@ -119,7 +119,7 @@ func refuseIfMutating(enabled bool, method string) error {
 	// have to go and find out which flag they are in.
 	return fmt.Errorf(
 		"talos: refusing %s: it is a mutating RPC and this process was started with --dry-run, "+
-			"so it is not issued and no node is changed; restart holzkubed without --dry-run "+
-			"(or with HOLZKUBE_DRY_RUN=false) to issue it: %w",
+			"so it is not issued and no node is changed; restart holzkube-managerd without --dry-run "+
+			"(or with HOLZKUBE_MANAGER_DRY_RUN=false) to issue it: %w",
 		shortMethod(method), ErrDryRun)
 }

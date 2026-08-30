@@ -1,4 +1,4 @@
-# holzkube
+# holzkube-manager
 
 Self-hosted management UI for Kubernetes clusters on Talos Linux. A single Go
 binary runs **outside** the cluster, talks to the Talos machine API directly,
@@ -13,7 +13,7 @@ and serves an embedded web UI.
 One command produces the binary:
 
 ```sh
-task build          # builds web, then go, into bin/holzkubed
+task build          # builds web, then go, into bin/holzkube-managerd
 ```
 
 The frontend is built **before** the Go compiler runs, and that ordering is a
@@ -27,7 +27,7 @@ Without `task`:
 ```sh
 npm --prefix web ci      # ci, not install: builds what the lockfile pins
 npm --prefix web run build
-go build -o bin/holzkubed ./cmd/holzkubed
+go build -o bin/holzkube-managerd ./cmd/holzkube-managerd
 ```
 
 Toolchain: Go 1.26.7 (pinned in `go.mod`), Node with npm, and — for the full
@@ -37,7 +37,7 @@ task, lint and release chain — [`go-task`](https://taskfile.dev),
 ## Run
 
 ```sh
-./bin/holzkubed
+./bin/holzkube-managerd
 ```
 
 Then open <https://127.0.0.1:8443> and complete the setup wizard. The first
@@ -46,7 +46,7 @@ no second account.
 
 ### The certificate warning is expected
 
-On first run holzkube generates a long-lived self-signed certificate into the
+On first run holzkube-manager generates a long-lived self-signed certificate into the
 data directory and logs its SHA-256 fingerprint:
 
 ```
@@ -65,7 +65,7 @@ That line is `INFO` level, so `--log-level=warn` or higher suppresses it. The
 same string comes out of:
 
 ```sh
-openssl x509 -in "$HOLZKUBE_DATA_DIR/cert.pem" -noout -fingerprint -sha256
+openssl x509 -in "$HOLZKUBE_MANAGER_DATA_DIR/cert.pem" -noout -fingerprint -sha256
 ```
 
 The certificate is generated once and reused on every later start, so the
@@ -77,21 +77,21 @@ To use your own certificate instead, pass `--tls-cert` and `--tls-key`.
 
 ## Configuration
 
-Flags and `HOLZKUBE_*` environment variables only. There is deliberately no
+Flags and `HOLZKUBE_MANAGER_*` environment variables only. There is deliberately no
 configuration file: nothing to parse means nothing to migrate, and
 Docker/Compose speaks environment variables natively. Precedence is
 flag > environment > default.
 
 | Flag | Environment | Default |
 |---|---|---|
-| `--listen` | `HOLZKUBE_LISTEN` | `127.0.0.1:8443` |
-| `--data-dir` | `HOLZKUBE_DATA_DIR` | `$XDG_DATA_HOME/holzkube`, else `~/.local/share/holzkube` |
-| `--tls-cert` | `HOLZKUBE_TLS_CERT` | generated on first run |
-| `--tls-key` | `HOLZKUBE_TLS_KEY` | generated on first run |
-| `--insecure-http` | `HOLZKUBE_INSECURE_HTTP` | `false` |
-| `--sudo-window` | `HOLZKUBE_SUDO_WINDOW` | `5m` |
-| `--session-lifetime` | `HOLZKUBE_SESSION_LIFETIME` | `24h` |
-| `--log-level` | `HOLZKUBE_LOG_LEVEL` | `info` |
+| `--listen` | `HOLZKUBE_MANAGER_LISTEN` | `127.0.0.1:8443` |
+| `--data-dir` | `HOLZKUBE_MANAGER_DATA_DIR` | `$XDG_DATA_HOME/holzkube-manager`, else `~/.local/share/holzkube-manager` |
+| `--tls-cert` | `HOLZKUBE_MANAGER_TLS_CERT` | generated on first run |
+| `--tls-key` | `HOLZKUBE_MANAGER_TLS_KEY` | generated on first run |
+| `--insecure-http` | `HOLZKUBE_MANAGER_INSECURE_HTTP` | `false` |
+| `--sudo-window` | `HOLZKUBE_MANAGER_SUDO_WINDOW` | `5m` |
+| `--session-lifetime` | `HOLZKUBE_MANAGER_SESSION_LIFETIME` | `24h` |
+| `--log-level` | `HOLZKUBE_MANAGER_LOG_LEVEL` | `info` |
 
 `--version` and `--help` print and exit; the help output is generated from the
 same table as the flags, so it cannot drift from them.
@@ -139,20 +139,20 @@ of reporting it.
 
 ### In a container
 
-`HOLZKUBE_DATA_DIR` is the volume path. Mount a named volume or bind mount there,
+`HOLZKUBE_MANAGER_DATA_DIR` is the volume path. Mount a named volume or bind mount there,
 give it to the non-root user the container runs as, and nothing else needs
 configuring — every option is an environment variable:
 
 ```yaml
 services:
-  holzkube:
-    image: holzkube
+  holzkube-manager:
+    image: holzkube-manager
     user: "1000:1000"
     environment:
-      HOLZKUBE_DATA_DIR: /data
-      HOLZKUBE_LISTEN: 0.0.0.0:8443
+      HOLZKUBE_MANAGER_DATA_DIR: /data
+      HOLZKUBE_MANAGER_LISTEN: 0.0.0.0:8443
     volumes:
-      - holzkube-data:/data
+      - holzkube-manager-data:/data
     ports:
       - "8443:8443"
 ```
@@ -161,12 +161,12 @@ services:
 
 From phase 2 this directory holds cluster CA **private keys**. Anyone who can
 read it can mint an admin `talosconfig` and an admin `kubeconfig`, and can
-therefore wipe every machine in the cluster. **The holzkube data directory is
+therefore wipe every machine in the cluster. **The holzkube-manager data directory is
 equivalent to root on every managed node.**
 
 Two consequences, neither of which code can fix:
 
-1. The host running holzkube is inside the cluster's trust boundary. It deserves
+1. The host running holzkube-manager is inside the cluster's trust boundary. It deserves
    control-plane-grade treatment, not "that Raspberry Pi in the corner".
 2. Compromise of the host is compromise of the cluster. There is no partial
    credential design that avoids this — generating machine configuration
@@ -221,18 +221,18 @@ browser matches the pinned version. If it is missing, the test run says so and
 repeats this command. CI installs it the same way, so the gate is not one that
 only exists there.
 
-Run `./bin/holzkubed` in one terminal and `task dev` in another; the dev server
+Run `./bin/holzkube-managerd` in one terminal and `task dev` in another; the dev server
 proxies `/api` to `https://127.0.0.1:8443` and accepts the self-signed
 certificate.
 
 ### Module layout
 
-`cmd/holzkubed` depends on the light `pkg/machinery` only. The Docker and QEMU
+`cmd/holzkube-managerd` depends on the light `pkg/machinery` only. The Docker and QEMU
 provisioners live in the Talos **root** module, which pulls in a large part of an
 operating system, so they get their own module under
 [`sandbox/`](sandbox/README.md) — outside the product build and outside
 `go list ./...`. `internal/depguard_test.go` fails the build if a root-module
-package ever reaches `cmd/holzkubed`.
+package ever reaches `cmd/holzkube-managerd`.
 
 ## Documentation
 
@@ -241,14 +241,14 @@ package ever reaches `cmd/holzkubed`.
 
 ## Licence
 
-holzkube is free software under the **GNU Affero General Public License,
+holzkube-manager is free software under the **GNU Affero General Public License,
 version 3** — see [`LICENSE`](LICENSE).
 
 The Affero clause is the reason for this choice rather than a plain GPL: section
-13 covers the case that matters for a management UI, namely a modified holzkube
+13 covers the case that matters for a management UI, namely a modified holzkube-manager
 offered to other people over a network. If you run a changed version and let
 anyone else use it, they are entitled to your changes. Running an unmodified
-holzkube on your own cluster obliges you to nothing.
+holzkube-manager on your own cluster obliges you to nothing.
 
 ## Contributing
 

@@ -6,10 +6,10 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/holzcloud/holzkube/internal/auth"
-	"github.com/holzcloud/holzkube/internal/httpapi"
-	"github.com/holzcloud/holzkube/internal/httpapi/middleware"
-	"github.com/holzcloud/holzkube/internal/model"
+	"github.com/holzcloud/holzkube-manager/internal/auth"
+	"github.com/holzcloud/holzkube-manager/internal/httpapi"
+	"github.com/holzcloud/holzkube-manager/internal/httpapi/middleware"
+	"github.com/holzcloud/holzkube-manager/internal/model"
 )
 
 // maxInlineDelay is the longest wait this package will serve by holding the

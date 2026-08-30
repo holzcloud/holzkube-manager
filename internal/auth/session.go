@@ -8,12 +8,12 @@ import (
 
 	"github.com/alexedwards/scs/v2"
 
-	"github.com/holzcloud/holzkube/internal/auth/scsstore"
-	"github.com/holzcloud/holzkube/internal/store"
+	"github.com/holzcloud/holzkube-manager/internal/auth/scsstore"
+	"github.com/holzcloud/holzkube-manager/internal/store"
 )
 
 // CookieName is the session cookie's name.
-const CookieName = "holzkube_session"
+const CookieName = "holzkube-manager_session"
 
 // Session state keys. The values live in the session record, which travels
 // through store.Sessions() like every other record (FOUND-07).
@@ -88,7 +88,7 @@ func (s *Service) withinAbsoluteLifetime(ctx context.Context) bool {
 // InvalidateAllExcept deletes every session record but one.
 //
 // It reaches the sessions through the store rather than through the session
-// manager because there is no per-user index: holzkube has exactly one
+// manager because there is no per-user index: holzkube-manager has exactly one
 // operator, so every other live session belongs to them, and the question
 // "which of my sessions are these" has no interesting answer.
 func (s *Service) InvalidateAllExcept(ctx context.Context, keep string) error {

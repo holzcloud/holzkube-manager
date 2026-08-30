@@ -185,7 +185,7 @@ export function hasControlCharacter(value: string): boolean {
  * `U+202E` is *not* refused, and that is deliberate rather than an oversight:
  * the live differential measured it round-tripping through the Factory
  * unchanged, so refusing it would block a value the API accepts (plan 02-14).
- * The override is therefore a character holzkube carries and has to render
+ * The override is therefore a character holzkube-manager carries and has to render
  * safely, which is exactly why the isolate is the answer and a refusal is not.
  *
  * It applies to every stored-string render site uniformly. A contract applied
@@ -887,13 +887,13 @@ function UsabilityVerdict({
  * that inspecting a saved schematic at another architecture cannot change what
  * the next schematic is created and probed against.
  *
- * There is no sensible default. holzkube is developed on arm64 and targets
+ * There is no sensible default. holzkube-manager is developed on arm64 and targets
  * amd64, so a hardcoded one is a bug that only ever appears on someone else's
  * machine -- and asking again on every visit is a control an operator has
  * already answered. The last answer is the least wrong starting point, and it
  * is a preference rather than a secret: nothing security-relevant is stored.
  */
-export const ARCH_STORAGE_KEY = 'holzkube.images.arch'
+export const ARCH_STORAGE_KEY = 'holzkube-manager.images.arch'
 
 function isArchitecture(value: unknown): value is Architecture {
   return value === 'amd64' || value === 'arm64'
@@ -1435,7 +1435,7 @@ function UnresolvedInstallerRow({
         {secureBoot && (
           <p className="text-xs text-muted-foreground">
             This request asked for SecureBoot, which is what selects the installer repository —
-            holzkube asked only about the SecureBoot names. Unticking SecureBoot asks a different
+            holzkube-manager asked only about the SecureBoot names. Unticking SecureBoot asks a different
             question: the ordinary installer is a different image, and it does not produce a
             SecureBoot node.
           </p>

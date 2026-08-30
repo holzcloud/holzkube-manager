@@ -40,7 +40,7 @@ import (
 
 	"github.com/cosi-project/runtime/pkg/state"
 
-	"github.com/holzcloud/holzkube/internal/talos"
+	"github.com/holzcloud/holzkube-manager/internal/talos"
 )
 
 // DefaultTalosVersion is the version the simulated node reports when Options

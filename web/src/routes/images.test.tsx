@@ -741,7 +741,7 @@ const UNPROBED = schematicFixture({
  * that guard, anything an import writes — are still readable.
  *
  * U+202E is not a refused character on either side: the live differential
- * measured it round-tripping through the Factory unchanged, so holzkube carries
+ * measured it round-tripping through the Factory unchanged, so holzkube-manager carries
  * it and has to render it safely rather than refuse it.
  */
 const OVERRIDE_STORED = schematicFixture({

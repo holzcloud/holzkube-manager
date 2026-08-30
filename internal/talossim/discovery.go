@@ -3,9 +3,9 @@ package talossim
 import (
 	"context"
 
-	"github.com/holzcloud/holzkube/internal/model"
+	"github.com/holzcloud/holzkube-manager/internal/model"
 
-	"github.com/holzcloud/holzkube/internal/talos"
+	"github.com/holzcloud/holzkube-manager/internal/talos"
 )
 
 // DiscoverySource returns a talos.DiscoverySource that announces this node.
@@ -14,7 +14,7 @@ import (
 // is the retrofit claim: scanning pushes outward, a registration source pushes
 // inward, and both satisfy the same interface with the same call site above
 // them. A simulator that only implemented Dialer would leave the harder half of
-// the SideroLink question -- who tells holzkube a node exists -- untested.
+// the SideroLink question -- who tells holzkube-manager a node exists -- untested.
 func (s *Server) DiscoverySource() talos.DiscoverySource { return &fakeSource{server: s} }
 
 type fakeSource struct{ server *Server }

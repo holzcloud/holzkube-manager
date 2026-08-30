@@ -514,7 +514,7 @@ func (c *ClusterClient) Target() Target { return c.conn.target }
 func (c *ClusterClient) Transport() string { return c.conn.dialer.Kind() }
 
 // COSI is the node's resource state, read-only in practice for everything
-// holzkube does with it.
+// holzkube-manager does with it.
 func (c *ClusterClient) COSI() state.State { return c.conn.c.COSI }
 
 // Version returns the node's Talos version tag.
@@ -645,7 +645,7 @@ func (c *ClusterClient) Probe(ctx context.Context) (string, error) {
 
 // LogStream is a running log stream from one node.
 //
-// It is holzkube's own shape rather than machinery's generated client, for the
+// It is holzkube-manager's own shape rather than machinery's generated client, for the
 // seam's reason: the machinery client is the implementation of this package,
 // not a type that travels above it.
 type LogStream struct {
@@ -728,7 +728,7 @@ func (m *MaintenanceClient) Version(ctx context.Context) (string, error) {
 
 // Disk is one block device the node reported.
 //
-// It is holzkube's own shape rather than machinery's: the seam's rule is that
+// It is holzkube-manager's own shape rather than machinery's: the seam's rule is that
 // the machinery client is the implementation of this package and not a type
 // that travels above it, and an installer picking a disk needs five fields
 // rather than fourteen.

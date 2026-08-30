@@ -12,9 +12,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/holzcloud/holzkube/internal/model"
-	"github.com/holzcloud/holzkube/internal/store"
-	"github.com/holzcloud/holzkube/internal/store/migrate"
+	"github.com/holzcloud/holzkube-manager/internal/model"
+	"github.com/holzcloud/holzkube-manager/internal/store"
+	"github.com/holzcloud/holzkube-manager/internal/store/migrate"
 )
 
 // openTestStore opens a store over a fresh 0700 directory and closes it when
@@ -308,7 +308,7 @@ func TestOpenRefusesASchemaVersionNewerThanTheBinary(t *testing.T) {
 	s, err := Open(dir)
 	if err == nil {
 		_ = s.Close()
-		t.Fatal("Open accepted a data directory written by a newer holzkube")
+		t.Fatal("Open accepted a data directory written by a newer holzkube-manager")
 	}
 	if !errors.Is(err, migrate.ErrVersionTooNew) {
 		t.Fatalf("Open error = %v, want migrate.ErrVersionTooNew", err)

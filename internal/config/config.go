@@ -1,7 +1,7 @@
-// Package config resolves holzkube's runtime configuration.
+// Package config resolves holzkube-manager's runtime configuration.
 //
 // There is deliberately no configuration file, no search path and no schema
-// (D-03): flags and HOLZKUBE_* environment variables only, with precedence
+// (D-03): flags and HOLZKUBE_MANAGER_* environment variables only, with precedence
 // flag > environment > default. Nothing to parse means nothing to migrate, and
 // Docker/Compose speaks environment variables natively.
 //
@@ -25,8 +25,8 @@ import (
 	"time"
 )
 
-// EnvPrefix is prepended to every environment variable holzkube reads.
-const EnvPrefix = "HOLZKUBE_"
+// EnvPrefix is prepended to every environment variable holzkube-manager reads.
+const EnvPrefix = "HOLZKUBE_MANAGER_"
 
 // redacted replaces the value of an option marked secret.
 const redacted = "<redacted>"
@@ -44,7 +44,7 @@ type Origin string
 const (
 	// OriginDefault means nothing set the option; the built-in default applies.
 	OriginDefault Origin = "default"
-	// OriginEnv means a HOLZKUBE_ environment variable set the option.
+	// OriginEnv means a HOLZKUBE_MANAGER_ environment variable set the option.
 	OriginEnv Origin = "environment"
 	// OriginFlag means a command line flag set the option.
 	OriginFlag Origin = "flag"
@@ -106,7 +106,7 @@ func (o option) display(c Config) string {
 	return "(unset)"
 }
 
-// optionTable is the single definition of holzkube's configuration surface.
+// optionTable is the single definition of holzkube-manager's configuration surface.
 //
 // defaultDataDir is the XDG-resolved path used as the default of --data-dir; it
 // is irrelevant to callers that only need names and renderers, which may pass an
@@ -247,7 +247,7 @@ func optionTable(defaultDataDir string) []option {
 func Load(args []string) (Config, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
-		// Not fatal on its own: --data-dir or HOLZKUBE_DATA_DIR may supply the
+		// Not fatal on its own: --data-dir or HOLZKUBE_MANAGER_DATA_DIR may supply the
 		// path. Resolve reports it only if nothing else does.
 		home = ""
 	}
@@ -286,7 +286,7 @@ func LoadWith(args []string, env Lookup, home string) (Config, error) {
 	// Flags are parsed into raw strings and applied through the same parser the
 	// environment uses, so that a bad value produces the same message with the
 	// origin swapped instead of the flag package's own wording.
-	fs := flag.NewFlagSet("holzkubed", flag.ContinueOnError)
+	fs := flag.NewFlagSet("holzkube-managerd", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	raws := make([]*rawValue, len(table))
 	for i, o := range table {
@@ -307,7 +307,7 @@ func LoadWith(args []string, env Lookup, home string) (Config, error) {
 		return Config{}, ErrVersion
 	}
 	if fs.NArg() > 0 {
-		return Config{}, fmt.Errorf("config: unexpected argument %q; holzkubed takes options only", fs.Arg(0))
+		return Config{}, fmt.Errorf("config: unexpected argument %q; holzkube-managerd takes options only", fs.Arg(0))
 	}
 
 	for i, o := range table {
@@ -333,7 +333,7 @@ func LoadWith(args []string, env Lookup, home string) (Config, error) {
 		}
 		return Config{}, fmt.Errorf(
 			"config: --%s was given without --%s: supply both or neither; "+
-				"holzkube does not fall back to a generated certificate once one was configured",
+				"holzkube-manager does not fall back to a generated certificate once one was configured",
 			given, missing)
 	}
 	return cfg, nil
@@ -356,7 +356,7 @@ func (c Config) LogEffective(logger *slog.Logger) {
 	// IoT device on it, and this data directory is equivalent to root on every
 	// managed node (PITFALLS.md:497,633).
 	if loopback, err := IsLoopback(c.Listen); err != nil || !loopback {
-		logger.Warn("listening beyond loopback: holzkube is reachable from every device on this network",
+		logger.Warn("listening beyond loopback: holzkube-manager is reachable from every device on this network",
 			slog.String("listen", c.Listen))
 	}
 
@@ -393,9 +393,9 @@ func IsLoopback(listen string) (bool, error) {
 
 // Usage writes the help output, generated from the same table as the flags.
 func Usage(w io.Writer) {
-	fmt.Fprint(w, `holzkubed serves the holzkube web UI over HTTPS.
+	fmt.Fprint(w, `holzkube-managerd serves the holzkube-manager web UI over HTTPS.
 
-Usage: holzkubed [options]
+Usage: holzkube-managerd [options]
 
 Options come from flags and `+EnvPrefix+`* environment variables only; there is no
 configuration file. Precedence is flag > environment > default.

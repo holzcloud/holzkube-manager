@@ -20,7 +20,7 @@ import (
 
 // COSI returns the node's resource state.
 //
-// It is the read surface holzkube actually uses: client.Client.COSI is a
+// It is the read surface holzkube-manager actually uses: client.Client.COSI is a
 // state.State, it supports Watch, and the resources that carry a node's
 // identity, addresses, disks and services all live there rather than behind a
 // typed RPC. A test seeds through this accessor and the production client

@@ -17,6 +17,13 @@ import "context"
 // genesisDomain is the domain-separation string behind Genesis. It names the
 // project and the format version, so a chain from a different tool or a future
 // incompatible format cannot accidentally share an anchor.
+// It deliberately does NOT follow the holzkube -> holzkube-manager rename. This
+// string is not a name, it is the pre-image of Genesis, and Genesis is the anchor
+// of an append-only hash chain with unlimited retention. Renaming it would give
+// every existing data directory a genesis its own records no longer chain to --
+// a rename that silently invalidates tamper-evidence. The product name changed;
+// the protocol constant did not, for the same reason the problem-type taxonomy
+// was not repointed at a domain nobody owns.
 const genesisDomain = "holzkube/audit/genesis/v1"
 
 // Genesis is the prev_hash of the very first record of a data directory.

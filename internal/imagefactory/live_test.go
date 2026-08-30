@@ -14,12 +14,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/holzcloud/holzkube/internal/imagefactory"
-	"github.com/holzcloud/holzkube/internal/talos"
+	"github.com/holzcloud/holzkube-manager/internal/imagefactory"
+	"github.com/holzcloud/holzkube-manager/internal/talos"
 )
 
 // liveEnv opts a run in to the contract test against the real Image Factory.
-const liveEnv = "HOLZKUBE_FACTORY_LIVE"
+const liveEnv = "HOLZKUBE_MANAGER_FACTORY_LIVE"
 
 // TestLiveFactory is the fake-drift guard for this package: it checks that the
 // recordings in testdata/ and the behaviours reproduced in fake_test.go still
@@ -78,7 +78,7 @@ func TestLiveFactory(t *testing.T) {
 		}
 		if !slices.Contains(versions, catalogVersion) {
 			t.Errorf("the live version list no longer contains %s; the recorded fixture and "+
-				"holzkube's supported range disagree with upstream", catalogVersion)
+				"holzkube-manager's supported range disagree with upstream", catalogVersion)
 		}
 	})
 
@@ -490,7 +490,7 @@ func installerNameMatrixSubtests(ctx context.Context, t *testing.T, client *imag
 }
 
 // liveNewestSupportedRow returns the extra version the matrix should probe: the
-// newest concrete stable release the Factory offers inside holzkube's supported
+// newest concrete stable release the Factory offers inside holzkube-manager's supported
 // range, when that is newer than the pin and not already a row.
 //
 // It exists because installer.go used to claim the matrix settled the question

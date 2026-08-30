@@ -1,4 +1,4 @@
-// Package scsstore adapts holzkube's session entity onto the scs session
+// Package scsstore adapts holzkube-manager's session entity onto the scs session
 // manager's Store interface.
 //
 // Its whole reason to exist is FOUND-07: session state is state, so it travels
@@ -11,8 +11,8 @@ import (
 	"errors"
 	"time"
 
-	"github.com/holzcloud/holzkube/internal/model"
-	"github.com/holzcloud/holzkube/internal/store"
+	"github.com/holzcloud/holzkube-manager/internal/model"
+	"github.com/holzcloud/holzkube-manager/internal/store"
 )
 
 // Store implements scs.Store and scs.IterableStore over a store.SessionStore.

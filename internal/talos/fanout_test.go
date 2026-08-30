@@ -9,9 +9,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/holzcloud/holzkube/internal/model"
-	"github.com/holzcloud/holzkube/internal/talos"
-	"github.com/holzcloud/holzkube/internal/talossim"
+	"github.com/holzcloud/holzkube-manager/internal/model"
+	"github.com/holzcloud/holzkube-manager/internal/talos"
+	"github.com/holzcloud/holzkube-manager/internal/talossim"
 )
 
 // TestFanOutOneSilentNodeCostsOneNode is TRANS-05 and the explicit half of
@@ -255,8 +255,8 @@ func TestTransportTakesNoAuditOrHTTPDependency(t *testing.T) {
 	}
 
 	for _, forbidden := range []string{
-		"github.com/holzcloud/holzkube/internal/audit",
-		"github.com/holzcloud/holzkube/internal/httpapi",
+		"github.com/holzcloud/holzkube-manager/internal/audit",
+		"github.com/holzcloud/holzkube-manager/internal/httpapi",
 	} {
 		for _, dep := range deps {
 			if dep == forbidden {

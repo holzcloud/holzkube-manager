@@ -133,7 +133,7 @@ func measureHash(p *argon2id.Params) time.Duration {
 	fastest := time.Duration(math.MaxInt64)
 	for range samples {
 		start := time.Now()
-		if _, err := argon2id.CreateHash("holzkube-calibration-probe", p); err != nil {
+		if _, err := argon2id.CreateHash("holzkube-manager-calibration-probe", p); err != nil {
 			// Unusable parameters must not read as "instant": reporting zero
 			// would make the caller raise the cost, which is the safe
 			// direction to fail in.

@@ -12,7 +12,7 @@ import { defaultExclude, defineConfig, type Plugin } from 'vitest/config'
  */
 function keepEmbedDirectoryTracked(): Plugin {
   return {
-    name: 'holzkube:keep-embed-dir-tracked',
+    name: 'holzkube-manager:keep-embed-dir-tracked',
     generateBundle() {
       this.emitFile({ type: 'asset', fileName: '.gitkeep', source: '' })
     },
@@ -52,7 +52,7 @@ async function fileExists(path: string): Promise<boolean> {
  */
 function requireBrowserBinary(): Plugin {
   return {
-    name: 'holzkube:require-browser-binary',
+    name: 'holzkube-manager:require-browser-binary',
     async configResolved() {
       const { chromium } = await import('playwright')
       if (await fileExists(chromium.executablePath())) {
@@ -89,7 +89,7 @@ export default defineConfig({
   },
   server: {
     proxy: {
-      // In dev the UI runs on Vite and the API on holzkubed. secure:false
+      // In dev the UI runs on Vite and the API on holzkube-managerd. secure:false
       // accepts the self-signed certificate generated on first run (D-04).
       '/api': {
         target: 'https://127.0.0.1:8443',

@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/holzcloud/holzkube/internal/imagefactory"
+	"github.com/holzcloud/holzkube-manager/internal/imagefactory"
 )
 
 // serverReturning stands up a server whose extension endpoint answers with a
@@ -54,7 +54,7 @@ func TestClientRefusesAnOversizedResponse(t *testing.T) {
 
 // TestClientRefusesAnUnknownField makes an upstream schema change loud. A field
 // silently dropped here is a field nobody notices until an operator wonders why
-// a value they can see in the Factory's own API is not in holzkube.
+// a value they can see in the Factory's own API is not in holzkube-manager.
 func TestClientRefusesAnUnknownField(t *testing.T) {
 	body := `[{"name":"siderolabs/intel-ucode","ref":"r","digest":"d","author":"a","description":"x","surprise":1}]`
 	client := newClient(t, serverReturning(t, http.StatusOK, body))

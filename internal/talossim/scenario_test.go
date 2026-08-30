@@ -21,9 +21,9 @@ import (
 	"github.com/siderolabs/talos/pkg/machinery/api/machine"
 	"github.com/siderolabs/talos/pkg/machinery/resources/k8s"
 
-	"github.com/holzcloud/holzkube/internal/model"
-	"github.com/holzcloud/holzkube/internal/talos"
-	"github.com/holzcloud/holzkube/internal/talossim"
+	"github.com/holzcloud/holzkube-manager/internal/model"
+	"github.com/holzcloud/holzkube-manager/internal/talos"
+	"github.com/holzcloud/holzkube-manager/internal/talossim"
 )
 
 // trans07Scenarios are the nine tokens REQUIREMENTS.md TRANS-07 names, written
@@ -570,7 +570,7 @@ func TestScenarioIPChangesOnReboot(t *testing.T) {
 //
 // An error that says only "unsupported" leaves an operator with a node that
 // will not connect and no way to tell whether to upgrade it, downgrade it or
-// upgrade holzkube.
+// upgrade holzkube-manager.
 func TestScenarioVersionOutOfRange(t *testing.T) {
 	t.Parallel()
 

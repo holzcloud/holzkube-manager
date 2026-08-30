@@ -23,10 +23,10 @@ export function ErrorPage({ error, notFound = false }: { error: Error; notFound?
 
   const title = notFound ? 'That page does not exist' : (problem?.title ?? 'Something went wrong')
   const detail = notFound
-    ? 'holzkube has no screen at this address. Nothing failed — the link or the typed URL is wrong, and there is nothing in the server log to find.'
+    ? 'holzkube-manager has no screen at this address. Nothing failed — the link or the typed URL is wrong, and there is nothing in the server log to find.'
     : (problem?.detail ??
       (problem === null
-        ? 'holzkube could not complete that request. The details are in the server log.'
+        ? 'holzkube-manager could not complete that request. The details are in the server log.'
         : undefined))
 
   return (

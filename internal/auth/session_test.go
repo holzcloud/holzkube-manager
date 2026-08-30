@@ -11,9 +11,9 @@ import (
 	"github.com/alexedwards/argon2id"
 	"github.com/alexedwards/scs/v2"
 
-	"github.com/holzcloud/holzkube/internal/model"
-	"github.com/holzcloud/holzkube/internal/store"
-	"github.com/holzcloud/holzkube/internal/store/fsstore"
+	"github.com/holzcloud/holzkube-manager/internal/model"
+	"github.com/holzcloud/holzkube-manager/internal/store"
+	"github.com/holzcloud/holzkube-manager/internal/store/fsstore"
 )
 
 const (

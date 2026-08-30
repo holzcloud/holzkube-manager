@@ -24,8 +24,8 @@ import (
 
 	"github.com/siderolabs/talos/pkg/machinery/api/machine"
 
-	"github.com/holzcloud/holzkube/internal/talos"
-	"github.com/holzcloud/holzkube/internal/talossim"
+	"github.com/holzcloud/holzkube-manager/internal/talos"
+	"github.com/holzcloud/holzkube-manager/internal/talossim"
 )
 
 // mutationRPCs is the mutation class, read out of the class table rather than

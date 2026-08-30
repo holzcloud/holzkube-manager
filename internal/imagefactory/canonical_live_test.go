@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/holzcloud/holzkube/internal/imagefactory"
+	"github.com/holzcloud/holzkube-manager/internal/imagefactory"
 )
 
 // TestLiveCanonical is the differential behind G-02-16.

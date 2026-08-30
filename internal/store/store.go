@@ -1,4 +1,4 @@
-// Package store defines holzkube's persistence seam.
+// Package store defines holzkube-manager's persistence seam.
 //
 // The interface is deliberately entity-shaped and never path-shaped:
 // store.Users().Get(ctx, id), never store.ReadFile("users/x.json"). No method
@@ -11,7 +11,7 @@ import (
 	"context"
 	"errors"
 
-	"github.com/holzcloud/holzkube/internal/model"
+	"github.com/holzcloud/holzkube-manager/internal/model"
 )
 
 var (
@@ -42,7 +42,7 @@ var (
 // sweeper, the backup exclusion) needs the same string. A package that invents
 // its own prefix writes files nothing sweeps -- which for tlsx meant orphaned
 // private keys.
-const TempFilePrefix = ".holzkube-tmp-"
+const TempFilePrefix = ".holzkube-manager-tmp-"
 
 // Store is the root of the persistence seam.
 type Store interface {

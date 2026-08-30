@@ -289,7 +289,7 @@ func (s *Server) registerNodeServices(srv *grpc.Server) {
 // It embeds machine.UnimplementedMachineServiceServer, so every one of the 54
 // RPCs this milestone does not reach answers Unimplemented rather than failing
 // to compile. That is the honest default for a surface this wide: the methods
-// holzkube actually calls are implemented one at a time, and an unimplemented
+// holzkube-manager actually calls are implemented one at a time, and an unimplemented
 // one shows up as a clear gRPC status instead of as a zero-valued success that
 // a test would read as working.
 //

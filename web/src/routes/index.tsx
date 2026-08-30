@@ -43,14 +43,14 @@ function Dashboard() {
       <Card className="max-w-2xl">
         <CardHeader>
           <CardTitle>Instance</CardTitle>
-          <CardDescription>Reported by this holzkube process.</CardDescription>
+          <CardDescription>Reported by this holzkube-manager process.</CardDescription>
         </CardHeader>
         <CardContent>
           {status.isPending && <Skeleton className="h-16 w-full" />}
 
           {status.isError && (
             <p className="text-sm text-muted-foreground">
-              The status endpoint did not answer. holzkube itself may be restarting.
+              The status endpoint did not answer. holzkube-manager itself may be restarting.
             </p>
           )}
 

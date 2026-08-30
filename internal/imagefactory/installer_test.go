@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/holzcloud/holzkube/internal/imagefactory"
+	"github.com/holzcloud/holzkube-manager/internal/imagefactory"
 )
 
 // fakeHost is the host:port half of the fake's URL, which is what an OCI

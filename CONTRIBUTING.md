@@ -1,4 +1,4 @@
-# Contributing to holzkube
+# Contributing to holzkube-manager
 
 Two facts shape most of what follows. The web UI is compiled into the binary,
 so a frontend change is also a Go build and both sets of checks run for either
@@ -43,8 +43,8 @@ task --version && golangci-lint --version && goreleaser --version
 From a clean clone:
 
 ```sh
-task build        # npm ci, vite build, then go build into bin/holzkubed
-./bin/holzkubed
+task build        # npm ci, vite build, then go build into bin/holzkube-managerd
+./bin/holzkube-managerd
 ```
 
 Open <https://127.0.0.1:8443> and complete the setup wizard. The first account
@@ -66,7 +66,7 @@ dependency, the updated lockfile belongs in the same commit.
 
 ### Two modes, and the daemon is needed for both
 
-**The binary alone.** `./bin/holzkubed` serves the embedded bundle on
+**The binary alone.** `./bin/holzkube-managerd` serves the embedded bundle on
 <https://127.0.0.1:8443>. This is what a user gets, and it is what you should
 check a UI change against before opening a PR. Frontend edits are not picked up
 until you rebuild with `task build`.
@@ -75,20 +75,20 @@ until you rebuild with `task build`.
 the dev server on <http://localhost:5173> with hot reload and proxies `/api` to
 `https://127.0.0.1:8443`, with `secure: false` so the self-signed certificate is
 accepted. Vite serves no API of its own — every `/api` call is forwarded — so
-**holzkubed must be running either way**. Without it the UI loads and every
+**holzkube-managerd must be running either way**. Without it the UI loads and every
 request fails.
 
 The normal loop is two terminals:
 
 ```sh
-./bin/holzkubed                          # terminal 1
+./bin/holzkube-managerd                          # terminal 1
 npm --prefix web run dev                 # terminal 2 → http://localhost:5173
 ```
 
 Working on Go only, with the bundle already built once:
 
 ```sh
-go build -o bin/holzkubed ./cmd/holzkubed
+go build -o bin/holzkube-managerd ./cmd/holzkube-managerd
 ```
 
 That skips `npm ci`, which is most of the build time.
@@ -97,15 +97,15 @@ To get a fresh setup wizard, point the daemon at a throwaway directory rather
 than deleting your real one:
 
 ```sh
-./bin/holzkubed --data-dir /tmp/holzkube-dev
+./bin/holzkube-managerd --data-dir /tmp/holzkube-manager-dev
 ```
 
-holzkubed creates that directory with mode `0700` when it does not exist. See
+holzkube-managerd creates that directory with mode `0700` when it does not exist. See
 below for what happens when it does exist and is wrong.
 
 ## The certificate warning is expected
 
-On first run holzkubed generates a long-lived self-signed leaf certificate into
+On first run holzkube-managerd generates a long-lived self-signed leaf certificate into
 the data directory and logs its SHA-256 fingerprint:
 
 ```
@@ -126,7 +126,7 @@ That line is `INFO`, so `--log-level=warn` or higher suppresses it. The same
 string comes out of the file:
 
 ```sh
-openssl x509 -in ~/.local/share/holzkube/cert.pem -noout -fingerprint -sha256
+openssl x509 -in ~/.local/share/holzkube-manager/cert.pem -noout -fingerprint -sha256
 ```
 
 The certificate is generated once and reused on every later start, so you accept
@@ -145,8 +145,8 @@ pass `--tls-cert` and `--tls-key`.
 
 ## The data directory must be 0700
 
-Default `~/.local/share/holzkube`, or `$XDG_DATA_HOME/holzkube` when that is set.
-Override with `--data-dir` or `HOLZKUBE_DATA_DIR`; the override wins over both.
+Default `~/.local/share/holzkube-manager`, or `$XDG_DATA_HOME/holzkube-manager` when that is set.
+Override with `--data-dir` or `HOLZKUBE_MANAGER_DATA_DIR`; the override wins over both.
 
 The directory is `0700` and its contents are `0600`. The store walks the whole
 tree at startup and **refuses to start** if anything in it grants group or other
@@ -154,15 +154,15 @@ access. Every violation is collected and reported at once, so you repair once an
 start once:
 
 ```
-holzkubed: fsstore: data directory permissions are too permissive:
-  /Users/you/.local/share/holzkube is mode 0755, want 0700
-  /Users/you/.local/share/holzkube/settings.json is mode 0644, want 0600
+holzkube-managerd: fsstore: data directory permissions are too permissive:
+  /Users/you/.local/share/holzkube-manager is mode 0755, want 0700
+  /Users/you/.local/share/holzkube-manager/settings.json is mode 0644, want 0600
 
-Repair with: chmod 0700 /Users/you/.local/share/holzkube && chmod 0600 /Users/you/.local/share/holzkube/*
+Repair with: chmod 0700 /Users/you/.local/share/holzkube-manager && chmod 0600 /Users/you/.local/share/holzkube-manager/*
 ```
 
 Nothing is repaired automatically, and that is deliberate on both sides.
-holzkubed creates a missing directory with `0700`, but it never changes the mode
+holzkube-managerd creates a missing directory with `0700`, but it never changes the mode
 of one that already exists: a silent `chmod` would repair the condition the guard
 exists to report, and the window during which the files were readable by every
 account on the host is the thing worth knowing about.
@@ -172,7 +172,7 @@ under a different heading — it is not a permission problem but a shape problem
 because it can point anywhere.
 
 The common way to hit this in development is creating the directory yourself:
-`mkdir -p` under the usual `umask 022` gives you `0755`. Either let holzkubed
+`mkdir -p` under the usual `umask 022` gives you `0755`. Either let holzkube-managerd
 create it, or `chmod 0700` after you do.
 
 ## Before you open a pull request
@@ -215,7 +215,7 @@ Two more that are not in the five but are worth knowing:
 `go test ./...` does not reach `sandbox/`: it is a separate module and Go's
 package patterns stop at a nested `go.mod`. If you change anything there, build
 and test it from inside that directory. `internal/depguard_test.go` fails if a
-package of the Talos root module ever reaches `cmd/holzkubed`, which is the
+package of the Talos root module ever reaches `cmd/holzkube-managerd`, which is the
 boundary `sandbox/` exists to hold.
 
 If your change touches the HTTP API, update
@@ -264,14 +264,14 @@ committed as `chore(…)` silently disappears from the release notes.
 
 ## Licence and sign-off
 
-holzkube is licensed under **AGPL-3.0-only** (GNU Affero General Public License
+holzkube-manager is licensed under **AGPL-3.0-only** (GNU Affero General Public License
 version 3; see [`LICENSE`](LICENSE)). **Contributions are accepted under
 AGPL-3.0-only.** There is no CLA and no copyright assignment: you keep your
 copyright, and your contribution is licensed under the same terms as the rest of
 the project.
 
 The Affero clause is the reason for AGPL rather than plain GPL. Section 13 covers
-the case that matters for a management UI — a modified holzkube offered to other
+the case that matters for a management UI — a modified holzkube-manager offered to other
 people over a network. Contributing here means your work carries that obligation
 forward too.
 
@@ -295,14 +295,14 @@ branch.
 ## Map of the codebase
 
 ```
-cmd/holzkubed/       main.go, the only main package
+cmd/holzkube-managerd/       main.go, the only main package
 internal/            the product
 web/src/             the React UI, compiled into the binary
 sandbox/             separate module, outside the product build
 docs/                the binding API contract
 ```
 
-**`cmd/holzkubed`** is one file. It resolves configuration, builds the logger,
+**`cmd/holzkube-managerd`** is one file. It resolves configuration, builds the logger,
 opens the store, the audit log and the session store, assembles the route table
 from each handler package's own `Routes` function, sets up TLS and the HTTP
 server timeouts, and handles shutdown. New routes add a line here and a file in
@@ -318,7 +318,7 @@ server timeouts, and handles shutdown. New routes add a line here and a file in
   (`alexedwards/scs`, with `scsstore/` adapting it to the file store), the login
   delay, and the sudo window that gates destructive routes.
 - **`config/`** — `config.go` is the single option table that produces the flags,
-  the `HOLZKUBE_*` variables, the `--help` text and the startup log of every
+  the `HOLZKUBE_MANAGER_*` variables, the `--help` text and the startup log of every
   effective value and its origin. `datadir.go` resolves and creates the data
   directory.
 - **`httpapi/`** — `router.go`, `problem.go` (RFC 9457 `application/problem+json`,

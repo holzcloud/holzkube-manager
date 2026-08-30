@@ -17,7 +17,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/holzcloud/holzkube/internal/store"
+	"github.com/holzcloud/holzkube-manager/internal/store"
 )
 
 const (
@@ -106,7 +106,7 @@ func writeTree(tw *tar.Writer, root string) error {
 		if err != nil {
 			return err
 		}
-		// Symlinks and devices are not part of a holzkube data directory; a
+		// Symlinks and devices are not part of a holzkube-manager data directory; a
 		// tarball that followed one would capture something outside the tree.
 		if !d.IsDir() && !info.Mode().IsRegular() {
 			return nil

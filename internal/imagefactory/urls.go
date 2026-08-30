@@ -8,7 +8,7 @@ import (
 // Arch is a machine architecture the Factory builds for.
 //
 // It is a parameter of every asset URL and never a constant inside one. FACT-03
-// says "ohne hartkodierte Architektur" and the reason is concrete: holzkube is
+// says "ohne hartkodierte Architektur" and the reason is concrete: holzkube-manager is
 // developed on darwin/arm64 and its target hardware is amd64, so an
 // architecture baked into a URL is a bug that works perfectly on the machine
 // that wrote it and fails on every machine that matters.
@@ -33,7 +33,7 @@ func (a Arch) Valid() bool { return a == ArchAMD64 || a == ArchARM64 }
 // addressed.
 type Platform string
 
-// PlatformMetal is bare metal, the only platform holzkube provisions in this
+// PlatformMetal is bare metal, the only platform holzkube-manager provisions in this
 // milestone.
 const PlatformMetal Platform = "metal"
 
@@ -90,7 +90,7 @@ func PXEURL(base string, r AssetRequest) (string, error) {
 // DiskImageURL is the raw disk image, zstd-compressed.
 //
 // The Factory serves both .raw.zst and .raw.xz for a current version; zstd is
-// the form Talos itself moved to and the one written here, so holzkube offers
+// the form Talos itself moved to and the one written here, so holzkube-manager offers
 // one answer rather than a choice nobody has a basis to make.
 func DiskImageURL(base string, r AssetRequest) (string, error) {
 	return r.assetURL(base, "image", r.variant()+".raw.zst")
@@ -174,7 +174,7 @@ func (r AssetRequest) validate() error {
 	}
 	if !r.Platform.Valid() {
 		return fmt.Errorf(
-			"imagefactory: %q is not a platform holzkube provisions; this milestone builds for %s only",
+			"imagefactory: %q is not a platform holzkube-manager provisions; this milestone builds for %s only",
 			r.Platform, PlatformMetal)
 	}
 	return nil

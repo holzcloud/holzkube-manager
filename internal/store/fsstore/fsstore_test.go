@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/holzcloud/holzkube/internal/model"
-	"github.com/holzcloud/holzkube/internal/store"
+	"github.com/holzcloud/holzkube-manager/internal/model"
+	"github.com/holzcloud/holzkube-manager/internal/store"
 )
 
 // TestOpenReapsExpiredSessions covers the only growth path the store had.

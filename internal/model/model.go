@@ -1,4 +1,4 @@
-// Package model holds the record types shared across holzkube.
+// Package model holds the record types shared across holzkube-manager.
 //
 // UserID, ClusterID and MachineID are distinct named types on purpose. Making
 // them separate types costs nothing today and is the entire multi-cluster
@@ -26,7 +26,7 @@ type MachineID string
 // ClusterID are -- the compiler finds the place someone passes the wrong one.
 type SchematicID string
 
-// User is an operator account. holzkube is a single-operator tool, but the
+// User is an operator account. holzkube-manager is a single-operator tool, but the
 // record is shaped so that a future OIDC or multi-user layer has somewhere to
 // go without a migration.
 type User struct {
@@ -61,7 +61,7 @@ type Session struct {
 // Factory made of it, and whether it was ever proven to build.
 //
 // It follows model.User's shape -- snake_case JSON tags, a CreatedAt, and a
-// trailing Rev -- because every stored record in holzkube does.
+// trailing Rev -- because every stored record in holzkube-manager does.
 type Schematic struct {
 	// ID is the Factory's own schematic id, which is the SHA-256 of Canonical.
 	//
