@@ -58,7 +58,19 @@ tasks:
   test:web:
     desc: Run the frontend tests.
     cmds:
+      # Both vitest projects: the jsdom suite and the browser one that measures
+      # layout. The command did not change when the second project was added, so
+      # neither this target nor CI's `Test web` step can forget it.
       - npm --prefix web run test
+
+  test:web:browser:
+    desc: Run only the frontend tests that measure layout in a real browser.
+    cmds:
+      # For iterating on a layout question without the other 111 tests. It needs
+      # a Chromium; `npm --prefix web exec -- playwright install chromium` fetches
+      # the one the pinned playwright expects, and the run says so when it is
+      # missing.
+      - npm --prefix web run test:browser
 
   lint:go:
     desc: Lint the Go sources.
