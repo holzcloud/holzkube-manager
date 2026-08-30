@@ -1,11 +1,18 @@
 package handlers
 
 import (
+	"bytes"
+	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
+	"maps"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/holzcloud/holzkube/internal/httpapi"
 	"github.com/holzcloud/holzkube/internal/imagefactory"
@@ -248,7 +255,26 @@ func createSchematic(d httpapi.Deps) http.HandlerFunc {
 			return
 		}
 
+		// The body is read whole before it is decoded, because one class of
+		// refusal is invisible afterwards. encoding/json rewrites an escaped
+		// unpaired surrogate -- and a raw byte that is not valid UTF-8 -- into
+		// U+FFFD as it decodes, so a validator handed the decoded string is
+		// looking at a repaired value and has nothing to object to. That is how
+		// a caller got a 201 and a schematic id computed over a character it
+		// never sent (T-02-67, WINDOWS entry 29). The check has to stand here,
+		// on the bytes, or it cannot stand anywhere.
+		raw, problem := readBody(w, r)
+		if problem != nil {
+			httpapi.WriteProblem(w, r, problem)
+			return
+		}
+		if problem := rawBodyRefusal(raw); problem != nil {
+			httpapi.WriteProblem(w, r, problem)
+			return
+		}
+
 		var in schematicInput
+		r.Body = io.NopCloser(bytes.NewReader(raw))
 		if err := decodeJSON(w, r, &in); err != nil {
 			httpapi.WriteProblem(w, r, httpapi.Validation(err.Error()))
 			return
@@ -566,10 +592,58 @@ func (in schematicInput) validate() *httpapi.Problem {
 			Field: "arch", Reason: "must be amd64 or arm64; the build probe needs to know which image to ask for",
 		})
 	}
+	in.refuseUnrepresentable(&errs)
 	if len(errs) == 0 {
 		return nil
 	}
 	return httpapi.Validation("The schematic is not valid.", errs...)
+}
+
+// refuseUnrepresentable appends a field error for every operator-supplied
+// scalar in the request that holzkube will not carry.
+//
+// It asks imagefactory.NotRepresentableReason rather than restating the rule.
+// That function is the single statement of which scalars survive serialisation,
+// storage and rendering, and this is its second call site; the canonical writer
+// is the first. A copy here would be a second rule that agreed with the first
+// only until one of them was edited.
+//
+// name and cluster are in the list, and their absence from it is what G-02-17
+// recorded. Both arrive in the same request body as kernel_args and meta, both
+// are stored, and both are rendered -- name in the saved table and in the detail
+// dialog's own heading -- so they are exactly as capable of carrying a
+// character that cannot be shown as the fields that were already guarded. A
+// POST with NUL and a right-to-left override in the name answered 201 and
+// rendered the override raw. cluster was worse: nothing read it at all
+// (WINDOWS entry 13).
+//
+// Every scalar is checked and each appends, so an operator fixing a form is
+// told about all of their mistakes in one answer rather than one per round
+// trip. That is a property validate already had for the three fields it knew
+// about, and extending the list must not cost it.
+func (in schematicInput) refuseUnrepresentable(errs *[]httpapi.FieldError) {
+	scalar := func(field, value string) {
+		if reason := imagefactory.NotRepresentableReason(value); reason != "" {
+			*errs = append(*errs, httpapi.FieldError{Field: field, Reason: reason})
+		}
+	}
+	sequence := func(field string, values []string) {
+		for i, value := range values {
+			if reason := imagefactory.NotRepresentableReason(value); reason != "" {
+				*errs = append(*errs, httpapi.FieldError{Field: field, Reason: entryReason(i, reason)})
+			}
+		}
+	}
+
+	scalar("name", in.Name)
+	scalar("cluster", in.Cluster)
+	sequence("kernel_args", in.KernelArgs)
+	sequence("extensions", in.Extensions)
+	for i, m := range in.Meta {
+		if reason := imagefactory.NotRepresentableReason(m.Value); reason != "" {
+			*errs = append(*errs, httpapi.FieldError{Field: "meta", Reason: entryReason(i, reason)})
+		}
+	}
 }
 
 // schematic projects the input onto the Factory's own request type.
@@ -689,9 +763,18 @@ func probeDetail(err error) string {
 // one-based, matching what an operator counting rows in a form sees.
 func refusalReason(e *imagefactory.NotRepresentableError) string {
 	if e.Index >= 0 {
-		return "entry " + strconv.Itoa(e.Index+1) + " " + e.Reason
+		return entryReason(e.Index, e.Reason)
 	}
 	return e.Reason
+}
+
+// entryReason places a refusal in a sequence. One-based, matching the row an
+// operator counts in the form, and spelled once so a refusal raised by validate
+// and a refusal raised by the serialiser read identically -- they are the same
+// statement about the same value, and an operator should not have to notice
+// which layer produced it.
+func entryReason(index int, reason string) string {
+	return "entry " + strconv.Itoa(index+1) + " " + reason
 }
 
 // requestFieldForPath maps a canonical document path onto the request's own
@@ -706,6 +789,158 @@ var requestFieldForPath = map[string]string{
 	"customization.extraKernelArgs":                     "kernel_args",
 	"customization.meta.value":                          "meta",
 	"customization.systemExtensions.officialExtensions": "extensions",
+}
+
+// readBody reads the request body whole, under the same cap decodeJSON applies.
+//
+// It exists because rawBodyRefusal has to see the bytes the caller sent, and a
+// decoder consumes the stream. The cap is applied here and again inside
+// decodeJSON; MaxBytesReader is idempotent in the way that matters -- the
+// second wrapper never sees more than the first allowed.
+func readBody(w http.ResponseWriter, r *http.Request) ([]byte, *httpapi.Problem) {
+	r.Body = http.MaxBytesReader(w, r.Body, maxBodyBytes)
+	raw, err := io.ReadAll(r.Body)
+	if err != nil {
+		return nil, httpapi.Validation(err.Error())
+	}
+	return raw, nil
+}
+
+// rawBodyRefusal answers the one question that cannot be asked after decoding.
+//
+// The contract, decided here rather than left to emerge: an unpaired surrogate
+// escape and a byte sequence that is not valid UTF-8 are REFUSED with a 400,
+// deterministically, and are never repaired. The alternative -- accept the
+// U+FFFD encoding/json substitutes and carry on -- is the one thing every other
+// decision on this route rules out: holzkube reports and refuses, it does not
+// silently rewrite an operator's value into something they did not write
+// (T-02-67). A schematic stored under a name its author would not recognise,
+// with an id computed over a character they never sent, is worse than a 400.
+//
+// It is a raw-bytes check and it must stay one. By the time a Go string exists
+// the evidence is gone: json.Decode has already written U+FFFD over both cases,
+// so the value is valid UTF-8 with no control character in it and every check
+// downstream passes. This is also why the test for it posts a byte slice --
+// a test that marshals a Go string cannot reach this branch at all, which is
+// precisely why the hole survived commit ec10e08's browser-side refusal.
+//
+// The field is named when it can be identified and left unnamed when it cannot,
+// the same way createProblem treats a document path this handler does not
+// recognise: saying less truthfully beats naming the wrong input.
+func rawBodyRefusal(raw []byte) *httpapi.Problem {
+	reason := rawTextReason(raw)
+	if reason == "" {
+		return nil
+	}
+
+	fieldErr := httpapi.FieldError{Reason: reason}
+	// json.RawMessage copies the member's bytes instead of interpreting its
+	// escapes, so this walk sees exactly what the caller sent while still
+	// getting the request's own field names for free. Sorted, so a body with
+	// two offending members always names the same one.
+	var members map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &members); err == nil {
+		for _, name := range slices.Sorted(maps.Keys(members)) {
+			if memberReason := rawTextReason(members[name]); memberReason != "" {
+				fieldErr.Field = name
+				fieldErr.Reason = memberReason
+				break
+			}
+		}
+	}
+
+	return httpapi.Validation(
+		"The request body carries text holzkube will not repair, so the schematic was not created.",
+		fieldErr)
+}
+
+// rawTextReason names the class of a value the JSON decoder would rewrite
+// rather than reject, or returns the empty string.
+//
+// Like every other refusal on this route it names the class and never the
+// value: name, cluster, kernel_args and meta can all carry a secret, and a
+// problem body is rendered in a browser, may be logged by a proxy, and outlives
+// the form that produced it (T-02-64).
+func rawTextReason(b []byte) string {
+	if !utf8.Valid(b) {
+		return "contains a byte sequence that is not valid UTF-8, which the JSON decoder would rewrite to U+FFFD"
+	}
+
+	for i := 0; i+1 < len(b); {
+		if b[i] != '\\' {
+			i++
+			continue
+		}
+		if b[i+1] != 'u' {
+			// An escaped backslash, quote or control character. Stepping over
+			// both bytes is what keeps a literal \\u sequence from being read
+			// as an escape.
+			i += 2
+			continue
+		}
+		cp, ok := hexQuad(b[i+2:])
+		if !ok {
+			// Malformed; the decoder refuses it on its own terms and says so
+			// better than a guess here would.
+			i += 2
+			continue
+		}
+		switch {
+		case cp >= 0xD800 && cp <= 0xDBFF:
+			// A high half is only half a character. The low one has to follow
+			// it immediately and as its own escape; anything else -- the end of
+			// the string, an ordinary character, a second high half -- leaves
+			// this one unpaired.
+			paired := false
+			if i+12 <= len(b) && b[i+6] == '\\' && b[i+7] == 'u' {
+				if low, ok := hexQuad(b[i+8:]); ok && low >= 0xDC00 && low <= 0xDFFF {
+					paired = true
+				}
+			}
+			if !paired {
+				return unpairedSurrogateReason(cp)
+			}
+			// A well-formed pair is an ordinary astral character and is judged
+			// as one, by the refusal set and not by its encoding.
+			i += 12
+		case cp >= 0xDC00 && cp <= 0xDFFF:
+			return unpairedSurrogateReason(cp)
+		default:
+			i += 6
+		}
+	}
+	return ""
+}
+
+func unpairedSurrogateReason(cp rune) string {
+	return fmt.Sprintf("contains the unpaired surrogate %U, half of a character whose other half never arrived", cp)
+}
+
+// hexQuad reads the four hex digits of a \uXXXX escape.
+//
+// Assembled digit by digit rather than through strconv, so the result is a rune
+// by construction and never a widening conversion from a type that could hold
+// more than four hex digits' worth.
+func hexQuad(b []byte) (rune, bool) {
+	if len(b) < 4 {
+		return 0, false
+	}
+	var cp rune
+	for _, c := range b[:4] {
+		var digit rune
+		switch {
+		case c >= '0' && c <= '9':
+			digit = rune(c - '0')
+		case c >= 'a' && c <= 'f':
+			digit = rune(c-'a') + 10
+		case c >= 'A' && c <= 'F':
+			digit = rune(c-'A') + 10
+		default:
+			return 0, false
+		}
+		cp = cp<<4 | digit
+	}
+	return cp, true
 }
 
 // createProblem maps a failure from the authoring path.
@@ -726,6 +961,16 @@ var requestFieldForPath = map[string]string{
 //
 // Anything else came from the Factory and belongs to factoryProblem's upstream
 // family.
+//
+// The NotRepresentableError branch is a backstop rather than the route's first
+// answer, and deliberately kept as one. schematicInput.refuseUnrepresentable now
+// asks the same predicate about every scalar the request vocabulary knows, so a
+// refusal usually arrives before Author runs. What is left for this branch is
+// everything that vocabulary does not enumerate -- a document scalar a future
+// field adds without a matching check, and an in-process caller that never went
+// through validate at all. Deleting it would make the first of those a 502
+// blaming factory.talos.dev for a value that never left the process, which is
+// the whole of G-02-6.
 func createProblem(err error) *httpapi.Problem {
 	var refused *imagefactory.NotRepresentableError
 	if errors.As(err, &refused) {

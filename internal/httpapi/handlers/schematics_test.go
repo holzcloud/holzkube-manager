@@ -1856,7 +1856,7 @@ func TestCreateReportsEveryRefusedFieldAtOnce(t *testing.T) {
 	c := operator(t, s)
 
 	resp, raw := c.do(http.MethodPost, "/api/v1/schematics", map[string]any{
-		"name":          "workersone",
+		"name":          "workers\u0085one",
 		"cluster":       "production \u2028 one",
 		"talos_version": catalogVersion,
 		"arch":          string(imagefactory.ArchAMD64),
