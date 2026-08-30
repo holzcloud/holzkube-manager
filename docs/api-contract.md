@@ -11,7 +11,7 @@ are always RFC 9457 `application/problem+json`.
 ## Error Taxonomy
 
 The taxonomy is **closed and stable**. Every `type` is an absolute URI under
-`https://holzkube.dev/problems/`; `about:blank` is never used. Every response
+`urn:holzkube-manager:problem:`; `about:blank` is never used. Every response
 carries a `code`, a machine token that is finer-grained than `type` and that
 clients may branch on. **Codes never change.** They are the contract.
 
@@ -44,11 +44,30 @@ an unreachable node and an unreachable Factory are both anonymous 500s in an
 archive that D-16 never deletes, and the operator is shown a request id for a
 failure that was never holzkube's.
 
+### What a `type` is, and what it is not
+
+A `type` is an **identifier**. Clients match on it; nothing fetches it. It is
+deliberately **not dereferenceable** — there is no page at that address, and
+none is promised. That is a property a URN makes obvious and an https URL
+actively misrepresented, which is why the taxonomy is rooted at a URN and not at
+a vendor domain.
+
+It is also **deployment-independent**. Every installation of holzkube emits the
+same thirteen types, and the base is not configurable: not by flag, not by
+environment variable, not by build tag. A per-deployment base was considered and
+rejected, because two installations emitting different `type` values for the
+same error would force a per-install special case into every third-party client
+— solving a problem nobody has, since nothing fetches the URI, at the cost of the
+one property the field has.
+
+The namespace identifier is not registered with IANA; RFC 9457 asks for a URI,
+not a registered URN namespace, and the value is an opaque identifier either way.
+
 ### Response shape
 
 ```json
 {
-  "type": "https://holzkube.dev/problems/conflict",
+  "type": "urn:holzkube-manager:problem:conflict",
   "title": "Request conflicts with the current state",
   "status": 409,
   "detail": "An operator account already exists. Setup can only run once.",
