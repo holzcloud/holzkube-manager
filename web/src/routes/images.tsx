@@ -955,7 +955,17 @@ function SchematicDetail({
         }
       }}
     >
-      <DialogContent className="max-h-[85vh] max-w-3xl overflow-y-auto">
+      {/*
+        G-02-19. The width class is prefixed on purpose. DialogContent's base
+        string ends in `sm:max-w-sm`, and tailwind-merge keys a class by variant
+        as well as by property -- so an unprefixed `max-w-3xl` lands in a
+        *different* group, survives the merge beside the default, and then loses
+        the cascade to it at every viewport >= sm. The measured dialog was 384px
+        wide and the class read as dead code. Same breakpoint, same group, and
+        the caller's rule replaces the default outright. Below `sm` the base
+        `max-w-[calc(100%-2rem)]` is left to win, which is what it is there for.
+      */}
+      <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-3xl">
         {record.isSuccess && (
           <SchematicDetailBody
             record={record.data}
