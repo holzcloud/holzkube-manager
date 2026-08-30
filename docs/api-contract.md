@@ -671,19 +671,68 @@ against that divergence (FACT-04).**
   }
   ```
 
-  If neither SecureBoot name resolves the route answers `502` with **no
-  installer reference**, exactly as it does when neither ordinary name resolves.
-  It does **not** fall back to the ordinary installer: a SecureBoot ISO paired
-  with an installer that does not produce a SecureBoot node is the drift the
-  resolution exists to prevent.
+  If neither SecureBoot name resolves the route answers `200` with `"installer":
+  null` and an `installer_error`, exactly as it does when neither ordinary name
+  resolves — the four other references are still returned. It does **not** fall
+  back to the ordinary installer: a SecureBoot ISO paired with an installer that
+  does not produce a SecureBoot node is the drift the resolution exists to
+  prevent, and because `secureboot` is a query parameter that never reaches the
+  stored record, a substitution here would be undetectable from that point on by
+  anything — no log, no audit entry, no later re-derivation.
+- **The route is not atomic, and that is deliberate.** Once the request itself is
+  valid, the `iso`, `pxe`, `disk_image` and `cmdline` references are **always**
+  returned. They are pure string assembly over the request — schematic id,
+  version, architecture, platform, SecureBoot flag — and nothing that builds them
+  touches the registry, so nothing an upstream does can make them wrong or
+  unavailable. `installer` is the one field the registry can withhold, and
+  withholding it withholds only itself.
+
+  A request that fails *before* that point is a different thing and answers the
+  way it always has, with a problem and no body: an unknown schematic is `404`,
+  and a missing or unserved `arch` or platform is `400` `validation.failed`.
+  There are no references to return, because there is no valid request to derive
+  them from.
+- `installer_error` is present **when and only when `installer` is null**, and is
+  absent otherwise. It carries the `code` and `detail` of the problem the route
+  would previously have answered with:
+
+  ```json
+  {
+    "installer": null,
+    "installer_error": {
+      "code": "upstream.factory-unavailable",
+      "detail": "The Image Factory did not answer usably: resolving the installer image reference for v1.13.9."
+    }
+  }
+  ```
+
+  Branch on `code`, not on the presence of the member alone: the two reasons have
+  opposite remedies. `upstream.factory-unavailable` means the registry did not
+  answer — asking again may succeed, and this is the common case, because
+  `factory.talos.dev` throttles without producing an HTTP response at all.
+  `upstream.factory-rejected` means it did answer and no candidate carries a
+  manifest — this version has no installer under the requested name, and no
+  number of retries changes that. The same two tokens carry the same two meanings
+  here as they do in the Upstream failures table below.
 - `warnings` is always present and is `[]` when there is nothing to say, in the
   same shape and under the same name as the `201` body's — a client has one
-  warning shape to learn rather than two. An empty array means the installer
-  repository name was **proven**. A non-empty one means the reference is usable
-  but **provisional**, and the detail says what was not ruled out. Unlike the
-  `201` body's warnings, these are about *this resolution* rather than about the
-  schematic: nothing persists them, and they cannot be recomputed from the
-  record later.
+  warning shape to learn rather than two. Unlike the `201` body's warnings, these
+  are about *this resolution* rather than about the schematic: nothing persists
+  them, and they cannot be recomputed from the record later.
+
+  What `warnings` means depends on whether there is a reference for it to be
+  about, and a client must not read the empty array as proof on its own:
+
+  | `installer` | `installer_error` | `warnings` | Means |
+  |---|---|---|---|
+  | a reference | absent | `[]` | **Proven** — the preferred repository name answered. |
+  | a reference | absent | one entry | **Provisional** — usable, but the preferred name was never ruled out. The detail says which name did not answer. |
+  | `null` | present, `upstream.factory-rejected` | `[]` | **Refused** — every candidate answered and none carries a manifest. Nothing to be provisional about. |
+  | `null` | present, `upstream.factory-unavailable` | `[]` | **Unresolved** — the registry did not answer. Retryable. |
+
+  So `warnings: []` means "proven" only when `installer` is non-null. When
+  `installer` is null it means "there is nothing to warn about", which is why the
+  null and not an empty string is what carries the news.
 - **`installer` is resolved against the registry, never assembled.** The
   repository name is version-dependent: for part of the supported range only the
   legacy `installer` name answers, for the rest the platform-prefixed
@@ -691,10 +740,10 @@ against that divergence (FACT-04).**
   wrong one produces an upgrade that reports success while silently dropping
   every system extension the node was built with.
 
-  There are three outcomes, not two:
+  There are four outcomes, not three:
 
   1. **Proven** — the preferred candidate answered. The reference is returned
-     with `warnings: []`.
+     with `warnings: []` and no `installer_error`.
   2. **Provisional** — a candidate failed at the transport level and a later one
      answered, so the preferred name was never actually ruled out. The reference
      is returned *and* carries `installer.repo-fallback-unverified` naming the
@@ -704,10 +753,22 @@ against that divergence (FACT-04).**
      throttle without producing an HTTP response at all, and refusing here would
      leave an operator unable to read their own asset URLs because a third party
      was busy.
-  3. **Refused** — every candidate answered and none carries a manifest. The
-     route answers `502` `upstream` with `upstream.factory-unavailable` or
-     `upstream.factory-rejected` and **no reference at all** — there is no
-     guessed fallback, because a guess here is the failure it exists to prevent.
+  3. **Refused** — every candidate answered and none carries a manifest. `200`
+     with `"installer": null` and `installer_error.code`
+     `upstream.factory-rejected`. There is no guessed fallback, because a guess
+     here is the failure the whole resolution exists to prevent.
+  4. **Unresolved** — the registry did not answer at all, or answered something
+     that says nothing about this schematic (a 5xx, a rate limit, an
+     authentication challenge, a dropped connection). `200` with `"installer":
+     null` and `installer_error.code` `upstream.factory-unavailable`. Retryable,
+     and reached far more often than 3.
+
+  Outcomes 3 and 4 answered `502` with no body at all until 2026-08-30. That was
+  never the intent recorded here — this section described them as returning "no
+  installer reference", which is what they now do — and the four references the
+  old behaviour discarded had never depended on the registry in the first place.
+  A client that treated a `502` from this route as "no assets" should treat a
+  `200` with a null `installer` the same way for the installer *alone*.
 
 ### Upstream failures
 

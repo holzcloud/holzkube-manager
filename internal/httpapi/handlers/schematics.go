@@ -60,13 +60,47 @@ type createdSchematic struct {
 // holds them. That is why they ride on the response and are not persisted: there
 // is no record to put them in and no later moment at which they could be
 // derived again.
+//
+// Installer is a pointer, and that is the shape decision this route turns on.
+// The other four references are functions of the request -- see imagefactory's
+// URL builders, none of which reaches the registry -- and the installer is the
+// one field an upstream can withhold. When it is withheld the field is null and
+// InstallerError says why, so a client written before that outcome existed
+// fails to decode a null into a string rather than reading an empty one as a
+// proven reference. An empty string would have been an affirmative claim of
+// proof, because `warnings: []` on this route means exactly that.
 type assetReferences struct {
-	ISO       string                 `json:"iso"`
-	PXE       string                 `json:"pxe"`
-	DiskImage string                 `json:"disk_image"`
-	Cmdline   string                 `json:"cmdline"`
-	Installer string                 `json:"installer"`
-	Warnings  []imagefactory.Warning `json:"warnings"`
+	ISO       string  `json:"iso"`
+	PXE       string  `json:"pxe"`
+	DiskImage string  `json:"disk_image"`
+	Cmdline   string  `json:"cmdline"`
+	Installer *string `json:"installer"`
+
+	// InstallerError is present when, and only when, Installer is null. Its
+	// absence is the signal on a resolved answer, so a proven response is byte
+	// for byte what it was before this member existed.
+	InstallerError *installerUnresolved `json:"installer_error,omitempty"`
+
+	Warnings []imagefactory.Warning `json:"warnings"`
+}
+
+// installerUnresolved is the problem the route would have answered with, minus
+// the envelope.
+//
+// It carries the code and the detail and nothing else. The code is the part the
+// client branches on -- upstream.factory-rejected is a verdict about this
+// version and no retry changes it, upstream.factory-unavailable is a registry
+// that did not answer and asking again may work -- and the detail is the
+// server's own sentence, already naming the schematic, the version and the
+// repository names that were asked. A client that re-derived either from a
+// status code would be inventing a second, divergent account of one failure.
+//
+// There is deliberately no status member. This travels inside a 200: the
+// request succeeded and four of the five references are in the same body. A
+// status here would be a number describing a response that never happened.
+type installerUnresolved struct {
+	Code   string `json:"code"`
+	Detail string `json:"detail"`
 }
 
 // schematicInput is the POST body.
@@ -423,18 +457,29 @@ func schematicAssets(d httpapi.Deps) http.HandlerFunc {
 		// assembled. It is consumed by the upgrade RPC, and a guessed one produces
 		// an upgrade that reports success while silently dropping every system
 		// extension the node was built with. If it cannot be resolved this route
-		// answers with no reference at all rather than a plausible string.
+		// answers with no installer reference at all rather than a plausible
+		// string -- and for a SecureBoot request that rule is absolute, because a
+		// substituted ordinary installer would be undetectable forever: SecureBoot
+		// is a query parameter that never reaches the stored record, so no later
+		// code, log or audit entry can re-derive that a substitution happened.
+		//
+		// What that rule does *not* license is answering with nothing at all. The
+		// four references above are pure string assembly over this request --
+		// nothing in ISOURL, PXEURL, DiskImageURL or CmdlineURL touches the
+		// registry, and their only failure is a validation error about the
+		// request itself, already handled. By the time resolution runs, four
+		// correct references exist. Discarding them because a fifth could not be
+		// obtained is a denial of service holzkube inflicts on itself, and it is
+		// the branch an operator most often meets through a slow registry rather
+		// than through a version that genuinely has no installer (02-UAT.md
+		// G-02-15). So the installer alone is marked unresolved, carrying the
+		// code and the detail the 502 would have carried, and the rest is served.
 		//
 		// The warnings say how sure of the name we are. A reference reached past
 		// a candidate that never answered is usable but provisional, and the
 		// operator has to be able to see that on the panel that shows it --
 		// which is the whole of G-02-3.
 		installer, warnings, err := d.Factory.InstallerImage(r.Context(), req)
-		if err != nil {
-			httpapi.WriteProblem(w, r, factoryProblem(err,
-				"resolving the installer image reference for "+req.Version))
-			return
-		}
 		// Normalised the way schematicOut normalises the record's nil
 		// collections, for the reason this file already gives: a null reads as
 		// "the server did not check".
@@ -442,14 +487,32 @@ func schematicAssets(d httpapi.Deps) http.HandlerFunc {
 			warnings = []imagefactory.Warning{}
 		}
 
-		writeJSON(w, http.StatusOK, assetReferences{
+		refs := assetReferences{
 			ISO:       iso,
 			PXE:       pxe,
 			DiskImage: disk,
 			Cmdline:   cmdline,
-			Installer: installer,
 			Warnings:  warnings,
-		})
+		}
+		if err != nil {
+			// The failure's own words, not a second sentence invented here. The
+			// detail already names the schematic, the version and what the
+			// registry answered, and the code already separates a refusal from a
+			// non-answer -- which is precisely the distinction the operator needs
+			// to tell "wait and retry" from "this version has no installer under
+			// that name".
+			problem := factoryProblem(err,
+				"resolving the installer image reference for "+req.Version)
+			refs.InstallerError = &installerUnresolved{
+				Code:   problem.Code,
+				Detail: problem.Detail,
+			}
+			writeJSON(w, http.StatusOK, refs)
+			return
+		}
+
+		refs.Installer = &installer
+		writeJSON(w, http.StatusOK, refs)
 	}
 }
 
