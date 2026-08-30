@@ -623,8 +623,21 @@ weaker statement.
 | `schematic.installer-ignores-kernel-args` | the schematic carries extra kernel arguments |
 | `schematic.installer-ignores-meta` | the schematic carries META values |
 | `installer.repo-fallback-unverified` | the installer repository name was reached past a candidate that never answered, so the preferred name was unheard rather than ruled out. Raised on `GET .../assets`, not on this route. |
+| `installer.secureboot-repo-fallback-unverified` | the same, for a SecureBoot request, where the fallback name may be a *different image* rather than another name for the same one. Raised on `GET .../assets`, not on this route. |
 
-Both exist because of a restriction stated verbatim upstream: *"`installer` and
+The table has four members and the taxonomy is closed: a client may match on
+these codes, and no code is added without a row here.
+
+The two `installer.` codes are separate deliberately. `installer-secureboot` is
+not reliably another name for `metal-installer-secureboot` — at the pinned Talos
+version the two resolve to two different images, and at the oldest supported
+version to the same one — so neither "alias" nor "different image" is true of the
+pair in general, and the answer is labelled per resolution instead of settled
+once. Both candidates behind the SecureBoot code are still SecureBoot
+installers: this is a statement about *which* SecureBoot image, never a fallback
+to the ordinary one.
+
+The first two exist because of a restriction stated verbatim upstream: *"`installer` and
 `initramfs` images only support system extensions (kernel args and META are
 ignored)"*. The ISO therefore has them and the installed system does not, and
 the machine boots correctly from the USB stick and then installs a subtly
@@ -746,8 +759,11 @@ against that divergence (FACT-04).**
      with `warnings: []` and no `installer_error`.
   2. **Provisional** — a candidate failed at the transport level and a later one
      answered, so the preferred name was never actually ruled out. The reference
-     is returned *and* carries `installer.repo-fallback-unverified` naming the
-     repository that did not answer, the version and the transport error. It is
+     is returned *and* carries `installer.repo-fallback-unverified` — or, for a
+     SecureBoot request, `installer.secureboot-repo-fallback-unverified`, which
+     adds that the name that answered may select a *different image* rather than
+     the same one — naming the repository that did not answer, the version and
+     the transport error. It is
      usable; asking again once the registry is reachable may produce a different
      reference. The fallback is deliberate — `factory.talos.dev` is known to
      throttle without producing an HTTP response at all, and refusing here would
