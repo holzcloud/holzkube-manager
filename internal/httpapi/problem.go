@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"strconv"
 
-	"github.com/holzcloud/holzkube/internal/httpapi/middleware"
+	"github.com/holzcloud/holzkube-manager/internal/httpapi/middleware"
 )
 
 // ProblemContentType is the media type every error response carries.
@@ -78,11 +78,11 @@ const (
 	CodeUpstreamNodeTimeout = "upstream.node-timeout"
 
 	// CodeUpstreamFactoryUnavailable: factory.talos.dev did not answer, answered
-	// 5xx, or answered something holzkube will not decode. Retryable.
+	// 5xx, or answered something holzkube-manager will not decode. Retryable.
 	CodeUpstreamFactoryUnavailable = "upstream.factory-unavailable"
 
 	// CodeUpstreamFactoryRejected: the Factory answered, and the answer was a
-	// refusal of what holzkube asked for. Not retryable: retrying an identical
+	// refusal of what holzkube-manager asked for. Not retryable: retrying an identical
 	// rejected request produces an identical rejection.
 	CodeUpstreamFactoryRejected = "upstream.factory-rejected"
 )
@@ -95,7 +95,7 @@ type FieldError struct {
 
 // Problem is an RFC 9457 problem detail.
 //
-// Code is holzkube's addition to the standard members: a stable machine token
+// Code is holzkube-manager's addition to the standard members: a stable machine token
 // that is finer-grained than Type, so a client can distinguish
 // setup.already-completed from store.conflict without parsing prose.
 type Problem struct {
@@ -190,7 +190,7 @@ func MethodNotAllowed(detail string) *Problem {
 	}
 }
 
-// UnsupportedMediaType reports a body holzkube will not parse.
+// UnsupportedMediaType reports a body holzkube-manager will not parse.
 //
 // Reserved rather than dead: in phase 1 the CSRF preconditions reject a
 // non-JSON mutating request at 403 before a handler ever inspects the body, so
@@ -229,7 +229,7 @@ func SudoRequired() *Problem {
 	}
 }
 
-// RateLimited reports a throttled caller. holzkube delays, it never locks out:
+// RateLimited reports a throttled caller. holzkube-manager delays, it never locks out:
 // there is exactly one operator and no recovery path by design (D-08).
 func RateLimited(retryAfterSeconds int) *Problem {
 	return &Problem{
@@ -269,7 +269,7 @@ func Internal(err error) *Problem {
 // internal.unexpected, which by contract carries instance and nothing else --
 // and that detail-free record is what lands, permanently, in an audit archive
 // that D-16 gives no deletion path. The operator would be left with a 500 and a
-// request id for a failure that was never holzkube's to begin with.
+// request id for a failure that was never holzkube-manager's to begin with.
 //
 // One type, four codes: the type axis stays a taxonomy of failure kinds rather
 // than a register of dependencies, and the code stays the fine-grained

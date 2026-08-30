@@ -16,11 +16,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/holzcloud/holzkube/internal/audit"
-	"github.com/holzcloud/holzkube/internal/auth"
-	"github.com/holzcloud/holzkube/internal/httpapi"
-	"github.com/holzcloud/holzkube/internal/httpapi/handlers"
-	"github.com/holzcloud/holzkube/internal/store/fsstore"
+	"github.com/holzcloud/holzkube-manager/internal/audit"
+	"github.com/holzcloud/holzkube-manager/internal/auth"
+	"github.com/holzcloud/holzkube-manager/internal/httpapi"
+	"github.com/holzcloud/holzkube-manager/internal/httpapi/handlers"
+	"github.com/holzcloud/holzkube-manager/internal/store/fsstore"
 )
 
 // TestAuditQueryContract walks GET /api/v1/audit against the shape

@@ -152,7 +152,7 @@ function reasonText(reason: LoginReason): string {
     case 'signed-out':
       return 'You are signed out.'
     default:
-      return 'holzkube needs a session before it will show you anything.'
+      return 'holzkube-manager needs a session before it will show you anything.'
   }
 }
 

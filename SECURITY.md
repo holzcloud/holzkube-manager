@@ -1,6 +1,6 @@
 # Security policy
 
-holzkube runs outside the cluster and holds the credential that guards it. Its
+holzkube-manager runs outside the cluster and holds the credential that guards it. Its
 data directory already holds the operator's password hash, the live sessions and
 the TLS key; from phase 2 it holds the cluster CA **private keys**, at which
 point reading that directory is equivalent to root on every managed node. Take
@@ -9,7 +9,7 @@ anywhere.
 
 ## Supported versions
 
-holzkube is pre-1.0. There is no stable release series, no maintenance branch and
+holzkube-manager is pre-1.0. There is no stable release series, no maintenance branch and
 no backporting: a fix lands on `main` and goes out in the next tag. Only the most
 recent release is supported.
 
@@ -28,7 +28,7 @@ versions. Breaking changes are called out in the release notes.
 
 Report it through GitHub private security advisories:
 
-> [github.com/holzcloud/holzkube → Security → Report a vulnerability](https://github.com/holzcloud/holzkube/security/advisories/new)
+> [github.com/holzcloud/holzkube-manager → Security → Report a vulnerability](https://github.com/holzcloud/holzkube-manager/security/advisories/new)
 
 That channel is private to you and the maintainer, it keeps the discussion, the
 patch and the eventual advisory in one place, and it needs no address for either
@@ -37,14 +37,14 @@ side to publish or verify.
 
 ### What to include
 
-- The version (`holzkubed --version`) and the OS and architecture.
+- The version (`holzkube-managerd --version`) and the OS and architecture.
 - The bind address, and whether `--insecure-http` was in use.
 - Whether the instance had completed setup.
 - The steps, in order, and what they achieve.
 - **What the attacker already has when they start.** Network reach only? A
   session cookie? A browser the operator is logged into? A local account on the
   host? This matters more than a severity score, because almost everything in
-  holzkube's threat model turns on it.
+  holzkube-manager's threat model turns on it.
 
 ### What not to include
 
@@ -94,7 +94,7 @@ today still needs to know to unplug today.
 A report that turns out to be a bug but not a security bug becomes a normal
 public issue, with your agreement.
 
-**Dependency scanner output**: check first whether holzkube actually reaches the
+**Dependency scanner output**: check first whether holzkube-manager actually reaches the
 affected code. If it does, report privately. If it does not, a public issue is
 fine and gets an answer sooner.
 
@@ -104,7 +104,7 @@ One binary, one operator, one data directory. There are no roles, no second
 account and no server-side multi-tenancy, so every control below is about
 keeping a stranger out rather than about separating insiders.
 
-### What holzkube defends against
+### What holzkube-manager defends against
 
 **Being on the network at all.** The listener binds `127.0.0.1:8443`. A wider
 bind is permitted — it is a legitimate choice — but it is logged as a warning at
@@ -158,11 +158,11 @@ every other check in the chain is satisfied by the cookie itself. Changing the
 password destroys every other session but keeps the one making the change.
 
 **Cross-site request forgery.** Every mutating request must satisfy three
-conditions at once: `Content-Type: application/json`, an `X-Holzkube-CSRF: 1`
+conditions at once: `Content-Type: application/json`, an `X-Holzkube-Manager-CSRF: 1`
 header, and an `Origin`/`Sec-Fetch-Site` consistent with the request's own
 origin. A cross-origin HTML form can satisfy none of the first two, and a
 cross-origin `fetch` that sets them is preflighted — with no CORS headers sent by
-holzkube, that preflight has nowhere to succeed, so the request never arrives at
+holzkube-manager, that preflight has nowhere to succeed, so the request never arrives at
 all. `SameSite=Lax` is treated as necessary but not sufficient: it is a browser
 default that browsers have relaxed before, and it says nothing about a non-browser
 caller.
@@ -225,7 +225,7 @@ password hash, the live sessions, the TLS key and — from phase 2 — the clust
 private keys, which are enough to mint an admin `talosconfig` and wipe every
 machine in the cluster. There is no encryption at rest in this version. The
 honest mitigation is full-disk encryption plus host hygiene, and the host running
-holzkube is inside the cluster's trust boundary whether or not it is treated that
+holzkube-manager is inside the cluster's trust boundary whether or not it is treated that
 way.
 
 **A compromised host, root, or anything running as the same OS user.** Such an
@@ -278,7 +278,7 @@ get this section as the answer.
 4. **Missing headers or hardening on responses where they change nothing**, and
    scanner output with no working scenario attached. Attach the scenario and it
    becomes a report.
-5. **Weaknesses in what holzkube does not do yet.** Phase 1 is the foundation
+5. **Weaknesses in what holzkube-manager does not do yet.** Phase 1 is the foundation
    only, with no Talos interaction. Design concerns about later phases are
    welcome, and belong in a public issue.
 6. **Self-XSS, social engineering, physical access, and denial of service by the

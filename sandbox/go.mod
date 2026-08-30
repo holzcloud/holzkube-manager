@@ -1,5 +1,5 @@
 // A separate module on purpose. See README.md in this directory.
-module github.com/holzcloud/holzkube/sandbox
+module github.com/holzcloud/holzkube-manager/sandbox
 
 go 1.26
 

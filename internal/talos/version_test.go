@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/holzcloud/holzkube/internal/talos"
+	"github.com/holzcloud/holzkube-manager/internal/talos"
 )
 
 // TestCheckSupportedVersion pins the window and its edges.
@@ -52,7 +52,7 @@ func TestCheckSupportedVersion(t *testing.T) {
 			}
 			// Both halves of the reason, every time: an operator holding a node
 			// that will not connect has to be able to tell whether to move the
-			// node or to move holzkube.
+			// node or to move holzkube-manager.
 			for _, want := range []string{talos.MinSupportedVersion, talos.MaxSupportedVersion} {
 				if !strings.Contains(err.Error(), want) {
 					t.Errorf("error %q does not name the supported range bound %q", err, want)

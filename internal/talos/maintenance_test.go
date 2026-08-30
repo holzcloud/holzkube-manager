@@ -13,9 +13,9 @@ import (
 	"github.com/cosi-project/runtime/pkg/safe"
 	"github.com/siderolabs/talos/pkg/machinery/resources/hardware"
 
-	"github.com/holzcloud/holzkube/internal/model"
-	"github.com/holzcloud/holzkube/internal/talos"
-	"github.com/holzcloud/holzkube/internal/talossim"
+	"github.com/holzcloud/holzkube-manager/internal/model"
+	"github.com/holzcloud/holzkube-manager/internal/talos"
+	"github.com/holzcloud/holzkube-manager/internal/talossim"
 )
 
 // compileFailTag is the build tag that admits the fixture file which must not

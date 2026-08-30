@@ -252,7 +252,7 @@ func TestMigrateRefusesAVersionNewerThanTheBinary(t *testing.T) {
 
 	err := Run(dir)
 	if err == nil {
-		t.Fatal("Run accepted a directory written by a newer holzkube; it would downgrade records it cannot read")
+		t.Fatal("Run accepted a directory written by a newer holzkube-manager; it would downgrade records it cannot read")
 	}
 	if !errors.Is(err, ErrVersionTooNew) {
 		t.Fatalf("err = %v, want ErrVersionTooNew", err)

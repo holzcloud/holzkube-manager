@@ -7,7 +7,7 @@ package imagefactory
 // "field <name> not found in type schematic.Schematic" -- so this struct set is
 // the contract, not a convenience. A field added here that upstream does not
 // have turns every POST into a 400; a field upstream has and this does not is a
-// capability holzkube cannot offer, which is a gap rather than a bug.
+// capability holzkube-manager cannot offer, which is a gap rather than a bug.
 //
 // Field order is load-bearing. The Factory canonicalises what it receives and
 // hashes the result, so the order below is the order it emits -- owner, then
@@ -39,7 +39,7 @@ type Schematic struct {
 // Overlay names an SBC overlay image and the board within it.
 //
 // The Factory's overlay also carries a free-form `options` mapping. It is
-// deliberately not modelled: holzkube has no SBC provisioning path in this
+// deliberately not modelled: holzkube-manager has no SBC provisioning path in this
 // milestone, and an unmodelled field cannot be silently dropped from a
 // schematic that was never able to express it in the first place. Adding it
 // later is a struct field plus an emitter case, and the recorded-document tests

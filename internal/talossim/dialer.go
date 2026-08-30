@@ -8,7 +8,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 
-	"github.com/holzcloud/holzkube/internal/talos"
+	"github.com/holzcloud/holzkube-manager/internal/talos"
 )
 
 // Dialer returns a talos.Dialer that reaches this node through its in-process

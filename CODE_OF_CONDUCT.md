@@ -90,5 +90,5 @@ Conduct concerns go to <conduct@holzcloud.ch>. It reaches the maintainer and
 nobody else.
 
 Security vulnerabilities do **not** belong here — those go through
-[private security advisories](https://github.com/holzcloud/holzkube/security/advisories/new),
+[private security advisories](https://github.com/holzcloud/holzkube-manager/security/advisories/new),
 and `SECURITY.md` says why.

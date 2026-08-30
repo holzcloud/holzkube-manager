@@ -11,7 +11,7 @@ package audit
 // this package and there is no branch that passes an unrecognised value
 // through; both absences are asserted by the plan's gate greps.
 //
-// The stakes are not ordinary. holzkube holds cluster PKI, and D-16 keeps every
+// The stakes are not ordinary. holzkube-manager holds cluster PKI, and D-16 keeps every
 // rotated file forever, so a secret written here is written permanently: there
 // is no path that deletes it and no path that could delete it without breaking
 // the chain. A log that holds secrets would have to be guarded more carefully

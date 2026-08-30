@@ -20,7 +20,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/holzcloud/holzkube/internal/model"
+	"github.com/holzcloud/holzkube-manager/internal/model"
 )
 
 const (

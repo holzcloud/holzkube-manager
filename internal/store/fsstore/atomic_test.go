@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/holzcloud/holzkube/internal/store"
+	"github.com/holzcloud/holzkube-manager/internal/store"
 )
 
 // setInterrupt arms the crash hook for the duration of one test. It lives in a

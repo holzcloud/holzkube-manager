@@ -1,8 +1,8 @@
 # sandbox — a separate Go module, deliberately
 
-This directory is its own Go module (`github.com/holzcloud/holzkube/sandbox`) and
+This directory is its own Go module (`github.com/holzcloud/holzkube-manager/sandbox`) and
 is **not** part of the product build. Nothing under `sandbox/` is compiled into
-`holzkubed`, and `go list ./...` in the repository root does not report it: Go's
+`holzkube-managerd`, and `go list ./...` in the repository root does not report it: Go's
 package patterns stop at a nested `go.mod`.
 
 ## Why
@@ -15,7 +15,7 @@ image handling, and their transitive dependencies.
 
 If that arrives in the product module, three things happen at once:
 
-1. `holzkubed` grows from roughly 10 MB to something on the order of 200 MB.
+1. `holzkube-managerd` grows from roughly 10 MB to something on the order of 200 MB.
 2. The supply-chain surface of a tool that holds cluster PKI expands to every
    dependency of a container runtime, none of which the product uses.
 3. `goreleaser` cross-compilation gets slower and more fragile, because the
@@ -28,11 +28,11 @@ move.
 
 ## The rule
 
-`cmd/holzkubed` depends on `pkg/machinery` **only**. Anything that needs the
+`cmd/holzkube-managerd` depends on `pkg/machinery` **only**. Anything that needs the
 Talos root module goes here.
 
 `internal/depguard_test.go` in the root module enforces it: it walks the full
-dependency graph of `./cmd/holzkubed` and fails if any package of the Talos root
+dependency graph of `./cmd/holzkube-managerd` and fails if any package of the Talos root
 module appears. It is running now, before phase 2 adds the first Talos import, so
 the guard is in place at the moment it starts to matter rather than after.
 

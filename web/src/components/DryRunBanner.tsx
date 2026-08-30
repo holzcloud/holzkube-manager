@@ -37,7 +37,7 @@ export function DryRunBanner({ dryRun }: { dryRun: boolean }) {
     >
       <p className="font-semibold">Dry-run mode: this instance changes nothing on any node.</p>
       <p className="mt-1 opacity-90">
-        holzkubed was started with <span className="font-mono text-xs">--dry-run</span>. Every
+        holzkube-managerd was started with <span className="font-mono text-xs">--dry-run</span>. Every
         mutating call is refused in the transport before it reaches a node, so applying a
         configuration, bootstrapping, rebooting and resetting all do nothing at all. Reading is
         unaffected: everything shown here is real. Restart without the flag to make changes.

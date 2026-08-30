@@ -1,5 +1,5 @@
 name: Feature request
-description: Something holzkube should do that it does not do.
+description: Something holzkube-manager should do that it does not do.
 labels: ["enhancement"]
 body:
   - type: markdown
@@ -14,7 +14,7 @@ body:
     attributes:
       label: What are you trying to do, and what stops you?
       description: >-
-        A concrete situation rather than a category. Say which part of holzkube
+        A concrete situation rather than a category. Say which part of holzkube-manager
         you were in when you hit it.
     validations:
       required: true
@@ -34,7 +34,7 @@ body:
     attributes:
       label: Roadmap area
       description: >-
-        holzkube is built in phases, and the sidebar names them: an area marked
+        holzkube-manager is built in phases, and the sidebar names them: an area marked
         "Coming in phase N" is already planned. If your request belongs to one
         of those, say which. Being scheduled for a later phase is not a
         rejection. "Not sure" is a fine answer.

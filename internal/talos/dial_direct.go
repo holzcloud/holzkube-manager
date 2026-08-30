@@ -25,7 +25,7 @@ const ApidPort = 50000
 const probeDialTimeout = 2 * time.Second
 
 // NewDirectDialer returns the Dialer that reaches a node over plain TCP, the
-// way holzkube reaches machines today.
+// way holzkube-manager reaches machines today.
 //
 // port defaults to ApidPort. It is a parameter rather than a constant because
 // tests point this dialer at a simulated node on an ephemeral port, and because

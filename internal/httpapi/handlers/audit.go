@@ -6,8 +6,8 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/holzcloud/holzkube/internal/audit"
-	"github.com/holzcloud/holzkube/internal/httpapi"
+	"github.com/holzcloud/holzkube-manager/internal/audit"
+	"github.com/holzcloud/holzkube-manager/internal/httpapi"
 )
 
 // maxActionLen bounds the action filter. The token is a short dotted name; a

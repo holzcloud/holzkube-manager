@@ -14,10 +14,10 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/holzcloud/holzkube/internal/httpapi"
-	"github.com/holzcloud/holzkube/internal/imagefactory"
-	"github.com/holzcloud/holzkube/internal/model"
-	"github.com/holzcloud/holzkube/internal/store"
+	"github.com/holzcloud/holzkube-manager/internal/httpapi"
+	"github.com/holzcloud/holzkube-manager/internal/imagefactory"
+	"github.com/holzcloud/holzkube-manager/internal/model"
+	"github.com/holzcloud/holzkube-manager/internal/store"
 )
 
 // versionBuckets is the answer to GET /api/v1/factory/versions.
@@ -204,7 +204,7 @@ func factoryVersions(d httpapi.Deps) http.HandlerFunc {
 		}
 
 		stable, prerelease := imagefactory.SplitVersions(versions)
-		// A list with no stable version at all is an upstream answer holzkube will
+		// A list with no stable version at all is an upstream answer holzkube-manager will
 		// not act on, not an empty selection: silently promoting a release
 		// candidate is what FACT-05 exists to prevent.
 		newest, err := imagefactory.NewestStable(versions)
@@ -495,7 +495,7 @@ func schematicAssets(d httpapi.Deps) http.HandlerFunc {
 		// registry, and their only failure is a validation error about the
 		// request itself, already handled. By the time resolution runs, four
 		// correct references exist. Discarding them because a fifth could not be
-		// obtained is a denial of service holzkube inflicts on itself, and it is
+		// obtained is a denial of service holzkube-manager inflicts on itself, and it is
 		// the branch an operator most often meets through a slow registry rather
 		// than through a version that genuinely has no installer (02-UAT.md
 		// G-02-15). So the installer alone is marked unresolved, carrying the
@@ -600,7 +600,7 @@ func (in schematicInput) validate() *httpapi.Problem {
 }
 
 // refuseUnrepresentable appends a field error for every operator-supplied
-// scalar in the request that holzkube will not carry.
+// scalar in the request that holzkube-manager will not carry.
 //
 // It asks imagefactory.NotRepresentableReason rather than restating the rule.
 // That function is the single statement of which scalars survive serialisation,
@@ -684,7 +684,7 @@ func (in schematicInput) meta() []model.MetaValue {
 
 // assetRequest reads the asset query parameters.
 //
-// arch is required and has no default. holzkube is developed on arm64 and
+// arch is required and has no default. holzkube-manager is developed on arm64 and
 // targets amd64, so a defaulted architecture is a bug that only ever appears on
 // someone else's machine (FACT-03). The record now carries an architecture of
 // its own (model.Schematic.Arch) and it is deliberately not read here: that
@@ -720,7 +720,7 @@ func assetRequest(r *http.Request, rec model.Schematic) (imagefactory.AssetReque
 	}
 	if !platform.Valid() {
 		return imagefactory.AssetRequest{}, httpapi.Validation(
-			"The platform is not one holzkube builds for.",
+			"The platform is not one holzkube-manager builds for.",
 			httpapi.FieldError{Field: "platform", Reason: "must be metal"})
 	}
 
@@ -812,7 +812,7 @@ func readBody(w http.ResponseWriter, r *http.Request) ([]byte, *httpapi.Problem)
 // escape and a byte sequence that is not valid UTF-8 are REFUSED with a 400,
 // deterministically, and are never repaired. The alternative -- accept the
 // U+FFFD encoding/json substitutes and carry on -- is the one thing every other
-// decision on this route rules out: holzkube reports and refuses, it does not
+// decision on this route rules out: holzkube-manager reports and refuses, it does not
 // silently rewrite an operator's value into something they did not write
 // (T-02-67). A schematic stored under a name its author would not recognise,
 // with an id computed over a character they never sent, is worse than a 400.
@@ -850,7 +850,7 @@ func rawBodyRefusal(raw []byte) *httpapi.Problem {
 	}
 
 	return httpapi.Validation(
-		"The request body carries text holzkube will not repair, so the schematic was not created.",
+		"The request body carries text holzkube-manager will not repair, so the schematic was not created.",
 		fieldErr)
 }
 
@@ -948,7 +948,7 @@ func hexQuad(b []byte) (rune, bool) {
 // That path has two kinds of failure with two different owners, and the split is
 // the whole point of this function.
 //
-// A value holzkube's own canonical serialiser will not render is the operator's
+// A value holzkube-manager's own canonical serialiser will not render is the operator's
 // input. It is raised by Schematic.ID() before the catalog is fetched and before
 // any POST, so no request was made, nothing is known about the Factory, and no
 // retry can help: it is a 400 naming the field. The 18ms 502 recorded in
@@ -984,7 +984,7 @@ func createProblem(err error) *httpapi.Problem {
 			fieldErr.Field = field
 		}
 		return httpapi.Validation(
-			"The schematic carries a value holzkube cannot serialise, so it was never sent to the Image Factory.",
+			"The schematic carries a value holzkube-manager cannot serialise, so it was never sent to the Image Factory.",
 			fieldErr)
 	}
 

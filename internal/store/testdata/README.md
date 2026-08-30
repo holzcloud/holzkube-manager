@@ -10,10 +10,10 @@ writes `VERSION` and may create `backups/`.
 |---|---|---|
 | `version-current/` | `VERSION` = `CurrentVersion` | `Run` is a no-op: no backup, no rewrite. Upgrading a binary that changed nothing must not churn the operator's data directory. |
 | `version-previous/` | `VERSION` = `0` | Refusal to start on a version no release ever wrote. `readVersion` rejects it rather than passing it to the migration loop, which used to skip every step and then stamp the directory as fully migrated. |
-| `version-future/` | `VERSION` = `CurrentVersion + 1` | Refusal to start. A newer holzkube wrote this directory; an older binary that "helpfully" proceeded would silently downgrade records it does not understand. Nothing is written and no backup is created. |
+| `version-future/` | `VERSION` = `CurrentVersion + 1` | Refusal to start. A newer holzkube-manager wrote this directory; an older binary that "helpfully" proceeded would silently downgrade records it does not understand. Nothing is written and no backup is created. |
 | `version-garbage/` | `VERSION` = `not-a-number` | Refusal to guess. An unreadable version is not version 0 and not the current version; either assumption risks running the wrong migrations against real data. |
 | `version-1/` | `VERSION` = `1`, one user record | The 1 -> 2 migration under the real `Run`: the `schematics/` directory is created, the existing record survives, and the pre-migration tarball does *not* contain `schematics/` — which is what proves the backup was taken before the migration ran rather than after. |
-| `legacy-no-version/` | no `VERSION`, one user record | A data directory written by holzkube before `VERSION` existed (phase 1, plan 01). It is by definition at version 1, not version 0. Since phase 2 that makes it one version behind, so it is migrated and backed up like any other version-1 directory. |
+| `legacy-no-version/` | no `VERSION`, one user record | A data directory written by holzkube-manager before `VERSION` existed (phase 1, plan 01). It is by definition at version 1, not version 0. Since phase 2 that makes it one version behind, so it is migrated and backed up like any other version-1 directory. |
 
 An empty data directory has no fixture: `t.TempDir()` already is one. It is the
 case where `Run` writes `VERSION` and deliberately creates no backup, because

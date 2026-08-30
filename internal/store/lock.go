@@ -14,18 +14,18 @@ const (
 	// LockFileName is the flock target inside the data directory. It is
 	// exported so that the permission guard and the backup writer can name it
 	// without re-deriving the string.
-	LockFileName = "holzkube.lock"
+	LockFileName = "holzkube-manager.lock"
 
 	lockFilePerm = 0o600
 )
 
 // AcquireProcessLock takes an exclusive, non-blocking flock on
-// <dir>/holzkube.lock and records the calling pid in it.
+// <dir>/holzkube-manager.lock and records the calling pid in it.
 //
 // This is the outermost of the three layers of concurrency control. The
 // per-entity mutex and the rev compare-and-swap protect a data directory from
 // the goroutines of one process; only the flock protects it from a second
-// process. Two holzkubed instances on one directory would interleave writes
+// process. Two holzkube-managerd instances on one directory would interleave writes
 // that each believe they hold the current revision, which no amount of
 // in-process locking can detect.
 //

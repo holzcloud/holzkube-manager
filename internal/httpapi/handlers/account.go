@@ -4,8 +4,8 @@ import (
 	"errors"
 	"net/http"
 
-	"github.com/holzcloud/holzkube/internal/auth"
-	"github.com/holzcloud/holzkube/internal/httpapi"
+	"github.com/holzcloud/holzkube-manager/internal/auth"
+	"github.com/holzcloud/holzkube-manager/internal/httpapi"
 )
 
 type changePasswordRequest struct {
@@ -15,7 +15,7 @@ type changePasswordRequest struct {
 
 // AccountRoutes serves the operator's own account.
 //
-// POST /api/v1/account/password is the first Destructive route in holzkube and
+// POST /api/v1/account/password is the first Destructive route in holzkube-manager and
 // the proof of the pattern every later phase depends on (D-06): the flag is set
 // here, on the route, and the middleware reads it. Phase 6's reboot, shutdown
 // and reset and phase 9's etcd member removal hang off the same marking, so the

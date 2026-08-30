@@ -54,7 +54,7 @@ func Guard(dir string) error {
 					"%s is mode %04o, want 0600", p, mode.Perm()))
 			}
 		default:
-			// A symlink or device node in a holzkube data directory is not a
+			// A symlink or device node in a holzkube-manager data directory is not a
 			// permission problem, it is a shape problem: it can point anywhere.
 			violations = append(violations, fmt.Sprintf(
 				"%s is not a regular file or directory (%s)", p, mode.Type()))

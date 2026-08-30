@@ -6,7 +6,7 @@
 # dependency in this project.
 version: 2
 
-project_name: holzkube
+project_name: holzkube-manager
 
 before:
   hooks:
@@ -17,9 +17,9 @@ before:
     - npm --prefix web run build
 
 builds:
-  - id: holzkubed
-    main: ./cmd/holzkubed
-    binary: holzkubed
+  - id: holzkube-managerd
+    main: ./cmd/holzkube-managerd
+    binary: holzkube-managerd
     env:
       - CGO_ENABLED=0
     flags:
@@ -33,7 +33,7 @@ builds:
       - amd64
       - arm64
     ignore:
-      # Intel macOS is not a target: holzkube runs beside the cluster, and the
+      # Intel macOS is not a target: holzkube-manager runs beside the cluster, and the
       # Apple hosts that do so are arm64.
       - goos: darwin
         goarch: amd64
@@ -41,7 +41,7 @@ builds:
 archives:
   - id: default
     ids:
-      - holzkubed
+      - holzkube-managerd
     formats:
       - tar.gz
     name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"

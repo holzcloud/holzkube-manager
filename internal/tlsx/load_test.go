@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/holzcloud/holzkube/internal/config"
+	"github.com/holzcloud/holzkube-manager/internal/config"
 )
 
 func mustGenerate(t *testing.T) (certPath, keyPath string) {

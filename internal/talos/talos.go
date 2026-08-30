@@ -1,4 +1,4 @@
-// Package talos defines holzkube's transport seam to Talos machines.
+// Package talos defines holzkube-manager's transport seam to Talos machines.
 //
 // The interface is deliberately identity-shaped and never address-shaped:
 // everything above this package speaks Target{Cluster, Machine}, never
@@ -21,7 +21,7 @@
 // TestNoAddressAboveTheSeam in seam_test.go enforces both.
 //
 // There are two seams here, not one, because a tunnel inverts the direction of
-// contact. Today holzkube finds nodes by scanning outward; with SideroLink the
+// contact. Today holzkube-manager finds nodes by scanning outward; with SideroLink the
 // nodes register inward. Dialer covers "how do I talk to a node I know about";
 // DiscoverySource covers "how do I learn a node exists". A design with only the
 // first would have to be reopened to retrofit the second.
@@ -34,7 +34,7 @@ import (
 
 	"google.golang.org/grpc"
 
-	"github.com/holzcloud/holzkube/internal/model"
+	"github.com/holzcloud/holzkube-manager/internal/model"
 )
 
 var (
@@ -110,11 +110,11 @@ type Creds struct {
 
 // Identity is what a cheap probe learns about a machine without configuring it.
 //
-// Machine is holzkube's own identifier and is never the peer's to choose.
+// Machine is holzkube-manager's own identifier and is never the peer's to choose.
 // Everything else on this type is read off the certificate the peer presented
 // on a connection that verified nothing -- maintenance mode has no cluster CA,
 // and Creds.Fingerprint is not yet pinned (T-02-27) -- so it is what something
-// answering on the apid port said about itself, and not a fact holzkube has
+// answering on the apid port said about itself, and not a fact holzkube-manager has
 // checked. Hostname is bounded and character-checked where it is harvested;
 // Maintenance is a single bit, which is the whole of what bounds it. Neither
 // is a basis for a trust decision until pinning lands.

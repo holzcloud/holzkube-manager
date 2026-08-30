@@ -5,14 +5,14 @@ import (
 	"time"
 )
 
-// The login delay is holzkube's only answer to guessing, and it is deliberately
+// The login delay is holzkube-manager's only answer to guessing, and it is deliberately
 // the weaker-sounding of the two available answers.
 //
 // D-08: repeated failures make the next attempt wait, the wait doubles, and it
 // stops growing at half a minute. There is no state that survives the wait --
 // no counter that has to be cleared by hand, no flag that stops a login from
 // being possible, no administrative path back. That is not an omission and it
-// must not be "fixed" later: holzkube has exactly one operator, so any state
+// must not be "fixed" later: holzkube-manager has exactly one operator, so any state
 // that can refuse them is a state they can be stranded in, and every mechanism
 // for getting out of it is a second way in for somebody else. The attacker's
 // cost comes from here plus argon2id's quarter second per attempt; the

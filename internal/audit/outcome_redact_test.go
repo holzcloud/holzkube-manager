@@ -14,7 +14,7 @@ func TestOutcomeCauseRedactsFreeText(t *testing.T) {
 		{"taxonomy code", "sudo.required", "sudo.required"},
 		{"status fallback", "http.428", "http.428"},
 		{"dashed code", "csrf.precondition-unmet", "csrf.precondition-unmet"},
-		{"filesystem path", "open /home/holz/.local/share/holzkube/x: no such file", RedactedMarker},
+		{"filesystem path", "open /home/holz/.local/share/holzkube-manager/x: no such file", RedactedMarker},
 		{"store message", "store: revision conflict", RedactedMarker},
 		{"empty", "", RedactedMarker},
 		{"uppercase", "Sudo.Required", RedactedMarker},

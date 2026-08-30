@@ -28,7 +28,7 @@
 // The client is hand-rolled over net/http rather than using
 // siderolabs/image-factory (D-01): that module requires machinery at a
 // v1.14.0-rc.2 pseudo-version and lists the Talos root module among its direct
-// requires, which would move holzkube off its pin and pull the root module into
+// requires, which would move holzkube-manager off its pin and pull the root module into
 // a graph the package-level dependency guard does not cover.
 package imagefactory
 
@@ -56,7 +56,7 @@ var (
 	ErrSchematicNotBuildable = errors.New("imagefactory: schematic is not buildable for this version and architecture")
 
 	// ErrUpstreamUnavailable reports that the Factory did not answer, answered
-	// with a status holzkube will not act on, or answered something it will not
+	// with a status holzkube-manager will not act on, or answered something it will not
 	// decode.
 	//
 	// Retryable, unlike the two above: it says nothing about the request, only

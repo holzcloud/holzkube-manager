@@ -9,7 +9,7 @@ import { Toaster as Sonner, type ToasterProps } from 'sonner'
 import { useTheme } from '@/hooks/useTheme'
 
 const Toaster = ({ ...props }: ToasterProps) => {
-  // shadcn ships this wired to next-themes. holzkube has its own two-value
+  // shadcn ships this wired to next-themes. holzkube-manager has its own two-value
   // theme (D-11) and does not carry a second theming layer, so the copy in
   // this repository reads ours instead. This is what D-12 buys: the component
   // is source, not a dependency with an opinion.

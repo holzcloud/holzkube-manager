@@ -5,7 +5,7 @@ blank_issues_enabled: false
 
 contact_links:
   - name: Report a security vulnerability
-    url: https://github.com/holzcloud/holzkube/security/advisories/new
+    url: https://github.com/holzcloud/holzkube-manager/security/advisories/new
     about: >-
-      Privately, never as an issue. holzkube holds cluster PKI, so a public
+      Privately, never as an issue. holzkube-manager holds cluster PKI, so a public
       report is a working attack against every running instance.

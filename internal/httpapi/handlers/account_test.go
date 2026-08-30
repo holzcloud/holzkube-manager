@@ -16,13 +16,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/holzcloud/holzkube/internal/audit"
-	"github.com/holzcloud/holzkube/internal/auth"
-	"github.com/holzcloud/holzkube/internal/httpapi"
-	"github.com/holzcloud/holzkube/internal/httpapi/handlers"
-	"github.com/holzcloud/holzkube/internal/imagefactory"
-	"github.com/holzcloud/holzkube/internal/store/fsstore"
-	"github.com/holzcloud/holzkube/internal/talos"
+	"github.com/holzcloud/holzkube-manager/internal/audit"
+	"github.com/holzcloud/holzkube-manager/internal/auth"
+	"github.com/holzcloud/holzkube-manager/internal/httpapi"
+	"github.com/holzcloud/holzkube-manager/internal/httpapi/handlers"
+	"github.com/holzcloud/holzkube-manager/internal/imagefactory"
+	"github.com/holzcloud/holzkube-manager/internal/store/fsstore"
+	"github.com/holzcloud/holzkube-manager/internal/talos"
 )
 
 const (
@@ -31,7 +31,7 @@ const (
 	newPass  = "a-completely-different-passphrase"
 )
 
-// server is the whole object graph cmd/holzkubed builds, over a throwaway data
+// server is the whole object graph cmd/holzkube-managerd builds, over a throwaway data
 // directory. Password change is only observable through the full chain -- the
 // sudo gate lives in middleware, not in the handler -- so the test has to drive
 // the real thing rather than a handler in isolation.
@@ -161,7 +161,7 @@ func (c *client) do(method, path string, body any, opts ...reqOpt) (*http.Respon
 		c.t.Fatalf("new request: %v", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-Holzkube-CSRF", "1")
+	req.Header.Set("X-Holzkube-Manager-CSRF", "1")
 	for _, o := range opts {
 		o(req)
 	}
@@ -554,7 +554,7 @@ func TestMutatingRequestWithoutTheCSRFHeaderIs403(t *testing.T) {
 	c.setup()
 
 	resp, raw := c.do(http.MethodPost, "/api/v1/auth/logout", map[string]string{},
-		func(r *http.Request) { r.Header.Del("X-Holzkube-CSRF") })
+		func(r *http.Request) { r.Header.Del("X-Holzkube-Manager-CSRF") })
 	if resp.StatusCode != http.StatusForbidden {
 		t.Fatalf("got %d, want 403 (body: %s)", resp.StatusCode, raw)
 	}
@@ -576,7 +576,7 @@ func TestReadingRequestNeedsNoCSRFHeader(t *testing.T) {
 
 	resp, raw := c.do(http.MethodGet, "/api/v1/system/status", nil,
 		func(r *http.Request) {
-			r.Header.Del("X-Holzkube-CSRF")
+			r.Header.Del("X-Holzkube-Manager-CSRF")
 			r.Header.Del("Content-Type")
 		})
 	if resp.StatusCode != http.StatusOK {

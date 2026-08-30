@@ -24,7 +24,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/holzcloud/holzkube/internal/imagefactory"
+	"github.com/holzcloud/holzkube-manager/internal/imagefactory"
 )
 
 // registryAnswer is one row of the taxonomy: a status the Factory or the

@@ -21,7 +21,7 @@ import { useSyncExternalStore } from 'react'
  * reflects them.
  */
 
-export const THEME_STORAGE_KEY = 'holzkube.theme'
+export const THEME_STORAGE_KEY = 'holzkube-manager.theme'
 
 export type Theme = 'dark' | 'light'
 

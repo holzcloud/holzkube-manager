@@ -1,4 +1,4 @@
-# holzkube API contract
+# holzkube-manager API contract
 
 **This document is binding.** The five wave-2 plans of phase 1 work against it
 in parallel without further coordination, and later phases extend it rather
@@ -42,7 +42,7 @@ the first is retryable, the second is not.
 `upstream` exists because `internal` carries no detail by contract. Without it,
 an unreachable node and an unreachable Factory are both anonymous 500s in an
 archive that D-16 never deletes, and the operator is shown a request id for a
-failure that was never holzkube's.
+failure that was never holzkube-manager's.
 
 ### What a `type` is, and what it is not
 
@@ -52,7 +52,7 @@ none is promised. That is a property a URN makes obvious and an https URL
 actively misrepresented, which is why the taxonomy is rooted at a URN and not at
 a vendor domain.
 
-It is also **deployment-independent**. Every installation of holzkube emits the
+It is also **deployment-independent**. Every installation of holzkube-manager emits the
 same thirteen types, and the base is not configurable: not by flag, not by
 environment variable, not by build tag. A per-deployment base was considered and
 rejected, because two installations emitting different `type` values for the
@@ -202,7 +202,7 @@ must satisfy **all three** conditions simultaneously. Failing any one gives
 
 1. `Content-Type: application/json`, optionally with parameters
    (`; charset=utf-8` is accepted).
-2. `X-Holzkube-CSRF: 1` — the value is checked, not just the header's presence.
+2. `X-Holzkube-Manager-CSRF: 1` — the value is checked, not just the header's presence.
    Any other value is a refusal, so a client cannot drift to `true` and only
    discover it later.
 3. An `Origin` / `Sec-Fetch-Site` consistent with our own origin:
@@ -420,7 +420,7 @@ GET /api/v1/auth/me
 ```
 
 `dry_run` reports whether this process was started with `--dry-run` (or
-`HOLZKUBE_DRY_RUN=true`). It is a statement about the transport, not about the
+`HOLZKUBE_MANAGER_DRY_RUN=true`). It is a statement about the transport, not about the
 UI: while it is `true`, every RPC the deadline class table classifies as a
 mutation is refused by a gRPC client interceptor on the one connect path both
 Talos client types are built on, before the call reaches the wire. Nothing is
@@ -452,7 +452,7 @@ A wave-2 plan adds a route **without touching `router.go`**:
    `internal/httpapi/handlers/`, returned from that file's `…Routes(deps)`
    function.
 2. If the file is new, add its `…Routes(deps)` call to the `slices.Concat` in
-   `cmd/holzkubed/main.go` — one line.
+   `cmd/holzkube-managerd/main.go` — one line.
 3. If the handler needs a dependency the composition root already builds, add
    **one field** to `Deps` in `router.go`, with a doc comment in the style every
    other field there has. That field is the third and last permitted `router.go`
@@ -460,7 +460,7 @@ A wave-2 plan adds a route **without touching `router.go`**:
    `router.go`.
 
 Set the new dependency **inside** the `httpapi.Deps{…}` literal in
-`cmd/holzkubed/main.go`, never afterwards. `Deps` is copied by value into every
+`cmd/holzkube-managerd/main.go`, never afterwards. `Deps` is copied by value into every
 `…Routes(deps)` call, so a field assigned after the literal is the zero value
 inside each handler closure — a nil dependency with no compile error and no
 failure until the first request.
@@ -490,7 +490,7 @@ on lands in plan 02-04. Nothing in this section is served yet.
 
 A *schematic* is an Image Factory customisation — system extensions, kernel
 arguments, META values — identified by the SHA-256 the Factory assigns to its
-own canonical rendering of the document. holzkube persists the Factory's
+own canonical rendering of the document. holzkube-manager persists the Factory's
 canonical document verbatim, not the input, because the id is the hash of
 exactly those bytes.
 
@@ -672,7 +672,7 @@ against that divergence (FACT-04).**
 }
 ```
 
-- `arch` is a **required** parameter with no default. holzkube is developed on
+- `arch` is a **required** parameter with no default. holzkube-manager is developed on
   `arm64` and targets `amd64`; a defaulted architecture is a bug that only ever
   appears on someone else's machine (FACT-03). The record carrying an `arch` of
   its own does not change this: the record describes what was *probed*, the
@@ -807,14 +807,14 @@ the taxonomy above:
 
 | Code | Meaning |
 |---|---|
-| `upstream.factory-unavailable` | the Factory did not answer, answered 5xx, or answered something holzkube will not decode. **Retryable.** |
+| `upstream.factory-unavailable` | the Factory did not answer, answered 5xx, or answered something holzkube-manager will not decode. **Retryable.** |
 | `upstream.factory-rejected` | the Factory answered and the answer was a refusal. **Not retryable**; the request or the schematic is wrong. |
 
 A schematic the Factory refuses to build is `upstream.factory-rejected`; a
 Factory that did not answer while probing is `upstream.factory-unavailable`.
 Merging them would send an operator to fix a schematic that is not broken.
 
-**Which status is which is fixed, and it is the same rule everywhere holzkube
+**Which status is which is fixed, and it is the same rule everywhere holzkube-manager
 reads a Factory or registry answer** — the ISO probe and the installer manifest
 resolution included:
 
@@ -832,7 +832,7 @@ cost of the other side of that trade is that more records finish creation with
 `probed_at` unset, which is `never probed` and is what the contract already
 requires a client not to merge with `probed and refused`.
 
-**A Factory that assigns an id holzkube did not compute is also
+**A Factory that assigns an id holzkube-manager did not compute is also
 `upstream.factory-rejected`, and `POST /api/v1/schematics` still stores the
 record before answering it.** The two halves are one rule. The Factory answered
 and a retry reproduces the identical mismatch — the canonical serialisations
@@ -842,10 +842,10 @@ And the schematic does exist upstream, under an id the Factory chose; since the
 Factory will not enumerate schematics, the stored record is the only place that
 id can ever be read back from. So the record is written, `usable` is `false` and
 `probed_at` is zero because no probe ran, and the response is the `502` rather
-than a `201` — drift in the mechanism that lets holzkube know a schematic's id
+than a `201` — drift in the mechanism that lets holzkube-manager know a schematic's id
 without a round trip is not something to report as success.
 
-**A value holzkube's own serialiser will not render is a `400`, not a `502`.**
+**A value holzkube-manager's own serialiser will not render is a `400`, not a `502`.**
 This is the exception the paragraph opening this section swallows. Before any
 request is made, `POST /api/v1/schematics` computes the schematic id locally, and
 that computation refuses a scalar it cannot render the way the Factory would.
@@ -911,9 +911,9 @@ so a `😀` is refused for being above `U+FFFD` and never for its encoding.
 **The refusal set is a floor, not a ceiling, and it is derived from a
 measurement rather than from a reading of the upstream emitter.** The
 measurement is an opt-in test in the repository —
-`HOLZKUBE_FACTORY_LIVE=1 go test ./internal/imagefactory/ -run TestLiveCanonical` —
+`HOLZKUBE_MANAGER_FACTORY_LIVE=1 go test ./internal/imagefactory/ -run TestLiveCanonical` —
 which builds each candidate scalar into a schematic, POSTs it, and compares
-holzkube's canonical document and id against the ones `factory.talos.dev`
+holzkube-manager's canonical document and id against the ones `factory.talos.dev`
 returns. The rules above are the classes it observed diverging; every one of
 them cites the rows that proved it.
 
@@ -950,7 +950,7 @@ at all, so both are stated here rather than left to the handler.
 **The audit allowlist for `schematic.create` permits `name` and
 `talos_version`, and nothing else.** `kernel_args`, `meta`, `extensions` and
 `canonical` are redacted. The Image Factory itself refuses to enumerate
-schematics precisely because kernel arguments may carry secrets, and holzkube's
+schematics precisely because kernel arguments may carry secrets, and holzkube-manager's
 archive is append-only and kept forever (D-16) with no deletion path — so one
 kernel argument written in clear is written in clear permanently. The allowlist
 default is redact-everything, which means this entry can only be got wrong by

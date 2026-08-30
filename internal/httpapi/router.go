@@ -1,4 +1,4 @@
-// Package httpapi is holzkube's HTTP surface: the route table, the RFC 9457
+// Package httpapi is holzkube-manager's HTTP surface: the route table, the RFC 9457
 // error taxonomy, the middleware wiring and the embedded UI.
 package httpapi
 
@@ -11,12 +11,12 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/holzcloud/holzkube/internal/audit"
-	"github.com/holzcloud/holzkube/internal/auth"
-	"github.com/holzcloud/holzkube/internal/httpapi/middleware"
-	"github.com/holzcloud/holzkube/internal/imagefactory"
-	"github.com/holzcloud/holzkube/internal/store"
-	"github.com/holzcloud/holzkube/internal/talos"
+	"github.com/holzcloud/holzkube-manager/internal/audit"
+	"github.com/holzcloud/holzkube-manager/internal/auth"
+	"github.com/holzcloud/holzkube-manager/internal/httpapi/middleware"
+	"github.com/holzcloud/holzkube-manager/internal/imagefactory"
+	"github.com/holzcloud/holzkube-manager/internal/store"
+	"github.com/holzcloud/holzkube-manager/internal/talos"
 )
 
 // Route is one entry in the route table.

@@ -19,8 +19,8 @@ import (
 
 	"github.com/alexedwards/scs/v2"
 
-	"github.com/holzcloud/holzkube/internal/model"
-	"github.com/holzcloud/holzkube/internal/store"
+	"github.com/holzcloud/holzkube-manager/internal/model"
+	"github.com/holzcloud/holzkube-manager/internal/store"
 )
 
 // ErrInvalidCredentials is returned for an unknown username, a wrong password
@@ -67,7 +67,7 @@ func New(st store.Store, lifetime time.Duration) (*Service, error) {
 // "no such user" path costs the same as the "wrong password" path. Without it
 // the response time alone enumerates accounts.
 var decoyHash = sync.OnceValue(func() string {
-	h, err := Hash("holzkube-decoy-password-never-valid")
+	h, err := Hash("holzkube-manager-decoy-password-never-valid")
 	if err != nil {
 		return ""
 	}

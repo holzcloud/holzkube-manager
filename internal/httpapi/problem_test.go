@@ -15,11 +15,11 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/holzcloud/holzkube/internal/httpapi"
-	"github.com/holzcloud/holzkube/internal/httpapi/middleware"
+	"github.com/holzcloud/holzkube-manager/internal/httpapi"
+	"github.com/holzcloud/holzkube-manager/internal/httpapi/middleware"
 )
 
-// taxonomy is the closed set of problems holzkube can produce. Every entry is
+// taxonomy is the closed set of problems holzkube-manager can produce. Every entry is
 // exercised by TestProblemTaxonomy below; an entry added to problem.go without
 // a line here is an entry nobody checked.
 var taxonomy = []struct {
@@ -81,7 +81,7 @@ func TestProblemTaxonomy(t *testing.T) {
 				t.Errorf("type %q is not rooted at the taxonomy base %s", gotType, httpapi.ProblemBaseURI)
 			}
 			if gotType == "about:blank" {
-				t.Errorf("about:blank is never a valid holzkube problem type")
+				t.Errorf("about:blank is never a valid holzkube-manager problem type")
 			}
 
 			if title, _ := body["title"].(string); strings.TrimSpace(title) == "" {
@@ -116,7 +116,7 @@ func TestProblemRateLimitedSetsRetryAfter(t *testing.T) {
 // reconnaissance for whoever is probing it.
 func TestProblemInternalLeaksNothing(t *testing.T) {
 	const (
-		secretPath = "/Users/holz/.local/share/holzkube/users/a1b2c3.json"
+		secretPath = "/Users/holz/.local/share/holzkube-manager/users/a1b2c3.json"
 		goErrText  = "open " + secretPath + ": permission denied"
 	)
 	cause := fmt.Errorf("load user record: %w", fmt.Errorf("%s", goErrText))
@@ -131,7 +131,7 @@ func TestProblemInternalLeaksNothing(t *testing.T) {
 		goErrText,
 		"permission denied",
 		"load user record",
-		".local/share/holzkube",
+		".local/share/holzkube-manager",
 		"users/",
 	} {
 		if strings.Contains(body, forbidden) {
@@ -329,7 +329,7 @@ var typeTaxonomy = []struct {
 //
 // The taxonomy is deployment-independent by construction: there is no flag, no
 // environment variable and no build tag that moves it, so this literal is the
-// value every installation of holzkube emits. Asserting it here means a
+// value every installation of holzkube-manager emits. Asserting it here means a
 // re-rooting is a decision someone takes deliberately in two places, not a
 // character someone changes in one.
 func TestProblemTaxonomyIsRootedAtTheURN(t *testing.T) {
