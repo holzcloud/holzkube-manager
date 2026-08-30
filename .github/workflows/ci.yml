@@ -55,6 +55,21 @@ jobs:
       - name: Lint web
         run: npm --prefix web run lint
 
+      # `npm --prefix web exec`, not a globally installed playwright: this runs
+      # the copy web/package-lock.json pins, so the browser it downloads is the
+      # one that version expects and the two cannot drift apart. It is the same
+      # command the local failure message names, for the reason at the top of
+      # this file -- a check only CI can run is a check nobody can reproduce, so
+      # this step exists to make the two environments the same rather than to add
+      # a gate that only lives here.
+      #
+      # The `--` is load-bearing. Without it npm eats `--with-deps` as one of its
+      # own options and the step exits 0 having installed nothing, so the failure
+      # would surface as a confusing browser-launch error in the step after this
+      # one rather than here.
+      - name: Install the browser the frontend tests measure in
+        run: npm --prefix web exec -- playwright install --with-deps chromium
+
       - name: Test web
         run: npm --prefix web test
 
