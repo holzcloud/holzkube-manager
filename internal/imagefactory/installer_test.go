@@ -975,3 +975,124 @@ func TestInstallerImageDoesNotReStampAReQuestionItsCallerAbandoned(t *testing.T)
 			"context does not reach the registry", n, asked)
 	}
 }
+
+// TestInstallerNameCheckDoesNotReadAFallbackAsAnObservation is the offline
+// proof behind G-02-18, and the reason checkInstallerName is a named helper
+// rather than four lines inside a live subtest.
+//
+// The defect it pins down is a test that passes when it should fail.
+// resolveInstallerRepo returns ErrUpstreamUnavailable only when *no* candidate
+// answered 2xx, so a partial throttle -- the preferred name silent, the legacy
+// one answering -- produces a nil error, a usable reference and a warning. The
+// live drift guard tested errors.Is(err, ErrUpstreamUnavailable), which never
+// fires in that state, and then asserted only that the two references differ
+// and that the SecureBoot one names a SecureBoot repository. Both hold for the
+// fallback. Nothing asserted which name resolved, and the one edit that would
+// have closed it went the other way: cffa851 turned `plain, err :=` into
+// `plain, _, err :=`.
+//
+// A guard whose failure mode nobody has reproduced is not a guard, so this
+// reproduces it: setRepoUnreachable makes the preferred candidate silent at the
+// transport level, which is the offline shape of the throttle WINDOWS entry 5
+// records. No network is touched.
+func TestInstallerNameCheckDoesNotReadAFallbackAsAnObservation(t *testing.T) {
+	t.Run("a name reached past a silent candidate is not an observation", func(t *testing.T) {
+		fake := newFakeFactory(t)
+		fake.setRepoUnreachable(preferredInstallerRepo)
+		client := newClient(t, fake.URL)
+
+		ref, warnings, err := client.InstallerImage(t.Context(), installerRequest(installerModernVersion))
+		if err != nil {
+			t.Fatalf("the fallback produced an error rather than a warning: %v", err)
+		}
+
+		got := checkInstallerName(ref, warnings, preferredInstallerRepo)
+		if got.outcome != installerNameNotObserved {
+			t.Errorf("checkInstallerName reported outcome %d for the reference %q, want "+
+				"installerNameNotObserved (%d).\nThe preferred candidate was never heard from, so "+
+				"this answer says which name was reachable and not which name the registry serves. "+
+				"Reporting it as anything else is G-02-18.\nreason: %s",
+				got.outcome, ref, installerNameNotObserved, got.reason)
+		}
+		if !strings.Contains(got.reason, imagefactory.WarningInstallerRepoFallbackUnverified) {
+			t.Errorf("the non-observation does not name the warning code that produced it: %q", got.reason)
+		}
+	})
+
+	t.Run("the same answer served from the cache is still not an observation", func(t *testing.T) {
+		// storeInstallerRepo keeps the warning on the cached entry, so a guard
+		// that is only honest on the cold path is honest once per process.
+		fake := newFakeFactory(t)
+		fake.setRepoUnreachable(preferredInstallerRepo)
+		client := newClient(t, fake.URL)
+		req := installerRequest(installerModernVersion)
+
+		if _, _, err := client.InstallerImage(t.Context(), req); err != nil {
+			t.Fatalf("seeding the provisional entry: %v", err)
+		}
+		ref, warnings, err := client.InstallerImage(t.Context(), req)
+		if err != nil {
+			t.Fatalf("the cached answer produced an error: %v", err)
+		}
+		if n := fake.count("GET /v2/" + preferredInstallerRepo + "/manifests/" + installerModernVersion); n != 1 {
+			t.Fatalf("the never-ruled-out candidate was asked %d times, want 1 -- the second "+
+				"answer was not served from the cache, so this subtest did not test what it says", n)
+		}
+
+		got := checkInstallerName(ref, warnings, preferredInstallerRepo)
+		if got.outcome != installerNameNotObserved {
+			t.Errorf("a cached provisional answer reported outcome %d, want installerNameNotObserved "+
+				"(%d): %s", got.outcome, installerNameNotObserved, got.reason)
+		}
+	})
+
+	t.Run("a proven answer is an observation", func(t *testing.T) {
+		fake := newFakeFactory(t)
+		fake.setRepoUnreachable(preferredInstallerRepo)
+		client := newClientWithRetryInterval(t, fake.URL, 0)
+		req := installerRequest(installerModernVersion)
+
+		if _, warnings, err := client.InstallerImage(t.Context(), req); err != nil || len(warnings) != 1 {
+			t.Fatalf("seeding the provisional entry: err = %v, warnings = %+v", err, warnings)
+		}
+
+		// The registry comes back and the stale provisional entry is
+		// re-questioned, which promotes it: every candidate is now accounted
+		// for and the answer carries nothing.
+		fake.setRepoReachable(preferredInstallerRepo)
+		ref, warnings, err := client.InstallerImage(t.Context(), req)
+		if err != nil {
+			t.Fatalf("the re-question returned an error: %v", err)
+		}
+
+		got := checkInstallerName(ref, warnings, preferredInstallerRepo)
+		if got.outcome != installerNameResolved {
+			t.Errorf("a proven answer reported outcome %d, want installerNameResolved (%d): %s",
+				got.outcome, installerNameResolved, got.reason)
+		}
+		if got.repo != preferredInstallerRepo {
+			t.Errorf("repo = %q, want %q", got.repo, preferredInstallerRepo)
+		}
+	})
+
+	t.Run("the legacy SecureBoot name is not the preferred SecureBoot name", func(t *testing.T) {
+		// The assertion this helper replaces was
+		// strings.Contains(secure, "-secureboot/"), which "installer-secureboot"
+		// satisfies exactly as well as "metal-installer-secureboot" does. That
+		// is the whole of G-02-18's second missing bullet, and it is worth a
+		// subtest of its own because the two names are two different images
+		// (02-UAT.md G-02-13), not two spellings of one.
+		ref := "factory.talos.dev/installer-secureboot/" + schematicA + ":" + installerModernVersion
+
+		got := checkInstallerName(ref, nil, preferredSecureBootInstallerRepo)
+		if got.outcome != installerNameDrifted {
+			t.Errorf("the legacy SecureBoot name reported outcome %d against the preferred one, "+
+				"want installerNameDrifted (%d): %s", got.outcome, installerNameDrifted, got.reason)
+		}
+		if !strings.Contains(got.reason, preferredSecureBootInstallerRepo) ||
+			!strings.Contains(got.reason, "installer-secureboot") {
+			t.Errorf("the drift message does not name both the expected and the actual "+
+				"repository: %q", got.reason)
+		}
+	})
+}
