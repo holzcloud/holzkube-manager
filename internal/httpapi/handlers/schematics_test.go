@@ -4,6 +4,8 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -1350,4 +1352,115 @@ func mustCreate(t *testing.T, c *client, name string, extensions []string) strin
 		t.Fatalf("create %s: no id in %s", name, raw)
 	}
 	return got.ID
+}
+
+// refusedCodepoints is the class table the live differential produced, in the
+// vocabulary this layer speaks.
+//
+// It is a second copy of internal/imagefactory's divergingClasses, because the
+// two live in different test packages and Go has no way to share one. The copy
+// cannot drift, though, and the reason is the first half of the test below:
+// every entry here is asserted against Schematic.ID() itself before it is ever
+// POSTed. If the serialiser stops refusing one of these, this test fails at
+// that assertion rather than quietly agreeing with a stale list. Plan 02-20
+// extends the same table to name and cluster.
+var refusedCodepoints = []struct {
+	class string
+	cp    rune
+	// reason is the class name the problem body must carry. It is never the
+	// value (T-02-64).
+	reason string
+}{
+	{"C1 control", 0x0085, "control character"},
+	{"YAML line separator", 0x2028, "line separator"},
+	{"YAML paragraph separator", 0x2029, "line separator"},
+	{"byte order mark", 0xFEFF, "byte order mark"},
+	{"above the printable ceiling", 0x1F600, "above U+FFFD"},
+}
+
+// TestCreateRefusesAMeasuredDivergenceWithAFieldNamed400 is G-02-11's truth
+// asserted at the route, which is the only place it can be asserted.
+//
+// A serialiser-level suite cannot stand in for this. The claim is not "ID()
+// returns an error" but "the operator is told which of their inputs is wrong",
+// and between the two sits createProblem, whose job is to keep a local refusal
+// from being reported as somebody else's outage. U+2028 is the codepoint that
+// produced the failure live: the document holzkube emitted was invalid YAML,
+// the Factory answered 400, the client folded every non-2xx into
+// ErrUpstreamUnavailable, and the operator was shown "The Image Factory did not
+// answer usably" -- a sentence blaming a third party, telling them to retry
+// something no retry can fix, for a mistake in their own kernel argument.
+//
+// So the absence of that sentence is asserted explicitly and not inferred from
+// the status. A 400 carrying it would satisfy a status-only check, and the
+// adjacent proposition passing for the named one is the failure this whole
+// round is about.
+func TestCreateRefusesAMeasuredDivergenceWithAFieldNamed400(t *testing.T) {
+	// The sentence factoryProblem produces when the Factory did not answer.
+	const unreachableFactorySentence = "The Image Factory did not answer usably"
+
+	for _, tc := range refusedCodepoints {
+		t.Run(fmt.Sprintf("%s %U", tc.class, tc.cp), func(t *testing.T) {
+			bad := "console=" + string(tc.cp) + "ttyS0"
+
+			// The binding between this table and the serialiser's. A codepoint
+			// this layer claims is refused but the serialiser accepts would
+			// otherwise reach the Factory and be reported as an outage.
+			probe := imagefactory.Schematic{Customization: imagefactory.Customization{
+				ExtraKernelArgs: []string{bad},
+			}}
+			if _, err := probe.ID(); !errors.Is(err, imagefactory.ErrSchematicNotRepresentable) {
+				t.Fatalf("the serialiser no longer refuses %U (%v); this table and "+
+					"internal/imagefactory's divergingClasses have drifted", tc.cp, err)
+			}
+
+			s, f := schematicServer(t)
+			c := operator(t, s)
+
+			// Second of two entries, so the reported position is a real
+			// position and not the only one there was.
+			resp, raw := c.do(http.MethodPost, "/api/v1/schematics", map[string]any{
+				"name": "measured divergence", "talos_version": catalogVersion,
+				"arch": string(imagefactory.ArchAMD64), "extensions": []string{},
+				"kernel_args": []string{"quiet", bad},
+			})
+
+			if resp.StatusCode != http.StatusBadRequest {
+				t.Fatalf("got %d, want 400 (body: %s)", resp.StatusCode, raw)
+			}
+			if strings.Contains(string(raw), unreachableFactorySentence) {
+				t.Errorf("the response blamed the Image Factory for a refusal that never "+
+					"left this process: %s", raw)
+			}
+
+			p := decodeProblemWithErrors(t, raw)
+			if p.Code != "validation.failed" {
+				t.Errorf("code = %q, want validation.failed (body: %s)", p.Code, raw)
+			}
+			if len(p.Errors) != 1 {
+				t.Fatalf("errors has %d entries, want exactly one: %s", len(p.Errors), raw)
+			}
+			if p.Errors[0].Field != "kernel_args" {
+				t.Errorf("field = %q, want kernel_args", p.Errors[0].Field)
+			}
+			if !strings.Contains(p.Errors[0].Reason, "entry 2") {
+				t.Errorf("reason = %q, want the one-based entry position", p.Errors[0].Reason)
+			}
+			if !strings.Contains(p.Errors[0].Reason, tc.reason) {
+				t.Errorf("reason = %q, want it to name the class %q", p.Errors[0].Reason, tc.reason)
+			}
+			if !strings.Contains(p.Errors[0].Reason, fmt.Sprintf("%U", tc.cp)) {
+				t.Errorf("reason = %q, want the %%U rendering of the codepoint", p.Errors[0].Reason)
+			}
+			if strings.Contains(p.Errors[0].Reason, "ttyS0") {
+				t.Errorf("reason echoed the offending value: %q", p.Errors[0].Reason)
+			}
+
+			// Nothing crossed the network, so nothing about the Image Factory
+			// is being asserted (T-02-65).
+			if n := f.count("POST /schematics"); n != 0 {
+				t.Errorf("the Factory recorded %d schematic POSTs; this refusal is local", n)
+			}
+		})
+	}
 }
