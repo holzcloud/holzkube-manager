@@ -3,6 +3,7 @@ package imagefactory_test
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -376,5 +377,196 @@ func TestSchematicCanonicalIndentsFourSpaces(t *testing.T) {
 	}
 	if !strings.HasSuffix(string(doc), "\n") {
 		t.Error("the canonical document does not end in a newline")
+	}
+}
+
+// The classes TestLiveCanonical measured to diverge from factory.talos.dev.
+//
+// This is not a transcription of a list somebody wrote down. Every entry names
+// the rows of the recorded three-way table that proved it, and a class the
+// table did not prove is not here -- see 02-14-SUMMARY.md for the table itself
+// and for the classes it left unmeasured. The negative control below is the
+// other half of the same measurement: without it this table could only show
+// that refusing everything is safe.
+var divergingClasses = []struct {
+	class string
+	// reason is the substring the refusal must carry. It names the character
+	// class; it never carries the value (T-02-64).
+	reason string
+	// cps are codepoints the table classified DIVERGES.
+	cps []rune
+}{
+	{
+		// U+0080, U+0081, U+008D, U+0094 and U+009F each DIVERGES in all six
+		// position/style variants on both document paths: the Factory escapes
+		// them into "\x80console=ttyS0", so the value survives and only the id
+		// moves. U+0085 is worse and is the reason this class is refused rather
+		// than escaped -- it DIVERGES as "would not parse" in a plain scalar
+		// and as "silently altered" in a quoted one, where the Factory folded
+		// it into a space, and it was eaten outright at the end of a plain
+		// scalar. That last row is the false 409 G-02-16 recorded.
+		class:  "C1 control (U+0080-U+009F)",
+		reason: "control character",
+		cps:    []rune{0x0080, 0x0081, 0x0085, 0x008D, 0x0094, 0x009F},
+	},
+	{
+		// Five of six variants DIVERGES for each, on both paths: "would not
+		// parse" when plain, and "silently altered" when quoted, where the
+		// Factory folded the break and inserted ten spaces. U+2028 is the
+		// codepoint that produced the 502 UAT test 5(b) exists to exclude.
+		//
+		// The sixth variant -- trailing, inside an already-quoted scalar --
+		// AGREES. It is refused anyway: whether a scalar can be represented is
+		// a property of the scalar, and making it depend on where in the
+		// surrounding text the codepoint happens to sit would mean the same
+		// character is carriable or not according to its neighbours.
+		class:  "YAML line break above the C1 range",
+		reason: "line separator",
+		cps:    []rune{0x2028, 0x2029},
+	},
+	{
+		// All four measured variants DIVERGES on both paths, re-normalised:
+		// the Factory escapes the BOM and every character after it. U+FEFF sits
+		// inside YAML's printable range and is excluded from it by name, which
+		// is why no range test catches it and it needs its own clause.
+		class:  "byte order mark",
+		reason: "byte order mark",
+		cps:    []rune{0xFEFF},
+	},
+	{
+		// U+FFFE and U+FFFF DIVERGES as "would not parse"; U+1F600 and
+		// U+10FFFF DIVERGES re-normalised, escaped to "\U0001F600". U+FFFD
+		// AGREES, which is what fixes this boundary exactly rather than
+		// approximately -- and U+FDD0 AGREES too, so "non-character" is not the
+		// rule: a non-character below the ceiling round-trips.
+		class:  "above the printable ceiling U+FFFD",
+		reason: "above U+FFFD",
+		cps:    []rune{0xFFFE, 0xFFFF, 0x1F600, 0x10FFFF},
+	},
+}
+
+// TestSchematicIDRefusesEveryMeasuredDivergence is the refusal half of
+// G-02-16. Each subtest is named for the rule rather than for a codepoint,
+// because the rule is what is in the code.
+func TestSchematicIDRefusesEveryMeasuredDivergence(t *testing.T) {
+	for _, class := range divergingClasses {
+		t.Run(class.class, func(t *testing.T) {
+			for _, cp := range class.cps {
+				t.Run(fmt.Sprintf("%U", cp), func(t *testing.T) {
+					s := imagefactory.Schematic{Customization: imagefactory.Customization{
+						ExtraKernelArgs: []string{"console=ttyS0", "console=" + string(cp) + "ttyS0"},
+					}}
+					id, err := s.ID()
+					if id != "" {
+						t.Errorf("a refused schematic still produced an id: %q", id)
+					}
+					var typed *imagefactory.NotRepresentableError
+					if !errors.As(err, &typed) {
+						t.Fatalf("ID() = %q, %v; want a *NotRepresentableError", id, err)
+					}
+					if !errors.Is(err, imagefactory.ErrSchematicNotRepresentable) {
+						t.Error("the typed error no longer satisfies errors.Is against the sentinel")
+					}
+					if typed.Path != "customization.extraKernelArgs" {
+						t.Errorf("Path = %q; want customization.extraKernelArgs", typed.Path)
+					}
+					if typed.Index != 1 {
+						t.Errorf("Index = %d; want 1 -- the first bad entry in document order", typed.Index)
+					}
+					if !strings.Contains(typed.Reason, class.reason) {
+						t.Errorf("Reason = %q; want it to name the class %q", typed.Reason, class.reason)
+					}
+					// The reason names the class and the codepoint, never the
+					// value. A kernel argument can carry a secret (T-02-64).
+					if strings.Contains(typed.Reason, "ttyS0") {
+						t.Errorf("Reason echoed the offending value: %q", typed.Reason)
+					}
+					if !strings.Contains(typed.Reason, fmt.Sprintf("%U", cp)) {
+						t.Errorf("Reason = %q; want the %%U rendering of the codepoint, which is what makes it actionable", typed.Reason)
+					}
+				})
+			}
+		})
+	}
+}
+
+// TestSchematicIDRefusesAMeasuredDivergenceInAMetaValue: the differential swept
+// both document paths and found the same verdicts on each, so the refusal has
+// to name the path it happened in. A meta value reported as a kernel argument
+// sends the operator to the wrong input.
+func TestSchematicIDRefusesAMeasuredDivergenceInAMetaValue(t *testing.T) {
+	for _, class := range divergingClasses {
+		t.Run(class.class, func(t *testing.T) {
+			s := imagefactory.Schematic{Customization: imagefactory.Customization{
+				Meta: []imagefactory.MetaValue{
+					{Key: 10, Value: "fine"},
+					{Key: 11, Value: "v" + string(class.cps[0])},
+				},
+			}}
+			_, err := s.ID()
+			var typed *imagefactory.NotRepresentableError
+			if !errors.As(err, &typed) {
+				t.Fatalf("ID() = %v; want a *NotRepresentableError", err)
+			}
+			if typed.Path != "customization.meta.value" {
+				t.Errorf("Path = %q; want customization.meta.value", typed.Path)
+			}
+			if typed.Index != 1 {
+				t.Errorf("Index = %d; want 1", typed.Index)
+			}
+		})
+	}
+}
+
+// TestSchematicIDStillAcceptsWhatTheFactoryProvedItCarries is the negative
+// control, and it is the half that keeps the widening honest.
+//
+// Every codepoint here was measured AGREES in both quoting styles on both
+// document paths: the Factory's own canonical document carried holzkube's line
+// back byte for byte. So each of these ids is the hash of a rendering upstream
+// confirmed, and asserting the literal rather than merely "no error" is what
+// makes this a stability test -- a test that only checked for a nil error would
+// pass while the rendering moved underneath it, which is exactly the failure
+// WINDOWS entry 29 warns about.
+func TestSchematicIDStillAcceptsWhatTheFactoryProvedItCarries(t *testing.T) {
+	for _, tc := range []struct {
+		cp   rune
+		want string
+	}{
+		{0x00A0, "9ec2f6d3dc3a7837dc31f10c0709374a99f19fdd9ac6b80d8238d8111b166ba3"}, // no-break space
+		{0x00E4, "5c2455ed2d6f954bad82dda2c792e6bec1c589dc8235392822ff6c6d8e90470e"}, // a-umlaut
+		{0x200B, "291f583fa58bc85ad8223c5bc255fb4ad32fbfee926316b2404cfaaf6cd331de"}, // zero-width space
+		{0x202E, "27abc4abc09cd3ab81f67ed83d8bb24b1b2d0d41102a83bea599cd3e43678cfc"}, // right-to-left override
+		{0x4E2D, "2c613e9a60fb0072f63b315642f4df8a0067006315a4be897e7a0718b7181480"}, // CJK
+		{0xD7FF, "42832d54f32124aacc61c1f50531bbe98c889e167d490062999d2f18b8f1ceb6"}, // last before the surrogates
+		{0xE000, "26f35c35573dc70dce9b35f745f9e5118f72d25511a130859d5e7178863230a8"}, // first after the surrogates
+		{0xFDD0, "33d13000bbc8c52266b6212a889cffe3dcdf3ca4abf86e24d6a001dc331ef191"}, // a non-character that round-trips
+		{0xFFFD, "866118490b38801b7e08a0f4f4ae1a4926d1b74b2481140b6a306281c7e03591"}, // the printable ceiling itself
+	} {
+		t.Run(fmt.Sprintf("%U", tc.cp), func(t *testing.T) {
+			s := imagefactory.Schematic{Customization: imagefactory.Customization{
+				ExtraKernelArgs: []string{"console=" + string(tc.cp) + "ttyS0"},
+			}}
+			got, err := s.ID()
+			if err != nil {
+				t.Fatalf("ID() refused a codepoint the Factory proved it carries: %v", err)
+			}
+			if got != tc.want {
+				t.Errorf("id = %s, want %s -- the rendering of an accepted scalar moved", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestTheWellKnownIDsDidNotMove restates the two anchors here, beside the
+// widening, so that the one prohibition this change had to respect is asserted
+// in the file that made the change. Both are also pinned in tracer_test.go
+// against their recorded documents; neither literal moved.
+func TestTheWellKnownIDsDidNotMove(t *testing.T) {
+	if got := mustID(t, imagefactory.Schematic{}); got != emptySchematicID {
+		t.Errorf("empty schematic id = %s, want %s", got, emptySchematicID)
+	}
+	if got := mustID(t, goodSchematic()); got != consoleSchematicID {
+		t.Errorf("console schematic id = %s, want %s", got, consoleSchematicID)
 	}
 }
