@@ -281,11 +281,23 @@ func renderScalar(s string) string {
 // a META value, and implementing them from memory rather than from a pinned
 // observation is how a serialiser acquires a bug that only shows up as a
 // mismatched id.
-// The refused set is unchanged from the observation it was pinned against: not
-// valid UTF-8, any rune below U+0020, or U+007F. Which scalars this renders
-// decides the locally precomputed id, and the id is what FACT-06 rests on, so
-// widening or narrowing it here is a change to what holzkube believes a
-// schematic hashes to. Only the reporting changed.
+//
+// Which scalars this renders decides the locally precomputed id, and the id is
+// what FACT-06 rests on, so widening or narrowing this set is a change to what
+// holzkube believes a schematic hashes to. It was widened once, deliberately,
+// and on evidence: for years the set was "below U+0020, or U+007F", which was
+// the ASCII observation it had been pinned against, and above U+007F it was an
+// assumption nothing had ever checked. TestLiveCanonical checked it -- a
+// differential against the document and the id factory.talos.dev returns -- and
+// found 116 diverging rows across two document paths. Every clause below cites
+// the rows that proved it. A clause no row proved is not here, and what the
+// sweep never reached is written down in docs/api-contract.md rather than
+// implied away: this set is a floor, not a ceiling.
+//
+// Run the instrument before changing this function. Reasoning about upstream's
+// emitter from its source is how the assumption got here in the first place:
+//
+//	HOLZKUBE_FACTORY_LIVE=1 go test ./internal/imagefactory/ -run TestLiveCanonical -v
 //
 // The returned reason is written for an operator and names the character class,
 // never the value (T-02-64). An empty string means the scalar is representable.
@@ -294,8 +306,55 @@ func representable(s string) string {
 		return "is not valid UTF-8"
 	}
 	for _, r := range s {
-		if r < 0x20 || r == 0x7F {
+		switch {
+		// C0, DEL and C1, which are one contiguous rule and one reason.
+		// U+0000-U+001F and U+007F are the original pinned set. U+0080-U+009F
+		// is the widening: U+0080, U+0081, U+008D, U+0094 and U+009F each
+		// DIVERGES in all six variants on both paths, escaped by the Factory
+		// into "\x80console=ttyS0" so that only the id moved -- and U+0085
+		// DIVERGES worse, unparseable in a plain scalar and altered in a quoted
+		// one, where the break was folded into a space and, at the end of a
+		// plain scalar, eaten outright. That eaten row is the stored
+		// kernel_args and canonical disagreeing about what gets built, and the
+		// false 409 it collapsed into. U+00A0 AGREES, which closes this range
+		// at the top rather than guessing where it ends.
+		case r < 0x20, r >= 0x7F && r <= 0x9F:
 			return fmt.Sprintf("contains the control character %U", r)
+
+		// The two line breaks above the C1 range. Both are inside YAML's
+		// printable set, so no printability test finds them; they are refused
+		// because the Factory reads them as breaks. Each DIVERGES in five of
+		// six variants on both paths: unparseable when the scalar is plain
+		// (this is the HTTP 400 that reached the operator as "The Image Factory
+		// did not answer usably", G-02-11), and altered when it is quoted,
+		// where the fold inserted ten spaces into the value. The sixth variant,
+		// trailing inside an already-quoted scalar, AGREES and is refused
+		// anyway: representability is a property of the scalar, not of the text
+		// that happens to surround the codepoint.
+		case r == 0x2028, r == 0x2029:
+			return fmt.Sprintf("contains the line separator %U", r)
+
+		// The byte order mark. Also inside YAML's printable set and also
+		// excluded from it by name, which is why it needs a clause of its own
+		// rather than falling out of a range. All four measured variants
+		// DIVERGES on both paths: the Factory escaped the BOM and every
+		// character following it.
+		case r == 0xFEFF:
+			return fmt.Sprintf("contains the byte order mark %U", r)
+
+		// Everything above the printable ceiling. U+FFFE and U+FFFF DIVERGES
+		// unparseable; U+1F600 and U+10FFFF DIVERGES re-normalised, escaped to
+		// "\U0001F600" -- the Factory writes nothing above the BMP literally.
+		// The boundary is exact rather than approximate because U+FFFD AGREES,
+		// and it is this boundary rather than "non-characters" because U+FDD0
+		// is a non-character and AGREES too.
+		//
+		// The measurement reached this range at four points, two of them its
+		// ends. Everything between U+1F601 and U+10FFFE is refused on the
+		// strength of those two, and that extrapolation is named in the
+		// contract.
+		case r > 0xFFFD:
+			return fmt.Sprintf("contains %U, which is above U+FFFD and outside the range the Image Factory writes literally", r)
 		}
 	}
 	return ""
@@ -432,6 +491,23 @@ func looksLikeTimestamp(s string) bool {
 // verdict is computed: this package emits no flow collections, so the flow rules
 // -- which additionally forbid the comma and the brackets anywhere in a scalar --
 // would never be consulted.
+//
+// This function is deliberately unchanged by the G-02-16 widening, and the
+// measurement is the reason rather than the excuse. TestLiveCanonical produced
+// no row in which the Factory quoted a scalar this code left plain and the
+// scalar is still accepted: every codepoint above U+007F it measured either
+// AGREES -- the Factory's document carried this code's plain line back byte for
+// byte -- or DIVERGES, and every diverging one is now refused by representable
+// before this function is reached. Editing it on anything less would move the
+// id of a scalar that is already correct, which is the one outcome the widening
+// was not allowed to have.
+//
+// Its two byte-level checks stay safe above U+007F for a structural reason and
+// not a measured one: it looks only for ':' and '#', and a UTF-8 continuation
+// byte is always >= 0x80, so no multi-byte sequence can ever produce either.
+// What the sweep did not reach here is a leading or trailing non-ASCII
+// codepoint that the parser strips the way it strips a space -- U+00A0 was
+// measured in the interior only.
 func plainAllowed(s string) bool {
 	if s == "" {
 		return false
