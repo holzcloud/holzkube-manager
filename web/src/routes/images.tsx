@@ -659,7 +659,17 @@ function CreatedPanel({ created, onOpen }: { created: CreatedSchematic; onOpen: 
   )
 }
 
-/** The zero time means the probe never answered, which is not a refusal. */
+/**
+ * The zero time means the probe never answered, which is not a refusal.
+ *
+ * Both zero forms are accepted: the empty string, which a hand-written or
+ * partially-migrated record carries, and `0001-01-01...`, which a decoded zero
+ * `time.Time` serialises to.
+ *
+ * `UsabilityVerdict` consults this on *every* branch, including the usable one
+ * (G-02-14), so a caller may rely on the badge never asserting a verdict for a
+ * record that holds none. It did not always -- see the ordering argument there.
+ */
 export function isProbed(probedAt: string): boolean {
   return probedAt !== '' && !probedAt.startsWith('0001-01-01')
 }
@@ -724,10 +734,25 @@ function UsabilityVerdict({
   probedAt: string
   reason?: string
 }) {
-  if (usable) {
-    return <Badge variant="secondary">Usable — the build probe confirmed it</Badge>
-  }
   if (!isProbed(probedAt)) {
+    // G-02-14. This test comes first, and the order is the argument rather than
+    // an accident of how the branches were written down.
+    //
+    // The three states are not symmetric. "There is no verdict" is a fact about
+    // the record; "usable" and "the Factory refused" are *readings of* a
+    // verdict. A reading cannot be correct before its subject exists, so the
+    // record is asked whether it holds a verdict at all, and only then what the
+    // verdict says. Written the other way round -- as it was -- `isProbed` was
+    // never consulted on the usable branch, and a record carrying `usable: true`
+    // with a zero `probed_at` rendered "the build probe confirmed it" about a
+    // probe that never answered.
+    //
+    // No request path produces such a record today, and that is precisely why
+    // the ordering has to be enforced here rather than left to the producer. A
+    // migration, an import, a re-probe or a hand-edited store file is not bound
+    // by what the POST handler happens to do, and T-02-62 is a promise about
+    // what the screen may claim, not about where the record came from.
+    //
     // G-02-1. This used to read "the build probe did not run", which is a claim
     // the record cannot support: on the measured common case the probe ran for a
     // full thirty seconds and gave up, and the record looks identical either
@@ -751,6 +776,9 @@ function UsabilityVerdict({
         </span>
       </span>
     )
+  }
+  if (usable) {
+    return <Badge variant="secondary">Usable — the build probe confirmed it</Badge>
   }
   return (
     <span className="flex flex-col gap-1">
