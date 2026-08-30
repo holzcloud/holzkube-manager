@@ -8,6 +8,7 @@ import {
   type SudoChallenge,
   WARNING_INSTALLER_REPO_FALLBACK_UNVERIFIED,
 } from '@/api'
+import { problemType } from '@/test/problem-fixtures'
 import { ARCH_STORAGE_KEY, hasControlCharacter, ImagesView } from './images'
 
 /**
@@ -194,7 +195,7 @@ function stubFactory(options: StubOptions = {}) {
         if (options.sudoRequired === true) {
           return new Response(
             JSON.stringify({
-              type: 'https://holzkube.dev/problems/sudo',
+              type: problemType('sudo'),
               title: 'Re-authentication required',
               status: 428,
               detail: 'This action is destructive.',
@@ -506,7 +507,7 @@ describe('ImagesView — the authoring half', () => {
         path: '/api/v1/schematics',
         status: 502,
         body: {
-          type: 'https://holzkube.dev/problems/upstream',
+          type: problemType('upstream'),
           title: 'The Image Factory did not answer usably.',
           status: 502,
           detail: 'The Image Factory did not answer usably: creating the schematic.',
@@ -581,7 +582,7 @@ describe('ImagesView — the authoring half', () => {
         path: '/api/v1/factory/extensions',
         status: 502,
         body: {
-          type: 'https://holzkube.dev/problems/upstream',
+          type: problemType('upstream'),
           title: 'The Image Factory did not answer usably.',
           status: 502,
           code: 'upstream.factory-unavailable',
@@ -1221,7 +1222,7 @@ describe('ImagesView — the saved schematics', () => {
    * nothing asks for them.
    */
   const NOT_FOUND_PROBLEM = {
-    type: 'https://holzkube.dev/problems/not-found',
+    type: problemType('not-found'),
     title: 'Not found',
     status: 404,
     detail: 'No such schematic.',
@@ -1229,7 +1230,7 @@ describe('ImagesView — the saved schematics', () => {
   }
 
   const STORE_FAILURE_PROBLEM = {
-    type: 'https://holzkube.dev/problems/internal',
+    type: problemType('internal'),
     title: 'Internal error',
     status: 500,
     code: 'internal.unexpected',

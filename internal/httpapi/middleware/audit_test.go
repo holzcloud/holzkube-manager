@@ -112,10 +112,18 @@ func TestAuditWritesIntentThenOutcome(t *testing.T) {
 // could name a path or a store message.
 func TestAuditRecordsTheStableCodeNotTheGoError(t *testing.T) {
 	rec := &recorder{}
+	// The body is spelled out rather than composed from httpapi.ProblemBaseURI,
+	// and that is a decision rather than an oversight. This is the internal test
+	// package of middleware, and httpapi imports middleware, so the constant is
+	// not reachable from here at all. It is also the right shape for what this
+	// test does: the bytes stand in for whatever a handler upstream of the
+	// middleware wrote, and the claim under test is that the recorder reads
+	// `code` and never `type`. A composed expectation would suggest the
+	// middleware cares about the base. It does not.
 	serve(t, rec, "auth.login", http.MethodPost, `{"username":"holz"}`, func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/problem+json")
 		w.WriteHeader(http.StatusInternalServerError)
-		_, _ = w.Write([]byte(`{"type":"https://holzkube.dev/problems/internal","status":500,` +
+		_, _ = w.Write([]byte(`{"type":"urn:holzkube-manager:problem:internal","status":500,` +
 			`"instance":"/requests/abc","code":"internal.unexpected"}`))
 	})
 
