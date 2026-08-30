@@ -194,10 +194,24 @@ export const schematicSchema = z.object({
    * sending it is a regression this schema should surface as a decode failure
    * rather than as a silently missing qualifier.
    *
-   * An empty value means a record written before the field existed. Its verdict
-   * cannot be qualified after the fact -- the architecture a past probe used is
-   * not recoverable from the record -- so it is rendered unqualified rather than
-   * guessed at.
+   * An empty value means a record written before the field existed. Whether
+   * its verdict can be qualified after the fact depends on the probe's
+   * outcome, not on the record's age:
+   *
+   * - the probe **refused**: `probe_reason` names the architecture verbatim,
+   *   in the shape `<id> at <version>/<arch> answered HTTP <status>` (Go:
+   *   `imagefactory/probe.go`, pinned by
+   *   `TestRefusalReasonNamesTheArchitectureItAskedAbout`), so it is
+   *   machine-parseable out of that sentence;
+   * - the probe **succeeded, or never answered**: there is no sentence and
+   *   nothing to read.
+   *
+   * Nothing here parses it, and nothing should start to. That would mean
+   * reading an architecture out of prose written for an operator, which is
+   * weaker and more fragile than a field and one rewording away from being
+   * wrong. The row renders such a verdict unqualified rather than guessing at
+   * it — which for a refused record costs nothing, because the reason it would
+   * be qualifying is already on screen.
    */
   arch: z.string(),
   created_at: z.string(),

@@ -116,9 +116,25 @@ type Schematic struct {
 	//
 	// Additive and unversioned for the reason ProbeReason states at length
 	// below. A record written before this field existed decodes with an empty
-	// architecture, and an empty architecture is a true statement about such a
-	// record: the architecture a past probe used is not derivable from anything
-	// the record holds, so there is nothing for a migration to write.
+	// architecture, and for most such records an empty architecture is a true
+	// statement: there is nothing for a migration to write.
+	//
+	// Most, not all -- and the difference is the probe's outcome, not the
+	// record's age. A record whose probe *refused* carries the architecture
+	// verbatim inside ProbeReason, in the format imagefactory/probe.go's
+	// ErrSchematicNotBuildable produces: `<id> at <version>/<arch> answered
+	// HTTP <status>`, pinned by
+	// handlers.TestRefusalReasonNamesTheArchitectureItAskedAbout. For those
+	// records the architecture is machine-parseable out of the sentence. For a
+	// record whose probe succeeded, or never answered, there is no sentence and
+	// nothing to read, so the verdict stays unqualified.
+	//
+	// This is not good news and nothing here acts on it. Recovering an
+	// architecture that way means parsing prose written for an operator to
+	// read -- weaker and more fragile than a field, and one reworded sentence
+	// from being wrong. The correction is to the claim, not an argument for
+	// building the backfill: a record whose probe refused is a record with no
+	// usable verdict to qualify in the first place.
 	Arch string `json:"arch"`
 
 	// Canonical is the Factory's own normalised schematic document, stored
