@@ -1,4 +1,4 @@
-// Command holzkubed is the holzkube server: one binary that serves the embedded
+// Command holzkube-managerd is the holzkube-manager server: one binary that serves the embedded
 // web UI over HTTPS and, from phase 2 onward, talks to Talos.
 package main
 
@@ -15,15 +15,15 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/holzcloud/holzkube/internal/audit"
-	"github.com/holzcloud/holzkube/internal/auth"
-	"github.com/holzcloud/holzkube/internal/config"
-	"github.com/holzcloud/holzkube/internal/httpapi"
-	"github.com/holzcloud/holzkube/internal/httpapi/handlers"
-	"github.com/holzcloud/holzkube/internal/imagefactory"
-	"github.com/holzcloud/holzkube/internal/store/fsstore"
-	"github.com/holzcloud/holzkube/internal/talos"
-	"github.com/holzcloud/holzkube/internal/tlsx"
+	"github.com/holzcloud/holzkube-manager/internal/audit"
+	"github.com/holzcloud/holzkube-manager/internal/auth"
+	"github.com/holzcloud/holzkube-manager/internal/config"
+	"github.com/holzcloud/holzkube-manager/internal/httpapi"
+	"github.com/holzcloud/holzkube-manager/internal/httpapi/handlers"
+	"github.com/holzcloud/holzkube-manager/internal/imagefactory"
+	"github.com/holzcloud/holzkube-manager/internal/store/fsstore"
+	"github.com/holzcloud/holzkube-manager/internal/talos"
+	"github.com/holzcloud/holzkube-manager/internal/tlsx"
 )
 
 const (
@@ -53,7 +53,7 @@ var version = "dev"
 
 func main() {
 	if err := run(os.Args[1:]); err != nil {
-		fmt.Fprintln(os.Stderr, "holzkubed:", err)
+		fmt.Fprintln(os.Stderr, "holzkube-managerd:", err)
 		os.Exit(1)
 	}
 }
@@ -70,7 +70,7 @@ func run(args []string) error {
 		config.Usage(os.Stdout)
 		return nil
 	case errors.Is(err, config.ErrVersion):
-		fmt.Println("holzkubed", version)
+		fmt.Println("holzkube-managerd", version)
 		return nil
 	case err != nil:
 		return err
@@ -82,7 +82,7 @@ func run(args []string) error {
 	// the output.
 	slog.SetDefault(logger)
 
-	logger.Info("holzkube starting", slog.String("version", version))
+	logger.Info("holzkube-manager starting", slog.String("version", version))
 	// Every option, its effective value and where that value came from. A
 	// misconfigured option is then visible here rather than in the failure it
 	// eventually causes (D-03).

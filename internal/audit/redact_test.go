@@ -247,7 +247,7 @@ func TestRedactKeepsSiblingSegmentsApart(t *testing.T) {
 // mistake would be permanent.
 //
 // The Image Factory itself refuses to enumerate schematics on the grounds that
-// kernel arguments may carry secrets, and holzkube's archive is append-only and
+// kernel arguments may carry secrets, and holzkube-manager's archive is append-only and
 // kept forever (D-16) with no deletion path. So a kernel argument written in
 // clear here is written in clear for good: there is no migration, no redaction
 // pass and no delete that could take it back without breaking the hash chain.

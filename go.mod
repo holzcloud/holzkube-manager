@@ -1,4 +1,4 @@
-module github.com/holzcloud/holzkube
+module github.com/holzcloud/holzkube-manager
 
 go 1.26.6
 

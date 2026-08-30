@@ -9,7 +9,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/holzcloud/holzkube/internal/audit"
+	"github.com/holzcloud/holzkube-manager/internal/audit"
 )
 
 type intent struct {

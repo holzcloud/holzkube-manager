@@ -53,7 +53,7 @@ const legacyInstallerRepo = "installer"
 // cache still walks both candidates serially. Bounding that needs the per-route
 // deadline that
 // .planning/phases/02-transport-seam-talossim-image-factory/02-DECISION-probe-budget.md
-// owns and G-02-2 is deferred to; cmd/holzkubed/budget_test.go declares the
+// owns and G-02-2 is deferred to; cmd/holzkube-managerd/budget_test.go declares the
 // route as known-over-budget in the meantime. Do not "simplify" this constant
 // away against the UAT's wording without reading that document first.
 const installerRepoRetryInterval = 5 * time.Minute

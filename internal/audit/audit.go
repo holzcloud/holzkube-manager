@@ -1,4 +1,4 @@
-// Package audit is holzkube's append-only JSONL log with a hash chain.
+// Package audit is holzkube-manager's append-only JSONL log with a hash chain.
 //
 // It is called by middleware; it never reads an HTTP request. The format is
 // one record per line -- no indentation, ever. A record that spans several
@@ -106,7 +106,7 @@ func open(dir string, now func() time.Time) (*Logger, error) {
 	// Retry the housekeeping a previous run may have logged and moved past. A
 	// mid-run compression failure must not fail the mutation that crossed
 	// midnight, so it is logged there and the day is never retried by that
-	// process. Here it is: nothing is serving yet, and an archive holzkube
+	// process. Here it is: nothing is serving yet, and an archive holzkube-manager
 	// cannot maintain is a legitimate refusal to start rather than a surprise
 	// months later next to the gap it caused.
 	if err := CompressOlderThan(l.dir, keepPlain); err != nil {

@@ -31,7 +31,7 @@ func TestDefaultsWithoutAnyInput(t *testing.T) {
 	if cfg.Listen != "127.0.0.1:8443" {
 		t.Errorf("Listen = %q, want the loopback default", cfg.Listen)
 	}
-	if want := filepath.Join(testHome, ".local", "share", "holzkube"); cfg.DataDir != want {
+	if want := filepath.Join(testHome, ".local", "share", "holzkube-manager"); cfg.DataDir != want {
 		t.Errorf("DataDir = %q, want %q", cfg.DataDir, want)
 	}
 	if cfg.SudoWindow != 5*time.Minute {
@@ -76,25 +76,25 @@ func TestPrecedenceFlagBeatsEnvBeatsDefault(t *testing.T) {
 		get     func(Config) string
 	}{
 		{
-			option: "listen", env: "HOLZKUBE_LISTEN", envVal: "127.0.0.1:9000",
+			option: "listen", env: "HOLZKUBE_MANAGER_LISTEN", envVal: "127.0.0.1:9000",
 			flagArg: "--listen=127.0.0.1:9100",
 			wantEnv: "127.0.0.1:9000", want: "127.0.0.1:9100",
 			get: func(c Config) string { return c.Listen },
 		},
 		{
-			option: "sudo-window", env: "HOLZKUBE_SUDO_WINDOW", envVal: "9m",
+			option: "sudo-window", env: "HOLZKUBE_MANAGER_SUDO_WINDOW", envVal: "9m",
 			flagArg: "--sudo-window=11m",
 			wantEnv: "9m0s", want: "11m0s",
 			get: func(c Config) string { return c.SudoWindow.String() },
 		},
 		{
-			option: "session-lifetime", env: "HOLZKUBE_SESSION_LIFETIME", envVal: "2h",
+			option: "session-lifetime", env: "HOLZKUBE_MANAGER_SESSION_LIFETIME", envVal: "2h",
 			flagArg: "--session-lifetime=3h",
 			wantEnv: "2h0m0s", want: "3h0m0s",
 			get: func(c Config) string { return c.SessionLifetime.String() },
 		},
 		{
-			option: "log-level", env: "HOLZKUBE_LOG_LEVEL", envVal: "warn",
+			option: "log-level", env: "HOLZKUBE_MANAGER_LOG_LEVEL", envVal: "warn",
 			flagArg: "--log-level=debug",
 			wantEnv: "WARN", want: "DEBUG",
 			get: func(c Config) string { return c.LogLevel.String() },
@@ -103,7 +103,7 @@ func TestPrecedenceFlagBeatsEnvBeatsDefault(t *testing.T) {
 			// FOUND-12. The safety mode is only worth having if an operator can
 			// be sure which way round it is, so its precedence is asserted like
 			// every other option's rather than assumed to follow.
-			option: "dry-run", env: "HOLZKUBE_DRY_RUN", envVal: "true",
+			option: "dry-run", env: "HOLZKUBE_MANAGER_DRY_RUN", envVal: "true",
 			flagArg: "--dry-run=false",
 			wantEnv: "true", want: "false",
 			get: func(c Config) string { return strconv.FormatBool(c.DryRun) },
@@ -134,17 +134,17 @@ func TestPrecedenceFlagBeatsEnvBeatsDefault(t *testing.T) {
 }
 
 // The data directory has three layers rather than two, because XDG_DATA_HOME is
-// not a holzkube variable and must lose to one (D-02).
+// not a holzkube-manager variable and must lose to one (D-02).
 func TestDataDirPrecedence(t *testing.T) {
 	xdg := map[string]string{"XDG_DATA_HOME": "/xdg"}
 
-	if got := load(t, nil, xdg).DataDir; got != filepath.Join("/xdg", "holzkube") {
+	if got := load(t, nil, xdg).DataDir; got != filepath.Join("/xdg", "holzkube-manager") {
 		t.Errorf("XDG_DATA_HOME ignored: %q", got)
 	}
 
-	withEnv := map[string]string{"XDG_DATA_HOME": "/xdg", "HOLZKUBE_DATA_DIR": "/env"}
+	withEnv := map[string]string{"XDG_DATA_HOME": "/xdg", "HOLZKUBE_MANAGER_DATA_DIR": "/env"}
 	if got := load(t, nil, withEnv).DataDir; got != "/env" {
-		t.Errorf("HOLZKUBE_DATA_DIR did not beat XDG_DATA_HOME: %q", got)
+		t.Errorf("HOLZKUBE_MANAGER_DATA_DIR did not beat XDG_DATA_HOME: %q", got)
 	}
 
 	cfg := load(t, []string{"--data-dir=/flag"}, withEnv)
@@ -156,7 +156,7 @@ func TestDataDirPrecedence(t *testing.T) {
 	}
 }
 
-// Every option is reachable from a flag and from a HOLZKUBE_ variable. The test
+// Every option is reachable from a flag and from a HOLZKUBE_MANAGER_ variable. The test
 // value table is checked against the option table, so a new option that forgets
 // either half fails here rather than in production.
 func TestEveryOptionIsSettableByFlagAndByEnvironment(t *testing.T) {
@@ -226,8 +226,8 @@ func TestUnparsableValueAbortsAndNamesOptionAndOrigin(t *testing.T) {
 	}{
 		{
 			name:     "duration without a unit from the environment",
-			env:      map[string]string{"HOLZKUBE_SUDO_WINDOW": "5"},
-			contains: []string{"sudo-window", "HOLZKUBE_SUDO_WINDOW", `"5"`},
+			env:      map[string]string{"HOLZKUBE_MANAGER_SUDO_WINDOW": "5"},
+			contains: []string{"sudo-window", "HOLZKUBE_MANAGER_SUDO_WINDOW", `"5"`},
 		},
 		{
 			name:     "duration without a unit from a flag",
@@ -239,8 +239,8 @@ func TestUnparsableValueAbortsAndNamesOptionAndOrigin(t *testing.T) {
 			// five-minute window, with the startup log reporting the 0 that was
 			// not in force.
 			name:     "a sudo window of zero",
-			env:      map[string]string{"HOLZKUBE_SUDO_WINDOW": "0s"},
-			contains: []string{"sudo-window", "HOLZKUBE_SUDO_WINDOW", `"0s"`},
+			env:      map[string]string{"HOLZKUBE_MANAGER_SUDO_WINDOW": "0s"},
+			contains: []string{"sudo-window", "HOLZKUBE_MANAGER_SUDO_WINDOW", `"0s"`},
 		},
 		{
 			name:     "a negative sudo window",
@@ -254,8 +254,8 @@ func TestUnparsableValueAbortsAndNamesOptionAndOrigin(t *testing.T) {
 		},
 		{
 			name:     "unknown log level",
-			env:      map[string]string{"HOLZKUBE_LOG_LEVEL": "chatty"},
-			contains: []string{"log-level", "HOLZKUBE_LOG_LEVEL", `"chatty"`},
+			env:      map[string]string{"HOLZKUBE_MANAGER_LOG_LEVEL": "chatty"},
+			contains: []string{"log-level", "HOLZKUBE_MANAGER_LOG_LEVEL", `"chatty"`},
 		},
 		{
 			name:     "listen address without a port",
@@ -264,8 +264,8 @@ func TestUnparsableValueAbortsAndNamesOptionAndOrigin(t *testing.T) {
 		},
 		{
 			name:     "boolean that is not a boolean",
-			env:      map[string]string{"HOLZKUBE_INSECURE_HTTP": "maybe"},
-			contains: []string{"insecure-http", "HOLZKUBE_INSECURE_HTTP", `"maybe"`},
+			env:      map[string]string{"HOLZKUBE_MANAGER_INSECURE_HTTP": "maybe"},
+			contains: []string{"insecure-http", "HOLZKUBE_MANAGER_INSECURE_HTTP", `"maybe"`},
 		},
 	}
 
@@ -329,7 +329,7 @@ func logRecords(t *testing.T, cfg Config) []map[string]any {
 // misconfiguration is then visible at start rather than in the failure it
 // eventually causes (D-03).
 func TestLogEffectiveLogsEveryOptionExactlyOnce(t *testing.T) {
-	cfg := load(t, []string{"--sudo-window=9m"}, map[string]string{"HOLZKUBE_LISTEN": "127.0.0.1:9443"})
+	cfg := load(t, []string{"--sudo-window=9m"}, map[string]string{"HOLZKUBE_MANAGER_LISTEN": "127.0.0.1:9443"})
 
 	seen := map[string]int{}
 	for _, rec := range logRecords(t, cfg) {

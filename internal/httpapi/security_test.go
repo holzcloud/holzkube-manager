@@ -13,9 +13,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/holzcloud/holzkube/internal/auth"
-	"github.com/holzcloud/holzkube/internal/httpapi"
-	"github.com/holzcloud/holzkube/internal/store/fsstore"
+	"github.com/holzcloud/holzkube-manager/internal/auth"
+	"github.com/holzcloud/holzkube-manager/internal/httpapi"
+	"github.com/holzcloud/holzkube-manager/internal/store/fsstore"
 )
 
 // minimalDeps is enough of a wiring to build the handler; these tests only

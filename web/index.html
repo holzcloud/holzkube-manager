@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="color-scheme" content="dark light" />
-    <title>holzkube</title>
+    <title>holzkube-manager</title>
     <script>
       // Dark-first (D-11), applied before the first paint. React mounts after
       // this runs, so an operator who chose light never sees a dark flash and
@@ -12,7 +12,7 @@
       // with src/hooks/useTheme.ts -- same key, same two values.
       (function () {
         try {
-          var stored = localStorage.getItem('holzkube.theme')
+          var stored = localStorage.getItem('holzkube-manager.theme')
           var theme =
             stored === 'dark' || stored === 'light'
               ? stored

@@ -10,7 +10,7 @@ package middleware
 // deliberately not a dependency of this project: it would be an unused module
 // that `go mod tidy` removes on the next run, and it protects a shape --
 // cross-origin form posts against a server that accepts form encodings -- that
-// holzkube does not have. If a form-post path is ever added, this file is where
+// holzkube-manager does not have. If a form-post path is ever added, this file is where
 // a double-submit token gets layered on top, not instead.
 //
 // The three conditions are stated in docs/api-contract.md § CSRF Contract and
@@ -27,7 +27,7 @@ import (
 
 const (
 	// CSRFHeader is the custom header every mutating request must carry.
-	CSRFHeader = "X-Holzkube-CSRF"
+	CSRFHeader = "X-Holzkube-Manager-CSRF"
 
 	// CSRFHeaderValue is the only value that header may have. The contract
 	// names it literally, and accepting anything non-empty would make the
@@ -39,13 +39,13 @@ const (
 // CSRF enforces three preconditions simultaneously on every mutating request:
 //
 //  1. Content-Type: application/json
-//  2. X-Holzkube-CSRF: 1
+//  2. X-Holzkube-Manager-CSRF: 1
 //  3. an Origin / Sec-Fetch-Site consistent with our own origin
 //
 // A cross-origin HTML form can satisfy neither of the first two: a form can
 // only send three encodings, none of them JSON, and it cannot set a header at
 // all. A cross-origin fetch that sets them is preflighted, and the preflight
-// has nowhere to succeed because holzkube sends no CORS headers. So the request
+// has nowhere to succeed because holzkube-manager sends no CORS headers. So the request
 // never arrives rather than arriving and being rejected.
 //
 // SameSite=Lax on the cookie is necessary but not sufficient on its own: it is
@@ -137,7 +137,7 @@ func checkOrigin(r *http.Request) error {
 		return errors.New("Origin " + origin + " does not match this host")
 	}
 	if scheme := requestScheme(r); !strings.EqualFold(u.Scheme, scheme) {
-		// holzkube is HTTPS by default (D-04). Accepting an http:// origin on
+		// holzkube-manager is HTTPS by default (D-04). Accepting an http:// origin on
 		// an https:// request would accept a page a network attacker can write,
 		// which is most of the reason the transport is encrypted at all.
 		return errors.New("Origin " + origin + " does not match this scheme")

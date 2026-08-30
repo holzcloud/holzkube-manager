@@ -28,7 +28,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/holzcloud/holzkube/internal/store"
+	"github.com/holzcloud/holzkube-manager/internal/store"
 )
 
 const (
@@ -126,7 +126,7 @@ func generate(hostname string, extra ...string) (certPEM, keyPEM, der []byte, er
 	now := time.Now()
 	tmpl := &x509.Certificate{
 		SerialNumber: serial,
-		Subject:      pkix.Name{CommonName: "holzkube", Organization: []string{"holzkube"}},
+		Subject:      pkix.Name{CommonName: "holzkube-manager", Organization: []string{"holzkube-manager"}},
 		NotBefore:    now.Add(-clockSkew),
 		NotAfter:     now.Add(validity),
 

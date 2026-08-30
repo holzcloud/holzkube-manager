@@ -13,9 +13,9 @@ import (
 	"github.com/siderolabs/talos/pkg/machinery/api/machine"
 	"github.com/siderolabs/talos/pkg/machinery/client"
 
-	"github.com/holzcloud/holzkube/internal/model"
-	"github.com/holzcloud/holzkube/internal/talos"
-	"github.com/holzcloud/holzkube/internal/talossim"
+	"github.com/holzcloud/holzkube-manager/internal/model"
+	"github.com/holzcloud/holzkube-manager/internal/talos"
+	"github.com/holzcloud/holzkube-manager/internal/talossim"
 )
 
 // newMachineryClient builds the unmodified production client against a
@@ -277,7 +277,7 @@ func etcdState(ctx context.Context, t *testing.T, cl *client.Client) string {
 // UnimplementedMachineServiceServer, and the whole value of that arrangement is
 // that a method nobody wrote answers with a status a caller can see rather than
 // with a zero value a caller would believe. Containers is chosen because
-// holzkube does not call it -- if that ever changes, TestMethodCoverage fails
+// holzkube-manager does not call it -- if that ever changes, TestMethodCoverage fails
 // and this test has to pick another.
 func TestUnimplementedMethodIsUnimplemented(t *testing.T) {
 	t.Parallel()

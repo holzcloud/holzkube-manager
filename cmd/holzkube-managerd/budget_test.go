@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/holzcloud/holzkube/internal/imagefactory"
+	"github.com/holzcloud/holzkube-manager/internal/imagefactory"
 )
 
 // This file is the composition guard 02-DECISION-probe-budget.md asks for under

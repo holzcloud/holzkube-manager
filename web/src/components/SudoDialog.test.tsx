@@ -118,7 +118,7 @@ describe('SudoDialog', () => {
 
     // And the CSRF preconditions survived the replay, by value.
     const headers = replay[1].headers as Record<string, string>
-    expect(headers['X-Holzkube-CSRF']).toBe('1')
+    expect(headers['X-Holzkube-Manager-CSRF']).toBe('1')
     expect(headers['Content-Type']).toBe('application/json')
 
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())

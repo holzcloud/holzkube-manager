@@ -10,8 +10,8 @@ import (
 	"github.com/siderolabs/talos/pkg/machinery/api/machine"
 	"github.com/siderolabs/talos/pkg/machinery/api/storage"
 
-	"github.com/holzcloud/holzkube/internal/talos"
-	"github.com/holzcloud/holzkube/internal/talossim"
+	"github.com/holzcloud/holzkube-manager/internal/talos"
+	"github.com/holzcloud/holzkube-manager/internal/talossim"
 )
 
 // TestRequireDeadline is D-04's structure, which is the half of the decision

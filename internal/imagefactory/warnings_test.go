@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/holzcloud/holzkube/internal/imagefactory"
+	"github.com/holzcloud/holzkube-manager/internal/imagefactory"
 )
 
 // TestWarningsForKernelArgs is FACT-04's core case. A schematic with a kernel

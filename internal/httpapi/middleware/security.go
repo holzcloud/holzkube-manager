@@ -3,7 +3,7 @@ package middleware
 import "net/http"
 
 // SecurityHeaders sets the response headers that constrain what a browser will
-// do with holzkube's pages, on every response including static assets.
+// do with holzkube-manager's pages, on every response including static assets.
 //
 // nosniff was previously set on JSON and problem responses but on nothing the
 // file server produced, and none of the others were set anywhere.

@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/holzcloud/holzkube/internal/talos"
+	"github.com/holzcloud/holzkube-manager/internal/talos"
 )
 
 // TestMeReportsTheDryRunMode is FOUND-12's API half.

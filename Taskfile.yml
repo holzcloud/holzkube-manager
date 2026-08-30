@@ -1,7 +1,7 @@
 version: '3'
 
 vars:
-  BINARY: bin/holzkubed
+  BINARY: bin/holzkube-managerd
   WEB_DIST: internal/httpapi/dist
   # A working-tree build is honestly called what git calls it; goreleaser passes
   # the real tag through the same variable. The substitution is plain shell so
@@ -44,10 +44,10 @@ tasks:
     # and produces stale-asset bugs that look like frontend bugs.
     deps: ["build:web"]
     cmds:
-      - go build -ldflags "{{.LDFLAGS}}" -o {{.BINARY}} ./cmd/holzkubed
+      - go build -ldflags "{{.LDFLAGS}}" -o {{.BINARY}} ./cmd/holzkube-managerd
 
   build:
-    desc: Build everything into bin/holzkubed.
+    desc: Build everything into bin/holzkube-managerd.
     deps: ["build:go"]
 
   test:
@@ -95,7 +95,7 @@ tasks:
       - npm --prefix web run format
 
   dev:
-    desc: Run the Vite dev server against a locally running holzkubed.
+    desc: Run the Vite dev server against a locally running holzkube-managerd.
     cmds:
       - npm --prefix web run dev
 

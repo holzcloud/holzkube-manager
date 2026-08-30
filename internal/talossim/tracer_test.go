@@ -6,9 +6,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/holzcloud/holzkube/internal/model"
-	"github.com/holzcloud/holzkube/internal/talos"
-	"github.com/holzcloud/holzkube/internal/talossim"
+	"github.com/holzcloud/holzkube-manager/internal/model"
+	"github.com/holzcloud/holzkube-manager/internal/talos"
+	"github.com/holzcloud/holzkube-manager/internal/talossim"
 )
 
 // TestTracerRealClientReachesFakeNode is the end-to-end slice this phase is
@@ -63,8 +63,8 @@ func TestTracerRealClientReachesFakeNode(t *testing.T) {
 	if len(verified) == 0 {
 		t.Fatal("the simulator verified no client certificate; the RPC succeeded without mutual TLS")
 	}
-	if verified[0] != "holzkube" {
-		t.Errorf("verified client certificate CN = %q, want %q", verified[0], "holzkube")
+	if verified[0] != "holzkube-manager" {
+		t.Errorf("verified client certificate CN = %q, want %q", verified[0], "holzkube-manager")
 	}
 }
 

@@ -3,7 +3,7 @@ package talos
 // Test-only access to the shared call path.
 //
 // It lives in an _test.go file, so it is compiled into the package's test
-// binary and never into holzkubed: this is a window for the test package next
+// binary and never into holzkube-managerd: this is a window for the test package next
 // door, not an escape hatch on the seam. A production caller reaches a node
 // through a method on one of the two client types, and that is the property
 // D-06 and the maintenance client's closed method set exist to hold.

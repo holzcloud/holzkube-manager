@@ -19,11 +19,11 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
-	"github.com/holzcloud/holzkube/internal/audit"
-	"github.com/holzcloud/holzkube/internal/auth"
-	"github.com/holzcloud/holzkube/internal/httpapi"
-	"github.com/holzcloud/holzkube/internal/httpapi/handlers"
-	"github.com/holzcloud/holzkube/internal/store/fsstore"
+	"github.com/holzcloud/holzkube-manager/internal/audit"
+	"github.com/holzcloud/holzkube-manager/internal/auth"
+	"github.com/holzcloud/holzkube-manager/internal/httpapi"
+	"github.com/holzcloud/holzkube-manager/internal/httpapi/handlers"
+	"github.com/holzcloud/holzkube-manager/internal/store/fsstore"
 )
 
 const (
@@ -38,7 +38,7 @@ type harness struct {
 	logger  *audit.Logger
 }
 
-// newHarness wires the same object graph as cmd/holzkubed against a throwaway
+// newHarness wires the same object graph as cmd/holzkube-managerd against a throwaway
 // data directory and serves it over real TLS.
 func newHarness(t *testing.T) *harness {
 	t.Helper()
@@ -118,7 +118,7 @@ func (h *harness) sessionCookie(t *testing.T) string {
 		t.Fatalf("parse server url: %v", err)
 	}
 	for _, c := range h.client.Jar.Cookies(u) {
-		if c.Name == "holzkube_session" {
+		if c.Name == "holzkube-manager_session" {
 			return c.Value
 		}
 	}
@@ -127,7 +127,7 @@ func (h *harness) sessionCookie(t *testing.T) string {
 
 type reqOpt func(*http.Request)
 
-func withoutCSRFHeader(r *http.Request) { r.Header.Del("X-Holzkube-CSRF") }
+func withoutCSRFHeader(r *http.Request) { r.Header.Del("X-Holzkube-Manager-CSRF") }
 
 func withTextContentType(r *http.Request) { r.Header.Set("Content-Type", "text/plain") }
 
@@ -150,7 +150,7 @@ func (h *harness) do(t *testing.T, method, path string, body any, opts ...reqOpt
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
-	req.Header.Set("X-Holzkube-CSRF", "1")
+	req.Header.Set("X-Holzkube-Manager-CSRF", "1")
 	for _, o := range opts {
 		o(req)
 	}
@@ -241,7 +241,7 @@ func TestEndToEndSetupLoginAudit(t *testing.T) {
 	}
 	afterSetup := h.sessionCookie(t)
 	if afterSetup == "" {
-		t.Fatalf("setup did not set a %q cookie", "holzkube_session")
+		t.Fatalf("setup did not set a %q cookie", "holzkube-manager_session")
 	}
 	assertSessionCookieFlags(t, resp)
 
@@ -415,7 +415,7 @@ func TestEndToEndSetupLoginAudit(t *testing.T) {
 				return err
 			}
 			req.Header.Set("Content-Type", "application/json")
-			req.Header.Set("X-Holzkube-CSRF", "1")
+			req.Header.Set("X-Holzkube-Manager-CSRF", "1")
 
 			resp, err := h.client.Do(req)
 			if err != nil {
@@ -460,7 +460,7 @@ func TestEndToEndSetupLoginAudit(t *testing.T) {
 func assertSessionCookieFlags(t *testing.T, resp *http.Response) {
 	t.Helper()
 	for _, c := range resp.Cookies() {
-		if c.Name != "holzkube_session" {
+		if c.Name != "holzkube-manager_session" {
 			continue
 		}
 		if !c.HttpOnly {
@@ -474,7 +474,7 @@ func assertSessionCookieFlags(t *testing.T, resp *http.Response) {
 		}
 		return
 	}
-	t.Errorf("response set no holzkube_session cookie")
+	t.Errorf("response set no holzkube-manager_session cookie")
 }
 
 func findRawField(t *testing.T, raw []byte, field string) (json.RawMessage, bool) {

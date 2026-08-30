@@ -17,9 +17,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/holzcloud/holzkube/internal/httpapi"
-	"github.com/holzcloud/holzkube/internal/httpapi/handlers"
-	"github.com/holzcloud/holzkube/internal/imagefactory"
+	"github.com/holzcloud/holzkube-manager/internal/httpapi"
+	"github.com/holzcloud/holzkube-manager/internal/httpapi/handlers"
+	"github.com/holzcloud/holzkube-manager/internal/imagefactory"
 )
 
 // catalogVersion is the one Talos version the fake Factory serves a catalog
@@ -589,7 +589,7 @@ func TestCreateRejectsUnknownExtensionsBeforeAnyPOST(t *testing.T) {
 
 // TestCreateRefusesALocallyUnrenderableValueAsAnInputProblem closes G-02-6.
 //
-// A control character in a kernel argument is refused by holzkube's own
+// A control character in a kernel argument is refused by holzkube-manager's own
 // canonical serialiser, in Schematic.ID(), before the catalog is fetched and
 // before any POST. The UAT saw that answered as HTTP 502 "The Image Factory did
 // not answer usably" after 18.658ms -- a sentence that blames a third party,
@@ -1090,7 +1090,7 @@ func TestUnansweredProbeStillStoresTheArchitecture(t *testing.T) {
 // the obvious next thought.
 //
 // Reading rec.Arch as a default for a missing ?arch= is wrong for the reason
-// assetRequest's own comment gives: holzkube is developed on arm64 and targets
+// assetRequest's own comment gives: holzkube-manager is developed on arm64 and targets
 // amd64, so a defaulted architecture is a bug that only ever appears on someone
 // else's machine. The record describes what was probed; the parameter asks what
 // to build. This test is the difference between a comment and a rule.
@@ -1148,7 +1148,7 @@ func TestCreateAgainstAnOutageIsUpstreamAndNotInternal(t *testing.T) {
 // TestCreateStoresASchematicWhoseIDWasNotPredicted is CR-02.
 //
 // A Factory answer carrying an id the local canonical serialiser did not
-// predict means the schematic exists upstream under an id holzkube did not
+// predict means the schematic exists upstream under an id holzkube-manager did not
 // choose. The Factory offers no way to list schematics back, so a record
 // dropped here is a reference an operator cannot recover — which is the whole
 // reason the handler keeps the record whatever the probe said.
@@ -1786,7 +1786,7 @@ var refusedCodepoints = []struct {
 // returns an error" but "the operator is told which of their inputs is wrong",
 // and between the two sits createProblem, whose job is to keep a local refusal
 // from being reported as somebody else's outage. U+2028 is the codepoint that
-// produced the failure live: the document holzkube emitted was invalid YAML,
+// produced the failure live: the document holzkube-manager emitted was invalid YAML,
 // the Factory answered 400, the client folded every non-2xx into
 // ErrUpstreamUnavailable, and the operator was shown "The Image Factory did not
 // answer usably" -- a sentence blaming a third party, telling them to retry
@@ -2239,7 +2239,7 @@ func (c *client) doRaw(method, path string, body []byte) (*http.Response, []byte
 		c.t.Fatalf("new request: %v", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-Holzkube-CSRF", "1")
+	req.Header.Set("X-Holzkube-Manager-CSRF", "1")
 
 	resp, err := c.http.Do(req)
 	if err != nil {

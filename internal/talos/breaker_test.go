@@ -14,7 +14,7 @@ import (
 
 	"google.golang.org/grpc/codes"
 
-	"github.com/holzcloud/holzkube/internal/model"
+	"github.com/holzcloud/holzkube-manager/internal/model"
 )
 
 const testMachine = model.MachineID("00000000-0000-0000-0000-0000000000b1")

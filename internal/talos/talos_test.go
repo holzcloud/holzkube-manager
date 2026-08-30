@@ -18,9 +18,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/holzcloud/holzkube/internal/model"
-	"github.com/holzcloud/holzkube/internal/talos"
-	"github.com/holzcloud/holzkube/internal/talossim"
+	"github.com/holzcloud/holzkube-manager/internal/model"
+	"github.com/holzcloud/holzkube-manager/internal/talos"
+	"github.com/holzcloud/holzkube-manager/internal/talossim"
 )
 
 // TestDialerSwap is the proof that the seam is a seam.
@@ -386,7 +386,7 @@ func TestProbeDoesNotPropagateAnUnverifiedPeersHostname(t *testing.T) {
 			if id.Hostname != tc.want {
 				t.Errorf("Identity.Hostname = %q (%d bytes), want %q", id.Hostname, len(id.Hostname), tc.want)
 			}
-			// Machine is holzkube's own identifier and is never the peer's to
+			// Machine is holzkube-manager's own identifier and is never the peer's to
 			// choose. Stated here because it is the field a hostname that got
 			// through would be mistaken for.
 			if id.Machine != "hostile" {

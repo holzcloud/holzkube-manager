@@ -15,7 +15,7 @@ func envFrom(m map[string]string) Lookup {
 	}
 }
 
-// D-02: $XDG_DATA_HOME/holzkube, falling back to ~/.local/share/holzkube, with
+// D-02: $XDG_DATA_HOME/holzkube-manager, falling back to ~/.local/share/holzkube-manager, with
 // an explicit override winning over both. The override is also the Docker
 // volume path, so it has to beat an environment that a base image may set.
 func TestResolvePrecedence(t *testing.T) {
@@ -30,29 +30,29 @@ func TestResolvePrecedence(t *testing.T) {
 		{
 			name: "falls back to the home directory",
 			env:  map[string]string{},
-			want: filepath.Join(home, ".local", "share", "holzkube"),
+			want: filepath.Join(home, ".local", "share", "holzkube-manager"),
 		},
 		{
 			name: "XDG_DATA_HOME moves it",
 			env:  map[string]string{"XDG_DATA_HOME": "/xdg"},
-			want: filepath.Join("/xdg", "holzkube"),
+			want: filepath.Join("/xdg", "holzkube-manager"),
 		},
 		{
 			name: "an empty XDG_DATA_HOME is treated as unset",
 			env:  map[string]string{"XDG_DATA_HOME": ""},
-			want: filepath.Join(home, ".local", "share", "holzkube"),
+			want: filepath.Join(home, ".local", "share", "holzkube-manager"),
 		},
 		{
 			name:     "the override beats XDG_DATA_HOME",
 			env:      map[string]string{"XDG_DATA_HOME": "/xdg"},
-			override: "/volume/holzkube",
-			want:     "/volume/holzkube",
+			override: "/volume/holzkube-manager",
+			want:     "/volume/holzkube-manager",
 		},
 		{
 			name:     "the override beats the home fallback",
 			env:      map[string]string{},
-			override: "/volume/holzkube",
-			want:     "/volume/holzkube",
+			override: "/volume/holzkube-manager",
+			want:     "/volume/holzkube-manager",
 		},
 	}
 
@@ -89,7 +89,7 @@ func TestEnsureDirCreatesWith0700(t *testing.T) {
 		t.Skip("POSIX permission bits are not meaningful on windows")
 	}
 	base := t.TempDir()
-	dir := filepath.Join(base, "nested", "holzkube")
+	dir := filepath.Join(base, "nested", "holzkube-manager")
 
 	if err := EnsureDir(dir); err != nil {
 		t.Fatalf("EnsureDir: %v", err)
@@ -110,7 +110,7 @@ func TestEnsureDirLeavesAnExistingDirectoryAlone(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("POSIX permission bits are not meaningful on windows")
 	}
-	dir := filepath.Join(t.TempDir(), "holzkube")
+	dir := filepath.Join(t.TempDir(), "holzkube-manager")
 	if err := os.Mkdir(dir, 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
@@ -128,7 +128,7 @@ func TestEnsureDirLeavesAnExistingDirectoryAlone(t *testing.T) {
 }
 
 func TestEnsureDirRefusesAFile(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "holzkube")
+	path := filepath.Join(t.TempDir(), "holzkube-manager")
 	if err := os.WriteFile(path, []byte("x"), 0o600); err != nil {
 		t.Fatalf("write: %v", err)
 	}

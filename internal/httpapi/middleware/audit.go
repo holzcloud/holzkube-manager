@@ -10,7 +10,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/holzcloud/holzkube/internal/audit"
+	"github.com/holzcloud/holzkube-manager/internal/audit"
 )
 
 const (
@@ -224,7 +224,7 @@ func isCodeToken(s string) bool {
 	return true
 }
 
-// ClientIP reports the peer address. holzkube binds loopback by default and
+// ClientIP reports the peer address. holzkube-manager binds loopback by default and
 // sits behind no proxy, so forwarded headers are deliberately not trusted:
 // honouring them would let a caller write any address it likes into the log.
 func ClientIP(r *http.Request) string {

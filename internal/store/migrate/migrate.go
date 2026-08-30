@@ -18,8 +18,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/holzcloud/holzkube/internal/store"
-	"github.com/holzcloud/holzkube/internal/store/migrate/backup"
+	"github.com/holzcloud/holzkube-manager/internal/store"
+	"github.com/holzcloud/holzkube-manager/internal/store/migrate/backup"
 )
 
 // CurrentVersion is the schema version this binary understands.
@@ -45,7 +45,7 @@ const (
 
 var (
 	// ErrVersionTooNew is returned when the data directory was written by a
-	// newer holzkube. Starting anyway would let an older binary rewrite
+	// newer holzkube-manager. Starting anyway would let an older binary rewrite
 	// records whose shape it does not know, which is silent data loss.
 	ErrVersionTooNew = errors.New("migrate: data directory is newer than this binary")
 
@@ -112,7 +112,7 @@ func run(dir string, migs []Migration, target int) error {
 
 	switch {
 	case from > target:
-		return fmt.Errorf("%w: %s says version %d, this binary understands version %d; upgrade holzkube",
+		return fmt.Errorf("%w: %s says version %d, this binary understands version %d; upgrade holzkube-manager",
 			ErrVersionTooNew, filepath.Join(dir, VersionFileName), from, target)
 	case from == target:
 		// Nothing to do, and deliberately nothing written: an upgrade that
@@ -185,7 +185,7 @@ func plan(migs []Migration, from, target int) ([]Migration, error) {
 //
 // A missing VERSION is ambiguous and is resolved by looking at the directory:
 // empty means a fresh install, which is current by definition; existing
-// records mean a directory written by holzkube before VERSION existed, which
+// records mean a directory written by holzkube-manager before VERSION existed, which
 // is version 1 — not version 0, because no release ever wrote a version 0
 // layout.
 func readVersion(dir string, target int) (int, error) {

@@ -118,7 +118,7 @@ func TestPermissionGuardCoversBackupsAndTheLockFile(t *testing.T) {
 	if err := os.WriteFile(tarball, []byte("x"), 0o644); err != nil {
 		t.Fatalf("write: %v", err)
 	}
-	lock := filepath.Join(dir, "holzkube.lock")
+	lock := filepath.Join(dir, "holzkube-manager.lock")
 	if err := os.WriteFile(lock, []byte("1\n"), 0o644); err != nil {
 		t.Fatalf("write: %v", err)
 	}

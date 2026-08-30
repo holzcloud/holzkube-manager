@@ -16,13 +16,13 @@ import { ChainBanner } from './ChainBanner'
 const BROKEN: AuditChain = {
   ok: false,
   broken_at_line: 3,
-  file: '/var/lib/holzkube/audit/audit-2026-08-28.jsonl',
+  file: '/var/lib/holzkube-manager/audit/audit-2026-08-28.jsonl',
 }
 
 const INTACT: AuditChain = {
   ok: true,
   broken_at_line: 0,
-  file: '/var/lib/holzkube/audit/audit-2026-08-28.jsonl',
+  file: '/var/lib/holzkube-manager/audit/audit-2026-08-28.jsonl',
 }
 
 describe('ChainBanner', () => {
@@ -36,7 +36,7 @@ describe('ChainBanner', () => {
 
     const banner = screen.getByRole('alert')
     expect(banner).toHaveTextContent('line 3')
-    expect(banner).toHaveTextContent('/var/lib/holzkube/audit/audit-2026-08-28.jsonl')
+    expect(banner).toHaveTextContent('/var/lib/holzkube-manager/audit/audit-2026-08-28.jsonl')
   })
 
   it('says what the finding means and what it does not mean', () => {

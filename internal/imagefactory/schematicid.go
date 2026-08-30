@@ -18,7 +18,7 @@ import (
 //
 // It exists so that a schematic outside the domain the canonical emitter was
 // pinned against produces a refusal rather than an id. A wrong id is worse than
-// no id: FACT-06 exists so holzkube can recognise "this schematic already
+// no id: FACT-06 exists so holzkube-manager can recognise "this schematic already
 // exists" without a round trip, and a locally computed value that silently
 // disagrees with the Factory's turns that optimisation into a lie. Callers that
 // hit this can still create the schematic -- CreateSchematic gets the id from
@@ -82,7 +82,7 @@ const canonicalIndent = 4
 // The id is the lowercase hex SHA-256 of the canonical document -- verified
 // against the live Factory across a corpus of recorded documents, every one of
 // which satisfies id == sha256(canonical). Computing it locally is what lets
-// holzkube recognise a schematic it has seen before without a round trip
+// holzkube-manager recognise a schematic it has seen before without a round trip
 // (FACT-06); the Factory deliberately offers no way to list schematics, so an
 // id that is neither stored nor recoverable from a running node is gone.
 //
@@ -272,7 +272,7 @@ func renderScalar(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", "''") + "'"
 }
 
-// NotRepresentableReason is the single statement of which scalars holzkube will
+// NotRepresentableReason is the single statement of which scalars holzkube-manager will
 // carry. It returns the reason the value is refused, or the empty string when
 // it is representable.
 //
@@ -282,7 +282,7 @@ func renderScalar(s string) string {
 // disagrees with the Factory's. The HTTP layer asks it about a request field,
 // before there is a document at all, because a value that cannot survive
 // serialisation cannot survive storage or rendering either -- a request field, a
-// stored record and a document scalar are all text holzkube keeps, shows and
+// stored record and a document scalar are all text holzkube-manager keeps, shows and
 // hands to a third party, and a character that breaks one of those breaks the
 // others. Stating the rule twice is how a request validator and a serialiser
 // come to disagree about which values exist; this is the shape registryRefused
@@ -301,7 +301,7 @@ func renderScalar(s string) string {
 //
 // Which scalars this renders decides the locally precomputed id, and the id is
 // what FACT-06 rests on, so widening or narrowing this set is a change to what
-// holzkube believes a schematic hashes to. It was widened once, deliberately,
+// holzkube-manager believes a schematic hashes to. It was widened once, deliberately,
 // and on evidence: for years the set was "below U+0020, or U+007F", which was
 // the ASCII observation it had been pinned against, and above U+007F it was an
 // assumption nothing had ever checked. TestLiveCanonical checked it -- a
@@ -314,7 +314,7 @@ func renderScalar(s string) string {
 // Run the instrument before changing this function. Reasoning about upstream's
 // emitter from its source is how the assumption got here in the first place:
 //
-//	HOLZKUBE_FACTORY_LIVE=1 go test ./internal/imagefactory/ -run TestLiveCanonical -v
+//	HOLZKUBE_MANAGER_FACTORY_LIVE=1 go test ./internal/imagefactory/ -run TestLiveCanonical -v
 //
 // The returned reason is written for an operator and names the character class,
 // never the value (T-02-64). An empty string means the scalar is representable.

@@ -4,7 +4,7 @@
 the real `MachineService`, `StorageService` and COSI `State` protobufs from
 `pkg/machinery`, behind a real TLS listener that requires and verifies a client
 certificate. The unmodified production client — machinery's own `client.New`,
-reached through holzkube's transport seam — drives it. A test that passes
+reached through holzkube-manager's transport seam — drives it. A test that passes
 against `talossim` has exercised the wire, the protobuf and the handshake.
 
 It exists so that every phase from three onward can be built and tested without
@@ -15,7 +15,7 @@ produced on demand, in a second, in a test.
 
 **1. Missing coverage is a test failure, never a zero value.** The simulator
 embeds `machine.UnimplementedMachineServiceServer`, so each of the 54 RPCs
-holzkube does not reach answers `codes.Unimplemented` rather than a plausible
+holzkube-manager does not reach answers `codes.Unimplemented` rather than a plausible
 empty success. Which methods are implemented is not a judgement call that can
 drift: `TestMethodCoverage` walks `internal/talos` for machinery-client call
 sites and fails when one of them lands on an inherited method.

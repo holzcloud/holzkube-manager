@@ -17,7 +17,7 @@ import (
 )
 
 // maxBodyBytes caps a request body. Unbounded decoding of attacker-controlled
-// input is a denial of service with no upside; nothing holzkube accepts in this
+// input is a denial of service with no upside; nothing holzkube-manager accepts in this
 // phase is anywhere near this size.
 const maxBodyBytes = 64 << 10
 

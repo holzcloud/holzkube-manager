@@ -26,8 +26,8 @@ func runCSRF(t *testing.T, tc csrfCase) (passed bool, denial error) {
 		w.WriteHeader(http.StatusForbidden)
 	})
 
-	req := httptest.NewRequest(tc.method, "https://holzkube.test/api/v1/account/password", nil)
-	req.Host = "holzkube.test"
+	req := httptest.NewRequest(tc.method, "https://holzkube-manager.test/api/v1/account/password", nil)
+	req.Host = "holzkube-manager.test"
 	if tc.tls {
 		req.TLS = &tls.ConnectionState{}
 	}
@@ -47,10 +47,10 @@ func runCSRF(t *testing.T, tc csrfCase) (passed bool, denial error) {
 func TestCSRFPreconditions(t *testing.T) {
 	full := func(over ...string) map[string]string {
 		h := map[string]string{
-			"Content-Type":    "application/json",
-			"X-Holzkube-CSRF": "1",
-			"Sec-Fetch-Site":  "same-origin",
-			"Origin":          "https://holzkube.test",
+			"Content-Type":            "application/json",
+			"X-Holzkube-Manager-CSRF": "1",
+			"Sec-Fetch-Site":          "same-origin",
+			"Origin":                  "https://holzkube-manager.test",
 		}
 		for i := 0; i+1 < len(over); i += 2 {
 			if over[i+1] == "" {
@@ -70,9 +70,9 @@ func TestCSRFPreconditions(t *testing.T) {
 			headers: full("Origin", "", "Sec-Fetch-Site", ""), pass: true},
 
 		{name: "missing the custom header", method: http.MethodPost, tls: true,
-			headers: full("X-Holzkube-CSRF", ""), pass: false},
+			headers: full("X-Holzkube-Manager-CSRF", ""), pass: false},
 		{name: "custom header with the wrong value", method: http.MethodPost, tls: true,
-			headers: full("X-Holzkube-CSRF", "0"), pass: false},
+			headers: full("X-Holzkube-Manager-CSRF", "0"), pass: false},
 		{name: "form content type", method: http.MethodPost, tls: true,
 			headers: full("Content-Type", "application/x-www-form-urlencoded"), pass: false},
 		{name: "text content type", method: http.MethodPost, tls: true,
@@ -84,14 +84,14 @@ func TestCSRFPreconditions(t *testing.T) {
 		{name: "origin null", method: http.MethodPost, tls: true,
 			headers: full("Origin", "null"), pass: false},
 		{name: "origin on the wrong scheme", method: http.MethodPost, tls: true,
-			headers: full("Origin", "http://holzkube.test"), pass: false},
+			headers: full("Origin", "http://holzkube-manager.test"), pass: false},
 		{name: "cross-site fetch metadata", method: http.MethodPost, tls: true,
 			headers: full("Sec-Fetch-Site", "cross-site"), pass: false},
 		{name: "same-site fetch metadata", method: http.MethodPost, tls: true,
 			headers: full("Sec-Fetch-Site", "same-site"), pass: false},
 
 		{name: "delete is mutating too", method: http.MethodDelete, tls: true,
-			headers: full("X-Holzkube-CSRF", ""), pass: false},
+			headers: full("X-Holzkube-Manager-CSRF", ""), pass: false},
 		{name: "put is mutating too", method: http.MethodPut, tls: true,
 			headers: full("Content-Type", "text/plain"), pass: false},
 	}

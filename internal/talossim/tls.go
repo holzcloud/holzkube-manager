@@ -72,7 +72,7 @@ func newPKI(hostname, nodeIP string) (*pki, error) {
 	}
 
 	clientKey, clientDER, err := issue(caCert, caKey, &x509.Certificate{
-		Subject:     pkix.Name{CommonName: "holzkube", Organization: []string{"talossim"}},
+		Subject:     pkix.Name{CommonName: "holzkube-manager", Organization: []string{"talossim"}},
 		KeyUsage:    x509.KeyUsageDigitalSignature,
 		ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth},
 	})

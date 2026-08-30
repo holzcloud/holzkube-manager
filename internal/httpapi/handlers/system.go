@@ -3,7 +3,7 @@ package handlers
 import (
 	"net/http"
 
-	"github.com/holzcloud/holzkube/internal/httpapi"
+	"github.com/holzcloud/holzkube-manager/internal/httpapi"
 )
 
 type systemStatus struct {

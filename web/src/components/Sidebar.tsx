@@ -56,7 +56,7 @@ export const NAV_AREAS: NavArea[] = [
     icon: Server,
     phase: 3,
     description:
-      'Every machine holzkube knows about, with its Talos version, its role and an honest health state — including the machines that are not answering.',
+      'Every machine holzkube-manager knows about, with its Talos version, its role and an honest health state — including the machines that are not answering.',
   },
   {
     path: '/clusters',
@@ -80,7 +80,7 @@ export const NAV_AREAS: NavArea[] = [
     icon: ListChecks,
     phase: 6,
     description:
-      'Long-running and dangerous operations as persisted jobs that survive a restart of holzkube itself.',
+      'Long-running and dangerous operations as persisted jobs that survive a restart of holzkube-manager itself.',
   },
   {
     path: '/upgrades',
@@ -122,7 +122,7 @@ export function Sidebar() {
       className="flex h-full w-56 shrink-0 flex-col gap-1 border-r border-border bg-sidebar p-3"
     >
       <div className="mb-4 px-2 pt-1">
-        <span className="font-heading text-lg font-semibold tracking-tight">holzkube</span>
+        <span className="font-heading text-lg font-semibold tracking-tight">holzkube-manager</span>
         <p className="text-xs text-muted-foreground">Talos cluster management</p>
       </div>
 

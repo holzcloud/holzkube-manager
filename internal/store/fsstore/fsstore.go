@@ -1,6 +1,6 @@
 // Package fsstore implements store.Store over 0600 files on disk.
 //
-// It is the only package in holzkube permitted to know filesystem paths for
+// It is the only package in holzkube-manager permitted to know filesystem paths for
 // state. Everything above it addresses records by entity and identifier.
 package fsstore
 
@@ -14,9 +14,9 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/holzcloud/holzkube/internal/model"
-	"github.com/holzcloud/holzkube/internal/store"
-	"github.com/holzcloud/holzkube/internal/store/migrate"
+	"github.com/holzcloud/holzkube-manager/internal/model"
+	"github.com/holzcloud/holzkube-manager/internal/store"
+	"github.com/holzcloud/holzkube-manager/internal/store/migrate"
 )
 
 // Store is the filesystem-backed implementation of store.Store.
@@ -38,7 +38,7 @@ type Store struct {
 	schematics *schematicStore
 }
 
-// Open prepares dir as a holzkube data directory and returns a Store over it.
+// Open prepares dir as a holzkube-manager data directory and returns a Store over it.
 // The directory is created 0700 if missing.
 //
 // The order of the startup steps is load-bearing:

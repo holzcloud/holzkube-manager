@@ -56,7 +56,7 @@ const (
 // talosVersionPattern is the shape of a Talos version as it appears in a
 // Factory path segment.
 //
-// Validated rather than escaped: these values reach holzkube from an operator
+// Validated rather than escaped: these values reach holzkube-manager from an operator
 // and are then interpolated into an upstream URL path, so a segment containing
 // a slash or a dot-dot would address a different endpoint than the one this
 // code reads as being addressed. Rejecting the shape outright is checkable;

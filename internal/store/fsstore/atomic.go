@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"sync/atomic"
 
-	"github.com/holzcloud/holzkube/internal/store"
+	"github.com/holzcloud/holzkube-manager/internal/store"
 )
 
 const (

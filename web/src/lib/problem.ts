@@ -132,7 +132,7 @@ export function messageFor(error: unknown): string {
     if (title.trim() !== '') {
       return title
     }
-    return 'holzkube refused the request but did not say why. The server log has the details.'
+    return 'holzkube-manager refused the request but did not say why. The server log has the details.'
   }
   if (error instanceof Error && error.message.trim() !== '') {
     return error.message
@@ -218,12 +218,12 @@ export async function toProblemError(response: Response): Promise<ProblemError> 
 
 function fallbackTitle(status: number): string {
   if (status >= 500) {
-    return 'holzkube could not complete that request'
+    return 'holzkube-manager could not complete that request'
   }
   if (status === 0) {
-    return 'holzkube did not answer'
+    return 'holzkube-manager did not answer'
   }
-  return 'holzkube refused that request'
+  return 'holzkube-manager refused that request'
 }
 
 function fallbackDetail(status: number): string {
