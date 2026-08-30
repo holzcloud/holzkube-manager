@@ -311,6 +311,25 @@ export const WARNING_INSTALLER_IGNORES_META = 'schematic.installer-ignores-meta'
  */
 export const WARNING_INSTALLER_REPO_FALLBACK_UNVERIFIED = 'installer.repo-fallback-unverified'
 
+/**
+ * The same provenance for a SecureBoot request, and a separate code because the
+ * fact it carries is a different one.
+ *
+ * `installer-secureboot` was recorded as a legacy alias of
+ * `metal-installer-secureboot`, and it is not one: at the pinned Talos version
+ * the two names resolve to two different images, while at the oldest supported
+ * version they resolve to the same one. Neither "alias" nor "different image" is
+ * true of the pair in general, so the answer is labelled per resolution rather
+ * than settled once. An operator who copied this reference earlier is not
+ * necessarily holding the same thing.
+ *
+ * It does not weaken the rule that a SecureBoot request is never answered with
+ * an ordinary installer: both candidates behind this code are SecureBoot
+ * installers.
+ */
+export const WARNING_INSTALLER_SECUREBOOT_REPO_FALLBACK_UNVERIFIED =
+  'installer.secureboot-repo-fallback-unverified'
+
 export interface AuditQuery {
   from?: string
   to?: string
