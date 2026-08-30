@@ -163,6 +163,39 @@ export function hasControlCharacter(value: string): boolean {
   return false
 }
 
+/**
+ * Stored operator text, rendered inside its own directional isolate.
+ *
+ * **The contract, stated here because this is where the rendering happens.**
+ * Every string that came out of a stored record and was written by an operator
+ * is rendered inside a `<bdi>`. A directional control inside such a value may
+ * reorder that value and nothing else: the cell may look strange, but the row
+ * cannot lie about which record it belongs to. That is the property worth
+ * buying. A name that reverses its own characters is confusing; a name that
+ * reorders the identifier or the badge beside it is a spoof.
+ *
+ * Refusing the input was the other half, and it happened first: `name` and
+ * `cluster` now go through the same server-side guard as `kernel_args` and
+ * `meta`, so no new record can carry a bidi control in either. This is about
+ * the records that already can — anything stored before that guard existed,
+ * anything an import or a migration writes, and any future field that forgets
+ * to be guarded. Those are readable but not re-creatable, and the operator who
+ * has one deletes and re-authors it; nothing migrates them.
+ *
+ * `U+202E` is *not* refused, and that is deliberate rather than an oversight:
+ * the live differential measured it round-tripping through the Factory
+ * unchanged, so refusing it would block a value the API accepts (plan 02-14).
+ * The override is therefore a character holzkube carries and has to render
+ * safely, which is exactly why the isolate is the answer and a refusal is not.
+ *
+ * It applies to every stored-string render site uniformly. A contract applied
+ * to the name cell and not the probe reason is a contract the next reader will
+ * take as covering both.
+ */
+function StoredText({ children }: { children: string }) {
+  return <bdi>{children}</bdi>
+}
+
 const ARCHITECTURES = ['amd64', 'arm64'] as const
 export type Architecture = (typeof ARCHITECTURES)[number]
 
@@ -839,7 +872,9 @@ function UsabilityVerdict({
     <span className="flex flex-col gap-1">
       <Badge variant="destructive">Not usable — the Factory refused to build it</Badge>
       {reason !== undefined && reason !== '' && (
-        <span className="text-xs text-muted-foreground">{reason}</span>
+        <span className="text-xs text-muted-foreground">
+          <StoredText>{reason}</StoredText>
+        </span>
       )}
     </span>
   )
@@ -945,10 +980,15 @@ function SavedSchematics({ onOpen }: { onOpen: (id: string) => void }) {
                 }}
                 tabIndex={0}
                 role="button"
+                // The accessible name is an attribute rather than rendered
+                // text, so no isolate applies to it and none is needed: an
+                // attribute has no surrounding run to reorder.
                 aria-label={`Schematic ${record.name}`}
                 className="cursor-pointer"
               >
-                <TableCell>{record.name}</TableCell>
+                <TableCell>
+                  <StoredText>{record.name}</StoredText>
+                </TableCell>
                 <TableCell className="tabular-nums">{record.talos_version}</TableCell>
                 <TableCell className="tabular-nums">{record.extensions.length}</TableCell>
                 <TableCell className="tabular-nums">{record.created_at}</TableCell>
@@ -1131,7 +1171,9 @@ function SchematicDetailBody({
   return (
     <>
       <DialogHeader>
-        <DialogTitle>{record.name}</DialogTitle>
+        <DialogTitle>
+          <StoredText>{record.name}</StoredText>
+        </DialogTitle>
         <DialogDescription>
           Authored against {record.talos_version}. The id below is the SHA-256 of the Factory's own
           canonical document, and it is what a machine config refers to.
@@ -1162,7 +1204,7 @@ function SchematicDetailBody({
       <div>
         <h3 className="mb-1 text-sm font-medium">Factory-canonical document</h3>
         <pre className="overflow-x-auto rounded-md bg-muted p-3 font-mono text-xs">
-          {record.canonical}
+          <StoredText>{record.canonical}</StoredText>
         </pre>
       </div>
 
