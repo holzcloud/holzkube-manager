@@ -78,6 +78,25 @@ describe('presentationFor', () => {
   it('falls back to a toast for a code nobody taught it', () => {
     expect(presentationFor(problem('something.new', 418))).toBe('toast')
   })
+
+  /**
+   * The premise of the whole taxonomy, made checkable (G-02-23).
+   *
+   * The problem `type` could be re-rooted at a URN without touching a single
+   * consumer because no consumer reads it: the presentation is a function of
+   * `code` alone. If this test ever fails, someone has made the type
+   * load-bearing -- and the cost model of that decision changes with it, since
+   * re-rooting is only free while nothing branches on the value.
+   */
+  it('ignores the type entirely: the presentation is a function of code alone', () => {
+    const types = ['', 'about:blank', 'https://example.invalid/problems/conflict', 'not a uri']
+
+    for (const [code, status, expected] of TAXONOMY) {
+      for (const type of types) {
+        expect(presentationFor(problem(code, status, { type }))).toBe(expected)
+      }
+    }
+  })
 })
 
 describe('messageFor', () => {
