@@ -310,17 +310,27 @@ func TestWarningDetailsMatchTheUI(t *testing.T) {
 		}
 	}
 
-	// The installer fallback code is checked differently, and deliberately: only
-	// the code, never a sentence. The other two details are static text authored
+	// The installer codes are checked differently, and deliberately: only the
+	// code, never a sentence. The other two details are static text authored
 	// once in Warnings, so they can be transcribed and compared byte for byte.
-	// This one is built per incident -- it names the repository that answered,
+	// These are built per incident -- they name the repository that answered,
 	// the repository that did not, the version and the transport error as the
 	// client reported it -- so there is no sentence to transcribe. The UI renders
 	// the server's detail as it arrives; what has to stay in step is the
 	// identifier the component keys on.
-	if !strings.Contains(apiModule, imagefactory.WarningInstallerRepoFallbackUnverified) {
-		t.Errorf("%s: %s declares no constant for this code",
-			imagefactory.WarningInstallerRepoFallbackUnverified, apiPath)
+	//
+	// Enumerated rather than listed by name, which is the point of this loop.
+	// This check used to name the one installer code it knew about, so plan
+	// 02-16 could add installer.secureboot-repo-fallback-unverified, ship the Go
+	// half with no TS mirror, and go green -- the drift guard was blind to the
+	// exact drift it exists to catch. exportedWarningCodes walks the package's
+	// own source, so a code added anywhere in it is covered the moment it is
+	// declared.
+	for name, code := range exportedWarningCodes(t) {
+		if !strings.Contains(apiModule, code) {
+			t.Errorf("%s (%s): %s declares no constant for this code. Add the mirror there, "+
+				"and a row to docs/api-contract.md's warning table.", code, name, apiPath)
+		}
 	}
 }
 
