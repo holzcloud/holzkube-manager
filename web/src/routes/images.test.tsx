@@ -731,6 +731,29 @@ const UNPROBED = schematicFixture({
 })
 
 /**
+ * A record whose stored strings carry a right-to-left override.
+ *
+ * This case can no longer be created through the API: plan 02-20 routed `name`
+ * and `cluster` through the same refusal predicate as `kernel_args` and `meta`,
+ * so a POST carrying one is a 400. That is exactly why it needs a fixture. The
+ * branch is unreachable from the form and therefore invisible to every other
+ * test in this file, while the records it describes — anything stored before
+ * that guard, anything an import writes — are still readable.
+ *
+ * U+202E is not a refused character on either side: the live differential
+ * measured it round-tripping through the Factory unchanged, so holzkube carries
+ * it and has to render it safely rather than refuse it.
+ */
+const OVERRIDE_STORED = schematicFixture({
+  id: 'd'.repeat(64),
+  name: 'pwn\u202eRLO',
+  usable: false,
+  probed_at: '2026-08-29T10:05:00Z',
+  probe_reason: 'the Factory said \u202edeifitnedinu\u202c at v1.13.9/amd64',
+  arch: 'amd64',
+})
+
+/**
  * A record written before model.Schematic.Arch existed. Its architecture is
  * empty forever -- there is nothing on the record to recover it from -- and
  * those are precisely the records the G-02-8 leak produced.
@@ -829,6 +852,43 @@ describe('ImagesView — the saved schematics', () => {
     // the field did, unqualified forever, and not dressed up with a guess.
     expect(preArch.getByText(/Usable — the build probe confirmed it/)).toBeInTheDocument()
     expect(preArch.queryByText(/^architecture:/)).not.toBeInTheDocument()
+  })
+
+  /**
+   * G-02-17's second missing bullet: the rendering contract for a stored bidi
+   * control, applied and asserted rather than described.
+   *
+   * The claim is not that the cell looks tidy — a name that reverses its own
+   * characters still reads oddly, and it should. The claim is containment: an
+   * override inside a stored value reorders that value and nothing around it,
+   * so the row cannot lie about which record it belongs to. `<bdi>` is
+   * `unicode-bidi: isolate` by definition, which is why the assertion is on the
+   * element and not on a class name.
+   *
+   * The probe reason and the detail heading are checked alongside the name
+   * cell, because a contract applied to one of them is a contract nobody can
+   * rely on for the others.
+   */
+  it('isolates every stored string a bidi override could otherwise reorder', async () => {
+    stubFactory({ saved: [OVERRIDE_STORED] })
+    const user = userEvent.setup()
+
+    renderImages()
+
+    const table = within(await screen.findByRole('table'))
+    expect(table.getByText(OVERRIDE_STORED.name).tagName).toBe('BDI')
+    expect(table.getByText(OVERRIDE_STORED.probe_reason).tagName).toBe('BDI')
+
+    const detail = await openDetail(user, OVERRIDE_STORED)
+    // The dialog heading and the canonical document are the two remaining
+    // stored strings; the id is hex and the version is validated.
+    expect(detail.getByRole('heading', { level: 2 }).textContent).toBe(OVERRIDE_STORED.name)
+    const renderedNames = detail.getAllByText(OVERRIDE_STORED.name)
+    expect(renderedNames.length).toBeGreaterThan(0)
+    for (const element of renderedNames) {
+      expect(element.tagName).toBe('BDI')
+    }
+    expect(detail.getByText(OVERRIDE_STORED.canonical.trim()).tagName).toBe('BDI')
   })
 
   it('names the architecture the new schematic was created at on the result panel', async () => {
