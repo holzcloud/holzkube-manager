@@ -738,6 +738,45 @@ describe('ImagesView — the saved schematics', () => {
     expect(detail.getByText('architecture: arm64')).toBeInTheDocument()
   })
 
+  it("keeps the detail dialog's width class through the class merge", async () => {
+    // G-02-19, and named for the merge rather than for the width because the
+    // merge is what this can actually check. jsdom lays nothing out: it has no
+    // viewport, applies no stylesheet and resolves no breakpoint, so a width
+    // assertion here would be a sentence about a number nothing computed. What
+    // *is* checkable is the defect itself, which was never a rendering
+    // outcome -- `DialogContent` sets `sm:max-w-sm`, the caller set an
+    // unprefixed `max-w-3xl`, tailwind-merge keys by variant as well as by
+    // property, so both classes survived onto the element and the narrower one
+    // won the cascade. The class attribute below is the exact artifact of that
+    // merge, and it holds the wide rule at the same breakpoint as the default
+    // and no longer holds the default.
+    //
+    // The pixel half of this claim is plan 02-17's: it adds the browser runner,
+    // and its first assertion is that this dialog measures wider than the old
+    // 384px at a wide viewport. Neither test is sufficient alone -- this one
+    // says the right classes reach the element, that one says the browser then
+    // does something with them.
+    stubFactory({ saved: [USABLE] })
+    const user = userEvent.setup()
+
+    renderImages()
+    await openDetail(user, USABLE)
+
+    const dialog = await screen.findByRole('dialog')
+    const classes = (dialog.getAttribute('class') ?? '').split(/\s+/)
+
+    expect(classes).toContain('sm:max-w-3xl')
+    expect(classes).not.toContain('sm:max-w-sm')
+    // The unprefixed form is the trap, not a second acceptable answer: it would
+    // reintroduce the same silent loss and would also clobber the base
+    // small-screen rule asserted below.
+    expect(classes).not.toContain('max-w-3xl')
+    // Below the breakpoint the component's own rule is still the one that
+    // applies; widening the dialog must not have taken the narrow-viewport
+    // margin with it.
+    expect(classes).toContain('max-w-[calc(100%-2rem)]')
+  })
+
   it('leaves a record written before the architecture existed unqualified', async () => {
     // Every schematic stored before model.Schematic.Arch existed decodes with an
     // empty architecture -- and those are precisely the records the G-02-8 leak
