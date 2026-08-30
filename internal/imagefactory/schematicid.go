@@ -272,8 +272,25 @@ func renderScalar(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", "''") + "'"
 }
 
-// representable rejects the scalars whose rendering this package deliberately
-// does not implement.
+// NotRepresentableReason is the single statement of which scalars holzkube will
+// carry. It returns the reason the value is refused, or the empty string when
+// it is representable.
+//
+// Two layers have to answer this question and they must not answer it
+// differently. The canonical writer asks it about a document scalar, because a
+// value it cannot render the way the Factory would produces an id that
+// disagrees with the Factory's. The HTTP layer asks it about a request field,
+// before there is a document at all, because a value that cannot survive
+// serialisation cannot survive storage or rendering either -- a request field, a
+// stored record and a document scalar are all text holzkube keeps, shows and
+// hands to a third party, and a character that breaks one of those breaks the
+// others. Stating the rule twice is how a request validator and a serialiser
+// come to disagree about which values exist; this is the shape registryRefused
+// already established in this package, and the reason the unexported
+// representable below is a call rather than a copy.
+//
+// It rejects the scalars whose rendering this package deliberately does not
+// implement.
 //
 // A newline turns the scalar into a block literal with its own chomping and
 // indentation rules; a control character forces a double-quoted form with
@@ -301,7 +318,7 @@ func renderScalar(s string) string {
 //
 // The returned reason is written for an operator and names the character class,
 // never the value (T-02-64). An empty string means the scalar is representable.
-func representable(s string) string {
+func NotRepresentableReason(s string) string {
 	if !utf8.ValidString(s) {
 		return "is not valid UTF-8"
 	}
@@ -359,6 +376,12 @@ func representable(s string) string {
 	}
 	return ""
 }
+
+// representable is the canonical writer's spelling of the same question, kept
+// because that is the vocabulary the writer reads in and because an unexported
+// name is what the call sites inside this file were written against. It states
+// nothing of its own: the rule has one home, directly above.
+func representable(s string) string { return NotRepresentableReason(s) }
 
 // doubleQuote renders the double-quoted form. Only reachable for scalars that
 // representable already cleared, so the escape set is exactly the two
