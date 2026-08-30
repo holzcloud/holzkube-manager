@@ -53,22 +53,32 @@ const (
 // This is a branch-coverage fixture, not a transcript of the registry. Each
 // version here exists to make one resolution branch reachable offline, and the
 // names under it were chosen for that -- not read off factory.talos.dev. The
-// installerLegacyVersion row is the demonstration: it pins v1.9.0 to
-// "installer" alone so TestInstallerImageFallsBackToTheLegacyName has a version
-// where the fallback is the only path, while 02-04-SUMMARY.md:387 records
-// metal-installer@v1.9.0 answering 200 confirmed live. Both statements are
-// correct and they are about different things, so do not "fix" this map against
-// the registry: doing so deletes the premise a passing test rests on. The
-// registry's actual matrix is recorded by TestLiveFactory's installer-name
-// subtest in live_test.go and in the plan summary, which is where an
-// observation belongs.
+// installerLegacyVersion row is the demonstration: it carries the two legacy
+// names and neither platform-prefixed one, so v1.9.0 is a version where the
+// fallback is the only path for an ordinary request (which is what
+// TestInstallerImageFallsBackToTheLegacyName rests on) and for a SecureBoot one
+// (TestInstallerImageFallsBackToTheLegacySecureBootName), while
+// 02-04-SUMMARY.md:387 records metal-installer@v1.9.0 answering 200 confirmed
+// live. Both statements are correct and they are about different things, so do
+// not "fix" this map against the registry: doing so deletes the premise two
+// passing tests rest on. The registry's actual matrix is recorded by
+// TestLiveFactory's installer-name subtest in live_test.go and in the plan
+// summary, which is where an observation belongs.
 //
 // The modern row is the one cell that is also an observation: at v1.13.9 all
 // four names answer, measured against the live registry, with the two SecureBoot
 // names carrying a different image digest than the two ordinary ones (02-UAT.md
-// G-02-4). The SecureBoot cell under installerLegacyVersion is an assumption --
-// nothing has checked whether installer-secureboot answers at v1.9.0 -- and
-// TestLiveFactory's matrix subtest is what settles it.
+// G-02-4).
+//
+// Both cells under installerLegacyVersion are constructed rather than observed,
+// in the same register as installerNoSecureBootVersion: nothing has checked what
+// either legacy name answers at v1.9.0, and TestLiveFactory's matrix subtest
+// cannot settle it -- v1.9.0 is outside the supported range and the subtest
+// probes only versions inside it. This comment used to claim that subtest
+// settled the SecureBoot cell, which was false in two ways at once (02-UAT.md
+// G-02-12): it cannot reach v1.9.0, and the row it described as pinning v1.9.0
+// to the legacy ordinary name alone has carried the legacy SecureBoot name all
+// along.
 var installerRepos = map[string]map[string]bool{
 	installerModernVersion: {
 		"metal-installer": true, "installer": true,

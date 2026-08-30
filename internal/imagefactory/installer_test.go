@@ -1096,3 +1096,81 @@ func TestInstallerNameCheckDoesNotReadAFallbackAsAnObservation(t *testing.T) {
 		}
 	})
 }
+
+// TestInstallerImageLabelsASecureBootFallbackAsADifferentImage is the decision
+// taken in plan 02-16's task 2, made with the measurement in hand.
+//
+// Round 1 recorded installer-secureboot as a legacy alias of
+// metal-installer-secureboot, and that recording is why the SecureBoot fallback
+// was treated as harmless when installerCandidates was written. It is wrong at
+// the pinned version -- the two names resolve to two different images
+// (02-UAT.md G-02-13) -- so the fallback silently swaps one SecureBoot image
+// for another and the generic provenance warning, which says only that the
+// preferred name was unheard, is not the sentence an operator needs.
+//
+// The fallback is kept: both candidates are SecureBoot installers, so the drift
+// the refusal exists to prevent cannot occur through this path, and dropping it
+// would turn the throttle it was built for into a 502. What changes is the
+// label.
+func TestInstallerImageLabelsASecureBootFallbackAsADifferentImage(t *testing.T) {
+	fake := newFakeFactory(t)
+	fake.setRepoUnreachable(preferredSecureBootInstallerRepo)
+	client := newClient(t, fake.URL)
+
+	ref, warnings, err := client.InstallerImage(t.Context(), secureBootInstallerRequest(installerModernVersion))
+	if err != nil {
+		t.Fatalf("the SecureBoot fallback produced an error rather than a warning: %v", err)
+	}
+
+	want := fakeHost(t, fake.URL) + "/installer-secureboot/" + schematicA + ":" + installerModernVersion
+	if ref != want {
+		t.Errorf("ref  = %s\nwant = %s", ref, want)
+	}
+	if len(warnings) != 1 {
+		t.Fatalf("got %d warnings, want exactly 1: %+v", len(warnings), warnings)
+	}
+
+	w := warnings[0]
+	if w.Code != imagefactory.WarningInstallerSecureBootRepoFallbackUnverified {
+		t.Errorf("code = %q, want %q -- a SecureBoot fallback is not merely provisional, it may be "+
+			"a different image, and the generic code cannot say so",
+			w.Code, imagefactory.WarningInstallerSecureBootRepoFallbackUnverified)
+	}
+	if !strings.Contains(w.Detail, "different images") {
+		t.Errorf("the warning does not say the two SecureBoot names are different images: %q", w.Detail)
+	}
+	if !strings.Contains(w.Detail, preferredSecureBootInstallerRepo) {
+		t.Errorf("the warning does not name the repository that never answered: %q", w.Detail)
+	}
+
+	// T-02-53 is untouched: the ordinary names were never asked, so nothing
+	// here can answer a SecureBoot request with an ordinary installer.
+	for _, repo := range []string{"metal-installer", "installer"} {
+		if n := fake.count("GET /v2/" + repo + "/manifests/" + installerModernVersion); n != 0 {
+			t.Errorf("a SecureBoot request asked the ordinary repository %s %d times, want 0", repo, n)
+		}
+	}
+}
+
+// TestInstallerImageKeepsTheGenericCodeForAnOrdinaryFallback is the other half
+// of the same statement: the new code is specific to the SecureBoot pair, and
+// an ordinary fallback -- where the two names were measured resolving to one
+// image -- keeps the code the UI and docs/api-contract.md already know.
+func TestInstallerImageKeepsTheGenericCodeForAnOrdinaryFallback(t *testing.T) {
+	fake := newFakeFactory(t)
+	fake.setRepoUnreachable(preferredInstallerRepo)
+	client := newClient(t, fake.URL)
+
+	_, warnings, err := client.InstallerImage(t.Context(), installerRequest(installerModernVersion))
+	if err != nil {
+		t.Fatalf("the fallback produced an error rather than a warning: %v", err)
+	}
+	if len(warnings) != 1 || warnings[0].Code != imagefactory.WarningInstallerRepoFallbackUnverified {
+		t.Errorf("an ordinary fallback carries %+v, want the generic %q",
+			warnings, imagefactory.WarningInstallerRepoFallbackUnverified)
+	}
+	if strings.Contains(warnings[0].Detail, "different images") {
+		t.Errorf("the ordinary fallback claims a difference that was not measured of its pair: %q",
+			warnings[0].Detail)
+	}
+}

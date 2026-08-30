@@ -50,6 +50,30 @@ const (
 	// at a restart, with nothing anywhere saying the preferred name had never
 	// been ruled out. This code is that missing sentence.
 	WarningInstallerRepoFallbackUnverified = "installer.repo-fallback-unverified"
+
+	// WarningInstallerSecureBootRepoFallbackUnverified reports the same
+	// provenance for a SecureBoot request, and it is a separate code because
+	// the fact an operator needs from it is a different one.
+	//
+	// Round 1 recorded installer-secureboot as a legacy alias of
+	// metal-installer-secureboot, and that recording is why the SecureBoot
+	// fallback was treated as harmless when installerCandidates was written. It
+	// is wrong at the pinned version: the two names resolve to two different
+	// manifest digests (02-UAT.md G-02-13, re-measured 2026-08-30 by
+	// TestLiveFactory's installer-name matrix, which is where the numbers live
+	// so that they can be re-measured rather than believed). At the oldest
+	// supported version the same two names do resolve to one image, so neither
+	// "alias" nor "different image" is true of the pair in general -- which is
+	// exactly why the answer has to be labelled per resolution rather than
+	// settled once in a comment.
+	//
+	// Nothing about this weakens T-02-53: both candidates are SecureBoot
+	// installers and a SecureBoot request is still never answered with an
+	// ordinary one. What the operator gains is the ability to tell "the
+	// preferred name was unheard" from "and the image you were handed is
+	// therefore not the one that name selects", which the generic code above
+	// cannot say without claiming it of every fallback.
+	WarningInstallerSecureBootRepoFallbackUnverified = "installer.secureboot-repo-fallback-unverified"
 )
 
 // Warning is one thing an operator should know about a schematic before they
