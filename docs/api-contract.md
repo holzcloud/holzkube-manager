@@ -838,10 +838,26 @@ request is made, `POST /api/v1/schematics` computes the schematic id locally, an
 that computation refuses a scalar it cannot render the way the Factory would.
 No request reaches `factory.talos.dev`, nothing is known about the Factory, and
 no retry can succeed, so the answer is the `validation` problem type at `400`
-with code `validation.failed` and a single field error. The fields that can
-produce it are `kernel_args`, `meta` and `extensions`; a document path this
-handler does not recognise still answers `400`, with no field named, rather than
-falling back to a `502`.
+with code `validation.failed`. The fields that can produce it are `name`,
+`cluster`, `kernel_args`, `meta` and `extensions` — every operator-supplied
+string the request carries, checked against one predicate rather than five
+transcriptions of it. A document path this handler does not recognise still
+answers `400`, with no field named, rather than falling back to a `502`.
+
+**`name` and `cluster` were added to that list in plan 02-20, and a client
+written before it may see a `400` where it previously saw a `201`.** Both were
+accepted unchecked: a `POST` carrying a NUL and a right-to-left override in
+`name` answered `201`, stored both verbatim, and rendered the override in the
+saved table. `cluster` was not read at all. The two are stored and rendered, so
+they are held to the same rule as the fields that reach the document — a value
+that cannot survive serialisation cannot survive being shown either. Nothing
+about the accepted set changed: the refusal is the table below, and text in any
+language, including the bidirectional controls `U+200B` and `U+202E`, is
+accepted exactly as it was.
+
+**Every bad field is reported in one answer.** A body with a refused `name`, a
+refused `cluster` and a refused `kernel_args` entry produces three field errors,
+not the first one — fixing a form should cost one round trip, not three.
 
 **What is refused, stated as rules rather than as a list of characters:**
 
@@ -855,6 +871,29 @@ falling back to a `502`.
 
 `U+FFFD` itself is accepted, and so is `U+FDD0` — a non-character below the
 ceiling round-trips, so the rule is the ceiling and not "non-characters".
+
+**An unpaired surrogate in the request body is a `400`, and is never repaired.**
+This one is checked on the raw bytes, before the JSON decoder runs, and it is the
+only check on this route that is. `encoding/json` rewrites an escaped unpaired
+surrogate — `"\ud800"` with no low half after it, or a low half standing alone —
+to `U+FFFD` while decoding, and does the same to any raw byte sequence that is
+not valid UTF-8. A validator handed the decoded string therefore sees a clean
+value and has nothing to object to, which is how such a body used to answer
+`201` with a schematic id computed over a character the caller never sent.
+
+The answer is deterministic: `400`, `validation.failed`, one field error naming
+the member of the body that carried it when the body is an object whose members
+can be identified, and naming no field when it is not. The reason names the
+class — `contains the unpaired surrogate U+D800, half of a character whose other
+half never arrived`, or `contains a byte sequence that is not valid UTF-8` — and
+never the value.
+
+**No value is ever silently repaired.** Not this one, not a control character,
+not anything else on this route: a refusal reports and refuses. A stored value
+the operator did not write, filed under a name they will not recognise, is worse
+than the `400` that would have told them. A well-formed surrogate pair is not
+affected — it is an ordinary astral character and is judged by the table above,
+so a `😀` is refused for being above `U+FFFD` and never for its encoding.
 
 **The refusal set is a floor, not a ceiling, and it is derived from a
 measurement rather than from a reading of the upstream emitter.** The
@@ -883,7 +922,7 @@ surfaces as `upstream.factory-rejected` with an id mismatch, which is the
 paragraph above this one.
 
 **The reason names the entry and the character class and never the value.**
-`kernel_args` and `meta` can carry secrets — which is why the Factory offers no
+`name`, `cluster`, `kernel_args` and `meta` can carry secrets — which is why the Factory offers no
 way to enumerate schematics at all — and a problem body is rendered in a browser,
 may be logged by a proxy, and outlives the form that produced it. A reason reads
 `entry 2 contains the control character U+0007`, one-based, matching the row an
