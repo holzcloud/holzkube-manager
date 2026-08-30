@@ -911,7 +911,16 @@ describe('ImagesView — the saved schematics', () => {
     renderImages()
     const detail = await openDetail(user, USABLE)
 
-    expect(detail.getByText(USABLE.id)).toBeInTheDocument()
+    // Scoped to the Schematic ID heading's own paragraph rather than the whole
+    // dialog. Since ReferenceValue wraps each path segment in its own element,
+    // the asset references below also contain an element whose entire text is
+    // the id -- `/image/<id>/<version>/...` has the id as one segment -- so an
+    // unscoped exact-text query now matches three elements. All three are the id
+    // shown in full; this test is about the one under the heading.
+    const idHeading = detail.getByRole('heading', { name: 'Schematic ID' })
+    const idPanel = idHeading.parentElement
+    expect(idPanel).not.toBeNull()
+    expect(within(idPanel as HTMLElement).getByText(USABLE.id)).toBeInTheDocument()
     expect(detail.getByText(USABLE.canonical.trim())).toBeInTheDocument()
   })
 
@@ -971,11 +980,25 @@ describe('ImagesView — the saved schematics', () => {
     expect(detail.queryByRole('alert', { name: 'Installer reference warnings' })).toBeNull()
   })
 
-  it('cannot split a repository name across a line break', async () => {
-    // G-02-3's second artifact. `break-all` permits a break at any character, so
-    // `metal-installer` could wrap into something a reader — or a DOM-scraping
-    // verifier, as happened during this UAT — takes for `installer`. Breaks are
-    // now permitted only at path separators.
+  it('renders each path segment as its own element and the reference as one string', async () => {
+    // This replaces a test named `cannot split a repository name across a line
+    // break`, which asserted that the class string lacked two utilities and that
+    // the text content was intact. Both stayed true while the name split, so it
+    // passed throughout: UAX #14 offers a break after U+002D HYPHEN-MINUS
+    // regardless of `overflow-wrap` and `word-break`, and every installer name is
+    // hyphenated. It was then cited as evidence that the gap was refuted, which
+    // is what a test named for a property it cannot check is for (G-02-10).
+    //
+    // THE LINE-BREAK PROPERTY IS NOT ASSERTED HERE AND CANNOT BE. jsdom performs
+    // no layout, so nothing in this file can tell a name that splits from one
+    // that does not. It is measured in `images.browser.test.tsx`, which counts
+    // line boxes for all four installer repository names at every width in a
+    // swept range, in an engine that lays out.
+    //
+    // What this checks is the structure that fix is made of, which jsdom can see
+    // honestly: the segments are separate elements each carrying the rule that
+    // suppresses soft wrapping inside it, `<wbr />` sits between them as the only
+    // offered break point, and the text content is still exactly the reference.
     stubFactory({ saved: [USABLE] })
     const user = userEvent.setup()
 
@@ -985,15 +1008,35 @@ describe('ImagesView — the saved schematics', () => {
     const installer = await detail.findByLabelText('Installer reference')
     const reference = `factory.talos.dev/metal-installer/${USABLE.id}:v1.13.9`
 
-    // The whole reference is still one string: the Copy control and every other
-    // assertion in this file read the element's text content.
+    // The whole reference is still one string: the Copy control writes this
+    // value and a mouse selection yields the rendered text. A mitigation that
+    // swapped the hyphen for U+2011 would satisfy a line-box measurement and
+    // hand out something that is not a valid OCI reference, so this assertion is
+    // what forbids that class of fix.
     expect(installer).toHaveTextContent(reference)
 
     const value = installer.querySelector('[data-reference]')
     expect(value).not.toBeNull()
     expect(value?.textContent).toBe(reference)
-    expect(value?.className ?? '').not.toContain('break-all')
-    expect(value?.className ?? '').not.toContain('break-words')
+
+    const segments = Array.from(value?.querySelectorAll('span') ?? [])
+    expect(segments.map((each) => each.textContent)).toEqual([
+      'factory.talos.dev',
+      'metal-installer',
+      `${USABLE.id}:v1.13.9`,
+    ])
+    for (const segment of segments) {
+      expect(segment.className).toContain('whitespace-nowrap')
+    }
+
+    // The `<wbr />` elements are OUTSIDE the segment elements. Inside one they
+    // would be suppressed along with every other break opportunity there, and
+    // the reference could then not wrap anywhere at all.
+    const breaks = Array.from(value?.querySelectorAll('wbr') ?? [])
+    expect(breaks).toHaveLength(segments.length - 1)
+    for (const each of breaks) {
+      expect(each.closest('span[class*="whitespace-nowrap"]')).toBeNull()
+    }
   })
 
   it('changes every asset URL when the architecture control changes', async () => {

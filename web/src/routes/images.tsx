@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { createRoute } from '@tanstack/react-router'
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { Fragment, useCallback, useEffect, useRef, useState } from 'react'
 import {
   api,
   type CreatedSchematic,
@@ -1264,24 +1264,51 @@ function AssetRow({ label, value }: { label: string; value: string }) {
 }
 
 /**
- * A reference that may wrap, but never inside a token.
+ * A reference that may wrap, but never inside a path segment.
  *
- * This carried `break-all`, which permits a break at any character — so
- * `metal-installer` could wrap into something a reader takes for `installer`,
- * and during this phase's UAT a DOM-scraping verifier did exactly that and
- * reported a real gap as refuted. The repository name is the one part of the
- * string where a misreading changes its meaning: the two names are different
- * images, and the reference is consumed by the upgrade RPC.
+ * The repository name is the one part of the string where a misreading changes
+ * its meaning: `metal-installer` and `installer` are different images, and the
+ * reference is consumed by the upgrade RPC. So a break must never fall inside a
+ * segment, only between segments.
  *
- * So breaks are offered only at path separators. `<wbr />` marks the permitted
- * points and `break-normal` refuses the rest, which means a 64-character
- * schematic id — one segment longer than any row — still overflows rather than
- * breaking. That is acceptable and unavoidable; a fifteen-character repository
- * name never can, which is the property that matters.
+ * Two earlier attempts got this wrong, in the same direction.
  *
- * The element's text content stays the complete reference, because `<wbr />`
- * contributes nothing to it. The Copy control and every `toHaveTextContent`
- * assertion keep working on the exact string.
+ * The first permitted a break at any character, which is how a name could wrap
+ * into something a reader — or a DOM-scraping verifier, as happened during this
+ * phase's UAT — takes for a different image.
+ *
+ * The second, which this replaces, offered breaks at path separators with
+ * `<wbr />` and set `break-normal` to refuse the rest. That argument was wrong,
+ * and the test written to defend it could not have caught the error: it asserted
+ * the absence of two class names. `overflow-wrap: normal` and `word-break:
+ * normal` suppress ARBITRARY mid-word breaking. They do not touch the break
+ * opportunity UAX #14 gives after U+002D HYPHEN-MINUS, which is line-break class
+ * HY and is offered independently of both. Every one of these names is
+ * hyphenated. Measured across a 30-280px sweep, `metal-installer` split at 151
+ * of 251 widths and `metal-installer-secureboot` at all 251 — reading, at the
+ * decisive one, as `metal-installer` on the first line and `secureboot` on the
+ * second: the ordinary installer's name standing as the head of a SecureBoot
+ * reference, which is the ISO/installer drift `installer.go` says the whole
+ * resolution exists to prevent (02-UAT.md G-02-10).
+ *
+ * So each segment is its own inline element with `whitespace-nowrap`, which
+ * removes every soft-wrap opportunity inside it — the hyphen rule included,
+ * because it suppresses the opportunity rather than arguing about which
+ * character offers it. The `<wbr />` sits BETWEEN segments, outside those
+ * elements, so it is the only break point that survives. A 64-character
+ * schematic id is one segment and still cannot break; it overflows into this
+ * element's horizontal scroll, which is what that scroll is for.
+ *
+ * The text content is untouched, and that is a requirement rather than a
+ * convenience: the Copy control writes this value and a mouse selection yields
+ * the rendered text, so substituting U+2011 NON-BREAKING HYPHEN — which would
+ * also stop the break — would hand out a string that is not a valid OCI
+ * reference. Neither `<span>`, `<wbr />` nor a fragment contributes anything to
+ * `textContent`.
+ *
+ * The line boxes are measured in `images.browser.test.tsx`, across four names
+ * and every width in the swept range. They cannot be measured in jsdom, which is
+ * why the assertion that used to stand here was a class-name assertion.
  */
 export function ReferenceValue({ value }: { value: string }) {
   const segments = value.split('/')
@@ -1293,11 +1320,11 @@ export function ReferenceValue({ value }: { value: string }) {
         // (`installer` appears in both the host path and the repository name on
         // some references) and the list is never reordered.
         // biome-ignore lint/suspicious/noArrayIndexKey: positional by nature
-        <span key={index}>
+        <Fragment key={index}>
           {index > 0 && '/'}
-          {segment}
+          <span className="whitespace-nowrap">{segment}</span>
           {index < segments.length - 1 && <wbr />}
-        </span>
+        </Fragment>
       ))}
     </span>
   )
