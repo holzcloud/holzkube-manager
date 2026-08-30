@@ -2,6 +2,7 @@ import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import { api, type Problem } from '@/api'
+import { PROBLEM_BASE_URI } from '@/test/problem-fixtures'
 import { SessionExpiryWatcher, SudoDialog } from './SudoDialog'
 
 /**
@@ -18,9 +19,15 @@ import { SessionExpiryWatcher, SudoDialog } from './SudoDialog'
  * No server runs.
  */
 
+/**
+ * The type is composed from the code's first segment, a fixture convention that
+ * for some codes names a type the taxonomy does not contain. Nothing reads the
+ * type -- `presentationFor` branches on `code` alone -- so the convention costs
+ * nothing and is left alone here.
+ */
 function problemResponse(status: number, code: string, detail: string, headers = {}): Response {
   const body: Problem = {
-    type: `https://holzkube.dev/problems/${code.split('.')[0]}`,
+    type: `${PROBLEM_BASE_URI}${code.split('.')[0]}`,
     title: 'Re-authentication required',
     status,
     detail,

@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { PROBLEM_BASE_URI } from '@/test/problem-fixtures'
 import {
   fieldErrorsOf,
   messageFor,
@@ -19,9 +20,16 @@ import {
  * silently landing in the default bucket.
  */
 
+/**
+ * The type is built from the code's first segment, which is a fixture
+ * convention and not a real relationship -- for some codes it names a type the
+ * taxonomy does not contain. That is harmless, and it is also a small piece of
+ * evidence for the claim this file proves below: nothing reads the type, so
+ * nothing can notice. Left as it is deliberately.
+ */
 function problem(code: string, status: number, extra: Partial<Problem> = {}): Problem {
   return {
-    type: `https://holzkube.dev/problems/${code.split('.')[0]}`,
+    type: `${PROBLEM_BASE_URI}${code.split('.')[0]}`,
     title: 'Something happened',
     status,
     code,
