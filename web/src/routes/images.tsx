@@ -75,53 +75,88 @@ import { authenticatedRoute } from '@/routes/__root'
 export type MetaRow = { key: number; value: string }
 
 /**
- * Whether a value carries a character holzkube's canonical serialiser refuses.
+ * The refusal set, declared as data.
  *
- * The original rule lives in `internal/imagefactory/schematicid.go`'s
- * `representable`: not valid UTF-8, any rune below U+0020, or U+007F. Both
- * halves are transcribed here, and the second half is the one that has to be.
+ * This is the browser's half of one rule. The other half is
+ * `NotRepresentableReason` in `internal/imagefactory/schematicid.go`, and the
+ * two are held equal by `internal/imagefactory/guard_drift_test.go`, which
+ * reads the ranges below out of this file and sweeps every codepoint through
+ * both sides. That guard fails in *both* directions, which is why the shape
+ * matters: a chain of comparisons inside an `if` — what this used to be — is
+ * unreadable from Go, and while it was one, the two sets drifted. Plan 02-14
+ * widened the server to four measured classes and this file kept refusing
+ * three, so an operator typing an emoji learned of it from a round trip instead
+ * of from the row (G-02-11).
  *
- * A lone surrogate is the only way a browser produces something that is not
- * valid UTF-8, and the server does *not* answer 400 for one. `JSON.stringify`
- * emits it as a well-formed `\udXXX` escape, and Go's `encoding/json` decodes an
- * unpaired surrogate escape to U+FFFD — so by the time `representable` sees the
- * string it is valid UTF-8 with no control character in it. The value is
- * accepted, the schematic is created, and its id is computed over a character
- * the operator never typed. That also makes `representable`'s `utf8.ValidString`
- * branch unreachable from the HTTP route altogether; only an in-process caller
- * can reach it.
+ * Every range here was measured, not reasoned about. `TestLiveCanonical` posts
+ * each candidate scalar to `factory.talos.dev` and compares the document and
+ * the id it returns; these are the classes it observed diverging. The
+ * codepoints it measured as round-tripping — U+00A0, U+200B, U+202E, U+FDD0,
+ * U+FFFD among them — are deliberately absent. Refusing more than the server
+ * does is a false refusal an operator cannot work around, and it makes this
+ * form the authority instead of the contract.
  *
- * Having their input silently rewritten into something they did not type is
- * precisely what T-02-67 says an operator must not get, so the refusal happens
- * here, where the offending row can still be named. It stays on this side
- * deliberately: widening `representable`'s refused set would change which
- * scalars the canonical serialiser renders, and that decides the locally
- * precomputed schematic id FACT-06 rests on.
- *
- * For every class the server can still see, its 400 is the backstop and not the
- * fallback. Refusing at the input is what tells an operator *which row* is wrong
- * while they are still looking at it; the server answering afterwards is the
- * guarantee that such a value never reaches the Factory. The lone surrogate is
- * the exception stated above, and the reason this carries both halves of the
- * rule rather than one.
- *
- * It reports rather than strips, for the same T-02-67 reason.
+ * `class` is not rendered. It is here because a range with no name is a number
+ * nobody can check, and because the drift guard's failure message is easier to
+ * act on when the entry can be identified.
  */
+type RefusedRange = { from: number; to: number; class: string }
+
+const REFUSED_RANGES: readonly RefusedRange[] = [
+  // C0 and DEL through the C1 range. The Factory escapes most of these, which
+  // moves the id; U+0085 it also folds into a space inside a quoted scalar and
+  // eats at the end of a plain one. U+00A0 round-trips, which is what closes
+  // this range at the top on a measurement rather than a guess.
+  { from: 0x0000, to: 0x001f, class: 'control character' },
+  { from: 0x007f, to: 0x009f, class: 'control character' },
+  // The surrogate range. `for...of` iterates code points, so a well-formed pair
+  // yields the astral character it encodes and never a surrogate — a code in
+  // this range is therefore an unpaired one. Its server-side twin is
+  // `rawBodyRefusal`, which reads the raw request body before `encoding/json`
+  // can rewrite the escape to U+FFFD; until plan 02-20 the server had no such
+  // check and this was the one rule the browser enforced alone.
+  { from: 0xd800, to: 0xdfff, class: 'unpaired surrogate' },
+  // The two YAML line breaks above the C1 range. Both are printable to YAML and
+  // both are read as breaks by the Factory: a plain scalar carrying one becomes
+  // a document the Factory answers 400 to, which is the 502 the operator saw as
+  // "The Image Factory did not answer usably".
+  { from: 0x2028, to: 0x2029, class: 'line separator' },
+  // The byte order mark, inside YAML's printable range and excluded from it by
+  // name. The Factory escapes it and every character after it.
+  { from: 0xfeff, to: 0xfeff, class: 'byte order mark' },
+  // Everything above the printable ceiling. U+FFFE and U+FFFF make the document
+  // unparseable; everything above the BMP, emoji included, comes back escaped.
+  // U+FFFD itself round-trips, so the boundary is exact.
+  { from: 0xfffe, to: 0x10ffff, class: 'above U+FFFD' },
+]
+
 /**
- * The row-level message. It names the character class and never the value, for
- * the same reason the server's problem body does not: kernel arguments and META
- * values can carry secrets (T-02-64).
+ * The row-level message. It names the character classes and never the value,
+ * for the same reason the server's problem body does not: every guarded field
+ * can carry a secret (T-02-64).
  */
 const CONTROL_CHARACTER_MESSAGE =
-  'This contains a control character or an unpaired surrogate — half of a character whose other half never arrived. The Image Factory schematic cannot carry either, so remove it before creating.'
+  'This contains a character the Image Factory schematic cannot carry \u2014 a control character, a line separator, a byte order mark, an unpaired surrogate, or a character above U+FFFD such as an emoji. Remove it before creating.'
 
+/**
+ * Whether a value carries a character the schematic cannot carry.
+ *
+ * It walks REFUSED_RANGES rather than restating them, so there is one statement
+ * of the set on this side and the guard has something to read.
+ *
+ * The server's 400 is the backstop and not the fallback. Refusing at the input
+ * is what tells an operator *which row* is wrong while they are still looking
+ * at it; the server answering afterwards is the guarantee that such a value
+ * never reaches the Factory. Both halves are wanted, which is why neither one
+ * is allowed to be wider than the other.
+ *
+ * It reports rather than strips (T-02-67). A value silently repaired is a value
+ * the operator did not write, stored under a name they will not recognise.
+ */
 export function hasControlCharacter(value: string): boolean {
   for (const character of value) {
     const code = character.codePointAt(0) ?? 0
-    // for...of iterates code points, so a well-formed pair yields the astral
-    // character it encodes and never a surrogate. A code in this range is
-    // therefore an unpaired one, which is the invalid-UTF-8 half of the rule.
-    if (code < 0x20 || code === 0x7f || (code >= 0xd800 && code <= 0xdfff)) {
+    if (REFUSED_RANGES.some((range) => code >= range.from && code <= range.to)) {
       return true
     }
   }
@@ -240,6 +275,18 @@ function ImagesView() {
   // Computed once here and passed down, rather than duplicated inside both row
   // components: the rule has one home, and "is anything offending" is one
   // question rather than two that could disagree.
+  //
+  // The name joins them, and its absence was half of G-02-17: a POST carrying
+  // NUL and a right-to-left override in the name answered 201 and rendered the
+  // override raw in the saved table, while kernel_args and meta — arriving in
+  // the same request body — were refused. The server now guards all of them; so
+  // does the form, through this one computation, so the two cannot answer
+  // differently.
+  //
+  // `cluster` is guarded server-side too and has no input here to guard: this
+  // form does not offer one, and the request it builds carries no cluster. When
+  // one is added it belongs in this computation and nowhere else.
+  const nameError = hasControlCharacter(name) ? CONTROL_CHARACTER_MESSAGE : null
   const kernelArgErrors = kernelArgs.map((value) =>
     hasControlCharacter(value) ? CONTROL_CHARACTER_MESSAGE : null,
   )
@@ -247,7 +294,9 @@ function ImagesView() {
     hasControlCharacter(row.value) ? CONTROL_CHARACTER_MESSAGE : null,
   )
   const hasUnusableValue =
-    kernelArgErrors.some((each) => each !== null) || metaErrors.some((each) => each !== null)
+    nameError !== null ||
+    kernelArgErrors.some((each) => each !== null) ||
+    metaErrors.some((each) => each !== null)
 
   const submit = useCallback(() => {
     create.mutate({
@@ -293,6 +342,7 @@ function ImagesView() {
               placeholder="workers with intel microcode"
               className="w-72"
             />
+            <RowProblem label="Name" message={nameError} />
           </div>
 
           <div className="flex flex-col gap-1">
