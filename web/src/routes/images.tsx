@@ -40,6 +40,11 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
+import {
+  CODE_UPSTREAM_FACTORY_REJECTED,
+  CODE_UPSTREAM_FACTORY_UNAVAILABLE,
+  messageFor,
+} from '@/lib/problem'
 import { authenticatedRoute } from '@/routes/__root'
 
 /**
@@ -1199,11 +1204,22 @@ function AssetPanel({ record, archSeed }: { record: Schematic; archSeed: Archite
 
       {assets.isPending && <p className="text-sm text-muted-foreground">Resolving…</p>}
 
+      {/*
+       * A whole-request failure: the schematic is gone, the architecture is not
+       * one the Factory builds for. Nothing was computed, so there is nothing to
+       * show but the reason — and the reason is the server's own sentence rather
+       * than one written here.
+       *
+       * This used to be the only failure branch, and it carried one hardcoded
+       * sentence for every way the route could fail. It never read
+       * `assets.error`, so a 400 naming an architecture and a registry that had
+       * not answered in 50 seconds produced the same words. Its argument — that
+       * a guessed installer is worse than none — was right and has moved into
+       * the installer row below, where it is about one field instead of five.
+       */}
       {assets.isError && (
-        <p role="alert" className="text-sm text-destructive">
-          The asset references could not be resolved. The installer reference in particular is
-          resolved against the registry and never assembled, so nothing is shown rather than a
-          plausible string — a guessed installer is the failure this avoids.
+        <p role="alert" aria-label="Asset references failed" className="text-sm text-destructive">
+          {messageFor(assets.error)}
         </p>
       )}
 
@@ -1226,21 +1242,26 @@ function AssetPanel({ record, archSeed }: { record: Schematic; archSeed: Archite
           />
           <div className="grid gap-2">
             <AssetRow label="ISO" value={assets.data.iso} />
-            {/*
-             * A null installer is the server saying the registry would not
-             * answer for it, and the row that explains which of the two reasons
-             * it was is the next task's work. Until then the row is omitted
-             * rather than rendered empty: an empty value beside four correct
-             * references reads as "there is no installer", which is a claim
-             * nobody made.
-             */}
-            {assets.data.installer !== null && (
+            {assets.data.installer === null ? (
+              <UnresolvedInstallerRow
+                reason={assets.data.installer_error}
+                secureBoot={secureBoot}
+              />
+            ) : (
               <AssetRow label="Installer" value={assets.data.installer} />
             )}
             <AssetRow label="PXE" value={assets.data.pxe} />
             <AssetRow label="Disk image" value={assets.data.disk_image} />
             <AssetRow label="Kernel cmdline" value={assets.data.cmdline} />
           </div>
+          {assets.data.installer === null && (
+            <p className="text-xs text-muted-foreground">
+              The four references above are correct and usable for booting. They are built from this
+              request alone and never touched the registry, so nothing that happened to the
+              installer reference affects them. What is missing is the reference the upgrade RPC
+              consumes.
+            </p>
+          )}
           <p className="text-xs text-muted-foreground">
             The ISO and the installer must share this schematic. Booting from this ISO and
             installing with a different installer produces a machine that boots with these
@@ -1269,6 +1290,71 @@ function AssetRow({ label, value }: { label: string; value: string }) {
       <span className="text-sm text-muted-foreground">{label}</span>
       <ReferenceValue value={value} />
       <CopyButton label={label} value={value} />
+    </fieldset>
+  )
+}
+
+/**
+ * The installer row when the registry would not answer for it.
+ *
+ * A row and not an omission. Four rows where five are expected reads as a grid
+ * that is complete by design, and an operator who came for an ISO URL would have
+ * no way to tell that a fifth reference was asked for and withheld. The row is
+ * where the value would have been, and it says why it is not there.
+ *
+ * The sentence comes from the server. `detail` already names the version and
+ * what the registry answered, and inventing a second account of one failure here
+ * is how the two halves of an interface end up describing one condition as two
+ * problems. What this component adds is the remedy, which the server does not
+ * state and which is *opposite* for the two codes: a registry that did not
+ * answer is worth asking again, and a version that has no installer under the
+ * requested name is not. Collapsing them into one sentence — which is what this
+ * panel did for both, plus every other failure — is the whole of G-02-15's
+ * second bullet.
+ */
+function UnresolvedInstallerRow({
+  reason,
+  secureBoot,
+}: {
+  reason: { code: string; detail: string } | undefined
+  secureBoot: boolean
+}) {
+  const refused = reason?.code === CODE_UPSTREAM_FACTORY_REJECTED
+  const unavailable = reason?.code === CODE_UPSTREAM_FACTORY_UNAVAILABLE
+
+  // A code neither branch recognises still gets a sentence, never a bare code
+  // and never silence -- the same rule messageFor enforces for a problem body.
+  const remedy = refused
+    ? 'This Talos version has no installer image under the repository name this request asks for. Asking again reproduces the same answer.'
+    : unavailable
+      ? 'The registry did not answer, which says nothing about this schematic. Asking again may succeed.'
+      : 'The installer reference could not be resolved.'
+
+  return (
+    <fieldset
+      aria-label="Installer reference"
+      className="grid grid-cols-[minmax(0,8rem)_1fr_auto] items-start gap-2"
+    >
+      <span className="text-sm text-muted-foreground">Installer</span>
+      <div className="space-y-1">
+        <p role="alert" className="text-sm text-destructive">
+          {reason === undefined ? remedy : `${reason.detail} ${remedy}`}
+        </p>
+        {secureBoot && (
+          <p className="text-xs text-muted-foreground">
+            This request asked for SecureBoot, which is what selects the installer repository —
+            holzkube asked only about the SecureBoot names. Unticking SecureBoot asks a different
+            question: the ordinary installer is a different image, and it does not produce a
+            SecureBoot node.
+          </p>
+        )}
+        <p className="text-xs text-muted-foreground">
+          No reference is shown rather than a plausible one. The installer is resolved against the
+          registry and never assembled, because it is consumed by the upgrade RPC and a guessed one
+          produces an upgrade that reports success while silently dropping every system extension
+          the node was built with.
+        </p>
+      </div>
     </fieldset>
   )
 }
