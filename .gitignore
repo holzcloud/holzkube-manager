@@ -25,3 +25,8 @@ web/node_modules/
 # OS noise
 .DS_Store
 .playwright-mcp/
+
+# vitest's browser project writes failure screenshots and attachments beside the
+# run. They are diagnostics for one run, not artifacts of the repository.
+web/.vitest-attachments/
+web/src/**/__screenshots__/
