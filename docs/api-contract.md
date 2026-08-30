@@ -608,6 +608,19 @@ is `Destructive` and behind the sudo window, and a `POST` marked
 probe verdict of a record that already exists. Read it back with `GET
 /api/v1/schematics/{id}`, or delete it and author it again.
 
+**A second architecture collides too, and that is the case worth stating
+separately.** The canonical document does not contain the architecture —
+upstream leaves it out, because a schematic describes what goes into an image
+and the architecture is a path segment on the asset URL. So the same
+customisation at `arm64` hashes to the id it already has at `amd64` and answers
+`409`. The `arch` field on the stored record names which architecture the
+`usable`, `probed_at` and `probe_reason` verdict is about; it does not make room
+for a second verdict. **One stored customisation holds exactly one
+architecture's verdict, and obtaining the other means deleting the record and
+authoring it again.** This is a recorded constraint rather than a defect — the
+reasoning and the decided direction are in
+`.planning/phases/02-transport-seam-talossim-image-factory/02-DECISION-schematic-identity.md`.
+
 The `201` body is the schematic resource plus:
 
 ```json
