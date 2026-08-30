@@ -624,8 +624,8 @@ func reportCanonResults(t *testing.T, results []canonResult) {
 	b.WriteString("| codepoint | position/style | path | verdict | shape | rule |\n")
 	for _, r := range results {
 		counts[r.verdict]++
-		b.WriteString(fmt.Sprintf("| %U | %s/%s | %s | %s | %s | %s |\n",
-			r.cand.cp, r.cand.position, r.cand.style, r.path, r.verdict, r.shape, r.cand.rule))
+		fmt.Fprintf(&b, "| %U | %s/%s | %s | %s | %s | %s |\n",
+			r.cand.cp, r.cand.position, r.cand.style, r.path, r.verdict, r.shape, r.cand.rule)
 	}
 	t.Log(b.String())
 	t.Logf("agrees=%d diverges=%d refused-locally=%d not-observed=%d",
