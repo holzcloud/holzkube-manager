@@ -2,6 +2,8 @@ package imagefactory_test
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -240,6 +242,26 @@ type installerNameCheck struct {
 //  3. If it is not, say both names, because the message is the whole value of
 //     a drift guard that fires once a year.
 func checkInstallerName(ref string, warnings []imagefactory.Warning, want string) installerNameCheck {
+	if len(warnings) > 0 {
+		// Deliberately any warning and not one code in particular. Every
+		// "installer." warning this package emits is a statement about how the
+		// name in this reference was obtained, and every one of them means the
+		// same thing here: a candidate earlier in the preference order was
+		// never heard from, so the name that answered is the name that was
+		// reachable. Keying on a single code would go quietly blind the day a
+		// second one is added, which is the shape of failure this whole check
+		// exists to remove.
+		repo, _ := installerRepoSegment(ref)
+		return installerNameCheck{
+			outcome: installerNameNotObserved,
+			repo:    repo,
+			reason: fmt.Sprintf("the reference %q carries %s, so the repository %q answered past a "+
+				"candidate that was never ruled out. This run observed which name was reachable, "+
+				"not which name the registry serves, and it is neither a pass nor a drift",
+				ref, strings.Join(warningCodes(warnings), ", "), repo),
+		}
+	}
+
 	repo, ok := installerRepoSegment(ref)
 	if !ok {
 		return installerNameCheck{
@@ -261,6 +283,16 @@ func checkInstallerName(ref string, warnings []imagefactory.Warning, want string
 		repo:    repo,
 		reason:  fmt.Sprintf("%s resolved to the repository %q", ref, repo),
 	}
+}
+
+// warningCodes is the codes of a warning slice, for a message that has to name
+// what it saw without repeating a paragraph of operator-facing prose.
+func warningCodes(warnings []imagefactory.Warning) []string {
+	codes := make([]string, 0, len(warnings))
+	for _, w := range warnings {
+		codes = append(codes, w.Code)
+	}
+	return codes
 }
 
 // installerRepoSegment returns the repository segment of an OCI reference of
@@ -307,7 +339,15 @@ func installerNameMatrixSubtests(ctx context.Context, t *testing.T, client *imag
 		// a throttle would train a reader to ignore this test. There is no
 		// retry and no raised timeout here: every budget in this package is
 		// 02-DECISION-probe-budget.md's.
-		plain, _, err := client.InstallerImage(ctx, base)
+		//
+		// The second return value is bound rather than discarded, and that is
+		// the whole of G-02-18. resolveInstallerRepo returns
+		// ErrUpstreamUnavailable only when *no* candidate answered 2xx, so the
+		// errors.Is checks below never fire on a partial throttle: the
+		// preferred name times out, the legacy one answers, and a nil error
+		// comes back with the fallback warning riding it. checkInstallerName is
+		// what reads that warning; cffa851 threw it away.
+		plain, plainWarnings, err := client.InstallerImage(ctx, base)
 		if errors.Is(err, imagefactory.ErrUpstreamUnavailable) {
 			t.Skipf("NOT OBSERVED: the ordinary installer did not resolve at %s, so the "+
 				"SecureBoot pairing went unverified in this run: %v", catalogVersion, err)
@@ -316,7 +356,7 @@ func installerNameMatrixSubtests(ctx context.Context, t *testing.T, client *imag
 			t.Fatalf("InstallerImage without SecureBoot: %v", err)
 		}
 		base.SecureBoot = true
-		secure, _, err := client.InstallerImage(ctx, base)
+		secure, secureWarnings, err := client.InstallerImage(ctx, base)
 		if errors.Is(err, imagefactory.ErrUpstreamUnavailable) {
 			t.Skipf("NOT OBSERVED: the SecureBoot installer did not resolve at %s, so the "+
 				"pairing went unverified in this run (the ordinary one resolved to %s): %v",
@@ -328,21 +368,43 @@ func installerNameMatrixSubtests(ctx context.Context, t *testing.T, client *imag
 			// asset request answers 502 with no installer reference.
 			t.Fatalf("InstallerImage with SecureBoot: %v", err)
 		}
-		t.Logf("live installer references at %s:\n  plain  = %s\n  secure = %s", catalogVersion, plain, secure)
+		t.Logf("live installer references at %s:\n  plain  = %s (warnings: %v)\n  secure = %s (warnings: %v)",
+			catalogVersion, plain, warningCodes(plainWarnings), secure, warningCodes(secureWarnings))
+
+		plainCheck := checkInstallerName(plain, plainWarnings, preferredInstallerRepo)
+		secureCheck := checkInstallerName(secure, secureWarnings, preferredSecureBootInstallerRepo)
+
+		// A provisional answer is skipped rather than failed, for the reason
+		// the transport failures above are: factory.talos.dev throttles
+		// (WINDOWS entry 5) and a throttle is not a defect. What changed is
+		// that it is no longer reported as a pass.
+		for _, c := range []installerNameCheck{plainCheck, secureCheck} {
+			if c.outcome == installerNameNotObserved {
+				t.Skipf("NOT OBSERVED: %s", c.reason)
+			}
+		}
+		if plainCheck.outcome != installerNameResolved {
+			t.Errorf("the ordinary installer name has drifted: %s", plainCheck.reason)
+		}
+		// By exact repository segment, not by containment: the old check was
+		// strings.Contains(secure, "-secureboot/"), which the legacy
+		// "installer-secureboot" satisfies exactly as well as the
+		// platform-prefixed name does -- and the two are different images
+		// (02-UAT.md G-02-13), so the difference is not cosmetic.
+		if secureCheck.outcome != installerNameResolved {
+			t.Errorf("the SecureBoot installer name has drifted: %s", secureCheck.reason)
+		}
 		if plain == secure {
 			t.Errorf("a SecureBoot request resolved to the same reference as an ordinary one (%s); "+
 				"the SecureBoot installer is a different image selected by repository name, and "+
 				"pairing a SecureBoot ISO with the ordinary installer is G-02-4", plain)
-		}
-		if !strings.Contains(secure, "-secureboot/") {
-			t.Errorf("the SecureBoot reference %q does not name a SecureBoot repository", secure)
 		}
 	})
 
 	t.Run("the installer-name matrix is what this file records", func(t *testing.T) {
 		for _, version := range []string{catalogVersion, liveOlderVersion} {
 			for _, repo := range liveInstallerRepos {
-				answered, err := liveManifestAnswers(ctx, repo, consoleSchematicID, version)
+				m, err := liveManifestProbe(ctx, repo, consoleSchematicID, version)
 				if err != nil {
 					// A transport failure is not an observation. Say so and
 					// move on: factory.talos.dev throttles (WINDOWS entry 5),
@@ -351,7 +413,14 @@ func installerNameMatrixSubtests(ctx context.Context, t *testing.T, client *imag
 					t.Logf("MATRIX %s %-28s -> not observed: %v", version, repo, err)
 					continue
 				}
-				t.Logf("MATRIX %s %-28s -> answered=%t", version, repo, answered)
+				answered := m.answered
+				// The digest is logged and never asserted on, and it is
+				// deliberately not copied into a source comment. A digest in a
+				// comment is a fact with an expiry date that nothing in the
+				// build checks, which is exactly how installer.go's previous
+				// pair went stale (02-UAT.md G-02-13). Re-measuring it is one
+				// test run; re-reading a stale comment is a wrong belief.
+				t.Logf("MATRIX %s %-28s -> answered=%t digest=%s", version, repo, answered, m.digest)
 
 				switch liveInstallerMatrix[version][repo] {
 				case liveAnswers:
@@ -370,19 +439,37 @@ func installerNameMatrixSubtests(ctx context.Context, t *testing.T, client *imag
 	})
 }
 
-// liveManifestAnswers asks the registry whether a repository name carries a
+// liveManifest is one registry answer about one (repository, version) cell.
+type liveManifest struct {
+	// answered reports a 2xx.
+	answered bool
+
+	// digest identifies the image the repository name selects, which is the
+	// only way to tell two names for one image apart from two names for two
+	// images. Empty when the registry did not answer 2xx.
+	digest string
+}
+
+// liveManifestProbe asks the registry whether a repository name carries a
 // manifest for this schematic at this version, with the same Accept header
 // installer.go sends -- a registry given none of those media types can answer
 // 404 for a manifest that exists, which would look exactly like a name that
 // does not resolve.
 //
-// A non-2xx that the registry actually answered is an observation (false, nil);
-// only a transport failure is a non-observation (error).
-func liveManifestAnswers(ctx context.Context, repo, id, version string) (bool, error) {
+// A non-2xx that the registry actually answered is an observation
+// (answered=false, nil); only a transport failure is a non-observation (error).
+//
+// It also reports the manifest digest, because "is installer-secureboot another
+// name for metal-installer-secureboot" is a question only a digest answers, and
+// round 1 answered it wrongly from a pair of literals nothing re-measured
+// (02-UAT.md G-02-13). The registry's own Docker-Content-Digest is preferred;
+// when it is absent the SHA-256 of the body is computed here, which is what
+// that header is defined to be.
+func liveManifestProbe(ctx context.Context, repo, id, version string) (liveManifest, error) {
 	u := imagefactory.DefaultBaseURL + "/v2/" + repo + "/" + id + "/manifests/" + version
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 	if err != nil {
-		return false, err
+		return liveManifest{}, err
 	}
 	req.Header.Set("Accept", "application/vnd.oci.image.index.v1+json, "+
 		"application/vnd.oci.image.manifest.v1+json, "+
@@ -391,9 +478,22 @@ func liveManifestAnswers(ctx context.Context, repo, id, version string) (bool, e
 
 	resp, err := (&http.Client{Timeout: 60 * time.Second}).Do(req)
 	if err != nil {
-		return false, err
+		return liveManifest{}, err
 	}
 	defer func() { _ = resp.Body.Close() }()
-	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<20))
-	return resp.StatusCode/100 == 2, nil
+
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return liveManifest{}, err
+	}
+	if resp.StatusCode/100 != 2 {
+		return liveManifest{}, nil
+	}
+
+	digest := resp.Header.Get("Docker-Content-Digest")
+	if digest == "" {
+		sum := sha256.Sum256(body)
+		digest = "sha256:" + hex.EncodeToString(sum[:]) + " (computed from the body; the registry sent no Docker-Content-Digest)"
+	}
+	return liveManifest{answered: true, digest: digest}, nil
 }
