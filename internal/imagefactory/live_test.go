@@ -3,6 +3,7 @@ package imagefactory_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"os"
@@ -114,11 +115,20 @@ func TestLiveFactory(t *testing.T) {
 	installerNameMatrixSubtests(ctx, t, client)
 }
 
+// The two repository names installerCandidates asks about first for a metal
+// request: the platform-prefixed ordinary name and the platform-prefixed
+// SecureBoot one. These are the names the drift guard asserts about, so they
+// are spelled once here rather than at each assertion.
+const (
+	preferredInstallerRepo           = "metal-installer"
+	preferredSecureBootInstallerRepo = "metal-installer-secureboot"
+)
+
 // liveInstallerRepos is every repository name the resolver can ask about, in
 // the two ordered pairs installerCandidates produces.
 var liveInstallerRepos = []string{
-	"metal-installer", "installer",
-	"metal-installer-secureboot", "installer-secureboot",
+	preferredInstallerRepo, "installer",
+	preferredSecureBootInstallerRepo, "installer-secureboot",
 }
 
 // liveOlderVersion is a supported Talos version older than the pinned one. The
@@ -177,6 +187,99 @@ var liveInstallerMatrix = map[string]map[string]liveExpect{
 		"metal-installer": liveAnswers, "installer": liveAnswers,
 		"metal-installer-secureboot": liveAnswers, "installer-secureboot": liveAnswers,
 	},
+}
+
+// installerNameOutcome is what one InstallerImage answer entitles a reader to
+// say about which repository name the registry resolves.
+type installerNameOutcome int
+
+const (
+	// installerNameNotObserved -- the answer was reached past a candidate that
+	// never answered, so it records which name was *reachable*, not which name
+	// the registry serves. Neither a pass nor a defect.
+	installerNameNotObserved installerNameOutcome = iota
+
+	// installerNameResolved -- the expected repository answered and every
+	// candidate was accounted for.
+	installerNameResolved
+
+	// installerNameDrifted -- a repository other than the expected one
+	// answered, with nothing unheard to explain it. A real drift.
+	installerNameDrifted
+)
+
+// installerNameCheck is one answer's verdict together with the sentence to
+// report it by.
+type installerNameCheck struct {
+	outcome installerNameOutcome
+
+	// repo is the repository segment parsed out of the reference, or empty
+	// when the reference could not be parsed.
+	repo string
+
+	// reason is the message to skip, log or fail with. Always non-empty.
+	reason string
+}
+
+// checkInstallerName is the drift guard's one assertion about a resolved
+// installer reference, in a form that can be exercised without a network.
+//
+// It answers three questions at once and keeps them apart, which is G-02-18:
+//
+//  1. Is this an observation at all? A reference carrying any warning was
+//     reached past a candidate the resolver never heard from --
+//     resolveInstallerRepo returns ErrUpstreamUnavailable only when *no*
+//     candidate answered 2xx, so a partial throttle produces a nil error, a
+//     usable reference and a warning. Such an answer says nothing about which
+//     name the registry prefers, and reporting it as a pass is exactly the
+//     failure the guard exists to catch.
+//  2. If it is an observation, is it the expected name? By exact repository
+//     segment, never by substring: "installer-secureboot" contains
+//     "-secureboot/" just as well as "metal-installer-secureboot" does, and a
+//     schematic id is 64 hex characters that a substring test would also read.
+//  3. If it is not, say both names, because the message is the whole value of
+//     a drift guard that fires once a year.
+func checkInstallerName(ref string, warnings []imagefactory.Warning, want string) installerNameCheck {
+	repo, ok := installerRepoSegment(ref)
+	if !ok {
+		return installerNameCheck{
+			outcome: installerNameDrifted,
+			reason: fmt.Sprintf("the reference %q is not host/[prefix/]repository/id:tag, so the "+
+				"repository name it carries cannot be read at all", ref),
+		}
+	}
+	if repo != want {
+		return installerNameCheck{
+			outcome: installerNameDrifted,
+			repo:    repo,
+			reason: fmt.Sprintf("the reference %q names the repository %q, want %q",
+				ref, repo, want),
+		}
+	}
+	return installerNameCheck{
+		outcome: installerNameResolved,
+		repo:    repo,
+		reason:  fmt.Sprintf("%s resolved to the repository %q", ref, repo),
+	}
+}
+
+// installerRepoSegment returns the repository segment of an OCI reference of
+// the shape host[:port]/[prefix/]repository/id:tag.
+//
+// It splits rather than searches. The repository is the second-to-last path
+// element whatever the host, the port and the optional path prefix look like,
+// and every substring alternative can be satisfied by the 64 hex characters of
+// the schematic id sitting immediately after it.
+func installerRepoSegment(ref string) (string, bool) {
+	parts := strings.Split(ref, "/")
+	if len(parts) < 3 {
+		return "", false
+	}
+	repo := parts[len(parts)-2]
+	if repo == "" {
+		return "", false
+	}
+	return repo, true
 }
 
 // installerNameMatrixSubtests answers G-02-4's third open item: the version
