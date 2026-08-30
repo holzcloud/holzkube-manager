@@ -1226,7 +1226,17 @@ function AssetPanel({ record, archSeed }: { record: Schematic; archSeed: Archite
           />
           <div className="grid gap-2">
             <AssetRow label="ISO" value={assets.data.iso} />
-            <AssetRow label="Installer" value={assets.data.installer} />
+            {/*
+             * A null installer is the server saying the registry would not
+             * answer for it, and the row that explains which of the two reasons
+             * it was is the next task's work. Until then the row is omitted
+             * rather than rendered empty: an empty value beside four correct
+             * references reads as "there is no installer", which is a claim
+             * nobody made.
+             */}
+            {assets.data.installer !== null && (
+              <AssetRow label="Installer" value={assets.data.installer} />
+            )}
             <AssetRow label="PXE" value={assets.data.pxe} />
             <AssetRow label="Disk image" value={assets.data.disk_image} />
             <AssetRow label="Kernel cmdline" value={assets.data.cmdline} />
