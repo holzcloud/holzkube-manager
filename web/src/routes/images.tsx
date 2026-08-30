@@ -1283,7 +1283,7 @@ function AssetRow({ label, value }: { label: string; value: string }) {
  * contributes nothing to it. The Copy control and every `toHaveTextContent`
  * assertion keep working on the exact string.
  */
-function ReferenceValue({ value }: { value: string }) {
+export function ReferenceValue({ value }: { value: string }) {
   const segments = value.split('/')
 
   return (
