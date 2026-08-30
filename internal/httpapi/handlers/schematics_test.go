@@ -10,6 +10,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"regexp"
 	"slices"
 	"strings"
 	"sync"
@@ -911,6 +912,97 @@ func TestUnreachableProbeRecordsNoReason(t *testing.T) {
 	}
 	if got.ProbeReason != "" {
 		t.Errorf("probe_reason = %q; the Factory said nothing about this schematic", got.ProbeReason)
+	}
+}
+
+// probeRefusalShape is the sentence a refused probe stores, as a pattern.
+//
+// `<schematic id> at <talos version>/<arch> answered HTTP <status>` --
+// imagefactory/probe.go's ErrSchematicNotBuildable format, minus the package
+// prefix probeDetail strips. It is spelled here as a regexp rather than as a
+// substring check because the assertion below is about the *format*, not about
+// the architecture appearing somewhere in an English sentence.
+var probeRefusalShape = regexp.MustCompile(
+	`^[0-9a-f]{64} at (v[0-9]+\.[0-9]+\.[0-9]+)/(amd64|arm64) answered HTTP [0-9]{3}$`)
+
+// TestRefusalReasonNamesTheArchitectureItAskedAbout pins the format that a doc
+// comment three files away depends on.
+//
+// G-02-22: `model.go`'s Arch comment and `web/src/api.ts`'s `arch` comment both
+// used to say the architecture a past probe used "is not recoverable from the
+// record". That is true of a record whose probe *succeeded* -- there is no
+// sentence, and before plan 02-13 there was no field -- and false of one it
+// refused, because the refusal reason carries the architecture verbatim and in
+// a machine-parseable shape. Both comments are now scoped to the probe outcome
+// on the strength of this test.
+//
+// Which makes the format load-bearing, and until now nothing pinned it. Drop
+// the `/%s` for arch from probe.go's ErrSchematicNotBuildable message and every
+// other test in this package still passes while two doc comments in two
+// languages quietly become false. This one goes red.
+//
+// arm64 and not amd64 on purpose: createBody posts amd64, so an assertion
+// against amd64 would pass against a format that hardcoded it, defaulted to it,
+// or dropped the architecture from a sentence that still named the version.
+func TestRefusalReasonNamesTheArchitectureItAskedAbout(t *testing.T) {
+	s, f := schematicServer(t)
+	c := operator(t, s)
+
+	f.listButRefuse("siderolabs/accepted-but-unbuildable")
+
+	body := createBody("arm-refused", []string{"siderolabs/accepted-but-unbuildable"}, nil)
+	body["arch"] = string(imagefactory.ArchARM64)
+
+	resp, raw := c.do(http.MethodPost, "/api/v1/schematics", body)
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("got %d, want 201 (body: %s)", resp.StatusCode, raw)
+	}
+
+	var got struct {
+		ID          string `json:"id"`
+		Usable      bool   `json:"usable"`
+		ProbeReason string `json:"probe_reason"`
+	}
+	decodeInto(t, raw, &got)
+	if got.Usable {
+		t.Fatalf("usable = true; this test needs a refused probe (body: %s)", raw)
+	}
+
+	match := probeRefusalShape.FindStringSubmatch(got.ProbeReason)
+	if match == nil {
+		t.Fatalf("probe_reason = %q does not match %s\n"+
+			"model.go's Arch comment and web/src/api.ts's arch comment both claim the "+
+			"architecture is readable out of a refused record's reason. If the format moved, "+
+			"those two claims moved with it and are now false.",
+			got.ProbeReason, probeRefusalShape)
+	}
+	if match[1] != catalogVersion {
+		t.Errorf("probe_reason names version %q, want %q", match[1], catalogVersion)
+	}
+	if match[2] != string(imagefactory.ArchARM64) {
+		t.Errorf("probe_reason names architecture %q, want %q; the record was probed at arm64",
+			match[2], imagefactory.ArchARM64)
+	}
+	// Negative control: the request body's default is amd64, so a sentence
+	// naming it would mean the reason describes a probe that did not happen.
+	if strings.Contains(got.ProbeReason, string(imagefactory.ArchAMD64)) {
+		t.Errorf("probe_reason = %q names amd64; the probe asked about arm64", got.ProbeReason)
+	}
+
+	// And the same is true of the stored record, not only of the 201 body --
+	// the claim being scoped is about what a *record* carries, and the record
+	// is what a later reader has.
+	resp, raw = c.do(http.MethodGet, "/api/v1/schematics/"+got.ID, nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("GET by id: got %d, want 200 (body: %s)", resp.StatusCode, raw)
+	}
+	var readBack struct {
+		ProbeReason string `json:"probe_reason"`
+	}
+	decodeInto(t, raw, &readBack)
+	if !probeRefusalShape.MatchString(readBack.ProbeReason) {
+		t.Errorf("stored probe_reason = %q does not match %s; the sentence the claim "+
+			"rests on did not survive storage", readBack.ProbeReason, probeRefusalShape)
 	}
 }
 
