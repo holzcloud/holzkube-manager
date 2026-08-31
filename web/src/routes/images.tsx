@@ -1435,9 +1435,9 @@ function UnresolvedInstallerRow({
         {secureBoot && (
           <p className="text-xs text-muted-foreground">
             This request asked for SecureBoot, which is what selects the installer repository —
-            holzkube-manager asked only about the SecureBoot names. Unticking SecureBoot asks a different
-            question: the ordinary installer is a different image, and it does not produce a
-            SecureBoot node.
+            holzkube-manager asked only about the SecureBoot names. Unticking SecureBoot asks a
+            different question: the ordinary installer is a different image, and it does not produce
+            a SecureBoot node.
           </p>
         )}
         <p className="text-xs text-muted-foreground">

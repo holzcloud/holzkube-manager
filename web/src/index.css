@@ -1,74 +1,244 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
-@import "@fontsource-variable/geist";
+@import "@fontsource-variable/manrope";
+@import "@fontsource-variable/jetbrains-mono";
 
 @custom-variant dark (&:is(.dark *));
 
-/* Dark-first (D-11). :root carries the light palette; the .dark class on
-   <html> carries the dark one and is what the inline script in index.html sets
-   before the first paint, so a dark-preferring operator never sees a white
-   flash. color-scheme travels with the palette so that form controls, scroll
-   bars and the browser's own chrome follow the same choice. */
+/* ══════════════════════════════════════════════════════════════════════════
+   holzcloud-design, applied to this application.
+
+   The values in the --hc-* block below are a COPY of holzcloud-design's
+   tokens.css, not a dependency. This repository has no package manager for
+   CSS and shadcn expects its own variable names, so the design system
+   arrives the only way it can: by being here, and by being checked.
+
+   The tag it is copied from is in .design-version at the repository root,
+   and .github/scripts/check-design.sh fails the build on the first value
+   that no longer matches. A copy drifts; this one cannot drift silently.
+
+   Everything below --hc-* is a mapping, not a new palette. shadcn's
+   semantic names (--background, --card, --primary, --ring, --sidebar-*)
+   are redefined in terms of the tokens. Nothing in this file invents a
+   colour except the light counterpart, which the design system does not
+   define and which is documented where it starts.
+   ══════════════════════════════════════════════════════════════════════════ */
+
 :root {
+  /* ── Grund ─────────────────────────────────────────────────────── */
+  --hc-ground: #0a0705;
+  --hc-ground-2: #140d08;
+  --hc-wash-warm: rgb(138 83 38 / 0.55);
+  --hc-wash-brass: rgb(240 174 95 / 0.28);
+  --hc-wash-violet: rgb(107 63 122 / 0.26);
+  --hc-ground-image:
+    radial-gradient(60% 50% at 20% 16%, var(--hc-wash-warm) 0%, transparent 100%),
+    radial-gradient(46% 40% at 84% 26%, var(--hc-wash-brass) 0%, transparent 100%),
+    radial-gradient(55% 48% at 60% 95%, var(--hc-wash-violet) 0%, transparent 100%),
+    linear-gradient(160deg, var(--hc-ground-2) 0%, var(--hc-ground) 100%);
+
+  /* ── Der Grund dieser Anwendung ──────────────────────────────────
+     The template's washes, damped to 28% of their strength. This is the
+     one place where this application deliberately departs from
+     holzcloud-design, and the reason is measured, not aesthetic.
+
+     holzcloud.ch puts almost all of its text on panes. This application
+     is a tool: extension descriptions, audit rows and field hints sit
+     directly on the ground. At the template's strength the warm wash
+     lifts the ground to #503017, and --hc-ink-3 - the muted role, which
+     here carries real content and not decoration - measures 4.00:1 on
+     it. That is under WCAG AA for body text, and it was going to ship.
+
+     Measured at the worst case, all three washes overlapping at full
+     strength - which their positions make geometrically impossible, so
+     the real page is always better than this:
+
+       damping   ink-3   brass   danger
+       1.00      2.91    3.67    2.69     every role fails
+       0.45      4.16    6.44    4.72     ink-3 still fails
+       0.28      4.69    7.97    5.84     all roles hold
+
+     The --hc-* tokens above keep the template's values untouched, so
+     check-design.sh still compares like with like. Only the image this
+     application paints is different, and it says so here. */
+  --hk-wash-warm: rgb(138 83 38 / 0.154);
+  --hk-wash-brass: rgb(240 174 95 / 0.078);
+  --hk-wash-violet: rgb(107 63 122 / 0.073);
+  --hk-ground-image:
+    radial-gradient(60% 50% at 20% 16%, var(--hk-wash-warm) 0%, transparent 100%),
+    radial-gradient(46% 40% at 84% 26%, var(--hk-wash-brass) 0%, transparent 100%),
+    radial-gradient(55% 48% at 60% 95%, var(--hk-wash-violet) 0%, transparent 100%),
+    linear-gradient(160deg, var(--hc-ground-2) 0%, var(--hc-ground) 100%);
+
+  /* ── Bernstein ─────────────────────────────────────────────────── */
+  --hc-brass: #f0ae5f;
+  --hc-brass-soft: rgb(240 174 95 / 0.4);
+  --hc-brass-wash: rgb(240 174 95 / 0.1);
+  --hc-on-brass: #150e08;
+
+  /* ── Schrift ───────────────────────────────────────────────────── */
+  --hc-ink: #f6efe6;
+  --hc-ink-2: rgb(246 239 230 / 0.7);
+  --hc-ink-3: rgb(246 239 230 / 0.52);
+
+  /* ── Flächen ───────────────────────────────────────────────────── */
+  --hc-pane: rgb(255 248 240 / 0.055);
+  --hc-pane-solid: #20150d;
+  --hc-pane-edge: rgb(255 226 190 / 0.14);
+  --hc-pane-lift: rgb(240 174 95 / 0.4);
+  --hc-hairline: rgb(255 226 190 / 0.1);
+  --hc-pane-bar: rgb(14 9 5 / 0.55);
+  --hc-pane-bar-solid: rgb(14 9 5 / 0.97);
+  --hc-pane-sunken: rgb(0 0 0 / 0.22);
+  --hc-blur: blur(24px) saturate(150%);
+  --hc-blur-bar: blur(18px) saturate(140%);
+
+  /* ── Zustände ──────────────────────────────────────────────────── */
+  --hc-ok: #8cc271;
+  --hc-warn: #e8c15c;
+  --hc-danger: #ec8272;
+  --hc-info: #8fb8d8;
+  --hc-ok-wash: rgb(140 194 113 / 0.12);
+  --hc-warn-wash: rgb(232 193 92 / 0.12);
+  --hc-danger-wash: rgb(236 130 114 / 0.12);
+  --hc-info-wash: rgb(143 184 216 / 0.12);
+
+  /* ── Form ──────────────────────────────────────────────────────── */
+  --hc-r-sm: 8px;
+  --hc-r: 16px;
+  --hc-r-lg: 24px;
+  --hc-r-pill: 999px;
+
+  --hc-font-sans: Manrope, ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --hc-font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  --hc-track-tight: -0.03em;
+  --hc-track-snug: -0.015em;
+  --hc-track-wide: 0.1em;
+  --hc-track-widest: 0.2em;
+
+  --hc-shadow-pane: inset 0 1px 0 rgb(255 240 220 / 0.14), 0 16px 40px rgb(0 0 0 / 0.45);
+  --hc-shadow-lift: inset 0 1px 0 rgb(255 240 220 / 0.18), 0 22px 56px rgb(0 0 0 / 0.55);
+
+  --hc-dur-fast: 0.16s;
+  --hc-dur-base: 0.24s;
+  --hc-ease: cubic-bezier(0.2, 0.7, 0.3, 1);
+
+  --hc-cubes-mask: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='280' height='320' viewBox='0 0 280 320'><g fill='none' stroke='white' stroke-width='1.1'><path d='M64 44 L114 72 L114 130 L64 102 Z'/><path d='M164 44 L114 72 L114 130 L164 102 Z'/><path d='M64 44 L114 16 L164 44 L114 72 Z'/><path d='M204 188 L244 211 L244 258 L204 235 Z'/><path d='M284 188 L244 211 L244 258 L284 235 Z'/><path d='M204 188 L244 165 L284 188 L244 211 Z'/><path d='M-6 208 L34 231 L34 278 L-6 255 Z'/><path d='M74 208 L34 231 L34 278 L74 255 Z'/><path d='M-6 208 L34 185 L74 208 L34 231 Z'/></g></svg>");
+  --hc-cubes-size: 280px 320px;
+  --hc-cubes-opacity: 0.085;
+
+  /* ══════════════════════════════════════════════════════════════════
+     The light counterpart.
+
+     holzcloud-design is a dark language: one ground, one ink, one brass.
+     This application has a theme toggle and therefore needs a light half
+     the template does not define. It is derived rather than invented -
+     the same warm family, mirrored, and every value below was measured
+     against the ratio it has to hold rather than picked by eye:
+
+       ink on ground              17.20  (dark: 17.61)
+       ink-2 on ground             7.69  (dark:  8.66)
+       ink-3 on ground             5.60  (dark:  5.11)  AA for body text
+       brass-ink on ground         5.84  (dark: 10.45)
+
+     --hc-brass stays #F0AE5F as a FILL - it is the brand - but at 1.79 on
+     paper it cannot carry text or a border. --hcl-brass-ink is that same
+     hue taken down to where it can, and it is not a new colour: #8A5326
+     is the base of --hc-wash-warm, already in the template.
+
+     ink-3 sits at .65 rather than the .60 that mirrors the dark half, and
+     the difference was measured rather than chosen: where all three light
+     washes overlap, the ground lifts to #EBDCCF and .60 falls to 4.38:1 -
+     under AA, on the role that carries field hints and table captions.
+     .65 holds 5.12 at that point and 5.60 on the plain ground.
+     ══════════════════════════════════════════════════════════════════ */
+  --hcl-ground: #fbf6ef;
+  --hcl-ground-2: #f5ede2;
+  --hcl-ground-image:
+    radial-gradient(60% 50% at 20% 16%, rgb(138 83 38 / 0.07) 0%, transparent 100%),
+    radial-gradient(46% 40% at 84% 26%, rgb(240 174 95 / 0.1) 0%, transparent 100%),
+    radial-gradient(55% 48% at 60% 95%, rgb(107 63 122 / 0.05) 0%, transparent 100%),
+    linear-gradient(160deg, var(--hcl-ground-2) 0%, var(--hcl-ground) 100%);
+  --hcl-ink: #1a120b;
+  --hcl-ink-2: rgb(26 18 11 / 0.74);
+  --hcl-ink-3: rgb(26 18 11 / 0.65);
+  --hcl-brass-ink: #8a5326;
+  --hcl-pane: #ffffff;
+  --hcl-pane-edge: rgb(26 18 11 / 0.22);
+  --hcl-hairline: rgb(26 18 11 / 0.12);
+  --hcl-ok: #2f6b1f;
+  --hcl-warn: #7a5a0a;
+  --hcl-danger: #a32c1a;
+  --hcl-info: #1f5a80;
+
+  /* ── shadcn-Abbildung, hell ────────────────────────────────────── */
   color-scheme: light;
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.145 0 0);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0 0);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
-  --accent: oklch(0.97 0 0);
-  --accent-foreground: oklch(0.205 0 0);
-  /* UAT G-01-4: the destructive badge renders text-destructive on
-     bg-destructive/10. At L=0.577 that pair is 4.01:1, under AA for 12px bold,
-     and the `error` outcome was the faintest badge in the audit table when it
-     is the one that has to be caught. L=0.52 takes the pair to 4.72:1 and also
-     strengthens `text-destructive` on white. */
-  --destructive: oklch(0.52 0.245 27.325);
-  /* UAT G-01-2: cards are bg-card on bg-background -- both pure white -- so
-     this border is the ONLY thing separating a card from the page. At L=0.922
-     that was 1.25:1. Dividers should not shout, so this stops short of the 3:1
-     that --input takes. */
-  --border: oklch(0.85 0 0);
-  /* UAT G-01-2: an input's fill is the same white as the card, so its border is
-     the only cue that a control is there -- which puts it squarely under
-     WCAG 1.4.11's 3:1 for component boundaries. L=0.65 is 3.23:1. */
-  --input: oklch(0.65 0 0);
-  /* UAT G-01-3: the focus indicator is `focus-visible:border-ring` plus a
-     ring-ring/50 halo. At L=0.708 the halo lands on #D0D0D0 (1.54:1) and the
-     border barely moved off the resting state. L=0.45 is 7.46:1 solid, so the
-     border carries the indicator and the halo only widens it. */
-  --ring: oklch(0.45 0 0);
-  --chart-1: oklch(0.87 0 0);
-  --chart-2: oklch(0.556 0 0);
-  --chart-3: oklch(0.439 0 0);
-  --chart-4: oklch(0.371 0 0);
-  --chart-5: oklch(0.269 0 0);
-  --radius: 0.625rem;
-  --sidebar: oklch(0.985 0 0);
-  --sidebar-foreground: oklch(0.145 0 0);
-  --sidebar-primary: oklch(0.205 0 0);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  /* UAT G-01-5: the active nav pill was L=0.97 on an L=0.985 sidebar, a 5/255
-     step (1.045:1), and the active label was the same weight and near enough
-     the same colour as the inactive ones -- so the current page had no
-     reliable cue at all. */
-  --sidebar-accent: oklch(0.93 0 0);
-  --sidebar-accent-foreground: oklch(0.145 0 0);
-  --sidebar-border: oklch(0.85 0 0);
-  --sidebar-ring: oklch(0.45 0 0);
+  --background: var(--hcl-ground);
+  --foreground: var(--hcl-ink);
+  --card: var(--hcl-pane);
+  --card-foreground: var(--hcl-ink);
+  --popover: var(--hcl-pane);
+  --popover-foreground: var(--hcl-ink);
+  /* Brass is the primary action, and the dark ink on it is the template's
+     own --hc-on-brass: 9.95:1, so a filled button reads at any size. */
+  --primary: var(--hc-brass);
+  --primary-foreground: var(--hc-on-brass);
+  --secondary: var(--hcl-ground-2);
+  --secondary-foreground: var(--hcl-ink);
+  --muted: var(--hcl-ground-2);
+  --muted-foreground: var(--hcl-ink-3);
+  --accent: rgb(240 174 95 / 0.18);
+  --accent-foreground: var(--hcl-brass-ink);
+  /* G-01-4 held: the destructive badge is text-destructive on
+     bg-destructive/10. #A32C1A on that wash over white is 5.88:1, up from
+     the 4.72 the greyscale palette reached after its own fix. */
+  --destructive: var(--hcl-danger);
+  /* G-01-2 held: card and page are both near-white, so this border is the
+     only thing separating them. 1.62:1 - deliberately short of the 3:1
+     that --input takes, because a divider that shouts is a worse page.
+     The greyscale palette it replaces sat at 1.48. */
+  --border: var(--hcl-pane-edge);
+  /* G-01-2 held: an input's fill is the same white as the card, so its
+     border is the only cue that a control is there - WCAG 1.4.11's 3:1.
+     #8A5326 is 6.28:1 on white, well clear of it. */
+  --input: var(--hcl-brass-ink);
+  /* G-01-3 held: the focus indicator must carry on its own, not as a
+     halo. 5.84:1 on the ground, 6.28 on a pane. */
+  --ring: var(--hcl-brass-ink);
+  --chart-1: var(--hc-brass);
+  --chart-2: var(--hcl-brass-ink);
+  --chart-3: var(--hcl-info);
+  --chart-4: var(--hcl-ok);
+  --chart-5: var(--hcl-warn);
+  /* 16px is --hc-r. shadcn derives sm/md from it, which lands close
+     enough to the template's 8/16/24 step without a second scale. */
+  --radius: 1rem;
+  --sidebar: var(--hcl-ground-2);
+  --sidebar-foreground: var(--hcl-ink);
+  --sidebar-primary: var(--hc-brass);
+  --sidebar-primary-foreground: var(--hc-on-brass);
+  /* G-01-5 held: the active nav pill was a 5/255 step off its sidebar and
+     the active label looked like the inactive ones. Brass at 18% is a
+     step no one can miss, and the label takes --accent-foreground with
+     it, so colour and weight both change. */
+  --sidebar-accent: rgb(240 174 95 / 0.18);
+  --sidebar-accent-foreground: var(--hcl-brass-ink);
+  --sidebar-border: var(--hcl-pane-edge);
+  --sidebar-ring: var(--hcl-brass-ink);
 }
 
 @theme inline {
   --font-heading: var(--font-sans);
-  --font-sans: "Geist Variable", sans-serif;
+  /* The token stays exactly what holzcloud-design says, so the drift check
+     compares like with like. The fontsource packages register the family as
+     "Manrope Variable" / "JetBrains Mono Variable", so that name is
+     prepended here, at the point of use, rather than edited into the token.
+     If the import ever fails, the stack falls through to the token and the
+     page keeps its metrics. */
+  --font-sans: "Manrope Variable", var(--hc-font-sans);
+  --font-mono: "JetBrains Mono Variable", var(--hc-font-mono);
   --color-sidebar-ring: var(--sidebar-ring);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
@@ -109,55 +279,106 @@
   --radius-4xl: calc(var(--radius) * 2.6);
 }
 
+/* ── shadcn-Abbildung, dunkel ─────────────────────────────────────
+   This is the template in its native form; nothing here is derived.
+   Measured on the dark ground: ink 17.61, ink-2 8.66, ink-3 5.11,
+   brass 10.45, danger 7.65, ok 9.63, warn 11.68, info 9.58. */
 .dark {
   color-scheme: dark;
-  --background: oklch(0.145 0 0);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.205 0 0);
-  --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.205 0 0);
-  --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.922 0 0);
-  --primary-foreground: oklch(0.205 0 0);
-  --secondary: oklch(0.269 0 0);
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.269 0 0);
-  --muted-foreground: oklch(0.708 0 0);
-  --accent: oklch(0.269 0 0);
-  --accent-foreground: oklch(0.985 0 0);
-  --destructive: oklch(0.704 0.191 22.216);
-  --border: oklch(1 0 0 / 14%);
-  /* Same 1.4.11 reasoning as the light palette; dark inputs also carry a
-     bg-input/30 fill, so they need less border to read as controls. */
-  --input: oklch(1 0 0 / 32%);
-  --ring: oklch(0.75 0 0);
-  --chart-1: oklch(0.87 0 0);
-  --chart-2: oklch(0.556 0 0);
-  --chart-3: oklch(0.439 0 0);
-  --chart-4: oklch(0.371 0 0);
-  --chart-5: oklch(0.269 0 0);
-  --sidebar: oklch(0.205 0 0);
-  --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-primary: oklch(0.488 0.243 264.376);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.32 0 0);
-  --sidebar-accent-foreground: oklch(0.985 0 0);
-  --sidebar-border: oklch(1 0 0 / 14%);
-  --sidebar-ring: oklch(0.75 0 0);
+  --background: var(--hc-ground);
+  --foreground: var(--hc-ink);
+  --card: var(--hc-pane-solid);
+  --card-foreground: var(--hc-ink);
+  --popover: var(--hc-pane-solid);
+  --popover-foreground: var(--hc-ink);
+  --primary: var(--hc-brass);
+  --primary-foreground: var(--hc-on-brass);
+  --secondary: var(--hc-pane);
+  --secondary-foreground: var(--hc-ink);
+  --muted: var(--hc-pane);
+  --muted-foreground: var(--hc-ink-3);
+  --accent: var(--hc-brass-wash);
+  --accent-foreground: var(--hc-brass);
+  /* On the wash over a pane: 5.66:1. */
+  --destructive: var(--hc-danger);
+  --border: var(--hc-pane-edge);
+  /* WCAG 1.4.11 again, and the template's own pane-edge is a divider at
+     1.44:1 - correct for a divider, not for a control boundary. Raised to
+     .42 alpha, which measures 3.51:1 on a pane and 3.94 on the ground.
+     This is the one value here that is neither the template's nor
+     shadcn's, and it exists because a control needs 3:1 and the divider
+     it would otherwise borrow does not reach it. */
+  --input: rgb(255 226 190 / 0.42);
+  --ring: var(--hc-brass);
+  --chart-1: var(--hc-brass);
+  --chart-2: var(--hc-info);
+  --chart-3: var(--hc-ok);
+  --chart-4: var(--hc-warn);
+  --chart-5: var(--hc-danger);
+  --sidebar: var(--hc-pane-bar-solid);
+  --sidebar-foreground: var(--hc-ink);
+  --sidebar-primary: var(--hc-brass);
+  --sidebar-primary-foreground: var(--hc-on-brass);
+  --sidebar-accent: var(--hc-brass-wash);
+  --sidebar-accent-foreground: var(--hc-brass);
+  --sidebar-border: var(--hc-hairline);
+  --sidebar-ring: var(--hc-brass);
 }
 
 @layer base {
   * {
-    /* UAT G-01-3: this outline -- not the component's ring -- is what paints
-       when :focus-visible does not match, e.g. a click into a field. At /50 it
-       rendered #AAAAAA (2.32:1), under the 3:1 a focus indicator needs, and it
-       was the ONLY cue in that state. Full strength is 7.46:1. */
+    /* G-01-3: this outline - not the component's ring - is what paints
+       when :focus-visible does not match, e.g. a click into a field. It
+       is the ring colour at full strength: brass at 9.30:1 on a dark
+       pane, #8A5326 at 5.84 on light paper. */
     @apply border-border outline-ring;
   }
   body {
-    @apply bg-background text-foreground;
+    @apply text-foreground;
+    /* The ground is an image, and the colour under it is not decoration:
+       the gradients paint no colour of their own, so without this the
+       pixels before they resolve belong to the browser, not to us. Fixed
+       attachment so the wash does not travel with a scrolling table. */
+    background-color: var(--background);
+    background-image: var(--hcl-ground-image);
+    background-attachment: fixed;
+    letter-spacing: var(--hc-track-snug);
+  }
+  .dark body {
+    background-image: var(--hk-ground-image);
   }
   html {
     @apply font-sans;
+  }
+  /* The cube texture, as a body pseudo-element rather than the
+     template's .hc-cubes element: this application renders its shell
+     from React and has no place to put a first child that is guaranteed
+     to stay first. A pseudo-element cannot be reordered by a re-render.
+     Behind everything, and never in the way of a pointer. */
+  body::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    z-index: 0;
+    pointer-events: none;
+    background-color: var(--hc-brass);
+    opacity: var(--hc-cubes-opacity);
+    -webkit-mask-image: var(--hc-cubes-mask);
+    mask-image: var(--hc-cubes-mask);
+    -webkit-mask-size: var(--hc-cubes-size);
+    mask-size: var(--hc-cubes-size);
+    -webkit-mask-repeat: repeat;
+    mask-repeat: repeat;
+  }
+  /* On paper the same texture at the same opacity is dirt rather than
+     depth - the brass has nothing to glow against. Half strength. */
+  :root:not(.dark) body::before {
+    opacity: 0.045;
+  }
+  /* The texture sits at z-index 0, so the application root has to rise
+     above it. One rule, on the one element React owns. */
+  body > #root {
+    position: relative;
+    z-index: 1;
   }
 }
