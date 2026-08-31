@@ -120,7 +120,9 @@ describe('messageFor', () => {
 
   it('falls back to title when detail is missing', () => {
     const error = new ProblemError(
-      problem('internal.unexpected', 500, { title: 'holzkube-manager could not complete that request' }),
+      problem('internal.unexpected', 500, {
+        title: 'holzkube-manager could not complete that request',
+      }),
     )
     expect(messageFor(error)).toBe('holzkube-manager could not complete that request')
   })
