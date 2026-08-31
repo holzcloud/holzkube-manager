@@ -37,8 +37,12 @@ def norm(v: str) -> str:
     v = re.sub(r'\s*,\s*', ',', v)                           # spacing around commas
     v = re.sub(r'\s*/\s*', '/', v)                           # rgb(a b c / d)
     # 0.40 == 0.4: biome strips the trailing zero the template writes.
-    v = re.sub(r'(\d+\.\d*?)0+(?=\D|$)', r'\1', v)
-    v = re.sub(r'(\d+)\.(?=\D|$)', r'\1', v)
+    # Only inside a decimal, and only trailing zeros. The rule that also
+    # stripped a bare trailing dot had to go: it matched the dot in
+    # "www.w3.org" inside the cube mask's data URI and reported a drift it
+    # had created itself - w3.org became w3org on one side only.
+    v = re.sub(r'(\d+\.\d*?)0+\b', r'\1', v)
+    v = re.sub(r'(\d+)\.(?=\s|,|\)|$)', r'\1', v)
     return v
 
 def read(path):
