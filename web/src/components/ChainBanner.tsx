@@ -34,7 +34,8 @@ export function ChainBanner({ chain }: { chain: AuditChain }) {
         The first record that does not match is line {chain.broken_at_line} of{' '}
         <span className="font-mono text-xs">{chain.file}</span>. That means the file on disk has
         been changed since it was written. It does not by itself say by whom, and it does not mean
-        the cluster is compromised. holzkube-manager will not repair the file: the break is the evidence.
+        the cluster is compromised. holzkube-manager will not repair the file: the break is the
+        evidence.
       </p>
     </div>
   )
