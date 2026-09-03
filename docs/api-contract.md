@@ -601,12 +601,43 @@ every unknown name in `errors[]` — all of them at once, not the first.
 the SHA-256 of the canonical document, so two authoring attempts that share a
 customisation are the same schematic however they are named — a second name, a
 second cluster and a second Talos version all collide, and so does a browser
-reload that re-submits the form. The stored record is not replaced: it is the
-only copy of a reference the Factory will not list back, which is why `DELETE`
-is `Destructive` and behind the sudo window, and a `POST` marked
-`Destructive: false` does not get to overwrite the label, the version and the
-probe verdict of a record that already exists. Read it back with `GET
+reload that re-submits the form. The operator's own text is not replaced: the
+record is the only copy of a reference the Factory will not list back, which is
+why `DELETE` is `Destructive` and behind the sudo window, and a `POST` marked
+`Destructive: false` does not get to overwrite the label, the cluster and the
+version of a record that already exists. Read it back with `GET
 /api/v1/schematics/{id}`, or delete it and author it again.
+
+**The probe verdict is the exception, and it is a documented side effect of this
+`409`.** A re-POST runs the whole authoring sequence, including a fresh probe
+that often answers because the first attempt warmed the Factory. That verdict
+used to be discarded. It is now written back onto the existing record —
+`usable`, `probed_at` and `probe_reason`, and no other field — under a
+compare-and-swap on the record's revision. The status code is still `409` and
+the body shape is unchanged; what changed is that a failed create can now change
+stored state, so a client should refetch the saved list after one.
+
+The refresh happens only when **both** conditions hold, and the `409` `detail`
+says which of the three outcomes the caller got:
+
+| Condition | Meaning |
+|---|---|
+| the fresh probe answered | `probed_at` is stamped for a success and for a Factory refusal and for nothing else. A probe that could not reach the Factory says nothing about the schematic, and writing its silence over a stored verdict would replace an answer with an absence. |
+| the stored `arch` equals the architecture this submission asked about | the verdict is architecture-scoped, and this record's identity cannot vary by architecture. A record written before `arch` existed carries an empty one and is therefore never refreshed. |
+
+| `detail` says | Outcome |
+|---|---|
+| the probe ran again and this schematic builds | refreshed, `usable` now `true` |
+| the probe ran again and the Factory refused it, with the reason | refreshed, `usable` still `false`, `probe_reason` written |
+| the verdict was not refreshed, and why | left exactly as it was — the probe did not answer either, or the record holds another architecture's verdict |
+
+A refresh that loses the compare-and-swap, or whose record was deleted between
+the read and the write, abandons the refresh and answers the plain conflict. It
+never retries and never recreates the record.
+
+This is a recovery and not a re-probe route: it is reached by re-submitting a
+form and is answered as an error, and a probe that times out again leaves the
+record unchanged. There is no endpoint that asks for a verdict.
 
 **A second architecture collides too, and that is the case worth stating
 separately.** The canonical document does not contain the architecture —
@@ -617,7 +648,10 @@ customisation at `arm64` hashes to the id it already has at `amd64` and answers
 `usable`, `probed_at` and `probe_reason` verdict is about; it does not make room
 for a second verdict. **One stored customisation holds exactly one
 architecture's verdict, and obtaining the other means deleting the record and
-authoring it again.** This is a recorded constraint rather than a defect — the
+authoring it again.** This is also the case the verdict refresh above declines:
+a second-architecture `POST` changes nothing at all, and its `detail` names both
+architectures so the caller can tell that decline from the other one. This is a
+recorded constraint rather than a defect — the
 reasoning and the decided direction are in
 `.planning/phases/02-transport-seam-talossim-image-factory/02-DECISION-schematic-identity.md`.
 
