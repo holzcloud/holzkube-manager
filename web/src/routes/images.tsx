@@ -199,6 +199,37 @@ function StoredText({ children }: { children: string }) {
 const ARCHITECTURES = ['amd64', 'arm64'] as const
 export type Architecture = (typeof ARCHITECTURES)[number]
 
+/**
+ * The two waits an operator sits through on this screen, in seconds.
+ *
+ * Each is the server-side deadline for the route behind it -- ASSETS_WAIT_SECONDS
+ * is handlers.AssetsRouteBudget and CREATE_WAIT_SECONDS is
+ * handlers.CreateRouteBudget, both declared in
+ * internal/httpapi/handlers/schematics.go. They are transcribed here because
+ * TypeScript cannot import a Go constant, and
+ * internal/httpapi/handlers/budget_drift_test.go reads these two declarations
+ * and fails the moment either stops equalling the budget it names. If that test
+ * goes red, the number here is what changes.
+ *
+ * Say what these are and, more importantly, what they are not.
+ *
+ * They are a stated ceiling: the maximum the server will spend before it gives
+ * up and answers, which is a fact about this program and not a prediction about
+ * how long the Image Factory takes. The wording must stay factual for that
+ * reason -- "may take up to" and never "takes about". A cold create is usually
+ * far inside its ceiling and a warm assets resolution is served without touching
+ * the registry at all.
+ *
+ * They are NOT the progress indicator .planning/research/PITFALLS.md:164
+ * requires, which is elapsed time, the current sub-step and an expected
+ * duration; :646 names a bare disabled button as the anti-pattern.
+ * 02-DECISION-probe-budget.md records that as a risk Option 2 accepts, and it is
+ * still open. Stating a ceiling is not showing progress, and nothing here should
+ * be read as that requirement having been met.
+ */
+export const ASSETS_WAIT_SECONDS = 35
+export const CREATE_WAIT_SECONDS = 120
+
 function ImagesView() {
   const queryClient = useQueryClient()
 
@@ -534,6 +565,13 @@ function ImagesView() {
         >
           {create.isPending ? 'Creating…' : 'Create schematic'}
         </Button>
+
+        {create.isPending && (
+          <p className="text-sm text-muted-foreground">
+            The Image Factory builds the image while it answers. This may take up to{' '}
+            {CREATE_WAIT_SECONDS} seconds.
+          </p>
+        )}
       </form>
 
       {created !== null && (
@@ -1294,7 +1332,12 @@ function AssetPanel({ record, archSeed }: { record: Schematic; archSeed: Archite
         </label>
       </div>
 
-      {assets.isPending && <p className="text-sm text-muted-foreground">Resolving…</p>}
+      {assets.isPending && (
+        <p className="text-sm text-muted-foreground">
+          Resolving… The installer reference is looked up in the registry. This may take up to{' '}
+          {ASSETS_WAIT_SECONDS} seconds.
+        </p>
+      )}
 
       {/*
        * A whole-request failure: the schematic is gone, the architecture is not
