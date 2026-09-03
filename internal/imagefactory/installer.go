@@ -447,23 +447,22 @@ func (c *Client) requestionInstallerRepo(ctx context.Context, r AssetRequest, ke
 		// deriving the call context is what leaves ctx untouched here when it
 		// is only the per-call budget that ran out.
 		//
-		// Match Canceled specifically rather than any non-nil ctx.Err(). Today
-		// the two spellings behave identically, because nothing wraps the
-		// inbound request context in a deadline -- there is no
-		// context.WithTimeout under internal/httpapi and no http.TimeoutHandler
-		// anywhere. But adding exactly that is G-02-2's first missing bullet,
-		// still open in 02-DECISION-probe-budget.md. The moment a per-route
-		// deadline shorter than DefaultTimeout lands, a genuine registry
-		// timeout would satisfy a bare ctx.Err() != nil, skip the re-stamp
-		// below, leave entry.at stale forever, and make every subsequent
-		// request re-question and pay the silent candidate's full budget --
-		// which is the cost installerRepoRetryInterval exists to amortise, and
-		// plan 02-12's must_have #4. Canceled is what "the caller went away"
-		// actually means; DeadlineExceeded is a budget expiring, and a budget
-		// expiring against a silent registry must keep re-stamping.
-		//
-		// This decides nothing about cluster A. It only stops this line from
-		// depending on cluster A staying undone.
+		// Match Canceled specifically rather than any non-nil ctx.Err(). The
+		// two spellings used to behave identically, because nothing wrapped the
+		// inbound request context in a deadline. That was G-02-2's first
+		// missing bullet and it is closed: internal/httpapi/handlers/schematics.go
+		// now derives AssetsRouteBudget over this whole resolution, so ctx here
+		// carries a deadline of its own and a bare ctx.Err() != nil is no longer
+		// equivalent. This distinction is now load-bearing rather than
+		// prospective. A genuine registry timeout that satisfied a bare
+		// ctx.Err() != nil would skip the re-stamp below, leave entry.at stale
+		// forever, and make every subsequent request re-question and pay the
+		// silent candidate's full budget -- which is the cost
+		// installerRepoRetryInterval exists to amortise, and plan 02-12's
+		// must_have #4. Canceled is what "the caller went away" actually means;
+		// DeadlineExceeded is a budget expiring, and a budget expiring against a
+		// silent registry must keep re-stamping, whether the budget that expired
+		// was the route's or ManifestTimeout.
 		if errors.Is(ctx.Err(), context.Canceled) {
 			return entry
 		}

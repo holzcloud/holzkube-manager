@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -18,6 +19,63 @@ import (
 	"github.com/holzcloud/holzkube-manager/internal/imagefactory"
 	"github.com/holzcloud/holzkube-manager/internal/model"
 	"github.com/holzcloud/holzkube-manager/internal/store"
+)
+
+// The two Factory routes' upstream budgets.
+//
+// Each is one deadline shared by every upstream call the route makes, applied
+// to the inbound request context before the first of them. That is what makes
+// a route's worst case a number the route declares rather than the sum of
+// whatever its callees happen to do -- the shape that produced
+// `status=502 duration=1m0.002907792s` against a 60s writeTimeout, a problem
+// document flushed to an already-expired socket.
+//
+// Both are exported so cmd/holzkube-managerd/budget_test.go can read the value
+// that runs. That guard lives in package main because writeTimeout is
+// unexported there, and a guard that re-declares the number it is guarding
+// guards nothing: it would keep passing while the real constant moved
+// underneath it.
+//
+// Both are written as expressions over the client budgets rather than as bare
+// durations, so they move with their inputs instead of having to be remembered.
+const (
+	// CreateRouteBudget bounds POST /api/v1/schematics: Extensions,
+	// CreateSchematic and ProbeBuildable, in series, under one ceiling.
+	//
+	// The construction, in this order and not back-computed from the answer.
+	// The floor comes first: the route must be able to give its longest single
+	// call that call's whole budget, or that call's constant is a number that
+	// never applies -- so the ceiling is at least imagefactory.ProbeTimeout. A
+	// ceiling exactly at that floor would guarantee the probe is starved by
+	// whatever the two JSON calls before it consumed, so one JSON budget of
+	// headroom is added for everything that runs first. That is the whole
+	// derivation, and it is also what makes the clipping exactly one JSON
+	// budget wide.
+	//
+	// The slowest complete cold POST recorded in G-02-1's evidence, 31.18s, is
+	// a sanity check on the result and not its derivation: the ceiling sits far
+	// above anything observed, which is what a ceiling should do.
+	CreateRouteBudget = imagefactory.ProbeTimeout + imagefactory.DefaultTimeout
+
+	// AssetsRouteBudget bounds GET /api/v1/schematics/{id}/assets: the
+	// installer repository resolution, under one ceiling.
+	//
+	// Two manifest budgets and not one, because at this wave resolveInstallerRepo
+	// still walks its candidates serially, so the route's real worst case is two
+	// of them. A ceiling of one would cut the legacy candidate before it could
+	// answer -- which is the silent fallback G-02-3 already cost this phase once.
+	// Plan 02-23 makes that walk concurrent and tightens this constant to
+	// imagefactory.ManifestTimeout + 5*time.Second; the clipping ratchet in
+	// cmd/holzkube-managerd/budget_test.go fires if it is tightened without the
+	// declared call list changing with it. A reader who finds 65s here after
+	// 02-23 has landed is looking at a stale constant.
+	//
+	// The five seconds are the resolution's own bookkeeping around the calls, on
+	// the same reasoning budgetSlack gives for the response. Check what this
+	// admits: G-02-2's 43.42s successful serial resolution and its
+	// 60.002907792s double-silent case both now fit inside the ceiling and
+	// inside the response budget, which is the whole of the fix at this wave.
+	AssetsRouteBudget = 2*imagefactory.ManifestTimeout + 5*time.Second
 )
 
 // versionBuckets is the answer to GET /api/v1/factory/versions.
@@ -284,13 +342,26 @@ func createSchematic(d httpapi.Deps) http.HandlerFunc {
 			return
 		}
 
-		// Author owns the order this route's correctness depends on: fetch the
-		// version-scoped catalog, reject every unknown extension name before any
-		// POST, create, confirm the Factory's id equals the locally precomputed
-		// one, and only then probe whether the intended image builds. Reproducing
-		// that order here would make it a property of this handler's memory rather
-		// than of the package that documents it.
-		authored, err := imagefactory.Author(r.Context(), d.Factory, imagefactory.AuthorRequest{
+		// One deadline over every upstream call this route makes, derived
+		// before the first of them and shared by all three. It is what stops
+		// the route's worst case being the sum of its callees' budgets: with
+		// three independent budgets and no ceiling, Extensions, CreateSchematic
+		// and ProbeBuildable compose to 150s, and the server stops listening
+		// long before that. context.WithTimeout takes the earlier of this and
+		// anything the client budgets impose, so it is a ceiling and never a
+		// floor.
+		//
+		// The order is untouched. Author owns the order this route's
+		// correctness depends on: fetch the version-scoped catalog, reject
+		// every unknown extension name before any POST, create, confirm the
+		// Factory's id equals the locally precomputed one, and only then probe
+		// whether the intended image builds. Reproducing that order here would
+		// make it a property of this handler's memory rather than of the
+		// package that documents it.
+		ctx, cancel := context.WithTimeout(r.Context(), CreateRouteBudget)
+		defer cancel()
+
+		authored, err := imagefactory.Author(ctx, d.Factory, imagefactory.AuthorRequest{
 			TalosVersion: in.TalosVersion,
 			Arch:         imagefactory.Arch(in.Arch),
 			Schematic:    in.schematic(),
@@ -345,7 +416,10 @@ func createSchematic(d httpapi.Deps) http.HandlerFunc {
 			ProbeReason: probeReason,
 			CreatedAt:   time.Now().UTC(),
 		}
-		stored, storeErr := d.Store.Schematics().Put(r.Context(), rec)
+		// The route context and not r.Context(): a route that has run out of
+		// budget stops rather than performing a store write on a request the
+		// server has already stopped answering.
+		stored, storeErr := d.Store.Schematics().Put(ctx, rec)
 		switch {
 		case errors.Is(storeErr, store.ErrConflict):
 			// rec carries no Rev, so the store reads a Put against an existing
@@ -505,7 +579,17 @@ func schematicAssets(d httpapi.Deps) http.HandlerFunc {
 		// a candidate that never answered is usable but provisional, and the
 		// operator has to be able to see that on the panel that shows it --
 		// which is the whole of G-02-3.
-		installer, warnings, err := d.Factory.InstallerImage(r.Context(), req)
+		// One deadline over the whole resolution, for the same reason
+		// createSchematic derives one: a cold resolveInstallerRepo walks two
+		// candidates in series, each with its own manifest budget, and the sum
+		// of those two was the 60.000s worst case that arrived against a 60s
+		// writeTimeout as a problem document written to an expired socket. The
+		// ceiling is the route's worst case now; the sum only says whether the
+		// ceiling clips it, and at this wave it does not.
+		ctx, cancel := context.WithTimeout(r.Context(), AssetsRouteBudget)
+		defer cancel()
+
+		installer, warnings, err := d.Factory.InstallerImage(ctx, req)
 		// Normalised the way schematicOut normalises the record's nil
 		// collections, for the reason this file already gives: a null reads as
 		// "the server did not check".
