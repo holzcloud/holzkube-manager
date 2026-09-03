@@ -17,12 +17,17 @@ import (
 // nonce and the PKCE verifier are only worth anything if the browser carrying
 // them cannot read or choose them.
 const (
-	sessionKeyState     = "oidc.state"
-	sessionKeyNonce     = "oidc.nonce"
-	sessionKeyVerifier  = "oidc.verifier"
-	sessionKeyRedirect  = "oidc.redirect"
-	sessionKeySudoFlow  = "oidc.sudo"
-	sessionKeyIDToken   = "oidc.id_token"
+	sessionKeyState    = "oidc.state"
+	sessionKeyNonce    = "oidc.nonce"
+	sessionKeyVerifier = "oidc.verifier"
+	sessionKeyRedirect = "oidc.redirect"
+	sessionKeySudoFlow = "oidc.sudo"
+	// gosec G101 flags this because the name contains "token" and the value is
+	// a literal. It is a session *key* -- the name under which the token is
+	// stored -- and not the token itself, which only ever arrives from the
+	// provider at runtime. Renaming it to something without the word would hide
+	// the finding by making the constant worse.
+	sessionKeyIDToken   = "oidc.id_token" //nolint:gosec // a session key name, not a credential
 	sessionKeyIsSSOAuth = "oidc.authenticated"
 )
 
@@ -131,7 +136,14 @@ func oidcStart(d httpapi.Deps, w http.ResponseWriter, r *http.Request, sudo bool
 	sm.Put(r.Context(), sessionKeyRedirect, flow.Redirect)
 	sm.Put(r.Context(), sessionKeySudoFlow, flow.Sudo)
 
-	http.Redirect(w, r, url, http.StatusFound)
+	// gosec G710 sees a redirect target that came out of a function and cannot
+	// tell where it came from. This one is the provider's authorization
+	// endpoint, taken from the discovery document of --oidc-issuer, with our own
+	// parameters appended. The issuer is configuration, it is refused unless it
+	// is https (see config.optionTable), and nothing on the request influences
+	// it. The genuinely attacker-shaped redirect in this flow is the one back to
+	// the application afterwards, and that is the constant afterAuth.
+	http.Redirect(w, r, url, http.StatusFound) //nolint:gosec // target derives from the configured issuer, not from the request
 }
 
 // refuseUnlinkedOnSSOOnlyHost answers a sign-in that cannot possibly succeed,
@@ -400,7 +412,9 @@ func oidcLogout(d httpapi.Deps, w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, afterAuth, http.StatusFound)
 		return
 	}
-	http.Redirect(w, r, end, http.StatusFound)
+	// Same as above: end comes from the provider's end_session_endpoint in the
+	// discovery document, not from anything the caller sent.
+	http.Redirect(w, r, end, http.StatusFound) //nolint:gosec // target derives from the configured issuer, not from the request
 }
 
 func clearFlow(d httpapi.Deps, r *http.Request) {
