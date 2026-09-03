@@ -370,3 +370,173 @@ func TestValidateExtensionsNamesEveryUnknownAtOnce(t *testing.T) {
 		t.Errorf("an empty catalog validated a name; error = %v", err)
 	}
 }
+
+// The three budgets, and the promise the client-wide timeout used to keep by
+// accident.
+//
+// http.Client.Timeout is one value for every request a client makes. That is
+// why the ISO probe -- which makes the Factory build a ~335MB image
+// synchronously, measured cold at 30.50 to 32.69 seconds -- was bounded by a
+// number sized against a list of extensions, and why it produced no verdict on
+// every one of those five runs. Removing the field is what makes three budgets
+// expressible; requireDeadline is what stops the removal turning a forgotten
+// wrapper into an unbounded request.
+
+// TestClientCarriesNoClientWideTimeout asserts the removal behaviourally rather
+// than by grepping for an absent assignment. A grep proves a string is not in a
+// file; this proves the value the client runs with.
+func TestClientCarriesNoClientWideTimeout(t *testing.T) {
+	plain, err := imagefactory.New(imagefactory.DefaultBaseURL)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	if got := plain.HTTPClientTimeoutForTest(); got != 0 {
+		t.Errorf("http.Client.Timeout = %s on a default client, want 0; one client-wide value "+
+			"cannot express three budgets, and the one it used to express bounded the ISO "+
+			"probe with a number sized against a JSON list", got)
+	}
+
+	// The supplied client carries a timeout of its own, which is exactly the
+	// shape WINDOWS entry 8 (WR-01) recorded being silently discarded. It is
+	// now neither honoured nor discarded: it is not the mechanism.
+	supplied, err := imagefactory.New(imagefactory.DefaultBaseURL,
+		imagefactory.WithHTTPClient(&http.Client{Timeout: 7 * time.Second}))
+	if err != nil {
+		t.Fatalf("New(WithHTTPClient): %v", err)
+	}
+	if got := supplied.HTTPClientTimeoutForTest(); got != 0 {
+		t.Errorf("http.Client.Timeout = %s through WithHTTPClient, want 0; the budgets are not "+
+			"carried on the copied client", got)
+	}
+}
+
+// TestRequestWithNoDeadlineIsRefusedBeforeTheWire is the other half. With no
+// client-wide timeout, a request built on a deadline-less context would run
+// until the process ends, so the refusal has to happen before anything is sent
+// -- which is what the request count asserts.
+func TestRequestWithNoDeadlineIsRefusedBeforeTheWire(t *testing.T) {
+	fake := newFakeFactory(t)
+	client := newClient(t, fake.URL)
+
+	// context.Background and not t.Context(): both are deadline-less today,
+	// and this test is about the deadline-less case specifically rather than
+	// about whatever the harness happens to hand out.
+	ctx := context.Background()
+
+	t.Run("probeStatus", func(t *testing.T) {
+		if _, err := client.ProbeStatusUnbudgetedForTest(ctx, fake.URL+"/image/x/y/z"); !errors.Is(err, imagefactory.ErrNoDeadline) {
+			t.Fatalf("err = %v, want ErrNoDeadline", err)
+		}
+		if got := fake.count("* /image/*"); got != 0 {
+			t.Errorf("the image endpoint saw %d requests; a refused call must reach no wire at all", got)
+		}
+	})
+
+	t.Run("do", func(t *testing.T) {
+		if err := client.DoUnbudgetedForTest(ctx, fake.URL+"/versions"); !errors.Is(err, imagefactory.ErrNoDeadline) {
+			t.Fatalf("err = %v, want ErrNoDeadline", err)
+		}
+		if got := fake.count("GET /versions"); got != 0 {
+			t.Errorf("/versions saw %d requests; a refused call must reach no wire at all", got)
+		}
+	})
+}
+
+// TestBudgetOptionsRejectNonPositiveValues keeps the three options in one
+// register. Zero would mean "no budget", which after the removal of the
+// client-wide timeout means "no bound at all" -- the state requireDeadline
+// exists to refuse, arrived at through configuration instead of through a
+// forgotten wrapper.
+func TestBudgetOptionsRejectNonPositiveValues(t *testing.T) {
+	options := map[string]func(time.Duration) imagefactory.Option{
+		"WithTimeout":         imagefactory.WithTimeout,
+		"WithProbeTimeout":    imagefactory.WithProbeTimeout,
+		"WithManifestTimeout": imagefactory.WithManifestTimeout,
+	}
+	for name, opt := range options {
+		t.Run(name, func(t *testing.T) {
+			for _, bad := range []time.Duration{0, -time.Second} {
+				if _, err := imagefactory.New(imagefactory.DefaultBaseURL, opt(bad)); err == nil {
+					t.Errorf("%s(%s) was accepted", name, bad)
+				}
+			}
+			if _, err := imagefactory.New(imagefactory.DefaultBaseURL, opt(time.Second)); err != nil {
+				t.Errorf("%s(1s): %v", name, err)
+			}
+		})
+	}
+}
+
+// TestEachBudgetBoundsItsOwnWorkloadAndNoOther is the package-level statement of
+// what the three constants are for: a workload is bounded by its own budget, and
+// moving another one does not move it.
+//
+// Each case gives the workload under test a budget the fake's latency fits
+// inside and gives the other two a budget it does not, so a call that took the
+// wrong constant fails. The latencies are milliseconds because the ratio is
+// what is being asserted, not the size.
+func TestEachBudgetBoundsItsOwnWorkloadAndNoOther(t *testing.T) {
+	const (
+		roomy  = 2 * time.Second
+		narrow = 20 * time.Millisecond
+		delay  = 200 * time.Millisecond
+	)
+
+	t.Run("the ISO probe takes the probe budget", func(t *testing.T) {
+		fake := newFakeFactory(t)
+		client := newClientWithBudgets(t, fake.URL, narrow, roomy, narrow)
+		// The schematic was never POSTed to this fake, so the image endpoint
+		// would 404 on it. The status is forced because the question here is
+		// which budget bounded the request, not what the Factory thought of the
+		// schematic.
+		fake.setISOStatus(http.StatusOK)
+		fake.answerAfter("HEAD /image", delay)
+
+		if err := client.ProbeBuildable(t.Context(), schematicA, catalogVersion, imagefactory.ArchAMD64); err != nil {
+			t.Fatalf("ProbeBuildable: %v -- the probe was bounded by something other than the probe budget", err)
+		}
+	})
+
+	t.Run("a manifest GET takes the manifest budget", func(t *testing.T) {
+		fake := newFakeFactory(t)
+		client := newClientWithBudgets(t, fake.URL, narrow, narrow, roomy)
+		fake.answerAfter("GET /v2", delay)
+
+		ref, _, err := client.InstallerImage(t.Context(), imagefactory.AssetRequest{
+			SchematicID: schematicA,
+			Version:     installerModernVersion,
+			Arch:        imagefactory.ArchAMD64,
+			Platform:    imagefactory.PlatformMetal,
+		})
+		if err != nil {
+			t.Fatalf("InstallerImage: %v -- the manifest GET was bounded by something other than the manifest budget", err)
+		}
+		if ref == "" {
+			t.Error("InstallerImage resolved no reference")
+		}
+	})
+
+	t.Run("a JSON endpoint takes the JSON budget", func(t *testing.T) {
+		fake := newFakeFactory(t)
+		client := newClientWithBudgets(t, fake.URL, roomy, narrow, narrow)
+		fake.answerAfter("GET /versions", delay)
+
+		if _, err := client.Versions(t.Context()); err != nil {
+			t.Fatalf("Versions: %v -- the JSON endpoint was bounded by something other than the JSON budget", err)
+		}
+	})
+
+	t.Run("a JSON budget no longer bounds the probe", func(t *testing.T) {
+		// The defect itself: the probe outruns the JSON budget and stays well
+		// inside its own. Before the split this produced ErrUpstreamUnavailable
+		// and therefore no verdict.
+		fake := newFakeFactory(t)
+		client := newClientWithBudgets(t, fake.URL, narrow, roomy, narrow)
+		fake.setISOStatus(http.StatusOK)
+		fake.answerAfter("HEAD /image", delay)
+
+		if err := client.ProbeBuildable(t.Context(), schematicA, catalogVersion, imagefactory.ArchAMD64); errors.Is(err, imagefactory.ErrUpstreamUnavailable) {
+			t.Fatalf("a probe %s long produced %v against a %s probe budget; this is G-02-1", delay, err, roomy)
+		}
+	})
+}

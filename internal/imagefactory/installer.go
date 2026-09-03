@@ -438,11 +438,14 @@ func (c *Client) requestionInstallerRepo(ctx context.Context, r AssetRequest, ke
 		// going away is not a reason to refuse the one that is still here.
 		//
 		// The discriminator is the caller's context and deliberately not the
-		// error. This client's own budget is http.Client.Timeout, whose expiry
+		// error. This client's own budget is ManifestTimeout, applied by
+		// probeStatus to a context *derived* from this one, and its expiry
 		// satisfies errors.Is(err, context.DeadlineExceeded) exactly as a
 		// cancelled caller does -- and that expiry is a real observation of a
 		// silent registry, which is the observation this branch exists to
-		// record. The context tells the two apart where the error cannot.
+		// record. The context tells the two apart where the error cannot:
+		// deriving the call context is what leaves ctx untouched here when it
+		// is only the per-call budget that ran out.
 		//
 		// Match Canceled specifically rather than any non-nil ctx.Err(). Today
 		// the two spellings behave identically, because nothing wraps the
@@ -569,7 +572,10 @@ func (c *Client) resolveInstallerRepo(ctx context.Context, r AssetRequest, candi
 		lastAttempt = repo
 		u := c.base.JoinPath("v2", repo, r.SchematicID, "manifests", r.Version).String()
 
-		status, err := c.probeStatus(ctx, http.MethodGet, u, http.Header{"Accept": []string{manifestAccept}})
+		// classManifest, not classProbe and not the JSON budget: this is one
+		// registry manifest GET, whose budget was derived from the 13.4s cold
+		// candidate answer decomposed out of G-02-2's 43.42s resolution.
+		status, err := c.probeStatus(ctx, http.MethodGet, u, http.Header{"Accept": []string{manifestAccept}}, classManifest)
 		if err != nil {
 			refusedAll = false
 			unresolved = append(unresolved, repo)

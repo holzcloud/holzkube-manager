@@ -16,31 +16,66 @@ import (
 )
 
 const (
-	// DefaultTimeout bounds one Factory request end to end.
+	// DefaultTimeout bounds one *JSON* Factory request end to end: GET
+	// /versions, GET /version/<v>/extensions/official and POST /schematics.
+	// Those three and nothing else.
 	//
 	// Named and justified rather than inherited: http.DefaultClient has no
 	// timeout at all, so a Factory that accepts a connection and then stops
 	// talking would hold a goroutine and a connection for as long as the
 	// process runs.
 	//
-	// What it governs is three different workloads, not one. The three JSON
-	// endpoints -- versions, the version-scoped extension catalog, and schematic
-	// creation -- are the small ones; the largest answer among them is the
-	// catalog at a few tens of kilobytes. It also bounds ProbeBuildable's HEAD
-	// of the ISO URL, which makes the Factory build a ~335MB image
-	// synchronously, and both installer manifest GETs in installer.go, which a
-	// cold resolution issues in series.
-	//
-	// The value has never been sized against those last two. It was chosen
-	// against the JSON endpoints, and the measured cold ISO probe lands in the
-	// 30.5-32.7s band -- one to three seconds past this constant, every time.
-	// The value is deliberately left alone here: what it should be is the open
-	// question in
-	// .planning/phases/02-transport-seam-talossim-image-factory/02-DECISION-probe-budget.md,
-	// together with how a per-route deadline composes with it. Whoever reads
-	// this constant next should find that question rather than a justification
-	// that was never about them.
+	// The value was chosen against those three endpoints, whose largest answer
+	// is the extension catalog at a few tens of kilobytes -- reasoning that is
+	// now true of everything this constant covers, because the two workloads it
+	// used to cover by accident have their own constants: ProbeTimeout for the
+	// ISO probe and ManifestTimeout for a registry manifest GET. A reader
+	// looking for the budget that bounds the probe should look there and not
+	// here; that they were the same number is exactly what G-02-1 measured as a
+	// defect.
 	DefaultTimeout = 30 * time.Second
+
+	// ProbeTimeout bounds ProbeBuildable's HEAD of the ISO URL and the
+	// single-byte ranged GET it falls back to. That request makes the Factory
+	// build a ~335MB image synchronously, which is a different workload from
+	// asking it for a list.
+	//
+	// The rule, stated so the number can be rederived rather than remembered: a
+	// budget is at least twice the slowest observed cold response for the
+	// workload it bounds, rounded up to the next thirty seconds. The
+	// observations are the five cold probes recorded in
+	// .planning/phases/02-transport-seam-talossim-image-factory/02-DECISION-probe-budget.md,
+	// measured across two investigators: 30.50, 30.59, 31.18, 31.52 and 32.69
+	// seconds. The slowest doubles to 65.38 and rounds to 90.
+	//
+	// Twice, and not something tighter, for a reason worth writing down. The
+	// bounded quantity is work on somebody else's build farm: sampled five
+	// times, never controlled, and known to throttle. The constant this
+	// replaces sat at 0.92 of the observed maximum and was exceeded on every
+	// single one of those five runs. A budget at 1.2 of the maximum would be a
+	// prediction about upstream latency, and a prediction is what failed.
+	//
+	// Widening the sample is how this moves. internal/imagefactory/live_test.go
+	// re-applies the rule above to what it measures and fails when the shipped
+	// value no longer satisfies it, so a new observation arrives here as a red
+	// test rather than as nothing.
+	ProbeTimeout = 90 * time.Second
+
+	// ManifestTimeout bounds one registry manifest GET in resolveInstallerRepo.
+	//
+	// Same rule as ProbeTimeout: twice the slowest observed cold response,
+	// rounded up to the next thirty seconds. The observation is the 13.4s cold
+	// candidate answer decomposed out of G-02-2's 43.42s serial resolution
+	// (30s for the silent candidate plus 13.4s for the one that answered),
+	// which doubles to 26.8 and rounds to 30.
+	//
+	// That it equals DefaultTimeout is what the rule happened to produce from a
+	// different input, and not an alias. The two are separate constants that
+	// move independently, cmd/holzkube-managerd/budget_test.go reads them as
+	// two, and code that means "the manifest budget" must say so -- a manifest
+	// GET bounded by the JSON constant is precisely the confusion this plan
+	// exists to end, in a new place.
+	ManifestTimeout = 30 * time.Second
 
 	// maxResponseBytes caps a response body before it is decoded, for the
 	// reason internal/httpapi/handlers already states about inbound bodies:
@@ -116,7 +151,115 @@ type Client struct {
 	// re-question on every call. It bounds no request and moves no deadline;
 	// see installerRepoRetryInterval in installer.go.
 	installerRetry time.Duration
+
+	// The three budgets, one per workload. They live here and not on
+	// http.Client.Timeout because that field is one value for every request a
+	// client makes, and three budgets cannot be expressed in one value -- which
+	// is how the ISO probe came to be bounded by a number sized against a JSON
+	// list. budgetClass names which of them a call is spending; withBudget
+	// turns that into the call's context deadline.
+	jsonBudget     time.Duration
+	probeBudget    time.Duration
+	manifestBudget time.Duration
 }
+
+// budgetClass is which of the three workloads a request belongs to.
+//
+// It is the shape internal/talos/deadline.go's DeadlineClass uses, for the
+// reason that file gives: a budget is only reviewable when the classes and
+// their memberships can be read in one place rather than inferred from
+// whichever constant happened to be in scope at a call site. It is unexported
+// because the membership is not a caller's decision -- the three Client options
+// are how a caller moves a budget, and which class a given request spends is a
+// property of the request.
+type budgetClass int
+
+const (
+	// classJSON is one of the three JSON endpoints: versions, the
+	// version-scoped extension catalog, schematic creation.
+	classJSON budgetClass = iota + 1
+
+	// classProbe is the ISO probe: a HEAD (or a ranged GET) that makes the
+	// Factory build an image synchronously.
+	classProbe
+
+	// classManifest is one registry manifest GET during installer repository
+	// resolution.
+	classManifest
+)
+
+func (b budgetClass) String() string {
+	switch b {
+	case classJSON:
+		return "json"
+	case classProbe:
+		return "probe"
+	case classManifest:
+		return "manifest"
+	default:
+		return fmt.Sprintf("budgetClass(%d)", int(b))
+	}
+}
+
+// budget is the client's duration for a class, and zero for a class it does not
+// know.
+func (c *Client) budget(class budgetClass) time.Duration {
+	switch class {
+	case classJSON:
+		return c.jsonBudget
+	case classProbe:
+		return c.probeBudget
+	case classManifest:
+		return c.manifestBudget
+	default:
+		return 0
+	}
+}
+
+// withBudget derives the context one call is issued on.
+//
+// It is a ceiling and not a floor: context.WithTimeout takes the earlier of an
+// inherited deadline and this one, which is exactly what a shorter route
+// deadline above it needs. Do not "fix" that by rebuilding the context from
+// context.Background or by wrapping it in context.WithoutCancel -- a call that
+// outlives the request it belongs to is the thing the route deadline exists to
+// prevent.
+//
+// A class with no budget gets a cancellable context and no deadline, which
+// requireDeadline then refuses at the wire. That is deliberate: the failure
+// mode of a new, unbudgeted class must be a named refusal, never an unbounded
+// request.
+func (c *Client) withBudget(ctx context.Context, class budgetClass) (context.Context, context.CancelFunc) {
+	d := c.budget(class)
+	if d <= 0 {
+		return context.WithCancel(ctx)
+	}
+	return context.WithTimeout(ctx, d)
+}
+
+// requireDeadline is the structural gate, and it is the imagefactory sibling of
+// internal/talos/deadline.go's function of the same name (D-04).
+//
+// It matters more here than it looks. This client no longer sets
+// http.Client.Timeout -- it cannot, because that field is one number and there
+// are three budgets -- so a request issued on a context with no deadline would
+// run until the process ends. The removed field used to keep that promise by
+// accident; this keeps it on purpose, at the two and only two places that reach
+// http.Client.Do.
+//
+// It is a refusal and it is never retryable. There is no value, option or
+// context key that turns it off: the fix for reaching it is a withBudget call
+// at the site that forgot one, not a default here.
+func requireDeadline(ctx context.Context) error {
+	if _, ok := ctx.Deadline(); !ok {
+		return ErrNoDeadline
+	}
+	return nil
+}
+
+// ErrNoDeadline reports a request that would have gone to the wire on a context
+// with no deadline. Nothing was sent.
+var ErrNoDeadline = errors.New("imagefactory: refusing a request with no deadline")
 
 // Option configures a Client. Options are applied in the order given.
 type Option func(*Client) error
@@ -128,6 +271,15 @@ type Option func(*Client) error
 // this package, not a default a caller can accidentally drop by passing a
 // client it configured for something else. Copying also means the caller's
 // value is not mutated behind its back.
+//
+// The copy's Timeout is cleared, and the budgets are not carried on it. They
+// live on the Client and are applied per call as context deadlines, so a
+// caller's own Timeout is neither honoured nor silently discarded -- it is
+// simply not the mechanism any more, and a request through this client is
+// bounded by the same three budgets whether or not this option was used. That
+// removes the reason .planning/WINDOWS.md entry 8 (WR-01) exists: the option
+// used to overwrite a configured timeout with the supplied client's zero value
+// and say nothing.
 func WithHTTPClient(h *http.Client) Option {
 	return func(c *Client) error {
 		if h == nil {
@@ -135,18 +287,51 @@ func WithHTTPClient(h *http.Client) Option {
 		}
 		cp := *h
 		cp.CheckRedirect = refuseCrossHostRedirect
+		cp.Timeout = 0
 		c.http = &cp
 		return nil
 	}
 }
 
-// WithTimeout sets the per-request timeout.
+// WithTimeout sets the budget for the three JSON endpoints.
+//
+// It keeps its old name and its old meaning is now narrower: it is the JSON
+// budget, DefaultTimeout's, and it does not move the probe or the manifest one.
+// Renaming it would break every caller to say something the doc comment can say
+// -- but a caller that means "bound the ISO probe" has to reach for
+// WithProbeTimeout, because that is a different workload with a different
+// derivation.
 func WithTimeout(d time.Duration) Option {
 	return func(c *Client) error {
 		if d <= 0 {
 			return fmt.Errorf("imagefactory: timeout must be positive, got %s", d)
 		}
-		c.http.Timeout = d
+		c.jsonBudget = d
+		return nil
+	}
+}
+
+// WithProbeTimeout sets the budget for the ISO probe. See ProbeTimeout for what
+// the shipped value is derived from; a caller overriding it is overriding that
+// derivation and should have observations of its own.
+func WithProbeTimeout(d time.Duration) Option {
+	return func(c *Client) error {
+		if d <= 0 {
+			return fmt.Errorf("imagefactory: the probe timeout must be positive, got %s", d)
+		}
+		c.probeBudget = d
+		return nil
+	}
+}
+
+// WithManifestTimeout sets the budget for one registry manifest GET. See
+// ManifestTimeout for its derivation.
+func WithManifestTimeout(d time.Duration) Option {
+	return func(c *Client) error {
+		if d <= 0 {
+			return fmt.Errorf("imagefactory: the manifest timeout must be positive, got %s", d)
+		}
+		c.manifestBudget = d
 		return nil
 	}
 }
@@ -192,12 +377,18 @@ func New(baseURL string, opts ...Option) (*Client, error) {
 
 	c := &Client{
 		base: u,
+		// No Timeout. One value cannot express three budgets, and the one it
+		// used to express bounded the ISO probe with a number sized against a
+		// JSON list. The budgets below are applied per call by withBudget, and
+		// requireDeadline refuses at the wire if a call path ever forgets to.
 		http: &http.Client{
-			Timeout:       DefaultTimeout,
 			CheckRedirect: refuseCrossHostRedirect,
 		},
 		installerRepos: map[string]installerRepoEntry{},
 		installerRetry: installerRepoRetryInterval,
+		jsonBudget:     DefaultTimeout,
+		probeBudget:    ProbeTimeout,
+		manifestBudget: ManifestTimeout,
 	}
 	for _, opt := range opts {
 		if err := opt(c); err != nil {
@@ -312,8 +503,11 @@ func (c *Client) CreateSchematic(ctx context.Context, s Schematic) (Created, err
 		return Created{}, err
 	}
 
+	callCtx, cancel := c.withBudget(ctx, classJSON)
+	defer cancel()
+
 	u := c.base.JoinPath("schematics")
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, u.String(), bytes.NewReader(doc))
+	req, err := http.NewRequestWithContext(callCtx, http.MethodPost, u.String(), bytes.NewReader(doc))
 	if err != nil {
 		return Created{}, fmt.Errorf("imagefactory: build request: %w", err)
 	}
@@ -344,8 +538,14 @@ func (c *Client) CreateSchematic(ctx context.Context, s Schematic) (Created, err
 // getJSON issues a GET against the base URL joined with segments and decodes
 // the answer.
 func (c *Client) getJSON(ctx context.Context, dst any, segments ...string) error {
+	// Both callers -- Versions and Extensions -- are JSON endpoints, so the
+	// class is fixed here rather than passed in. probeStatus takes its class as
+	// a parameter for the opposite reason: it serves two workloads.
+	callCtx, cancel := c.withBudget(ctx, classJSON)
+	defer cancel()
+
 	u := c.base.JoinPath(segments...)
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
+	req, err := http.NewRequestWithContext(callCtx, http.MethodGet, u.String(), nil)
 	if err != nil {
 		return fmt.Errorf("imagefactory: build request: %w", err)
 	}
@@ -355,6 +555,12 @@ func (c *Client) getJSON(ctx context.Context, dst any, segments ...string) error
 
 // do performs the request and decodes a JSON answer into dst.
 func (c *Client) do(req *http.Request, dst any) error {
+	// One of the two places in this package that reach http.Client.Do, and
+	// therefore one of the two that have to hold the deadline promise.
+	if err := requireDeadline(req.Context()); err != nil {
+		return fmt.Errorf("%w: %s %s", err, req.Method, req.URL.Path)
+	}
+
 	resp, err := c.http.Do(req)
 	if err != nil {
 		return fmt.Errorf("%w: %s %s: %w", ErrUpstreamUnavailable, req.Method, req.URL.Path, err)

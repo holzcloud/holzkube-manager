@@ -1,6 +1,10 @@
 package imagefactory
 
-import "time"
+import (
+	"context"
+	"net/http"
+	"time"
+)
 
 // This file exists only in the test binary. It exposes the installer-repository
 // cache entry -- an unexported struct with unexported fields -- to the external
@@ -43,4 +47,37 @@ func (c *Client) InstallerRepoEntryForTest(r AssetRequest) (InstallerRepoEntryFo
 		Unresolved:  entry.unresolved,
 		WrittenAt:   entry.at,
 	}, true
+}
+
+// HTTPClientTimeoutForTest exposes the embedded http.Client's Timeout.
+//
+// It exists so the removal of the client-wide timeout can be asserted
+// behaviourally rather than by grepping for a string that is absent. A grep
+// proves the field is not assigned in the file it greps; this proves the value
+// the client actually runs with, including through WithHTTPClient, which
+// shallow-copies a client a caller may have set a Timeout on.
+func (c *Client) HTTPClientTimeoutForTest() time.Duration { return c.http.Timeout }
+
+// ProbeStatusUnbudgetedForTest calls probeStatus with a class the client has no
+// budget for, which is the one way to reach a request built on a context with
+// no deadline.
+//
+// Every production path derives its deadline through withBudget, so the refusal
+// requireDeadline exists for is unreachable from outside the package -- which
+// is the property being asserted, and is also why asserting it needs a door
+// like this one. The class value is deliberately not one of the three: it
+// stands for the next class somebody adds and forgets to give a budget.
+func (c *Client) ProbeStatusUnbudgetedForTest(ctx context.Context, u string) (int, error) {
+	return c.probeStatus(ctx, http.MethodHead, u, nil, budgetClass(0))
+}
+
+// DoUnbudgetedForTest reaches the other of the two call sites that touch
+// http.Client.Do, on a context with no deadline.
+func (c *Client) DoUnbudgetedForTest(ctx context.Context, u string) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+	if err != nil {
+		return err
+	}
+	var dst any
+	return c.do(req, &dst)
 }
