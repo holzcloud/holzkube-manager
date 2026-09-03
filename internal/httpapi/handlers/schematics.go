@@ -60,22 +60,27 @@ const (
 	// AssetsRouteBudget bounds GET /api/v1/schematics/{id}/assets: the
 	// installer repository resolution, under one ceiling.
 	//
-	// Two manifest budgets and not one, because at this wave resolveInstallerRepo
-	// still walks its candidates serially, so the route's real worst case is two
-	// of them. A ceiling of one would cut the legacy candidate before it could
-	// answer -- which is the silent fallback G-02-3 already cost this phase once.
-	// Plan 02-23 makes that walk concurrent and tightens this constant to
-	// imagefactory.ManifestTimeout + 5*time.Second; the clipping ratchet in
-	// cmd/holzkube-managerd/budget_test.go fires if it is tightened without the
-	// declared call list changing with it. A reader who finds 65s here after
-	// 02-23 has landed is looking at a stale constant.
+	// One manifest budget and not two, because resolveInstallerRepo asks every
+	// candidate repository name at the same time: the route's worst case is the
+	// slowest single candidate rather than the sum of them all.
+	//
+	// This constant was two manifest budgets wide through wave 1 of round 4,
+	// while that walk was still serial. A one-candidate ceiling would have cut
+	// the legacy candidate before it could answer, which is the silent fallback
+	// G-02-3 already cost this phase once -- so the ceiling was sized for the
+	// walk that existed rather than for the one that was planned. Wave 2 made
+	// the walk concurrent and tightened this in the same change; the two move
+	// together or neither does, and the clipping ratchet in
+	// cmd/holzkube-managerd/budget_test.go fires if this is tightened without
+	// the declared call list changing with it.
 	//
 	// The five seconds are the resolution's own bookkeeping around the calls, on
 	// the same reasoning budgetSlack gives for the response. Check what this
 	// admits: G-02-2's 43.42s successful serial resolution and its
-	// 60.002907792s double-silent case both now fit inside the ceiling and
-	// inside the response budget, which is the whole of the fix at this wave.
-	AssetsRouteBudget = 2*imagefactory.ManifestTimeout + 5*time.Second
+	// 60.002907792s double-silent case are both *history*. A cold resolution now
+	// costs one candidate's budget, and the double-silent case costs the same
+	// one rather than two.
+	AssetsRouteBudget = imagefactory.ManifestTimeout + 5*time.Second
 )
 
 // versionBuckets is the answer to GET /api/v1/factory/versions.
