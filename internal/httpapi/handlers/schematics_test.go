@@ -1356,9 +1356,18 @@ func TestCreateTheSameContentTwiceIs409NotInternal(t *testing.T) {
 		t.Errorf("code = %q, want store.conflict", p.Code)
 	}
 
-	// Nothing was overwritten. A POST that replaced the record would be doing
-	// on a route the contract marks Destructive: false what DELETE is behind
-	// the sudo window to do.
+	// The operator's own text was not overwritten. A POST that replaced the
+	// label would be doing on a route the contract marks Destructive: false
+	// what DELETE is behind the sudo window to do.
+	//
+	// The revision is deliberately not asserted here any more. Since plan
+	// 02-24 the conflict path writes back the probe verdict it just computed --
+	// Usable, ProbedAt and ProbeReason and nothing else -- so a second POST
+	// whose probe answered advances the revision by exactly one without
+	// touching anything the operator wrote. That bound has a test of its own,
+	// TestConflictRefreshTouchesNothingButTheThreeProbeFields, which compares
+	// the whole marshalled record rather than a field list; asserting an
+	// unchanged revision here would be asserting the old behaviour twice.
 	resp, raw = c.do(http.MethodGet, "/api/v1/schematics/"+first.ID, nil)
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("GET by id: got %d, want 200 (body: %s)", resp.StatusCode, raw)
@@ -1371,9 +1380,6 @@ func TestCreateTheSameContentTwiceIs409NotInternal(t *testing.T) {
 	if stored.Name != "first" {
 		t.Errorf("name = %q after a second create under another label, want %q: the refused create "+
 			"renamed the record it refused", stored.Name, "first")
-	}
-	if stored.Rev != first.Rev {
-		t.Errorf("rev = %d, want %d: the refused create wrote", stored.Rev, first.Rev)
 	}
 
 	// And there is still exactly one record, not two and not none.
@@ -2886,6 +2892,27 @@ func storedRecord(t *testing.T, c *client, id string) map[string]any {
 	return rec
 }
 
+// mustString and mustNumber read a field out of the wire form with the type
+// assertion checked, so a field that changed shape fails the test where it
+// changed rather than panicking somewhere downstream.
+func mustString(t *testing.T, rec map[string]any, key string) string {
+	t.Helper()
+	v, ok := rec[key].(string)
+	if !ok {
+		t.Fatalf("%s is %T, want a string (record: %v)", key, rec[key], rec)
+	}
+	return v
+}
+
+func mustNumber(t *testing.T, rec map[string]any, key string) float64 {
+	t.Helper()
+	v, ok := rec[key].(float64)
+	if !ok {
+		t.Fatalf("%s is %T, want a number (record: %v)", key, rec[key], rec)
+	}
+	return v
+}
+
 func marshalRecord(t *testing.T, rec map[string]any) string {
 	t.Helper()
 	out, err := json.Marshal(rec)
@@ -2932,7 +2959,7 @@ func TestConflictRefreshesTheVerdictItJustComputed(t *testing.T) {
 	c := operator(t, s)
 
 	created := coldCreate(t, c, f, "cold", []string{"siderolabs/intel-ucode"})
-	id := created["id"].(string)
+	id := mustString(t, created, "id")
 
 	// The Factory is warm now, which is exactly why a re-POST is the recovery.
 	f.answerAfter("HEAD /image", 0)
@@ -2950,11 +2977,11 @@ func TestConflictRefreshesTheVerdictItJustComputed(t *testing.T) {
 	if after["probed_at"] == zeroTime {
 		t.Error("probed_at is still zero although the conflicting POST's probe answered")
 	}
-	probedAt, err := time.Parse(time.RFC3339Nano, after["probed_at"].(string))
+	probedAt, err := time.Parse(time.RFC3339Nano, mustString(t, after, "probed_at"))
 	if err != nil {
 		t.Fatalf("parse probed_at: %v", err)
 	}
-	createdAt, err := time.Parse(time.RFC3339Nano, created["created_at"].(string))
+	createdAt, err := time.Parse(time.RFC3339Nano, mustString(t, created, "created_at"))
 	if err != nil {
 		t.Fatalf("parse created_at: %v", err)
 	}
@@ -2974,7 +3001,7 @@ func TestConflictRefreshStoresTheFactorysRefusal(t *testing.T) {
 
 	f.listButRefuse("siderolabs/accepted-but-unbuildable")
 	created := coldCreate(t, c, f, "cold-refusal", []string{"siderolabs/accepted-but-unbuildable"})
-	id := created["id"].(string)
+	id := mustString(t, created, "id")
 
 	f.answerAfter("HEAD /image", 0)
 	resp, raw := c.do(http.MethodPost, "/api/v1/schematics",
@@ -3004,7 +3031,7 @@ func TestConflictWithNoAnswerFromTheProbeChangesNothing(t *testing.T) {
 	c := operator(t, s)
 
 	created := coldCreate(t, c, f, "still-cold", []string{"siderolabs/intel-ucode"})
-	id := created["id"].(string)
+	id := mustString(t, created, "id")
 	before := storedRecord(t, c, id)
 
 	// The delay stays: the second probe does not answer either.
@@ -3029,7 +3056,7 @@ func TestConflictRefreshTouchesNothingButTheThreeProbeFields(t *testing.T) {
 	c := operator(t, s)
 
 	created := coldCreate(t, c, f, "bounded", []string{"siderolabs/intel-ucode"})
-	id := created["id"].(string)
+	id := mustString(t, created, "id")
 	before := storedRecord(t, c, id)
 
 	f.answerAfter("HEAD /image", 0)
@@ -3047,7 +3074,7 @@ func TestConflictRefreshTouchesNothingButTheThreeProbeFields(t *testing.T) {
 		t.Errorf("the refresh changed a field that is not one of the three:\n before %s\n after  %s",
 			want, got)
 	}
-	beforeRev, afterRev := before["rev"].(float64), after["rev"].(float64)
+	beforeRev, afterRev := mustNumber(t, before, "rev"), mustNumber(t, after, "rev")
 	if afterRev != beforeRev+1 {
 		t.Errorf("rev went %v -> %v; the refresh is exactly one compare-and-swap write",
 			beforeRev, afterRev)
@@ -3063,7 +3090,7 @@ func TestConflictAtAnotherArchitectureDeclinesTheRefresh(t *testing.T) {
 	c := operator(t, s)
 
 	created := coldCreate(t, c, f, "amd-record", []string{"siderolabs/intel-ucode"})
-	id := created["id"].(string)
+	id := mustString(t, created, "id")
 	before := storedRecord(t, c, id)
 
 	f.answerAfter("HEAD /image", 0)
@@ -3098,7 +3125,7 @@ func TestConflictRefreshLosingTheCompareAndSwapAnswersThePlainConflict(t *testin
 	c := operator(t, s)
 
 	created := coldCreate(t, c, f, "raced", []string{"siderolabs/intel-ucode"})
-	id := created["id"].(string)
+	id := mustString(t, created, "id")
 	before := storedRecord(t, c, id)
 
 	f.answerAfter("HEAD /image", 0)
@@ -3123,7 +3150,7 @@ func TestConflictRefreshLosingTheCompareAndSwapAnswersThePlainConflict(t *testin
 		t.Errorf("the refresh wrote after losing the compare-and-swap: usable=%v probed_at=%v",
 			after["usable"], after["probed_at"])
 	}
-	beforeRev, afterRev := before["rev"].(float64), after["rev"].(float64)
+	beforeRev, afterRev := mustNumber(t, before, "rev"), mustNumber(t, after, "rev")
 	if afterRev != beforeRev+1 {
 		t.Errorf("rev went %v -> %v; exactly one write should have landed, the concurrent "+
 			"writer's, and a retry would show as a second", beforeRev, afterRev)
@@ -3142,7 +3169,7 @@ func TestConflictRefreshAgainstADeletedRecordDoesNotRecreateIt(t *testing.T) {
 	c := operator(t, s)
 
 	created := coldCreate(t, c, f, "deleted-midway", []string{"siderolabs/intel-ucode"})
-	id := created["id"].(string)
+	id := mustString(t, created, "id")
 
 	f.answerAfter("HEAD /image", 0)
 	h.arm(func(inner store.SchematicStore, rec model.Schematic) {

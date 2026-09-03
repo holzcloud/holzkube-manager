@@ -439,14 +439,26 @@ func createSchematic(d httpapi.Deps) http.HandlerFunc {
 			// symmetry. The record is the only copy of a reference the Factory
 			// will not list back, which is why DELETE is Destructive and behind
 			// the sudo window; a POST that replaced the label, the version and
-			// the probe verdict of an existing record would do most of that
-			// same damage on a route the contract marks Destructive: false.
-			// The operator can read the record back by id, or delete it and
-			// author again.
+			// the cluster of an existing record would do most of that same
+			// damage on a route the contract marks Destructive: false. The
+			// operator can read the record back by id, or delete it and author
+			// again.
+			//
+			// The probe verdict is the one thing that argument does not cover,
+			// and it used to be refused with the rest. It is not the operator's
+			// text: they did not write it, they cannot disagree with it, and a
+			// second POST carries no competing version of it to prefer. This
+			// request has just run the whole Author sequence, including a fresh
+			// probe that usually answers because the first attempt warmed the
+			// Factory, so what it holds is a strictly better-informed answer to
+			// the same question than the stored one -- and it was being thrown
+			// away (G-02-9: HTTP 409 in 4.186898875s, the probe ran and
+			// succeeded, the record stayed usable=false with probed_at zero).
+			// Usable, ProbedAt and ProbeReason are therefore written and
+			// nothing else is; see refreshTheStoredVerdict for the two
+			// conditions and for why a failed refresh is silent.
 			httpapi.WriteProblem(w, r, httpapi.Conflict("store.conflict",
-				"This schematic already exists. Its id is the hash of its contents, so the same "+
-					"customisation is the same schematic however it is named. Read it back by id, "+
-					"or delete it and author it again."))
+				conflictDetail+refreshTheStoredVerdict(ctx, d, rec)))
 			return
 		case storeErr != nil:
 			httpapi.WriteInternal(w, r, d.Logger, storeErr)
@@ -470,6 +482,120 @@ func createSchematic(d httpapi.Deps) http.HandlerFunc {
 			Warnings:  imagefactory.Warnings(in.schematic()),
 		})
 	}
+}
+
+// conflictDetail is the sentence a store.ErrConflict on the create route has
+// always carried, unchanged. ProblemError surfaces detail as the create form's
+// error message verbatim, so this is the operator's whole answer and not a
+// summary of one written elsewhere.
+const conflictDetail = "This schematic already exists. Its id is the hash of its contents, so the " +
+	"same customisation is the same schematic however it is named. Read it back by id, or " +
+	"delete it and author it again."
+
+// refreshTheStoredVerdict writes the probe verdict this request has already
+// computed onto the record the conflict is about, and returns the clause that
+// tells the operator what became of it. An empty return is the plain conflict:
+// the sentence above and nothing added to it.
+//
+// The whole of the write is Usable, ProbedAt and ProbeReason. The label, the
+// cluster, the Talos version, the architecture, the canonical document, the
+// extensions, the kernel arguments, the META values and the creation time are
+// read from the store and written back unchanged, which is what keeps a route
+// the contract marks Destructive: false from doing a destructive route's damage
+// (T-02-110).
+//
+// It is a mitigation and not a closure. There is still no re-probe route,
+// button or job; the recovery is a re-submission that is answered as an error
+// and is not discoverable from the saved list, and a probe that times out again
+// leaves the record exactly as it was. See
+// .planning/phases/02-transport-seam-talossim-image-factory/02-DECISION-probe-budget.md,
+// whose Option 1 is where the structural answer lives and which was not taken.
+func refreshTheStoredVerdict(ctx context.Context, d httpapi.Deps, fresh model.Schematic) string {
+	stored, err := d.Store.Schematics().Get(ctx, fresh.ID)
+	if err != nil {
+		// The refresh is a bonus on a path that is already answering a
+		// conflict. A read that failed for any reason -- the record gone, the
+		// route out of budget, the store broken -- must never turn that
+		// conflict into a 500, so the plain sentence is the whole answer.
+		return ""
+	}
+
+	// The first condition: the fresh probe actually answered.
+	//
+	// This is the predicate computed above the store call, not a restatement of
+	// it: ProbedAt is stamped for nil and for ErrSchematicNotBuildable and for
+	// nothing else, so a non-zero ProbedAt on the record this request built is
+	// exactly "the probe answered". A probe that could not reach the Factory
+	// says nothing about the schematic, and writing its silence over an
+	// existing verdict would replace an answer with an absence -- strictly
+	// worse than the discard this function exists to remove.
+	if fresh.ProbedAt.IsZero() {
+		return " The stored verdict was not refreshed, because the build probe did not answer " +
+			"this time either. Submitting the same customisation again runs it once more, which " +
+			"is a retry rather than a guarantee."
+	}
+
+	// The second condition: the stored record's architecture is the one the
+	// fresh probe asked about.
+	//
+	// The verdict is architecture-scoped -- ProbeReason carries the
+	// architecture inside its own sentence, which is the evidence that it
+	// always was -- and this record's identity cannot vary by architecture,
+	// because the canonical document the id hashes does not contain one. So an
+	// arm64 verdict written onto an amd64 record would be G-02-8's lie in a new
+	// place and would be undetectable afterwards, there being no second record
+	// to disagree with it (T-02-111).
+	//
+	// A record written before Arch existed carries an empty one and is
+	// therefore never refreshed. That is deliberate and not an oversight: an
+	// empty architecture is not a claim that the record is architecture-neutral,
+	// it is the absence of the claim, and there is nothing here to match
+	// against.
+	if stored.Arch != fresh.Arch {
+		return " The stored verdict was not refreshed, because " + archMismatchReason(stored.Arch, fresh.Arch) + "."
+	}
+
+	stored.Usable = fresh.Usable
+	stored.ProbedAt = fresh.ProbedAt
+	stored.ProbeReason = fresh.ProbeReason
+
+	// Put carries the Rev that was read, so this is a compare-and-swap and not
+	// an overwrite. Two failures are expected, both arrive as
+	// store.ErrConflict, and both answer the plain conflict: a stale Rev means
+	// another writer changed the record between the read and this write and
+	// their write wins, and a store.ErrConflict against a record that has since
+	// been deleted means the record is gone and must not be recreated by a
+	// route whose whole job here is to refuse. Any other error is equally not a
+	// reason to escalate a 409 into a 500, so every failure returns the same
+	// silence.
+	//
+	// Not retrying is the decision rather than an omission. A compare-and-swap
+	// retry loop on a route that is already answering a conflict would be
+	// inventing a write path nobody asked for, on the one route the contract
+	// marks Destructive: false.
+	if _, err := d.Store.Schematics().Put(ctx, stored); err != nil {
+		return ""
+	}
+
+	if stored.Usable {
+		return " The build probe ran again as part of this submission and this schematic builds, " +
+			"so the stored verdict was refreshed. Nothing else about the record was changed."
+	}
+	return " The build probe ran again as part of this submission and the Factory refused it: " +
+		stored.ProbeReason + " The stored verdict was refreshed; nothing else about the record " +
+		"was changed."
+}
+
+// archMismatchReason names both architectures, so an operator who meets the
+// declined refresh can tell it from the other declining condition.
+func archMismatchReason(stored, asked string) string {
+	if stored == "" {
+		return "this record was written before the architecture was recorded, so which " +
+			"architecture its verdict is about is not known, and this submission asked about " +
+			asked
+	}
+	return "this record holds the verdict for " + stored + " and this submission asked about " +
+		asked + ", and one stored customisation holds exactly one architecture's verdict"
 }
 
 func listSchematics(d httpapi.Deps) http.HandlerFunc {
