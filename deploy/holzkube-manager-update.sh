@@ -10,11 +10,11 @@
 # Voraussetzungen auf dem Host: curl, tar, python3, systemd. Alle sind auf einem
 # Debian-Standardsystem vorhanden; jq bewusst nicht, weil es das nicht ist.
 #
-# Das Repository ist privat, also braucht der Download einen Token. Er liegt in
-# TOKEN_FILE, gehoert root und wird nur von diesem Skript gelesen. Ein
-# fine-grained PAT mit "Contents: read" auf genau dieses Repository reicht -
-# mehr Rechte braucht es nicht, und ein Token, das mehr kann, liegt hier ohne
-# Grund.
+# Ist das Repository oeffentlich, braucht es nichts weiter. Ist es privat, legt
+# man einen fine-grained PAT mit "Contents: read" auf genau dieses Repository
+# nach /etc/holzkube-manager/github-token, root-only 0600 - mehr Rechte braucht
+# es nicht, und ein Token, das mehr kann, liegt dort ohne Grund. Das Skript
+# merkt selbst, welcher Fall vorliegt.
 #
 # Was dieses Skript ausdruecklich NICHT anfasst:
 #
@@ -87,23 +87,38 @@ command -v curl    >/dev/null || fail "curl fehlt"
 command -v tar     >/dev/null || fail "tar fehlt"
 command -v python3 >/dev/null || fail "python3 fehlt"
 
-[[ -r $TOKEN_FILE ]] || fail "$TOKEN_FILE fehlt.
-Lege dort einen fine-grained GitHub-Token mit 'Contents: read' auf $REPO ab:
-  install -d -m 0700 -o root -g root /etc/holzkube-manager
-  printf '%s' 'github_pat_...' > $TOKEN_FILE
-  chmod 0600 $TOKEN_FILE"
-TOKEN=$(tr -d ' \t\r\n' < "$TOKEN_FILE")
-[[ -n $TOKEN ]] || fail "$TOKEN_FILE ist leer"
+# Der Token ist optional, und zwar nach Lage des Repositories statt nach
+# Konfiguration: ein oeffentliches Release laedt anonym, ein privates nicht. Die
+# Datei wird gelesen, wenn sie da ist, und sonst nicht vermisst - so muss beim
+# Umschalten von privat auf oeffentlich nichts nachgezogen werden.
+TOKEN=""
+if [[ -r $TOKEN_FILE ]]; then
+  TOKEN=$(tr -d ' \t\r\n' < "$TOKEN_FILE")
+  [[ -n $TOKEN ]] || fail "$TOKEN_FILE existiert, ist aber leer.
+Entweder einen Token hineinschreiben oder die Datei loeschen - eine leere Datei
+sieht aus wie eine Konfiguration und ist keine."
+fi
 
 api() {
   # --fail-with-body, damit ein 404 als Fehler ankommt und trotzdem sagt, was
   # GitHub geantwortet hat. Ein stiller leerer Body waere hier die schlechteste
   # aller Rueckmeldungen.
-  curl -sS --fail-with-body --max-time 30 \
-    -H "Authorization: Bearer $TOKEN" \
-    -H "Accept: application/vnd.github+json" \
-    -H "X-GitHub-Api-Version: 2022-11-28" \
-    "$@"
+  #
+  # Ohne Token wird der Header weggelassen statt leer gesetzt: ein
+  # "Authorization: Bearer " ohne Wert beantwortet GitHub mit 401, was dann wie
+  # ein falscher Token aussaehe statt wie gar keiner.
+  if [[ -n $TOKEN ]]; then
+    curl -sS --fail-with-body --max-time 30 \
+      -H "Authorization: Bearer $TOKEN" \
+      -H "Accept: application/vnd.github+json" \
+      -H "X-GitHub-Api-Version: 2022-11-28" \
+      "$@"
+  else
+    curl -sS --fail-with-body --max-time 30 \
+      -H "Accept: application/vnd.github+json" \
+      -H "X-GitHub-Api-Version: 2022-11-28" \
+      "$@"
+  fi
 }
 
 # --- Welches Release ist das neueste? ---------------------------------------
