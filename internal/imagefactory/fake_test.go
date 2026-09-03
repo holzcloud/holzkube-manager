@@ -189,6 +189,23 @@ type fakeFactory struct {
 	// that sleeps past the client timeout, which is a 30s test". With three
 	// budgets a caller can set, it is a sub-second one.
 	delays map[string]time.Duration
+
+	// manifestDelays is an artificial latency per *repository name*, applied to
+	// registry manifest requests only.
+	//
+	// delays above is deliberately coarse -- keyed by workload, because a budget
+	// governs a workload -- and that is the right key for exercising a budget.
+	// It is the wrong key for exercising the *shape* of a resolution. Every
+	// candidate in one resolution shares the "GET /v2" shape, so a coarse delay
+	// slows all of them by the same amount and cannot express "this candidate is
+	// slow and that one is not". Telling a concurrent fan-out apart from a
+	// serial walk needs exactly that: the ordering case gives the legacy
+	// candidate zero latency and the preferred one a real one, which is a
+	// statement about two names rather than about a workload.
+	//
+	// Keyed like counts and unreachable, per repository, and read under the same
+	// mutex as every other knob here.
+	manifestDelays map[string]time.Duration
 }
 
 func newFakeFactory(t *testing.T) *fakeFactory {
@@ -201,6 +218,7 @@ func newFakeFactory(t *testing.T) *fakeFactory {
 		unreachable:     map[string]bool{},
 		silentRemaining: map[string]int{},
 		delays:          map[string]time.Duration{},
+		manifestDelays:  map[string]time.Duration{},
 		versionsJSON:    readTestdata(t, "versions.json"),
 		catalogJSON:     readTestdata(t, "extensions-"+catalogVersion+".json"),
 	}
@@ -313,6 +331,25 @@ func (f *fakeFactory) delayFor(shape string) time.Duration {
 	return f.delays[shape]
 }
 
+// answerManifestAfter makes every subsequent registry manifest request for repo
+// wait d before it is served, and abandons the wait when the inbound request's
+// context is cancelled -- so a resolution that gives up on a candidate actually
+// releases it rather than the fake sleeping through the cancellation.
+//
+// Per repository rather than per shape; see manifestDelays for why the coarse
+// knob cannot stand in for this one.
+func (f *fakeFactory) answerManifestAfter(repo string, d time.Duration) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.manifestDelays[repo] = d
+}
+
+func (f *fakeFactory) manifestDelayFor(repo string) time.Duration {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.manifestDelays[repo]
+}
+
 // forgeID makes every subsequent POST /schematics answer with id rather than
 // with the hash of the document it was sent.
 func (f *fakeFactory) forgeID(id string) {
@@ -363,7 +400,7 @@ func (f *fakeFactory) serve(w http.ResponseWriter, r *http.Request) {
 	case (r.Method == http.MethodGet || r.Method == http.MethodHead) && len(parts) == 5 &&
 		parts[0] == "v2" && parts[3] == "manifests":
 		f.record("GET /v2/" + parts[1] + "/manifests/" + parts[4])
-		f.serveManifest(w, parts[1], parts[4])
+		f.serveManifest(w, r, parts[1], parts[4])
 
 	default:
 		http.Error(w, "not found", http.StatusNotFound)
@@ -374,7 +411,19 @@ func (f *fakeFactory) serve(w http.ResponseWriter, r *http.Request) {
 // does: the platform-prefixed and the legacy repository names resolve for
 // different, version-dependent subsets of the supported range, and a name that
 // does not resolve is a 404 rather than an empty manifest.
-func (f *fakeFactory) serveManifest(w http.ResponseWriter, repo, version string) {
+func (f *fakeFactory) serveManifest(w http.ResponseWriter, r *http.Request, repo, version string) {
+	// The per-repository latency, before any knob is claimed: it is a property
+	// of the name, not of the answer, so it applies whatever this request goes
+	// on to be answered with. Abandoned on cancellation so a resolution that
+	// short-circuits past this candidate is not held open by the fake.
+	if d := f.manifestDelayFor(repo); d > 0 {
+		select {
+		case <-time.After(d):
+		case <-r.Context().Done():
+			return
+		}
+	}
+
 	f.mu.Lock()
 	forced := f.manifestStatus
 	silent := f.unreachable[repo]
