@@ -41,8 +41,27 @@ const (
 	// on a slow host, plus the rate limiter parking a login for up to
 	// maxInlineDelay -- and cutting one of those off would look like a bug in
 	// the login. idleTimeout bounds a kept-alive connection between requests.
+	//
+	// That argon2id-plus-rate-limiter reasoning is still true and is still a
+	// reason this value cannot be small. It was never the whole of it, and the
+	// sentence it never had is this one: writeTimeout must also cover the
+	// largest upstream budget any handler declares, plus room for the handler's
+	// own work after the last upstream call returns. The two Factory routes
+	// declare theirs as CreateRouteBudget and AssetsRouteBudget in
+	// internal/httpapi/handlers/schematics.go, and nothing anywhere added them
+	// to this number -- which is how a route with a 60.000s worst case came to
+	// meet a 60s response budget and flush a problem document to an expired
+	// socket (`status=502 duration=1m0.002907792s`).
+	//
+	// 130s is derived from that: the smallest multiple of ten strictly greater
+	// than CreateRouteBudget + budgetSlack = 125s, and comfortably above the
+	// argon2id-plus-rate-limiter floor that produced the old 60s.
+	//
+	// cmd/holzkube-managerd/budget_test.go is the assertion that keeps the
+	// numbers composed, and it fails in both directions. Whoever moves this
+	// value goes to that table rather than moving it alone.
 	readTimeout    = 30 * time.Second
-	writeTimeout   = 60 * time.Second
+	writeTimeout   = 130 * time.Second
 	idleTimeout    = 120 * time.Second
 	maxHeaderBytes = 1 << 16
 )
