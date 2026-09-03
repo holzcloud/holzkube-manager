@@ -29,13 +29,18 @@
 #     Binary aus.
 set -euo pipefail
 
-# Woher die Releases kommen. Es gibt zwei Repositories - das Arbeits-Repo mit
-# .planning/ und das daraus abgeleitete Produkt-Repo - und welches die Tags
-# traegt, ist eine Entscheidung und nichts, was dieses Skript erraten sollte.
-# CONF darf sie ueberschreiben, ohne das Skript zu aendern:
+# Woher die Releases kommen.
+#
+# Das Arbeits-Repo, nicht das Produkt-Repo, und das ist kein Versehen. Der
+# oeffentliche Spiegel wird von .planning/publish-public.sh aus diesem hier
+# abgeleitet - die Historie wird dabei neu geschrieben, und direkte Commits
+# darauf sind ausdruecklich verboten, weil der naechste Lauf sie ueberschreibt.
+# Ein Release entsteht aus einem Tag, den die CI sieht, und die laeuft hier.
+#
+# CONF darf es ueberschreiben, ohne das Skript zu aendern:
 #
 #   echo 'REPO=holzcloud/holzkube-manager' > /etc/holzkube-manager/update.conf
-REPO=${REPO:-holzcloud/holzkube-manager}
+REPO=${REPO:-holzcloud/holzkube-manager-planning}
 CONF=/etc/holzkube-manager/update.conf
 # shellcheck source=/dev/null
 [[ -r $CONF ]] && . "$CONF"
