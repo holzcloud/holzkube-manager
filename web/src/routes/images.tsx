@@ -292,8 +292,22 @@ function ImagesView() {
 
   const create = useMutation({
     mutationFn: (input: SchematicInput) => api.schematics.create(input),
-    onSuccess: async (result) => {
+    onSuccess: (result) => {
       setCreated(result)
+    },
+    // On settle rather than on success. Since plan 02-24 a `409` on this route
+    // writes the probe fields of the record it refuses -- the verdict the
+    // refused submission just computed, rather than discarding it -- so "the
+    // create failed" no longer implies "nothing changed". A list left
+    // un-refetched would show the operator the stale badge for the record they
+    // just refreshed, which is the badge this screen spent G-02-1 making
+    // truthful.
+    //
+    // The cost is one extra refetch after an ordinary validation failure, which
+    // is a request answered from a local store read. The saved list is also the
+    // only place that refresh is visible at all: the 409 is surfaced as an
+    // error on the form, not as a row.
+    onSettled: async () => {
       await queryClient.invalidateQueries({ queryKey: ['schematics'] })
     },
   })
@@ -889,16 +903,38 @@ function UsabilityVerdict({
     // This is a copy change and only a copy change. No new field, no third
     // state, no change to the probed-or-not predicate above, and no change to
     // what the server stores.
-    // 02-DECISION-probe-budget.md owns the state question and is still open;
-    // this item is on its unconditional list precisely because it needs none of
-    // that. If closing it ever seems to need a third probe state, stop — the
-    // boundary has been crossed and the decision has to land first.
+    //
+    // 02-DECISION-probe-budget.md owned the state question and was open when
+    // the paragraph above was written. It was ratified on 2026-09-03 as
+    // Option 2 — compose the budgets — and Option 1's third probe state was
+    // explicitly not taken. This branch therefore still has exactly two
+    // record-shaped inputs, `usable` and `probed_at`, and the instruction below
+    // stands as the ratified position rather than as a precaution: if closing
+    // anything here ever seems to need a third probe state, stop — the boundary
+    // has been crossed and the decision has to be reopened first.
+    //
+    // What the ratified decision adds to this branch is the recovery it could
+    // not name while the question was open. Since plan 02-24 a re-POST of the
+    // identical customisation answers `409` and refreshes `usable`, `probed_at`
+    // and `probe_reason` in place from the probe that submission just ran. The
+    // sentence names it, and names what it will look like: an operator told to
+    // re-submit and then handed an error would reasonably conclude they had
+    // done something wrong, and a badge that misdescribes the record teaches an
+    // operator to ignore badges.
+    //
+    // It stops there deliberately. The re-run probe can time out exactly as the
+    // first one did, so the copy offers a retry and never a verdict — a promise
+    // the product cannot keep is the failure this copy already had once
+    // (G-02-1), and G-02-9 stays open for the same reason: there is still no
+    // re-probe route, button or job.
     return (
       <span className="flex flex-col gap-1">
         <Badge variant="outline">Not verified — the build probe has no verdict</Badge>
         <span className="text-xs text-muted-foreground">
           The probe either did not run or did not answer in time. The schematic may still be
-          buildable.
+          buildable. Submitting the identical customisation again runs the probe again and updates
+          this verdict in place; that submission is still answered as a conflict, because the
+          schematic already exists.
         </span>
       </span>
     )
