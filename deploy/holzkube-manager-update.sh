@@ -69,7 +69,11 @@ done
 log()  { printf '%s\n' "$*"; }
 fail() { printf 'FEHLER: %s\n' "$*" >&2; exit 1; }
 
-[[ $EUID -eq 0 ]] || fail "muss als root laufen (sudo $0)"
+# root braucht nur, wer etwas veraendert. --check sieht nach und fasst nichts
+# an; es dafuer sudo zu verlangen, erzieht dazu, alles mit sudo aufzurufen.
+if [[ $CHECK_ONLY -eq 0 ]]; then
+  [[ $EUID -eq 0 ]] || fail "muss als root laufen (sudo $0)"
+fi
 
 # --- Rollback ---------------------------------------------------------------
 # Steht vor allem anderen, weil es der Pfad ist, den jemand unter Zeitdruck
@@ -99,26 +103,43 @@ Entweder einen Token hineinschreiben oder die Datei loeschen - eine leere Datei
 sieht aus wie eine Konfiguration und ist keine."
 fi
 
+# AUTH ist ein Array und keine Zeichenkette. ${TOKEN:+-H "Authorization: Bearer
+# $TOKEN"} sieht richtig aus und ist es nicht: die Anfuehrungszeichen darin sind
+# literale Zeichen, keine Quotierung, also zerfaellt der Header bei gesetztem
+# Token in vier Woerter. Ein leeres Array expandiert dagegen zu nichts.
+AUTH=()
+[[ -n $TOKEN ]] && AUTH=(-H "Authorization: Bearer $TOKEN")
+
 api() {
-  # --fail-with-body, damit ein 404 als Fehler ankommt und trotzdem sagt, was
-  # GitHub geantwortet hat. Ein stiller leerer Body waere hier die schlechteste
-  # aller Rueckmeldungen.
+  # Metadaten. --fail-with-body, damit ein 404 als Fehler ankommt und trotzdem
+  # sagt, was GitHub geantwortet hat. Ein stiller leerer Body waere hier die
+  # schlechteste aller Rueckmeldungen.
   #
   # Ohne Token wird der Header weggelassen statt leer gesetzt: ein
   # "Authorization: Bearer " ohne Wert beantwortet GitHub mit 401, was dann wie
   # ein falscher Token aussaehe statt wie gar keiner.
-  if [[ -n $TOKEN ]]; then
-    curl -sS --fail-with-body --max-time 30 \
-      -H "Authorization: Bearer $TOKEN" \
-      -H "Accept: application/vnd.github+json" \
-      -H "X-GitHub-Api-Version: 2022-11-28" \
-      "$@"
-  else
-    curl -sS --fail-with-body --max-time 30 \
-      -H "Accept: application/vnd.github+json" \
-      -H "X-GitHub-Api-Version: 2022-11-28" \
-      "$@"
-  fi
+  curl -sS --fail-with-body --max-time 30 \
+    "${AUTH[@]}" \
+    -H "Accept: application/vnd.github+json" \
+    -H "X-GitHub-Api-Version: 2022-11-28" \
+    "$@"
+}
+
+# download holt ein Release-Asset. Eine eigene Funktion, und das ist keine
+# Kosmetik: der Asset-Endpunkt liefert die Datei nur bei
+# "Accept: application/octet-stream" und sonst seine eigenen Metadaten. Als
+# api() den JSON-Accept setzte und die Aufrufstelle den Octet-Stream-Accept
+# dazuhaengte, schickte curl beide, GitHub bediente den ersten - und das Skript
+# lud 1818 Bytes JSON, wo ein Tarball hingehoerte. Aufgefallen ist es nur, weil
+# die Pruefsumme nicht passte; ohne sie waere der Fehler ein `tar`-Absturz nach
+# dem Stoppen des Dienstes gewesen.
+#
+# Zwei Funktionen koennen sich nicht gegenseitig einen Header unterschieben.
+download() {
+  curl -sSL --fail-with-body --max-time 300 \
+    "${AUTH[@]}" \
+    -H "Accept: application/octet-stream" \
+    "$@"
 }
 
 # --- Welches Release ist das neueste? ---------------------------------------
@@ -179,18 +200,16 @@ TMP=$(mktemp -d /tmp/holzkube-manager-update.XXXXXX)
 trap 'rm -rf "$TMP"' EXIT
 
 log "lade $ASSET_NAME ..."
-# Accept: octet-stream liefert die Datei statt der Metadaten. GitHub leitet auf
-# einen Speicher-Host um; curl schickt den Authorization-Header ueber eine
-# Host-Grenze hinweg nicht mit, was hier genau richtig ist - der Token hat auf
-# dem Speicher-Host nichts zu suchen und wuerde dort einen 400 ausloesen.
-api -L -H "Accept: application/octet-stream" \
-  -o "$TMP/$ASSET_NAME" \
+# GitHub leitet auf einen Speicher-Host um; curl schickt den
+# Authorization-Header ueber eine Host-Grenze hinweg nicht mit, was hier genau
+# richtig ist - der Token hat auf dem Speicher-Host nichts zu suchen und wuerde
+# dort einen 400 ausloesen.
+download -o "$TMP/$ASSET_NAME" \
   "https://api.github.com/repos/$REPO/releases/assets/$ASSET_ID" \
   || fail "Download fehlgeschlagen"
 
 if [[ -n $SUMS_ID ]]; then
-  api -L -H "Accept: application/octet-stream" \
-    -o "$TMP/checksums.txt" \
+  download -o "$TMP/checksums.txt" \
     "https://api.github.com/repos/$REPO/releases/assets/$SUMS_ID" \
     || fail "checksums.txt nicht ladbar"
 
