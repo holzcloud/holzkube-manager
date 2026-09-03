@@ -438,6 +438,29 @@ interface RequestOptions {
   interceptSudo?: boolean
 }
 
+/**
+ * How long the browser waits for one request before giving up on it.
+ *
+ * Its derivation, in one sentence: it is longer than the server's largest route
+ * budget so the server's own answer always wins the race, and it exists for the
+ * case where there will be no answer at all.
+ *
+ * The number it is above is `writeTimeout` in cmd/holzkube-managerd/main.go,
+ * 130 seconds -- the outermost bound the server puts on producing a response,
+ * itself derived from the largest route budget plus slack. A ceiling below that
+ * would abort while the server is still working and replace an honest
+ * problem+json, which says what went wrong upstream and whether retrying helps,
+ * with a generic network failure, which says nothing. That is strictly less
+ * information than the operator has today, so this sits above it with room to
+ * spare rather than tuned close to it.
+ *
+ * What it is for is the case the server never answers: a dropped connection, a
+ * suspended laptop, a process that went away. There, the alternative is a
+ * promise that never settles -- a spinner with no end and a pending state
+ * nothing clears (T-02-109).
+ */
+const REQUEST_CEILING_MS = 150_000
+
 function buildInit(method: string, body: unknown): RequestInit {
   const headers: Record<string, string> = { Accept: 'application/json' }
 
@@ -453,6 +476,47 @@ function buildInit(method: string, body: unknown): RequestInit {
     credentials: 'same-origin',
     body: body === undefined ? undefined : JSON.stringify(body),
   }
+}
+
+/**
+ * Issues one attempt with a ceiling of its own.
+ *
+ * The signal deliberately does NOT go into `init`. `init` is built once and
+ * reused so the sudo replay is byte for byte the request that was refused, and
+ * an `AbortSignal.timeout` starts counting the moment it is created -- so a
+ * signal stored in `init` would arrive at the replay partly spent, or already
+ * fired, and turn a retry the operator just authorised into an immediate abort
+ * blaming the network. Each attempt gets a whole ceiling because each attempt is
+ * a whole request.
+ *
+ * Do not "simplify" this back into buildInit. The property it protects is
+ * invisible from there.
+ */
+function fetchWithCeiling(path: string, init: RequestInit): Promise<Response> {
+  return fetch(path, { ...init, signal: AbortSignal.timeout(REQUEST_CEILING_MS) })
+}
+
+/** Whether a rejected fetch was this module's own ceiling firing. */
+function isCeilingAbort(cause: unknown): boolean {
+  return (
+    cause instanceof DOMException && (cause.name === 'TimeoutError' || cause.name === 'AbortError')
+  )
+}
+
+/**
+ * The error a request that ran out of ceiling ends as.
+ *
+ * It is deliberately not run through `toProblemError`: there is no response to
+ * read, and inventing a problem document would put words in the server's mouth.
+ * The message says what this side did and claims nothing about what the server
+ * is doing, because this side does not know -- the request may have been
+ * received, acted on and answered into a socket nobody is holding any more.
+ */
+function ceilingError(): Error {
+  return new Error(
+    `The server did not answer within ${Math.round(REQUEST_CEILING_MS / 1000)} seconds, ` +
+      'so the request was given up on. It may or may not have been carried out.',
+  )
 }
 
 async function askForSudo(path: string): Promise<boolean> {
@@ -478,7 +542,15 @@ async function send(
   // credentials mode. Rebuilding it would be the bug this design avoids.
   const init = buildInit(method, body)
 
-  let response = await fetch(path, init)
+  let response: Response
+  try {
+    response = await fetchWithCeiling(path, init)
+  } catch (cause) {
+    if (isCeilingAbort(cause)) {
+      throw ceilingError()
+    }
+    throw cause
+  }
   if (response.ok) {
     return response
   }
@@ -490,7 +562,17 @@ async function send(
     if (!granted) {
       throw error
     }
-    response = await fetch(path, init)
+    // A fresh ceiling, not the remainder of the first one: the operator has
+    // just spent time at the password prompt, and charging that time to the
+    // replay's budget would abort a request that had not started.
+    try {
+      response = await fetchWithCeiling(path, init)
+    } catch (cause) {
+      if (isCeilingAbort(cause)) {
+        throw ceilingError()
+      }
+      throw cause
+    }
     if (response.ok) {
       return response
     }

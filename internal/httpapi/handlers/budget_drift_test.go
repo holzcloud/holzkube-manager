@@ -87,13 +87,13 @@ func TestBudgetWaitsStatedInTheUIMatchTheRouteBudgets(t *testing.T) {
 		// integer of seconds: an expression would be a second place the value
 		// could be computed, and this guard would then be checking one of them.
 		pattern := regexp.MustCompile(fmt.Sprintf(
-			`(?m)^\s*const\s+%s\s*=\s*([0-9]+)\b`, regexp.QuoteMeta(w.constant)))
+			`(?m)^\s*(?:export\s+)?const\s+%s\s*=\s*([0-9]+)\b`, regexp.QuoteMeta(w.constant)))
 
 		match := pattern.FindStringSubmatch(ui)
 		if match == nil {
 			t.Errorf("%s declares no constant %s as a bare integer of seconds.\n"+
 				"The waiting state that names %s (%s) reads its number from there, and this "+
-				"guard reads the same declaration. Declare it as `const %s = %d`.",
+				"guard reads the same declaration. Declare it as `export const %s = %d`.",
 				uiPath, w.constant, w.budgetName, w.budget, w.constant,
 				int(w.budget/time.Second))
 			continue
