@@ -4,11 +4,11 @@ milestone: v1.14
 current_phase: 02
 current_phase_name: Transport Seam, `talossim` & Image Factory
 status: executing
-stopped_at: Completed 02-23-PLAN.md
-last_updated: "2026-09-03T19:24:10.473Z"
+stopped_at: Completed 02-24-PLAN.md
+last_updated: "2026-09-03T20:01:37.085Z"
 last_activity: 2026-09-03
 last_activity_desc: 02-23 abgeschlossen — nebenlaeufige Kandidaten, engeres AssetsRouteBudget, Browser-Obergrenze
-state_head: 6830979a1fe1feb0222f9d04467bb2f33c53720f
+state_head: 970855df342b0affc3c8b423334a0ba9bb7fbab7
 progress:
   total_phases: 10
   completed_phases: 1
@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-08-27)
 ## Current Position
 
 Phase: 02 (Transport Seam, `talossim` & Image Factory) — EXECUTING
-Plan: 23 of 24 (23 summaries on disk; round-4 gap closure)
+Plan: 24 of 24 (23 summaries on disk; round-4 gap closure)
 Status: Ready to execute 02-24
 Last activity: 2026-09-03 — 02-23 abgeschlossen: jeder Kandidat wird gleichzeitig gefragt, die deklarierte Reihenfolge entscheidet weiter
 
@@ -87,6 +87,7 @@ Progress: [█░░░░░░░░░] 1 of 10 phases
 | Phase 02 P21 | 23 min | 4 tasks | 6 files |
 | Phase 02 P22 | 90 min | 3 tasks | 13 files |
 | Phase 02 P23 | 30 min | 3 tasks | 12 files |
+| Phase 02 P24 | 23 min | 3 tasks | 9 files |
 
 ## Accumulated Context
 
@@ -184,6 +185,9 @@ Recent decisions affecting current work:
 - [Phase 02]: handlers.AssetsRouteBudget tightened 65s -> 35s (one manifest budget plus five seconds) in the same commit that removed the serial candidate walk it was sized for. — The clipping ratchet in cmd/holzkube-managerd/budget_test.go fires on the under-provisioned half-change (two declared calls against the tightened constant computes clipped against a declared uncut) and, by the arithmetic, tolerates the over-provisioned one. Both directions driven locally.
 - [Phase 02]: Every browser request carries a fresh AbortSignal ceiling of 150s, attached at the fetch call rather than stored in the reused RequestInit, with its own abort branch that never passes through toProblemError. — init is built once and reused so the sudo replay is byte-identical to the refused request, and an AbortSignal.timeout starts counting when it is created -- a signal stored there would reach the replay partly spent. The ceiling is above writeTimeout (130s) so the server's own problem+json always wins the race; only a server that never answers is cut.
 - [Phase 02]: The two waiting screens state the route budget the server enforces, held equal to it by internal/httpapi/handlers/budget_drift_test.go -- the third Go-reads-TypeScript drift guard in this repository. — vitest is rooted at web/ and could not read a Go constant even if allowed out of it, so the guard reads the TypeScript literal instead. Stating a ceiling is explicitly NOT the elapsed-time progress indicator PITFALLS:164 requires; that stays open and the code comment says so.
+- [Phase 02]: Der 409-Pfad schreibt das berechnete Sondierungsurteil in genau drei Felder, unter zwei Bedingungen
+- [Phase 02]: Ein verlorenes Compare-and-Swap auf dem 409-Pfad wird nicht wiederholt und ein zwischenzeitlich geloeschter Datensatz nicht neu angelegt: beide antworten den blanken Konflikt
+- [Phase 02]: G-02-9 bleibt offen und wird als WINDOWS-Eintrag 58 gefuehrt -- die Erholung ist eine Wiedervorlage, die als Fehler beantwortet wird, keine Nachsondier-Route (Option 1 wurde nicht genommen)
 
 ### Pending Todos
 
@@ -227,6 +231,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-09-03T19:23:44.349Z
-Stopped at: Completed 02-23-PLAN.md
+Last session: 2026-09-03T20:01:09.159Z
+Stopped at: Completed 02-24-PLAN.md
 Resume file: None
