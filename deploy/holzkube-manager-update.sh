@@ -29,7 +29,17 @@
 #     Binary aus.
 set -euo pipefail
 
-REPO=holzcloud/holzkube-manager-planning
+# Woher die Releases kommen. Es gibt zwei Repositories - das Arbeits-Repo mit
+# .planning/ und das daraus abgeleitete Produkt-Repo - und welches die Tags
+# traegt, ist eine Entscheidung und nichts, was dieses Skript erraten sollte.
+# CONF darf sie ueberschreiben, ohne das Skript zu aendern:
+#
+#   echo 'REPO=holzcloud/holzkube-manager' > /etc/holzkube-manager/update.conf
+REPO=${REPO:-holzcloud/holzkube-manager}
+CONF=/etc/holzkube-manager/update.conf
+# shellcheck source=/dev/null
+[[ -r $CONF ]] && . "$CONF"
+
 SERVICE=holzkube-manager.service
 BIN=/usr/local/bin/holzkube-managerd
 PREVIOUS=/usr/local/lib/holzkube-manager/holzkube-managerd.previous
@@ -52,7 +62,7 @@ for arg in "$@"; do
     --check)    CHECK_ONLY=1 ;;
     --force)    FORCE=1 ;;
     --rollback) ROLLBACK=1 ;;
-    -h|--help)  sed -n '2,30p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help)  sed -n '2,29p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "FEHLER: unbekannte Option $arg" >&2; exit 1 ;;
   esac
 done
