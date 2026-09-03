@@ -199,11 +199,24 @@ export const schematicSchema = z.object({
    * it: the Factory accepts a schematic naming an extension that does not
    * exist, assigns it an ordinary id, and refuses only when an image is asked
    * for. Rendering "created" as success is the lie this field exists to stop.
+   *
+   * The value may have been written by a *later* POST than the one that created
+   * the record. Re-submitting an identical customisation answers `409`
+   * `store.conflict` and, as a documented side effect, refreshes `usable`,
+   * `probed_at` and `probe_reason` from the probe that submission just ran —
+   * see `POST /api/v1/schematics` in `docs/api-contract.md`. A client must
+   * therefore refetch the saved list after a create that *failed*: "the create
+   * failed" no longer implies "nothing changed".
    */
   usable: z.boolean(),
   /**
    * The zero time means never probed, which is not the same as probed and
    * refused. The two must not be merged in the UI.
+   *
+   * It is not safe to reason about this against `created_at`. A value later
+   * than the creation time does not mean a second probe ran on a schedule — it
+   * means a conflicting POST refreshed it (see `usable` above), which is the
+   * only mechanism that writes it after creation. There is no re-probe route.
    */
   probed_at: z.string(),
   /**
