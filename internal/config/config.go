@@ -546,15 +546,15 @@ func (c *Config) resolveOIDC() error {
 		"oidc-client-secret": c.OIDCClientSecret != "",
 	}
 	var missing []string
-	var any bool
+	var anySet bool
 	for _, name := range []string{"oidc-issuer", "oidc-client-id", "oidc-client-secret"} {
 		if set[name] {
-			any = true
+			anySet = true
 		} else {
 			missing = append(missing, "--"+name)
 		}
 	}
-	if any && len(missing) > 0 {
+	if anySet && len(missing) > 0 {
 		return fmt.Errorf("config: the identity provider is half configured; %s %s missing",
 			strings.Join(missing, " and "), plural(len(missing), "is", "are"))
 	}
