@@ -4,16 +4,16 @@ milestone: v1.14
 current_phase: 02
 current_phase_name: Transport Seam, `talossim` & Image Factory
 status: executing
-stopped_at: Round-3 gaps closed; awaiting round-4 re-verification
-last_updated: "2026-09-03T00:00:00.000Z"
+stopped_at: Completed 02-22-PLAN.md
+last_updated: "2026-09-03T18:47:43.144Z"
 last_activity: 2026-09-03
-last_activity_desc: Phase 02 round-3 gaps closed
-state_head: 35675c0
+last_activity_desc: 02-22 abgeschlossen — ProbeTimeout/ManifestTimeout, Routen-Deadlines, Kompositionswache
+state_head: e4a15cea9b2dd2199983c8516536cb7aebda8807
 progress:
   total_phases: 10
   completed_phases: 1
-  total_plans: 27
-  completed_plans: 27
+  total_plans: 30
+  completed_plans: 28
 ---
 
 # Project State
@@ -28,9 +28,9 @@ See: .planning/PROJECT.md (updated 2026-08-27)
 ## Current Position
 
 Phase: 02 (Transport Seam, `talossim` & Image Factory) — EXECUTING
-Plan: 21 of 21
-Status: All plans executed; round-3 gaps closed, round-4 re-verification outstanding
-Last activity: 2026-09-03 — Phase 02 round-3 gaps closed
+Plan: 22 of 24 (22 summaries on disk; round-4 gap closure)
+Status: Ready to execute 02-23
+Last activity: 2026-09-03 — 02-22 abgeschlossen: drei Upstream-Budgets und die Wache, die sie komponiert
 
 Progress: [█░░░░░░░░░] 1 of 10 phases
 
@@ -85,6 +85,7 @@ Progress: [█░░░░░░░░░] 1 of 10 phases
 | Phase 02 P19 | 29 min | 4 tasks | 8 files |
 | Phase 02 P20 | 33 min | 3 tasks | 8 files |
 | Phase 02 P21 | 23 min | 4 tasks | 6 files |
+| Phase 02 P22 | 90 min | 3 tasks | 13 files |
 
 ## Accumulated Context
 
@@ -172,6 +173,12 @@ Recent decisions affecting current work:
 - [Phase 02]: Schematic identity: Option B (one record, per-architecture verdicts) is the decided direction; Option C (state the constraint) is what plan 02-21 wrote. B's implementation is scoped to the phase that next opens the schematic store.
 - [Phase 02]: The architecture-unrecoverability claim is narrowed to the probe's outcome, not the record's age: a refused record carries it verbatim in probe_reason. Narrowed, not inverted -- recovering it means parsing prose and nothing does.
 - [Phase 02]: Ledger amendments are filed as superseding entries, not edits: gsd-tools windows has no amend verb and hand-editing WINDOWS.md is prohibited.
+- [Phase 02]: Die drei Image-Factory-Budgets liegen als Kontext-Deadlines pro Aufruf am Client, nicht mehr auf http.Client.Timeout. — Ein clientweiter Wert kann drei Budgets nicht ausdruecken -- genau daran war der ISO-Probe an eine gegen JSON-Listen bemessene Zahl gebunden. requireDeadline/ErrNoDeadline halten die Zusage, die das entfernte Feld nur zufaellig hielt.
+- [Phase 02]: ProbeTimeout=90s und ManifestTimeout=30s folgen einer genannten Regel: mindestens das Doppelte der langsamsten beobachteten kalten Antwort, aufgerundet auf dreissig Sekunden. — Faktor zwei statt etwas Engerem, weil die gemessene Groesse Arbeit auf fremder Build-Farm ist, fuenfmal beobachtet und nie kontrolliert. Die abgeloeste Konstante lag bei 0,92 des Maximums und wurde in jedem der fuenf Laeufe ueberschritten.
+- [Phase 02]: ManifestTimeout ist trotz gleichen Werts kein Alias von DefaultTimeout. — Der gleiche Wert ist das, was die Regel aus einem anderen Input erzeugt hat. Die beiden bewegen sich unabhaengig, und die Kompositionswache liest sie als zwei.
+- [Phase 02]: Beide Factory-Routen deklarieren eine geteilte Deadline (CreateRouteBudget=120s, AssetsRouteBudget=65s), writeTimeout steigt auf 130s. — Sobald eine Route eine Deadline deklariert, ist die Deadline der Worst Case und nicht mehr die Summe dessen, was ihre Callees zufaellig tun. writeTimeout ist aus R1 hergeleitet: kleinste Zehnerzahl echt groesser als CreateRouteBudget + budgetSlack.
+- [Phase 02]: Clipping ist deklarierte Tabellendaten mit eigener Ratsche in beide Richtungen, keine Doc-Comment-Prosa. — POST /api/v1/schematics deklariert 150s Aufrufbudgets gegen 120s Decke. Als Datum kann die Behauptung veralten und rot werden; als Prosa liest sie niemand nach.
+- [Phase 02]: AssetsRouteBudget ist fuer den seriellen Kandidatenlauf dieser Welle bemessen; 02-23 zieht es nach. 02-22 allein liefert G-02-2s Verbesserung an der Assets-Route nicht. — Eine Decke von einem Manifest-Budget wuerde den Legacy-Kandidaten abschneiden, bevor er antworten kann -- der stille Fallback, den G-02-3 diese Phase schon einmal gekostet hat.
 
 ### Pending Todos
 
@@ -215,6 +222,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-08-30T10:08:31.162Z
-Stopped at: Completed 02-21-PLAN.md
+Last session: 2026-09-03T18:47:06.865Z
+Stopped at: Completed 02-22-PLAN.md
 Resume file: None
