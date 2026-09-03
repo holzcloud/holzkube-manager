@@ -177,6 +177,10 @@ func TestOpenRefusesAWideOpenDataDirectory(t *testing.T) {
 //     callers of it. store.go is checked separately below and is not exempt.
 //   - internal/tlsx — owns the certificate and key files. TLS material is not
 //     a store record; it is read by crypto/tls before any store exists.
+//   - internal/config — resolves the client secret file at start, before a
+//     store exists. A credential a deployment presents as a file (systemd
+//     LoadCredential=, Docker secrets) is configuration, not a state record:
+//     nothing writes it back and nothing revises it.
 //   - internal/audit — the audit log is, by design, an append-only JSONL file
 //     next to the store rather than a store entity. Routing an append-only
 //     hash chain through a rev-CAS record store would mean rewriting the whole
@@ -188,6 +192,7 @@ func TestNoDirectFileAccessOutsideFsstore(t *testing.T) {
 	exemptDirs := []string{
 		filepath.Join("internal", "store"),
 		filepath.Join("internal", "tlsx"),
+		filepath.Join("internal", "config"),
 		filepath.Join("internal", "audit"),
 	}
 

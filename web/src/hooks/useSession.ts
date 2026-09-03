@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { api, type Me, type SystemStatus } from '@/api'
+import { api, type Me, oidcPath, type SystemStatus } from '@/api'
 
 /**
  * The session and instance state the whole shell reads.
@@ -60,7 +60,20 @@ export function useSession(): Session {
   })
 
   const logout = useMutation({
-    mutationFn: api.logout,
+    mutationFn: async () => {
+      // A session established through the identity provider has to end there
+      // too. Destroying only the local one leaves the provider signed in, so
+      // the next sign-in round-trips and returns immediately -- which is
+      // indistinguishable, to the operator, from the sign-out being ignored.
+      //
+      // The route destroys the local session itself and then redirects, so this
+      // is a navigation rather than a fetch and nothing after it runs.
+      if (me.data?.sso === true) {
+        window.location.assign(oidcPath.signOut)
+        return
+      }
+      await api.logout()
+    },
     onSettled: async () => {
       queryClient.setQueryData(SESSION_QUERY_KEY, undefined)
       await queryClient.invalidateQueries()

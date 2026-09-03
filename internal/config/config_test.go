@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -161,16 +162,28 @@ func TestDataDirPrecedence(t *testing.T) {
 // either half fails here rather than in production.
 func TestEveryOptionIsSettableByFlagAndByEnvironment(t *testing.T) {
 	values := map[string]string{
-		"listen":           "127.0.0.1:9443",
-		"data-dir":         "/data",
-		"tls-cert":         "/tls/cert.pem",
-		"tls-key":          "/tls/key.pem",
-		"insecure-http":    "true",
-		"dry-run":          "true",
-		"sudo-window":      "7m0s",
-		"session-lifetime": "48h0m0s",
-		"log-level":        "debug",
+		"listen":                  "127.0.0.1:9443",
+		"allowed-hosts":           "manager.example.com,192.168.1.10",
+		"sso-only-hosts":          "manager.example.com",
+		"data-dir":                "/data",
+		"tls-cert":                "/tls/cert.pem",
+		"tls-key":                 "/tls/key.pem",
+		"insecure-http":           "true",
+		"dry-run":                 "true",
+		"sudo-window":             "7m0s",
+		"session-lifetime":        "48h0m0s",
+		"oidc-issuer":             "https://idp.example.com/application/o/holzkube-manager/",
+		"oidc-client-id":          "holzkube-manager",
+		"oidc-client-secret":      "s3cret",
+		"oidc-client-secret-file": "/run/credentials/oidc-client-secret",
+		"log-level":               "debug",
 	}
+
+	// --oidc-client-secret and --oidc-client-secret-file are refused together,
+	// so the one load that sets everything at once cannot carry both. The file
+	// form keeps its entry above -- a new option must still fail the count
+	// below -- and is exercised on its own in TestClientSecretFile.
+	notInCombinedLoad := map[string]bool{"oidc-client-secret-file": true}
 
 	table := optionTable("")
 	if len(values) != len(table) {
@@ -190,6 +203,9 @@ func TestEveryOptionIsSettableByFlagAndByEnvironment(t *testing.T) {
 		if !strings.Contains(o.usage, EnvPrefix+o.env) {
 			t.Errorf("usage of %q does not name %s%s", o.name, EnvPrefix, o.env)
 		}
+		if notInCombinedLoad[o.name] {
+			continue
+		}
 		args = append(args, "--"+o.name+"="+v)
 		env[EnvPrefix+o.env] = v
 	}
@@ -198,7 +214,15 @@ func TestEveryOptionIsSettableByFlagAndByEnvironment(t *testing.T) {
 	fromFlags := load(t, args, nil)
 
 	for _, o := range table {
+		if notInCombinedLoad[o.name] {
+			continue
+		}
+		// A secret option is set like any other but must never render its
+		// value: display is what the startup log and the help output print.
 		want := values[o.name]
+		if o.secret {
+			want = redacted
+		}
 		if got := o.display(fromEnv); got != want {
 			t.Errorf("%s from the environment = %q, want %q", o.name, got, want)
 		}
@@ -211,6 +235,11 @@ func TestEveryOptionIsSettableByFlagAndByEnvironment(t *testing.T) {
 		if got := fromFlags.Origin(o.name); got != OriginFlag {
 			t.Errorf("%s origin = %q, want %q", o.name, got, OriginFlag)
 		}
+	}
+
+	// The redaction above is only meaningful if the value really did arrive.
+	if fromEnv.OIDCClientSecret != values["oidc-client-secret"] {
+		t.Errorf("the client secret was redacted in display but also not stored: %q", fromEnv.OIDCClientSecret)
 	}
 }
 
@@ -471,5 +500,199 @@ func TestHelpAndVersionAreSentinels(t *testing.T) {
 		if !strings.Contains(buf.String(), EnvPrefix+o.env) {
 			t.Errorf("usage does not mention %s%s", EnvPrefix, o.env)
 		}
+	}
+}
+
+// A systemd unit file is world-readable, so the deployed form of the client
+// secret is a file reference rather than a value. The two forms are refused
+// together: with both set, the startup log names one origin while the process
+// authenticates with the other.
+func TestClientSecretFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "secret")
+	// The trailing newline is what every editor and `echo` writes, and a secret
+	// one byte off fails at the token endpoint without naming the byte.
+	if err := os.WriteFile(path, []byte("s3cret\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	base := []string{
+		"--oidc-issuer=https://idp.example.com/application/o/holzkube-manager/",
+		"--oidc-client-id=holzkube-manager",
+	}
+
+	t.Run("from a flag", func(t *testing.T) {
+		cfg := load(t, append(base, "--oidc-client-secret-file="+path), nil)
+		if cfg.OIDCClientSecret != "s3cret" {
+			t.Errorf("OIDCClientSecret = %q, want the file contents without the newline", cfg.OIDCClientSecret)
+		}
+		if !cfg.OIDCEnabled() {
+			t.Error("OIDCEnabled() is false although issuer, client and secret are all set")
+		}
+	})
+
+	t.Run("from the environment", func(t *testing.T) {
+		cfg := load(t, base, map[string]string{"HOLZKUBE_MANAGER_OIDC_CLIENT_SECRET_FILE": path})
+		if cfg.OIDCClientSecret != "s3cret" {
+			t.Errorf("OIDCClientSecret = %q, want the file contents", cfg.OIDCClientSecret)
+		}
+	})
+
+	t.Run("both forms are refused", func(t *testing.T) {
+		_, err := LoadWith(append(base, "--oidc-client-secret=other", "--oidc-client-secret-file="+path),
+			envFrom(nil), testHome)
+		if err == nil {
+			t.Fatal("both forms were accepted; the effective secret is then ambiguous")
+		}
+		for _, want := range []string{"oidc-client-secret", "oidc-client-secret-file"} {
+			if !strings.Contains(err.Error(), want) {
+				t.Errorf("error does not name %s: %v", want, err)
+			}
+		}
+	})
+
+	t.Run("a missing file aborts the start", func(t *testing.T) {
+		if _, err := LoadWith(append(base, "--oidc-client-secret-file="+filepath.Join(dir, "absent")),
+			envFrom(nil), testHome); err == nil {
+			t.Fatal("a missing secret file was accepted; the server would start unable to authenticate anyone")
+		}
+	})
+
+	t.Run("an empty file aborts the start", func(t *testing.T) {
+		empty := filepath.Join(dir, "empty")
+		if err := os.WriteFile(empty, []byte("\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := LoadWith(append(base, "--oidc-client-secret-file="+empty), envFrom(nil), testHome); err == nil {
+			t.Fatal("an empty secret file was accepted")
+		}
+	})
+}
+
+// The identity provider is all three values or none. A partial set otherwise
+// fails at the first login attempt, which is the worst moment to discover it.
+func TestHalfConfiguredProviderIsRefused(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		args     []string
+		contains []string
+	}{
+		{
+			name:     "issuer without client",
+			args:     []string{"--oidc-issuer=https://idp.example.com/"},
+			contains: []string{"--oidc-client-id", "--oidc-client-secret"},
+		},
+		{
+			name: "client without secret",
+			args: []string{
+				"--oidc-issuer=https://idp.example.com/",
+				"--oidc-client-id=holzkube-manager",
+			},
+			contains: []string{"--oidc-client-secret"},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := LoadWith(tc.args, envFrom(nil), testHome)
+			if err == nil {
+				t.Fatal("a half configured provider was accepted")
+			}
+			for _, want := range tc.contains {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("error does not name %s: %v", want, err)
+				}
+			}
+		})
+	}
+
+	// None of the three is a valid configuration: it means local password only.
+	cfg := load(t, nil, nil)
+	if cfg.OIDCEnabled() {
+		t.Error("OIDCEnabled() is true with nothing configured")
+	}
+}
+
+// An SSO-only host with no provider configured has no way in at all. Refusing
+// at start is the difference between a message and a lockout.
+func TestSSOOnlyWithoutProviderIsRefused(t *testing.T) {
+	_, err := LoadWith([]string{"--sso-only-hosts=manager.example.com"}, envFrom(nil), testHome)
+	if err == nil {
+		t.Fatal("an SSO-only host was accepted without an identity provider")
+	}
+	if !strings.Contains(err.Error(), "manager.example.com") {
+		t.Errorf("error does not name the host: %v", err)
+	}
+}
+
+// The host lists are normalised on the way in, so that the comparison against a
+// Host header is a plain lookup rather than a parse at every request.
+func TestHostListsAreNormalised(t *testing.T) {
+	cfg := load(t, []string{"--allowed-hosts= Manager.Example.COM , [::1]:8443 ,,192.168.1.10:8443 "}, nil)
+
+	want := []string{"manager.example.com", "::1", "192.168.1.10"}
+	if len(cfg.AllowedHosts) != len(want) {
+		t.Fatalf("AllowedHosts = %v, want %v", cfg.AllowedHosts, want)
+	}
+	for i, w := range want {
+		if cfg.AllowedHosts[i] != w {
+			t.Errorf("AllowedHosts[%d] = %q, want %q", i, cfg.AllowedHosts[i], w)
+		}
+	}
+
+	// Duplicates that differ only by case or port collapse to one entry.
+	if got := load(t, []string{"--allowed-hosts=a.example.com,A.example.com:8443"}, nil).AllowedHosts; len(got) != 1 {
+		t.Errorf("AllowedHosts = %v, want one entry", got)
+	}
+}
+
+// A URL pasted where a host belongs is refused rather than trimmed. Keeping the
+// part that happens to parse would admit a host the operator did not name.
+func TestHostListRefusesURLs(t *testing.T) {
+	for _, raw := range []string{
+		"https://manager.example.com",
+		"manager.example.com/callback",
+		"manager.example.com other.example.com",
+	} {
+		if _, err := LoadWith([]string{"--allowed-hosts=" + raw}, envFrom(nil), testHome); err == nil {
+			t.Errorf("--allowed-hosts=%q was accepted", raw)
+		}
+	}
+}
+
+// IsSSOOnly compares by the same rule middleware.AllowHosts uses, so a Host
+// header carrying a port still matches a configured bare name.
+func TestIsSSOOnlyMatchesHostHeaderForms(t *testing.T) {
+	cfg := load(t, []string{
+		"--oidc-issuer=https://idp.example.com/",
+		"--oidc-client-id=holzkube-manager",
+		"--oidc-client-secret=s3cret",
+		"--sso-only-hosts=manager.example.com",
+	}, nil)
+
+	for _, host := range []string{"manager.example.com", "manager.example.com:443", "Manager.Example.com"} {
+		if !cfg.IsSSOOnly(host) {
+			t.Errorf("IsSSOOnly(%q) = false, want true", host)
+		}
+	}
+	for _, host := range []string{"192.168.1.10:8443", "localhost", ""} {
+		if cfg.IsSSOOnly(host) {
+			t.Errorf("IsSSOOnly(%q) = true, want false", host)
+		}
+	}
+}
+
+// A plaintext issuer can be substituted in transit, which makes every token it
+// vouches for worthless. Loopback is the one exception, for a provider on the
+// same host.
+func TestIssuerMustBeHTTPS(t *testing.T) {
+	base := []string{"--oidc-client-id=holzkube-manager", "--oidc-client-secret=s3cret"}
+
+	if _, err := LoadWith(append(base, "--oidc-issuer=http://idp.example.com/"), envFrom(nil), testHome); err == nil {
+		t.Error("a plaintext issuer was accepted")
+	}
+	if _, err := LoadWith(append(base, "--oidc-issuer=idp.example.com"), envFrom(nil), testHome); err == nil {
+		t.Error("an issuer without a scheme was accepted")
+	}
+	if _, err := LoadWith(append(base, "--oidc-issuer=http://127.0.0.1:9000/"), envFrom(nil), testHome); err != nil {
+		t.Errorf("a loopback issuer was refused: %v", err)
 	}
 }

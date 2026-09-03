@@ -36,6 +36,15 @@ type meResponse struct {
 	// answers before authentication and Phase 1 declined to extend it for that
 	// reason; the operator asking here is signed in by definition.
 	DryRun bool `json:"dry_run"`
+
+	// SSO says this session was established through the identity provider.
+	//
+	// The shell needs it for two decisions that are wrong the other way round:
+	// signing out has to go through the provider's RP-initiated logout, or the
+	// next sign-in returns instantly from a provider session that never ended;
+	// and re-authentication for a destructive action has to be the provider
+	// round-trip rather than a password prompt this session has no password for.
+	SSO bool `json:"sso"`
 }
 
 // AuthRoutes serves login, logout, re-authentication and the identity probe.
@@ -110,7 +119,29 @@ func throttle(limiter *auth.Limiter, w http.ResponseWriter, r *http.Request) boo
 	}
 }
 
+// refusePasswordOnSSOOnlyHost answers the two password routes when they are
+// reached on a host the operator declared SSO-only, and reports whether it did.
+//
+// The refusal is before the body is read and before the rate limiter is
+// consulted, so that a guesser on the public name cannot spend another
+// account's limiter budget or learn anything from timing. It is deliberately
+// not a 404: the route exists, and pretending otherwise would leave an operator
+// who mistyped a hostname debugging a missing endpoint instead of reading that
+// this address wants the identity provider.
+func refusePasswordOnSSOOnlyHost(d httpapi.Deps, w http.ResponseWriter, r *http.Request) bool {
+	if !d.SSOOnly(r) {
+		return false
+	}
+	httpapi.WriteProblem(w, r, httpapi.Forbidden("auth.sso-only",
+		"This address accepts the identity provider only. The local account works on the local network."))
+	return true
+}
+
 func login(d httpapi.Deps, limiter *auth.Limiter, w http.ResponseWriter, r *http.Request) {
+	if refusePasswordOnSSOOnlyHost(d, w, r) {
+		return
+	}
+
 	var req loginRequest
 	if err := decodeJSON(w, r, &req); err != nil {
 		// Even a malformed login body answers with the authentication problem
@@ -155,6 +186,14 @@ func logout(d httpapi.Deps, w http.ResponseWriter, r *http.Request) {
 // It answers 401 rather than 428 for a wrong password: the caller is logged in,
 // so the failure is about the credential, not about the window.
 func openSudo(d httpapi.Deps, limiter *auth.Limiter, w http.ResponseWriter, r *http.Request) {
+	// The same rule as login, and for a stronger reason: this route is what
+	// stands between a session cookie and a destructive action. Leaving the
+	// password path open here would mean the public address refuses the
+	// password to sign in and then accepts it to authorise wiping a node.
+	if refusePasswordOnSSOOnlyHost(d, w, r) {
+		return
+	}
+
 	var req sudoRequest
 	if err := decodeJSON(w, r, &req); err != nil {
 		httpapi.WriteProblem(w, r, httpapi.Unauthenticated())
@@ -194,5 +233,10 @@ func me(d httpapi.Deps, w http.ResponseWriter, r *http.Request) {
 		httpapi.WriteProblem(w, r, httpapi.Unauthenticated())
 		return
 	}
-	writeJSON(w, http.StatusOK, meResponse{ID: u.ID, Username: u.Username, DryRun: d.TalosMode.DryRun})
+	writeJSON(w, http.StatusOK, meResponse{
+		ID:       u.ID,
+		Username: u.Username,
+		DryRun:   d.TalosMode.DryRun,
+		SSO:      d.Auth.Sessions().GetBool(r.Context(), sessionKeyIsSSOAuth),
+	})
 }

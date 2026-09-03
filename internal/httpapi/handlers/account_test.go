@@ -67,7 +67,7 @@ func newServerInMode(t *testing.T, mode talos.Mode) *server {
 // …Routes(deps) call, so a field set after the literal is the zero value inside
 // every handler closure, with no compile error. A test harness that got that
 // wrong would prove the routes exist and nothing about whether they work.
-func newServerWith(t *testing.T, sudoWindow time.Duration, factory *imagefactory.Client, mode talos.Mode) *server {
+func newServerWith(t *testing.T, sudoWindow time.Duration, factory *imagefactory.Client, mode talos.Mode, opts ...depOption) *server {
 	t.Helper()
 
 	dir := t.TempDir()
@@ -102,10 +102,19 @@ func newServerWith(t *testing.T, sudoWindow time.Duration, factory *imagefactory
 		Factory:    factory,
 		TalosMode:  mode,
 	}
+	// Applied before the route table is built, because Deps is copied by value
+	// into every …Routes(deps) call: an option applied afterwards would be
+	// invisible to every handler closure, and the test would assert against a
+	// server that never had the setting.
+	for _, o := range opts {
+		o(&deps)
+	}
+
 	deps.Routes = slices.Concat(
 		handlers.SystemRoutes(deps),
 		handlers.SetupRoutes(deps),
 		handlers.AuthRoutes(deps),
+		handlers.OIDCRoutes(deps),
 		handlers.AccountRoutes(deps),
 		handlers.AuditRoutes(deps),
 		handlers.SchematicRoutes(deps),

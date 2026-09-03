@@ -18,12 +18,58 @@ import (
 	"io"
 	"log/slog"
 	"net"
+	"net/url"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 	"text/tabwriter"
 	"time"
 )
+
+// NormalizeHost reduces a Host header or a configured address to a comparable
+// host: no port, no brackets, lowercase.
+//
+// It lives here, and middleware.AllowHosts calls it, so that the set of hosts
+// this instance answers to and the set on which the password is refused are
+// compared by the same rule. Two implementations of "is this the same host"
+// that disagree would mean a name the allowlist admits and the SSO policy does
+// not recognise -- which fails open, on the one host where that is worst.
+func NormalizeHost(host string) string {
+	if host == "" {
+		return ""
+	}
+	if h, _, err := net.SplitHostPort(host); err == nil {
+		host = h
+	}
+	return strings.ToLower(strings.Trim(host, "[]"))
+}
+
+// splitHosts parses a comma-separated host list into normalised, de-duplicated
+// entries. An entry carrying a scheme or a path is refused rather than
+// normalised: it means a URL was pasted where a host belongs, and quietly
+// keeping the part that happens to parse would admit a host the operator did
+// not name.
+func splitHosts(raw string) ([]string, error) {
+	var hosts []string
+	for _, part := range strings.Split(raw, ",") {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		if strings.ContainsAny(part, "/\\ \t") {
+			return nil, fmt.Errorf("%q is not a bare host; give a name or an address, without scheme or path", part)
+		}
+		h := NormalizeHost(part)
+		if h == "" {
+			return nil, fmt.Errorf("%q is not a host", part)
+		}
+		if !slices.Contains(hosts, h) {
+			hosts = append(hosts, h)
+		}
+	}
+	return hosts, nil
+}
 
 // EnvPrefix is prepended to every environment variable holzkube-manager reads.
 const EnvPrefix = "HOLZKUBE_MANAGER_"
@@ -70,7 +116,45 @@ type Config struct {
 	SessionLifetime time.Duration
 	LogLevel        slog.Level
 
+	// AllowedHosts names further Host header values this instance answers to,
+	// beyond the bind address and the loopback names the composition root
+	// derives on its own. A reverse proxy publishing holzkube-manager under a
+	// public name is the reason it exists: that name reaches the process in the
+	// Host header and in nothing else, so there is no way to infer it.
+	AllowedHosts []string
+
+	// SSOOnlyHosts is the subset of the answered hosts on which the local
+	// password is not accepted -- neither to log in nor to open the sudo
+	// window. Only the identity provider can authenticate there.
+	//
+	// The split exists because the two ways in are not equally exposed. A
+	// break-glass account that works from the LAN is what gets the operator
+	// back in when the identity provider is down; the same account reachable
+	// from the internet is a password on the public net guarding cluster PKI.
+	SSOOnlyHosts []string
+
+	OIDCIssuer       string
+	OIDCClientID     string
+	OIDCClientSecret string
+
+	// oidcClientSecretFile is resolved into OIDCClientSecret by Load and is
+	// never a second source of truth afterwards.
+	oidcClientSecretFile string
+
 	origins map[string]Origin
+}
+
+// OIDCEnabled reports whether the identity provider is configured. All three
+// values are required together; Load refuses a partial set.
+func (c Config) OIDCEnabled() bool {
+	return c.OIDCIssuer != "" && c.OIDCClientID != "" && c.OIDCClientSecret != ""
+}
+
+// IsSSOOnly reports whether host may not use the local password. The comparison
+// is on the same normalised form middleware.AllowHosts uses, so a configured
+// name and an incoming Host header agree on ports, brackets and case.
+func (c Config) IsSSOOnly(host string) bool {
+	return slices.Contains(c.SSOOnlyHosts, NormalizeHost(host))
 }
 
 // Origin reports where the effective value of an option came from.
@@ -124,6 +208,36 @@ func optionTable(defaultDataDir string) []option {
 				return nil
 			},
 			render: func(c Config) string { return c.Listen },
+		},
+		{
+			// The bind address and the loopback names are derived, not
+			// configured. This is for the names that only ever arrive in a Host
+			// header -- a reverse proxy's public hostname -- which nothing in
+			// the process can otherwise discover.
+			name: "allowed-hosts", env: "ALLOWED_HOSTS", def: "",
+			usage: "further Host values this instance answers to, comma separated (env " + EnvPrefix + "ALLOWED_HOSTS)",
+			apply: func(c *Config, raw string) error {
+				hosts, err := splitHosts(raw)
+				if err != nil {
+					return err
+				}
+				c.AllowedHosts = hosts
+				return nil
+			},
+			render: func(c Config) string { return strings.Join(c.AllowedHosts, ",") },
+		},
+		{
+			name: "sso-only-hosts", env: "SSO_ONLY_HOSTS", def: "",
+			usage: "hosts on which only the identity provider may authenticate, comma separated (env " + EnvPrefix + "SSO_ONLY_HOSTS)",
+			apply: func(c *Config, raw string) error {
+				hosts, err := splitHosts(raw)
+				if err != nil {
+					return err
+				}
+				c.SSOOnlyHosts = hosts
+				return nil
+			},
+			render: func(c Config) string { return strings.Join(c.SSOOnlyHosts, ",") },
 		},
 		{
 			name: "data-dir", env: "DATA_DIR", def: defaultDataDir,
@@ -225,6 +339,62 @@ func optionTable(defaultDataDir string) []option {
 				return nil
 			},
 			render: func(c Config) string { return c.SessionLifetime.String() },
+		},
+		{
+			name: "oidc-issuer", env: "OIDC_ISSUER", def: "",
+			usage: "OpenID Connect issuer URL; discovery is read from it (env " + EnvPrefix + "OIDC_ISSUER)",
+			apply: func(c *Config, raw string) error {
+				if raw != "" {
+					u, err := url.Parse(raw)
+					if err != nil || u.Scheme == "" || u.Host == "" {
+						return errors.New("not an absolute URL, for example https://authentik.example.com/application/o/holzkube-manager/")
+					}
+					// The issuer is compared byte for byte against the iss
+					// claim of every token (OIDC Core 3.1.3.7). A trailing
+					// slash the operator added or dropped would otherwise fail
+					// verification with a message about the token rather than
+					// about this setting.
+					if u.Scheme != "https" && !isLoopbackURL(u) {
+						return errors.New("must be https; an issuer reached over plaintext can be substituted in transit")
+					}
+				}
+				c.OIDCIssuer = raw
+				return nil
+			},
+			render: func(c Config) string { return c.OIDCIssuer },
+		},
+		{
+			name: "oidc-client-id", env: "OIDC_CLIENT_ID", def: "",
+			usage: "OpenID Connect client ID (env " + EnvPrefix + "OIDC_CLIENT_ID)",
+			apply: func(c *Config, raw string) error {
+				c.OIDCClientID = raw
+				return nil
+			},
+			render: func(c Config) string { return c.OIDCClientID },
+		},
+		{
+			// secret: the value is redacted in the startup log and in help.
+			name: "oidc-client-secret", env: "OIDC_CLIENT_SECRET", def: "", secret: true,
+			usage: "OpenID Connect client secret; prefer the -file form (env " + EnvPrefix + "OIDC_CLIENT_SECRET)",
+			apply: func(c *Config, raw string) error {
+				c.OIDCClientSecret = raw
+				return nil
+			},
+			render: func(c Config) string { return c.OIDCClientSecret },
+		},
+		{
+			// The reason this exists rather than only the value form: a systemd
+			// unit file is world-readable, and an Environment= line in one puts
+			// the client secret in front of every account on the host. systemd
+			// LoadCredential= and Docker secrets both present a file instead,
+			// and this is how holzkube-manager reads it.
+			name: "oidc-client-secret-file", env: "OIDC_CLIENT_SECRET_FILE", def: "",
+			usage: "file holding the client secret, read at start (env " + EnvPrefix + "OIDC_CLIENT_SECRET_FILE)",
+			apply: func(c *Config, raw string) error {
+				c.oidcClientSecretFile = raw
+				return nil
+			},
+			render: func(c Config) string { return c.oidcClientSecretFile },
 		},
 		{
 			name: "log-level", env: "LOG_LEVEL", def: "info",
@@ -336,7 +506,84 @@ func LoadWith(args []string, env Lookup, home string) (Config, error) {
 				"holzkube-manager does not fall back to a generated certificate once one was configured",
 			given, missing)
 	}
+
+	if err := cfg.resolveOIDC(); err != nil {
+		return Config{}, err
+	}
 	return cfg, nil
+}
+
+// resolveOIDC reads the client secret file if one was named and refuses every
+// half-configured identity provider.
+//
+// Each refusal here replaces a failure that would otherwise surface much later
+// and much less legibly: a partial client configuration fails at the first
+// login attempt, and an SSO-only host with no provider configured fails by
+// having no way in at all -- discovered by the operator locked out of it.
+func (c *Config) resolveOIDC() error {
+	if c.oidcClientSecretFile != "" {
+		if c.OIDCClientSecret != "" {
+			return errors.New("config: --oidc-client-secret and --oidc-client-secret-file were both given; " +
+				"the secret has to come from exactly one place, or the log says one thing and the process uses another")
+		}
+		b, err := os.ReadFile(c.oidcClientSecretFile)
+		if err != nil {
+			return fmt.Errorf("config: --oidc-client-secret-file: %w", err)
+		}
+		// A trailing newline is what every editor and `echo` adds, and a secret
+		// that differs from the provider's by one byte fails at the token
+		// endpoint with an error that names neither the byte nor the file.
+		secret := strings.TrimRight(string(b), "\r\n")
+		if secret == "" {
+			return fmt.Errorf("config: --oidc-client-secret-file: %s is empty", c.oidcClientSecretFile)
+		}
+		c.OIDCClientSecret = secret
+	}
+
+	set := map[string]bool{
+		"oidc-issuer":        c.OIDCIssuer != "",
+		"oidc-client-id":     c.OIDCClientID != "",
+		"oidc-client-secret": c.OIDCClientSecret != "",
+	}
+	var missing []string
+	var any bool
+	for _, name := range []string{"oidc-issuer", "oidc-client-id", "oidc-client-secret"} {
+		if set[name] {
+			any = true
+		} else {
+			missing = append(missing, "--"+name)
+		}
+	}
+	if any && len(missing) > 0 {
+		return fmt.Errorf("config: the identity provider is half configured; %s %s missing",
+			strings.Join(missing, " and "), plural(len(missing), "is", "are"))
+	}
+
+	if len(c.SSOOnlyHosts) > 0 && !c.OIDCEnabled() {
+		return fmt.Errorf(
+			"config: --sso-only-hosts names %s but no identity provider is configured; "+
+				"that host would refuse the password and have nothing to offer instead",
+			strings.Join(c.SSOOnlyHosts, ", "))
+	}
+	return nil
+}
+
+func plural(n int, one, many string) string {
+	if n == 1 {
+		return one
+	}
+	return many
+}
+
+// isLoopbackURL reports whether u names the loopback interface, which is the
+// one case where a plaintext issuer is not a substitutable one.
+func isLoopbackURL(u *url.URL) bool {
+	host := u.Hostname()
+	if host == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }
 
 // LogEffective writes one line per option with its effective value and where
