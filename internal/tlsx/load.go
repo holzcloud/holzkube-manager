@@ -69,7 +69,13 @@ func Ensure(cfg config.Config) (*tls.Config, string, error) {
 	if err != nil {
 		hostname = ""
 	}
-	certPath, keyPath, _, err = Generate(cfg.DataDir, hostname, ListenHost(cfg.Listen))
+	// The SAN set and the Host allowlist have to agree, or a name the
+	// certificate vouches for is one the server refuses -- and the other way
+	// round, a name the server answers on produces a second browser warning
+	// about a mismatch stacked on the self-signed one (see allowedHosts in the
+	// composition root).
+	extra := append([]string{ListenHost(cfg.Listen)}, cfg.AllowedHosts...)
+	certPath, keyPath, _, err = Generate(cfg.DataDir, hostname, extra...)
 	if err != nil {
 		return nil, "", err
 	}

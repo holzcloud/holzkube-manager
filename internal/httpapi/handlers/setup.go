@@ -62,6 +62,21 @@ func isReservedActor(username string) bool {
 }
 
 func createFirstUser(d httpapi.Deps, w http.ResponseWriter, r *http.Request) {
+	// Setup creates the account that owns this instance, and it is reachable
+	// before any credential exists. On the public address that is a race
+	// anybody can enter: whoever loads the page first becomes the operator of
+	// a tool the threat model calls equivalent to root on every managed node.
+	//
+	// An SSO-only host is by definition the exposed one, so setup is refused
+	// there. The wizard runs on the local network, which is the same boundary
+	// the break-glass account and the first identity binding already sit
+	// behind.
+	if d.SSOOnly(r) {
+		httpapi.WriteProblem(w, r, httpapi.Forbidden("setup.sso-only",
+			"The first account has to be created from the local network, not over the public address."))
+		return
+	}
+
 	var req setupRequest
 	if err := decodeJSON(w, r, &req); err != nil {
 		httpapi.WriteProblem(w, r, httpapi.Validation("The request body could not be read as a setup request."))

@@ -1,9 +1,9 @@
 package middleware
 
 import (
-	"net"
 	"net/http"
-	"strings"
+
+	"github.com/holzcloud/holzkube-manager/internal/config"
 )
 
 // AllowHosts refuses a request whose Host header names an address this instance
@@ -57,15 +57,14 @@ func AllowHosts(allowed []string, deny func(http.ResponseWriter, *http.Request, 
 }
 
 // normalizeHost reduces a Host header or a configured address to a comparable
-// host: no port, no brackets, lowercase.
+// host.
+//
+// The rule itself lives in config.NormalizeHost, because the SSO-only policy
+// compares hosts too and the two must not be able to disagree: a name this
+// allowlist admits but that policy does not recognise is a host where the
+// password stays accepted after the operator declared it SSO-only.
 func normalizeHost(host string) string {
-	if host == "" {
-		return ""
-	}
-	if h, _, err := net.SplitHostPort(host); err == nil {
-		host = h
-	}
-	return strings.ToLower(strings.Trim(host, "[]"))
+	return config.NormalizeHost(host)
 }
 
 type errHost struct{ host string }

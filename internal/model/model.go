@@ -35,8 +35,26 @@ type User struct {
 	PasswordHash string    `json:"password_hash"`
 	CreatedAt    time.Time `json:"created_at"`
 
+	// Issuer and Subject bind this account to an external identity. Both are
+	// empty until the operator has signed in through the provider once.
+	//
+	// Subject is the join key rather than the username, because a username can
+	// be reassigned to a different person at the provider while `sub` is
+	// defined to be stable and never reused. Issuer is stored alongside it
+	// because `sub` is only unique within one issuer: without it, changing
+	// providers would silently match the new provider's subjects against the
+	// old one's bindings.
+	Issuer  string `json:"issuer,omitempty"`
+	Subject string `json:"subject,omitempty"`
+
 	// Rev is the compare-and-swap revision. Every stored record carries one.
 	Rev uint64 `json:"rev"`
+}
+
+// HasIdentityBinding reports whether this account is linked to a provider
+// identity.
+func (u User) HasIdentityBinding() bool {
+	return u.Issuer != "" && u.Subject != ""
 }
 
 // Settings is the singleton instance-wide settings record.
