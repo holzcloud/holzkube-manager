@@ -49,6 +49,16 @@ export type AuditChain = z.infer<typeof auditChainSchema>
 export const systemStatusSchema = z.object({
   setup_required: z.boolean(),
   audit_chain: auditChainSchema,
+
+  // The two ways in, as they apply to the address this page was loaded from.
+  // One instance answers on a LAN address that offers both and a public name
+  // that offers only the identity provider, so the sign-in page renders from
+  // these rather than from a build-time assumption.
+  //
+  // Defaulted, so a page served by an older binary still renders the password
+  // form it has always shown instead of offering nothing at all.
+  oidc_enabled: z.boolean().default(false),
+  password_login: z.boolean().default(true),
 })
 
 export type SystemStatus = z.infer<typeof systemStatusSchema>
@@ -104,9 +114,27 @@ export const meSchema = z.object({
    * mutating Talos RPC is refused by an interceptor before it reaches the wire.
    */
   dry_run: z.boolean(),
+
+  /**
+   * Whether this session was established through the identity provider.
+   *
+   * Signing out then has to go through the provider's RP-initiated logout, or
+   * the next sign-in returns instantly from a provider session that never
+   * ended -- which looks exactly like the sign-out having been ignored.
+   *
+   * Defaulted, so a page served by an older binary keeps behaving as it did.
+   */
+  sso: z.boolean().default(false),
 })
 
 export type Me = z.infer<typeof meSchema>
+
+/** Where the browser is sent to start a flow against the identity provider. */
+export const oidcPath = {
+  signIn: '/api/v1/auth/oidc/start',
+  reauthenticate: '/api/v1/auth/oidc/sudo',
+  signOut: '/api/v1/auth/oidc/logout',
+} as const
 
 /* ---------------------------------------------------------------------- */
 /* Image Factory                                                           */

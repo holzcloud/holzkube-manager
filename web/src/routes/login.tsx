@@ -1,12 +1,13 @@
 import { useQueryClient } from '@tanstack/react-query'
 import { createRoute, useNavigate } from '@tanstack/react-router'
 import { type FormEvent, useEffect, useState } from 'react'
-import { api } from '@/api'
+import { api, oidcPath } from '@/api'
 import { SourceNotice } from '@/components/SourceNotice'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { useSystemStatus } from '@/hooks/useSession'
 import {
   fieldErrorsOf,
   messageFor,
@@ -29,11 +30,24 @@ import { rootRoute } from '@/routes/__root'
  * server sends `429` with `Retry-After` the button is disabled for exactly that
  * long and the remaining seconds are counted down in plain sight. There is no
  * locked state, so this page must never suggest one and never offers an unlock.
+ *
+ * Which ways in are offered comes from the server, per address. The same
+ * instance can answer on a LAN address that accepts both the identity provider
+ * and the local account, and on a public name that accepts only the provider --
+ * so this page renders what `system/status` reports for the address it was
+ * loaded from, rather than assuming one shape and failing on the other.
  */
 function LoginPage() {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const { reason } = loginRoute.useSearch()
+  const status = useSystemStatus()
+
+  // Until the answer arrives, offer the password form: it is what every
+  // deployment has, and a page that renders nothing while it waits looks broken
+  // on the slowest connections, which are the ones least able to afford it.
+  const ssoAvailable = status.data?.oidc_enabled === true
+  const passwordAvailable = status.data?.password_login !== false
 
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
@@ -93,49 +107,95 @@ function LoginPage() {
           <CardTitle>Sign in</CardTitle>
           <CardDescription>{reasonText(reason)}</CardDescription>
         </CardHeader>
-        <CardContent>
-          <form onSubmit={submit} className="space-y-4">
+        <CardContent className="space-y-4">
+          {ssoAvailable && (
             <div className="space-y-2">
-              <Label htmlFor="login-username">Username</Label>
-              <Input
-                id="login-username"
-                value={username}
-                onChange={(event) => setUsername(event.target.value)}
-                autoComplete="username"
-                aria-invalid={fieldErrors.username !== undefined}
-                required
-              />
-              {fieldErrors.username !== undefined && (
-                <p className="text-sm text-destructive">{fieldErrors.username}</p>
+              <Button
+                type="button"
+                className="w-full"
+                onClick={() => {
+                  // A full navigation, not a fetch: the authorization code flow
+                  // is a sequence of browser redirects, and an XHR would follow
+                  // them invisibly and land the provider's login page in a
+                  // response body nobody renders.
+                  window.location.assign(oidcPath.signIn)
+                }}
+              >
+                Continue with single sign-on
+              </Button>
+              {!passwordAvailable && (
+                <p className="text-sm text-muted-foreground">
+                  This address accepts single sign-on only. The local account works on the local
+                  network.
+                </p>
               )}
             </div>
+          )}
 
-            <div className="space-y-2">
-              <Label htmlFor="login-password">Password</Label>
-              <Input
-                id="login-password"
-                type="password"
-                value={password}
-                onChange={(event) => setPassword(event.target.value)}
-                autoComplete="current-password"
-                aria-invalid={fieldErrors.password !== undefined}
-                required
-              />
-              {fieldErrors.password !== undefined && (
-                <p className="text-sm text-destructive">{fieldErrors.password}</p>
-              )}
+          {ssoAvailable && passwordAvailable && (
+            <div className="flex items-center gap-3" aria-hidden="true">
+              <span className="h-px flex-1 bg-border" />
+              <span className="text-xs text-muted-foreground">or</span>
+              <span className="h-px flex-1 bg-border" />
             </div>
+          )}
 
-            {message !== '' && (
-              <p role="alert" className="text-sm text-destructive">
-                {waiting ? waitMessage(waitSeconds) : message}
-              </p>
-            )}
+          {passwordAvailable && (
+            <form onSubmit={submit} className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="login-username">Username</Label>
+                <Input
+                  id="login-username"
+                  value={username}
+                  onChange={(event) => setUsername(event.target.value)}
+                  autoComplete="username"
+                  aria-invalid={fieldErrors.username !== undefined}
+                  required
+                />
+                {fieldErrors.username !== undefined && (
+                  <p className="text-sm text-destructive">{fieldErrors.username}</p>
+                )}
+              </div>
 
-            <Button type="submit" disabled={busy || waiting} className="w-full">
-              {busy ? 'Signing in…' : waiting ? `Wait ${waitSeconds}s` : 'Sign in'}
-            </Button>
-          </form>
+              <div className="space-y-2">
+                <Label htmlFor="login-password">Password</Label>
+                <Input
+                  id="login-password"
+                  type="password"
+                  value={password}
+                  onChange={(event) => setPassword(event.target.value)}
+                  autoComplete="current-password"
+                  aria-invalid={fieldErrors.password !== undefined}
+                  required
+                />
+                {fieldErrors.password !== undefined && (
+                  <p className="text-sm text-destructive">{fieldErrors.password}</p>
+                )}
+              </div>
+
+              {message !== '' && (
+                <p role="alert" className="text-sm text-destructive">
+                  {waiting ? waitMessage(waitSeconds) : message}
+                </p>
+              )}
+
+              <Button
+                type="submit"
+                variant={ssoAvailable ? 'outline' : 'default'}
+                disabled={busy || waiting}
+                className="w-full"
+              >
+                {busy ? 'Signing in…' : waiting ? `Wait ${waitSeconds}s` : 'Sign in'}
+              </Button>
+            </form>
+          )}
+
+          {!ssoAvailable && !passwordAvailable && (
+            <p role="alert" className="text-sm text-destructive">
+              This address offers no way to sign in. Single sign-on is not configured, and the local
+              account is not accepted here.
+            </p>
+          )}
         </CardContent>
       </Card>
       <SourceNotice className="text-xs text-muted-foreground" />

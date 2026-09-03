@@ -13,6 +13,7 @@ import (
 
 	"github.com/holzcloud/holzkube-manager/internal/audit"
 	"github.com/holzcloud/holzkube-manager/internal/auth"
+	"github.com/holzcloud/holzkube-manager/internal/auth/oidc"
 	"github.com/holzcloud/holzkube-manager/internal/httpapi/middleware"
 	"github.com/holzcloud/holzkube-manager/internal/imagefactory"
 	"github.com/holzcloud/holzkube-manager/internal/store"
@@ -114,7 +115,28 @@ type Deps struct {
 	// httptest will pick.
 	AllowedHosts []string
 
+	// OIDC is the configured identity provider, or nil when this instance
+	// authenticates with the local password only. The OIDC routes are not
+	// registered at all when it is nil.
+	OIDC *oidc.Provider
+
+	// IsSSOOnly reports whether a Host header names an address on which the
+	// local password is refused. It is nil when no host is SSO-only, which is
+	// the default and means "the password is accepted everywhere this instance
+	// answers".
+	//
+	// It is a function rather than a list so that this package does not have to
+	// re-derive the normalisation the configuration already did; the same rule
+	// decides membership in AllowedHosts and here (config.NormalizeHost).
+	IsSSOOnly func(host string) bool
+
 	Routes []Route
+}
+
+// SSOOnly reports whether the local password is refused for this request. A nil
+// IsSSOOnly means no host is SSO-only.
+func (d Deps) SSOOnly(r *http.Request) bool {
+	return d.IsSSOOnly != nil && d.IsSSOOnly(r.Host)
 }
 
 // New builds the handler: the outer chain, the route table and the SPA fallback.

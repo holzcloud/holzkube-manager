@@ -9,6 +9,17 @@ import (
 type systemStatus struct {
 	SetupRequired bool                `json:"setup_required"`
 	AuditChain    httpapi.ChainStatus `json:"audit_chain"`
+
+	// The two ways in, as they apply to the address this request arrived on.
+	// The sign-in page renders from these rather than from a build-time
+	// assumption: one instance answers on a LAN address that offers both and a
+	// public name that offers only the provider, and a page that guesses would
+	// be wrong on one of them.
+	//
+	// Neither field discloses anything an unauthenticated caller could not
+	// establish by trying: the routes themselves already answer differently.
+	OIDCEnabled   bool `json:"oidc_enabled"`
+	PasswordLogin bool `json:"password_login"`
 }
 
 // SystemRoutes serves the instance status the UI polls before rendering
@@ -62,6 +73,8 @@ func SystemRoutes(d httpapi.Deps) []httpapi.Route {
 
 				writeJSON(w, http.StatusOK, systemStatus{
 					SetupRequired: len(users) == 0,
+					OIDCEnabled:   d.OIDC != nil,
+					PasswordLogin: !d.SSOOnly(r),
 					// A name, never a path. The audit directory sits under the
 					// XDG-resolved absolute data directory, so the full path
 					// discloses the OS username and the home directory layout

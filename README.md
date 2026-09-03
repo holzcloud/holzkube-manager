@@ -85,12 +85,18 @@ flag > environment > default.
 | Flag | Environment | Default |
 |---|---|---|
 | `--listen` | `HOLZKUBE_MANAGER_LISTEN` | `127.0.0.1:8443` |
+| `--allowed-hosts` | `HOLZKUBE_MANAGER_ALLOWED_HOSTS` | (none) |
+| `--sso-only-hosts` | `HOLZKUBE_MANAGER_SSO_ONLY_HOSTS` | (none) |
 | `--data-dir` | `HOLZKUBE_MANAGER_DATA_DIR` | `$XDG_DATA_HOME/holzkube-manager`, else `~/.local/share/holzkube-manager` |
 | `--tls-cert` | `HOLZKUBE_MANAGER_TLS_CERT` | generated on first run |
 | `--tls-key` | `HOLZKUBE_MANAGER_TLS_KEY` | generated on first run |
 | `--insecure-http` | `HOLZKUBE_MANAGER_INSECURE_HTTP` | `false` |
 | `--sudo-window` | `HOLZKUBE_MANAGER_SUDO_WINDOW` | `5m` |
 | `--session-lifetime` | `HOLZKUBE_MANAGER_SESSION_LIFETIME` | `24h` |
+| `--oidc-issuer` | `HOLZKUBE_MANAGER_OIDC_ISSUER` | (none) |
+| `--oidc-client-id` | `HOLZKUBE_MANAGER_OIDC_CLIENT_ID` | (none) |
+| `--oidc-client-secret` | `HOLZKUBE_MANAGER_OIDC_CLIENT_SECRET` | (none) |
+| `--oidc-client-secret-file` | `HOLZKUBE_MANAGER_OIDC_CLIENT_SECRET_FILE` | (none) |
 | `--log-level` | `HOLZKUBE_MANAGER_LOG_LEVEL` | `info` |
 
 `--version` and `--help` print and exit; the help output is generated from the
@@ -117,6 +123,102 @@ network is a different security proposition entirely.
 `--insecure-http` serves plain HTTP and is **refused unless the bind address is
 loopback**. The session cookie grants access to cluster PKI; it does not cross a
 home network in the clear.
+
+## Signing in
+
+Two ways in, and which of them an address offers is configuration rather than a
+build-time decision.
+
+**The local account** is created by the setup wizard and authenticates with a
+password. It is the break-glass credential.
+
+**Single sign-on** is OpenID Connect against an external provider, using the
+authorization code flow with PKCE. PKCE is used even though holzkube-manager is
+a confidential client with a secret: the redirect carrying the code lands in a
+browser on an operator's machine, and a code intercepted there is worth a
+session against cluster PKI.
+
+### Why the local account stays
+
+A cluster manager whose only route to authentication runs on the cluster it
+manages locks its operator out exactly when they need it. The provider is
+almost certainly a workload on that cluster; if it is down, the tool for
+repairing the cluster has to still let somebody in.
+
+Two consequences follow, and both are deliberate:
+
+- **Discovery is lazy.** The provider's metadata is fetched on first use, not at
+  start, and failing to reach it is not a startup failure. The process starts,
+  the local account works, and the sign-in page says single sign-on is
+  unavailable.
+- **The password is never removed**, only restricted by address.
+
+### Restricting the password by address
+
+`--sso-only-hosts` names the hosts on which the local password is refused --
+to sign in, to open the sudo window, and to run setup. Everything else about
+those hosts is unchanged.
+
+```sh
+holzkube-managerd \
+  --listen 0.0.0.0:8443 \
+  --allowed-hosts manager.example.com \
+  --sso-only-hosts manager.example.com \
+  --oidc-issuer https://idp.example.com/application/o/holzkube-manager/ \
+  --oidc-client-id holzkube-manager \
+  --oidc-client-secret-file /run/credentials/oidc-client-secret
+```
+
+That instance answers on its LAN address with both ways in, and on
+`manager.example.com` -- the name a reverse proxy publishes -- with single
+sign-on only.
+
+**What this rests on.** The policy keys on the `Host` header, so it is exactly
+as trustworthy as the network path that decides which Host can reach the
+process. It holds when the public name arrives only through a proxy that
+publishes that one name, and the port this server binds is not itself forwarded.
+It does not hold if the bind port is reachable from the internet directly: a
+caller who can open a socket to it chooses its own `Host`. The Host allowlist is
+what makes the header meaningful at all -- an unlisted name is refused before
+any of this is consulted.
+
+`--sso-only-hosts` without a configured provider is refused at start: that host
+would decline the password and have nothing to offer instead.
+
+### Linking the account to a provider identity
+
+The first sign-in through the provider binds the identity -- issuer and `sub` --
+to the one operator account. `sub` is the join key rather than the username,
+because a username can be reassigned to a different person at the provider while
+`sub` is defined to be stable.
+
+Binding is refused on an SSO-only host. Binding on first sign-in is trust on
+first use, and requiring it to happen off the public address puts that trust
+behind the same boundary the break-glass account already sits behind, instead of
+offering it to whoever reaches the public name first. In practice: sign in
+through the provider once from the local network, and the public address works
+from then on.
+
+### The client secret
+
+Prefer `--oidc-client-secret-file`. A systemd unit file is world-readable, so an
+`Environment=` line in one puts the secret in front of every account on the
+host; systemd `LoadCredential=` and Docker secrets both present a file instead.
+Giving both forms is refused rather than resolved by precedence.
+
+### Re-authentication and signing out
+
+A destructive action needs an open sudo window (D-05). For a provider session
+that is a round trip with `prompt=login` and `max_age=0`, and the returning
+`auth_time` claim is checked: a provider that answered from an existing session
+has not re-authenticated anybody, and accepting it would make the sudo gate a
+redirect with no proof behind it. A provider that sends no `auth_time` at all
+cannot demonstrate freshness and is refused.
+
+Signing out of a provider session goes through the provider's RP-initiated
+logout. Ending only the local session leaves the provider signed in, so the next
+sign-in returns immediately -- indistinguishable, to the operator, from the
+sign-out having been ignored.
 
 ## Data directory
 

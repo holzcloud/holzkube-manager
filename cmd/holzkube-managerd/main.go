@@ -17,6 +17,7 @@ import (
 
 	"github.com/holzcloud/holzkube-manager/internal/audit"
 	"github.com/holzcloud/holzkube-manager/internal/auth"
+	"github.com/holzcloud/holzkube-manager/internal/auth/oidc"
 	"github.com/holzcloud/holzkube-manager/internal/config"
 	"github.com/holzcloud/holzkube-manager/internal/httpapi"
 	"github.com/holzcloud/holzkube-manager/internal/httpapi/handlers"
@@ -150,6 +151,22 @@ func run(args []string) error {
 	// of them can inherit the wrong one (D-03, FOUND-12).
 	talosMode := talos.Mode{DryRun: cfg.DryRun}
 
+	// The identity provider, if one is configured. New performs no network I/O:
+	// discovery happens on first use, so that a provider which is down -- quite
+	// possibly because it runs on the cluster this tool exists to repair --
+	// cannot stop the process from starting and cannot take the local
+	// break-glass account down with it.
+	var provider *oidc.Provider
+	if cfg.OIDCEnabled() {
+		provider, err = oidc.New(cfg.OIDCIssuer, cfg.OIDCClientID, cfg.OIDCClientSecret)
+		if err != nil {
+			return err
+		}
+		logger.Info("identity provider configured",
+			slog.String("issuer", cfg.OIDCIssuer),
+			slog.String("client_id", cfg.OIDCClientID))
+	}
+
 	deps := httpapi.Deps{
 		Store:      st,
 		Audit:      auditLog,
@@ -174,7 +191,9 @@ func run(args []string) error {
 			BrokenAtLine: brokenLine,
 			File:         chainFile,
 		}.Public(),
-		AllowedHosts: allowedHosts(cfg.Listen),
+		AllowedHosts: allowedHosts(cfg),
+		OIDC:         provider,
+		IsSSOOnly:    ssoOnly(cfg),
 	}
 
 	// The route table is assembled here, from each handler package's own Routes
@@ -184,6 +203,7 @@ func run(args []string) error {
 		handlers.SystemRoutes(deps),
 		handlers.SetupRoutes(deps),
 		handlers.AuthRoutes(deps),
+		handlers.OIDCRoutes(deps),
 		handlers.AccountRoutes(deps),
 		handlers.AuditRoutes(deps),
 		handlers.SchematicRoutes(deps),
@@ -256,11 +276,25 @@ func run(args []string) error {
 // The set is the bind address plus the loopback names, which is the same set
 // tlsx puts in the certificate's SANs -- the two have to agree, or a host the
 // certificate vouches for is one the server refuses.
-func allowedHosts(listen string) []string {
+// ssoOnly reports, for a Host header, whether the local password is refused
+// there. It returns nil when no host is SSO-only, which lets the HTTP layer
+// skip the check entirely rather than call a function that always says no.
+func ssoOnly(cfg config.Config) func(string) bool {
+	if len(cfg.SSOOnlyHosts) == 0 {
+		return nil
+	}
+	return cfg.IsSSOOnly
+}
+
+func allowedHosts(cfg config.Config) []string {
 	hosts := []string{"localhost", "127.0.0.1", "::1"}
-	if h := tlsx.ListenHost(listen); h != "" {
+	if h := tlsx.ListenHost(cfg.Listen); h != "" {
 		hosts = append(hosts, h)
 	}
+	// The configured names are the ones nothing here can derive: a reverse
+	// proxy's public hostname reaches this process in the Host header and
+	// nowhere else.
+	hosts = append(hosts, cfg.AllowedHosts...)
 	if hostname, err := os.Hostname(); err == nil && hostname != "" {
 		hosts = append(hosts, hostname)
 		if !strings.Contains(hostname, ".") {
