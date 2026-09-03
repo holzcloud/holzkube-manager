@@ -75,6 +75,16 @@ type fakeFactory struct {
 	// provisional branch needs, and it is the one shape a status code cannot
 	// express -- factory.talos.dev is known to throttle exactly this way.
 	hijackRepo string
+	// delays is an artificial latency per request shape, keyed exactly the way
+	// counts is keyed.
+	//
+	// It is what makes a budget testable at all. Every other knob on this fake
+	// answers instantly, so a client bounded by the wrong timeout behaves
+	// identically to one bounded by the right one, and the failure G-02-1
+	// measured against the live Factory -- a probe that takes longer than the
+	// budget governing it -- is structurally unrepresentable. That is the state
+	// this field ends.
+	delays map[string]time.Duration
 }
 
 func newFakeFactory(t *testing.T) *fakeFactory {
@@ -85,6 +95,7 @@ func newFakeFactory(t *testing.T) *fakeFactory {
 		catalog:          slices.Clone(baseCatalog),
 		unbuildable:      map[string]bool{},
 		probeUnavailable: map[string]bool{},
+		delays:           map[string]time.Duration{},
 	}
 	f.Server = httptest.NewServer(http.HandlerFunc(f.serve))
 	t.Cleanup(f.Close)
@@ -110,11 +121,26 @@ func (f *fakeFactory) listButFailToProbe(name string) {
 	f.probeUnavailable[name] = true
 }
 
-// newFactoryClient wires a client to this fake, with a short timeout so a
+// newFactoryClient wires a client to this fake, with short budgets so a
 // misrouted request fails the test rather than stalling it.
+//
+// All three are set, not just the JSON one. The probe budget's production value
+// is ninety seconds, so a client that took the default for it would turn a
+// misrouted image request from a fast failure into a minute and a half of
+// nothing -- which is the shape of test nobody runs.
 func (f *fakeFactory) client(t *testing.T) *imagefactory.Client {
 	t.Helper()
-	c, err := imagefactory.New(f.URL, imagefactory.WithTimeout(5*time.Second))
+	return f.clientWithBudgets(t, 5*time.Second, 5*time.Second, 5*time.Second)
+}
+
+// clientWithBudgets wires a client to this fake with each of the three budgets
+// named explicitly, which is what a test about budgets has to be able to do.
+func (f *fakeFactory) clientWithBudgets(t *testing.T, json, probe, manifest time.Duration) *imagefactory.Client {
+	t.Helper()
+	c, err := imagefactory.New(f.URL,
+		imagefactory.WithTimeout(json),
+		imagefactory.WithProbeTimeout(probe),
+		imagefactory.WithManifestTimeout(manifest))
 	if err != nil {
 		t.Fatalf("imagefactory.New: %v", err)
 	}
@@ -159,6 +185,26 @@ func (f *fakeFactory) answerEveryManifestWith(status int) {
 	f.manifestStatus = status
 }
 
+// answerAfter makes every subsequent request of this shape wait d before it is
+// served. The shape is the one count already speaks -- "HEAD /image",
+// "GET /v2", "POST /schematics" -- so a test says "make the image endpoint
+// slow" in the vocabulary the counters use rather than inventing a second one.
+//
+// The wait is abandoned when the inbound request's context is cancelled, so a
+// client whose budget expires actually gives up rather than the fake sleeping
+// through the expiry and answering an audience that has already gone.
+func (f *fakeFactory) answerAfter(shape string, d time.Duration) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.delays[shape] = d
+}
+
+func (f *fakeFactory) delayFor(shape string) time.Duration {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.delays[shape]
+}
+
 // dropTheConnectionFor closes the connection, with no response, on a manifest
 // request for repo. The resolver reads that as "this candidate was never ruled
 // out" rather than as a refusal, which is the whole of the provisional branch.
@@ -191,10 +237,22 @@ var fakeInstallerRepos = map[string]bool{
 
 func (f *fakeFactory) serve(w http.ResponseWriter, r *http.Request) {
 	parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
+	shape := r.Method + " /" + parts[0]
 
 	f.mu.Lock()
-	f.counts[r.Method+" /"+parts[0]]++
+	f.counts[shape]++
 	f.mu.Unlock()
+
+	// Before any branch and after the counter: a delayed request is still a
+	// request that was made, and a test asserting a call was issued must see it
+	// whether or not the caller waited for the answer.
+	if d := f.delayFor(shape); d > 0 {
+		select {
+		case <-time.After(d):
+		case <-r.Context().Done():
+			return
+		}
+	}
 
 	if f.isDown() {
 		http.Error(w, "unavailable", http.StatusServiceUnavailable)
@@ -2252,4 +2310,178 @@ func (c *client) doRaw(method, path string, body []byte) (*http.Response, []byte
 		c.t.Fatalf("read body: %v", err)
 	}
 	return resp, raw
+}
+
+// The probe-budget reproduction.
+//
+// G-02-1 is the defect these three cases exist for, stated in its own words:
+// "Add a handler test with a slow fakeFactory probe asserting the distinct
+// timed-out signal; the current fakeFactory is zero-latency, which makes this
+// failure structurally unrepresentable." The measurement behind it is five cold
+// ISO probes against factory.talos.dev at 30.50, 30.59, 31.18, 31.52 and 32.69
+// seconds, every one of them past the 30s constant that bounded them, every
+// time, for any schematic the Factory had not built before. The verdict was not
+// wrong; it was absent.
+//
+// These cases do not use the production constants. A test that waits ninety
+// seconds is a test nobody runs, and a suite nobody runs guards nothing. They
+// use the production *ratio* instead: the JSON budget is scaled down to
+// scaledJSONBudget and the probe budget is scaled by exactly
+// ProbeTimeout/DefaultTimeout from it, so what is reproduced is the *relation*
+// between the two budgets -- which is what was wrong -- rather than their
+// absolute sizes. The relation is the thing the constants have to preserve, and
+// moving either constant moves these cases with it.
+//
+// scaledJSONBudget stands for imagefactory.DefaultTimeout (30s, the three JSON
+// endpoints), scaledProbeBudget for imagefactory.ProbeTimeout (90s, the ISO
+// probe) and scaledManifestBudget for imagefactory.ManifestTimeout (30s, one
+// registry manifest GET).
+const scaledJSONBudget = 200 * time.Millisecond
+
+// scaledProbeBudget is scaledJSONBudget carried across by the production ratio.
+// It is computed rather than written down: a literal here would keep agreeing
+// with itself after ProbeTimeout moved, which is the failure mode this whole
+// round is about.
+func scaledProbeBudget() time.Duration {
+	return scaleBudget(imagefactory.ProbeTimeout)
+}
+
+// scaledManifestBudget is the same construction for the registry manifest GET.
+// ManifestTimeout equals DefaultTimeout today, so this equals scaledJSONBudget
+// today -- and it is computed anyway, because the two constants are separate
+// values that move independently and an alias here would hide the day they do.
+func scaledManifestBudget() time.Duration {
+	return scaleBudget(imagefactory.ManifestTimeout)
+}
+
+func scaleBudget(production time.Duration) time.Duration {
+	return time.Duration(int64(scaledJSONBudget) * int64(production) / int64(imagefactory.DefaultTimeout))
+}
+
+// pastBudget is a latency comfortably past d and nowhere near the next budget
+// up. Ten percent: enough that scheduling jitter on a loaded machine cannot
+// make a request that should have expired arrive in time, and small enough that
+// three cases together stay well inside a second.
+func pastBudget(d time.Duration) time.Duration {
+	return d + d/10
+}
+
+// probeBudgetServer is the reproduction's object graph: the fake, and a client
+// whose three budgets are the scaled ones.
+func probeBudgetServer(t *testing.T) (*server, *fakeFactory) {
+	t.Helper()
+	f := newFakeFactory(t)
+	c := f.clientWithBudgets(t, scaledJSONBudget, scaledProbeBudget(), scaledManifestBudget())
+	return newServerWithFactory(t, 5*time.Minute, c), f
+}
+
+// TestProbeBudgetOutlivesTheJSONBudget is G-02-1's measured case, scaled: an ISO
+// probe that takes longer than the budget sized against the JSON endpoints and
+// well less than the budget sized against the probe.
+//
+// Before the probe had a budget of its own this produced no verdict at all --
+// usable false, probed_at zero -- for every schematic the Factory had not built
+// before, which is to say for every schematic an operator had just authored.
+// The window this closes is the whole of the plan.
+func TestProbeBudgetOutlivesTheJSONBudget(t *testing.T) {
+	s, f := probeBudgetServer(t)
+	c := operator(t, s)
+
+	f.answerAfter("HEAD /image", pastBudget(scaledJSONBudget))
+
+	resp, raw := c.do(http.MethodPost, "/api/v1/schematics",
+		createBody("slow-but-inside-the-probe-budget", []string{"siderolabs/intel-ucode"}, nil))
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("got %d, want 201 (body: %s)", resp.StatusCode, raw)
+	}
+
+	var got struct {
+		Usable      bool      `json:"usable"`
+		ProbedAt    time.Time `json:"probed_at"`
+		ProbeReason string    `json:"probe_reason"`
+	}
+	decodeInto(t, raw, &got)
+	if !got.Usable {
+		t.Errorf("usable = false for a probe that answered after %s, inside the %s probe budget "+
+			"and past the %s JSON budget; this is G-02-1 reproduced",
+			pastBudget(scaledJSONBudget), scaledProbeBudget(), scaledJSONBudget)
+	}
+	if got.ProbedAt.IsZero() {
+		t.Error("probed_at is zero although the probe answered inside its own budget; " +
+			"zero means never probed")
+	}
+	if got.ProbeReason != "" {
+		t.Errorf("probe_reason = %q for a probe that succeeded", got.ProbeReason)
+	}
+}
+
+// TestProbeBudgetStillEndsInNoVerdictWhenItIsExceeded is the other half, and it
+// is the half that must not change. The budget buys headroom; it does not make
+// a verdict guaranteed. A probe past even the probe budget still yields the
+// fail-safe tri-state -- created, unprobed, no reason invented -- because the
+// Factory said nothing about the schematic and a record that claimed otherwise
+// would be an accusation nothing supports.
+func TestProbeBudgetStillEndsInNoVerdictWhenItIsExceeded(t *testing.T) {
+	s, f := probeBudgetServer(t)
+	c := operator(t, s)
+
+	f.answerAfter("HEAD /image", pastBudget(scaledProbeBudget()))
+
+	resp, raw := c.do(http.MethodPost, "/api/v1/schematics",
+		createBody("slower-than-the-probe-budget", []string{"siderolabs/intel-ucode"}, nil))
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("got %d, want 201 (body: %s)", resp.StatusCode, raw)
+	}
+
+	var got struct {
+		Usable      bool      `json:"usable"`
+		ProbedAt    time.Time `json:"probed_at"`
+		ProbeReason string    `json:"probe_reason"`
+	}
+	decodeInto(t, raw, &got)
+	if got.Usable {
+		t.Error("usable = true although the probe never answered")
+	}
+	if !got.ProbedAt.IsZero() {
+		t.Errorf("probed_at = %s; a probe that outran even its own budget has not probed", got.ProbedAt)
+	}
+	if got.ProbeReason != "" {
+		t.Errorf("probe_reason = %q; the Factory said nothing about this schematic", got.ProbeReason)
+	}
+}
+
+// TestProbeBudgetIsNotTheManifestBudget drives the third workload. A registry
+// manifest GET that outruns the manifest budget is the registry declining to
+// answer, so it has to reach the operator as an outage
+// (upstream.factory-unavailable) and never as a statement about the schematic.
+// Recording it as a refusal would send someone to rebuild something nothing
+// found fault with.
+func TestProbeBudgetIsNotTheManifestBudget(t *testing.T) {
+	s, f := probeBudgetServer(t)
+	c := operator(t, s)
+	id := mustCreate(t, c, "manifest-past-its-budget", []string{"siderolabs/intel-ucode"})
+
+	// Set after the schematic exists: the create path never touches the
+	// registry, and delaying it earlier would only obscure which request the
+	// latency belongs to.
+	f.answerAfter("GET /v2", pastBudget(scaledManifestBudget()))
+
+	resp, raw := c.do(http.MethodGet, "/api/v1/schematics/"+id+"/assets?arch=amd64", nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("got %d, want 200 (body: %s)", resp.StatusCode, raw)
+	}
+
+	var got assetsBody
+	decodeInto(t, raw, &got)
+	if got.Installer != nil {
+		t.Errorf("installer = %q although no candidate answered", *got.Installer)
+	}
+	if got.InstallerError == nil {
+		t.Fatalf("no installer_error although the registry never answered (body: %s)", raw)
+	}
+	if got.InstallerError.Code != httpapi.CodeUpstreamFactoryUnavailable {
+		t.Errorf("installer_error.code = %q, want %q: a registry that ran out of budget has "+
+			"declined to answer, which says nothing about the schematic",
+			got.InstallerError.Code, httpapi.CodeUpstreamFactoryUnavailable)
+	}
 }

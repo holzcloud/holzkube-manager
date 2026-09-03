@@ -725,7 +725,11 @@ func TestWithInstallerRepoRetryIntervalRejectsANegativeValue(t *testing.T) {
 // cache and cannot see the first one's entries.
 func newClientWithRetryInterval(t *testing.T, baseURL string, d time.Duration) *imagefactory.Client {
 	t.Helper()
-	c, err := imagefactory.New(baseURL, imagefactory.WithInstallerRepoRetryInterval(d))
+	c, err := imagefactory.New(baseURL,
+		imagefactory.WithInstallerRepoRetryInterval(d),
+		imagefactory.WithTimeout(testBudget),
+		imagefactory.WithProbeTimeout(testBudget),
+		imagefactory.WithManifestTimeout(testBudget))
 	if err != nil {
 		t.Fatalf("New(%q): %v", baseURL, err)
 	}
