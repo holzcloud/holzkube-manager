@@ -363,3 +363,10 @@ None — no external service configuration required.
 ---
 *Phase: 02-transport-seam-talossim-image-factory*
 *Completed: 2026-09-03*
+
+## Self-Check: PASSED
+
+All eleven files named under `key-files.modified` exist on disk. All six commits
+(`6596e40`, `efb31da`, `b84e001`, `0328030`, `970855d`, `cad6b53`) are in `git log`. The
+working tree is clean. Every `<verification>` command in the plan was re-run at the end of
+task 3 and is recorded in the Verification table above with its result.
