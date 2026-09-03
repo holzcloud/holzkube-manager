@@ -108,8 +108,15 @@ interface StubOptions {
    * this is about one that does not.
    */
   installerError?: { code: string; detail: string }
-  /** Requests whose path matches are answered with this problem instead. */
-  fail?: { path: string; status: number; body: unknown }
+  /**
+   * Requests whose path matches are answered with this problem instead.
+   *
+   * `method` narrows it to one verb. It exists because `/api/v1/schematics` is
+   * both the create route and the saved-list route: a failure keyed on the path
+   * alone would also break the list, and the case this narrowing is for --
+   * a create that failed still refetching the list -- would be unobservable.
+   */
+  fail?: { path: string; status: number; body: unknown; method?: string }
   /**
    * DELETE answers 428 until the sudo window is granted, which is what the
    * server does for a Destructive route. Nothing in this file grants it.
@@ -193,7 +200,11 @@ function stubFactory(options: StubOptions = {}) {
       await options.hold.release
     }
 
-    if (options.fail !== undefined && url.pathname.startsWith(options.fail.path)) {
+    if (
+      options.fail !== undefined &&
+      url.pathname.startsWith(options.fail.path) &&
+      (options.fail.method === undefined || options.fail.method === method)
+    ) {
       return new Response(JSON.stringify(options.fail.body), {
         status: options.fail.status,
         headers: { 'Content-Type': 'application/problem+json' },
@@ -1673,5 +1684,154 @@ describe('ImagesView — the two waits state their ceiling', () => {
     // outlives the wait it bounds is a ceiling that means nothing.
     expect(await detail.findByLabelText('Installer reference')).toBeInTheDocument()
     await waitFor(() => expect(detail.queryByText(/may take up to/i)).not.toBeInTheDocument())
+  })
+})
+
+/**
+ * The recovery the no-verdict badge now names, and the refetch that keeps the
+ * saved list honest about it (plan 02-24).
+ *
+ * A `409` on the create route now refreshes the probe fields of the record it
+ * refuses, so "the create failed" no longer implies "nothing changed". Two
+ * things follow: the badge can name a recovery it could not name while
+ * `02-DECISION-probe-budget.md` was open, and a failed create has to refetch the
+ * list it may just have changed.
+ *
+ * The recovery is a re-submission answered as an error. It is not a re-probe
+ * route, it is not discoverable from the list, and the probe it runs can time
+ * out exactly as the first one did -- which is why the copy asserted below
+ * offers a retry and never a verdict.
+ */
+const RECOVERY_COPY =
+  'The probe either did not run or did not answer in time. The schematic may still be ' +
+  'buildable. Submitting the identical customisation again runs the probe again and updates ' +
+  'this verdict in place; that submission is still answered as a conflict, because the ' +
+  'schematic already exists.'
+
+/** The rendered text with its JSX whitespace collapsed. */
+function collapsed(element: HTMLElement): string {
+  return (element.textContent ?? '').replace(/\s+/g, ' ').trim()
+}
+
+describe('ImagesView — the recovery a missing verdict has', () => {
+  beforeEach(() => {
+    vi.stubGlobal('scrollTo', vi.fn())
+  })
+
+  it('names the recovery on the no-verdict badge, and what it will look like', async () => {
+    stubFactory({ saved: [UNPROBED] })
+
+    renderImages()
+
+    const table = within(await screen.findByRole('table'))
+    const unprobed = within(table.getByRole('button', { name: 'Schematic never-probed' }))
+
+    // The badge itself is unchanged: it still asserts only that there is no
+    // verdict, which is the one thing true in both of the record's cases.
+    expect(unprobed.getByText(/Not verified — the build probe has no verdict/)).toBeInTheDocument()
+
+    // The muted line is asserted whole rather than by fragments. An added
+    // promise -- "and it will then be verified" -- is a change to this string
+    // and fails here, which a set of `toContain` checks would not catch.
+    const muted = unprobed.getByText(/either did not run or did not answer in time/)
+    expect(collapsed(muted)).toBe(RECOVERY_COPY)
+  })
+
+  it('leaves the usable and refused branches exactly as they were', async () => {
+    stubFactory({ saved: [USABLE, REFUSED] })
+
+    renderImages()
+
+    const table = within(await screen.findByRole('table'))
+    const good = within(table.getByRole('button', { name: 'Schematic probed-good' }))
+    const bad = within(table.getByRole('button', { name: 'Schematic probed-bad' }))
+
+    expect(good.getByText(/Usable — the build probe confirmed it/)).toBeInTheDocument()
+    expect(bad.getByText(/Not usable — the Factory refused to build it/)).toBeInTheDocument()
+    // Neither branch acquired the recovery sentence: a record that has a
+    // verdict has nothing to recover.
+    expect(good.queryByText(/Submitting the identical customisation again/)).not.toBeInTheDocument()
+    expect(bad.queryByText(/Submitting the identical customisation again/)).not.toBeInTheDocument()
+  })
+
+  it('refetches the saved list after a create that failed', async () => {
+    const fetchMock = stubFactory({
+      saved: [UNPROBED],
+      fail: {
+        path: '/api/v1/schematics',
+        method: 'POST',
+        status: 409,
+        body: {
+          type: problemType('conflict'),
+          title: 'Request conflicts with the current state',
+          status: 409,
+          detail:
+            'This schematic already exists. The build probe ran again as part of this ' +
+            'submission and this schematic builds, so the stored verdict was refreshed.',
+          code: 'store.conflict',
+        },
+      },
+    })
+    const user = userEvent.setup()
+
+    renderImages()
+    await catalogLoaded()
+    await waitFor(() => expect(listFetchCount(fetchMock)).toBe(1))
+
+    await user.type(screen.getByLabelText('Name'), 'already-there')
+    await user.click(screen.getByRole('button', { name: 'Create schematic' }))
+
+    expect(await screen.findByRole('alert', { name: 'Create failed' })).toBeInTheDocument()
+    // A 409 can now write the probe fields of an existing record, so a list left
+    // un-refetched shows the stale badge for the record this submission just
+    // refreshed.
+    await waitFor(() => expect(listFetchCount(fetchMock)).toBe(2))
+  })
+
+  it('keeps the failed create sentence through the refetch and drops it on an edit', async () => {
+    const detail =
+      'This schematic already exists. The stored verdict was not refreshed, because the build ' +
+      'probe did not answer this time either.'
+    const fetchMock = stubFactory({
+      saved: [UNPROBED],
+      fail: {
+        path: '/api/v1/schematics',
+        method: 'POST',
+        status: 409,
+        body: {
+          type: problemType('conflict'),
+          title: 'Request conflicts with the current state',
+          status: 409,
+          detail,
+          code: 'store.conflict',
+        },
+      },
+    })
+    const user = userEvent.setup()
+
+    renderImages()
+    await catalogLoaded()
+
+    await user.type(screen.getByLabelText('Name'), 'already-there')
+    await user.click(screen.getByRole('button', { name: 'Create schematic' }))
+
+    // The operator reads the server's own sentence, the way the assets panel
+    // reads the installer error's, rather than one invented in the browser.
+    const alert = await screen.findByRole('alert', { name: 'Create failed' })
+    expect(collapsed(alert)).toBe(detail)
+
+    // The refetch the previous case asserts must not take the sentence with it.
+    // The fingerprint effect depends on the form fields and deliberately not on
+    // the mutation's state; an onSettled that made it fire would clear an error
+    // the operator has not yet read.
+    await waitFor(() => expect(listFetchCount(fetchMock)).toBe(2))
+    expect(screen.getByRole('alert', { name: 'Create failed' })).toBeInTheDocument()
+
+    // And it is still cleared by the thing that should clear it: a form edit,
+    // which makes the sentence about a submission that has been replaced.
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'something-else' } })
+    await waitFor(() =>
+      expect(screen.queryByRole('alert', { name: 'Create failed' })).not.toBeInTheDocument(),
+    )
   })
 })
