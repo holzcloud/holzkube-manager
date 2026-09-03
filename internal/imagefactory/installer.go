@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -36,26 +37,35 @@ const legacyInstallerRepo = "installer"
 //   - Never remember it, which is the UAT's literal wording ("do not cache a
 //     name reached past an unanswered earlier candidate, or re-probe on the next
 //     request"). That makes every subsequent assets request re-pay the silent
-//     candidate's full client timeout. Get the two measured numbers the right
-//     way round here, because an earlier revision of this reasoning did not:
-//     43.42s is the *measured success* of one such resolution (30s for the
-//     silent candidate plus 13.4s for the one that answered), while the worst
-//     case is both candidates silent at 2 x DefaultTimeout = 60.000s -- the same
-//     60s writeTimeout the same route has already returned a 502 at
-//     (G-02-2: status=502 duration=1m0.002907792s). Either number, paid per
-//     request, times out the very panel this warning exists to be rendered on.
+//     candidate's manifest budget. Two figures measured against the serial walk
+//     say what that cost: 43.42s was the *measured success* of one such
+//     resolution (30s for the silent candidate plus 13.4s for the one that
+//     answered) and 60.000s was the worst case with both candidates silent,
+//     which is the same 60s writeTimeout the same route has returned a 502 at
+//     (G-02-2: status=502 duration=1m0.002907792s). Both were measured
+//     2026-08-29 against the serial candidate walk and are recorded here as
+//     history: resolveInstallerRepo now asks every candidate at once, so the
+//     silent candidate no longer costs the one after it its budget. What
+//     survives the change is the shape of the argument -- a re-question paid per
+//     request still costs a manifest budget the panel does not have, which is
+//     the cost this interval exists to amortise.
 //
 // Five minutes is short enough that a registry which recovers is noticed within
 // one, and long enough that the silent candidate's timeout is amortised across
 // every request in between rather than paid by each of them.
 //
-// What this does not touch is the *cold* path: a first resolution with an empty
-// cache still walks both candidates serially. Bounding that needs the per-route
-// deadline that
-// .planning/phases/02-transport-seam-talossim-image-factory/02-DECISION-probe-budget.md
-// owns and G-02-2 is deferred to; cmd/holzkube-managerd/budget_test.go declares the
-// route as known-over-budget in the meantime. Do not "simplify" this constant
-// away against the UAT's wording without reading that document first.
+// What this does not touch is the *cold* path, and after the concurrency change
+// it no longer needs to. A first resolution with an empty cache asks every
+// candidate at the same time and costs the slowest of them, bounded twice over:
+// by ManifestTimeout on each candidate's own request, and by the route deadline
+// above it -- handlers.AssetsRouteBudget, which is one manifest budget plus the
+// resolution's own bookkeeping for exactly this reason. This interval bounds how
+// often an unproven answer is re-asked and it still moves no deadline; the two
+// mechanisms are independent and the decision behind both is
+// .planning/phases/02-transport-seam-talossim-image-factory/02-DECISION-probe-budget.md.
+// cmd/holzkube-managerd/budget_test.go composes them and fails in both
+// directions. Do not "simplify" this constant away against the UAT's wording
+// without reading that document first.
 const installerRepoRetryInterval = 5 * time.Minute
 
 // installerRepoEntry is one cached answer to "which repository name carries the
@@ -531,8 +541,10 @@ func installerFallbackWarning(r AssetRequest, res installerResolution) Warning {
 	}
 }
 
-// resolveInstallerRepo asks the registry, in order, which of the candidate
-// repository names carries a manifest for this schematic at this version.
+// resolveInstallerRepo asks the registry which of the candidate repository
+// names carries a manifest for this schematic at this version. It asks all of
+// them at once and takes the first 2xx in the declared candidate order -- see
+// "The requests are concurrent; the decision is sequential" below.
 //
 // It keeps two verdicts apart on exactly the terms ProbeBuildable does, because
 // both ask registryRefused rather than each deciding for itself. Only when every
@@ -558,7 +570,92 @@ func installerFallbackWarning(r AssetRequest, res installerResolution) Warning {
 // `unanswered` holds when a candidate answers 2xx came from a candidate tried
 // *earlier* -- one the caller preferred and did not get an answer from -- so it
 // is exactly the provenance the returned name needs to carry.
+//
+// # The requests are concurrent; the decision is sequential
+//
+// Every candidate is asked at the same time and the answers are then read back
+// **in installerCandidates' declared order**. Those are two separate properties
+// and the second one is the whole design.
+//
+// The first is why this is not the serial walk it used to be. A candidate that
+// does not answer 2xx used to cost its entire ManifestTimeout before the next
+// question was even issued: G-02-2 measured that as a 43.42s success -- 30s of
+// silence followed by a 13.4s answer -- and as a 60.000s worst case with both
+// candidates silent. Asking at once collapses the cold case to the slowest
+// single candidate, and it closes G-02-3's silent-fallback window for free,
+// because a candidate that never answers no longer costs the candidate after it
+// its budget.
+//
+// The second is what stops that from changing which image an operator installs.
+// installerCandidates declares a *preference*, not a set: the platform-prefixed
+// name first, the legacy name second, and at a Talos version where both resolve
+// the two are not interchangeable -- for the SecureBoot pair they are two
+// different images (02-UAT.md G-02-13), and a wrong installer reference drives
+// an upgrade that reports success while silently dropping every system extension
+// the node was built with (PITFALLS P9(c)). So the accumulation below is exactly
+// the accumulation the serial loop performed, walked over a fixed-length slice
+// indexed by candidate position: the first 2xx *in declared order* wins, and the
+// fact that a later candidate answered sooner is not information this function
+// is allowed to act on.
+//
+// A reader who later "simplifies" this into taking the first result off a shared
+// channel has changed which image an operator installs, silently and
+// undetectably after the fact. TestInstallerImagePrefersTheDeclaredOrderOverTheFastestAnswer
+// is the guard: it gives the legacy candidate zero latency and the preferred one
+// a real one, both answering 2xx, and it goes red against a first-to-answer
+// implementation.
+//
+// The short-circuit is taken only where it is free. Once the candidate at the
+// current index has answered 2xx, no later candidate can change the outcome, so
+// the deferred cancellation abandons the ones still in flight. It is deliberately
+// not taken on a *later* candidate while an earlier one is still outstanding: the
+// earlier one is preferred and may yet answer 2xx.
 func (c *Client) resolveInstallerRepo(ctx context.Context, r AssetRequest, candidates ...string) (installerResolution, error) {
+	// One slot per candidate, indexed by its position in the declared list, and
+	// never a shared append: an append records arrival order, which is the one
+	// ordering this function must not decide on.
+	type candidateAnswer struct {
+		status int
+		err    error
+	}
+	answers := make([]candidateAnswer, len(candidates))
+	done := make([]chan struct{}, len(candidates))
+
+	// Derived from the caller's, so the route deadline above and ManifestTimeout
+	// below both still apply and cancelling the caller cancels every candidate.
+	fanCtx, cancelFan := context.WithCancel(ctx)
+
+	var wg sync.WaitGroup
+	// Cancel first, then wait: no goroutine started here outlives this call, and
+	// the ones still in flight when a 2xx is taken are released rather than run
+	// to completion. A bare `defer wg.Wait()` would order these the other way
+	// round and hold the caller for the slowest candidate it no longer needs.
+	defer func() {
+		cancelFan()
+		wg.Wait()
+	}()
+
+	for i, repo := range candidates {
+		done[i] = make(chan struct{})
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			defer close(done[i])
+
+			u := c.base.JoinPath("v2", repo, r.SchematicID, "manifests", r.Version).String()
+
+			// classManifest, not classProbe and not the JSON budget: this is one
+			// registry manifest GET, whose budget was derived from the 13.4s cold
+			// candidate answer decomposed out of G-02-2's 43.42s resolution.
+			// Every candidate is issued under it, so the fan-out's worst case is
+			// one ManifestTimeout rather than one per candidate -- which is what
+			// lets handlers.AssetsRouteBudget be one manifest budget wide.
+			status, err := c.probeStatus(fanCtx, http.MethodGet, u,
+				http.Header{"Accept": []string{manifestAccept}}, classManifest)
+			answers[i] = candidateAnswer{status: status, err: err}
+		}()
+	}
+
 	var (
 		refused     []string
 		unresolved  []string
@@ -567,32 +664,32 @@ func (c *Client) resolveInstallerRepo(ctx context.Context, r AssetRequest, candi
 		lastAttempt string
 	)
 
-	for _, repo := range candidates {
-		lastAttempt = repo
-		u := c.base.JoinPath("v2", repo, r.SchematicID, "manifests", r.Version).String()
+	for i, repo := range candidates {
+		// The close is the happens-before for answers[i]; nothing reads a slot
+		// before the goroutine that owns it has finished writing it.
+		<-done[i]
 
-		// classManifest, not classProbe and not the JSON budget: this is one
-		// registry manifest GET, whose budget was derived from the 13.4s cold
-		// candidate answer decomposed out of G-02-2's 43.42s resolution.
-		status, err := c.probeStatus(ctx, http.MethodGet, u, http.Header{"Accept": []string{manifestAccept}}, classManifest)
-		if err != nil {
+		lastAttempt = repo
+		answer := answers[i]
+
+		if answer.err != nil {
 			refusedAll = false
 			unresolved = append(unresolved, repo)
 			unanswered = fmt.Errorf("%w: resolving the installer repository %q for %s: %w",
-				ErrUpstreamUnavailable, repo, r.Version, err)
+				ErrUpstreamUnavailable, repo, r.Version, answer.err)
 			continue
 		}
 
 		switch {
-		case status/100 == 2:
+		case answer.status/100 == 2:
 			return installerResolution{repo: repo, unresolved: unresolved, unanswered: unanswered}, nil
-		case registryRefused(status):
-			refused = append(refused, fmt.Sprintf("%s (HTTP %d)", repo, status))
+		case registryRefused(answer.status):
+			refused = append(refused, fmt.Sprintf("%s (HTTP %d)", repo, answer.status))
 		default:
 			refusedAll = false
 			unresolved = append(unresolved, repo)
 			unanswered = fmt.Errorf("%w: resolving the installer repository %q for %s answered HTTP %d",
-				ErrUpstreamUnavailable, repo, r.Version, status)
+				ErrUpstreamUnavailable, repo, r.Version, answer.status)
 		}
 	}
 
