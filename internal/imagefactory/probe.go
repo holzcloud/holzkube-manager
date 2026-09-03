@@ -37,7 +37,12 @@ func (c *Client) ProbeBuildable(ctx context.Context, id, talosVersion string, ar
 		return err
 	}
 
-	status, err := c.probeStatus(ctx, http.MethodHead, u, nil)
+	// classProbe, named here rather than chosen inside probeStatus: this
+	// request makes the Factory build a ~335MB image synchronously and is
+	// bounded by ProbeTimeout, while the same helper's other caller asks a
+	// registry for a manifest and is bounded by ManifestTimeout. A helper that
+	// picked one of them would be deciding which workload it was serving.
+	status, err := c.probeStatus(ctx, http.MethodHead, u, nil, classProbe)
 	if err != nil {
 		return err
 	}
@@ -45,7 +50,13 @@ func (c *Client) ProbeBuildable(ctx context.Context, id, talosVersion string, ar
 		// Some caches in front of a Factory answer HEAD with a refusal. A
 		// single-byte ranged GET asks the same question without downloading an
 		// ISO to find out.
-		status, err = c.probeStatus(ctx, http.MethodGet, u, http.Header{"Range": []string{"bytes=0-0"}})
+		//
+		// It takes a fresh probe budget rather than sharing the first one,
+		// because it is a second question and the first one was answered
+		// quickly by construction: this branch is reached only on a 405 or a
+		// 501, which is an answer, never a budget expiring. The route deadline
+		// above is what bounds the pair; see CreateRouteBudget.
+		status, err = c.probeStatus(ctx, http.MethodGet, u, http.Header{"Range": []string{"bytes=0-0"}}, classProbe)
 		if err != nil {
 			return err
 		}
@@ -98,8 +109,16 @@ func registryRefused(status int) bool {
 
 // probeStatus issues one request and returns its status code, discarding the
 // body. The body of an image asset is an ISO; nothing here wants it.
-func (c *Client) probeStatus(ctx context.Context, method, u string, header http.Header) (int, error) {
-	req, err := http.NewRequestWithContext(ctx, method, u, nil)
+//
+// The budget class is a parameter and never a choice made in here. This helper
+// serves two workloads with two different derivations -- ProbeBuildable's ISO
+// probe and resolveInstallerRepo's registry manifest GET -- so the caller that
+// knows which one it means is the one that says so.
+func (c *Client) probeStatus(ctx context.Context, method, u string, header http.Header, class budgetClass) (int, error) {
+	callCtx, cancel := c.withBudget(ctx, class)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(callCtx, method, u, nil)
 	if err != nil {
 		return 0, fmt.Errorf("imagefactory: build request: %w", err)
 	}
@@ -107,6 +126,14 @@ func (c *Client) probeStatus(ctx context.Context, method, u string, header http.
 		for _, v := range vs {
 			req.Header.Add(k, v)
 		}
+	}
+
+	// The other of the two places in this package that reach http.Client.Do.
+	// Checked on callCtx rather than on req.Context(): the two are the same
+	// value -- NewRequestWithContext stores exactly what it is given -- and
+	// contextcheck reads the accessor as a context appearing from nowhere.
+	if err := requireDeadline(callCtx); err != nil {
+		return 0, fmt.Errorf("%w: %s %s", err, method, req.URL.Path)
 	}
 
 	resp, err := c.http.Do(req)

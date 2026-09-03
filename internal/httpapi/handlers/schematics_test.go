@@ -2336,7 +2336,7 @@ func (c *client) doRaw(method, path string, body []byte) (*http.Response, []byte
 // endpoints), scaledProbeBudget for imagefactory.ProbeTimeout (90s, the ISO
 // probe) and scaledManifestBudget for imagefactory.ManifestTimeout (30s, one
 // registry manifest GET).
-const scaledJSONBudget = 200 * time.Millisecond
+const scaledJSONBudget = 150 * time.Millisecond
 
 // scaledProbeBudget is scaledJSONBudget carried across by the production ratio.
 // It is computed rather than written down: a literal here would keep agreeing
@@ -2354,8 +2354,14 @@ func scaledManifestBudget() time.Duration {
 	return scaleBudget(imagefactory.ManifestTimeout)
 }
 
+// scaleBudget carries scaledJSONBudget across by production/DefaultTimeout.
+//
+// In float, because the integer form overflows: 200ms times 90s is 1.8e19
+// nanoseconds and int64 stops at 9.2e18. The ratios in play are small whole
+// numbers, so the rounding is exact at every value these constants have held,
+// and the cases below leave a ten percent margin either side in any event.
 func scaleBudget(production time.Duration) time.Duration {
-	return time.Duration(int64(scaledJSONBudget) * int64(production) / int64(imagefactory.DefaultTimeout))
+	return time.Duration(float64(scaledJSONBudget) * float64(production) / float64(imagefactory.DefaultTimeout))
 }
 
 // pastBudget is a latency comfortably past d and nowhere near the next budget
