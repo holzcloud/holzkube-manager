@@ -4,16 +4,16 @@ milestone: v1.14
 current_phase: 02
 current_phase_name: Transport Seam, `talossim` & Image Factory
 status: executing
-stopped_at: Completed 02-22-PLAN.md
-last_updated: "2026-09-03T18:47:43.144Z"
+stopped_at: Completed 02-23-PLAN.md
+last_updated: "2026-09-03T19:24:10.473Z"
 last_activity: 2026-09-03
-last_activity_desc: 02-22 abgeschlossen — ProbeTimeout/ManifestTimeout, Routen-Deadlines, Kompositionswache
-state_head: e4a15cea9b2dd2199983c8516536cb7aebda8807
+last_activity_desc: 02-23 abgeschlossen — nebenlaeufige Kandidaten, engeres AssetsRouteBudget, Browser-Obergrenze
+state_head: 6830979a1fe1feb0222f9d04467bb2f33c53720f
 progress:
   total_phases: 10
   completed_phases: 1
   total_plans: 30
-  completed_plans: 28
+  completed_plans: 29
 ---
 
 # Project State
@@ -28,9 +28,9 @@ See: .planning/PROJECT.md (updated 2026-08-27)
 ## Current Position
 
 Phase: 02 (Transport Seam, `talossim` & Image Factory) — EXECUTING
-Plan: 22 of 24 (22 summaries on disk; round-4 gap closure)
-Status: Ready to execute 02-23
-Last activity: 2026-09-03 — 02-22 abgeschlossen: drei Upstream-Budgets und die Wache, die sie komponiert
+Plan: 23 of 24 (23 summaries on disk; round-4 gap closure)
+Status: Ready to execute 02-24
+Last activity: 2026-09-03 — 02-23 abgeschlossen: jeder Kandidat wird gleichzeitig gefragt, die deklarierte Reihenfolge entscheidet weiter
 
 Progress: [█░░░░░░░░░] 1 of 10 phases
 
@@ -86,6 +86,7 @@ Progress: [█░░░░░░░░░] 1 of 10 phases
 | Phase 02 P20 | 33 min | 3 tasks | 8 files |
 | Phase 02 P21 | 23 min | 4 tasks | 6 files |
 | Phase 02 P22 | 90 min | 3 tasks | 13 files |
+| Phase 02 P23 | 30 min | 3 tasks | 12 files |
 
 ## Accumulated Context
 
@@ -179,6 +180,10 @@ Recent decisions affecting current work:
 - [Phase 02]: Beide Factory-Routen deklarieren eine geteilte Deadline (CreateRouteBudget=120s, AssetsRouteBudget=65s), writeTimeout steigt auf 130s. — Sobald eine Route eine Deadline deklariert, ist die Deadline der Worst Case und nicht mehr die Summe dessen, was ihre Callees zufaellig tun. writeTimeout ist aus R1 hergeleitet: kleinste Zehnerzahl echt groesser als CreateRouteBudget + budgetSlack.
 - [Phase 02]: Clipping ist deklarierte Tabellendaten mit eigener Ratsche in beide Richtungen, keine Doc-Comment-Prosa. — POST /api/v1/schematics deklariert 150s Aufrufbudgets gegen 120s Decke. Als Datum kann die Behauptung veralten und rot werden; als Prosa liest sie niemand nach.
 - [Phase 02]: AssetsRouteBudget ist fuer den seriellen Kandidatenlauf dieser Welle bemessen; 02-23 zieht es nach. 02-22 allein liefert G-02-2s Verbesserung an der Assets-Route nicht. — Eine Decke von einem Manifest-Budget wuerde den Legacy-Kandidaten abschneiden, bevor er antworten kann -- der stille Fallback, den G-02-3 diese Phase schon einmal gekostet hat.
+- [Phase 02]: resolveInstallerRepo asks every installer candidate at once and decides in installerCandidates' declared order: concurrent requests, sequential decision, so the platform-prefixed name keeps its preference and a faster legacy answer cannot displace it. — A first-to-answer race would be a silent installer substitution that nothing downstream can detect (P9(c): an upgrade that reports success while dropping every system extension). The answers land in a slice indexed by candidate position and are read in order; a test gives the legacy candidate zero latency and the preferred one 300ms and goes red against the alternative.
+- [Phase 02]: handlers.AssetsRouteBudget tightened 65s -> 35s (one manifest budget plus five seconds) in the same commit that removed the serial candidate walk it was sized for. — The clipping ratchet in cmd/holzkube-managerd/budget_test.go fires on the under-provisioned half-change (two declared calls against the tightened constant computes clipped against a declared uncut) and, by the arithmetic, tolerates the over-provisioned one. Both directions driven locally.
+- [Phase 02]: Every browser request carries a fresh AbortSignal ceiling of 150s, attached at the fetch call rather than stored in the reused RequestInit, with its own abort branch that never passes through toProblemError. — init is built once and reused so the sudo replay is byte-identical to the refused request, and an AbortSignal.timeout starts counting when it is created -- a signal stored there would reach the replay partly spent. The ceiling is above writeTimeout (130s) so the server's own problem+json always wins the race; only a server that never answers is cut.
+- [Phase 02]: The two waiting screens state the route budget the server enforces, held equal to it by internal/httpapi/handlers/budget_drift_test.go -- the third Go-reads-TypeScript drift guard in this repository. — vitest is rooted at web/ and could not read a Go constant even if allowed out of it, so the guard reads the TypeScript literal instead. Stating a ceiling is explicitly NOT the elapsed-time progress indicator PITFALLS:164 requires; that stays open and the code comment says so.
 
 ### Pending Todos
 
@@ -222,6 +227,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-09-03T18:47:06.865Z
-Stopped at: Completed 02-22-PLAN.md
+Last session: 2026-09-03T19:23:44.349Z
+Stopped at: Completed 02-23-PLAN.md
 Resume file: None
