@@ -78,7 +78,7 @@ Plans:
 **Parallel tracks**: 2 — (a) Transport-Naht + `pool` + `talossim`, (b) Image-Factory-Client. Track (b) hat **null** Talos-Abhängigkeit; das ist die Research-Parallelität *Phase 1 ∥ Phase 1b*, hier innerhalb einer Phase realisiert.
 **Release blockers owned**: TRANS-06 🚫
 **Note**: FOUND-12 (`--dry-run` für das ganze Binary) liegt hier statt in Phase 1, weil die Research es explizit in den Deliverables der Transport-Phase führt — ein Dry-Run ist erst sinnvoll, wenn Mutationen einen Node erreichen könnten.
-**Plans**: 21/21 plans executed in 5 waves (Wave 1: 2 parallele Tracer — Track (a) Transport-Naht, Track (b) Image Factory) + 5 Gap-Closure-Pläne der Runde 1 aus 02-UAT.md in 4 Wellen (Cluster B und C; Cluster A ist auf `02-DECISION-probe-budget.md` blockiert) + 8 Gap-Closure-Pläne der Runde 2 in 6 Wellen (alle 14 Lücken G-02-10..G-02-23, voller Umfang in einer Runde)
+**Plans**: 21/24 plans executed in 5 waves (Wave 1: 2 parallele Tracer — Track (a) Transport-Naht, Track (b) Image Factory) + 5 Gap-Closure-Pläne der Runde 1 aus 02-UAT.md in 4 Wellen (Cluster B und C; Cluster A war auf `02-DECISION-probe-budget.md` blockiert) + 8 Gap-Closure-Pläne der Runde 2 in 6 Wellen (alle 14 Lücken G-02-10..G-02-23, voller Umfang in einer Runde) + 3 Gap-Closure-Pläne der Runde 4 in 3 Wellen (Cluster A, nachdem der Betreiber am 2026-09-03 Option 2 ratifiziert hat)
 **UI hint**: yes
 
 Plans:
@@ -148,7 +148,19 @@ Plans:
 
 - [x] 02-21-PLAN.md — G-02-20, G-02-21, G-02-22: die Identitätsfrage (Architektur gehört nicht in den Hash) wird als Entscheidung festgehalten, die drei zu breiten Aussagen werden auf die Sätze verengt, für die sie gelten, und das Ledger dieser Runde wird vollständig eingetragen
 
-**Blockiert** *(nicht geplant)*: G-02-1, G-02-2, G-02-9 — der Probe-Budget-Knoten. Offene Entscheidung in `.planning/phases/02-transport-seam-talossim-image-factory/02-DECISION-probe-budget.md`.
+**Runde-4-Gap-Closure Wave 1** *(Cluster A, entsperrt: der Betreiber hat am 2026-09-03 Option 2 — „compose the budgets" — ratifiziert; Option 1, das Aufteilen der Create-Route, wird in dieser Phase ausdrücklich **nicht** genommen)*
+
+- [ ] 02-22-PLAN.md — G-02-1, G-02-2 (Budget-Hälfte): ISO-Probe und Registry-Manifest bekommen je ein eigenes Budget mit hergeleitetem Wert, kein Request verlässt das Paket mehr ohne Deadline, beide Factory-Routen erklären ein gemeinsames Route-Deadline, `writeTimeout` deckt das größte davon — und der Kompositions-Wächter rechnet die Arithmetik nach, die nie jemand ausgeführt hat
+
+**Runde-4-Gap-Closure Wave 2** *(blocked on Wave 1)*
+
+- [ ] 02-23-PLAN.md — G-02-2 (Rest): die beiden Installer-Kandidaten werden gleichzeitig gefragt, aber weiterhin **in der deklarierten Reihenfolge** entschieden; dazu eine Obergrenze für jeden Browser-Request und zwei Wartebildschirme, die das serverseitig erzwungene Budget nennen, festgenagelt von einem Drift-Wächter
+
+**Runde-4-Gap-Closure Wave 3** *(blocked on Wave 2)*
+
+- [ ] 02-24-PLAN.md — G-02-1 (Badge-Hälfte), G-02-9 (Milderung, **keine** Schließung): der 409 wirft das Verdikt nicht mehr weg, das er gerade berechnet hat — genau `Usable`, `ProbedAt`, `ProbeReason` und sonst nichts; die drei zu breit gewordenen Aussagen werden verengt, und das Ledger sagt präzise, was diese Runde bewegt hat und was nicht
+
+**Offen nach Runde 4**: G-02-9. Der 409-Refresh ist die vom ratifizierten Entscheid verlangte, nicht-destruktive Erholung — **keine** Re-Probe-Route und keine Garantie auf ein Verdikt. Ein Probe, der auch mit dem erhöhten Budget nicht antwortet, lässt den Record unverändert. Als Fenster im Ledger geführt (Plan 02-24, Task 3); die strukturelle Antwort ist Option 1 in `.planning/phases/02-transport-seam-talossim-image-factory/02-DECISION-probe-budget.md` und gehört in Phase 3, wenn die Transport-Naht einen Produktions-Aufrufer hat.
 
 ### Phase 3: Inventar, Cluster-Import & Health
 
