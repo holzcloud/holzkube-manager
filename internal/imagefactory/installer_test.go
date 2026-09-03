@@ -736,6 +736,122 @@ func newClientWithRetryInterval(t *testing.T, baseURL string, d time.Duration) *
 	return c
 }
 
+// candidateLatency is the per-candidate manifest latency the two cases below
+// give the fake.
+//
+// The value is chosen against two opposite failure modes and it is worth saying
+// which one each end avoids, because both would make the timing case a test that
+// proves nothing.
+//
+// Too small and scheduling noise dominates the comparison: at a few
+// milliseconds, goroutine start-up, the loopback round trip and the -race
+// instrumentation are the same order of magnitude as the quantity under test, so
+// a serial walk and a concurrent fan-out are separated by less than the run-to-run
+// spread and the assertion becomes a coin toss.
+//
+// Too large and the package's test suite pays for it on every run for no extra
+// signal -- the ratio being asserted is scale-free, so a second buys nothing a
+// third of a second does not.
+//
+// 300ms is three orders of magnitude above the loopback round trip and well
+// inside testBudget (5s), so neither the manifest budget nor the test's own
+// runtime is a factor in what these cases measure.
+const candidateLatency = 300 * time.Millisecond
+
+// TestInstallerImageAsksEveryCandidateAtOnce is the timing half of G-02-2's
+// remaining gap: a cold resolution behind a candidate that does not answer 2xx
+// used to cost that candidate's whole wait before the second question was even
+// asked.
+//
+// installerLegacyVersion is the version where the platform-prefixed name 404s
+// and the legacy one answers, so the preferred candidate is genuinely walked
+// past rather than short-circuited on. Both are given the same latency, so a
+// serial walk costs two of them and a concurrent fan-out costs one.
+//
+// The assertion is a ratio and not a duration. A scheduler is not a stopwatch,
+// so pinning an absolute elapsed time would make this flaky on a loaded machine;
+// below 1.5 candidates' worth is unreachable for a serial walk (which needs 2.0)
+// and generous for a concurrent one (which needs 1.0) at any machine speed.
+func TestInstallerImageAsksEveryCandidateAtOnce(t *testing.T) {
+	fake := newFakeFactory(t)
+	fake.answerManifestAfter("metal-installer", candidateLatency)
+	fake.answerManifestAfter("installer", candidateLatency)
+	client := newClient(t, fake.URL)
+
+	start := time.Now()
+	ref, _, err := client.InstallerImage(t.Context(), installerRequest(installerLegacyVersion))
+	elapsed := time.Since(start)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(ref, "/installer/") {
+		t.Fatalf("ref = %s, want the legacy repository -- this case rests on the preferred "+
+			"candidate being walked past rather than answering", ref)
+	}
+
+	if limit := candidateLatency * 3 / 2; elapsed >= limit {
+		t.Errorf("a two-candidate cold resolution took %s, want under %s.\n"+
+			"Each candidate answers after %s, so %s is one candidate's wait plus half of "+
+			"another; a serial walk costs two of them (%s) and cannot fit. The candidates "+
+			"must be asked at the same time.",
+			elapsed, limit, candidateLatency, limit, 2*candidateLatency)
+	}
+	t.Logf("two candidates at %s each resolved in %s", candidateLatency, elapsed)
+
+	// The fan-out asks, it does not skip: both names were still questioned once.
+	for _, repo := range []string{"metal-installer", "installer"} {
+		if n := fake.count("GET /v2/" + repo + "/manifests/" + installerLegacyVersion); n != 1 {
+			t.Errorf("%s was asked %d times, want 1 -- the speed-up must come from asking at "+
+				"once, never from asking less", repo, n)
+		}
+	}
+}
+
+// TestInstallerImagePrefersTheDeclaredOrderOverTheFastestAnswer is the assertion
+// that matters more than the one above, and it exists to catch exactly one
+// mistake: turning the fan-out into a first-result-wins race.
+//
+// Both candidates answer 2xx here, and the legacy one answers instantly while
+// the preferred one takes candidateLatency. Under the serial walk this passes for
+// free, because the preferred name is asked first and nothing else is asked at
+// all. Under a concurrent fan-out that returns whichever result arrives first it
+// fails, and it is the only thing standing between this change and a silent
+// substitution.
+//
+// installerCandidates' own comment says what that substitution costs: a
+// SecureBoot request handed the image the preferred name would not have selected,
+// or an installer reference that drives an upgrade reporting success while
+// dropping every system extension the node was built with (PITFALLS P9(c)).
+// Neither is visible after the fact. The requests are concurrent; the *decision*
+// is sequential over the declared candidate order, and this test is the guard on
+// the second half.
+func TestInstallerImagePrefersTheDeclaredOrderOverTheFastestAnswer(t *testing.T) {
+	fake := newFakeFactory(t)
+	// installerModernVersion is the version where both names answer 200, so the
+	// only thing that can decide between them is the declared order.
+	fake.answerManifestAfter("metal-installer", candidateLatency)
+	client := newClient(t, fake.URL)
+
+	ref, warnings, err := client.InstallerImage(t.Context(), installerRequest(installerModernVersion))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	want := fakeHost(t, fake.URL) + "/metal-installer/" + schematicA + ":" + installerModernVersion
+	if ref != want {
+		t.Fatalf("ref  = %s\nwant = %s\n"+
+			"The legacy candidate answered first because it is faster, and it was taken. "+
+			"Concurrency changes when the candidates are asked, never which answer is used: "+
+			"the first 2xx *in installerCandidates' declared order* wins. A first-to-answer "+
+			"race here is a silent installer substitution that nothing downstream can detect.",
+			ref, want)
+	}
+	if len(warnings) != 0 {
+		t.Errorf("a candidate that answered 2xx produced %+v, want no warning -- nothing was "+
+			"left unheard", warnings)
+	}
+}
+
 // concurrentProbeDelay is how long the fake takes to go silent in the cases
 // below. It has to outlast an entire competing resolution against the same fake
 // -- a 200 over loopback, plus the cache write -- which is microseconds here, so
