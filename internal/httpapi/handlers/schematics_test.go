@@ -85,6 +85,15 @@ type fakeFactory struct {
 	// budget governing it -- is structurally unrepresentable. That is the state
 	// this field ends.
 	delays map[string]time.Duration
+	// manifestDelays is an artificial latency per registry *repository name*.
+	//
+	// delays above is keyed by request shape, so every candidate in one installer
+	// resolution shares the "GET /v2" key and a delay set there slows all of them
+	// by the same amount. That is the right key for exercising a budget and the
+	// wrong one for exercising the shape of a resolution: telling a concurrent
+	// fan-out apart from a serial walk needs "this candidate is slow and that one
+	// is not", which is a statement about two names.
+	manifestDelays map[string]time.Duration
 }
 
 func newFakeFactory(t *testing.T) *fakeFactory {
@@ -96,6 +105,7 @@ func newFakeFactory(t *testing.T) *fakeFactory {
 		unbuildable:      map[string]bool{},
 		probeUnavailable: map[string]bool{},
 		delays:           map[string]time.Duration{},
+		manifestDelays:   map[string]time.Duration{},
 	}
 	f.Server = httptest.NewServer(http.HandlerFunc(f.serve))
 	t.Cleanup(f.Close)
@@ -205,6 +215,24 @@ func (f *fakeFactory) delayFor(shape string) time.Duration {
 	return f.delays[shape]
 }
 
+// answerManifestAfter makes every subsequent manifest request for repo wait d
+// before it is served, abandoning the wait when the inbound request's context is
+// cancelled -- so a resolution that gives up on a candidate releases it.
+//
+// Per repository rather than per shape; see manifestDelays for why the shape
+// key cannot stand in for this one.
+func (f *fakeFactory) answerManifestAfter(repo string, d time.Duration) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.manifestDelays[repo] = d
+}
+
+func (f *fakeFactory) manifestDelayFor(repo string) time.Duration {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.manifestDelays[repo]
+}
+
 // dropTheConnectionFor closes the connection, with no response, on a manifest
 // request for repo. The resolver reads that as "this candidate was never ruled
 // out" rather than as a refusal, which is the whole of the provisional branch.
@@ -291,6 +319,16 @@ func (f *fakeFactory) serve(w http.ResponseWriter, r *http.Request) {
 
 	case (r.Method == http.MethodGet || r.Method == http.MethodHead) && len(parts) == 5 &&
 		parts[0] == "v2" && parts[3] == "manifests":
+		// The per-repository latency, before any other manifest knob: it is a
+		// property of the name, not of the answer, so it applies whatever this
+		// request goes on to be answered with.
+		if d := f.manifestDelayFor(parts[1]); d > 0 {
+			select {
+			case <-time.After(d):
+			case <-r.Context().Done():
+				return
+			}
+		}
 		status, hijack := f.manifestBehaviour()
 		if hijack != "" && parts[1] == hijack {
 			// No status, no body, no clean close: the client sees a transport
@@ -2521,12 +2559,17 @@ func TestProbeBudgetIsNotTheManifestBudget(t *testing.T) {
 
 // ceilingJSONBudget is the JSON budget's stand-in for the two ceiling tests.
 //
-// It is larger than scaledJSONBudget on purpose. The assets route spends its
-// budgets in series -- two manifest budgets against a ceiling of two plus five
-// seconds -- so the margin between the two is 8% of the ceiling at every scale,
-// and 8% of a small number is a number that loses to a loaded machine. At this
-// scale the margin is a hundred milliseconds, which scheduling jitter does not
-// reach and which still leaves both tests inside two seconds.
+// It is larger than scaledJSONBudget on purpose. The assets route asks its
+// installer candidates concurrently, so its worst case is one manifest budget
+// against a ceiling of one plus five seconds -- a margin of 14% of the ceiling
+// at every scale, and 14% of a small number is a number that loses to a loaded
+// machine. At this scale the margin is a hundred milliseconds, which scheduling
+// jitter does not reach and which still leaves both tests inside two seconds.
+//
+// The percentage moved when the walk became concurrent (the serial shape was
+// two manifest budgets against two plus five, an 8% margin) and the hundred
+// milliseconds did not, because the ceiling shrank with the worst case. Recheck
+// this if either AssetsRouteBudget or ManifestTimeout moves without the other.
 const ceilingJSONBudget = 600 * time.Millisecond
 
 // neverAnswers is longer than any test will wait. The fake abandons it as soon
@@ -2614,9 +2657,105 @@ func TestAssetsRouteAnswersInsideItsCeiling(t *testing.T) {
 	}
 	if elapsed >= ceiling {
 		t.Errorf("the route answered after %s, at or past the scaled equivalent of "+
-			"AssetsRouteBudget (%s at this scale, %s in production). Both candidates are "+
-			"walked in series at this wave, so this is the 60.000s composition that met a "+
-			"60s response budget, scaled", elapsed, ceiling, handlers.AssetsRouteBudget)
+			"AssetsRouteBudget (%s at this scale, %s in production). Every candidate is "+
+			"asked at once, so a registry that answers none of them costs one manifest "+
+			"budget and not one per candidate; a route that outruns its own ceiling has a "+
+			"worst case equal to whatever its callees happen to do",
+			elapsed, ceiling, handlers.AssetsRouteBudget)
 	}
 	t.Logf("GET /api/v1/schematics/{id}/assets answered in %s against a ceiling of %s", elapsed, ceiling)
+}
+
+// TestAssetsRouteResolvesPastASilentCandidateInOneBudget is the route-level
+// measurement of the concurrency change, and it is the one that would have gone
+// red every round the serial walk survived.
+//
+// The preferred candidate never answers and is cut by its own manifest budget;
+// the legacy one answers after half of that budget. Two things are asserted,
+// and they are two halves of one claim -- that the speed-up came from asking at
+// once and not from asking less:
+//
+//   - the elapsed time is below 1.5 manifest budgets rather than below two of
+//     them. This is the ratchet: a serial walk costs the silent candidate's whole
+//     budget and then the legacy candidate's answer on top of it, which is past
+//     the bound by construction. Asserting elapsed time and not only status and
+//     body is the whole point -- a status-and-body assertion passes just as well
+//     against the serial walk, which is how the serial walk survived three
+//     rounds.
+//   - the response still carries the legacy installer reference and the
+//     WarningInstallerRepoFallbackUnverified provenance. That is G-02-3's
+//     closure, unchanged, and here it is the other half of the claim: the
+//     speed-up came from asking at once and not from asking less. A resolution
+//     that got faster by dropping a candidate would satisfy the elapsed bound and
+//     fail this.
+//
+// Note which deadline is and is not in play. Only the three *client* budgets are
+// scaled here; AssetsRouteBudget is applied by the handler at its production
+// value, so the route deadline never binds in this test and the elapsed time
+// measures the resolution itself rather than the ceiling over it.
+// TestAssetsRouteAnswersInsideItsCeiling is where the ceiling is the subject.
+func TestAssetsRouteResolvesPastASilentCandidateInOneBudget(t *testing.T) {
+	s, f := ceilingServer(t)
+	c := operator(t, s)
+	id := mustCreate(t, c, "assets-past-a-silent-candidate", []string{"siderolabs/intel-ucode"})
+
+	manifestBudget := scaleFrom(ceilingJSONBudget, imagefactory.ManifestTimeout)
+	preferred := string(imagefactory.PlatformMetal) + "-installer"
+
+	// The preferred candidate is silent: its request runs into its own manifest
+	// budget. The legacy one answers inside that budget, so a serial walk costs one
+	// whole budget plus this latency and a concurrent fan-out costs the budget
+	// alone.
+	//
+	// Three quarters of a budget, chosen from both ends. It has to be large enough
+	// that the serial sum (1.75 budgets) clears the 1.5-budget bound by a margin
+	// scheduling jitter cannot cross, and small enough that this candidate
+	// genuinely answers rather than running into its own budget -- which would make
+	// the case about two silent candidates instead of one.
+	f.answerManifestAfter(preferred, neverAnswers)
+	f.answerManifestAfter("installer", manifestBudget*3/4)
+
+	start := time.Now()
+	resp, raw := c.do(http.MethodGet, "/api/v1/schematics/"+id+"/assets?arch=amd64", nil)
+	elapsed := time.Since(start)
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("got %d, want 200 (body: %s)", resp.StatusCode, raw)
+	}
+	var got assetsBody
+	decodeInto(t, raw, &got)
+
+	if got.InstallerError != nil {
+		t.Fatalf("installer_error = %+v after %s, although the legacy candidate answers "+
+			"inside its own manifest budget (%s). A candidate that answers must be heard: "+
+			"getting faster by not asking is not the change this test is about",
+			got.InstallerError, elapsed, manifestBudget)
+	}
+	if got.Installer == nil {
+		t.Fatalf("no installer reference and no installer_error (body: %s)", raw)
+	}
+	if !strings.Contains(*got.Installer, "/installer/") {
+		t.Errorf("installer = %q, want the legacy repository -- the preferred candidate never "+
+			"answered", *got.Installer)
+	}
+
+	// The provenance G-02-3 established, unchanged: a name reached past a
+	// candidate that was never ruled out says so on every answer that carries it.
+	var codes []string
+	for _, w := range got.Warnings {
+		codes = append(codes, w.Code)
+	}
+	if !slices.Contains(codes, imagefactory.WarningInstallerRepoFallbackUnverified) {
+		t.Errorf("warnings = %v, want %q. The timing improvement must not come from dropping "+
+			"a candidate: the preferred name was unheard rather than ruled out, and the answer "+
+			"has to keep saying so", codes, imagefactory.WarningInstallerRepoFallbackUnverified)
+	}
+
+	if limit := manifestBudget * 3 / 2; elapsed >= limit {
+		t.Errorf("the resolution took %s, want under %s -- one manifest budget (%s) plus half "+
+			"of another. A serial walk costs one budget for the silent candidate and then the "+
+			"legacy candidate's own answer on top of it", elapsed, limit, manifestBudget)
+	}
+	t.Logf("assets resolved past a silent candidate in %s; one manifest budget is %s and a "+
+		"serial walk would cost %s", elapsed, manifestBudget, manifestBudget+manifestBudget*3/4)
 }

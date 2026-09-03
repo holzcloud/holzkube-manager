@@ -798,6 +798,23 @@ against that divergence (FACT-04).**
   old behaviour discarded had never depended on the registry in the first place.
   A client that treated a `502` from this route as "no assets" should treat a
   `200` with a null `installer` the same way for the installer *alone*.
+- **How long the route may take, and who enforces it.** The installer resolution
+  is the one part of this route that leaves the process. Every candidate
+  repository name is asked at the same time rather than one after the other, and
+  the whole resolution runs under a **35-second server-side deadline**. A request
+  that does not get an answer inside it is cut by holzkube-manager, not by the
+  client and not by the socket: the response is a `200` carrying the four
+  locally assembled references, `"installer": null` and an `installer_error` with
+  `upstream.factory-unavailable` — outcome 4 above, on the table just above this
+  list.
+
+  Read that number as a **budget, not a prediction**. It is what the server will
+  spend before it gives up; it is not a claim about how long `factory.talos.dev`
+  takes, which is somebody else's build farm and is known to throttle. A typical
+  cold resolution is well inside it and a warm one is served from an in-process
+  cache without touching the registry at all. What the number guarantees is the
+  other end: this route will answer, with a body, rather than holding a
+  connection open until something else times out.
 
 ### Upstream failures
 

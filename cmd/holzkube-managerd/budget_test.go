@@ -182,21 +182,28 @@ var routeBudgets = []routeBudget{
 	{
 		route: "GET /api/v1/schematics/{id}/assets",
 		calls: []upstreamCall{
-			{name: "resolveInstallerRepo: platform-prefixed candidate manifest GET", class: manifestCall},
-			{name: "resolveInstallerRepo: legacy candidate manifest GET", class: manifestCall},
+			{name: "resolveInstallerRepo: slowest concurrent candidate manifest GET", class: manifestCall},
 		},
 		routeDeadline: handlers.AssetsRouteBudget,
 		verdict:       withinBudget,
 		clipping:      uncut,
-		why: "schematicAssets resolves the installer reference, and a cold resolveInstallerRepo " +
-			"walks both candidate repository names serially -- two manifest budgets, not two " +
-			"JSON ones. The four other references are assembled locally and cost nothing. The " +
-			"bounded re-question added by plan 02-12 is one call on the warm path, not an " +
-			"additional call on the cold path, so it does not lengthen this list. Measured " +
-			"before the ceiling existed: status=502 duration=1m0.002907792s, which is the " +
-			"60.000s sum arriving against a 60s writeTimeout. The composition is computed " +
-			"here now rather than asserted: AssetsRouteBudget is the worst case and the sum " +
-			"only says whether it clips.",
+		why: "schematicAssets resolves the installer reference, and resolveInstallerRepo asks " +
+			"every candidate repository name at the same time rather than one after the other " +
+			"-- so the route's worst case is the slowest single candidate, one manifest " +
+			"budget, and not the sum of the candidates. Check that against the function: it " +
+			"issues one request per candidate up front and only then walks the answers in " +
+			"declared order, so the number of candidates does not enter this row's arithmetic. " +
+			"The count is one for that reason and not because there is one candidate -- " +
+			"installerCandidates still returns two. A concurrent fan-out is exactly the shape " +
+			"a derived count would miscount, which is why this list is declared by hand and " +
+			"why whoever changes the handler has to come back and revisit this number. The " +
+			"four other references are assembled locally and cost nothing. The bounded " +
+			"re-question added by plan 02-12 is one call on the warm path, not an additional " +
+			"call on the cold path, so it does not lengthen this list. Measured against the " +
+			"serial walk before the ceiling existed: status=502 duration=1m0.002907792s, the " +
+			"60.000s serial sum arriving against a 60s writeTimeout -- history, not the " +
+			"current composition. AssetsRouteBudget is the worst case and the sum only says " +
+			"whether it clips.",
 	},
 	{
 		route: "POST /api/v1/schematics",
