@@ -132,12 +132,141 @@ func TestLiveFactory(t *testing.T) {
 	})
 
 	t.Run("a good schematic still builds", func(t *testing.T) {
-		if err := client.ProbeBuildable(ctx, consoleSchematicID, catalogVersion, imagefactory.ArchAMD64); err != nil {
+		// consoleSchematicID is warm by construction: every previous run of
+		// this file built it, and the Factory keeps the artefact. So this
+		// subtest measures the *warm* path, and a warm measurement cannot
+		// validate a budget sized for the cold one -- which is why the cold
+		// subtest below exists rather than this one being widened. What the
+		// bound here catches is the warm path itself drifting far enough to
+		// threaten the constant, which would be a change in what the Factory
+		// caches rather than in how long it builds.
+		start := time.Now()
+		err := client.ProbeBuildable(ctx, consoleSchematicID, catalogVersion, imagefactory.ArchAMD64)
+		elapsed := time.Since(start)
+
+		// Printed on pass as well as on failure. A number nobody records is a
+		// number nobody can widen a sample with, and widening the sample is the
+		// only honest way ProbeTimeout ever moves.
+		t.Logf("warm ProbeBuildable on %s at %s: %s (err = %v)",
+			consoleSchematicID, catalogVersion, elapsed, err)
+
+		if err != nil {
 			t.Errorf("ProbeBuildable on the recorded schematic: %v", err)
+			return
 		}
+		assertSatisfiesProbeDerivation(t, "the warm probe", elapsed)
 	})
 
+	coldProbeSubtest(ctx, t, client)
+
 	installerNameMatrixSubtests(ctx, t, client)
+}
+
+// probeDerivation re-applies the rule ProbeTimeout's doc comment states -- a
+// budget is at least twice the slowest observed cold response, rounded up to
+// the next thirty seconds -- to one observation.
+//
+// It is computed from the constant's inputs and never from the constant, so a
+// new observation arrives as a changed verdict rather than as nothing. Restating
+// 90 here would make this test agree with a number instead of with a rule.
+func probeDerivation(observed time.Duration) time.Duration {
+	const step = 30 * time.Second
+	doubled := 2 * observed
+	rounded := (doubled + step - 1) / step * step
+	return rounded
+}
+
+// assertSatisfiesProbeDerivation fails when the shipped constant no longer
+// satisfies its own derivation against what this run measured.
+//
+// The instruction in the failure message is deliberate and is the point of the
+// whole subtest: the response to a red here is to widen the recorded sample in
+// ProbeTimeout's comment and re-derive the constant, never to edit the
+// assertion. An assertion edited to fit an observation is the defect this round
+// exists to close, one level up.
+func assertSatisfiesProbeDerivation(t *testing.T, what string, observed time.Duration) {
+	t.Helper()
+
+	required := probeDerivation(observed)
+	if required > imagefactory.ProbeTimeout {
+		t.Errorf("%s took %s. The derivation rule in ProbeTimeout's doc comment -- at least "+
+			"twice the slowest observed cold response, rounded up to the next thirty seconds "+
+			"-- applied to that observation yields %s, and the shipped constant is %s.\n"+
+			"Widen the sample recorded in that comment with this observation and re-derive "+
+			"the constant. Do not edit this assertion: a bound adjusted until it agrees with "+
+			"what was measured stops being a bound.",
+			what, observed, required, imagefactory.ProbeTimeout)
+	}
+}
+
+// coldProbeSubtest measures a probe the Factory has demonstrably never served.
+//
+// It is the observation the shipped ProbeTimeout is actually sized against, and
+// it is the one this file never made: every other subtest here probes
+// consoleSchematicID, which is warm by construction. The five measurements
+// ProbeTimeout rests on were taken by hand, outside any test, and were
+// therefore not repeatable and not recorded by anything that runs.
+//
+// The schematic is new on every run by construction: one extra kernel argument
+// carries a nonce derived from the current time, so the canonical document --
+// and therefore the id, which is its hash -- differs between two runs in the
+// same minute.
+//
+// One cold probe per run, and no loop. Each one makes the Factory build a
+// ~335MB image, on somebody else's infrastructure, for a schematic nobody will
+// ever boot. The five recorded observations plus one per run is how the sample
+// widens honestly; a loop here would be this project deciding that its own
+// confidence is worth more than the upstream's capacity.
+func coldProbeSubtest(ctx context.Context, t *testing.T, client *imagefactory.Client) {
+	t.Helper()
+
+	t.Run("a cold schematic builds inside the probe budget", func(t *testing.T) {
+		cold := goodSchematic()
+		// Nanoseconds, not seconds: two runs in the same minute -- or the same
+		// second -- must not produce the same id, or the second one measures
+		// the first one's artefact and reports a warm number as a cold one.
+		cold.Customization.ExtraKernelArgs = append(
+			slices.Clone(cold.Customization.ExtraKernelArgs),
+			fmt.Sprintf("holzkube.cold-probe-nonce=%d", time.Now().UnixNano()))
+
+		created, err := client.CreateSchematic(ctx, cold)
+		if errors.Is(err, imagefactory.ErrUpstreamUnavailable) {
+			t.Skipf("NOT OBSERVED: creating the cold schematic did not reach the Factory, so "+
+				"no cold probe was measured in this run. factory.talos.dev throttles "+
+				"(.planning/WINDOWS.md entry 5) and a throttled run measured nothing: %v", err)
+		}
+		if err != nil {
+			t.Fatalf("CreateSchematic for the cold probe: %v", err)
+		}
+		t.Logf("cold schematic id = %s (kernel args: %v)", created.ID, cold.Customization.ExtraKernelArgs)
+
+		start := time.Now()
+		probeErr := client.ProbeBuildable(ctx, created.ID, catalogVersion, imagefactory.ArchAMD64)
+		elapsed := time.Since(start)
+
+		t.Logf("cold ProbeBuildable on %s at %s: %s (err = %v)",
+			created.ID, catalogVersion, elapsed, probeErr)
+
+		switch {
+		case errors.Is(probeErr, imagefactory.ErrUpstreamUnavailable):
+			// A run that measured nothing is not a pass. This is the rule
+			// installerNameMatrixSubtests already applies in this file, and it
+			// applies here for the same reason: the elapsed time above is a
+			// lower bound on a probe that never completed, so deriving a budget
+			// from it would derive one from a number that means nothing.
+			t.Skipf("NOT OBSERVED: the cold probe did not complete after %s. factory.talos.dev "+
+				"throttles (.planning/WINDOWS.md entry 5), and a throttled run has measured "+
+				"nothing rather than measured a fast answer: %v", elapsed, probeErr)
+		case probeErr != nil:
+			// A genuinely new schematic with a known-good extension set is
+			// supposed to build. ErrSchematicNotBuildable here would be the
+			// Factory refusing a customisation it has always accepted.
+			t.Fatalf("the cold schematic %s did not build (a behaviour change worth "+
+				"investigating, not a bug in this test): %v", created.ID, probeErr)
+		}
+
+		assertSatisfiesProbeDerivation(t, "the cold probe", elapsed)
+	})
 }
 
 // The two repository names installerCandidates asks about first for a metal
