@@ -174,6 +174,21 @@ type fakeFactory struct {
 	// state FACT-06 exists to detect: a well-formed 201 carrying an id the
 	// local canonical serialiser did not predict.
 	forgedID string
+
+	// delays is an artificial latency per coarse request shape --
+	// "HEAD /image", "GET /v2", "POST /schematics" -- deliberately keyed more
+	// coarsely than counts, which keys manifests per repository and per
+	// version. A budget governs a workload, not a repository name, so the knob
+	// that exercises a budget is keyed by workload.
+	//
+	// It is what makes a budget testable at all: every other knob here answers
+	// instantly, so a client bounded by the wrong timeout behaves identically
+	// to one bounded by the right one. The comment on unreachable above notes
+	// that the measured G-02-3 incident -- a client timeout rather than a
+	// hijacked connection -- was not reproduced because it "would need a fake
+	// that sleeps past the client timeout, which is a 30s test". With three
+	// budgets a caller can set, it is a sub-second one.
+	delays map[string]time.Duration
 }
 
 func newFakeFactory(t *testing.T) *fakeFactory {
@@ -185,6 +200,7 @@ func newFakeFactory(t *testing.T) *fakeFactory {
 		known:           map[string]struct{}{},
 		unreachable:     map[string]bool{},
 		silentRemaining: map[string]int{},
+		delays:          map[string]time.Duration{},
 		versionsJSON:    readTestdata(t, "versions.json"),
 		catalogJSON:     readTestdata(t, "extensions-"+catalogVersion+".json"),
 	}
@@ -281,6 +297,22 @@ func (f *fakeFactory) setRepoSilentForNext(repo string, n int, delay time.Durati
 	f.silentDelay = delay
 }
 
+// answerAfter makes every subsequent request of this coarse shape wait d before
+// it is served, and abandons the wait when the inbound request's context is
+// cancelled -- so a client whose budget expires actually gives up rather than
+// the fake sleeping through the expiry.
+func (f *fakeFactory) answerAfter(shape string, d time.Duration) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.delays[shape] = d
+}
+
+func (f *fakeFactory) delayFor(shape string) time.Duration {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.delays[shape]
+}
+
 // forgeID makes every subsequent POST /schematics answer with id rather than
 // with the hash of the document it was sent.
 func (f *fakeFactory) forgeID(id string) {
@@ -291,6 +323,19 @@ func (f *fakeFactory) forgeID(id string) {
 
 func (f *fakeFactory) serve(w http.ResponseWriter, r *http.Request) {
 	parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
+
+	// Before the switch and before any per-branch recording: a delayed request
+	// is still a request that was made, but the recording lives inside each
+	// branch here, so the abandoned case records nothing. That is the honest
+	// answer for this fake -- its counters are per repository and per version,
+	// and a request the client walked away from was never answered under either.
+	if d := f.delayFor(r.Method + " /" + parts[0]); d > 0 {
+		select {
+		case <-time.After(d):
+		case <-r.Context().Done():
+			return
+		}
+	}
 
 	switch {
 	case r.Method == http.MethodGet && r.URL.Path == "/versions":
