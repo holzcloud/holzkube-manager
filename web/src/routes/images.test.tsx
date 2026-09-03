@@ -10,7 +10,13 @@ import {
 } from '@/api'
 import { CODE_UPSTREAM_FACTORY_REJECTED, CODE_UPSTREAM_FACTORY_UNAVAILABLE } from '@/lib/problem'
 import { problemType } from '@/test/problem-fixtures'
-import { ARCH_STORAGE_KEY, hasControlCharacter, ImagesView } from './images'
+import {
+  ARCH_STORAGE_KEY,
+  ASSETS_WAIT_SECONDS,
+  CREATE_WAIT_SECONDS,
+  hasControlCharacter,
+  ImagesView,
+} from './images'
 
 /**
  * FACT-01, FACT-04 and FACT-05 as executed tests. The client is faked at the
@@ -109,6 +115,15 @@ interface StubOptions {
    * server does for a Destructive route. Nothing in this file grants it.
    */
   sudoRequired?: boolean
+  /**
+   * Requests whose path starts with `path` are held until `release` resolves.
+   *
+   * It exists for the two waiting states. Every other case here answers
+   * instantly, which is right for them and makes a pending state
+   * unobservable -- the screen passes through it faster than a query can be
+   * asked about it.
+   */
+  hold?: { path: string; method?: string; release: Promise<void> }
 }
 
 /**
@@ -169,6 +184,14 @@ function stubFactory(options: StubOptions = {}) {
         status,
         headers: { 'Content-Type': 'application/json' },
       })
+
+    if (
+      options.hold !== undefined &&
+      url.pathname.startsWith(options.hold.path) &&
+      method === (options.hold.method ?? 'GET')
+    ) {
+      await options.hold.release
+    }
 
     if (options.fail !== undefined && url.pathname.startsWith(options.fail.path)) {
       return new Response(JSON.stringify(options.fail.body), {
@@ -1577,5 +1600,78 @@ describe('ImagesView — the saved schematics', () => {
 
     expect(listFetchCount(fetchMock)).toBe(before)
     expect(screen.getByRole('button', { name: `Schematic ${USABLE.name}` })).toBeInTheDocument()
+  })
+})
+
+/**
+ * The two places an operator waits on an upstream, and the ceiling each of them
+ * states.
+ *
+ * The number in each sentence is the route budget the server actually enforces,
+ * and internal/httpapi/handlers/budget_drift_test.go is what holds the two
+ * equal. These tests assert the other half: that the sentence is rendered while
+ * the request is in flight and is gone when it is not. A number that is correct
+ * and never shown is not a ceiling anybody has been told about.
+ *
+ * What is deliberately NOT asserted, and cannot be, is progress. There is no
+ * elapsed time, no current sub-step and no expected duration here --
+ * .planning/research/PITFALLS.md:164 asks for all three and this round does not
+ * build them; see the comment beside the two constants in images.tsx.
+ */
+describe('ImagesView — the two waits state their ceiling', () => {
+  beforeEach(() => {
+    vi.stubGlobal('scrollTo', vi.fn())
+  })
+
+  it('states the create ceiling while the create is in flight and not before', async () => {
+    let release = (): void => undefined
+    const held = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    stubFactory({ hold: { path: '/api/v1/schematics', method: 'POST', release: held } })
+    const user = userEvent.setup()
+
+    renderImages()
+    await catalogLoaded()
+    await user.type(screen.getByLabelText('Name'), 'workers')
+
+    // Nothing is claimed before there is anything to wait for.
+    expect(screen.queryByText(/may take up to/i)).not.toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: 'Create schematic' }))
+
+    const stated = await screen.findByText(/may take up to/i)
+    expect(stated).toHaveTextContent(`${CREATE_WAIT_SECONDS} seconds`)
+    // A ceiling, not a prediction: the wording says what the server may spend,
+    // never what it is expected to spend.
+    expect(stated.textContent ?? '').not.toMatch(/takes about|estimated|roughly/i)
+
+    release()
+    await waitFor(() => expect(screen.queryByText(/may take up to/i)).not.toBeInTheDocument())
+  })
+
+  it('states the assets ceiling while the resolution is in flight and not after', async () => {
+    let release = (): void => undefined
+    const held = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    stubFactory({
+      saved: [USABLE],
+      hold: { path: `/api/v1/schematics/${USABLE.id}/assets`, release: held },
+    })
+    const user = userEvent.setup()
+
+    renderImages()
+    const detail = await openDetail(user, USABLE)
+
+    const stated = await detail.findByText(/may take up to/i)
+    expect(stated).toHaveTextContent(`${ASSETS_WAIT_SECONDS} seconds`)
+    expect(stated.textContent ?? '').not.toMatch(/takes about|estimated|roughly/i)
+
+    release()
+    // The references arrive and the sentence goes with them: a ceiling that
+    // outlives the wait it bounds is a ceiling that means nothing.
+    expect(await detail.findByLabelText('Installer reference')).toBeInTheDocument()
+    await waitFor(() => expect(detail.queryByText(/may take up to/i)).not.toBeInTheDocument())
   })
 })
