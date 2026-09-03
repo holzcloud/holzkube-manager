@@ -125,3 +125,81 @@ These are unconditional and should be planned regardless of the choice above:
 - The test fakes are zero-latency (`schematics_test.go` `fakeFactory`), which makes every failure
   above structurally unrepresentable. `internal/imagefactory/live_test.go:96` already pays the cold
   cost but asserts only `err == nil` and never bounds elapsed time.
+
+---
+
+# Implementation record
+
+*Written after the ratification, on 2026-09-03, by plan 02-24. Everything above this
+heading is the decision as the user approved it and is unchanged: the first 7767 bytes of
+this file still hash to
+`24bc3e11f8c65a9bf30f933cd7885de323715be60a840b32dfaf7cb1f156ec31`. This section is an
+append and nothing else.*
+
+## Which plan implemented which part
+
+| Part | Plan |
+|---|---|
+| The three budget constants, split off `DefaultTimeout`, applied per call rather than on `http.Client` | 02-22 |
+| The two route deadlines and the composition guard over them | 02-22 |
+| `writeTimeout` raised and re-argued | 02-22 |
+| `TestLiveFactory` bounding elapsed time, measuring a cold probe, re-applying the derivation rule | 02-22 |
+| `resolveInstallerRepo` asking every candidate at once, and `AssetsRouteBudget` tightened with it | 02-23 |
+| The browser's own request ceiling and the stated waiting sentences | 02-23 |
+| The `409` verdict refresh, the narrowed statements, the badge's recovery copy | 02-24 |
+
+## The constants as shipped
+
+| Constant | Value | Where |
+|---|---|---|
+| `imagefactory.DefaultTimeout` | 30s | the three JSON endpoints |
+| `imagefactory.ProbeTimeout` | 90s | the ISO probe (`HEAD /image/...`) |
+| `imagefactory.ManifestTimeout` | 30s | one registry manifest `GET` |
+| `handlers.CreateRouteBudget` | `ProbeTimeout + DefaultTimeout` = 120s | `POST /api/v1/schematics` |
+| `handlers.AssetsRouteBudget` | `ManifestTimeout + 5s` = 35s | `GET /api/v1/schematics/{id}/assets` |
+| `main.writeTimeout` | 130s (was 60s) | the response budget both route ceilings sit inside |
+
+`cmd/holzkube-managerd/budget_test.go` computes the composition from those constants and
+declares both Factory routes `withinBudget` with an empty `deferredTo`.
+
+## The `409` refresh, and its two conditions
+
+The `store.ErrConflict` branch of `createSchematic` now writes the probe verdict the
+conflicting request has already computed — `Usable`, `ProbedAt` and `ProbeReason`, and no
+other field — under a compare-and-swap on the revision it read. It is declined unless
+**both** of these hold:
+
+1. **the fresh probe answered** — the predicate that stamps `ProbedAt`, which is `nil` or
+   `ErrSchematicNotBuildable` and nothing else. Writing a silent probe's absence over an
+   existing verdict would replace an answer with an absence;
+2. **the stored record's `Arch` equals the architecture the fresh probe asked about** — the
+   verdict is architecture-scoped and this record's identity cannot vary by architecture, so
+   the wrong-architecture write would be undetectable afterwards. A record written before
+   `Arch` existed carries an empty one and is therefore never refreshed.
+
+A refresh that loses the compare-and-swap, or whose record was deleted between the read and
+the write, abandons the refresh and answers the plain conflict. It never retries and never
+recreates.
+
+The status code is still `409`, the body shape is unchanged, and no route was added — the
+four things that separate this from Option 1.
+
+## G-02-9 is not closed
+
+Restated here rather than assumed, because this is the claim the phase has spent three
+rounds correcting. **G-02-9 remains an open window**, exactly as the recommendation above
+asks. The refresh is a non-destructive recovery; it is not a re-probe route, it is not
+discoverable from the saved list, it is surfaced to the operator as an error, and it is
+declined in the two cases above. A probe that times out again leaves the record exactly as
+it was.
+
+It is carried in `.planning/WINDOWS.md` as **entry 58**. The structural answer is Option 1
+above, which was not taken.
+
+## The one unconditional item that was already discharged
+
+The badge no longer claims the probe "did not run" when it ran and timed out. Plan 02-12
+closed that; the copy reads *Not verified — the build probe has no verdict* with a muted
+line stating the disjunction. Plan 02-24 added the recovery sentence to that same line —
+naming what re-submitting does and that its answer is still a conflict, and promising no
+verdict, because the re-run probe can time out exactly as the first one did.
