@@ -40,7 +40,7 @@ import { rootRoute } from '@/routes/__root'
 function LoginPage() {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
-  const { reason } = loginRoute.useSearch()
+  const { reason, sso_error: ssoError } = loginRoute.useSearch()
   const status = useSystemStatus()
 
   // Until the answer arrives, offer the password form: it is what every
@@ -108,6 +108,12 @@ function LoginPage() {
           <CardDescription>{reasonText(reason)}</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
+          {ssoErrorMessage(ssoError) !== '' && (
+            <p role="alert" className="text-sm text-destructive">
+              {ssoErrorMessage(ssoError)}
+            </p>
+          )}
+
           {ssoAvailable && (
             <div className="space-y-2">
               <Button
@@ -205,6 +211,41 @@ function LoginPage() {
 
 export type LoginReason = 'required' | 'expired' | 'signed-out' | undefined
 
+/**
+ * Why a single sign-on attempt ended back here.
+ *
+ * The server sends a stable code rather than a message: those routes are
+ * browser navigations, and a problem document rendered as raw JSON in the
+ * address bar is where this flow used to leave people standing. The wording
+ * lives here, where it can name the next step.
+ */
+const ssoErrorText: Record<string, string> = {
+  'bind-host':
+    'This account is not linked to single sign-on yet. Linking has to happen from the local network — ' +
+    'sign in there once, and this address will work afterwards.',
+  'setup-required':
+    'This instance has no operator account yet. It has to be created from the local network.',
+  'other-identity': 'This instance is linked to a different account at the identity provider.',
+  denied:
+    'The identity provider refused the sign-in. Check that your account is assigned to this application.',
+  'provider-unreachable':
+    'The identity provider could not be reached. If it is down, the local account still works on the local network.',
+  'no-flow': 'That sign-in took too long or was started in another browser. Try again.',
+  'state-mismatch': 'That sign-in could not be matched to the one this browser started. Try again.',
+  'no-code': 'The identity provider returned no authorisation code.',
+  'exchange-failed': 'The sign-in could not be completed. The server log has the detail.',
+}
+
+function ssoErrorMessage(code: string | undefined): string {
+  if (code === undefined) {
+    return ''
+  }
+  // An unknown code still says something: a newer server may send one this
+  // page has not learned yet, and silence would look like the click did
+  // nothing at all.
+  return ssoErrorText[code] ?? 'The sign-in did not complete.'
+}
+
 function reasonText(reason: LoginReason): string {
   switch (reason) {
     case 'expired':
@@ -219,11 +260,20 @@ function reasonText(reason: LoginReason): string {
 export const loginRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/login',
-  validateSearch: (search: Record<string, unknown>): { reason?: LoginReason } => {
+  validateSearch: (
+    search: Record<string, unknown>,
+  ): { reason?: LoginReason; sso_error?: string } => {
     const reason = search.reason
-    return reason === 'required' || reason === 'expired' || reason === 'signed-out'
-      ? { reason }
-      : {}
+    const out: { reason?: LoginReason; sso_error?: string } =
+      reason === 'required' || reason === 'expired' || reason === 'signed-out' ? { reason } : {}
+
+    // Kept as a bare string rather than a union: the server owns this
+    // vocabulary, and a page that dropped codes it did not recognise would
+    // answer a newer server with silence.
+    if (typeof search.sso_error === 'string' && search.sso_error !== '') {
+      out.sso_error = search.sso_error
+    }
+    return out
   },
   component: LoginPage,
 })

@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/holzcloud/holzkube-manager/internal/auth/oidc"
 	"github.com/holzcloud/holzkube-manager/internal/httpapi"
 	"github.com/holzcloud/holzkube-manager/internal/talos"
 )
@@ -239,5 +240,106 @@ func TestOIDCRoutesAreAbsentWithoutAProvider(t *testing.T) {
 		if resp.StatusCode != http.StatusNotFound {
 			t.Errorf("GET %s = %d, want 404 with no provider configured", path, resp.StatusCode)
 		}
+	}
+}
+
+// withProvider configures an identity provider without contacting one.
+//
+// oidc.New performs no network I/O -- discovery is deliberately deferred to
+// first use -- so a provider built from a made-up issuer is enough to register
+// the routes and to exercise every check that runs before the browser would be
+// sent anywhere.
+func withProvider(t *testing.T) depOption {
+	t.Helper()
+	p, err := oidc.New("https://idp.example.com/application/o/holzkube-manager/", "holzkube-manager", "s3cret")
+	if err != nil {
+		t.Fatalf("oidc.New: %v", err)
+	}
+	return func(d *httpapi.Deps) { d.OIDC = p }
+}
+
+// A sign-in that cannot succeed is refused before the browser leaves.
+//
+// On an SSO-only host the first binding of an identity is refused, so offering
+// the button, sending the operator through the provider and only then saying
+// "this account is not linked" wastes a full round trip that was doomed when
+// the page rendered. The refusal is a redirect back to the sign-in page rather
+// than a problem document, because these routes are navigations: JSON in the
+// address bar is exactly where this flow used to leave people standing.
+func TestSignInIsRefusedBeforeLeavingWhenTheAccountIsNotLinked(t *testing.T) {
+	t.Parallel()
+
+	s := newServerWith(t, 5*time.Minute, nil, talos.Mode{}, withSSOOnly(publicHost), withProvider(t))
+	c := s.newClient(t)
+	c.setup() // creates the account; it has no identity binding
+
+	resp, _ := c.do(http.MethodGet, "/api/v1/auth/oidc/start", nil, c.asHost(publicHost))
+	if resp.StatusCode != http.StatusFound {
+		t.Fatalf("start on the public host = %d, want 302 back to the sign-in page", resp.StatusCode)
+	}
+
+	loc, err := resp.Location()
+	if err != nil {
+		t.Fatalf("no Location header: %v", err)
+	}
+	if loc.Path != "/login" {
+		t.Errorf("redirected to %q, want /login", loc.Path)
+	}
+	if got := loc.Query().Get("sso_error"); got != "bind-host" {
+		t.Errorf("sso_error = %q, want bind-host", got)
+	}
+
+	// The provider is a fiction, so anything that reached discovery would fail
+	// noisily. Nothing did: the refusal happened first.
+	if loc.Host == "idp.example.com" {
+		t.Error("the browser was sent to the provider anyway")
+	}
+}
+
+// On an address that still accepts the password, the same request is not
+// refused early -- there is nothing to refuse, because binding is allowed
+// there. It fails later, at discovery, which is the fiction in this harness.
+func TestSignInIsNotRefusedEarlyOnALinkableHost(t *testing.T) {
+	t.Parallel()
+
+	s := newServerWith(t, 5*time.Minute, nil, talos.Mode{}, withSSOOnly(publicHost), withProvider(t))
+	c := s.newClient(t)
+	c.setup()
+
+	resp, body := c.do(http.MethodGet, "/api/v1/auth/oidc/start", nil, c.asHost(lanHost))
+	if resp.StatusCode == http.StatusFound {
+		if loc, err := resp.Location(); err == nil && loc.Query().Get("sso_error") == "bind-host" {
+			t.Fatal("the LAN address refused the binding it is supposed to allow")
+		}
+	}
+	// What it must not be is a silent success: the made-up issuer cannot be
+	// discovered, so this has to surface as the provider being unreachable.
+	if resp.StatusCode == http.StatusFound {
+		loc, _ := resp.Location()
+		if loc != nil && loc.Query().Get("sso_error") != "provider-unreachable" {
+			t.Errorf("unexpected redirect %q (body %s)", loc, body)
+		}
+	}
+}
+
+// Before setup has run, an SSO-only address has nothing to offer at all: the
+// wizard is refused there too, so there is no account an identity could bind
+// to.
+func TestSignInBeforeSetupOnSSOOnlyHostSaysSetupIsRequired(t *testing.T) {
+	t.Parallel()
+
+	s := newServerWith(t, 5*time.Minute, nil, talos.Mode{}, withSSOOnly(publicHost), withProvider(t))
+	c := s.newClient(t)
+
+	resp, _ := c.do(http.MethodGet, "/api/v1/auth/oidc/start", nil, c.asHost(publicHost))
+	if resp.StatusCode != http.StatusFound {
+		t.Fatalf("start before setup = %d, want 302", resp.StatusCode)
+	}
+	loc, err := resp.Location()
+	if err != nil {
+		t.Fatalf("no Location header: %v", err)
+	}
+	if got := loc.Query().Get("sso_error"); got != "setup-required" {
+		t.Errorf("sso_error = %q, want setup-required", got)
 	}
 }
