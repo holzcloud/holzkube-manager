@@ -6,6 +6,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/holzcloud/holzkube-manager/internal/imagefactory"
 )
@@ -282,7 +283,24 @@ func TestTracerVersionsIncludeThePrereleaseTail(t *testing.T) {
 
 func newClient(t *testing.T, baseURL string) *imagefactory.Client {
 	t.Helper()
-	c, err := imagefactory.New(baseURL)
+	return newClientWithBudgets(t, baseURL, testBudget, testBudget, testBudget)
+}
+
+// testBudget is what every offline test in this package bounds its requests
+// with. Short on purpose: the shipped probe budget is ninety seconds, so a test
+// client that took the production default for it would turn a misrouted or
+// deliberately silent image request from a fast failure into a minute and a
+// half of nothing.
+const testBudget = 5 * time.Second
+
+// newClientWithBudgets names all three budgets, which is what a test about
+// budgets has to be able to do.
+func newClientWithBudgets(t *testing.T, baseURL string, json, probe, manifest time.Duration) *imagefactory.Client {
+	t.Helper()
+	c, err := imagefactory.New(baseURL,
+		imagefactory.WithTimeout(json),
+		imagefactory.WithProbeTimeout(probe),
+		imagefactory.WithManifestTimeout(manifest))
 	if err != nil {
 		t.Fatalf("New(%q): %v", baseURL, err)
 	}
