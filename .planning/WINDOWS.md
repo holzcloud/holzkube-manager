@@ -1,10 +1,10 @@
 ---
 schema_version: 1
-open_count: 47
+open_count: 52
 waived_count: 0
-fixed_count: 9
-total_count: 56
-last_updated: 2026-08-30T09:59:56.712Z
+fixed_count: 13
+total_count: 65
+last_updated: 2026-09-03T19:57:58.235Z
 ---
 
 # Broken Windows Ledger
@@ -22,7 +22,7 @@ last_updated: 2026-08-30T09:59:56.712Z
 | 5 | 02 | unrun-verify | internal/imagefactory/live_test.go |  | TestLiveFactory ist der einzige Drift-Waechter gegen factory.talos.dev, ist opt-in und wird von nichts geplant; factory.talos.dev hat in dieser Sitzung nachweislich gedrosselt, ein Retry fehlt. | open |  | 2026-08-29T05:30:01.609Z |  |
 | 6 | 02 | unrun-verify | docs/api-contract.md |  | golangci-lint run could not be executed on this host (binary not installed); go vet and gofmt are clean. Plan 02-06 task acceptance criterion 'golangci-lint run exits 0' is unverified. | fixed | Not installed on the subagent PATH, but present at ~/go/bin/golangci-lint (installed during plan 02-01 at the version CI pins). Orchestrator ran it at the wave-3 gate with that path exported: 0 issues. | 2026-08-29T06:53:45.252Z | 2026-08-29T09:05:00.000Z |
 | 7 | 02 | deviation | internal/talossim/scenario_conn.go |  | ip_changes_on_reboot: rebind() and Reboot() carried comments claiming established connections survive the reboot so the Reboot reply is delivered, while closeListener severs them. Plan 02-05 corrected the comments rather than the behaviour (severing is what makes the address change observable to an already-connected client), but the simulator is now harder to satisfy than hardware for this one RPC: talosctl reboot does return a reply. Closing it properly means delivering the reply and severing after a short grace, which needs a scenario-owned goroutine. | open |  | 2026-08-29T07:54:43.845Z |  |
-| 8 | 02 | todo | internal/imagefactory/client.go | 103 | [WR-01] WithHTTPClient silently discards the configured timeout. Code review 02-REVIEW.md, scoped out of the phase-2 fix pass. | open |  | 2026-08-29T12:40:00.000Z |  |
+| 8 | 02 | todo | internal/imagefactory/client.go | 103 | [WR-01] WithHTTPClient silently discards the configured timeout. Code review 02-REVIEW.md, scoped out of the phase-2 fix pass. | fixed |  | 2026-08-29T12:40:00.000Z | 2026-09-03T19:57:57.830Z |
 | 9 | 02 | todo | internal/imagefactory/client.go | 312 | [WR-05] One additive upstream field takes the whole Images screen down — DisallowUnknownFields on the catalog read turns an upstream addition into a 502. Verifier confirmed still present and still touching a phase-2 success criterion. | open |  | 2026-08-29T12:40:00.000Z |  |
 | 10 | 02 | todo | web/src/routes/images.tsx | 455 | [WR-06] A cleared META key silently becomes slot 0 via Number(''); out-of-range keys surface as a raw decoder error. Verifier confirmed still present and still touching a phase-2 success criterion. | open |  | 2026-08-29T12:40:00.000Z |  |
 | 11 | 02 | todo | internal/talossim/talossim.go | 183 | [WR-07] talossim.New leaks both listeners when seeding fails. Test infrastructure, not production code. | open |  | 2026-08-29T12:40:00.000Z |  |
@@ -34,7 +34,7 @@ last_updated: 2026-08-30T09:59:56.712Z
 | 17 | 02 | todo | internal/imagefactory/imagefactory.go | 37 | [IN-05] DefaultBaseURL is documented as overridable but nothing overrides it. | open |  | 2026-08-29T12:40:00.000Z |  |
 | 18 | 02 | todo | internal/httpapi/handlers/schematics.go | 156 | [IN-06] NewestStable's reason is discarded entirely. | open |  | 2026-08-29T12:40:00.000Z |  |
 | 19 | 02 | unrun-verify | Taskfile.yml |  | Plan 02-11 could not run 'task lint:go' (golangci-lint run): golangci-lint is not installed on this host. gofmt -l and go vet are clean. Same gap as the 02-06 entry. | fixed |  | 2026-08-29T17:10:58.006Z | 2026-08-29T17:16:43.845Z |
-| 20 | 02 | deviation | internal/imagefactory/installer.go |  | A cold resolveInstallerRepo still walks two candidates serially at DefaultTimeout=30s each, so GET /schematics/{id}/assets keeps a 2x30=60.000s worst case against writeTimeout=60s -- the composition G-02-2 measured as status=502 duration=1m0.002907792s, unchanged by plan 02-12. The bounded re-question that plan adds asks only the never-ruled-out candidate, costs at most 1x30s and cannot reach that ceiling. Bounding the cold path needs the per-route deadline 02-DECISION-probe-budget.md owns; G-02-2 is deferred to cluster A, and cmd/holzkubed/budget_test.go declares the route as known-over-budget. | open |  | 2026-08-29T17:27:33.353Z |  |
+| 20 | 02 | deviation | internal/imagefactory/installer.go |  | A cold resolveInstallerRepo still walks two candidates serially at DefaultTimeout=30s each, so GET /schematics/{id}/assets keeps a 2x30=60.000s worst case against writeTimeout=60s -- the composition G-02-2 measured as status=502 duration=1m0.002907792s, unchanged by plan 02-12. The bounded re-question that plan adds asks only the never-ruled-out candidate, costs at most 1x30s and cannot reach that ceiling. Bounding the cold path needs the per-route deadline 02-DECISION-probe-budget.md owns; G-02-2 is deferred to cluster A, and cmd/holzkubed/budget_test.go declares the route as known-over-budget. | fixed |  | 2026-08-29T17:27:33.353Z | 2026-09-03T19:57:57.966Z |
 | 21 | 02 | deviation | internal/model/model.go |  | model.Schematic.Arch is additive and unversioned, so every schematic stored before plan 02-13 carries an empty architecture and renders its verdict unqualified forever; those are precisely the records created while the G-02-8 arch leak was live, and the architecture a past probe used is not recoverable from the record, so there is nothing to backfill -- new records are qualified, old ones are readable only by deleting and re-authoring. | open |  | 2026-08-29T17:51:17.158Z |  |
 | 22 | 02 | todo | internal/imagefactory/installer.go | 244 | [R2-WR-02] No single-flight: every concurrent request on a cold or stale installer-repo key issues its own registry resolution. Round-2 code review, scoped out by the user. Also the only fix that would make two concurrent callers agree on one reference in the mirror ordering storeInstallerRepo does not close (see its doc comment). | open |  | 2026-08-29T21:31:26.855Z |  |
 | 23 | 02 | todo | internal/httpapi/handlers/schematics_test.go | 1195 | [R2-WR-06] The provisional-warning branch of GET /assets has no handler-level test: the warning is asserted in imagefactory and rendered in the web suite, but nothing pins that it survives the handler. Round-2 code review, scoped out by the user. | fixed |  | 2026-08-29T21:31:27.059Z | 2026-08-30T09:59:55.342Z |
@@ -62,7 +62,7 @@ last_updated: 2026-08-30T09:59:56.712Z
 | 45 | 02 | deviation | internal/httpapi/problem.go |  | [from 02-18] Wire-format change to a field the contract calls stable: every problem type moved from https://holzkube.dev/problems/<suffix> to urn:holzkube-manager:problem:<suffix>. A client matching on type rather than on code breaks. The project has no external clients today, which is why this is a note and not a migration -- the note is the difference between having decided that and not having noticed it. Matches T-02-90 (Repudiation, disposition accept). | open |  | 2026-08-30T09:59:17.027Z |  |
 | 46 | 02 | deviation | internal/httpapi/middleware/audit_test.go | 126 | [from 02-18] One fixture will not follow the next re-rooting automatically: audit_test.go:126 spells the problem-type base literally, by necessity (import cycle) and by intent (it stands in for an upstream writer). A future re-rooting must edit it by hand, and nothing fails first if it is forgotten, because the middleware never reads the field. | open |  | 2026-08-30T09:59:17.262Z |  |
 | 47 | 02 | deviation | docs/api-contract.md |  | [from 02-18] The URN namespace identifier holzkube-manager is unregistered with IANA. Documented in both problem.go and docs/api-contract.md as acceptable -- RFC 9457 asks for a URI, not a registered namespace -- and recorded here so the decision is visible rather than assumed. | open |  | 2026-08-30T09:59:17.526Z |  |
-| 48 | 02 | deviation | internal/imagefactory/installer.go |  | [from 02-19] READ WITH ENTRY 20, WHICH STAYS OPEN. Plan 02-19 changed what an unresolved installer RETURNS (502 with no body became 200 with installer:null plus installer_error), not the cold 2 x 30s serial candidate walk that produces it. The 49.8s and 60.002s observations recorded in G-02-15 are that composition and are unchanged. 'The panel now shows four references on a timeout' must not be read as the timeout having been addressed; the ceiling against writeTimeout=60s is still owned by 02-DECISION-probe-budget.md, and the milder symptom makes deferring that decision easier rather than more defensible. | open |  | 2026-08-30T09:59:17.754Z |  |
+| 48 | 02 | deviation | internal/imagefactory/installer.go |  | [from 02-19] READ WITH ENTRY 20, WHICH STAYS OPEN. Plan 02-19 changed what an unresolved installer RETURNS (502 with no body became 200 with installer:null plus installer_error), not the cold 2 x 30s serial candidate walk that produces it. The 49.8s and 60.002s observations recorded in G-02-15 are that composition and are unchanged. 'The panel now shows four references on a timeout' must not be read as the timeout having been addressed; the ceiling against writeTimeout=60s is still owned by 02-DECISION-probe-budget.md, and the milder symptom makes deferring that decision easier rather than more defensible. | fixed |  | 2026-08-30T09:59:17.754Z | 2026-09-03T19:57:58.102Z |
 | 49 | 02 | deviation | docs/api-contract.md |  | [from 02-19] The assets route's response shape changed for two outcomes: 502 with no body became 200 with installer:null plus installer_error, so installer is now nullable on every answer. No external clients exist, which is why this is a note and not a migration. Matches T-02-91/T-02-92. | open |  | 2026-08-30T09:59:18.030Z |  |
 | 50 | 02 | todo | docs/api-contract.md | 646 | [from 02-19] Entries 25 and 26 (R2-IN-02, R2-IN-03) sit inside the assets section plan 02-19 rewrote and were deliberately left alone: both are marked 'scoped out by the user', and a scoping decision is not an executor's to overturn. Entry 25's SecureBoot example still omits the warnings field the same section calls mandatory, and it now sits beside a table enumerating what warnings means in every outcome, so the inconsistency is more visible than before. Worth re-offering to the user rather than closing silently. | open |  | 2026-08-30T09:59:18.285Z |  |
 | 51 | 02 | todo | web/src/api.ts | 344 | [from 02-19] AMENDS ENTRY 27, WHICH STAYS OPEN (no amend verb exists). Entry 27 records WARNING_INSTALLER_REPO_FALLBACK_UNVERIFIED as exported, pinned by the Go drift guard and unused by application code. Still true, and now true of a second constant: WARNING_INSTALLER_SECUREBOOT_REPO_FALLBACK_UNVERIFIED is also unused, because SchematicWarnings renders code/detail generically with no per-code branch. That is the intended design -- an unknown code still reaches the operator -- so the entry is about the constants' purpose being drift-pinning rather than rendering. Re-word rather than close. | open |  | 2026-08-30T09:59:18.604Z |  |
@@ -71,6 +71,15 @@ last_updated: 2026-08-30T09:59:56.712Z
 | 54 | 02 | todo | web/src/routes/images.tsx | 329 | [from 02-20] The client cannot guard cluster because the authoring form has no cluster input; the server does guard it. When a cluster input is added it belongs in the single hasUnusableValue computation in images.tsx, which already carries a comment saying so. | open |  | 2026-08-30T09:59:19.461Z |  |
 | 55 | 02 | todo | internal/httpapi/handlers/schematics.go |  | [from 02-20] createProblem's NotRepresentableError branch is now unreachable from the HTTP route in practice: refuseUnrepresentable covers every document path the request vocabulary names, so the branch fires only for a future field that forgets a check, or for an in-process caller. It is kept deliberately -- deleting it would turn the first of those into a 502 blaming the Factory, which is G-02-6 -- but it is a branch no route-level test can reach, the same shape as the utf8.ValidString note that produced entry 29. | open |  | 2026-08-30T09:59:19.676Z |  |
 | 56 | 02 | unrun-verify | internal/imagefactory/guard_drift_test.go | 65 | [from 02-20] The codepoint sweep in guard_drift_test.go is exhaustive over Unicode but the SERVER set behind it is not exhaustively measured; it inherits 02-14's extrapolation (U+FDD1-U+FDEF, twenty-six C1 codepoints, and the interior of the range above U+FFFF are refused on the strength of measured ends). The guard proves the two layers agree; it cannot prove the set is right. Extends the 02-14 floor entry rather than starting a new claim. | open |  | 2026-08-30T09:59:19.914Z |  |
+| 57 | 02 | deviation | internal/imagefactory/installer.go |  | [from 02-24] SUPERSEDES ENTRIES 20 AND 48, BOTH NOW MARKED FIXED (no amend verb exists). What moved: resolveInstallerRepo no longer walks its candidates serially -- plan 02-23 issues every candidate at once on a context derived from the caller's and decides in declared candidate order, so the route's worst case is one candidate's budget rather than the sum. The candidates are bounded by imagefactory.ManifestTimeout=30s (plan 02-22) and not by DefaultTimeout; the manifest GET and the ISO probe have budgets of their own (ManifestTimeout=30s, ProbeTimeout=90s); both Factory routes declare a shared route deadline (handlers.AssetsRouteBudget = ManifestTimeout + 5s = 35s, handlers.CreateRouteBudget = ProbeTimeout + DefaultTimeout = 120s); writeTimeout rose from 60s to 130s and now names the budgets it covers; and cmd/holzkube-managerd/budget_test.go computes the composition from the four constants and declares BOTH Factory routes withinBudget with an empty deferredTo (assets: 30s sum, largest call 30s, route deadline 35s, slack 5s, writeTimeout 2m10s; create: 2m30s sum, largest call 1m30s, route deadline 2m0s). Entry 20's '2x30 = 60.000s worst case against writeTimeout=60s' has no surviving true reading. Marked fixed on exactly that evidence and no other: the composition guard passes and the offline elapsed-time tests pass (TestAssetsRouteAnswersInsideItsCeiling answered in 603.727542ms against a 700ms scaled ceiling; TestCreateRouteAnswersInsideItsCeiling in 623.888083ms against 2.4s). What did NOT move: the 43.42s and 60.002907792s figures entries 20 and 48 record are what the SERIAL walk cost and remain the correct record of it -- they now live in a comment beside installerRepoRetryInterval in internal/imagefactory/installer.go, measured 2026-08-29, so a reader who greps for those numbers finds why they are still written down rather than assuming they are stale. NOTHING re-measured the installer resolution against factory.talos.dev after the change: plan 02-22's two live runs on 2026-09-03 measured the ISO probe (cold 28.445563875s and 31.491771083s, warm 3.752628125s and 2.493417375s) and not the installer resolution. The concurrency improvement is measured offline against fakes and unmeasured against factory.talos.dev -- 305.96ms against 606.93ms serialised at the client, 603.57ms against 1.0599s serialised at the HTTP route. Entry 48's warning survives into this entry: a route that declares a ceiling is not the same as a route that is fast. | open |  | 2026-09-03T19:57:04.257Z |  |
+| 58 | 02 | deviation | internal/httpapi/handlers/schematics.go |  | [from 02-24] G-02-9 REMAINS OPEN AFTER ROUND 4. Plan 02-24 gives it the mitigation 02-DECISION-probe-budget.md's ratified Option 2 asks for and no more: the store.ErrConflict branch of POST /api/v1/schematics now writes the probe verdict that request just computed -- Usable, ProbedAt and ProbeReason and no other field, under a compare-and-swap on the read Rev -- instead of discarding it. G-02-9 measured the discard as HTTP 409 in 4.186898875s, a probe that ran and succeeded at that latency against a record that stayed usable=false with probed_at zero. What is still missing, which is why this is a window and not a closure: there is no re-probe route, no button and no job. The recovery is re-submitting the identical customisation, which answers 409 and refreshes the verdict as a side effect. That recovery is not discoverable from the saved list, it is surfaced to the operator as an error on the create form rather than as an action, and it is DECLINED in two cases -- when the stored record's Arch is not the architecture the fresh probe asked about (a record written before Arch existed carries an empty one and is therefore never refreshed), and when the fresh probe does not answer either. A probe that times out again leaves the record exactly as it was, which is 02-DECISION-probe-budget.md's own sentence and the reason it recorded G-02-9 as a known window rather than as fixed. The structural answer is that document's Option 1 -- split the create route, add a third probe state, add an explicit re-probe endpoint -- which the user did not take. | open |  | 2026-09-03T19:57:30.343Z |  |
+| 59 | 02 | deviation | cmd/holzkube-managerd/main.go | 64 | [from 02-22, filed by 02-24] writeTimeout was raised from 60s to 130s process-wide rather than scoped per route, so every route on this server carries the response budget only the two Factory routes need. The per-route alternative requires Flush, Unwrap and Hijack on the three middleware ResponseWriter wrappers, which is exactly the Phase 5 entry blocker recorded in 02-CONTEXT.md <deadline_policy> (lines 256-271: none of the three wrappers implements them, so a streaming endpoint on this chain silently buffers). Cross-referenced here so Phase 5 finds this rather than re-deriving it. | open |  | 2026-09-03T19:57:30.475Z |  |
+| 60 | 02 | deviation | internal/httpapi/handlers/schematics.go | 58 | [from 02-22, filed by 02-24] CreateRouteBudget = ProbeTimeout + DefaultTimeout = 120s is deliberately smaller than the sum of its route's three per-call budgets, which is DefaultTimeout 30s (Extensions) + DefaultTimeout 30s (CreateSchematic) + ProbeTimeout 90s (ProbeBuildable) = 150s. On a pathological upstream the probe is therefore cut by the route deadline before its own budget expires, and the clipping is exactly one JSON budget wide. Recorded rather than fixed because the outcome is the existing fail-safe: ProbedAt stays zero and the record is stored unprobed, which reads as 'no verdict' and never as 'the Factory refused'. The composition guard logs both numbers on every run (2m30s sum against a 2m0s route deadline). | open |  | 2026-09-03T19:57:30.611Z |  |
+| 61 | 02 | deviation | internal/httpapi/middleware/audit.go |  | [from 02-24] The audit middleware derives its outcome from the response status (audit.go lines 85-105), so a 409 from POST /api/v1/schematics that REFRESHED the record's three probe fields is filed as OutcomeError with cause store.conflict -- byte-identical to a 409 that changed nothing. There is no handler-side enrichment and this plan added none. The sentence an auditor needs: the permanent archive does not show the refresh, so a record whose Usable, ProbedAt and ProbeReason changed on a conflicting POST has no archive entry saying so, and the only evidence is the record itself. Left as it is deliberately (T-02-112, disposition accept): changing it reopens Phase 1's fail-closed intent/outcome contract, which is not this round's to touch. | open |  | 2026-09-03T19:57:30.743Z |  |
+| 62 | 02 | todo | web/src/routes/images.tsx |  | [from 02-23, filed by 02-24] The progress indicator .planning/research/PITFALLS.md:164 requires is still not built, and stating a ceiling is a different thing. Missing by name: elapsed time, the current sub-step, an expected duration, and a disabled action button carrying its reason. PITFALLS.md:646 names 'A spinner during the post-apply install window' as the anti-pattern and 'Named state, elapsed time, expected duration, current sub-step' as the approach. What plan 02-23 shipped is one static sentence per waiting state naming the server's own ceiling -- CREATE_WAIT_SECONDS=120 and ASSETS_WAIT_SECONDS=35 in web/src/routes/images.tsx -- which is a maximum rather than a prediction, and the create button is disabled while pending with no reason rendered beside it. The comment beside those two constants says so in the code, so a reader who finds a number there cannot mistake it for the requirement having been met. 02-DECISION-probe-budget.md names this as the risk its ratified Option 2 accepts. | open |  | 2026-09-03T19:57:30.876Z |  |
+| 63 | 02 | todo | internal/imagefactory/client.go | 103 | [from 02-24] SUPERSEDES ENTRY 8, WHICH IS NOW MARKED FIXED. The fixed verb carries no reason, so the reason lives here. Entry 8 reads '[WR-01] WithHTTPClient silently discards the configured timeout'. That was true while the budget lived on http.Client.Timeout: the option shallow-copied the caller's client and the copy's zero Timeout overwrote whatever WithTimeout had set, silently and order-dependently. Plan 02-22 moved the three budgets off http.Client.Timeout entirely and applies them per call from the Client, so there is no client-wide timeout left to discard -- WithHTTPClient now clears the copy's Timeout explicitly, and TestClientCarriesNoClientWideTimeout asserts the zero duration both for a default client and for one built through WithHTTPClient with a 7s timeout set. The discarding is gone and the order-dependence with it. This entry is a record and not a defect, and is marked fixed on creation for that reason. | fixed |  | 2026-09-03T19:57:48.980Z | 2026-09-03T19:57:58.235Z |
+| 64 | 02 | unrun-verify | internal/imagefactory/live_test.go |  | [from 02-24] SUPERSEDES ENTRY 5, WHICH STAYS OPEN (no amend verb exists). Entry 5 records that TestLiveFactory is the only drift guard against factory.talos.dev, is opt-in, and is planned by nothing. All three of those are unchanged: this round did not make it non-optional and did not schedule it. What DID change, from plan 02-22: TestLiveFactory now bounds the elapsed time of the probe it runs rather than asserting only err == nil; it measures a genuinely cold probe behind a per-run nonce, so each run authors a schematic the Factory has demonstrably never built; it re-applies ProbeTimeout's derivation rule to the widened sample of seven cold observations (28.45, 30.50, 30.59, 31.18, 31.52, 31.49, 32.69 -- slowest 32.69s, doubled 65.38s, rounded up to 90s, which is the shipped constant), so the next observation that would move the constant arrives as a red test; and a throttled cold measurement now Skipf's with 'NOT OBSERVED' rather than passing, so a run that measured nothing can no longer read as a run that measured something. | open |  | 2026-09-03T19:57:49.113Z |  |
+| 65 | 02 | todo | cmd/holzkube-managerd/budget_test.go |  | [from 02-23, filed by 02-24] Known limitation of the composition guard, recorded as a limitation and not as a defect. Relisting the assets row to one declared call while leaving AssetsRouteBudget at two manifest budgets computes uncut against a declared uncut and passes both the R1 and R2 ratchets, so the guard stays green on a route over-provisioned by thirty seconds. Driven locally by plan 02-23 and confirmed green. Tolerated because the failure direction it leaves open is a ceiling that is too generous rather than one that cuts a candidate before it can answer, which is the silent fallback G-02-3 already cost this phase once. Teaching R4 to catch it would require the guard to know how many candidates the handler actually issues, which is exactly the derived count the table's own comment argues against. | open |  | 2026-09-03T19:57:49.247Z |  |
 
 ````json
 [
@@ -165,10 +174,10 @@ last_updated: 2026-08-30T09:59:56.712Z
     "file": "internal/imagefactory/client.go",
     "line": 103,
     "description": "[WR-01] WithHTTPClient silently discards the configured timeout. Code review 02-REVIEW.md, scoped out of the phase-2 fix pass.",
-    "status": "open",
+    "status": "fixed",
     "reason": "",
     "recorded_at": "2026-08-29T12:40:00.000Z",
-    "resolved_at": null
+    "resolved_at": "2026-09-03T19:57:57.830Z"
   },
   {
     "id": 9,
@@ -309,10 +318,10 @@ last_updated: 2026-08-30T09:59:56.712Z
     "file": "internal/imagefactory/installer.go",
     "line": null,
     "description": "A cold resolveInstallerRepo still walks two candidates serially at DefaultTimeout=30s each, so GET /schematics/{id}/assets keeps a 2x30=60.000s worst case against writeTimeout=60s -- the composition G-02-2 measured as status=502 duration=1m0.002907792s, unchanged by plan 02-12. The bounded re-question that plan adds asks only the never-ruled-out candidate, costs at most 1x30s and cannot reach that ceiling. Bounding the cold path needs the per-route deadline 02-DECISION-probe-budget.md owns; G-02-2 is deferred to cluster A, and cmd/holzkubed/budget_test.go declares the route as known-over-budget.",
-    "status": "open",
+    "status": "fixed",
     "reason": "",
     "recorded_at": "2026-08-29T17:27:33.353Z",
-    "resolved_at": null
+    "resolved_at": "2026-09-03T19:57:57.966Z"
   },
   {
     "id": 21,
@@ -645,10 +654,10 @@ last_updated: 2026-08-30T09:59:56.712Z
     "file": "internal/imagefactory/installer.go",
     "line": null,
     "description": "[from 02-19] READ WITH ENTRY 20, WHICH STAYS OPEN. Plan 02-19 changed what an unresolved installer RETURNS (502 with no body became 200 with installer:null plus installer_error), not the cold 2 x 30s serial candidate walk that produces it. The 49.8s and 60.002s observations recorded in G-02-15 are that composition and are unchanged. 'The panel now shows four references on a timeout' must not be read as the timeout having been addressed; the ceiling against writeTimeout=60s is still owned by 02-DECISION-probe-budget.md, and the milder symptom makes deferring that decision easier rather than more defensible.",
-    "status": "open",
+    "status": "fixed",
     "reason": "",
     "recorded_at": "2026-08-30T09:59:17.754Z",
-    "resolved_at": null
+    "resolved_at": "2026-09-03T19:57:58.102Z"
   },
   {
     "id": 49,
@@ -744,6 +753,114 @@ last_updated: 2026-08-30T09:59:56.712Z
     "status": "open",
     "reason": "",
     "recorded_at": "2026-08-30T09:59:19.914Z",
+    "resolved_at": null
+  },
+  {
+    "id": 57,
+    "kind": "deviation",
+    "phase": "02",
+    "file": "internal/imagefactory/installer.go",
+    "line": null,
+    "description": "[from 02-24] SUPERSEDES ENTRIES 20 AND 48, BOTH NOW MARKED FIXED (no amend verb exists). What moved: resolveInstallerRepo no longer walks its candidates serially -- plan 02-23 issues every candidate at once on a context derived from the caller's and decides in declared candidate order, so the route's worst case is one candidate's budget rather than the sum. The candidates are bounded by imagefactory.ManifestTimeout=30s (plan 02-22) and not by DefaultTimeout; the manifest GET and the ISO probe have budgets of their own (ManifestTimeout=30s, ProbeTimeout=90s); both Factory routes declare a shared route deadline (handlers.AssetsRouteBudget = ManifestTimeout + 5s = 35s, handlers.CreateRouteBudget = ProbeTimeout + DefaultTimeout = 120s); writeTimeout rose from 60s to 130s and now names the budgets it covers; and cmd/holzkube-managerd/budget_test.go computes the composition from the four constants and declares BOTH Factory routes withinBudget with an empty deferredTo (assets: 30s sum, largest call 30s, route deadline 35s, slack 5s, writeTimeout 2m10s; create: 2m30s sum, largest call 1m30s, route deadline 2m0s). Entry 20's '2x30 = 60.000s worst case against writeTimeout=60s' has no surviving true reading. Marked fixed on exactly that evidence and no other: the composition guard passes and the offline elapsed-time tests pass (TestAssetsRouteAnswersInsideItsCeiling answered in 603.727542ms against a 700ms scaled ceiling; TestCreateRouteAnswersInsideItsCeiling in 623.888083ms against 2.4s). What did NOT move: the 43.42s and 60.002907792s figures entries 20 and 48 record are what the SERIAL walk cost and remain the correct record of it -- they now live in a comment beside installerRepoRetryInterval in internal/imagefactory/installer.go, measured 2026-08-29, so a reader who greps for those numbers finds why they are still written down rather than assuming they are stale. NOTHING re-measured the installer resolution against factory.talos.dev after the change: plan 02-22's two live runs on 2026-09-03 measured the ISO probe (cold 28.445563875s and 31.491771083s, warm 3.752628125s and 2.493417375s) and not the installer resolution. The concurrency improvement is measured offline against fakes and unmeasured against factory.talos.dev -- 305.96ms against 606.93ms serialised at the client, 603.57ms against 1.0599s serialised at the HTTP route. Entry 48's warning survives into this entry: a route that declares a ceiling is not the same as a route that is fast.",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-09-03T19:57:04.257Z",
+    "resolved_at": null
+  },
+  {
+    "id": 58,
+    "kind": "deviation",
+    "phase": "02",
+    "file": "internal/httpapi/handlers/schematics.go",
+    "line": null,
+    "description": "[from 02-24] G-02-9 REMAINS OPEN AFTER ROUND 4. Plan 02-24 gives it the mitigation 02-DECISION-probe-budget.md's ratified Option 2 asks for and no more: the store.ErrConflict branch of POST /api/v1/schematics now writes the probe verdict that request just computed -- Usable, ProbedAt and ProbeReason and no other field, under a compare-and-swap on the read Rev -- instead of discarding it. G-02-9 measured the discard as HTTP 409 in 4.186898875s, a probe that ran and succeeded at that latency against a record that stayed usable=false with probed_at zero. What is still missing, which is why this is a window and not a closure: there is no re-probe route, no button and no job. The recovery is re-submitting the identical customisation, which answers 409 and refreshes the verdict as a side effect. That recovery is not discoverable from the saved list, it is surfaced to the operator as an error on the create form rather than as an action, and it is DECLINED in two cases -- when the stored record's Arch is not the architecture the fresh probe asked about (a record written before Arch existed carries an empty one and is therefore never refreshed), and when the fresh probe does not answer either. A probe that times out again leaves the record exactly as it was, which is 02-DECISION-probe-budget.md's own sentence and the reason it recorded G-02-9 as a known window rather than as fixed. The structural answer is that document's Option 1 -- split the create route, add a third probe state, add an explicit re-probe endpoint -- which the user did not take.",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-09-03T19:57:30.343Z",
+    "resolved_at": null
+  },
+  {
+    "id": 59,
+    "kind": "deviation",
+    "phase": "02",
+    "file": "cmd/holzkube-managerd/main.go",
+    "line": 64,
+    "description": "[from 02-22, filed by 02-24] writeTimeout was raised from 60s to 130s process-wide rather than scoped per route, so every route on this server carries the response budget only the two Factory routes need. The per-route alternative requires Flush, Unwrap and Hijack on the three middleware ResponseWriter wrappers, which is exactly the Phase 5 entry blocker recorded in 02-CONTEXT.md <deadline_policy> (lines 256-271: none of the three wrappers implements them, so a streaming endpoint on this chain silently buffers). Cross-referenced here so Phase 5 finds this rather than re-deriving it.",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-09-03T19:57:30.475Z",
+    "resolved_at": null
+  },
+  {
+    "id": 60,
+    "kind": "deviation",
+    "phase": "02",
+    "file": "internal/httpapi/handlers/schematics.go",
+    "line": 58,
+    "description": "[from 02-22, filed by 02-24] CreateRouteBudget = ProbeTimeout + DefaultTimeout = 120s is deliberately smaller than the sum of its route's three per-call budgets, which is DefaultTimeout 30s (Extensions) + DefaultTimeout 30s (CreateSchematic) + ProbeTimeout 90s (ProbeBuildable) = 150s. On a pathological upstream the probe is therefore cut by the route deadline before its own budget expires, and the clipping is exactly one JSON budget wide. Recorded rather than fixed because the outcome is the existing fail-safe: ProbedAt stays zero and the record is stored unprobed, which reads as 'no verdict' and never as 'the Factory refused'. The composition guard logs both numbers on every run (2m30s sum against a 2m0s route deadline).",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-09-03T19:57:30.611Z",
+    "resolved_at": null
+  },
+  {
+    "id": 61,
+    "kind": "deviation",
+    "phase": "02",
+    "file": "internal/httpapi/middleware/audit.go",
+    "line": null,
+    "description": "[from 02-24] The audit middleware derives its outcome from the response status (audit.go lines 85-105), so a 409 from POST /api/v1/schematics that REFRESHED the record's three probe fields is filed as OutcomeError with cause store.conflict -- byte-identical to a 409 that changed nothing. There is no handler-side enrichment and this plan added none. The sentence an auditor needs: the permanent archive does not show the refresh, so a record whose Usable, ProbedAt and ProbeReason changed on a conflicting POST has no archive entry saying so, and the only evidence is the record itself. Left as it is deliberately (T-02-112, disposition accept): changing it reopens Phase 1's fail-closed intent/outcome contract, which is not this round's to touch.",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-09-03T19:57:30.743Z",
+    "resolved_at": null
+  },
+  {
+    "id": 62,
+    "kind": "todo",
+    "phase": "02",
+    "file": "web/src/routes/images.tsx",
+    "line": null,
+    "description": "[from 02-23, filed by 02-24] The progress indicator .planning/research/PITFALLS.md:164 requires is still not built, and stating a ceiling is a different thing. Missing by name: elapsed time, the current sub-step, an expected duration, and a disabled action button carrying its reason. PITFALLS.md:646 names 'A spinner during the post-apply install window' as the anti-pattern and 'Named state, elapsed time, expected duration, current sub-step' as the approach. What plan 02-23 shipped is one static sentence per waiting state naming the server's own ceiling -- CREATE_WAIT_SECONDS=120 and ASSETS_WAIT_SECONDS=35 in web/src/routes/images.tsx -- which is a maximum rather than a prediction, and the create button is disabled while pending with no reason rendered beside it. The comment beside those two constants says so in the code, so a reader who finds a number there cannot mistake it for the requirement having been met. 02-DECISION-probe-budget.md names this as the risk its ratified Option 2 accepts.",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-09-03T19:57:30.876Z",
+    "resolved_at": null
+  },
+  {
+    "id": 63,
+    "kind": "todo",
+    "phase": "02",
+    "file": "internal/imagefactory/client.go",
+    "line": 103,
+    "description": "[from 02-24] SUPERSEDES ENTRY 8, WHICH IS NOW MARKED FIXED. The fixed verb carries no reason, so the reason lives here. Entry 8 reads '[WR-01] WithHTTPClient silently discards the configured timeout'. That was true while the budget lived on http.Client.Timeout: the option shallow-copied the caller's client and the copy's zero Timeout overwrote whatever WithTimeout had set, silently and order-dependently. Plan 02-22 moved the three budgets off http.Client.Timeout entirely and applies them per call from the Client, so there is no client-wide timeout left to discard -- WithHTTPClient now clears the copy's Timeout explicitly, and TestClientCarriesNoClientWideTimeout asserts the zero duration both for a default client and for one built through WithHTTPClient with a 7s timeout set. The discarding is gone and the order-dependence with it. This entry is a record and not a defect, and is marked fixed on creation for that reason.",
+    "status": "fixed",
+    "reason": "",
+    "recorded_at": "2026-09-03T19:57:48.980Z",
+    "resolved_at": "2026-09-03T19:57:58.235Z"
+  },
+  {
+    "id": 64,
+    "kind": "unrun-verify",
+    "phase": "02",
+    "file": "internal/imagefactory/live_test.go",
+    "line": null,
+    "description": "[from 02-24] SUPERSEDES ENTRY 5, WHICH STAYS OPEN (no amend verb exists). Entry 5 records that TestLiveFactory is the only drift guard against factory.talos.dev, is opt-in, and is planned by nothing. All three of those are unchanged: this round did not make it non-optional and did not schedule it. What DID change, from plan 02-22: TestLiveFactory now bounds the elapsed time of the probe it runs rather than asserting only err == nil; it measures a genuinely cold probe behind a per-run nonce, so each run authors a schematic the Factory has demonstrably never built; it re-applies ProbeTimeout's derivation rule to the widened sample of seven cold observations (28.45, 30.50, 30.59, 31.18, 31.52, 31.49, 32.69 -- slowest 32.69s, doubled 65.38s, rounded up to 90s, which is the shipped constant), so the next observation that would move the constant arrives as a red test; and a throttled cold measurement now Skipf's with 'NOT OBSERVED' rather than passing, so a run that measured nothing can no longer read as a run that measured something.",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-09-03T19:57:49.113Z",
+    "resolved_at": null
+  },
+  {
+    "id": 65,
+    "kind": "todo",
+    "phase": "02",
+    "file": "cmd/holzkube-managerd/budget_test.go",
+    "line": null,
+    "description": "[from 02-23, filed by 02-24] Known limitation of the composition guard, recorded as a limitation and not as a defect. Relisting the assets row to one declared call while leaving AssetsRouteBudget at two manifest budgets computes uncut against a declared uncut and passes both the R1 and R2 ratchets, so the guard stays green on a route over-provisioned by thirty seconds. Driven locally by plan 02-23 and confirmed green. Tolerated because the failure direction it leaves open is a ceiling that is too generous rather than one that cuts a candidate before it can answer, which is the silent fallback G-02-3 already cost this phase once. Teaching R4 to catch it would require the guard to know how many candidates the handler actually issues, which is exactly the derived count the table's own comment argues against.",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-09-03T19:57:49.247Z",
     "resolved_at": null
   }
 ]
