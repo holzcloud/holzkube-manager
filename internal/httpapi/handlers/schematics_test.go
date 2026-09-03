@@ -2,12 +2,14 @@ package handlers_test
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"regexp"
@@ -20,6 +22,9 @@ import (
 	"github.com/holzcloud/holzkube-manager/internal/httpapi"
 	"github.com/holzcloud/holzkube-manager/internal/httpapi/handlers"
 	"github.com/holzcloud/holzkube-manager/internal/imagefactory"
+	"github.com/holzcloud/holzkube-manager/internal/model"
+	"github.com/holzcloud/holzkube-manager/internal/store"
+	"github.com/holzcloud/holzkube-manager/internal/talos"
 )
 
 // catalogVersion is the one Talos version the fake Factory serves a catalog
@@ -2758,4 +2763,468 @@ func TestAssetsRouteResolvesPastASilentCandidateInOneBudget(t *testing.T) {
 	}
 	t.Logf("assets resolved past a silent candidate in %s; one manifest budget is %s and a "+
 		"serial walk would cost %s", elapsed, manifestBudget, manifestBudget+manifestBudget*3/4)
+}
+
+// ---------------------------------------------------------------------------
+// The conflict path keeps the verdict it just computed (G-02-9's mitigation).
+//
+// A re-POST of an identical customisation runs the whole Author sequence,
+// including a fresh probe that usually answers because the first attempt warmed
+// the Factory -- and then threw the verdict away. G-02-9 measured it:
+// `HTTP 409 in 4.186898875s`, the probe ran and succeeded at that latency, and
+// the record stayed usable=false with probed_at zero.
+//
+// These eight cases are the whole of that behaviour: the three probe outcomes,
+// the byte-identity of everything else, the second architecture, the two ways a
+// compare-and-swap can fail, and the sentences an operator reads. They are
+// deliberately driven through the same fake behaving differently rather than
+// through three test doubles.
+//
+// This is a mitigation and not a closure: there is still no re-probe route,
+// button or job, the recovery is a re-submission answered as an error, and a
+// probe that times out again leaves the record exactly as it was. See
+// .planning/phases/02-transport-seam-talossim-image-factory/02-DECISION-probe-budget.md.
+
+// storeHook runs once, after a Schematics().Get has returned a record and
+// before its caller sees it. It is the only way to be *between* the handler's
+// read and its write deterministically, which is what the lost-compare-and-swap
+// and the deleted-mid-refresh cases are about. A sleep would be a race dressed
+// as a test.
+type storeHook struct {
+	mu sync.Mutex
+	fn func(inner store.SchematicStore, rec model.Schematic)
+}
+
+// arm sets the one-shot hook. It is armed immediately before the conflicting
+// POST, never at construction: the read-back GETs these tests use go through
+// the same seam and would otherwise fire it.
+func (h *storeHook) arm(fn func(store.SchematicStore, model.Schematic)) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.fn = fn
+}
+
+func (h *storeHook) fire(inner store.SchematicStore, rec model.Schematic) {
+	h.mu.Lock()
+	fn := h.fn
+	h.fn = nil
+	h.mu.Unlock()
+	if fn != nil {
+		fn(inner, rec)
+	}
+}
+
+type hookedStore struct {
+	store.Store
+	hook *storeHook
+}
+
+func (s hookedStore) Schematics() store.SchematicStore {
+	return hookedSchematics{SchematicStore: s.Store.Schematics(), hook: s.hook}
+}
+
+type hookedSchematics struct {
+	store.SchematicStore
+	hook *storeHook
+}
+
+func (s hookedSchematics) Get(ctx context.Context, id model.SchematicID) (model.Schematic, error) {
+	rec, err := s.SchematicStore.Get(ctx, id)
+	if err == nil {
+		s.hook.fire(s.SchematicStore, rec)
+	}
+	return rec, err
+}
+
+func withStoreHook(h *storeHook) depOption {
+	return func(d *httpapi.Deps) { d.Store = hookedStore{Store: d.Store, hook: h} }
+}
+
+// conflictRefreshServer is probeBudgetServer's object graph -- the scaled
+// budgets, so a probe that must not answer can be made not to answer in
+// milliseconds -- with the store wrapped by a one-shot hook.
+func conflictRefreshServer(t *testing.T, h *storeHook) (*server, *fakeFactory) {
+	t.Helper()
+	f := newFakeFactory(t)
+	c := f.clientWithBudgets(t, scaledJSONBudget, scaledProbeBudget(), scaledManifestBudget())
+	return newServerWith(t, 5*time.Minute, c, talos.Mode{}, withStoreHook(h)), f
+}
+
+// zeroTime is what a never-answered probe marshals as. Comparing against the
+// wire form rather than parsing keeps the assertion about what a client sees.
+const zeroTime = "0001-01-01T00:00:00Z"
+
+// coldCreate authors a schematic whose probe outlives its budget, so the record
+// is stored with no verdict at all. That is G-02-9's starting state and the one
+// an operator meets whenever the Factory has not built this image before.
+func coldCreate(t *testing.T, c *client, f *fakeFactory, name string, extensions []string) map[string]any {
+	t.Helper()
+	f.answerAfter("HEAD /image", pastBudget(scaledProbeBudget()))
+	resp, raw := c.do(http.MethodPost, "/api/v1/schematics", createBody(name, extensions, nil))
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("cold create: got %d, want 201 (body: %s)", resp.StatusCode, raw)
+	}
+	var created map[string]any
+	decodeInto(t, raw, &created)
+	if created["usable"] != false || created["probed_at"] != zeroTime {
+		t.Fatalf("the cold create was already probed, so this case proves nothing: %v", created)
+	}
+	return created
+}
+
+// storedRecord reads the whole record back as it goes over the wire, as a map
+// rather than into a struct: a field added to model.Schematic appears here
+// without anyone editing this helper, which is the point.
+func storedRecord(t *testing.T, c *client, id string) map[string]any {
+	t.Helper()
+	resp, raw := c.do(http.MethodGet, "/api/v1/schematics/"+id, nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("GET by id: got %d, want 200 (body: %s)", resp.StatusCode, raw)
+	}
+	var rec map[string]any
+	decodeInto(t, raw, &rec)
+	return rec
+}
+
+func marshalRecord(t *testing.T, rec map[string]any) string {
+	t.Helper()
+	out, err := json.Marshal(rec)
+	if err != nil {
+		t.Fatalf("marshal record: %v", err)
+	}
+	return string(out)
+}
+
+// exceptTheProbeFields is the whole record with the three probe fields and the
+// revision cleared, marshalled. json.Marshal sorts map keys, so the two strings
+// are comparable directly.
+//
+// Written this way rather than as a field-by-field comparison on purpose: a
+// field added to model.Schematic next year is covered by this assertion without
+// anyone remembering that this test exists, and a field-by-field list is not.
+func exceptTheProbeFields(t *testing.T, rec map[string]any) string {
+	t.Helper()
+	clone := maps.Clone(rec)
+	for _, k := range []string{"usable", "probed_at", "probe_reason", "rev"} {
+		delete(clone, k)
+	}
+	return marshalRecord(t, clone)
+}
+
+func conflictDetailOf(t *testing.T, raw []byte) string {
+	t.Helper()
+	var p struct {
+		Status int    `json:"status"`
+		Code   string `json:"code"`
+		Detail string `json:"detail"`
+	}
+	decodeInto(t, raw, &p)
+	if p.Status != http.StatusConflict || p.Code != "store.conflict" {
+		t.Fatalf("not the store conflict: status %d code %q (body: %s)", p.Status, p.Code, raw)
+	}
+	return p.Detail
+}
+
+// TestConflictRefreshesTheVerdictItJustComputed is G-02-9's own case: the
+// re-POST's probe answers, and the answer is kept rather than discarded.
+func TestConflictRefreshesTheVerdictItJustComputed(t *testing.T) {
+	s, f := conflictRefreshServer(t, &storeHook{})
+	c := operator(t, s)
+
+	created := coldCreate(t, c, f, "cold", []string{"siderolabs/intel-ucode"})
+	id := created["id"].(string)
+
+	// The Factory is warm now, which is exactly why a re-POST is the recovery.
+	f.answerAfter("HEAD /image", 0)
+	resp, raw := c.do(http.MethodPost, "/api/v1/schematics",
+		createBody("cold-under-a-second-label", []string{"siderolabs/intel-ucode"}, nil))
+	if resp.StatusCode != http.StatusConflict {
+		t.Fatalf("second create: got %d, want 409 (body: %s)", resp.StatusCode, raw)
+	}
+
+	after := storedRecord(t, c, id)
+	if after["usable"] != true {
+		t.Errorf("usable = %v after a conflicting POST whose probe succeeded; the verdict this "+
+			"request computed was discarded, which is G-02-9", after["usable"])
+	}
+	if after["probed_at"] == zeroTime {
+		t.Error("probed_at is still zero although the conflicting POST's probe answered")
+	}
+	probedAt, err := time.Parse(time.RFC3339Nano, after["probed_at"].(string))
+	if err != nil {
+		t.Fatalf("parse probed_at: %v", err)
+	}
+	createdAt, err := time.Parse(time.RFC3339Nano, created["created_at"].(string))
+	if err != nil {
+		t.Fatalf("parse created_at: %v", err)
+	}
+	if !probedAt.After(createdAt) {
+		t.Errorf("probed_at %s is not later than created_at %s", probedAt, createdAt)
+	}
+	if after["name"] != "cold" {
+		t.Errorf("name = %v; the refusing POST renamed the record", after["name"])
+	}
+}
+
+// TestConflictRefreshStoresTheFactorysRefusal is the second probe outcome: the
+// re-POST's probe answered *no*, which is a verdict and is kept as one.
+func TestConflictRefreshStoresTheFactorysRefusal(t *testing.T) {
+	s, f := conflictRefreshServer(t, &storeHook{})
+	c := operator(t, s)
+
+	f.listButRefuse("siderolabs/accepted-but-unbuildable")
+	created := coldCreate(t, c, f, "cold-refusal", []string{"siderolabs/accepted-but-unbuildable"})
+	id := created["id"].(string)
+
+	f.answerAfter("HEAD /image", 0)
+	resp, raw := c.do(http.MethodPost, "/api/v1/schematics",
+		createBody("cold-refusal-again", []string{"siderolabs/accepted-but-unbuildable"}, nil))
+	if resp.StatusCode != http.StatusConflict {
+		t.Fatalf("second create: got %d, want 409 (body: %s)", resp.StatusCode, raw)
+	}
+
+	after := storedRecord(t, c, id)
+	if after["usable"] != false {
+		t.Errorf("usable = %v although the Factory refused", after["usable"])
+	}
+	if after["probed_at"] == zeroTime {
+		t.Error("probed_at is still zero although the conflicting POST's probe answered with a refusal")
+	}
+	if after["probe_reason"] == "" {
+		t.Error("the refusal's reason was not stored; a red badge with no cause is unactionable")
+	}
+}
+
+// TestConflictWithNoAnswerFromTheProbeChangesNothing is the third outcome and
+// the one that must not move. A probe that could not reach the Factory says
+// nothing about the schematic, and writing its silence over a stored verdict
+// would replace an answer with an absence.
+func TestConflictWithNoAnswerFromTheProbeChangesNothing(t *testing.T) {
+	s, f := conflictRefreshServer(t, &storeHook{})
+	c := operator(t, s)
+
+	created := coldCreate(t, c, f, "still-cold", []string{"siderolabs/intel-ucode"})
+	id := created["id"].(string)
+	before := storedRecord(t, c, id)
+
+	// The delay stays: the second probe does not answer either.
+	resp, raw := c.do(http.MethodPost, "/api/v1/schematics",
+		createBody("still-cold-again", []string{"siderolabs/intel-ucode"}, nil))
+	if resp.StatusCode != http.StatusConflict {
+		t.Fatalf("second create: got %d, want 409 (body: %s)", resp.StatusCode, raw)
+	}
+
+	after := storedRecord(t, c, id)
+	if marshalRecord(t, after) != marshalRecord(t, before) {
+		t.Errorf("the record changed although the probe never answered:\n before %s\n after  %s",
+			marshalRecord(t, before), marshalRecord(t, after))
+	}
+}
+
+// TestConflictRefreshTouchesNothingButTheThreeProbeFields is the tampering
+// bound (T-02-110). A POST the contract marks Destructive: false now writes to
+// an existing record, and this is the assertion that says how far.
+func TestConflictRefreshTouchesNothingButTheThreeProbeFields(t *testing.T) {
+	s, f := conflictRefreshServer(t, &storeHook{})
+	c := operator(t, s)
+
+	created := coldCreate(t, c, f, "bounded", []string{"siderolabs/intel-ucode"})
+	id := created["id"].(string)
+	before := storedRecord(t, c, id)
+
+	f.answerAfter("HEAD /image", 0)
+	resp, raw := c.do(http.MethodPost, "/api/v1/schematics",
+		createBody("bounded-again", []string{"siderolabs/intel-ucode"}, nil))
+	if resp.StatusCode != http.StatusConflict {
+		t.Fatalf("second create: got %d, want 409 (body: %s)", resp.StatusCode, raw)
+	}
+	after := storedRecord(t, c, id)
+
+	if after["usable"] != true {
+		t.Fatalf("the refresh did not happen, so this case proves nothing: %v", after)
+	}
+	if got, want := exceptTheProbeFields(t, after), exceptTheProbeFields(t, before); got != want {
+		t.Errorf("the refresh changed a field that is not one of the three:\n before %s\n after  %s",
+			want, got)
+	}
+	beforeRev, afterRev := before["rev"].(float64), after["rev"].(float64)
+	if afterRev != beforeRev+1 {
+		t.Errorf("rev went %v -> %v; the refresh is exactly one compare-and-swap write",
+			beforeRev, afterRev)
+	}
+}
+
+// TestConflictAtAnotherArchitectureDeclinesTheRefresh is T-02-111. The verdict
+// is architecture-scoped, this record's identity cannot vary by architecture,
+// and writing an arm64 verdict onto an amd64 record would be undetectable
+// afterwards.
+func TestConflictAtAnotherArchitectureDeclinesTheRefresh(t *testing.T) {
+	s, f := conflictRefreshServer(t, &storeHook{})
+	c := operator(t, s)
+
+	created := coldCreate(t, c, f, "amd-record", []string{"siderolabs/intel-ucode"})
+	id := created["id"].(string)
+	before := storedRecord(t, c, id)
+
+	f.answerAfter("HEAD /image", 0)
+	body := createBody("arm-attempt", []string{"siderolabs/intel-ucode"}, nil)
+	body["arch"] = string(imagefactory.ArchARM64)
+	resp, raw := c.do(http.MethodPost, "/api/v1/schematics", body)
+	if resp.StatusCode != http.StatusConflict {
+		t.Fatalf("second-architecture create: got %d, want 409 (body: %s)", resp.StatusCode, raw)
+	}
+
+	after := storedRecord(t, c, id)
+	if marshalRecord(t, after) != marshalRecord(t, before) {
+		t.Errorf("an arm64 verdict was written onto an amd64 record:\n before %s\n after  %s",
+			marshalRecord(t, before), marshalRecord(t, after))
+	}
+
+	detail := conflictDetailOf(t, raw)
+	if !strings.Contains(detail, string(imagefactory.ArchAMD64)) ||
+		!strings.Contains(detail, string(imagefactory.ArchARM64)) {
+		t.Errorf("the 409 does not name both architectures, so the operator cannot tell why the "+
+			"verdict was left alone: %q", detail)
+	}
+}
+
+// TestConflictRefreshLosingTheCompareAndSwapAnswersThePlainConflict: another
+// writer changed the record between the read and the write. Their write wins
+// and this route does not retry -- a compare-and-swap retry on a route that is
+// already answering a conflict would be inventing a write path nobody asked for.
+func TestConflictRefreshLosingTheCompareAndSwapAnswersThePlainConflict(t *testing.T) {
+	h := &storeHook{}
+	s, f := conflictRefreshServer(t, h)
+	c := operator(t, s)
+
+	created := coldCreate(t, c, f, "raced", []string{"siderolabs/intel-ucode"})
+	id := created["id"].(string)
+	before := storedRecord(t, c, id)
+
+	f.answerAfter("HEAD /image", 0)
+	h.arm(func(inner store.SchematicStore, rec model.Schematic) {
+		rec.Name = "renamed by a concurrent writer"
+		if _, err := inner.Put(context.Background(), rec); err != nil {
+			t.Errorf("the concurrent writer could not write: %v", err)
+		}
+	})
+
+	resp, raw := c.do(http.MethodPost, "/api/v1/schematics",
+		createBody("raced-again", []string{"siderolabs/intel-ucode"}, nil))
+	if resp.StatusCode != http.StatusConflict {
+		t.Fatalf("second create: got %d, want 409 (body: %s)", resp.StatusCode, raw)
+	}
+
+	after := storedRecord(t, c, id)
+	if after["name"] != "renamed by a concurrent writer" {
+		t.Errorf("name = %v; the losing refresh overwrote the winner", after["name"])
+	}
+	if after["usable"] != false || after["probed_at"] != zeroTime {
+		t.Errorf("the refresh wrote after losing the compare-and-swap: usable=%v probed_at=%v",
+			after["usable"], after["probed_at"])
+	}
+	beforeRev, afterRev := before["rev"].(float64), after["rev"].(float64)
+	if afterRev != beforeRev+1 {
+		t.Errorf("rev went %v -> %v; exactly one write should have landed, the concurrent "+
+			"writer's, and a retry would show as a second", beforeRev, afterRev)
+	}
+	if detail := conflictDetailOf(t, raw); strings.Contains(detail, "refreshed") {
+		t.Errorf("the 409 claims a refresh that lost its compare-and-swap: %q", detail)
+	}
+}
+
+// TestConflictRefreshAgainstADeletedRecordDoesNotRecreateIt: the record was
+// deleted between the read and the write. A route whose whole job here is to
+// refuse must not undo a deletion.
+func TestConflictRefreshAgainstADeletedRecordDoesNotRecreateIt(t *testing.T) {
+	h := &storeHook{}
+	s, f := conflictRefreshServer(t, h)
+	c := operator(t, s)
+
+	created := coldCreate(t, c, f, "deleted-midway", []string{"siderolabs/intel-ucode"})
+	id := created["id"].(string)
+
+	f.answerAfter("HEAD /image", 0)
+	h.arm(func(inner store.SchematicStore, rec model.Schematic) {
+		if err := inner.Delete(context.Background(), rec.ID); err != nil {
+			t.Errorf("the concurrent deleter could not delete: %v", err)
+		}
+	})
+
+	resp, raw := c.do(http.MethodPost, "/api/v1/schematics",
+		createBody("deleted-midway-again", []string{"siderolabs/intel-ucode"}, nil))
+	if resp.StatusCode != http.StatusConflict {
+		t.Fatalf("second create: got %d, want 409 (body: %s)", resp.StatusCode, raw)
+	}
+
+	resp, raw = c.do(http.MethodGet, "/api/v1/schematics/"+id, nil)
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("GET by id after the deletion: got %d, want 404 -- the refusing POST recreated "+
+			"the record it refused (body: %s)", resp.StatusCode, raw)
+	}
+}
+
+// TestConflictDetailNamesWhichRefreshOutcomeHappened: ProblemError surfaces
+// detail as the create form's error message verbatim, and there is nowhere else
+// for an operator to read what became of the verdict.
+func TestConflictDetailNamesWhichRefreshOutcomeHappened(t *testing.T) {
+	// Refreshed and the schematic builds.
+	builds := func() string {
+		s, f := conflictRefreshServer(t, &storeHook{})
+		c := operator(t, s)
+		coldCreate(t, c, f, "d1", []string{"siderolabs/intel-ucode"})
+		f.answerAfter("HEAD /image", 0)
+		_, raw := c.do(http.MethodPost, "/api/v1/schematics",
+			createBody("d1b", []string{"siderolabs/intel-ucode"}, nil))
+		return conflictDetailOf(t, raw)
+	}()
+
+	// Refreshed and the Factory refused.
+	refused := func() string {
+		s, f := conflictRefreshServer(t, &storeHook{})
+		c := operator(t, s)
+		f.listButRefuse("siderolabs/accepted-but-unbuildable")
+		coldCreate(t, c, f, "d2", []string{"siderolabs/accepted-but-unbuildable"})
+		f.answerAfter("HEAD /image", 0)
+		_, raw := c.do(http.MethodPost, "/api/v1/schematics",
+			createBody("d2b", []string{"siderolabs/accepted-but-unbuildable"}, nil))
+		return conflictDetailOf(t, raw)
+	}()
+
+	// Not refreshed: the probe did not answer this time either.
+	silent := func() string {
+		s, f := conflictRefreshServer(t, &storeHook{})
+		c := operator(t, s)
+		coldCreate(t, c, f, "d3", []string{"siderolabs/intel-ucode"})
+		_, raw := c.do(http.MethodPost, "/api/v1/schematics",
+			createBody("d3b", []string{"siderolabs/intel-ucode"}, nil))
+		return conflictDetailOf(t, raw)
+	}()
+
+	for name, detail := range map[string]string{"builds": builds, "refused": refused, "silent": silent} {
+		if !strings.Contains(detail, "already exists") {
+			t.Errorf("%s: the 409 dropped the sentence it has always carried: %q", name, detail)
+		}
+	}
+	if builds == refused || builds == silent || refused == silent {
+		t.Errorf("the three outcomes do not have three distinct sentences:\n builds  %q\n refused %q\n silent  %q",
+			builds, refused, silent)
+	}
+	if !strings.Contains(builds, "builds") {
+		t.Errorf("the refreshed-and-buildable sentence does not say so: %q", builds)
+	}
+	if !strings.Contains(refused, "refused") {
+		t.Errorf("the refreshed-and-refused sentence does not say so: %q", refused)
+	}
+	if !strings.Contains(silent, "not refreshed") {
+		t.Errorf("the unanswered sentence does not say the verdict was left alone: %q", silent)
+	}
+	// The honest sentence for the unanswered case offers a retry and never a
+	// guarantee. Promising a verdict the product cannot deliver is the failure
+	// this copy already had once, and it is the whole of why G-02-9 stays open.
+	for _, promise := range []string{"will be verified", "will succeed", "will produce a verdict"} {
+		if strings.Contains(silent, promise) {
+			t.Errorf("the unanswered sentence promises a verdict (%q): %q", promise, silent)
+		}
+	}
 }
