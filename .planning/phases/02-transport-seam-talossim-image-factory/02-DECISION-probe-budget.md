@@ -1,8 +1,11 @@
-# Decision needed: how the build probe gets a budget it can actually meet
+# Decision: how the build probe gets a budget it can actually meet
 
-Status: open — blocks gap-closure planning for G-02-1, G-02-2, G-02-9
+Status: **decided** — Option 2 (compose the budgets), ratified by the user on 2026-09-03
 Raised by: 02-UAT.md (2026-08-29), UAT test 1
-Decide before: `/gsd-plan-phase --gaps` is run for cluster A
+Decided by: the user, in session, on the recommendation below — this is a ratified
+decision, not a self-resolved one; contrast `02-DECISION-schematic-identity.md`
+Consequence: G-02-9 is **not** closed by this choice. It is recorded as a known
+window per the recommendation, not treated as fixed.
 
 ---
 
