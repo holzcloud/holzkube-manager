@@ -39,6 +39,14 @@ function SetupPage() {
 
   const alreadyDone = refusal !== '' || (status.isSuccess && !status.data.setup_required)
 
+  // The server refuses setup on an address that accepts single sign-on only:
+  // it is reachable before any credential exists, and on a public address that
+  // is a race whose winner owns the instance. Saying so here rather than
+  // letting the form answer 403 is the difference between "wrong address" and
+  // "broken product". No new field was needed - password_login is already on
+  // the status response, and it is false exactly on those addresses.
+  const wrongAddress = status.isSuccess && status.data.password_login === false
+
   const submit = async (event: FormEvent) => {
     event.preventDefault()
     setMessage('')
@@ -94,12 +102,14 @@ function SetupPage() {
           </CardDescription>
         </CardHeader>
         <CardContent>
-          {alreadyDone ? (
+          {alreadyDone || wrongAddress ? (
             <div className="space-y-4">
               <p role="alert" className="text-sm text-muted-foreground">
                 {refusal !== ''
                   ? refusal
-                  : 'An operator account already exists. Setup can only run once.'}
+                  : alreadyDone
+                    ? 'An operator account already exists. Setup can only run once.'
+                    : 'The operator account has to be created from the local network. This address accepts single sign-on only, and there is no account to sign in with yet.'}
               </p>
               <Button
                 type="button"

@@ -3,6 +3,7 @@ package handlers
 import (
 	"errors"
 	"net/http"
+	"net/url"
 	"time"
 
 	"github.com/holzcloud/holzkube-manager/internal/auth"
@@ -107,6 +108,10 @@ func redirectURI(r *http.Request) string {
 }
 
 func oidcStart(d httpapi.Deps, w http.ResponseWriter, r *http.Request, sudo bool) {
+	if !sudo && refuseUnlinkedOnSSOOnlyHost(d, w, r) {
+		return
+	}
+
 	flow, err := oidc.NewFlowState(redirectURI(r), sudo)
 	if err != nil {
 		httpapi.WriteInternal(w, r, d.Logger, err)
@@ -115,7 +120,7 @@ func oidcStart(d httpapi.Deps, w http.ResponseWriter, r *http.Request, sudo bool
 
 	url, err := d.OIDC.AuthCodeURL(r.Context(), flow)
 	if err != nil {
-		writeProviderProblem(d, w, r, err)
+		writeProviderProblem(d, w, r, sudo, err)
 		return
 	}
 
@@ -128,6 +133,69 @@ func oidcStart(d httpapi.Deps, w http.ResponseWriter, r *http.Request, sudo bool
 
 	http.Redirect(w, r, url, http.StatusFound)
 }
+
+// refuseUnlinkedOnSSOOnlyHost answers a sign-in that cannot possibly succeed,
+// before the browser is sent anywhere, and reports whether it did.
+//
+// On an SSO-only host the first binding of an identity is refused (see
+// bindFirstIdentity). Without this check the operator learns that only at the
+// very end: the page offers the button, the provider authenticates them, and
+// the callback then says the account is not linked. Every step of that
+// round-trip was already doomed when the button was drawn.
+//
+// The check is here rather than in a field on GET /api/v1/system/status, which
+// is what would let the page grey the button out. That endpoint answers before
+// authentication, and "this instance has no identity linked yet" is a fact
+// about its state that an anonymous caller on the public address has no reason
+// to be told. Refusing at the start of a flow the caller deliberately began
+// discloses the same thing to somebody who could have discovered it by
+// finishing the flow anyway, and to nobody else.
+//
+// A missing binding is the only case that can be decided in advance. A binding
+// to a *different* subject cannot: the subject arrives with the token, so that
+// one still surfaces in the callback.
+func refuseUnlinkedOnSSOOnlyHost(d httpapi.Deps, w http.ResponseWriter, r *http.Request) bool {
+	if !d.SSOOnly(r) {
+		return false
+	}
+
+	u, err := d.Auth.SingleAccount(r.Context())
+	if err != nil {
+		// No account yet. Setup is refused here too, so there is nothing this
+		// address can offer until the wizard has run on the local network.
+		failSignIn(w, r, "setup-required")
+		return true
+	}
+	if u.HasIdentityBinding() {
+		return false
+	}
+
+	failSignIn(w, r, "bind-host")
+	return true
+}
+
+// failSignIn ends a failed sign-in the way a browser navigation has to end:
+// back on the sign-in page, with a stable code the page can render.
+//
+// These four routes are navigations, not API calls. A problem document is the
+// right answer to fetch() and the wrong one to a redirect chain the operator is
+// riding through: it renders as raw JSON in the address bar, which is where
+// this flow has actually left people standing. The code is the machine-readable
+// half of the problem that was there before; the human half moves into the
+// page, which can say it in the operator's own language and offer the next
+// step. The detail stays in the server log, where it was already going.
+//
+// Only the sign-in flow redirects. A failure during sudo re-authentication
+// keeps its problem document: the caller is already authenticated, /login is
+// the wrong place to send them, and that path is diagnosed far more often than
+// it is walked into.
+func failSignIn(w http.ResponseWriter, r *http.Request, code string) {
+	http.Redirect(w, r, afterAuthFailure+"?sso_error="+url.QueryEscape(code), http.StatusFound)
+}
+
+// afterAuthFailure is the sign-in page. Like afterAuth it is a constant and not
+// anything the caller may influence.
+const afterAuthFailure = "/login"
 
 func oidcCallback(d httpapi.Deps, w http.ResponseWriter, r *http.Request) {
 	sm := d.Auth.Sessions()
@@ -143,8 +211,7 @@ func oidcCallback(d httpapi.Deps, w http.ResponseWriter, r *http.Request) {
 	clearFlow(d, r)
 
 	if flow.State == "" || flow.Verifier == "" {
-		httpapi.WriteProblem(w, r, httpapi.Forbidden("oidc.no-flow",
-			"There is no sign-in in progress for this browser. Start again from the sign-in page."))
+		failSignIn(w, r, "no-flow")
 		return
 	}
 
@@ -152,33 +219,30 @@ func oidcCallback(d httpapi.Deps, w http.ResponseWriter, r *http.Request) {
 	// endpoint: an operator who is not assigned to this application in
 	// Authentik arrives with error=access_denied and no code at all.
 	if e := r.URL.Query().Get("error"); e != "" {
-		httpapi.WriteProblem(w, r, httpapi.Forbidden("oidc.denied",
-			"The identity provider refused the sign-in: "+e))
+		d.Logger.WarnContext(r.Context(), "the identity provider refused the sign-in", "error", e)
+		failSignIn(w, r, "denied")
 		return
 	}
 	if !flow.MatchesState(r.URL.Query().Get("state")) {
-		httpapi.WriteProblem(w, r, httpapi.Forbidden("oidc.state-mismatch",
-			"This callback does not belong to the sign-in this browser started."))
+		failSignIn(w, r, "state-mismatch")
 		return
 	}
 	code := r.URL.Query().Get("code")
 	if code == "" {
-		httpapi.WriteProblem(w, r, httpapi.Forbidden("oidc.no-code",
-			"The identity provider returned no authorisation code."))
+		failSignIn(w, r, "no-code")
 		return
 	}
 
 	identity, err := d.OIDC.Exchange(r.Context(), flow, code)
 	if err != nil {
 		if errors.Is(err, oidc.ErrProviderUnreachable) {
-			writeProviderProblem(d, w, r, err)
+			writeProviderProblem(d, w, r, flow.Sudo, err)
 			return
 		}
 		// The detail stays generic. The error text names token contents and
 		// provider internals, and this response is rendered in a browser.
 		d.Logger.WarnContext(r.Context(), "oidc callback failed", "error", err)
-		httpapi.WriteProblem(w, r, httpapi.Forbidden("oidc.exchange-failed",
-			"The sign-in could not be completed."))
+		failSignIn(w, r, "exchange-failed")
 		return
 	}
 
@@ -266,15 +330,15 @@ func bindFirstIdentity(d httpapi.Deps, r *http.Request, issuer string, identity 
 func writeBindProblem(d httpapi.Deps, w http.ResponseWriter, r *http.Request, err error) {
 	switch {
 	case errors.Is(err, errBindFromUntrustedHost):
-		httpapi.WriteProblem(w, r, httpapi.Forbidden("oidc.bind-host",
-			"This account has not been linked to the identity provider yet. "+
-				"Sign in once from the local network to link it; it cannot be linked over the public address."))
+		failSignIn(w, r, "bind-host")
 	case errors.Is(err, errBindBeforeSetup):
-		httpapi.WriteProblem(w, r, httpapi.SetupRequired())
+		failSignIn(w, r, "setup-required")
 	case errors.Is(err, auth.ErrAlreadyBound):
-		httpapi.WriteProblem(w, r, httpapi.Forbidden("oidc.other-identity",
-			"This instance is linked to a different identity."))
+		failSignIn(w, r, "other-identity")
 	default:
+		// An unexpected failure keeps its problem document and its request id:
+		// this one is a bug report, not something the operator can act on from
+		// the sign-in page.
 		httpapi.WriteInternal(w, r, d.Logger, err)
 	}
 }
@@ -351,8 +415,12 @@ func clearFlow(d httpapi.Deps, r *http.Request) {
 // writeProviderProblem answers a provider outage with 503 rather than 500. The
 // distinction is what tells the operator to use the local account instead of
 // filing a bug against this server.
-func writeProviderProblem(d httpapi.Deps, w http.ResponseWriter, r *http.Request, err error) {
+func writeProviderProblem(d httpapi.Deps, w http.ResponseWriter, r *http.Request, sudo bool, err error) {
 	d.Logger.WarnContext(r.Context(), "identity provider unreachable", "error", err)
-	httpapi.WriteProblem(w, r, httpapi.Upstream("oidc.provider-unreachable",
-		"The identity provider could not be reached."))
+	if sudo {
+		httpapi.WriteProblem(w, r, httpapi.Upstream("oidc.provider-unreachable",
+			"The identity provider could not be reached."))
+		return
+	}
+	failSignIn(w, r, "provider-unreachable")
 }
