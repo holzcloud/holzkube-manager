@@ -2361,7 +2361,14 @@ func scaledManifestBudget() time.Duration {
 // numbers, so the rounding is exact at every value these constants have held,
 // and the cases below leave a ten percent margin either side in any event.
 func scaleBudget(production time.Duration) time.Duration {
-	return time.Duration(float64(scaledJSONBudget) * float64(production) / float64(imagefactory.DefaultTimeout))
+	return scaleFrom(scaledJSONBudget, production)
+}
+
+// scaleFrom is the same construction with the JSON budget's stand-in named, so
+// the route ceiling tests below can run at a scale of their own without
+// restating the arithmetic.
+func scaleFrom(base, production time.Duration) time.Duration {
+	return time.Duration(float64(base) * float64(production) / float64(imagefactory.DefaultTimeout))
 }
 
 // pastBudget is a latency comfortably past d and nowhere near the next budget
@@ -2490,4 +2497,126 @@ func TestProbeBudgetIsNotTheManifestBudget(t *testing.T) {
 			"declined to answer, which says nothing about the schematic",
 			got.InstallerError.Code, httpapi.CodeUpstreamFactoryUnavailable)
 	}
+}
+
+// The two route ceiling tests.
+//
+// The table in cmd/holzkube-managerd/budget_test.go declares and these two
+// measure, and neither substitutes for the other: the guard cannot see whether
+// a declared deadline is actually applied to a request, and these cannot see
+// whether it composes against the response budget. Both are needed and each
+// says so.
+//
+// They assert on elapsed time and not only on the status code, because a test
+// that checks only the code passes just as well against a route with no
+// deadline at all -- which is the shape this whole round is closing. What they
+// prove is that nothing on either route runs unbounded against a Factory that
+// never answers, and that the answer carries the upstream-unavailable code
+// rather than a statement about the schematic. What they do not prove is that
+// the ceiling itself is the binding constraint: CreateRouteBudget and
+// AssetsRouteBudget are production constants at 120s and 65s, and a test that
+// waited for one of them to bind would be a two-minute test. The client budgets
+// are scaled instead, and the bound asserted is the scaled equivalent of the
+// route's declared ceiling.
+
+// ceilingJSONBudget is the JSON budget's stand-in for the two ceiling tests.
+//
+// It is larger than scaledJSONBudget on purpose. The assets route spends its
+// budgets in series -- two manifest budgets against a ceiling of two plus five
+// seconds -- so the margin between the two is 8% of the ceiling at every scale,
+// and 8% of a small number is a number that loses to a loaded machine. At this
+// scale the margin is a hundred milliseconds, which scheduling jitter does not
+// reach and which still leaves both tests inside two seconds.
+const ceilingJSONBudget = 600 * time.Millisecond
+
+// neverAnswers is longer than any test will wait. The fake abandons it as soon
+// as the caller's context is cancelled, so it costs nothing beyond the budget
+// under test.
+const neverAnswers = time.Hour
+
+func ceilingServer(t *testing.T) (*server, *fakeFactory) {
+	t.Helper()
+	f := newFakeFactory(t)
+	c := f.clientWithBudgets(t,
+		ceilingJSONBudget,
+		scaleFrom(ceilingJSONBudget, imagefactory.ProbeTimeout),
+		scaleFrom(ceilingJSONBudget, imagefactory.ManifestTimeout))
+	return newServerWithFactory(t, 5*time.Minute, c), f
+}
+
+// TestCreateRouteAnswersInsideItsCeiling drives POST /api/v1/schematics against
+// a Factory that never answers anything.
+func TestCreateRouteAnswersInsideItsCeiling(t *testing.T) {
+	s, f := ceilingServer(t)
+	c := operator(t, s)
+
+	f.answerAfter("GET /version", neverAnswers)
+	f.answerAfter("POST /schematics", neverAnswers)
+	f.answerAfter("HEAD /image", neverAnswers)
+
+	ceiling := scaleFrom(ceilingJSONBudget, handlers.CreateRouteBudget)
+
+	start := time.Now()
+	resp, raw := c.do(http.MethodPost, "/api/v1/schematics",
+		createBody("create-against-a-silent-factory", []string{"siderolabs/intel-ucode"}, nil))
+	elapsed := time.Since(start)
+
+	if resp.StatusCode != http.StatusBadGateway {
+		t.Fatalf("got %d, want 502 (body: %s)", resp.StatusCode, raw)
+	}
+	p := decodeProblemWithErrors(t, raw)
+	if p.Code != httpapi.CodeUpstreamFactoryUnavailable {
+		t.Errorf("code = %q, want %q: a Factory that never answered has said nothing about "+
+			"the schematic", p.Code, httpapi.CodeUpstreamFactoryUnavailable)
+	}
+	if elapsed >= ceiling {
+		t.Errorf("the route answered after %s, at or past the scaled equivalent of "+
+			"CreateRouteBudget (%s at this scale, %s in production). A route that outruns "+
+			"its own declared ceiling is a route whose worst case is the sum of its "+
+			"callees' budgets, which is what the ceiling exists to stop",
+			elapsed, ceiling, handlers.CreateRouteBudget)
+	}
+	t.Logf("POST /api/v1/schematics answered in %s against a ceiling of %s", elapsed, ceiling)
+}
+
+// TestAssetsRouteAnswersInsideItsCeiling drives
+// GET /api/v1/schematics/{id}/assets against a registry that never answers.
+//
+// The route still returns 200 with the four locally assembled references and an
+// installer_error member -- discarding four correct references because a fifth
+// could not be obtained is a denial of service holzkube-manager would be
+// inflicting on itself (G-02-15). The ceiling is what bounds how long that
+// answer takes.
+func TestAssetsRouteAnswersInsideItsCeiling(t *testing.T) {
+	s, f := ceilingServer(t)
+	c := operator(t, s)
+	id := mustCreate(t, c, "assets-against-a-silent-registry", []string{"siderolabs/intel-ucode"})
+
+	f.answerAfter("GET /v2", neverAnswers)
+
+	ceiling := scaleFrom(ceilingJSONBudget, handlers.AssetsRouteBudget)
+
+	start := time.Now()
+	resp, raw := c.do(http.MethodGet, "/api/v1/schematics/"+id+"/assets?arch=amd64", nil)
+	elapsed := time.Since(start)
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("got %d, want 200 (body: %s)", resp.StatusCode, raw)
+	}
+	var got assetsBody
+	decodeInto(t, raw, &got)
+	if got.InstallerError == nil {
+		t.Fatalf("no installer_error although the registry never answered (body: %s)", raw)
+	}
+	if got.InstallerError.Code != httpapi.CodeUpstreamFactoryUnavailable {
+		t.Errorf("installer_error.code = %q, want %q", got.InstallerError.Code,
+			httpapi.CodeUpstreamFactoryUnavailable)
+	}
+	if elapsed >= ceiling {
+		t.Errorf("the route answered after %s, at or past the scaled equivalent of "+
+			"AssetsRouteBudget (%s at this scale, %s in production). Both candidates are "+
+			"walked in series at this wave, so this is the 60.000s composition that met a "+
+			"60s response budget, scaled", elapsed, ceiling, handlers.AssetsRouteBudget)
+	}
+	t.Logf("GET /api/v1/schematics/{id}/assets answered in %s against a ceiling of %s", elapsed, ceiling)
 }
