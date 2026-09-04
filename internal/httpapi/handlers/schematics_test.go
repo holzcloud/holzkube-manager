@@ -137,6 +137,22 @@ func (f *fakeFactory) listButRefuse(name string) {
 	f.unbuildable[name] = true
 }
 
+// buildFromNowOn lifts a refusal set by listButRefuse, leaving the name in the
+// catalog: the image endpoint builds it from here on.
+//
+// It exists for the cross-version tests, which need one extension refused at
+// one Talos version and built at another. serveImage decides per extension and
+// not per version -- and that is not a shortcoming of the fake, because the
+// production code does not make that decision either, it records whatever the
+// image endpoint answered. So the version-dependent difference is produced by
+// flipping the fake between the two POSTs rather than by a version-dependent
+// branch inside it.
+func (f *fakeFactory) buildFromNowOn(name string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	delete(f.unbuildable, name)
+}
+
 // listButFailToProbe adds an extension the catalog lists and whose image
 // endpoint answers 503. The schematic is created upstream and the probe learns
 // nothing about it -- not a refusal, an outage.
@@ -3161,6 +3177,72 @@ func TestConflictAtAnotherTalosVersionDeclinesTheRefresh(t *testing.T) {
 	if !strings.Contains(detail, catalogVersion) || !strings.Contains(detail, otherCatalogVersion) {
 		t.Errorf("the 409 does not name both Talos versions, so the operator can neither tell why "+
 			"the verdict was left alone nor tell this refusal from the architecture one: %q", detail)
+	}
+}
+
+// TestConflictAtAnotherTalosVersionErasesNoStoredRefusal encodes the verifier's
+// own reproduction from 02-VERIFICATION.md round 4, gaps[0], step for step.
+//
+// This is the worse of the two directions, and the reason it is worse is
+// T-02-115. Writing a v1.13.9 "it builds" onto a v1.12.0 record does not only
+// make `usable` false into a claim nobody measured -- the same write erases the
+// v1.12.0 refusal sentence, which is the single place in the whole record where
+// the disagreement between the two versions was visible at all. Afterwards
+// there is nothing left to notice, and images.tsx's UsabilityVerdict renders
+// "Usable -- the build probe confirmed it" in good faith.
+func TestConflictAtAnotherTalosVersionErasesNoStoredRefusal(t *testing.T) {
+	s, f := conflictRefreshServer(t, &storeHook{})
+	c := operator(t, s)
+
+	// Authored at otherCatalogVersion, where the image endpoint refuses this
+	// extension. The probe answers, so the refusal is a verdict and not silence.
+	f.listButRefuse("siderolabs/cross-version-ext")
+	f.answerAfter("HEAD /image", 0)
+	body := createBody("cross-version", []string{"siderolabs/cross-version-ext"}, nil)
+	body["talos_version"] = otherCatalogVersion
+	resp, raw := c.do(http.MethodPost, "/api/v1/schematics", body)
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("create at %s: got %d, want 201 (body: %s)", otherCatalogVersion, resp.StatusCode, raw)
+	}
+	var created map[string]any
+	decodeInto(t, raw, &created)
+	id := mustString(t, created, "id")
+
+	before := storedRecord(t, c, id)
+	if before["usable"] != false {
+		t.Fatalf("the first create did not store a refusal, so this case proves nothing: %v", before)
+	}
+	if reason := mustString(t, before, "probe_reason"); !strings.Contains(reason, otherCatalogVersion) {
+		t.Fatalf("probe_reason = %q does not name %s, so this test cannot show that a true "+
+			"refusal about that version survived. The sentence comes from probe.go's "+
+			"ErrSchematicNotBuildable, `<id> at <version>/<arch> answered HTTP <status>`, whose "+
+			"format is pinned by TestRefusalReasonNamesTheArchitectureItAskedAbout; if it moved, "+
+			"that test moved with it.", reason, otherCatalogVersion)
+	}
+
+	// The same customisation at catalogVersion, where it now builds.
+	f.buildFromNowOn("siderolabs/cross-version-ext")
+	second := createBody("cross-version-again", []string{"siderolabs/cross-version-ext"}, nil)
+	resp, raw = c.do(http.MethodPost, "/api/v1/schematics", second)
+	if resp.StatusCode != http.StatusConflict {
+		t.Fatalf("second-version create: got %d, want 409 (body: %s)", resp.StatusCode, raw)
+	}
+
+	// marshalRecord over the whole record and not exceptTheProbeFields: here
+	// the three probe fields are precisely the ones that must not move.
+	after := storedRecord(t, c, id)
+	if marshalRecord(t, after) != marshalRecord(t, before) {
+		t.Errorf("a probe that succeeded at %s overwrote a true %s refusal -- and if usable "+
+			"went false -> true while probe_reason went to the empty string, the only visible "+
+			"trace of the disagreement was erased along with it:\n before %s\n after  %s",
+			catalogVersion, otherCatalogVersion,
+			marshalRecord(t, before), marshalRecord(t, after))
+	}
+
+	detail := conflictDetailOf(t, raw)
+	if !strings.Contains(detail, catalogVersion) || !strings.Contains(detail, otherCatalogVersion) {
+		t.Errorf("the 409 does not name both Talos versions, so the operator cannot tell that "+
+			"the stored refusal was left standing on purpose: %q", detail)
 	}
 }
 
