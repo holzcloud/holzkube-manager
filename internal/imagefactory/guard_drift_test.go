@@ -167,32 +167,145 @@ func TestBrowserInstallerNamesEqualInstallerCandidates(t *testing.T) {
 // An empty result is a failure and not a skip. A guard that silently passes
 // when it can no longer find what it guards is worse than no guard: it reports
 // agreement it never checked.
+//
+// The reading itself is parseBrowserRefusalRanges, which takes a string and
+// returns an error instead of taking a *testing.T. That split is the whole
+// point of this round: a guard whose failure nothing checks is exactly the
+// class of defect being closed here, and with t.Fatalf inside the reader its
+// failure cases cannot be tested at all. Only the file read and the fatal stay
+// on this side of the line.
 func browserRefusalRanges(t *testing.T) []declaredRange {
 	t.Helper()
-	source := readSource(t, imagesRoutePath)
 
-	matches := browserRefusalRange.FindAllStringSubmatch(source, -1)
-	if len(matches) == 0 {
-		t.Fatalf("%s declares no refusal ranges this guard can read.\n"+
+	ranges, err := parseBrowserRefusalRanges(readSource(t, imagesRoutePath))
+	if err != nil {
+		t.Fatalf("%s declares no refusal ranges this guard can read: %v\n"+
 			"The browser's set has to be data -- a named array of {from: 0x.., to: 0x..} "+
 			"entries -- so that this test can compare it to the server's. A chain of "+
 			"comparisons inside an if is unreadable from here, and while it was one, "+
-			"the two sets drifted (G-02-11).", imagesRoutePath)
+			"the two sets drifted (G-02-11).", imagesRoutePath, err)
+	}
+	return ranges
+}
+
+// parseBrowserRefusalRanges reads the refusal table out of images.tsx source.
+//
+// It is pure so that its failure cases are themselves testable; see
+// browserRefusalRanges for why that matters.
+func parseBrowserRefusalRanges(source string) ([]declaredRange, error) {
+	matches := browserRefusalRange.FindAllStringSubmatch(source, -1)
+	if len(matches) == 0 {
+		return nil, fmt.Errorf("no {from: 0x.., to: 0x..} entries anywhere in the source")
 	}
 
 	out := make([]declaredRange, 0, len(matches))
 	for _, m := range matches {
 		from, err := strconv.ParseUint(m[1], 16, 32)
 		if err != nil {
-			t.Fatalf("%s: unreadable range start %q: %v", imagesRoutePath, m[1], err)
+			return nil, fmt.Errorf("unreadable range start %q: %w", m[1], err)
 		}
 		to, err := strconv.ParseUint(m[2], 16, 32)
 		if err != nil {
-			t.Fatalf("%s: unreadable range end %q: %v", imagesRoutePath, m[2], err)
+			return nil, fmt.Errorf("unreadable range end %q: %w", m[2], err)
 		}
 		out = append(out, declaredRange{from: rune(from), to: rune(to)})
 	}
-	return out
+	return out, nil
+}
+
+// TestBrowserRefusalGuardRefusesToPassWithoutItsDeclaration is round 4's
+// falsification of this file's own guard, encoded with the outcome reversed.
+//
+// The verifier renamed REFUSED_RANGES to RENAMED_BY_VERIFIER throughout
+// images.tsx and re-ran TestBrowserRefusalSetEqualsTheServers:
+// `ok github.com/holzcloud/holzkube-manager/internal/imagefactory 0.546s`. The
+// guard was green against a declaration that no longer existed, which is the
+// one property browserRefusalRanges's own comment claims it has.
+//
+// The table runs over synthetic sources rather than over the file, because a
+// copy of the real file would be a second transcription and this file exists to
+// stop transcriptions nothing checks. The first row is the real source, so the
+// other three are anchored to reality and not merely consistent with each other.
+func TestBrowserRefusalGuardRefusesToPassWithoutItsDeclaration(t *testing.T) {
+	realSource := readSource(t, imagesRoutePath)
+
+	// Renamed throughout, entries left verbatim. This is the verifier's own
+	// experiment: `ok ... 0.546s` against a declaration that was gone.
+	const renamed = `type RefusedRange = { from: number; to: number; class: string }
+
+const RENAMED_BY_VERIFIER: readonly RefusedRange[] = [
+  { from: 0x0000, to: 0x001f, class: 'control character' },
+  { from: 0xfeff, to: 0xfeff, class: 'byte order mark' },
+]
+`
+
+	// The declaration gone altogether, with nothing entry-shaped left behind.
+	const absent = `export function hasControlCharacter(value: string): boolean {
+  return (value.codePointAt(0) ?? 0) === 0xfeff
+}
+`
+
+	// A valid declaration plus one entry-shaped literal outside it: the
+	// pollution direction. One entry inside, two in the file as a whole.
+	const polluted = `const REFUSED_RANGES: readonly RefusedRange[] = [
+  { from: 0x0000, to: 0x001f, class: 'control character' },
+]
+
+const SOME_OTHER_TABLE: readonly RefusedRange[] = [
+  { from: 0x2028, to: 0x2029, class: 'line separator' },
+]
+`
+
+	for _, tc := range []struct {
+		name       string
+		source     string
+		wantErr    string
+		wantRanges int
+	}{
+		{
+			name:       "the real route",
+			source:     realSource,
+			wantRanges: 6,
+		},
+		{
+			name:    "the declaration renamed out of existence",
+			source:  renamed,
+			wantErr: "REFUSED_RANGES",
+		},
+		{
+			name:    "the declaration absent",
+			source:  absent,
+			wantErr: "REFUSED_RANGES",
+		},
+		{
+			name:    "an entry-shaped literal outside the declaration",
+			source:  polluted,
+			wantErr: "1 entries inside the REFUSED_RANGES declaration, 2 in the source as a whole",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ranges, err := parseBrowserRefusalRanges(tc.source)
+
+			if tc.wantErr == "" {
+				if err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+				if len(ranges) != tc.wantRanges {
+					t.Fatalf("read %d ranges, want %d", len(ranges), tc.wantRanges)
+				}
+				return
+			}
+
+			if err == nil {
+				t.Fatalf("no error; read %d ranges instead.\n"+
+					"A guard that reports a pass here reports agreement it never "+
+					"checked -- the property round 4 measured as absent.", len(ranges))
+			}
+			if !strings.Contains(err.Error(), tc.wantErr) {
+				t.Errorf("error does not name %q:\n%v", tc.wantErr, err)
+			}
+		})
+	}
 }
 
 // stringArrayLiteral reads the single-quoted members of a named TypeScript
