@@ -4,16 +4,16 @@ milestone: v1.14
 current_phase: 02
 current_phase_name: Transport Seam, `talossim` & Image Factory
 status: executing
-stopped_at: Completed 02-24-PLAN.md
-last_updated: "2026-09-04T05:18:38.534Z"
-last_activity: 2026-09-03
+stopped_at: Completed 02-25-PLAN.md
+last_updated: "2026-09-04T05:47:39.938Z"
+last_activity: 2026-09-04
 last_activity_desc: Phase 02 execution started
-state_head: f17dd7729e6c4f57cd0e5853282b3256ade173b0
+state_head: 68037f7b2304776377cdd86b554e64d4e9765225
 progress:
   total_phases: 10
   completed_phases: 1
   total_plans: 32
-  completed_plans: 30
+  completed_plans: 31
 ---
 
 # Project State
@@ -27,10 +27,10 @@ See: .planning/PROJECT.md (updated 2026-08-27)
 
 ## Current Position
 
-Phase: 02 (Transport Seam, `talossim` & Image Factory) — READY TO EXECUTE
-Plan: 24 of 26 ausgeführt — 02-25 und 02-26 sind neu geplant und warten auf Ausführung
-Status: Ready to execute — Gap-Closure Runde 5 geplant (G-02-24, G-02-25 aus 02-VERIFICATION.md Runde 4)
-Last activity: 2026-09-04 — Gap-Closure-Pläne 02-25/02-26 geplant und verifiziert
+Phase: 02 (Transport Seam, `talossim` & Image Factory) — EXECUTING
+Plan: 2 of 26
+Status: Ready to execute
+Last activity: 2026-09-04 — Phase 02 execution started
 
 Progress: [█░░░░░░░░░] 1 of 10 phases
 
@@ -88,6 +88,7 @@ Progress: [█░░░░░░░░░] 1 of 10 phases
 | Phase 02 P22 | 90 min | 3 tasks | 13 files |
 | Phase 02 P23 | 30 min | 3 tasks | 12 files |
 | Phase 02 P24 | 23 min | 3 tasks | 9 files |
+| Phase 02 P25 | 10 min | 3 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -188,6 +189,8 @@ Recent decisions affecting current work:
 - [Phase 02]: Der 409-Pfad schreibt das berechnete Sondierungsurteil in genau drei Felder, unter zwei Bedingungen
 - [Phase 02]: Ein verlorenes Compare-and-Swap auf dem 409-Pfad wird nicht wiederholt und ein zwischenzeitlich geloeschter Datensatz nicht neu angelegt: beide antworten den blanken Konflikt
 - [Phase 02]: G-02-9 bleibt offen und wird als WINDOWS-Eintrag 58 gefuehrt -- die Erholung ist eine Wiedervorlage, die als Fehler beantwortet wird, keine Nachsondier-Route (Option 1 wurde nicht genommen)
+- [Phase 02]: Kein Sonderfall fuer eine leere gespeicherte TalosVersion im Refresh-Guard — Arch wurde additiv nachgeruestet, TalosVersion ist seit dem ersten Schematic-Datensatz Pflichtfeld: eine leere gespeicherte Version ist kein Alt-Datensatz, sondern ein Datensatz, dessen Version nicht bekannt ist — die Ungleichheitspruefung lehnt ihn korrekt ab.
+- [Phase 02]: Kein versionsuebergreifender Refresh — er ist eine Schema-Aenderung — model.Schematic hat Platz fuer genau ein Verdikt. Ein Datensatz, der die Verdikte zweier Versionen halten soll, braucht dieselbe Aenderung, die Option B fuer die Architektur beschreibt; argumentiert im angehaengten Vermerk von 02-DECISION-schematic-identity.md, nicht in einem Guard.
 
 ### Pending Todos
 
@@ -231,6 +234,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-09-03T20:01:09.159Z
-Stopped at: Completed 02-24-PLAN.md
+Last session: 2026-09-04T05:47:31.180Z
+Stopped at: Completed 02-25-PLAN.md
 Resume file: None
