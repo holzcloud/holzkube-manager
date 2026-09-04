@@ -87,6 +87,13 @@ const refusedRangesName = "REFUSED_RANGES"
 // carrying a bracket inside a string would cut it short -- which is not silent,
 // because the count check below compares the entries found in the body against
 // the entries found in the whole source and fails on any difference.
+//
+// That sentence was not true for a body cut short BEFORE its first entry: with
+// no entry left inside, the empty branch was reached first and reported the
+// declaration as empty, which round 5 measured against a declaration carrying
+// six of them. The whole-source count is now taken before that branch, so the
+// cut-short case carries its own message and the count check keeps the one it
+// can still explain.
 // refusedRangesEntry matches one flat object literal inside the declaration
 // body, whatever it is made of.
 //
@@ -282,6 +289,30 @@ func parseBrowserRefusalRanges(source string) ([]declaredRange, error) {
 	}
 
 	matches := browserRefusalRange.FindAllStringSubmatch(body, -1)
+
+	// Counted before the empty branch and not after it, because the empty
+	// branch needs the number to tell its two causes apart. While it was
+	// computed afterwards, a body cut short BEFORE its first entry reached the
+	// empty branch first and was reported as the declaration being empty --
+	// round 5 measured exactly that against a declaration carrying six entries.
+	// Fail closed, but a reader who follows the message looks in the wrong
+	// place.
+	whole := len(browserRefusalRange.FindAllString(source, -1))
+
+	// With the count in hand the three causes are three messages, and none of
+	// them claims another's: the readability loop above catches an unreadable
+	// entry INSIDE the declaration, this branch catches the body being cut off
+	// BEFORE the first entry, and the count check below catches an entry-shaped
+	// literal OUTSIDE the declaration.
+	if len(matches) == 0 && whole > 0 {
+		return nil, fmt.Errorf("the %s declaration body was cut short before its first entry, "+
+			"but %d entries are present in the source as a whole.\n"+
+			"The declaration is NOT empty. The body is captured non-greedily up to the first "+
+			"closing bracket, so a `]` inside a comment or a string before the first entry ends "+
+			"the capture there and nothing readable is left inside it. Look for that bracket, "+
+			"not for a missing table",
+			refusedRangesName, whole)
+	}
 	if len(matches) == 0 {
 		return nil, fmt.Errorf("%s is declared but carries no entries this guard can read.\n"+
 			"This is the declaration being empty, not the declaration being absent; "+
@@ -289,12 +320,12 @@ func parseBrowserRefusalRanges(source string) ([]declaredRange, error) {
 			refusedRangesName)
 	}
 
-	// The pollution direction, and the truncation direction, in one comparison.
-	// An entry-shaped literal outside the declaration is one this guard now
-	// correctly ignores but somebody should look at; a body that ended early
-	// because an entry carries a closing bracket inside a string produces the
-	// same inequality. This guard cannot tell the two apart, so it names both.
-	whole := len(browserRefusalRange.FindAllString(source, -1))
+	// The pollution direction, and the truncation direction that leaves entries
+	// inside the body, in one comparison. An entry-shaped literal outside the
+	// declaration is one this guard now correctly ignores but somebody should
+	// look at; a body that ended early after its first entry, because a later
+	// entry carries a closing bracket inside a string, produces the same
+	// inequality. This guard cannot tell those two apart, so it names both.
 	if whole != len(matches) {
 		return nil, fmt.Errorf("%d entries inside the %s declaration, %d in the source as a whole.\n"+
 			"Either an entry-shaped literal sits outside the declaration -- this guard "+
