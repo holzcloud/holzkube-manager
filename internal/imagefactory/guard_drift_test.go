@@ -491,6 +491,86 @@ func TestBrowserRefusalGuardRefusesAnEntryItCannotRead(t *testing.T) {
 	}
 }
 
+// TestBrowserRefusalGuardRefusesABoundItCannotRepresent pins round 5's second
+// measured hole: the unreadable-entry check above is syntactic, not semantic.
+//
+// It asks whether browserRefusalRange matches the literal, and nothing asks
+// whether the numbers it read mean anything. strconv.ParseUint(..., 16, 32)
+// accepts up to 0xFFFFFFFF, rune(uint64) is lossy, and there was neither
+// `from <= to` nor `to <= utf8.MaxRune`. Round 5 measured all three rows below
+// as `err=<nil>` with a declaredRange that covers no codepoint at all in a
+// sweep starting at rune(0) -- which is precisely the property the unreadable
+// check exists to remove, one layer deeper: an entry the guard passes over is a
+// codepoint it reports agreement about without having compared it.
+//
+// A separate table from the two above, for the reason
+// TestBrowserRefusalGuardRefusesAnEntryItCannotRead already gives: each table's
+// acceptance pins the number of its rows, and that number only holds while the
+// tables stay apart.
+func TestBrowserRefusalGuardRefusesABoundItCannotRepresent(t *testing.T) {
+	// Round 5: `{0xFFFFFFFF, 0xFFFFFFFF}` -> `{-1 -1}` and
+	// `{0x10FFFF, 0xFFFFFFFF}` -> `{1114111 -1}`.
+	const upperOutsideUnicode = `const REFUSED_RANGES: readonly RefusedRange[] = [
+  { from: 0x0000, to: 0xFFFFFFFF, class: 'control character' },
+]
+`
+
+	// Round 5: `{0x0061, 0xFFFFFFFF}` -> `{97 -1}`. A row of its own and not a
+	// variant of the one above, because this is the direction the verification
+	// text names as the worse one: the form in the browser refuses every
+	// lowercase letter, while Go reads {97 -1} and compares nothing. An
+	// over-refusing client is a false refusal an operator cannot work around.
+	const realLowerUnrepresentableUpper = `const REFUSED_RANGES: readonly RefusedRange[] = [
+  { from: 0x0061, to: 0xFFFFFFFF, class: 'control character' },
+]
+`
+
+	// Round 5: `{0x001f, 0x0000}` -> `{31 0}`. Representable on both ends and
+	// still covering nothing, because the sweep runs upwards.
+	const inverted = `const REFUSED_RANGES: readonly RefusedRange[] = [
+  { from: 0x001f, to: 0x0000, class: 'control character' },
+]
+`
+
+	for _, tc := range []struct {
+		name    string
+		source  string
+		wantErr []string
+	}{
+		{
+			name:    "an upper bound outside Unicode",
+			source:  upperOutsideUnicode,
+			wantErr: []string{"from 0x0000 to 0xFFFFFFFF", "cannot represent"},
+		},
+		{
+			name:    "a real lower bound with an unrepresentable upper",
+			source:  realLowerUnrepresentableUpper,
+			wantErr: []string{"from 0x0061 to 0xFFFFFFFF", "cannot represent"},
+		},
+		{
+			name:    "an inverted range",
+			source:  inverted,
+			wantErr: []string{"from 0x001f to 0x0000", "cannot represent"},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ranges, err := parseBrowserRefusalRanges(tc.source)
+			if err == nil {
+				t.Fatalf("no error; read %d ranges instead: %v\n"+
+					"A bound this guard cannot represent covers no codepoint in a sweep "+
+					"from rune(0) upwards, so the entry is passed over -- and an entry it "+
+					"passes over is a codepoint it reports agreement about without having "+
+					"compared it.", len(ranges), ranges)
+			}
+			for _, want := range tc.wantErr {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("error does not name %q:\n%v", want, err)
+				}
+			}
+		})
+	}
+}
+
 // stringArrayLiteral reads the single-quoted members of a named TypeScript
 // array. It is deliberately literal-only: a member computed at runtime is a
 // member this guard cannot see, and failing is the honest answer.
