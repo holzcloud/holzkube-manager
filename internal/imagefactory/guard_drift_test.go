@@ -314,6 +314,40 @@ func parseBrowserRefusalRanges(source string) ([]declaredRange, error) {
 		if err != nil {
 			return nil, fmt.Errorf("unreadable range end %q: %w", m[2], err)
 		}
+
+		// Semantic and not syntactic, which is what separates this from the
+		// readability loop above: those bounds parsed, and they still mean
+		// nothing. rune(uint64) is lossy -- 0xFFFFFFFF becomes -1 -- and the
+		// sweep in TestBrowserRefusalSetEqualsTheServers runs upwards from
+		// rune(0), so an entry whose upper bound landed on a negative rune, or
+		// whose lower bound sits above its upper, covers not one codepoint and
+		// is passed over in silence. That inherits the readability loop's
+		// reason word for word: an entry it skips is a codepoint it reports
+		// agreement about without having compared it.
+		//
+		// The expensive direction is the one round 5 names as the worse of the
+		// two: { from: 0x0061, to: 0xFFFFFFFF }, measured as {97 -1}. The form
+		// in the browser refuses every lowercase letter from it, while Go reads
+		// a range covering nothing and compares nothing -- an over-refusing
+		// client no operator can work around, and green the whole way.
+		//
+		// The bit width of ParseUint stays at 32 on purpose. At 21 ParseUint
+		// would reject these itself, but with `value out of range`, which names
+		// neither the entry, nor the set, nor the reason. Here the message is
+		// the point and not the abort, so the width stays wide enough to read
+		// the literal and the check below says what is wrong with it.
+		if to > utf8.MaxRune || from > to {
+			return nil, fmt.Errorf("this entry of %s has bounds this guard cannot represent: "+
+				"from 0x%s to 0x%s.\n"+
+				"The upper bound has to be at most utf8.MaxRune and the lower bound at most the "+
+				"upper. This guard compares SETS by sweeping every codepoint upwards from "+
+				"rune(0), and rune(uint64) is lossy: a bound above utf8.MaxRune lands on a "+
+				"negative rune, so such an entry covers no codepoint at all and is passed over. "+
+				"An entry it passes over is a codepoint it reports agreement about without "+
+				"having compared it -- the same reason the unreadable-entry check above gives",
+				refusedRangesName, m[1], m[2])
+		}
+
 		out = append(out, declaredRange{from: rune(from), to: rune(to)})
 	}
 	return out, nil
