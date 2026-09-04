@@ -617,19 +617,20 @@ compare-and-swap on the record's revision. The status code is still `409` and
 the body shape is unchanged; what changed is that a failed create can now change
 stored state, so a client should refetch the saved list after one.
 
-The refresh happens only when **both** conditions hold, and the `409` `detail`
+The refresh happens only when **all three** conditions hold, and the `409` `detail`
 says which of the three outcomes the caller got:
 
 | Condition | Meaning |
 |---|---|
 | the fresh probe answered | `probed_at` is stamped for a success and for a Factory refusal and for nothing else. A probe that could not reach the Factory says nothing about the schematic, and writing its silence over a stored verdict would replace an answer with an absence. |
 | the stored `arch` equals the architecture this submission asked about | the verdict is architecture-scoped, and this record's identity cannot vary by architecture. A record written before `arch` existed carries an empty one and is therefore never refreshed. |
+| the stored `talos_version` is the one this submission asked about | the verdict is version-scoped for the same reasons the architecture one is: the probe asks exactly one version's ISO URL, the extension catalog is version-scoped, and `probe_reason` names the version and the architecture in a single sentence. And this record's identity cannot vary by version either, because the canonical document contains no version — so a verdict measured at one version, written onto a record that names another, would be unrecognisable afterwards and would erase the refusal reason that was the only place the disagreement was visible. Unlike `arch` there is no old-record exemption: `talos_version` has been required since the first record. |
 
 | `detail` says | Outcome |
 |---|---|
 | the probe ran again and this schematic builds | refreshed, `usable` now `true` |
 | the probe ran again and the Factory refused it, with the reason | refreshed, `usable` still `false`, `probe_reason` written |
-| the verdict was not refreshed, and why | left exactly as it was — the probe did not answer either, or the record holds another architecture's verdict |
+| the verdict was not refreshed, and why | left exactly as it was — the probe did not answer either, or the record holds another architecture's verdict, or the record holds another Talos version's verdict |
 
 A refresh that loses the compare-and-swap, or whose record was deleted between
 the read and the write, abandons the refresh and answers the plain conflict. It
@@ -650,7 +651,12 @@ for a second verdict. **One stored customisation holds exactly one
 architecture's verdict, and obtaining the other means deleting the record and
 authoring it again.** This is also the case the verdict refresh above declines:
 a second-architecture `POST` changes nothing at all, and its `detail` names both
-architectures so the caller can tell that decline from the other one. This is a
+architectures so the caller can tell that decline from the other one. **A second
+Talos version has the same structure and is declined for the same reason** — the
+canonical document contains no version either, so `v1.12.0` and `v1.13.9` of one
+customisation are one record, and that record holds exactly one version's
+verdict; the `detail` names both versions there, so an operator can tell the
+version decline from the architecture one. This is a
 recorded constraint rather than a defect — the
 reasoning and the decided direction are in
 `.planning/phases/02-transport-seam-talossim-image-factory/02-DECISION-schematic-identity.md`.

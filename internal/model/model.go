@@ -101,12 +101,19 @@ type Schematic struct {
 	//
 	// What a second POST does with the *one* verdict was narrowed by plan
 	// 02-24 and no longer reads "refused rather than merged" across the board.
-	// At the same architecture the 409 now refreshes Usable, ProbedAt and
-	// ProbeReason in place from the probe that submission just ran, and refuses
-	// the label, the cluster and the Talos version exactly as before. At a
-	// different architecture it is still refused outright and changes nothing:
-	// that verdict is a different record's worth of statement and this record
-	// has no room for it.
+	// At the same architecture *and the same Talos version* the 409 now
+	// refreshes Usable, ProbedAt and ProbeReason in place from the probe that
+	// submission just ran, and refuses the label, the cluster and the Talos
+	// version exactly as before. At a different architecture it is still
+	// refused outright and changes nothing: that verdict is a different
+	// record's worth of statement and this record has no room for it.
+	//
+	// TalosVersion is the second of those two, narrowed by plan 02-25, and the
+	// stored field is now a condition of the refresh as well as something the
+	// 409 refuses to replace. At a different version the refresh is declined
+	// and the record is left byte for byte as it was, for the same reason it is
+	// declined at a different architecture: this record's identity cannot vary
+	// by either, because Canonical() emits neither.
 	ID SchematicID `json:"id"`
 
 	// Cluster is the cluster this schematic belongs to, empty when it is not
@@ -122,6 +129,14 @@ type Schematic struct {
 	// against. It is part of the record rather than a query parameter because
 	// the extension catalog is version-scoped: the same schematic may be
 	// un-buildable at a different version.
+	//
+	// Which makes the stored verdict bound to this version, and since plan
+	// 02-25 the code says so: the refresh a second POST performs is declined
+	// when this field is not the version the fresh probe asked about, and the
+	// record is left exactly as it was. At the same version and the same
+	// architecture the refresh still happens. See ID's comment above for why
+	// the two attempts are one record in the first place, and Arch's below for
+	// the one way the two conditions differ.
 	TalosVersion string `json:"talos_version"`
 
 	// Arch is the architecture the schematic was authored and probed against.
@@ -166,13 +181,25 @@ type Schematic struct {
 	// The verdict can now be re-obtained, at this architecture only, by
 	// submitting the identical customisation again: that POST answers 409 and
 	// refreshes Usable, ProbedAt and ProbeReason as a side effect (plan 02-24).
-	// Two things are still true and are the reason this is a mitigation rather
-	// than a route. The refresh is declined when this field does not equal the
-	// architecture the fresh probe asked about -- and a record written before
-	// this field existed carries an empty one, so it is never refreshed -- and
-	// it is declined when the fresh probe does not answer either, which leaves
-	// the record exactly as it was. The verdict for the *other* architecture is
-	// still not obtainable at all without deleting this record.
+	// Three things are still true and are the reason this is a mitigation
+	// rather than a route, in the order the handler checks them. The refresh is
+	// declined when the fresh probe does not answer either, which leaves the
+	// record exactly as it was. It is declined when this field does not equal
+	// the architecture the fresh probe asked about -- and a record written
+	// before this field existed carries an empty one, so it is never refreshed.
+	// And, since plan 02-25, it is declined when the record's TalosVersion is
+	// not the version the fresh probe asked about.
+	//
+	// That third condition needs no old-record exemption, which is the one way
+	// it differs from this one and is worth saying rather than leaving as an
+	// apparent inconsistency: Arch was retrofitted additively, so an empty
+	// architecture is a record written before the field existed, while
+	// TalosVersion has been set since the first schematic record, so an empty
+	// stored version is not an old record but a record whose version is not
+	// known -- and declining it is correct.
+	//
+	// The verdict for the *other* architecture, and the verdict at another
+	// version, are still not obtainable at all without deleting this record.
 	Arch string `json:"arch"`
 
 	// Canonical is the Factory's own normalised schematic document, stored

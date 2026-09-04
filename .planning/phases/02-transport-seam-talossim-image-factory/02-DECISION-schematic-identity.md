@@ -146,3 +146,40 @@ round.
 **This decision is therefore self-resolved, not ratified.** It is open to being overturned by the
 user at no cost, since the round implemented Option C (state the constraint) and deferred Option B's
 schema change to the phase that next opens the schematic store.
+
+## Nachtrag von Plan 02-25 (2026-09-04): dieselbe Beschraenkung gilt fuer `TalosVersion`
+
+Nachtraeglich angehaengt, nach der Entscheidung und ohne ein Byte des entschiedenen Textes zu
+beruehren. Der Statusblock oben und der Schlussabsatz — self-resolved, not ratified — bleiben, wie
+sie sind.
+
+Die Beobachtung, auf der dieses Dokument ruht, ist nicht auf die Architektur beschraenkt: die
+Identitaet eines Datensatzes wird von einem kanonischen Dokument bestimmt, das das fragliche Feld
+nicht enthaelt. `Schematic.Canonical()` (`internal/imagefactory/schematicid.go:125-178`) emittiert
+`owner`, `overlay` und `customization` — **weder Architektur noch Talos-Version**. Der Satz oben,
+"zwei Datensaetze, die sich nur in der Architektur unterscheiden, sind ein Datensatz", gilt fuer die
+Version wortgleich, und der Handler wusste es die ganze Zeit: sein Kommentar bei `schematics.go`
+:433-436 sagt, dass die Kollision "regardless of name, cluster or the version they were authored
+against" eintritt.
+
+Runde 4 der Verifikation hat gemessen, was passiert, wenn nur eines der beiden bewacht wird. Nach
+einer wahren Ablehnung bei `v1.12.0` und einem zweiten POST derselben Customisation bei `v1.13.9`
+stand im Datensatz `talos_version: v1.12.0, usable: true, probe_reason: ""`, rev 1 -> 2 — die
+korrekte Ablehnungs-Begruendung, die einzige sichtbare Stelle der Meinungsverschiedenheit, war von
+demselben Schreibvorgang geloescht. Reproduziert, nicht erschlossen; siehe `02-VERIFICATION.md`
+Runde 4, `gaps[0]`, und `02-REVIEW.md` CR-01.
+
+Die Antwort dieser Runde ist eine dritte Bedingung in `refreshTheStoredVerdict`
+(`stored.TalosVersion != fresh.TalosVersion`), neben der zweiten und in deren Form. Das ist die
+Fortsetzung von **Option C** — die Beschraenkung aussprechen und im Code halten — und ausdruecklich
+nicht von Option B. Es wurde nichts entschieden, was hier nicht schon entschieden war; die
+Reichweite der bestehenden Entscheidung wird nur auf das zweite Feld ausgesprochen, fuer das sie
+immer schon galt.
+
+**Ein versionsuebergreifender Refresh waere eine Schema-Aenderung und muesste hier argumentiert
+werden, nicht in einem Guard.** `model.Schematic` hat Platz fuer genau ein Verdikt — ein `usable`,
+ein `probed_at`, ein `probe_reason` —, so wie es Platz fuer genau ein Architektur-Verdikt hat. Ein
+Datensatz, der die Verdikte zweier Versionen halten soll, braucht dieselbe Aenderung, die Option B
+fuer die Architektur beschreibt, und faellt damit unter dieselbe Aufschiebung: in die Phase, die den
+Schematic-Store als naechstes oeffnet. Bis dahin ist das Verdikt einer anderen Version, wie das
+einer anderen Architektur, nur zu bekommen, indem der Datensatz geloescht und neu angelegt wird.
