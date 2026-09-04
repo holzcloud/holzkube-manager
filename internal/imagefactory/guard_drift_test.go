@@ -341,6 +341,18 @@ const SOME_OTHER_TABLE: readonly RefusedRange[] = [
 ]
 `
 
+	// The rename somebody actually performs, as opposed to the one nobody does.
+	// RENAMED_BY_VERIFIER above is a name chosen to be unrelated; this is a name
+	// that keeps REFUSED_RANGES as its prefix, which is what a leftover table
+	// looks like after the real one moves into another module. Round 5 measured
+	// this source as `ranges=[{0 0}] err=<nil>`: the guard read the leftover and
+	// reported agreement about a set the form no longer uses.
+	const prefixed = `const REFUSED_RANGES_LEGACY: readonly RefusedRange[] = [
+  { from: 0x0000, to: 0x001f, class: 'control character' },
+  { from: 0xfeff, to: 0xfeff, class: 'byte order mark' },
+]
+`
+
 	for _, tc := range []struct {
 		name       string
 		source     string
@@ -366,6 +378,11 @@ const SOME_OTHER_TABLE: readonly RefusedRange[] = [
 			name:    "an entry-shaped literal outside the declaration",
 			source:  polluted,
 			wantErr: "1 entries inside the REFUSED_RANGES declaration, 2 in the source as a whole",
+		},
+		{
+			name:    "the declaration renamed to a prefixed name",
+			source:  prefixed,
+			wantErr: "REFUSED_RANGES",
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
