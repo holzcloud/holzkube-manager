@@ -49,6 +49,30 @@ type declaredRange struct {
 var browserRefusalRange = regexp.MustCompile(
 	`\{\s*from:\s*0x([0-9a-fA-F]+),\s*to:\s*0x([0-9a-fA-F]+)`)
 
+// refusedRangesName is the identifier this guard binds to. It is a constant
+// rather than a literal inside the pattern so that the error messages name the
+// same string the anchor looks for.
+const refusedRangesName = "REFUSED_RANGES"
+
+// refusedRangesDecl cuts the declaration out before anything is read from it.
+//
+// Two precedents, and this takes one thing from each. stringArrayLiteral
+// anchors on the assignment rather than on the first bracket after the name,
+// because a type annotation -- here `readonly RefusedRange[]`, which carries a
+// bracket pair of its own -- sits between the two and would otherwise be read
+// as an empty array. budget_drift_test.go:89-90 anchors on the start of a line
+// with regexp.QuoteMeta around the name, "so a number that merely appears
+// somewhere in the file cannot satisfy this"; the same sentence is true of an
+// object literal, which is the gap this closes.
+//
+// The body is captured non-greedily up to the first closing bracket. An entry
+// carrying a bracket inside a string would cut it short -- which is not silent,
+// because the count check below compares the entries found in the body against
+// the entries found in the whole source and fails on any difference.
+var refusedRangesDecl = regexp.MustCompile(
+	`(?ms)^\s*(?:export\s+)?const\s+` + regexp.QuoteMeta(refusedRangesName) +
+		`\s*[^=\n]*=\s*\[(.*?)\]`)
+
 // TestBrowserRefusalSetEqualsTheServers is G-02-11's drift guard.
 //
 // It compares behaviour and not two declarations, which is what makes it a
@@ -179,11 +203,9 @@ func browserRefusalRanges(t *testing.T) []declaredRange {
 
 	ranges, err := parseBrowserRefusalRanges(readSource(t, imagesRoutePath))
 	if err != nil {
-		t.Fatalf("%s declares no refusal ranges this guard can read: %v\n"+
-			"The browser's set has to be data -- a named array of {from: 0x.., to: 0x..} "+
-			"entries -- so that this test can compare it to the server's. A chain of "+
-			"comparisons inside an if is unreadable from here, and while it was one, "+
-			"the two sets drifted (G-02-11).", imagesRoutePath, err)
+		// The reason lives in the error, which is where it is testable now.
+		// This says only which file was read.
+		t.Fatalf("%s: %v", imagesRoutePath, err)
 	}
 	return ranges
 }
@@ -192,10 +214,45 @@ func browserRefusalRanges(t *testing.T) []declaredRange {
 //
 // It is pure so that its failure cases are themselves testable; see
 // browserRefusalRanges for why that matters.
+//
+// It reads the declaration and not the file. Renamed, moved or deleted is the
+// same as never having been there, and other entry-shaped literals surviving
+// elsewhere in the file does not make it better -- that is precisely the state
+// round 4 measured as a green run.
 func parseBrowserRefusalRanges(source string) ([]declaredRange, error) {
-	matches := browserRefusalRange.FindAllStringSubmatch(source, -1)
+	decl := refusedRangesDecl.FindStringSubmatch(source)
+	if decl == nil {
+		return nil, fmt.Errorf("no %s declared as an array literal.\n"+
+			"The browser's set has to be data -- a named array of {from: 0x.., to: 0x..} "+
+			"entries -- so that this guard can compare it to the server's. A chain of "+
+			"comparisons inside an if is unreadable from here, and while it was one, the "+
+			"two sets drifted (G-02-11). Renamed, moved or deleted is the same as never "+
+			"having been there, and entry-shaped literals surviving elsewhere in the file "+
+			"do not make it better", refusedRangesName)
+	}
+	body := decl[1]
+
+	matches := browserRefusalRange.FindAllStringSubmatch(body, -1)
 	if len(matches) == 0 {
-		return nil, fmt.Errorf("no {from: 0x.., to: 0x..} entries anywhere in the source")
+		return nil, fmt.Errorf("%s is declared but carries no entries this guard can read.\n"+
+			"This is the declaration being empty, not the declaration being absent; "+
+			"the two are separate failures because they call for separate fixes",
+			refusedRangesName)
+	}
+
+	// The pollution direction, and the truncation direction, in one comparison.
+	// An entry-shaped literal outside the declaration is one this guard now
+	// correctly ignores but somebody should look at; a body that ended early
+	// because an entry carries a closing bracket inside a string produces the
+	// same inequality. This guard cannot tell the two apart, so it names both.
+	whole := len(browserRefusalRange.FindAllString(source, -1))
+	if whole != len(matches) {
+		return nil, fmt.Errorf("%d entries inside the %s declaration, %d in the source as a whole.\n"+
+			"Either an entry-shaped literal sits outside the declaration -- this guard "+
+			"used to fold those into the browser's set and now ignores them, which is "+
+			"correct and still worth a look -- or the declaration body was cut short "+
+			"because an entry carries a closing bracket inside a string",
+			len(matches), refusedRangesName, whole)
 	}
 
 	out := make([]declaredRange, 0, len(matches))
