@@ -69,6 +69,17 @@ const refusedRangesName = "REFUSED_RANGES"
 // carrying a bracket inside a string would cut it short -- which is not silent,
 // because the count check below compares the entries found in the body against
 // the entries found in the whole source and fails on any difference.
+// refusedRangesEntry matches one flat object literal inside the declaration
+// body, whatever it is made of.
+//
+// Deliberately without nesting: the entries are flat, and a nested one would
+// itself be a case this guard has to report rather than interpret. Every
+// literal it collects has to be readable by browserRefusalRange, which is the
+// same decision stringArrayLiteral and exportedWarningCodes already made -- a
+// member expressed as something other than a literal is a member the guard
+// cannot see, and failing is the honest answer. WR-04 names both as precedent.
+var refusedRangesEntry = regexp.MustCompile(`\{[^{}]*\}`)
+
 var refusedRangesDecl = regexp.MustCompile(
 	`(?ms)^\s*(?:export\s+)?const\s+` + regexp.QuoteMeta(refusedRangesName) +
 		`\s*[^=\n]*=\s*\[(.*?)\]`)
@@ -231,6 +242,23 @@ func parseBrowserRefusalRanges(source string) ([]declaredRange, error) {
 			"do not make it better", refusedRangesName)
 	}
 	body := decl[1]
+
+	// Before the count check and not after it, because this case would trip
+	// that one too and explain it wrongly: an unreadable entry INSIDE the
+	// declaration makes the body count differ from the whole-source count, and
+	// the count message speaks of a literal OUTSIDE the declaration. Order the
+	// checks so the more specific diagnosis wins.
+	for _, literal := range refusedRangesEntry.FindAllString(body, -1) {
+		if browserRefusalRange.MatchString(literal) {
+			continue
+		}
+		return nil, fmt.Errorf("this entry of %s cannot be read by this guard: %s\n"+
+			"Every bound has to be a hexadecimal literal, because this guard compares "+
+			"SETS: an entry it skips is a codepoint it reports agreement about without "+
+			"having compared it. Failing is the honest answer, which is what "+
+			"stringArrayLiteral and exportedWarningCodes already do",
+			refusedRangesName, literal)
+	}
 
 	matches := browserRefusalRange.FindAllStringSubmatch(body, -1)
 	if len(matches) == 0 {
