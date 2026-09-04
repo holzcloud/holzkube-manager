@@ -78,7 +78,7 @@ Plans:
 **Parallel tracks**: 2 — (a) Transport-Naht + `pool` + `talossim`, (b) Image-Factory-Client. Track (b) hat **null** Talos-Abhängigkeit; das ist die Research-Parallelität *Phase 1 ∥ Phase 1b*, hier innerhalb einer Phase realisiert.
 **Release blockers owned**: TRANS-06 🚫
 **Note**: FOUND-12 (`--dry-run` für das ganze Binary) liegt hier statt in Phase 1, weil die Research es explizit in den Deliverables der Transport-Phase führt — ein Dry-Run ist erst sinnvoll, wenn Mutationen einen Node erreichen könnten.
-**Plans**: 24/24 plans executed in 5 waves (Wave 1: 2 parallele Tracer — Track (a) Transport-Naht, Track (b) Image Factory) + 5 Gap-Closure-Pläne der Runde 1 aus 02-UAT.md in 4 Wellen (Cluster B und C; Cluster A war auf `02-DECISION-probe-budget.md` blockiert) + 8 Gap-Closure-Pläne der Runde 2 in 6 Wellen (alle 14 Lücken G-02-10..G-02-23, voller Umfang in einer Runde) + 3 Gap-Closure-Pläne der Runde 4 in 3 Wellen (Cluster A, nachdem der Betreiber am 2026-09-03 Option 2 ratifiziert hat)
+**Plans**: 24/24 plans executed in 5 waves (Wave 1: 2 parallele Tracer — Track (a) Transport-Naht, Track (b) Image Factory) + 5 Gap-Closure-Pläne der Runde 1 aus 02-UAT.md in 4 Wellen (Cluster B und C; Cluster A war auf `02-DECISION-probe-budget.md` blockiert) + 8 Gap-Closure-Pläne der Runde 2 in 6 Wellen (alle 14 Lücken G-02-10..G-02-23, voller Umfang in einer Runde) + 3 Gap-Closure-Pläne der Runde 4 in 3 Wellen (Cluster A, nachdem der Betreiber am 2026-09-03 Option 2 ratifiziert hat) + 2 Gap-Closure-Pläne der Runde 5 in 2 Wellen (G-02-24 die Regression, die Runde 4 eingeführt hat, und G-02-25 der unverankerte Drift-Wächter) — 24/26 ausgeführt
 **UI hint**: yes
 
 Plans:
@@ -161,6 +161,16 @@ Plans:
 - [x] 02-24-PLAN.md — G-02-1 (Badge-Hälfte), G-02-9 (Milderung, **keine** Schließung): der 409 wirft das Verdikt nicht mehr weg, das er gerade berechnet hat — genau `Usable`, `ProbedAt`, `ProbeReason` und sonst nichts; die drei zu breit gewordenen Aussagen werden verengt, und das Ledger sagt präzise, was diese Runde bewegt hat und was nicht
 
 **Offen nach Runde 4**: G-02-9. Der 409-Refresh ist die vom ratifizierten Entscheid verlangte, nicht-destruktive Erholung — **keine** Re-Probe-Route und keine Garantie auf ein Verdikt. Ein Probe, der auch mit dem erhöhten Budget nicht antwortet, lässt den Record unverändert. Als Fenster im Ledger geführt (Plan 02-24, Task 3); die strukturelle Antwort ist Option 1 in `.planning/phases/02-transport-seam-talossim-image-factory/02-DECISION-probe-budget.md` und gehört in Phase 3, wenn die Transport-Naht einen Produktions-Aufrufer hat.
+
+**Runde-5-Gap-Closure Wave 1**
+
+- [ ] 02-25-PLAN.md — G-02-24 (Verifikation Runde 4, `G4-1`, `status: failed`; Code-Review CR-01): der 409-Refresh aus 02-24 hat zwei Bedingungen und braucht drei. `Canonical()` emittiert weder Architektur noch Talos-Version, also sind zwei Versuche, die sich nur in `talos_version` unterscheiden, ein Record — und ein bei v1.13.9 gemessenes Verdikt hat eine wahre v1.12.0-Ablehnung überschrieben **und deren Begründung gelöscht**, reproduziert am HEAD. Dieser Plan setzt die dritte Bedingung neben die zweite, kodiert die Reproduktion des Verifiers als Test in beide Richtungen, lehrt den Fake einen zweiten versions-skopierten Katalog, und verengt die drei Aussagen im Baum, die noch zwei Bedingungen nennen
+
+**Runde-5-Gap-Closure Wave 2** *(blocked on Wave 1)*
+
+- [ ] 02-26-PLAN.md — G-02-25 (Verifikation Runde 4, `G4-2`, `status: partial`; Code-Review WR-04): `browserRefusalRange` läuft über die ganze `images.tsx` und ist an keinen Bezeichner verankert — `REFUSED_RANGES` umbenennen ließ den Wächter grün (`ok … 0.546s`), also genau die Eigenschaft, die sein eigener `t.Fatalf`-Kommentar ausschließt. Dieser Plan verankert auf der Deklaration, macht ihr Fehlen und einen unlesbaren Eintrag zu Fehlschlägen, zieht die Prüfung in eine reine Funktion, deren Fehlerfälle selbst geprüft werden — und führt das Ledger beider Pläne dieser Runde
+
+**Nicht in Runde 5**: die UI-Hälfte von SC 3 (TRANS-05) und TRANS-08 tragen beide `addressed_in: Phase 3` und bleiben dort. G-02-9 bleibt offen wie oben beschrieben; Plan 02-25 härtet dessen Minderung und schließt ihn nicht.
 
 ### Phase 3: Inventar, Cluster-Import & Health
 
