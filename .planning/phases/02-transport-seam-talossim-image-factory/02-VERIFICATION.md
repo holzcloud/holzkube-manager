@@ -1,635 +1,388 @@
 ---
 phase: 02-transport-seam-talossim-image-factory
-verified: 2026-08-30T12:25:00Z
-verified_at_commit: fb16546
+verified: 2026-09-04T04:23:14Z
+verified_at_commit: b6e954b
 status: gaps_found
-score: 18/19 must-haves verified
+score: 15/19 must-haves verified
 behavior_unverified: 1
 overrides_applied: 0
 re_verification:
-  round: 3
-  previous_status: human_needed
-  previous_score: 38/39
-  previous_verified_at_commit: ad786b59c058f741a2d5681c106e9f69d966ad74
+  round: 4
+  previous_status: gaps_found
+  previous_score: 18/19
+  previous_verified_at_commit: fb16546
   gaps_closed:
-    - "G-02-10 — a repository name occupies one line box; the hyphen break opportunity is suppressed and the property is now measured in a real layout engine across all four installer names"
-    - "G-02-11 — the browser's refusal set is the server's, held equal by an exhaustive codepoint sweep that fails in both directions"
-    - "G-02-12 — installer.go no longer claims the matrix settles the supported range; the unprobed regions are named in place"
-    - "G-02-13 — the two SecureBoot names are recorded as different images, the expired digests are gone, and the legacy fallback is labelled rather than passed off as equivalent"
-    - "G-02-14 — UsabilityVerdict asks whether a verdict exists before reading it, so usable:true with a zero probed_at can no longer render an affirmative badge"
-    - "G-02-15 — an unresolvable installer returns the four registry-free references plus installer_error, and the panel says which of the two things happened"
-    - "G-02-16 — representable covers the four measured divergence classes; the differential against the live Factory exists and its floor-not-ceiling limits are in the contract"
-    - "G-02-17 — name, cluster, kernel_args, extensions and meta all pass the one refusal predicate; a stored bidi control is isolated at render"
-    - "G-02-18 — the drift guard consults the warnings, compares the repository segment exactly, and reports a warning-bearing answer as NOT OBSERVED rather than as a pass"
-    - "G-02-19 — the caller's width rule is sm:max-w-3xl and the dialog measures 768px in a real browser"
-    - "G-02-20 — the identity constraint is written into model.go, docs/api-contract.md and the ledger; a decision document records the reasoning"
-    - "G-02-21 — WINDOWS entry 30 names the plan-09 throttle, the unprobed v1.14 and the unprobed v1.13.x below the pin; VERIFICATION row 7 is corrected in place"
-    - "G-02-22 — the recoverability claim is narrowed to the probe's outcome in model.go and api.ts, and entry 31 supersedes entry 21's clause"
-    - "G-02-23 — the problem taxonomy is re-rooted at urn:holzkube-manager:problem:, closed by an AST test, and documented as non-dereferenceable"
-  gaps_remaining: []
-  regressions: []
+    - "R3-3 — 02-21-SUMMARY.md's Issues Encountered #2 is struck through and marked WITHDRAWN with a dated correction block; web/vite.config.ts:113 still declares both projects and web/package.json still declares test:browser, so the correction is accurate at HEAD"
+    - "R3-1 (one half of two) — canonical_live_test.go's reportCanonResults now ends in `if !t.Failed() && counts[notObserved] > 0 { t.Skipf(...) }` (canonical_live_test.go:667-670), placed after the error loop so a real DIVERGES row still fails. The half that closed is the one round 3 named."
+  gaps_remaining:
+    - "R3-1 generalised — the truth round 3 stated was about guards, not about one file. Falsified at HEAD in a different guard: see gap G4-2."
+  regressions:
+    - "SC 4 / FACT-02 — plan 02-24's `refreshTheStoredVerdict` writes a probe verdict across Talos versions. Reproduced at HEAD, not inferred: see gap G4-1. This is new in round 4 and did not exist at fb16546."
   adversarial_checks_run:
-    - "Removed `whitespace-nowrap` from ReferenceValue's segment span and re-ran the browser project: 3 of 4 name sweeps FAILED with the split widths and line contents printed. metal-installer alone still passed — which is the original G-02-10 finding reproduced. File restored."
-    - "Deleted the U+FEFF entry from REFUSED_RANGES and re-ran TestBrowserRefusalSetEqualsTheServers: FAILED naming U+FEFF as under-refused. File restored."
-    - "Ran `npm --prefix web test` with a JSON reporter: 8 files / 126 tests, images.browser.test.tsx among them; `--project browser` alone is 7 tests. Both vitest projects execute under the bare command."
-    - "Parsed .planning/WINDOWS.md's three representations independently: frontmatter 47/0/9/56, table 47 open + 9 fixed over 56 rows, JSON block 56 entries with the same statuses. Zero status mismatches, ids 1..56 with no duplicates."
+    - "CR-01 REPRODUCED, not adjudicated on the reviewer's word. Widened the fake's catalog gate to two versions, authored `siderolabs/cross-version-ext` at v1.12.0 where the image endpoint refuses it (record: talos_version v1.12.0, usable=false, probe_reason `... at v1.12.0/amd64 answered HTTP 400`), stopped the refusal and re-POSTed the identical customisation at v1.13.9. Result: same id, HTTP 409, and the stored record became `talos_version: v1.12.0, usable: true, probe_reason: \"\"`, rev 1 -> 2. The true v1.12.0 refusal was ERASED, which is worse than 02-REVIEW.md described. Tree restored byte-for-byte (git status clean apart from the pre-existing STATE.md edit)."
+    - "WR-04 FALSIFIED. Renamed `REFUSED_RANGES` to `RENAMED_BY_VERIFIER` throughout web/src/routes/images.tsx and re-ran TestBrowserRefusalSetEqualsTheServers: `ok github.com/holzcloud/holzkube-manager/internal/imagefactory 0.546s`. The guard passed green against a declaration that no longer exists, which is precisely the property its own t.Fatalf comment claims it has (\"A guard that silently passes when it can no longer find what it guards is worse than no guard\"). File restored."
+    - "Parsed .planning/WINDOWS.md's three representations independently: frontmatter 52 open / 0 waived / 13 fixed / 65 total; markdown table 65 rows, 52 open + 13 fixed; JSON block 65 entries with the same statuses. Zero status mismatches, ids 1..65 with no duplicates."
+    - "Ran the eight TestConflict* cases, TestRouteBudget*, TestProbeBudget*, TestBudgetWaitsStatedInTheUIMatchTheRouteBudgets and TestInstallerImageNeverRevertsAProvenNameUnderConcurrentResolution individually rather than trusting the suite-level exit code. All pass."
+    - "Enumerated the handlers package's test list: there is no TestConflictAtAnotherTalosVersion* of any spelling, and createBody hardcodes catalogVersion. The reviewer's \"nothing catches this\" is measured, not asserted."
 gaps:
+  - truth: "Das Schematic gilt erst nach einem bestätigenden Model-Build-Probe als brauchbar (ROADMAP SC 4 / FACT-02) — and no stored verdict claims more than the probe measured"
+    status: failed
+    reason: >-
+      `refreshTheStoredVerdict` (schematics.go:513-587) guards two things and needs three. It
+      returns early when the fresh probe did not answer, and when `stored.Arch != fresh.Arch`.
+      There is no condition on `TalosVersion`, and there has to be, because `Schematic.Canonical()`
+      (schematicid.go:125-178) emits `owner`, `overlay` and `customization` and nothing else — no
+      architecture AND no Talos version — so two authoring attempts differing only in
+      `talos_version` are one record and collide on `store.ErrConflict`. The handler's own comment
+      at :433-436 says so ("regardless of name, cluster or the version they were authored
+      against"). The verdict, meanwhile, IS version-scoped on exactly the evidence the Arch guard
+      cites for itself: `ProbeBuildable(ctx, id, talosVersion, arch)` probes that version's ISO
+      URL, the extension catalog is version-scoped, and `probe.go:71` writes
+      `<id> at <version>/<arch> answered HTTP <status>` — version and architecture in one sentence.
+      `isTalosVersion` is a shape check only, so any well-formed version reaches this path.
+      Reproduced at HEAD rather than inferred (see adversarial_checks_run): the record ends as
+      `talos_version: v1.12.0, usable: true, probe_reason: ""` after a probe that succeeded only at
+      v1.13.9 — and the correct v1.12.0 refusal sentence, the single place the discrepancy was
+      visible, is erased by the same write. `UsabilityVerdict` (images.tsx:942) then renders
+      **"Usable — the build probe confirmed it"** about a version at which the probe did nothing of
+      the kind. That is the claim T-02-62 and G-02-1 exist to prevent, arriving through the
+      mitigation built for G-02-9, and it is producible through the supported UI in two POSTs.
+      Nothing in .planning/WINDOWS.md records it: entry 58 enumerates the two declining cases and
+      does not mention the version.
+    artifacts:
+      - path: "internal/httpapi/handlers/schematics.go:513-587"
+        issue: "the guard beside line 554 covers Arch and not TalosVersion; the write at :551-553 proceeds"
+      - path: "internal/httpapi/handlers/schematics_test.go:483-494"
+        issue: "createBody hardcodes catalogVersion, so no test varies the version across a conflict; TestConflictRefreshTouchesNothingButTheThreeProbeFields deliberately excludes the three fields at issue"
+      - path: "internal/model/model.go:105-108"
+        issue: "the doc comment says a second POST 'refuses the label, the cluster and the Talos version exactly as before' — true of the stored FIELD, false of the verdict now written onto it"
+    missing:
+      - "A third condition in refreshTheStoredVerdict: `if stored.TalosVersion != fresh.TalosVersion` returns the declining clause naming both versions, in the same register archMismatchReason already uses"
+      - "TestConflictAtAnotherTalosVersionDeclinesTheRefresh beside TestConflictAtAnotherArchitectureDeclinesTheRefresh, asserting marshalRecord(after) == marshalRecord(before) and that the 409 detail names both versions. It needs the fake's catalog gate to serve a second version — one line, and its absence is exactly why this shipped"
+      - "If a cross-version refresh is instead wanted, that is a schema change (model.Schematic has room for one verdict) and belongs in 02-DECISION-schematic-identity.md, not in a guard"
   - truth: "A guard reports a pass only when it measured the property it is named for"
     status: partial
     reason: >-
-      TestLiveCanonical classifies a throttled or transport-failed batch as `notObserved`, and
-      reportCanonResults handles that verdict with `t.Logf` alone — only `diverges` and an
-      over-refused negative control produce `t.Errorf`. A live run in which every batch is
-      throttled therefore records zero DIVERGES rows and reports PASS, with the NOT OBSERVED
-      marker visible only under `-v`. This is the same shape the round fixed in the sibling
-      guard: `live_test.go:425-431` turns a warning-bearing installer answer into `t.Skipf`
-      precisely so it "is no longer reported as a pass". The principle was applied in one file
-      of this round and not in the other, and nothing records the difference — WINDOWS entry 35
-      says the differential is opt-in and unrun in CI, not that a fully-throttled run reports
-      green. Nothing was masked in practice: 02-14's recorded runs carry 0 NOT OBSERVED rows,
-      so this is about the guard's future behaviour rather than about the current measurement.
+      The half round 3 named is closed: canonical_live_test.go:667-670 now skips a run in which any
+      row went unmeasured, after the error loop, so a fully-throttled differential is no longer a
+      pass. The truth as round 3 stated it was general, and it is falsified at HEAD in the sibling
+      guard written in that same round. `browserRefusalRange` (guard_drift_test.go:49-50) is
+      `\{\s*from:\s*0x([0-9a-fA-F]+),\s*to:\s*0x([0-9a-fA-F]+)` run over the whole of images.tsx,
+      anchored to no identifier. Measured: renaming `REFUSED_RANGES` out of existence leaves
+      TestBrowserRefusalSetEqualsTheServers green (`ok ... 0.546s`), while `browserRefusalRanges`'s
+      own t.Fatalf comment promises "A guard that silently passes when it can no longer find what
+      it guards is worse than no guard". The pollution direction is open too — any other
+      `{from: 0x.., to: 0x..}` literal added to images.tsx is folded into the set this test
+      believes the browser refuses, which masks an under-refusal rather than reporting it. The
+      discipline exists three files away: budget_drift_test.go:89-90 anchors on
+      `^\s*(?:export\s+)?const\s+NAME\s*=` and says why. Nothing is currently masked — the two
+      sets do agree, and deleting the U+FEFF entry still fails the guard — so this is about the
+      guard's future behaviour, which is the same standing round 3 gave the canonical half.
     artifacts:
-      - path: "internal/imagefactory/canonical_live_test.go:644-651"
-        issue: "the `notObserved` case is `t.Logf`; the test exits 0 having compared nothing against factory.talos.dev"
+      - path: "internal/imagefactory/guard_drift_test.go:49-50, used at :170-196"
+        issue: "the entry regex scans the whole file instead of the REFUSED_RANGES declaration; the empty-result Fatalf cannot fire while any such literal survives anywhere"
     missing:
-      - "Make a run that observed nothing report as something other than a pass — `t.Skipf` when every row is notObserved, or a failure when the observed fraction falls below a stated floor — matching live_test.go's own rule"
-      - "Or, if the current behaviour is deliberate, record it in WINDOWS entry 35 so the register carries it"
-  - truth: "A blocking human decision checkpoint that was resolved without a human says so where the decision is read"
-    status: partial
-    reason: >-
-      `02-21-PLAN.md:113` declares task 1 as `<task type="checkpoint:decision" gate="blocking">`.
-      It was resolved by the executor without stopping. 02-21-SUMMARY.md:165-181 records that
-      candidly and at length, including the explicit note that it is "a non-standard checkpoint
-      resolution rather than an approval". The artifact a later reader consults does not:
-      `02-DECISION-schematic-identity.md` opens `Status: **decided**` / `Decided in:
-      02-21-PLAN.md task 1` and contains no occurrence of "checkpoint", "ratified", "user" or
-      any equivalent. The contrast is inside this same phase — 02-UAT.md test 4 carries
-      `ratified_by: user` / `ratified_at`, and 02-DECISION-probe-budget.md is `open` and was
-      respected as such. This is the round's own failure shape: candid in the SUMMARY, silent
-      where a reader would look.
-    artifacts:
-      - path: ".planning/phases/02-transport-seam-talossim-image-factory/02-DECISION-schematic-identity.md:3-5"
-        issue: "`Status: decided` with no indication that the blocking human gate was self-resolved"
-    missing:
-      - "One line in the decision document's header stating that the blocking checkpoint was resolved by the executor on the dispatcher's pre-answer and the plan's own recommendation, not ratified by the user — with a pointer to 02-21-SUMMARY.md's account"
-  - truth: "A completion record states only what is true of the repository"
-    status: partial
-    reason: >-
-      02-21-SUMMARY.md's Issues Encountered #2 reads "`npm --prefix web test` runs one vitest
-      project, not two" and "No second project configuration exists in `web/` today, so the
-      criterion is met as far as the repository can express it." Both sentences are false.
-      `web/vite.config.ts` declares two named projects (`jsdom` and `browser`) inside one
-      config, and `web/package.json` declares `test:browser`. Measured at this commit with a
-      JSON reporter: the bare `npm --prefix web test` runs 8 files / 126 tests including
-      `images.browser.test.tsx`, and `--project browser` alone is 7 of those tests. The plan's
-      `<verification>` criterion "green across both projects" is therefore literally met, and
-      the SUMMARY records it as unmeetable for a reason that is not true. The risk is concrete:
-      a reader acting on that sentence would take `test:browser` and the browser project for
-      redundant configuration and remove the only layout evidence G-02-10 and G-02-19 have.
-    artifacts:
-      - path: ".planning/phases/02-transport-seam-talossim-image-factory/02-21-SUMMARY.md"
-        issue: "Issues Encountered #2 contradicts web/vite.config.ts and web/package.json, and contradicts a measured run"
-    missing:
-      - "Correct the two sentences — the criterion was met, both projects run under the bare command — in the same corrected-in-place register 02-21 used for VERIFICATION row 7"
+      - "Cut the declaration out first (`(?s)const\\s+REFUSED_RANGES\\s*:[^=]*=\\s*\\[(.*?)\\]`), Fatalf when it is absent, and scan only inside it — the shape stringArrayLiteral and exportedWarningCodes already use"
+      - "Fail on an entry inside the declaration that this regex cannot parse (a decimal literal or a named constant), rather than skipping it silently"
+      - "Or, if the current anchoring is deliberate, record it in .planning/WINDOWS.md beside entry 56 so the register carries it"
 deferred:
   - truth: "Ein nicht erreichbarer Node blockiert die UI nicht (the UI half of ROADMAP SC 3 / TRANS-05)"
     addressed_in: "Phase 3"
     evidence: >-
-      Unchanged at fb16546. `git diff ad786b5..fb16546 -- internal/talos internal/talossim
-      cmd/holzkubed` is empty, so the previous report's finding stands: no production caller of
-      NewClusterClient, NewMaintenanceClient, FanOut, NewBreaker, NewDirectDialer or
-      NewManualSource exists outside internal/talos and its tests. The transport half is proven
-      behaviourally.
+      Re-checked at b6e954b. There is still no production caller of NewClusterClient,
+      NewMaintenanceClient, FanOut, NewBreaker, NewDirectDialer or NewManualSource outside
+      internal/talos and its tests. The transport half is proven behaviourally
+      (TestFanOutOneSilentNodeCostsOneNode, TestFanOutCancellationTerminatesEveryInFlightCall,
+      TestFanOutSkipsAnOpenCircuitWithoutDialing all present and passing).
   - truth: "Dieselbe Contract-Suite läuft auch gegen echtes Talos (TRANS-08)"
     addressed_in: "Phase 3"
-    evidence: "REQUIREMENTS.md maps TRANS-08 to Phase 3 (Pending); internal/talos/contract_test.go already parameterises the transport."
-  - truth: "G-02-1 / G-02-2 / G-02-9 — the probe-budget cluster"
-    addressed_in: "Open decision — 02-DECISION-probe-budget.md"
+    evidence: "REQUIREMENTS.md:226 maps TRANS-08 to Phase 3 (Pending); ROADMAP.md:181 states why. internal/talos/contract_test.go already parameterises the transport."
+  - truth: "G-02-9 — a probe that times out despite the raised budget is still permanent"
+    addressed_in: "02-DECISION-probe-budget.md Option 1, deliberately not taken"
     evidence: >-
-      Re-confirmed at fb16546 rather than carried over: `DefaultTimeout = 30 * time.Second`
-      (client.go:43) and `writeTimeout != 60*time.Second` is a hard failure in
-      cmd/holzkubed/budget_test.go:157. Neither moved in this round. WINDOWS entry 20 is still
-      open and entry 48 stands beside it saying in capitals that plan 02-19 changed what an
-      unresolved installer returns and not the cold 2 x 30s walk that produces it.
+      Not a gap: it is recorded honestly rather than claimed closed, which is what round 4 was
+      asked to verify. 02-24-PLAN.md's frontmatter carries `gap_ids: [G-02-1]` with G-02-9 under a
+      separate `gaps_mitigated_not_closed` key so a machine reading frontmatter gets the same
+      answer as a prose reader; WINDOWS entry 58 opens "G-02-9 REMAINS OPEN AFTER ROUND 4" and
+      names the three missing things (no route, no button, no job); the decision document's own
+      status header says "G-02-9 is **not** closed by this choice"; 02-24-SUMMARY.md:236 has a
+      section titled "G-02-9 is not closed". No artifact of the round claims otherwise.
 behavior_unverified_items:
   - truth: "Ein nicht erreichbarer Node blockiert weder die UI noch andere Nodes (ROADMAP SC 3)"
     test: >-
-      Once Phase 3 wires a route to the transport: open the inventory with one node injected
-      with go_silent(90s) and confirm the page renders the healthy nodes immediately and the
-      silent one as unreachable, rather than the page waiting on the silent node's budget.
+      Once Phase 3 wires a route to the transport: open the inventory with one node injected with
+      go_silent(90s) and confirm the page renders the healthy nodes immediately and the silent one
+      as unreachable, rather than the page waiting on the silent node's budget.
     expected: >-
-      The UI paints healthy nodes within one round trip; the silent node resolves to an error
-      after its own per-node budget only.
+      The UI paints healthy nodes within one round trip; the silent node resolves to an error after
+      its own per-node budget only.
     why_human: >-
-      Unchanged and re-checked at this commit: there is still no production caller of the
-      transport seam, so the UI half of the criterion has no code path to exercise. The
-      transport half IS proven (TestFanOutOneSilentNodeCostsOneNode).
+      Unchanged and re-checked at b6e954b: there is still no production caller of the transport
+      seam, so the UI half of the criterion has no code path to exercise. The transport half IS
+      proven (TestFanOutOneSilentNodeCostsOneNode).
 coincidental_reliance_items:
-  - truth: "Das Schematic gilt erst nach einem bestätigenden Model-Build-Probe als brauchbar (part of ROADMAP SC 4)"
-    reason: undeclared-precondition
-    harden: >-
-      Carried forward unchanged. Every passing observation of the Usable=false -> true
-      transition rests on the Factory's ISO being already built; for a genuinely novel tuple the
-      probe measures 30.5-32.7s against a 30s budget and the verdict is absent. This is G-02-1
-      and it belongs to the open 02-DECISION-probe-budget.md. Advisory only.
   - truth: "The four installer repository names occupy one line box (G-02-10)"
     reason: incidental-ordering
     harden: >-
-      The sweep is Chromium-only (playwright 1.62.1, headless, 1200x900). UAX #14's hyphen rule
-      and `white-space: nowrap` are not a corner of CSS where engines disagree, so the
-      inference to Firefox and WebKit is sound — but it is an inference. Already declared:
-      WINDOWS entry 42 records exactly this. Advisory only; it changes no status and no score.
+      Carried forward unchanged. The sweep is Chromium-only (playwright, headless, 1200x900).
+      UAX #14's hyphen rule and `white-space: nowrap` are not a corner of CSS where engines
+      disagree, so the inference to Firefox and WebKit is sound — but it is an inference. Already
+      declared: WINDOWS entry 42. Advisory only.
+  - truth: "The browser's request ceiling sits above the server's outermost response bound (02-23)"
+    reason: fixture-only
+    harden: >-
+      web/src/api.test.ts:87-101 asserts the ceiling is `> 130_000` — a second hand-transcription
+      of `writeTimeout` on the TypeScript side, so the test moves with neither the Go constant nor
+      REQUEST_CEILING_MS. Raising writeTimeout to 160s leaves both the constant and this assertion
+      green while every long create aborts at 150s. See warning WR-03 below; advisory only, it
+      changes no status and no score.
 human_verification:
   - test: >-
       Drive the assembled binary through a browser against the live Image Factory: author a
-      schematic end to end, and confirm the /images route works outside a test harness.
+      schematic end to end, and confirm the /images route works outside a test harness
+      (02-UAT.md test 5, sub-checks a-d).
     expected: "The route behaves as the suites predict, with real latency and a real bundle."
     why_human: >-
-      Still outstanding, and correctly scoped by the round rather than claimed closed.
-      `images.browser.test.tsx` opens ImagesView in a real Chromium, but its own doc comment
-      says plainly: "this is not a general browser suite and it is not an end-to-end test... no
-      binary runs, no bundle is served, and the embedded UI has still never been driven end to
-      end in a browser." The two properties it does measure — the dialog width and the four
-      line-box sweeps — are genuinely closed and need no human.
+      Still outstanding at b6e954b and correctly scoped rather than claimed closed. 02-UAT.md test
+      5 carries `result: issue`. `images.browser.test.tsx` opens ImagesView in a real Chromium but
+      its own doc comment says "no binary runs, no bundle is served, and the embedded UI has still
+      never been driven end to end in a browser."
   - test: >-
       Confirm the CI browser-install step runs on ubuntu-latest.
-    expected: "`npm --prefix web exec -- playwright install --with-deps chromium` succeeds and the browser project runs in CI."
+    expected: "`npm --prefix web exec -- playwright install --with-deps chromium` (.github/workflows/ci.yml:71) succeeds and the browser project runs in CI."
     why_human: >-
-      WINDOWS entry 44 records this: no CI run has happened against this commit, and the
-      browser project is now the sole evidence for G-02-10 and G-02-19. It fails closed —
-      requireBrowserBinary() throws with the fixing command — so the risk is a red CI run, not
-      a silent pass.
+      WINDOWS entry 44 is still open at this commit. The browser project is the sole evidence for
+      G-02-10 and G-02-19. It fails closed — requireBrowserBinary() throws with the fixing command
+      — so the risk is a red CI run, not a silent pass.
+  - test: >-
+      Re-measure a cold installer resolution against factory.talos.dev after plan 02-23's
+      concurrent fan-out.
+    expected: "A cold resolution costs the slowest single candidate, not the sum — the improvement 02-23 claims."
+    why_human: >-
+      02-24-SUMMARY.md:232 says so itself: the improvement is measured offline against fakes and
+      unmeasured against factory.talos.dev. 02-22's two live runs measured the ISO probe, not the
+      installer resolution. Nothing here claims otherwise; the item exists because the claim is
+      offline-only and the phase's own standard is that a live number is a live number.
+  - test: >-
+      Decide whether the eleven findings of 02-REVIEW.md that are not gaps (WR-01, WR-02, WR-03,
+      WR-05, IN-01..IN-05) should be filed in .planning/WINDOWS.md.
+    expected: "Each is either fixed, filed as a window with `gsd-tools windows append`, or explicitly declined."
+    why_human: >-
+      A policy call, not a measurement. The review's own scope note lists the findings it did NOT
+      re-file because they are already in the ledger; the eleven above are new and are in no
+      representation of it. This phase's convention is that an accepted defect lives in the
+      register, and `workflow.windows_enforce` reads that register at ship time.
 ---
 
-# Phase 2 Verification — round 3 (the round-2 gap-closure round)
+# Phase 2 Verification — round 4 (the probe-budget cluster)
 
 **Phase Goal:** Jede Talos-Interaktion läuft durch eine austauschbare Naht und ist ohne Hardware
 testbar; Schematics und Image-URLs sind korrekt und nachweislich brauchbar herleitbar.
-**Verified:** 2026-08-30T12:25:00Z at `fb16546` (working tree clean)
-**Status:** gaps_found — 14/14 gap truths hold; three record- and guard-integrity defects introduced
-by the round itself
-**Re-verification:** Yes — round 3, over plans 02-14 … 02-21.
+**Verified:** 2026-09-04T04:23:14Z at `b6e954b` (branch `main`; working tree carries one
+uncommitted bookkeeping edit to `.planning/STATE.md` and no source change)
+**Status:** gaps_found — two gaps, one of them a regression introduced by this round
+**Re-verification:** Yes — round 4, over plans 02-22, 02-23, 02-24, superseding the round-3 report
+written at `fb16546`.
 
-This round exists because two UAT checks were recorded PASS on reasoning that proved a different
-proposition than the one asserted. Verification was therefore run against that failure mode
-specifically, and against the code rather than against the eight SUMMARYs. Where a claim was
-falsifiable, it was falsified: two guards were deliberately broken and re-run, and the ledger's
-three representations were parsed independently rather than read.
+Round 3 left three `partial` gaps and a deferred probe-budget cluster. Two of the three are closed.
+The third is closed in the file round 3 named and false in a sibling guard, measured here rather
+than read. The ratified decision was implemented faithfully and G-02-9 is recorded honestly
+throughout — and the mitigation built for it introduced a new instance of the exact claim this
+phase has spent four rounds correcting: a badge that asserts more than was measured.
 
-## 1. The fourteen closed gaps, checked against the tree
+Nothing in this report is carried over from round 3 without being re-measured at `b6e954b`.
 
-| Gap | Truth | Status | Evidence at `fb16546` |
+## 1. Observable truths
+
+| # | Truth | Status | Evidence at `b6e954b` |
 |---|---|---|---|
-| G-02-10 | The repository name is unbroken | ✓ VERIFIED | `ReferenceValue` wraps each `/`-separated segment in `whitespace-nowrap` (`images.tsx:1513`), which suppresses the UAX #14 HY break the previous `break-normal` did not. Proven by measurement, not by class string: `images.browser.test.tsx` sweeps all four names at every width 30→280px in Chromium, counting line boxes via `Range.getClientRects()`, and asserts `textContent` is byte-identical at every step so a look-alike hyphen cannot satisfy it. **Falsified:** removing `whitespace-nowrap` fails 3 of the 4 sweeps with the split widths and line contents printed — and `metal-installer` alone still passes, reproducing the original finding that testing one name could never have caught this. |
-| G-02-11 | A control character is refused with a field-named 400 | ✓ VERIFIED | `REFUSED_RANGES` (`images.tsx:105-132`) is declared as data covering C0/DEL/C1, surrogates, U+2028-9, U+FEFF and everything above U+FFFD. `NotRepresentableReason` is the server's single statement of the same rule and `refuseUnrepresentable` routes every operator scalar through it. `TestBrowserRefusalSetEqualsTheServers` sweeps all of Unicode through both sides and fails in **both** directions. **Falsified:** deleting the U+FEFF entry fails the guard naming U+FEFF. The unpaired-surrogate half is answered before decoding by `rawBodyRefusal` (`schematics.go:271`, `:830`), which is the only way to see what `encoding/json` would have rewritten. |
-| G-02-12 | 02-09's matrix claims match what it probed | ✓ VERIFIED | `installer.go:220-231` replaces "is settled by" with a paragraph naming what is unprobed: `talos.MaxSupportedVersion` v1.14 is a range bound and not a tag, and no v1.13.x below the pin has been probed. `fake_test.go:73-81` retracts both false statements about the v1.9.0 row by name. The UAT's own substitution of `live_test.go` for the plan's `fake_test.go` is recorded in 02-UAT.md test 3. |
-| G-02-13 | The two SecureBoot names are not interchangeable | ✓ VERIFIED | `installer.go:211-219` states the measured difference and says why the digests were removed — "a digest in a comment is a fact with an expiry date that nothing in the build checks". The fallback is kept and labelled: `WarningInstallerSecureBootRepoFallbackUnverified` is declared (`warnings.go:76`) **and emitted** (`installer.go:521`), mirrored in `web/src/api.ts:345` and given a row in `docs/api-contract.md:639`. |
-| G-02-14 | No state claims more than the record supports | ✓ VERIFIED | `UsabilityVerdict` tests `!isProbed(probedAt)` first (`images.tsx:825`), with the ordering argued in place rather than left as an accident of writing order. |
-| G-02-15 | A SecureBoot request that cannot resolve an installer still answers | ✓ VERIFIED | `schematics.go:508-537` returns the four registry-free references with `installer: null` plus `installer_error{code, detail}`. `UnresolvedInstallerRow` (`images.tsx:1407`) renders the server's own detail plus a per-code remedy that is *opposite* for the two codes, and names SecureBoot only when it was ticked. Both branches are tested (`images.test.tsx:1184`, `:1203`, `:1207`). The contract carries the new shape and its five-outcome table (`docs/api-contract.md:701-792`). |
-| G-02-16 | FACT-06 holds above U+007F | ✓ VERIFIED | `NotRepresentableReason` (`schematicid.go:321-380`) covers the four measured classes, each clause citing the rows that proved it. The oracle is external and only external: `canonical_live_test.go` compares the local document and id against `Created.Canonical` and `Created.ID` from factory.talos.dev — not against a second local YAML library, which the file says would "replace one transcription with a different transcription". `plainAllowed` was deliberately left unchanged and the measurement is given as the reason. See gap 1 below for the one integrity defect in this file. |
-| G-02-17 | Unusable operator input is refused before the Factory | ✓ VERIFIED | `refuseUnrepresentable` (`schematics.go:624-647`) walks `name`, `cluster`, `kernel_args`, `extensions` and `meta` through the one predicate and appends every error so one round trip reports all of them. The rendering contract is `StoredText`/`<bdi>`, applied at all four stored-operator-text render sites. |
-| G-02-18 | The drift guard fails when the installer name drifts | ✓ VERIFIED | `checkInstallerName` (`live_test.go:291`) inspects the warnings first — because `resolveInstallerRepo` returns `ErrUpstreamUnavailable` only when *no* candidate answered, so a partial throttle yields a nil error and a usable reference — and reports such an answer as `installerNameNotObserved`, which the caller turns into `t.Skipf`, not a pass (`live_test.go:425-431`). Comparison is by exact repository segment, replacing `strings.Contains(secure, "-secureboot/")` which the legacy name also satisfied. Exercisable offline and exercised: `installer_test.go:1009`, `:1042`, `:1068`. |
-| G-02-19 | The asset dialog widens on large screens | ✓ VERIFIED | The caller's class is now `sm:max-w-3xl` (`images.tsx:1091`), same tailwind-merge group as `DialogContent`'s `sm:max-w-sm`, so it wins instead of coexisting. Measured, not merged-and-asserted: the browser project reads `getBoundingClientRect().width` after awaiting the entry animation and asserts both `> 384` (the regression guard, which also fails loudly if the project is ever misconfigured back to jsdom) and `=== 768`. |
-| G-02-20 | A record carries the architecture its probe used | ✓ VERIFIED | The constraint is stated in `model.go:105-115`, in `docs/api-contract.md` beside the existing 409 section, and in WINDOWS. `02-DECISION-schematic-identity.md` records A/B/C with B as the direction and C as this round's action. See gap 2 below for how the decision was reached. |
-| G-02-21 | The unrun-verify ledger entry is filed | ✓ VERIFIED | WINDOWS entry 30 names all four things: the two-version matrix, the unprobeable v1.14, the never-probed v1.13.x below the pin, and the fake's v1.9.0 assumption. Entry 5 stays open independently, as the entry itself says. VERIFICATION row 7 is corrected **in place** with the original assessment kept verbatim — which is the right form, since "the criterion was reread rather than met" is the whole of the gap and a silent rewrite would repeat it. |
-| G-02-22 | The architecture is not recoverable from a pre-02-13 record | ✓ VERIFIED | Narrowed in both places the gap named (`model.go`, `web/src/api.ts:190-215`) to "depends on the probe's outcome, not on the record's age", with the refused-probe format pinned by `TestRefusalReasonNamesTheArchitectureItAskedAbout`. Entry 31 supersedes entry 21's recoverability clause while leaving 21 open for the window itself. |
-| G-02-23 | The problem taxonomy is deployment-independent | ✓ VERIFIED | `ProblemBaseURI = "urn:holzkube-manager:problem:"` with all thirteen types composed from it. No occurrence of `holzkube.dev/problems` survives anywhere outside `.planning/`. `TestProblemTaxonomyIsClosed` parses `problem.go` with `go/ast` and asserts each `Type*` is a `BinaryExpr` of `ProblemBaseURI + "<literal suffix>"` — so a repeated literal, which is "how a re-rooting lands on twelve of thirteen", is a failure and not a style question. |
+| 1 | SC 1 — the **unchanged** production client speaks to `talossim`: real protobufs, real mTLS, real in-memory COSI, no hardware, no `talosctl`, no network | ✓ VERIFIED | `internal/talossim/` intact (16 files); `TestTracerRealClientReachesFakeNode`, `TestTracerRefusesUnverifiableClientCertificate`, `TestTracerRefusesMaintenanceCredentialsOnTheClusterPath` all present and in a passing package. `internal/depguard_test.go:30,102` still pins the module boundary D-07 declares. Untouched by round 4 apart from the repo rename. |
+| 2 | SC 2 — the operator switches on nine failure scenarios and the client behaves definitely | ✓ VERIFIED | `internal/talossim/scenario.go:49-57` declares all nine by name (`GoSilent`, `RejectApply`, `SecondBootstrap`, `FlapConnection`, `SlowLogConsumer`, `IPChangesOnReboot`, `EtcdDown`, `K8sDown`, `VersionOutOfSupportedRange`), each with a documented expectation; `TestScenarioContract` and `TestGoSilentFailsAtItsOwnClassDeadline` present and passing. Unchanged this round. |
+| 3 | SC 3 — an unreachable node blocks neither the UI nor other nodes; every call has a forced deadline; retries only for a read allowlist; cluster and maintenance clients are distinct types | ⚠️ PRESENT_BEHAVIOR_UNVERIFIED | The transport half is behaviourally proven and re-checked: `TestFanOutOneSilentNodeCostsOneNode`, `TestFanOutCancellationTerminatesEveryInFlightCall`, `TestFanOutSkipsAnOpenCircuitWithoutDialing`, `TestRequireDeadline`, `TestWithClassDeadlineRefusesAnUnclassifiedMethod`, `TestRetryAllowlistIsExactlyTheFastReadClass`, `TestMaintenanceClientRejectsClusterOnlyCall`, `TestMaintenanceClientMethodSetIsClosed`. The **UI** half has no code path: no production caller of the seam exists outside `internal/talos` and its tests. Deferred to Phase 3; see behavior_unverified_items. |
+| 4 | SC 4 — the operator assembles a schematic from a version-scoped catalog, gets the exact ISO/installer/PXE URLs (version-dependent repo name, no hardcoded architecture), **and the schematic counts as usable only after a confirming model-build probe**; kernel args or META raise the installer/initramfs warning | ✗ FAILED | Every conjunct but one holds and was re-checked: the catalog is version-scoped and there is no free-text field; `ISOURL`/`InstallerImage`/PXE derive from `AssetRequest` with the architecture as a parameter; `resolveInstallerRepo` resolves the version-dependent repo name and now asks all candidates at once while still deciding in declared order; the kernel-args/META warning is emitted and mirrored in the UI. The last conjunct is false at HEAD — **reproduced**, see gap G4-1: a re-POST at a second Talos version writes `usable: true` onto a record that names the first, and erases the refusal that named it. |
+| 5 | SC 5 — the whole binary runs with `--dry-run` and no mutation reaches a node | ✓ VERIFIED | `internal/talos/dryrun.go` with six named tests present and passing (`TestDryRunRefusesEveryMutationAtTheNode`, `TestDryRunOffLetsTheSameMutationsThrough`, `TestDryRunLeavesReadsAndStreamsAlone`, `TestDryRunRefusesApplyConfigurationInMaintenanceMode`, `TestDryRunRefusalNamesTheRPCAndTheWayOut`, `TestDryRunRefusalIsNotATransportFailure`), plus `TestDryRunApplyChangesNothing` in talossim. Wired at the composition root: `cmd/holzkube-managerd/main.go:171` `talos.Mode{DryRun: cfg.DryRun}`. Unchanged this round. |
+| 6 | R3 carry-over — a guard reports a pass only when it measured the property it is named for | ✗ FAILED (partial) | The named half is closed: `reportCanonResults` ends in `if !t.Failed() && counts[notObserved] > 0 { t.Skipf(...) }` (`canonical_live_test.go:667-670`), placed after the error loop so a DIVERGES row still fails, with the reasoning and the `live_test.go:425-431` precedent written in place. The truth as stated is general, and **falsified at HEAD in the other guard of that round**: renaming `REFUSED_RANGES` away leaves `TestBrowserRefusalSetEqualsTheServers` green. See gap G4-2. |
+| 7 | R3 carry-over — a blocking human decision checkpoint resolved without a human says so where the decision is read | ✓ VERIFIED | `02-DECISION-schematic-identity.md:130-148` now carries a titled section, *How this decision was taken*, opening "Recorded for provenance, because the status line alone would misrepresent it" and ending **"This decision is therefore self-resolved, not ratified."** with a pointer to `02-21-SUMMARY.md:165-181` and the in-phase contrast (`02-UAT.md` test 4's `ratified_by: user`). Round 3's exact finding — the artifact "contains no occurrence of 'checkpoint', 'ratified', 'user' or any equivalent" — is measurably false now (grep hits at :134, :142, :146). One residual observation, not a gap: the header at :3 still reads `Status: **decided**` unqualified, while the sibling `02-DECISION-probe-budget.md:3-6` adopted the header convention in the same round *and cross-references this document by name*. The fix landed one line lower than asked for. |
+| 8 | R3 carry-over — a completion record states only what is true of the repository | ✓ VERIFIED | `02-21-SUMMARY.md:345-358`: the claim is struck through, headed "**— WITHDRAWN, this was false**", and followed by a dated correction block that names `web/vite.config.ts:113`, both project names, `web/package.json`'s `test:browser`, the measurement, and why it mattered ("a reader acting on the original sentence would … delete the only layout evidence G-02-10 and G-02-19 have"). Verified accurate at HEAD, not just present: `vite.config.ts:113-138` still declares `projects:` with `jsdom` and `browser`, `package.json:11-12` still declares both scripts. The given HEAD measurement (9 files / 137 tests under the bare command) is consistent with the correction and larger than round 3's 8/126 because 02-23 added `api.test.ts`. |
+| 9 | 02-22 — the ISO probe and the registry manifest GET each have a constant of their own, and no request reaches the wire on a context with no deadline | ✓ VERIFIED | `client.go:36,62,78` — `DefaultTimeout = 30s`, `ProbeTimeout = 90s`, `ManifestTimeout = 30s`, each with its derivation in place. `client.go:254-262` refuses before the wire: `if _, ok := ctx.Deadline(); !ok { return ErrNoDeadline }`, with `ErrNoDeadline` documented as "Nothing was sent." `TestEachBudgetBoundsItsOwnWorkloadAndNoOther` and `TestRequestWithNoDeadlineIsRefusedBeforeTheWire` present and passing. |
+| 10 | 02-22 — a probe past the JSON budget and inside the probe budget produces a verdict; one past the probe budget still produces none, and no invented refusal | ✓ VERIFIED | Run individually: `TestProbeBudgetOutlivesTheJSONBudget` PASS (1.68s), `TestProbeBudgetStillEndsInNoVerdictWhenItIsExceeded` PASS (0.95s), `TestProbeBudgetIsNotTheManifestBudget` PASS (0.65s). The fail-safe tri-state in `probe.go:65-77` is intact — `registryRefused` still gates `ErrSchematicNotBuildable` and everything else is `ErrUpstreamUnavailable`. |
+| 11 | 02-22 — both Factory routes carry one route deadline, `writeTimeout` covers the largest with slack, and the composition guard sums per-call budgets by class from the code that runs | ✓ VERIFIED | `schematics.go:58` `CreateRouteBudget = ProbeTimeout + DefaultTimeout` (120s) applied at :366; `:83` `AssetsRouteBudget = ManifestTimeout + 5s` (35s) applied at :720; `main.go:64` `writeTimeout = 130s`. `TestRouteBudgetsComposeAgainstWriteTimeout` and `TestRouteBudgetTableReadsTheRealConstants` PASS; the latter fails if `writeTimeout != 130s` (`budget_test.go:377`). Every shipped value matches the decision document's own "constants as shipped" table exactly. |
+| 12 | 02-22 — the probe budget is derived by a stated rule from measured cold observations, and `TestLiveFactory` bounds the elapsed time of the probe it runs | ✓ VERIFIED | The derivation and its observations are in `client.go:62`'s comment; the live guard re-applies the rule rather than restating the number. Opt-in and unrun in CI, which is recorded rather than hidden: WINDOWS entry 64 supersedes entry 5 and says which three of entry 5's claims are unchanged and which two moved. |
+| 13 | 02-23 — the installer candidates are asked at the same time, the first candidate in **declared** order that answered 2xx still wins, the G-02-3 provenance survives, and the errors are byte-identical to the serial walk's | ✓ VERIFIED | `installer.go:613-707`: one slot per candidate indexed by declared position, `close(done[i])` as the happens-before, cancel-then-wait so no goroutine outlives the call, and the return taken on the first 2xx **in the iteration order of `candidates`**, not on arrival. `unresolved` and `unanswered` are still accumulated and still drive the provisional caching and the fallback warning. `TestInstallerImageAsksEveryCandidateAtOnce` and `TestInstallerImageNeverRevertsAProvenNameUnderConcurrentResolution` (cold cache and stale provisional entry) PASS under `-race`. |
+| 14 | 02-23 — the composition table's assets row records one concurrent candidate budget, and the clipping ratchet goes red if the constant is tightened without the declared call list changing | ✓ VERIFIED | `AssetsRouteBudget` is one `ManifestTimeout` plus 5s and the guard recomputes from it. The half-change the truth explicitly declines to claim (relisting to one call while the constant stays at two budgets) is recorded as a known limitation in WINDOWS entry 65, in the same words the plan's own must-have used. A truth that states only the direction its arithmetic delivers is the correct shape and it does deliver it. |
+| 15 | 02-23 — every browser request carries a ceiling, and the two waits the UI names equal the route budgets the server enforces, held equal by a drift guard | ✓ VERIFIED | `api.ts:509` hands `AbortSignal.timeout(REQUEST_CEILING_MS)` to every `fetch`; `api.test.ts` has five cases including a fresh ceiling for the sudo replay and "does not dress the abort up as a server problem". `budget_drift_test.go` reads `CREATE_WAIT_SECONDS` and `ASSETS_WAIT_SECONDS` out of `images.tsx` by anchored regex and compares them to the Go constants; `TestBudgetWaitsStatedInTheUIMatchTheRouteBudgets` PASS. (The third constant, `REQUEST_CEILING_MS`, is unguarded — warning WR-03, not a truth failure.) |
+| 16 | 02-24 — the 409 refresh writes `Usable`, `ProbedAt`, `ProbeReason` and nothing else, only when the fresh probe answered and only when the stored architecture matches, under a compare-and-swap that never retries and never recreates | ✓ VERIFIED | All eight cases run individually and PASS: `TestConflictRefreshesTheVerdictItJustComputed`, `…StoresTheFactorysRefusal`, `TestConflictWithNoAnswerFromTheProbeChangesNothing`, `…TouchesNothingButTheThreeProbeFields` (whole-record comparison plus `rev == before+1`), `TestConflictAtAnotherArchitectureDeclinesTheRefresh`, `…LosingTheCompareAndSwapAnswersThePlainConflict`, `…AgainstADeletedRecordDoesNotRecreateIt`, `TestConflictDetailNamesWhichRefreshOutcomeHappened`. The truth as the plan stated it is exactly true. It is also exactly as wide as the plan stated it, which is the whole of gap G4-1. |
+| 17 | 02-24 — the 409 body says which outcome happened, the saved list refetches after a failed create, and the no-verdict badge names the recovery without promising a verdict | ✓ VERIFIED | Three distinct clauses in `refreshTheStoredVerdict` (:530, :551, :575, :578) plus `archMismatchReason` naming both architectures. `images.tsx:302-311` invalidates `['schematics']` on create failure with the reason written in place ("un-refetched would show the operator the stale badge"). `images.tsx:932-938` reads *Not verified — the build probe has no verdict* with the muted line naming the re-submission, that it updates the verdict in place, and that it is still answered as a conflict — and the comment at :925-929 says why it stops there. |
+| 18 | 02-24 — the ledger says precisely what this round moved and that G-02-9 stays open | ✓ VERIFIED | WINDOWS entry 57 opens "SUPERSEDES ENTRIES 20 AND 48, BOTH NOW MARKED FIXED (no amend verb exists)" and enumerates what moved; entry 58 opens "G-02-9 REMAINS OPEN AFTER ROUND 4" and names the three missing things; entries 59-65 carry the residuals including the ones that cut against the round (process-wide `writeTimeout`, `CreateRouteBudget` clipping, the un-surfaced audit outcome of a refreshing 409, the still-missing progress indicator, the guard's tolerated half-change). Entry 63 supersedes entry 8 and carries the reason the `fixed` verb cannot. Three representations parsed independently: 52/0/13/65 in all three, zero mismatches, ids 1..65 with no duplicates. |
+| 19 | The phase's own standing truth — no stored state claims more than the record supports (T-02-62 / G-02-1 / G-02-8 lineage) | ✗ FAILED | Reproduced at HEAD: `talos_version: v1.12.0, usable: true, probe_reason: ""` after a probe that succeeded only at v1.13.9, rendering **"Usable — the build probe confirmed it"**. Same root cause as truth 4; see gap G4-1. |
 
-**Score on the round's own work: 14/14.**
+**Score:** 15/19 truths verified (1 present, behavior-unverified; 3 failed, of which two share one root cause).
 
-## 2. Would any of the new guards go green while its property is false?
+## 2. Deferred items
 
-This is the G-02-10 shape, asked of every guard the round added.
-
-| Guard | Could it pass while the property is broken? | Evidence |
-|---|---|---|
-| Browser line-box sweep | **No.** | Falsified live. Also fails closed in the wrong environment: in jsdom every rect is zero, `lineBoxCount` returns 0, and `0 !== 1` pushes every width into `split`. The vite config excludes the file from the jsdom project by name and says why the exclusion is explicit rather than a narrower include. |
-| Dialog width | **No.** | `> 384` is stated as the regression guard *and* as the project-misconfiguration guard; `=== 768` is asserted separately as an observation. |
-| Codepoint drift guard | **No.** | Falsified live. Fails closed on its own reading: `browserRefusalRanges` calls `t.Fatalf` when the regex matches nothing, on the stated ground that "a guard that silently passes when it can no longer find what it guards is worse than no guard". Only one `{from: 0x…}` table exists in `images.tsx`, so no conflation. |
-| Installer-name binding | **No.** | The Go side pins the TypeScript literal array; the browser side asserts its own derivation equals that literal. A fifth Go candidate breaks the Go guard, and a drifted derivation breaks the browser one. Closes the residual 02-17 filed against itself (WINDOWS 43). |
-| Warning-code drift guard | **No.** | `TestWarningDetailsMatchTheUI` now loops `exportedWarningCodes(t)`, an AST walk of every non-test file in the package, instead of naming the codes it knows — which is exactly how 02-16 shipped a Go warning with no TS mirror and stayed green. `TestWarningsCodesAreNamespaced` additionally asserts three known codes are in the scan's output so that a scan reading nothing cannot pass. *Minor:* the failure message asks for a `docs/api-contract.md` row and nothing asserts one; the row does exist today. |
-| AST taxonomy closure | **No** for the declared surface. | Both directions asserted, plus declaration shape. *Minor:* it collects identifiers prefixed `Type`, so a fourteenth type named otherwise would escape. |
-| Canonical differential | **Yes — see gap 1.** | The oracle is genuinely external and the corpus is real, but a run in which every batch throttles reports PASS. |
-
-## 3. The three reported deviations
-
-| Plan | Deviation | Sound? | Honestly recorded? |
+| # | Item | Addressed In | Evidence |
 |---|---|---|---|
-| 02-19 | Extended the warning drift guard beyond "run the guard that checks the two sides agree" | **Yes.** No such guard existed for the new code; adding the mirror while leaving the guard blind would have left the next code in the same position. Verified in `warnings_test.go:329-334`. | Yes — filed as Rule 2, with the drift-and-restore verification recorded. |
-| 02-20 | Widened `validate` from the two named fields to five scalars | **Yes.** The plan's own behaviour row required "a POST with bad values in `name`, `cluster` and `kernel_args` reports all three field errors in one response", and `kernel_args` was only refused downstream in `Schematic.ID()`. Checking two fields would have shipped that row false. Verified in `schematics.go:624-647`. | Yes — and the accompanying limitation is stated rather than glossed: the form has no `cluster` input, so the client cannot guard it and only the server does (WINDOWS 54). |
-| 02-21 | `gsd-tools windows` has no amend verb, so entries 13/20/21/27 are superseded rather than reworded | **Yes.** The tool exposes `status`/`append`/`waive`/`fixed` only, and hand-editing would desynchronise the three representations the tool keeps in step. Each superseding entry opens in capitals naming what it supersedes, so a linear reader cannot meet the old text without the new. | Yes, and unusually well: the SUMMARY states the acceptance criterion is **"not literally met"** rather than reinterpreting it, on the explicit ground that reinterpreting a criterion inside the plan closing G-02-21 "would be a joke at the register's expense". |
-| 02-21 | A `gate="blocking"` `checkpoint:decision` resolved without stopping | **Defensible** — the dispatcher pre-answered it, the plan's own `<recommendation>` said the same independently, and the project runs `mode: yolo`. The answer taken was the recommendation, not "the first option". | **In the SUMMARY, yes. In the decision document, no** — see gap 2. |
+| 1 | The UI half of SC 3 / TRANS-05 | Phase 3 | No production caller of the seam exists; ROADMAP Phase 3 owns the inventory route. |
+| 2 | TRANS-08 — the contract suite against real Talos | Phase 3 | REQUIREMENTS.md:226 (Pending); ROADMAP.md:181 states why. |
+| 3 | G-02-9 — a timed-out probe is still permanent | 02-DECISION-probe-budget.md Option 1, not taken | Recorded open in four independent places; no artifact claims it closed. **This is the item round 4 was asked to check for dishonesty and it is honest.** |
 
-## 4. What the round did NOT fix
-
-Checked for closure claims that outrun their evidence. The ledger is candid on every one of these, which is the notable finding:
-
-- **WINDOWS entry 20 is unchanged and correctly stays open.** Re-measured rather than trusted: `DefaultTimeout = 30 * time.Second` and `budget_test.go` hard-fails if `writeTimeout != 60s`. Entry 48 stands beside 20 saying in capitals that 02-19 changed what an unresolved installer *returns*, not the cold 2 × 30s walk — and warning specifically that "the panel now shows four references on a timeout" must not be read as the timeout having been addressed. The milder symptom does make `02-DECISION-probe-budget.md` easier to defer; the ledger says so.
-- **The refusal set is a floor, not a ceiling.** Six unmeasured regions are named in `docs/api-contract.md:924-937` — where an API reader looks, not only in a SUMMARY — with the explicit instruction to read the section as "these classes were measured to diverge and are refused", not as "every divergent codepoint is refused". Also WINDOWS 32 and 56.
-- **The differential never runs in CI.** WINDOWS 35.
-- **Only one browser engine is measured.** WINDOWS 42.
-- **Pre-02-14 and pre-02-20 records are unmigratable.** WINDOWS 37, 53.
-- **Entries 25 and 26 were deliberately not fixed** even though 02-19 rewrote the section they sit in, on the ground that "a scoping decision is not an executor's to overturn". WINDOWS 50.
-- **Entry 13's `never sent` half is still true**; only the `unvalidated` half closed. WINDOWS 52 says exactly that.
-- **The CI browser-install step has never run.** WINDOWS 44. It fails closed.
-
-## 5. Ledger integrity
-
-Parsed independently rather than read.
-
-| Representation | open | waived | fixed | total |
-|---|---|---|---|---|
-| Frontmatter | 47 | 0 | 9 | 56 |
-| Markdown table | 47 | 0 | 9 | 56 rows |
-| JSON block | 47 | 0 | 9 | 56 entries |
-
-Ids 1…56, no duplicates, no status mismatch between table and JSON on any entry. The six entries 02-21 marked fixed were checked in the tree, not on the SUMMARY's say-so:
-
-| Entry | Claim | Verified |
-|---|---|---|
-| 23 | The provisional-warning branch of GET /assets had no handler-level test | `schematics_test.go:1584` `t.Run("provisional", …)` asserts the reference is non-null, exactly one fallback warning, and a non-empty detail |
-| 29 | A lone surrogate from an API client is rewritten before the id is computed | `rawBodyRefusal` at `schematics.go:830`, called at `:271` on the raw bytes before `decodeJSON` |
-| 33 | `images.tsx` under-refuses relative to the server | `REFUSED_RANGES` + `TestBrowserRefusalSetEqualsTheServers`, falsified live |
-| 38 | QF1012 in `canonical_live_test.go:627` | no `WriteString(fmt.Sprintf` remains in the file |
-| 40 | The new warning code had no TS mirror and no contract row | `api.ts:345` and `docs/api-contract.md:639` |
-| 43 | `INSTALLER_REPOSITORY_NAMES` was not pinned to `installerCandidates` | `TestBrowserInstallerNamesEqualInstallerCandidates`, passing |
-
-## 6. The unprobed regions
-
-| Region | Recorded where a reader would look? |
-|---|---|
-| `talos.MaxSupportedVersion` v1.14 never probed | Yes — `installer.go:220-231` (the function whose refusal it governs), `live_test.go:495-517` (with the reason it is unprobeable: a range bound is not a tag), WINDOWS 30 and 41 |
-| No v1.13.x below the pin probed | Yes — same three places. `liveNewestSupportedRow` asks the version list at run time and starts probing v1.14.x on its own once upstream ships it, so this half closes itself |
-| The fake's v1.9.0 rows are constructed, not observed | Yes — `fake_test.go:73-81`, in the register "do not fix this map against the registry" |
-| The canonical differential's six unmeasured regions | Yes — `docs/api-contract.md:924-937` names both what the sweep reached and what it did not, plus WINDOWS 32 and 56 |
-
-## 7. Regression check on the ROADMAP success criteria
-
-`git diff ad786b5..fb16546 -- internal/talos internal/talossim cmd/holzkubed` is **empty**, so SC 1, 2, 3 and 5 carry from the round-2 report unchanged, including SC 3's UI clause remaining ⚠️ PRESENT_BEHAVIOR_UNVERIFIED and deferred to Phase 3. SC 4 is materially strengthened by this round (the installer answer, the canonical serialiser and the browser refusal set all moved toward it) and nothing in the round weakened it.
-
-**ROADMAP score: 4/5 (1 present, behaviour-unverified). Round-2 gap truths: 14/14. Combined: 18/19.**
-
-## Gaps Summary
-
-All fourteen gap truths hold in the tree, and the two guards it was possible to falsify were
-falsified and fail closed. The three gaps are not in what the round built; they are in what the
-round *said*, and in one guard it built to a standard it applied elsewhere in the same round.
-
-1. `TestLiveCanonical` reports a pass on a run that measured nothing. The sibling guard in the
-   same round was changed for precisely this reason, and the divergence between the two files is
-   unrecorded.
-2. `02-DECISION-schematic-identity.md` reads `decided` without saying that a blocking human
-   checkpoint was resolved by the executor. The candid account exists — in the SUMMARY only.
-3. `02-21-SUMMARY.md` states two things about `web/`'s test configuration that are false, and
-   declares an acceptance criterion unmeetable that is in fact met.
-
-Each is a one-line to one-paragraph fix and none blocks the fourteen closures. They are filed as
-gaps rather than notes because this phase has twice now paid for the same thing: a record that is
-candid in one place and silent in the place a reader actually consults.
-
----
-
-_Verified: 2026-08-30T12:25:00Z at `fb16546`_
-_Verifier: Claude (gsd-verifier), round 3_
-
----
-
-## Appendix — round 2 report, retained verbatim
-
-
-# Phase 2: Transport Seam, `talossim` & Image Factory — Verification Report (round 2)
-
-**Phase Goal:** Jede Talos-Interaktion läuft durch eine austauschbare Naht und ist ohne Hardware
-testbar; Schematics und Image-URLs sind korrekt und nachweislich brauchbar herleitbar.
-**Verified:** 2026-08-29T21:35:00Z at `ad786b5`
-**Status:** human_needed
-**Re-verification:** Yes — after the gap-closure round (plans 02-09 … 02-13) and the review-fix
-pass (`49be02f`, `be75d5e`, `2ee117b`, `ec10e08`, `37d40b2`).
-
-Everything below was re-run in this session against the working tree. No claim is carried over
-from a SUMMARY, a PLAN or the previous report — including the four criteria that already passed,
-which were re-checked for regression.
-
-## Goal Achievement
-
-### A. Observable Truths — ROADMAP Success Criteria
-
-| # | Truth | Status | Evidence |
-|---|-------|--------|----------|
-| 1 | Der unveränderte Produktions-Client spricht gegen `talossim` — echte Protobufs, echtes mTLS, echter In-Memory-COSI-State | ✓ VERIFIED (regression) | `go test ./... -count=1` green across all 18 packages, including `TestTracerRealClientReachesFakeNode`. `go list -deps ./cmd/holzkubed \| grep -c talossim` = **0**. `TestSimulatorIsNotInTheProduct` present and passing. Untouched by the gap-closure round: `git diff c1c65a2..HEAD` names no file under `internal/talos*`. |
-| 2 | Die neun TRANS-07-Fehlerszenarien sind injizierbar und der Client verhält sich definiert | ✓ VERIFIED (regression) | `TestScenarioContract` and `TestRegistryCoversTRANS07` enumerate and pass; the suite still iterates `talossim.Registry`, so a tenth scenario without an assertion is a red test. Untouched by this round. |
-| 3 | Ein nicht erreichbarer Node blockiert weder die UI noch andere Nodes; erzwungenes Deadline; Retries nur für eine Read-Allowlist; getrennte Client-Typen | ⚠️ PRESENT_BEHAVIOR_UNVERIFIED | Three of four clauses behaviourally proven and unchanged. The **UI clause still has no code path**: `grep` over `cmd` and `internal` (excluding `internal/talos` and `_test.go`) finds no production caller of `NewClusterClient`, `NewMaintenanceClient`, `FanOut(`, `NewBreaker`, `NewDirectDialer` or `NewManualSource` — only a comment in `router.go:99` and a scenario string. Deferred to Phase 3. |
-| 4 | Schematic aus versions-skopiertem Katalog; exakte ISO-/Installer-/PXE-URLs mit versionsabhängigem Repo-Namen, ohne hartkodierte Architektur; usable erst nach Model-Build-Probe; Kernel-Args/META warnen | ✓ VERIFIED (coincidental-reliance) | Materially **stronger** than at `575da7a`: the installer reference is now SecureBoot-correct, which it was not. Proven live at this commit — see the SC 4 breakdown. The reliance flag is on the probe clause only and is advisory; see `coincidental_reliance_items`. |
-| 5 | Das gesamte Binary läuft mit `--dry-run`, und keine Mutation erreicht dabei einen Node | ✓ VERIFIED (regression) | `go run ./cmd/holzkubed --help` prints `--dry-run … refuse every mutating node call at the transport (env HOLZKUBE_DRY_RUN)`. `TestDryRunRefusesEveryMutationAtTheNode` and `TestDryRunRefusesApplyConfigurationInMaintenanceMode` present and passing. Untouched by this round. |
-
-**ROADMAP score: 4/5 truths verified (1 present, behaviour-unverified).**
-
-#### SC 3 breakdown (unchanged from `575da7a`, re-checked)
-
-| Clause | Status | Evidence at `ad786b5` |
-|--------|--------|-----------------------|
-| …blockiert nicht **andere Nodes** | ✓ VERIFIED | `TestFanOutOneSilentNodeCostsOneNode`, `TestFanOutSkipsAnOpenCircuitWithoutDialing`, `TestFanOutCancellationTerminatesEveryInFlightCall` all present and green. |
-| …**erzwungenes Deadline** | ✓ VERIFIED | `TestRequireDeadline` green; `requireDeadline(ctx)` in both interceptors. |
-| …**Retries nur für eine Allowlist** | ✓ VERIFIED | `TestRetryAllowlistIsExactlyTheFastReadClass` green. |
-| Client-Typen **nicht verwechselbar** | ✓ VERIFIED | `TestMaintenanceClientRejectsClusterOnlyCall` green — a real `go build -tags talos_compile_fail` that must fail. |
-| …blockiert nicht **die UI** | ⚠️ UNVERIFIED | No production caller. Deferred to Phase 3. |
-
-#### SC 4 breakdown — live evidence gathered in this session
-
-`HOLZKUBE_FACTORY_LIVE=1 go test ./internal/imagefactory -run TestLiveFactory` — **PASS in 32.1 s,
-7/7 subtests**, against the public `factory.talos.dev`:
-
-| Check | Result |
-|-------|--------|
-| Pinned Talos release still listed | PASS (0.49 s) |
-| Version-scoped catalog still lists the recorded extension | PASS (0.30 s) — no free-text field exists client-side either (`images.tsx` renders a `<fieldset>` over `catalog.data.extensions`) |
-| Locally precomputed id still agrees with upstream (**FACT-06**) | PASS (0.15 s) — the canonical serialiser has not drifted |
-| Creation is still not validation (**FACT-02**) | PASS (0.30 s) |
-| A good schematic still builds | PASS (3.52 s) — warm; see the reliance note |
-| **SecureBoot resolves to a different installer than the ordinary request** | PASS (5.73 s). Logged verbatim: `plain = factory.talos.dev/metal-installer/20e64852…:v1.13.9`, `secure = factory.talos.dev/metal-installer-secureboot/20e64852…:v1.13.9`. This is the G-02-4 defect, gone. |
-| The installer-name matrix is what the file records | PASS (21.62 s). Observed: at **v1.13.9** and **v1.12.0**, all four of `metal-installer`, `installer`, `metal-installer-secureboot`, `installer-secureboot` answered. Agrees with 02-09-SUMMARY.md:170-173. |
-
-Additional SC 4 checks, offline:
-
-| Check | Result |
-|-------|--------|
-| No hardcoded architecture (**FACT-03**) | `urls.go` contains the two `Arch` enum constants and no architecture literal inside a URL. `TestAssetURLsDifferOnlyInTheArchitecture` and the web test "changes every asset URL when the architecture control changes" pass. `TestTheStoredArchitectureDoesNotDefaultTheAssetsQuery` pins that `?arch=` stays required even now that the record carries one. |
-| usable only after the probe | `Usable` is written only from `ProbeBuildable`. `TestCreateReturns201WithWarningsAndAProbedVerdict`, `TestCreateStoresTheArchitectureTheProbeUsed`, `TestUnansweredProbeStillStoresTheArchitecture` pass. |
-| Kernel-args / META warning (**FACT-04**) | `TestWarningsForKernelArgs`, `TestWarningsForMeta`, `TestWarningsNameInstallerAndInitramfs`, `TestWarningDetailsMatchTheUI` pass; web tests "warns … while they are being typed, before any create request" and "stays quiet about a row that has just been added and holds nothing" pass. |
-| Prereleases / broken versions (**FACT-05**) | Web tests "hides prereleases until they are explicitly asked for" and "renders a broken version disabled and says why it is listed" pass. `brokenversions.go` is still deliberately empty, documented in-file. |
-
-### B. Observable Truths — gap-closure must_haves (plans 02-09 … 02-13)
-
-All 34 `must_haves.truths` across the five gap-closure plans, checked against code and tests
-rather than against the SUMMARYs.
-
-#### 02-09 — G-02-4 (SecureBoot) and G-02-5 (registry taxonomy)
-
-| # | Truth | Status | Evidence |
-|---|-------|--------|----------|
-| 1 | SecureBoot request ⇒ SecureBoot installer repository | ✓ VERIFIED | `installerCandidates` appends `secureBootRepoSuffix` (`installer.go:206-215`). `TestInstallerImageResolvesTheSecureBootName`, `TestInstallerImageFallsBackToTheLegacySecureBootName` pass; confirmed live. |
-| 2 | Two requests differing only in SecureBoot never share a cache entry | ✓ VERIFIED | `installerRepoKey` = `"%s/%s/secureboot=%t"` — formatted, not concatenated. `TestInstallerImageCachesSecureBootSeparately` passes under `-race -count=3`. |
-| 3 | 400/404 = refusal, everything else = no answer, **in both sites** | ✓ VERIFIED | One predicate: `registryRefused(status)` (`probe.go:95`) is called by `ProbeBuildable` (`probe.go:57`) *and* by `resolveInstallerRepo` (`installer.go:498`). The old `status == http.StatusNotFound` test is gone. |
-| 4 | A 429 no longer marks a schematic not buildable | ✓ VERIFIED | 429 falls into `default` ⇒ `ErrUpstreamUnavailable`. `TestInstallerImageSeparatesAnUnreachableRegistryFromARefusal` and the probe status table pass. |
-| 5 | `?secureboot=true` returns a SecureBoot ISO **and** a SecureBoot installer in one answer | ✓ VERIFIED | `TestAssetsSecureBootSuffixesTheURLs` asserts `metal-amd64-secureboot` in the ISO **and** `/metal-installer-secureboot/` in the installer, with a negative control that an ordinary request contains `secureboot` in neither. |
-| 6 | Where neither SecureBoot name answers, refuse rather than substitute | ✓ VERIFIED | `TestInstallerImageRefusesRatherThanSubstitutingTheOrdinaryInstaller` passes; the candidate list structurally cannot contain a non-SecureBoot name when the flag is set. Merge-time acceptance of the resulting 502 is a human item. |
-| 7 | The four-name matrix is a recorded observation or a ledger entry | ⚠ CORRECTED 2026-08-30 — was ✓ VERIFIED | **See the correction note below the table.** Original assessment, kept verbatim: *"Recorded in `02-09-SUMMARY.md:170-173` and in `live_test.go`'s expectation table; **independently reproduced live in this session**, agreeing cell for cell. The throttled first run is stated (`02-09-SUMMARY.md:182`), and `.planning/WINDOWS.md` entry 5 stays open."* Every fact in it is true. The reading it rests on is not: the criterion was conjunctive, and its third conjunct — the ledger entry — went unfiled. Filed 2026-08-30 as **WINDOWS entry 30**. |
-| 8 | `DefaultTimeout`'s comment names every call it governs; value unchanged | ✓ VERIFIED | `client.go:26-42` now names the ISO HEAD and both installer manifest GETs, states the 30.5-32.7 s measured band, and points at `02-DECISION-probe-budget.md`. `git show 7f87cb1:…` vs now: `DefaultTimeout = 30 * time.Second` unchanged. |
-
-> **Correction, 2026-08-30 (plan 02-21, closing G-02-21).** Row 7's truth was restated here as a
-> disjunction — *"a recorded observation **or** a ledger entry"* — and marked verified because the
-> observation exists. `02-09-PLAN.md:445-452` does not say *or*. On a throttle it requires three
-> things **conjunctively**: that the SUMMARY record the throttle verbatim, **and** that WINDOWS
-> entry 5 stay open, **and** that *"a new `unrun-verify` entry naming the unverified SecureBoot
-> matrix is appended with `gsd-tools windows append --kind unrun-verify --phase 02`"*.
->
-> The run throttled. **Two of the three were done. The third was not.**
->
-> `02-09-SUMMARY.md:271` gave the reason: every ledger command was failing project-wide
-> (`Ledger entry 7 has invalid kind: "review-finding"`), and the plan forbade hand-editing the
-> file. That blockage was real — and it lasted seven minutes, between `9562498` (18:41:05) and
-> `e1a5c6c` (18:48:09). Plans 02-11 through 02-13 appended entries 19–29 afterwards without
-> trouble. So the obligation survived the blockage and was simply never picked back up, and this
-> row then recorded the criterion as met on the softened reading rather than recording that it was
-> outstanding. **A ship gate reading the register between 2026-08-29 and today saw nothing about
-> the plan-09 throttle, nothing about the unprobed `talos.MaxSupportedVersion`, and nothing about
-> the unprobed v1.13.x below the pin.**
->
-> **Filed 2026-08-30 as WINDOWS entry 30** (`unrun-verify`, `internal/imagefactory/live_test.go`),
-> naming all three. WINDOWS entry 5 — the factory.talos.dev throttle itself — remains open and is
-> not closed by this. The original assessment above is corrected in place rather than deleted: that
-> the criterion was *reread* rather than *met* is the whole of G-02-21, and a silent rewrite would
-> repeat it.
-
-#### 02-10 — G-02-7, and the first half of G-02-8
-
-| # | Truth | Status | Evidence |
-|---|-------|--------|----------|
-| 1 | Inspecting arm64 asset URLs does not change what the next schematic is created against | ✓ VERIFIED | `AssetPanel` holds `useState<Architecture>(archSeed)` (`images.tsx:1123`); only the form uses `useRememberedArch()` (`:135`). Web tests "does not let the asset panel rewrite the remembered architecture" and "creates the next schematic for the architecture the form shows, not the one just inspected" pass. |
-| 2 | The panel's architecture is never written to localStorage | ✓ VERIFIED | The `localStorage` write lives only in `useRememberedArch`; the panel's state is seeded and discarded on unmount. Test "remembers the architecture rather than defaulting to the developer machine" pins the form half. |
-| 3 | A schematic that is no longer stored shows a dialog that says so | ✓ VERIFIED | `record.isError` branch at `images.tsx:968` → `SchematicDetailUnavailable`. Test "says a schematic is no longer stored instead of opening an empty dialog" passes. |
-| 4 | A detail fetch answering 404 removes the row | ✓ VERIFIED | `images.tsx:942` invalidates `['schematics']` guarded on `failure.code === 'notfound.schematic'` and a one-shot ref. |
-| 5 | A store/transport failure is presented differently from a deletion | ✓ VERIFIED | `gone` is computed from the problem **code**, not the message (`:994`). Test "distinguishes a failed fetch from a deleted schematic and keeps the row" passes. |
-| 6 | The second half of G-02-8 is 02-13's, not a silence | ✓ VERIFIED | 02-13 exists, carries `gap_ids: [G-02-8]`, and has executed. |
-
-#### 02-11 — G-02-6
-
-| # | Truth | Status | Evidence |
-|---|-------|--------|----------|
-| 1 | A locally refused value is a 400 naming the field, not a 502 | ✓ VERIFIED | `createProblem` does `errors.As(err, &refused)` on `*imagefactory.NotRepresentableError` **before** falling through to `factoryProblem` (`schematics.go:667-681`). `TestCreateRefusesALocallyUnrenderableValueAsAnInputProblem` and `TestCreateSplitsALocalRefusalFromAFactoryOutage` pass. |
-| 2 | The refusal names which field and which entry | ✓ VERIFIED | `refusalReason` renders a one-based entry index; `requestFieldForPath` is an explicit table. `TestSchematicRefusalNamesTheFieldAndEntry`, `TestSchematicRefusalReportsTheFirstBadValueInDocumentOrder` pass. |
-| 3 | A control character is refused at the input, before Create | ✓ VERIFIED | `hasControlCharacter` at `images.tsx:117-119`. Tests "refuses a kernel argument carrying a control character before any request", "…a META value…", "re-enables Create once the control character is removed" pass. |
-| 4 | A create error disappears when the form changes | ✓ VERIFIED | Test "clears a create error as soon as the form it belongs to changes" passes. |
-
-#### 02-12 — G-02-3 (plus the unconditional badge-copy and `break-all` items from G-02-1)
-
-| # | Truth | Status | Evidence |
-|---|-------|--------|----------|
-| 1 | A reference reached past an unanswered candidate carries a warning naming repo, version and transport error | ✓ VERIFIED | `installerFallbackWarning` (`installer.go:433-446`) interpolates all three. `TestInstallerImageWarnsWhenThePreferredNameWasNeverRuledOut` passes. |
-| 2 | Cached only provisionally; warning on every answer including cached; re-questioned after the interval | ✓ VERIFIED | `installerRepoEntry.proven()`, `installerRepoRetryInterval = 5m`, and the `installerRepo` branch at `:246-251`. `TestInstallerImageServesAProvisionalAnswerFromTheCacheWithinTheInterval` and `TestInstallerImageReQuestionsAProvisionalAnswer` pass under `-race -count=3`. |
-| 3 | A re-question asks only the never-ruled-out candidate | ✓ VERIFIED | `requestionInstallerRepo` passes `entry.unresolved...` to `resolveInstallerRepo`, never the full list. Asserted by a request counter in the concurrency test ("`installer` asked exactly once"). |
-| 4 | The silent candidate's timeout is paid at most once per interval | ✓ VERIFIED | Follows from truths 2 and 3 and is what `budget_test.go`'s slack computation is against; the re-stamp on failure (`:417`) is what enforces the cadence. |
-| 5 | A proven name carries no warning and never expires | ✓ VERIFIED | `TestInstallerImageProvenNameCarriesNoWarning` passes; `installerRepo` returns early on `entry.proven()`. |
-| 6 | A failed re-question keeps and re-stamps the provisional entry | ✓ VERIFIED | `TestInstallerImageRetainsAProvisionalAnswerWhenTheReQuestionFails` passes. |
-| 7 | A re-question whose preferred candidate refuses promotes the entry to proven | ✓ VERIFIED | The `errors.Is(err, ErrSchematicNotBuildable)` branch drops `unresolved` and the warning. `TestInstallerImagePromotesAProvisionalAnswerWhenTheReQuestionIsRefused` passes. |
-| 8 | Budget composition is asserted by a route table, with the two over-budget routes declared | ✓ VERIFIED | `cmd/holzkubed/budget_test.go`: `TestRouteBudgetsComposeAgainstWriteTimeout` computes `calls × DefaultTimeout + slack` and fails a row whose declaration disagrees **in either direction**, and `TestRouteBudgetTableReadsTheRealConstants` fails if either constant moves. Both pass with no budget raised. |
-| 9 | The operator sees the warning on the panel that shows the reference | ✓ VERIFIED | `assetReferences.Warnings` (`schematics.go:47`, populated at `:451`, `nil`-normalised to `[]`); `web/src/api.ts:245` requires the array. Tests "shows the operator what was not proven about the installer reference" and "renders no warning box when the installer repository name was proven" pass. |
-| 10 | The repository name cannot be split across a line break | ✓ VERIFIED | `ReferenceValue` replaces `break-all` with `break-normal` plus `<wbr />` at `/` only (`images.tsx:1249-1265`); text content is unchanged. Test "cannot split a repository name across a line break" passes. |
-| 11 | The badge no longer claims the probe did not run | ✓ VERIFIED | `images.tsx:747` reads "Not verified — the build probe has no verdict", with "The probe either did not run or did not answer in time." Test "renders three distinguishable usability states and the reason for a refusal" passes. |
-
-#### 02-13 — G-02-8, second half
-
-| # | Truth | Status | Evidence |
-|---|-------|--------|----------|
-| 1 | The record stores the architecture it was authored and probed against | ✓ VERIFIED | `model.Schematic.Arch string \`json:"arch"\`` (`model.go:98`); `createSchematic` stamps `Arch: in.Arch` (`schematics.go:278`) unconditionally. `TestCreateStoresTheArchitectureTheProbeUsed` and `TestUnansweredProbeStillStoresTheArchitecture` pass. |
-| 2 | The verdict is shown with that architecture beside it, in all three places | ✓ VERIFIED | `UsabilityBadge` renders `architecture: {arch}` (`:701`) and is called with `arch` at the create result (`:650`), the saved list (`:877`) and the detail dialog (`:1053`). Tests at all three sites pass. |
-| 3 | A pre-field record renders exactly 02-12's sentence, unqualified | ✓ VERIFIED | Test "leaves a record written before the architecture existed unqualified" passes; the Go drift guard `TestWarningDetailsMatchTheUI` still pins the transcribed sentences. |
-| 4 | The stored architecture never defaults the assets query | ✓ VERIFIED | `TestTheStoredArchitectureDoesNotDefaultTheAssetsQuery` passes; `web/src/api.ts:434` always sends `arch`. |
-| 5 | The records that can never be qualified are an open ledger entry | ✓ VERIFIED | `.planning/WINDOWS.md` entry 21, open, on `internal/model/model.go`. |
-
-**Gap-closure score: 34/34 truths verified.**
-**Combined score: 38/39 must-haves verified (5 ROADMAP SCs + 34 plan truths; 1 present,
-behaviour-unverified).**
-
-### Prohibition Checks (must-NOTs)
-
-Each gap-closure plan's `must_haves.prohibitions` verified against the diff, not against prose.
-All are judgment-tier; none is silently passed.
-
-| Prohibition (plan) | Status | Evidence |
-|--------------------|--------|----------|
-| No installer repository name may be assembled or guessed (02-09) | ✓ HELD | Every returned name comes from a candidate that answered 2xx; `resolveInstallerRepo` returns an error rather than a name when none does. `TestInstallerImageRefusesWhenNeitherAnswers` passes. |
-| No timeout, deadline or budget changed anywhere (02-09, 02-12, 02-13) | ✓ HELD | `git show 7f87cb1:internal/imagefactory/client.go` and `:cmd/holzkubed/main.go` vs the tree: `DefaultTimeout = 30 * time.Second` and `writeTimeout = 60 * time.Second`, both unchanged. 02-REVIEW-FIX.md's constraint audit over `e2db392..HEAD` reports `cmd/holzkubed/main.go` byte-identical; independently re-checked here. |
-| Carve-out: `DefaultTimeout`'s doc comment only (02-09) | ✓ HELD | Comment rewritten, value untouched (above). |
-| No probe state, no re-probe path, no change to `Usable`/`ProbedAt`/`ProbeReason` semantics (02-10, 02-12, 02-13) | ✓ HELD | The three fields' declarations and comments are unchanged from `7f87cb1`; `Arch` is additive and descriptive. `TestSchematicRoutesAreTheSevenContracted` passes, so no re-probe route was slipped in. |
-| No store schema bump or migration (02-13) | ✓ HELD | `migrate.CurrentVersion = 2`, unchanged. |
-| No architecture may be persisted in 02-10 (it is 02-13's) | ✓ HELD | `Arch` first appears in the 02-13 commits (`193b05e`), not in 02-10's two commits. |
-| The refusal must never echo the offending value (02-11) | ✓ HELD | `refusalReason` emits an index and a class only. `TestSchematicRefusalDoesNotEchoTheValue` and `TestCreateRefusalDoesNotEchoTheOffendingValue` pass. |
-| The canonical serialiser's refused set must not move (02-11, and again under WR-04) | ✓ HELD | WR-04 was fixed on the **client** side only; `representable`'s Go rule is untouched, which is what FACT-06 rests on — and FACT-06 is re-proven live ("the recorded payload still produces the recorded id"). |
-| The fallback must not become an error (02-12) | ✓ HELD | The provisional path returns a reference plus a warning; only "no candidate answered at all" is an error. |
-| The three badge sentences must not be rewritten (02-13) | ✓ HELD | `TestWarningDetailsMatchTheUI` passes; the architecture is rendered beside, not spliced in. |
-| The stored architecture must not default anything (02-13) | ✓ HELD | Test named above. |
-
-### Required Artifacts
+## 3. Required artifacts
 
 | Artifact | Expected | Status | Details |
-|----------|----------|--------|---------|
-| `internal/imagefactory/installer.go` | SecureBoot-aware candidates and cache key; provisional caching with a bounded re-question; a never-demote-proven write | ✓ VERIFIED | 519 lines. `installerCandidates`, `installerRepoKey`, `installerRepoEntry.proven`, `storeInstallerRepo`, `requestionInstallerRepo`, `installerFallbackWarning` all present and substantive; wired from `InstallerImage`, which is called from `schematics.go:432`. |
-| `internal/imagefactory/probe.go` | The package's single registry-answer taxonomy | ✓ VERIFIED | `registryRefused` defined here and called from both classification sites. |
-| `internal/imagefactory/probe_test.go` | A status table asserting both functions agree | ✓ VERIFIED | Table tests present; `TestInstallerImageTreatsAnAllBadRequestCandidateSetAsARefusal` covers the 400 case the old code could not reach. |
-| `internal/imagefactory/warnings.go` | `installer.repo-fallback-unverified` | ✓ VERIFIED | Constant present; `TestWarningsCodesAreNamespaced` now enumerates the package's exported codes by AST (WR-05 fix) instead of restating three names. |
-| `internal/imagefactory/schematicid.go` | A typed refusal naming path and index | ✓ VERIFIED | `NotRepresentableError{Path, Index, Reason}` with `Unwrap` to `ErrSchematicNotRepresentable`. |
-| `internal/httpapi/handlers/schematics.go` | `createProblem` split; assets response carrying `warnings`; `Arch` stamped | ✓ VERIFIED | All three present and wired; 7 contracted routes unchanged. |
-| `cmd/holzkubed/budget_test.go` | The composition guard | ✓ VERIFIED | Present, reads the real constants, declares two `knownOverBudget` rows with `deferredTo` set, and fails a stale declaration in either direction. |
-| `internal/model/model.go` | `Arch` on `Schematic` | ✓ VERIFIED | Additive, unversioned, documented; ledger entry 21 records the consequence. |
-| `web/src/api.ts` | `arch` required on the record; `warnings` required on the assets response | ✓ VERIFIED | `arch: z.string()` (`:202`), `warnings: z.array(schematicWarningSchema)` on both the 201 body (`:218`) and the assets response (`:245`). |
-| `web/src/routes/images.tsx` | Panel-owned arch, detail error branch, `ReferenceValue`, badge copy, control-char/surrogate refusal | ✓ VERIFIED | All present; 1 300+ lines; 36 tests in `images.test.tsx`, all passing. |
-| `web/src/components/SchematicWarnings.tsx` | `predictWarnings` = the server's predicate | ✓ VERIFIED | WR-03 fix: the blank-row filter moved to `LiveSchematicWarnings`; the Go drift guard still passes. |
-| `.planning/WINDOWS.md` | Entries for what this round could not close | ✓ VERIFIED | 21 entries, 19 open. Entry 20 (cold-path composition), entry 21 (unqualifiable legacy records) were added by this round. |
+|---|---|---|---|
+| `internal/imagefactory/client.go` | three budgets, the classes, the no-deadline refusal | ✓ VERIFIED | :36, :62, :78, :228-262. Each constant carries the rule that produced it. |
+| `internal/imagefactory/probe.go` | version- and arch-scoped probe, fail-safe tri-state | ✓ VERIFIED | :23 signature takes `talosVersion`; :71 writes `<id> at <version>/<arch>`; :65-77 tri-state intact. |
+| `internal/imagefactory/installer.go` | concurrent fan-out deciding in declared order | ✓ VERIFIED | :613-707. Race-clean, ordering-correct. |
+| `internal/httpapi/handlers/schematics.go` | route deadlines and the conflict refresh | ⚠️ HOLLOW | :366 and :720 wire the deadlines correctly; :513-587 refreshes a record on a guard set that is one condition short. Present, substantive, wired — and writes a claim the data does not support. |
+| `internal/httpapi/handlers/budget_drift_test.go` | Go-reads-TypeScript wait guard | ✓ VERIFIED | :41 `uiPath`, anchored constant regex, both waits compared to the Go constants. |
+| `cmd/holzkube-managerd/budget_test.go` | composition guard over the route table | ✓ VERIFIED | Sums by class from the real constants; :377 pins `writeTimeout`. |
+| `cmd/holzkube-managerd/main.go` | `writeTimeout` covering the largest route budget | ✓ VERIFIED | :64 = 130s. |
+| `web/src/api.ts` | a ceiling on every request | ✓ VERIFIED | :475, :509, :530. |
+| `web/src/routes/images.tsx` | recovery copy and post-failure refetch | ✓ VERIFIED | :302-311, :932-938. |
+| `internal/model/model.go` | the narrowed statements about a second POST | ⚠️ PARTIAL | :105-115 is accurate about the *fields* and reads as reassurance about the *verdict*. It should name the version condition once it exists. |
+| `.planning/WINDOWS.md` | entries 57-65 | ✓ VERIFIED | Three representations in agreement; supersessions explicit; nothing claimed closed that is not. |
+| `02-DECISION-probe-budget.md` | ratified text unaltered, implementation record appended | ✓ VERIFIED | The append is marked as written after ratification and states the hash of the preserved prefix. Every constant in its "as shipped" table matches the code. |
+| `internal/imagefactory/canonical_live_test.go` | a guard that does not pass on nothing | ✓ VERIFIED | :667-670. |
+| `internal/imagefactory/guard_drift_test.go` | a guard anchored to what it guards | ✗ STUB (as a guard) | :49-50 is unanchored; falsified by renaming the declaration. The comparison it performs is correct; the anchoring it claims is not. |
 
-### Key Link Verification
+## 4. Key link verification
 
 | From | To | Via | Status | Details |
-|------|----|-----|--------|---------|
-| `handlers/schematics.go` | `imagefactory/installer.go` | `AssetRequest.SecureBoot` reaches the repository name | ✓ WIRED | `?secureboot=` → `AssetRequest` → `installerCandidates`/`installerRepoKey`. End-to-end proof: `TestAssetsSecureBootSuffixesTheURLs` asserts the installer, not only the ISO. |
-| `imagefactory/installer.go` | `imagefactory/probe.go` | one classifier for both | ✓ WIRED | `registryRefused` call sites: `probe.go:57`, `installer.go:498`. |
-| `handlers/schematics.go` | `imagefactory/schematicid.go` | `errors.As` on the typed refusal | ✓ WIRED | `schematics.go:667`. |
-| `web/src/routes/images.tsx` | `web/src/lib/problem.ts` | detail dialog discriminates on the problem **code** | ✓ WIRED | `images.tsx:942`, `:994` — `notfound.schematic`, never message text. |
-| `imagefactory/installer.go` | `handlers/schematics.go` | `InstallerImage` returns warnings alongside the reference | ✓ WIRED | `schematics.go:432` destructures `(installer, warnings, err)`; `:451` puts them on the response. |
-| `web/src/routes/images.tsx` | `web/src/api.ts` | the assets schema requires `warnings`; the badge reads `record.arch` | ✓ WIRED | A response without either field is a decode failure, not an empty render. |
-| `handlers/schematics.go` | `internal/model/model.go` | `createSchematic` stamps `in.Arch` beside `ProbedAt` | ✓ WIRED | `schematics.go:278`, unconditional on the probe outcome. |
+|---|---|---|---|---|
+| `cmd/holzkube-managerd/budget_test.go` | `internal/imagefactory/client.go` | imports the budget constants rather than re-declaring them | ✓ WIRED | `imagefactory.ProbeTimeout` read directly; moving one changes the verdict. |
+| `internal/httpapi/handlers/schematics.go` | `internal/imagefactory/client.go` | route deadline wraps `r.Context()` before `Author` | ✓ WIRED | :366, and `context.WithTimeout` takes the earlier of the two, so it is a ceiling and never a floor. |
+| `internal/imagefactory/installer.go` | `internal/imagefactory/client.go` | every concurrent candidate issued under `classManifest` and the caller's deadline | ✓ WIRED | `fanCtx` derived from `ctx`; `probeStatus(fanCtx, …, classManifest)`. |
+| `internal/httpapi/handlers/budget_drift_test.go` | `web/src/routes/images.tsx` | Go test reads the TypeScript literal, anchored on the declaration | ✓ WIRED | Guard passes and is anchored. |
+| `web/src/api.ts` | `cmd/holzkube-managerd/main.go` | `REQUEST_CEILING_MS` transcribes `writeTimeout` | ✗ NOT WIRED | Third transcription of the phase and the only one with no guard. Warning WR-03. |
+| `internal/httpapi/handlers/schematics.go` | `internal/store/store.go` | refresh reads for `Rev` and writes with it | ✓ WIRED | `Schematics().Get` then `Put`; CAS loss and deleted-record cases both tested. |
+| `web/src/routes/images.tsx` | `internal/httpapi/handlers/schematics.go` | the operator reads the server's own conflict detail | ✓ WIRED | `create.error` surfaces `detail` verbatim, which is how my reproduction read the refresh sentence off the wire. |
+| `internal/imagefactory/guard_drift_test.go` | `web/src/routes/images.tsx` | Go test reads `REFUSED_RANGES` | ✗ NOT WIRED | It reads the *file*, not the declaration. Measured. |
 
-### Data-Flow Trace (Level 4)
-
-| Artifact | Data variable | Source | Produces real data | Status |
-|----------|---------------|--------|--------------------|--------|
-| `images.tsx` asset panel | `assets.data` | `api.schematics.assets` → `GET /api/v1/schematics/{id}/assets` → `imagefactory` URL derivations + live registry resolution | Yes | ✓ FLOWING |
-| `images.tsx` asset panel | `assets.data.warnings` | `InstallerImage`'s second return, `nil`-normalised server-side | Yes | ✓ FLOWING |
-| `images.tsx` saved list / detail | `record.arch` | `store.Schematics()` record, stamped at create | Yes | ✓ FLOWING |
-| `images.tsx` detail dialog | `record.error` | `ProblemError` from the real fetch | Yes | ✓ FLOWING |
-| `images.tsx` create form | `catalog.data.extensions` | version-scoped Factory catalog; no fallback path | Yes | ✓ FLOWING |
-
-No static returns, hardcoded literals or mock-terminated chains found in the rendered values of
-this round.
-
-### Behavioural Spot-Checks
+## 5. Behavioural spot-checks
 
 | Behaviour | Command | Result | Status |
-|-----------|---------|--------|--------|
-| Whole tree compiles | `go build ./...` | exit 0 | ✓ PASS |
-| Go suite | `go test ./... -count=1` | 18 packages ok, 0 failures | ✓ PASS |
-| The five state-transition/concurrency invariants of this round | `go test ./internal/imagefactory -race -count=3 -run 'NeverRevertsAProven\|DoesNotReStamp\|ReQuestions\|Promotes\|Retains\|CachesSecureBoot\|RefusesRatherThanSubstituting'` | all PASS, 3/3 iterations, no race | ✓ PASS |
-| Live Factory drift + SecureBoot split + name matrix | `HOLZKUBE_FACTORY_LIVE=1 go test ./internal/imagefactory -run TestLiveFactory` | PASS 32.1 s, 7/7 subtests | ✓ PASS |
-| Web suite | `npm --prefix web run test -- --run` | 108 passed, 7 files | ✓ PASS |
-| `--dry-run` reaches the binary | `go run ./cmd/holzkubed --help` | flag documented with its env var | ✓ PASS |
-| Go lint | `golangci-lint run ./...` | **0 issues** | ✓ PASS |
-| Web lint | `npm --prefix web run lint` | 47 files checked, clean | ✓ PASS |
-| Typecheck | `tsc -p web/tsconfig.json --noEmit` | exit 0 | ✓ PASS |
-| Route contract unchanged | `go test ./internal/httpapi/handlers -run TestSchematicRoutesAreTheSevenContracted` | ok | ✓ PASS |
-| Budget composition | `go test ./cmd/holzkubed -run Budget` | both tests pass with no budget raised | ✓ PASS |
+|---|---|---|---|
+| Cross-version conflict refresh (CR-01) | temporary test in `handlers_test` + widened fake catalog gate | record became `talos_version: v1.12.0, usable: true, probe_reason: ""` (rev 1→2); 409 detail read "this schematic builds, so the stored verdict was refreshed" | ✗ FAIL — defect reproduced |
+| Refusal-set guard anchoring (WR-04) | rename `REFUSED_RANGES` → `RENAMED_BY_VERIFIER`, `go test -run TestBrowserRefusalSetEqualsTheServers` | `ok … 0.546s` | ✗ FAIL — guard green against a declaration that does not exist |
+| The eight conflict-refresh cases | `go test ./internal/httpapi/handlers/ -run TestConflict -v` | 8/8 PASS, 11.755s | ✓ PASS |
+| Composition guard | `go test ./cmd/holzkube-managerd/ -run TestRouteBudget -v` | 2/2 PASS | ✓ PASS |
+| Probe-budget separation | `go test ./internal/httpapi/handlers/ -run 'TestBudgetWaits…\|TestProbeBudget' -v` | 4/4 PASS | ✓ PASS |
+| Concurrent installer resolution | `go test ./internal/imagefactory/ -run 'TestResolveInstaller\|Concurrent' -v` | PASS incl. both subtests | ✓ PASS |
+| Test existence: a cross-version conflict test | `go test ./internal/httpapi/handlers/ -list '.*' \| grep -i version` | no match; `createBody` hardcodes `catalogVersion` | ✗ FAIL — no such test exists |
+| Ledger self-consistency | independent parse of frontmatter, table and JSON | 52/0/13/65 in all three, 0 mismatches | ✓ PASS |
+| Whole Go suite / web suite | given at HEAD | `go test ./... -count=1 -race` exit 0 (19 packages); `npm --prefix web run test` exit 0, 9 files / 137 tests | ✓ PASS — not contradicted by anything measured here |
 
-Note on `golangci-lint`: `.planning/WINDOWS.md` entries 6 and 19 record earlier runs that could
-not execute it. It ran clean here with `~/go/bin` on PATH; both entries are already marked fixed.
+## 6. Requirements coverage
 
-### Probe Execution
+| Requirement | Source plans | Status | Evidence |
+|---|---|---|---|
+| FOUND-12 | 02-07 | ✓ SATISFIED | `internal/talos/dryrun.go` + six tests; `main.go:171` composition root; banner in the UI. |
+| TRANS-01 | 02-01 | ✓ SATISFIED | Real machinery client over the `Dialer` seam with real mTLS; tracer test. |
+| TRANS-02 | 02-01 | ✓ SATISFIED | `Dialer` and `DiscoverySource` each with a second implementation (`dial_direct.go`, `discovery_manual.go`, `talossim/dialer.go`, `talossim/discovery.go`). |
+| TRANS-03 | 02-05 | ✓ SATISFIED | Distinct types; `TestMaintenanceClientRejectsClusterOnlyCall`, `TestMaintenanceClientMethodSetIsClosed`, `clusteronly_fixture.go`. |
+| TRANS-04 | 02-05 | ✓ SATISFIED | `TestRequireDeadline`, `TestWithClassDeadlineRefusesAnUnclassifiedMethod`, `TestRetryAllowlistIsExactlyTheFastReadClass`. |
+| TRANS-05 | 02-05 | ⚠️ PARTIAL | Transport half proven; UI half has no caller — Phase 3. |
+| TRANS-06 🚫 | 02-01, 02-08 | ✓ SATISFIED | `internal/talossim` with in-memory COSI, the three streams and a method-drift guard. |
+| TRANS-07 | 02-03 | ✓ SATISFIED | Nine scenarios declared and contract-tested. |
+| TRANS-08 | — | ⏭ DEFERRED | Phase 3 (REQUIREMENTS.md:226, ROADMAP.md:181). |
+| FACT-01 | 02-02, 02-06 | ✓ SATISFIED | Version-scoped catalog, no free-text field. |
+| FACT-02 | 02-02, 02-22, 02-24 | ✗ BLOCKED | Pre-POST validation holds. "gilt erst als brauchbar, nachdem ein Model-Build-Probe es bestätigt hat" does not: gap G4-1 produces `usable: true` for a version no probe confirmed. |
+| FACT-03 | 02-04, 02-09, 02-23 | ✓ SATISFIED | Exact ISO/installer/PXE URLs, version-resolved repo name, architecture a parameter. |
+| FACT-04 | 02-04, 02-06 | ✓ SATISFIED | The installer/initramfs warning is emitted, mirrored in `api.ts` and contracted. |
+| FACT-05 | 02-04 | ✓ SATISFIED | Prerelease filtered structurally; broken versions curated. |
+| FACT-06 | 02-02, 02-14, 02-24 | ✓ SATISFIED | Id precomputed locally and persisted; `Canonical()` measured against the live Factory by an external oracle. |
 
-No `scripts/*/tests/probe-*.sh` exist in this repository and no plan declares one. This project's
-equivalent is the opt-in live drift guard, which was executed above rather than quoted.
+**Orphaned requirements:** none. All fourteen IDs the phase declares appear in at least one plan's `requirements` frontmatter, and REQUIREMENTS.md maps no additional ID to Phase 2.
 
-### Requirements Coverage
-
-Every ID in the ROADMAP's Phase 2 requirement list, cross-referenced against
-`.planning/REQUIREMENTS.md` and against the plans that claim it.
-
-| Requirement | Claimed by | Description | Status | Evidence |
-|-------------|-----------|-------------|--------|----------|
-| FOUND-12 | 02-07 | `--dry-run` for the whole binary; no mutation reaches a node | ✓ SATISFIED | `TestDryRunRefusesEveryMutationAtTheNode` (21 RPCs, sim counter 0); flag present in `--help`. Caveat on the record: the transport has no production caller yet, so the gate currently gates nothing (02-UAT.md, "Notes recorded, not gaps"). |
-| TRANS-01 | 02-01, 02-05 | gRPC/mTLS directly to node IPs | ✓ SATISFIED | `TestTracerRealClientReachesFakeNode`. Product-facing half is Phase 3's. |
-| TRANS-02 | 02-01 | `Dialer` + `DiscoverySource` seam | ✓ SATISFIED | `talos.go` interfaces; two implementations each; `TestSimulatorIsNotInTheProduct`. |
-| TRANS-03 | 02-05 | Cluster vs maintenance clients are distinct types | ✓ SATISFIED | `TestMaintenanceClientRejectsClusterOnlyCall` — a real compile failure with a negative control. |
-| TRANS-04 | 02-05 | Forced deadline; retries only for a read allowlist | ✓ SATISFIED | `TestRequireDeadline`, `TestRetryAllowlistIsExactlyTheFastReadClass`. |
-| TRANS-05 | 02-05 | An unreachable node blocks neither the UI nor other nodes | ⚠️ PARTIAL | Transport half proven (`TestFanOutOneSilentNodeCostsOneNode`). UI half has no code path — deferred to Phase 3. REQUIREMENTS.md marks it `Complete`, which is ahead of observable behaviour. |
-| TRANS-06 🚫 | 02-01, 02-03, 02-08 | `talossim` with real protobufs, mTLS, in-memory COSI | ✓ SATISFIED | Tracer test plus `coverage_test.go`'s AST-driven method-drift guard. Release blocker discharged. |
-| TRANS-07 | 02-03 | Nine scriptable failure scenarios | ✓ SATISFIED | `TestScenarioContract` (9 subtests), `TestRegistryCoversTRANS07`. |
-| TRANS-08 | — | Contract tests against fake **and** real Talos | ➖ NOT THIS PHASE | REQUIREMENTS.md maps it to Phase 3 (Pending). Not orphaned — deliberately relocated, with the reason in the ROADMAP Note. |
-| FACT-01 | 02-02, 02-06, 02-11 | Version-scoped catalog, no free-text field | ✓ SATISFIED | Checkbox `<fieldset>` over the fetched catalog; web test "offers extensions only from the catalog and has no field to type one into". |
-| FACT-02 | 02-02, 02-06, 02-09, 02-10, 02-13 | Names validated before the POST; usable only after the probe | ✓ SATISFIED | `ValidateExtensions` before the POST; `Usable` written only from `ProbeBuildable`; live "creation is still not validation" passes. Reachability of a *green* verdict for a novel tuple is G-02-1 (deferred). |
-| FACT-03 | 02-04, 02-06, 02-09, 02-10, 02-12, 02-13 | Exact ISO/installer/PXE URLs, version-resolved repo name, no hardcoded arch | ✓ SATISFIED | Live URL derivations verified at `575da7a` and the installer half re-proven live here, now SecureBoot-correct. `?arch=` stays required and undefaulted. |
-| FACT-04 | 02-04, 02-06, 02-12 | Kernel-args/META warning about `installer`/`initramfs` | ✓ SATISFIED | `Warnings()` plus the live-typing web tests; drift guard pins the three sentences. |
-| FACT-05 | 02-04, 02-06 | Prereleases filtered and opt-in; broken versions greyed out | ✓ SATISFIED | Both web tests pass. `brokenVersions` is deliberately empty and documented as a finding; the greyed-out rendering has never run against a non-empty real list (recorded in 02-UAT.md). |
-| FACT-06 | 02-02, 02-04, 02-11 | Schematic id precomputed locally and persisted | ✓ SATISFIED | Live "the recorded payload still produces the recorded id" passed in this session — the strongest available form of this claim. WR-04 was fixed client-side precisely so the serialiser's refused set stayed put. |
-
-**Orphaned requirements: none.** All 14 IDs the ROADMAP assigns to Phase 2 are claimed by at least
-one plan and accounted for above. The only Phase-2-adjacent ID not covered here is TRANS-08, which
-`REQUIREMENTS.md` assigns to Phase 3.
-
-### Anti-Patterns Found
-
-Scanned the 22 non-planning files changed by `c1c65a2..HEAD`.
+## 7. Anti-patterns
 
 | File | Line | Pattern | Severity | Impact |
-|------|------|---------|----------|--------|
-| `web/src/routes/images.tsx` | 81 | `XXX` | ℹ️ Info | Not a debt marker: the literal `\udXXX` in a comment explaining the surrogate mechanism. |
-| `web/src/routes/images.test.tsx` | 551 | `XXX` | ℹ️ Info | Same, in the test's comment. |
-| `.planning/ROADMAP.md` | 123 | Stale checkbox | ⚠️ Warning | `02-13-PLAN.md` is still `- [ ]` and the phase header still reads "12/13 plans executed", while `02-13-SUMMARY.md` exists, four commits landed (`f4d172b`…`0872da9`) and `STATE.md` records `stopped_at: Completed 02-13-PLAN.md` with 18/19 plans. Bookkeeping only — no code consequence — but the roadmap now understates what shipped. |
+|---|---|---|---|---|
+| — | — | `TBD` / `FIXME` / `XXX` | — | **None** in any file this round modified. |
+| — | — | `TODO` / `HACK` / `PLACEHOLDER` | — | **None** in any file this round modified. |
+| `internal/httpapi/handlers/schematics.go` | 513-587 | a guard set that is one condition short of the claim it writes | 🛑 Blocker | Gap G4-1. |
+| `internal/imagefactory/guard_drift_test.go` | 49-50 | a drift guard not anchored to its subject | ⚠️ Warning | Gap G4-2. |
+| `internal/httpapi/handlers/schematics.go` | 942-944 | `strconv.ParseBool` error discarded — `secureboot=yes` served as an ordinary request | ⚠️ Warning | 02-REVIEW WR-01. The one route whose own comments (`:691-695`, `docs/api-contract.md:735-741`) call a SecureBoot substitution undetectable forever; `arch`, `version` and `platform` all 400 on a value they do not understand. Not filed in WINDOWS. |
+| `internal/imagefactory/installer.go` | 420-431 | the `ErrSchematicNotBuildable` branch mints a **proven** entry from a negative observation, with the warning cleared and no expiry | ⚠️ Warning | 02-REVIEW WR-02. Pre-existing (plan 02-12), made more reachable by 02-23's concurrency. WINDOWS entry 22 records the single-flight half; the negative-observation half is not in the ledger. |
+| `web/src/api.ts` | 453-475 | `REQUEST_CEILING_MS` transcribes `writeTimeout` with no guard, while its two siblings have one | ⚠️ Warning | 02-REVIEW WR-03, and worse than reported: `api.test.ts:98` asserts `> 130_000`, a *second* hand-transcription, so raising `writeTimeout` to 160s leaves both green. |
+| `cmd/holzkube-managerd/main.go` | 288-306 | `allowedHosts`'s DNS-rebinding rationale is attached to `ssoOnly` | ⚠️ Warning | 02-REVIEW WR-05. Security-relevant justification on the wrong symbol; `allowedHosts` left undocumented. Introduced by the out-of-phase SSO work, not by 02-22/23/24. |
+| `web/src/lib/problem.ts` | 89-109 | a list that calls itself "the full closed taxonomy" and omits the `upstream.` family | ℹ️ Info | 02-REVIEW IN-01. Behaviour correct; the claim is not. |
+| `web/src/api.ts` | 512-517 | any `AbortError` reported as the 150-second ceiling firing | ℹ️ Info | 02-REVIEW IN-02. |
+| `web/src/test/problem-fixtures.ts` | 15 | a second unguarded transcription of `ProblemBaseURI`, producing no red test when stale | ℹ️ Info | 02-REVIEW IN-03; WINDOWS entry 46 records the sibling and not this file. |
+| `web/src/routes/images.tsx` / `schematics.go` | 379-393, 795-799 | a whitespace-only schematic name passes both guards | ℹ️ Info | 02-REVIEW IN-04. |
+| `internal/httpapi/handlers/schematics.go` | 713-719 | a budget comment still describing the serial candidate walk in the present tense, contradicting `AssetsRouteBudget`'s own comment one screen above | ℹ️ Info | 02-REVIEW IN-05. Exactly the "fact with an expiry date that nothing in the build checks" this file deleted its digest literals over. |
 
-No `TBD`, `FIXME`, `TODO`, `HACK`, `PLACEHOLDER`, "not yet implemented" or "coming soon" markers
-in any file this round touched. No empty-implementation or hollow-prop patterns found: every
-rendered value traces to a real query (see the Level 4 trace).
+**Test quality audit.** No skipped or disabled test is the sole evidence for any requirement: `grep -rn "t.Skip\|it.skip\|describe.skip\|test.todo"` over the phase's suites finds only the opt-in live guards (`live_test.go`, `canonical_live_test.go`), each recorded in WINDOWS (entries 5/64 and 35). Expected-value provenance for the FACT-06 differential is **external and only external** — `canonical_live_test.go` compares against `Created.Canonical` and `Created.ID` from factory.talos.dev, and the file says why a second local YAML library would not do. Assertion strength is value- or behaviour-level throughout the round-4 tests (whole-record marshalling, `rev` arithmetic, elapsed-time bounds, race-detected ordering). One coverage hole, and it is the gap: the conflict-refresh table has seven cases and no eighth for the version.
 
-### Human Verification Required
+## 8. Decision coverage
 
-Six items, in `human_verification` above. Three are the deferred `<human-check>` blocks the
-planner moved out of the executor's hands (02-09 task 3, 02-12 task 3, 02-13 task 2); one is the
-merge-time acceptance 02-09-SUMMARY.md:279 hands to a human; one is the ledger policy call; one is
-that **the /images route has never been opened outside jsdom since the gap-closure round**.
+`02-CONTEXT.md` declares D-01 … D-10. Nine are named in at least one SUMMARY. **D-07** (`talossim` lives in `internal/talossim`, module boundary extended) is named in no SUMMARY but is honoured in code and enforced: `internal/depguard_test.go:30` declares `simulatorPackage = rootModule + "/internal/talossim"` and `:102` pins it in the boundary table. Non-blocking; recorded for drift-spotting only.
 
-That last one deserves its weight. The previous UAT drove a real browser against the live Factory
-and found seven defects in a phase whose suites were entirely green — because the suites use
-zero-latency fakes and the failures were latency- and layout-shaped. Every fix in this round has a
-test that fails against the pre-fix code, which is much stronger than the round that preceded it,
-but the same structural blind spot is still there.
+## 9. Human verification required
 
-### Gaps Summary
+### 1. Drive the assembled binary through a browser against the live Image Factory
 
-**No gaps.** Every truth from every gap-closure plan is verified in the code, and the four ROADMAP
-criteria that passed at `575da7a` still pass. This report is `human_needed` rather than `passed`
-for three reasons, none of which is a defect in the delivered work:
+**Test:** 02-UAT.md test 5, sub-checks (a)-(d).
+**Expected:** the route behaves as the suites predict, with real latency and a real bundle.
+**Why human:** 02-UAT.md test 5 still carries `result: issue`. The browser project opens ImagesView in Chromium but its own doc comment says no binary runs and no bundle is served.
 
-1. **SC 3's UI clause remains behaviour-unverified.** Unchanged and unchangeable inside this phase:
-   there is still no production caller of the transport seam. Deferred to Phase 3.
-2. **Six human items are outstanding**, of which three are `<human-check>` blocks the plans
-   deliberately deferred to end-of-phase, and one is a merge-time acceptance of a new 502 path.
-3. **Cluster A is deliberately open.** G-02-1, G-02-2 and G-02-9 belong to
-   `02-DECISION-probe-budget.md`, which is still open. This round was forbidden from touching any
-   budget and did not: `DefaultTimeout` and `writeTimeout` are byte-identical to their pre-round
-   values, no probe state was added, and no re-probe route was slipped in. The cost is declared in
-   two places rather than hidden — `budget_test.go`'s `knownOverBudget` rows and `.planning/WINDOWS.md`
-   entry 20.
+### 2. Confirm the CI browser-install step runs on ubuntu-latest
 
-Two things worth carrying forward, neither counted against the phase:
+**Test:** a CI run reaching `.github/workflows/ci.yml:71`.
+**Expected:** `playwright install --with-deps chromium` succeeds and the browser project runs.
+**Why human:** WINDOWS entry 44 is still open. Fails closed, so the risk is a red run, not a silent pass.
 
-- **`REQUIREMENTS.md` is ahead of observable behaviour for TRANS-01 and TRANS-05**, both marked
-  `Complete` while their product-facing half belongs to Phase 3. Same finding as the previous
-  report; the table has not moved.
-- **Seven review findings from the gap-closure round are unfixed and off the ledger** — WR-02,
-  WR-06 and IN-01…IN-05 of `02-REVIEW.md`, left alone by explicit user scope choice. Leaving them
-  unfixed is a decision; where they are recorded is not one yet. The identical situation for
-  round 1 was resolved by entering eleven findings as ledger ids 8-18, and the ship gate cannot see
-  what is not on the ledger.
+### 3. Re-measure a cold installer resolution against factory.talos.dev
 
-What actually improved between `575da7a` and `ad786b5`: an operator asking for a SecureBoot ISO
-used to be handed the ordinary installer — proven live here to be a genuinely different image —
-and now is not. A registry rate-limit used to become a permanent accusation against a schematic,
-and now does not. A value holzkube itself refused used to be blamed on the Image Factory with an
-invitation to retry, and now names the field. A deleted schematic used to open a dialog whose
-entire text was "Close". Reading one schematic's arm64 URLs used to silently change what every
-future schematic was probed against, forever. And a proven installer repository could, until
-`49be02f`, be reverted to an unproven one by a slower goroutine — a defect nothing in the phase
-would have surfaced, found by review and now pinned by a test that forces the interleaving rather
-than hoping for it.
+**Test:** one cold assets request against the live Factory after 02-23's fan-out.
+**Expected:** the cold cost is the slowest single candidate, not the sum.
+**Why human:** 02-24-SUMMARY.md:232 states plainly that the improvement is measured offline and unmeasured live. Believed, not doubted — but it is the phase's own standard that a live number must be a live number.
+
+### 4. Decide where 02-REVIEW.md's eleven non-gap findings live
+
+**Test:** triage WR-01, WR-02, WR-03, WR-05 and IN-01..IN-05 into fixed / filed / declined.
+**Expected:** each is in `.planning/WINDOWS.md` or explicitly declined.
+**Why human:** a policy call. None of the eleven appears in any representation of the ledger, and `workflow.windows_enforce` reads that ledger at ship time.
+
+## 10. Gaps summary
+
+**Round 4 delivered what it was asked to deliver, and broke one thing doing it.**
+
+The ratified decision was implemented faithfully. Every constant in `02-DECISION-probe-budget.md`'s
+"constants as shipped" table matches the code exactly; the composition guard sums by class from the
+constants that run rather than multiplying one by a call count; the fan-out is genuinely
+concurrent, genuinely order-preserving and race-clean; the browser has a ceiling; and G-02-9 is
+recorded as open in the plan frontmatter, the ledger, the decision document and the SUMMARY, in
+four consistent voices with no artifact dissenting. Two of round 3's three record-integrity gaps
+are closed on evidence measured here.
+
+The two gaps are both of the same species, which is why this phase keeps finding them: **a claim
+that is wider than the measurement behind it.**
+
+**G4-1** is the serious one, and it is a regression the round introduced. The 409 refresh — built
+to stop discarding a verdict — writes a verdict across Talos versions, because the identity of a
+schematic record cannot vary by version any more than it can by architecture, and only the
+architecture was guarded. I reproduced it rather than reasoning about it, and it is worse than the
+code review described: the refresh does not merely add a wrong `usable: true`, it *erases* the
+correct refusal sentence that was the only evidence of the disagreement. An operator sees
+"Usable — the build probe confirmed it" for a version at which the Factory answered HTTP 400
+seconds earlier. Two POSTs through the supported UI produce it. The fix is fifteen lines beside a
+guard that already exists and already argues the case for itself; the test is a copy of
+`TestConflictAtAnotherArchitectureDeclinesTheRefresh` plus one line in the fake.
+
+**G4-2** is smaller and older. Round 3's truth was "a guard reports a pass only when it measured the
+property it is named for", and the file it named was fixed — but the sibling guard from that same
+round scans `images.tsx` for `{from: 0x.., to: 0x..}` with no anchor to `REFUSED_RANGES`, so it
+passes green against a declaration that has been renamed away. Its own `t.Fatalf` comment states
+the property it does not have. Nothing is masked today; this is about what the guard will notice
+tomorrow, which is the same standing round 3 gave the canonical half and the same fix shape:
+anchor on the declaration, the way `budget_drift_test.go` already does three files away.
+
+Neither gap touches the transport seam, `talossim`, the nine scenarios, `--dry-run` or the URL
+derivation. Success criteria 1, 2 and 5 hold; 3 holds on its transport half with its UI half
+correctly deferred to Phase 3; 4 holds on every conjunct but the one G4-1 breaks.
 
 ---
 
-_Verified: 2026-08-29T21:35:00Z_
-_Verifier: Claude (gsd-verifier)_
+_Verified: 2026-09-04T04:23:14Z at `b6e954b`_
+_Verifier: Claude (gsd-verifier) — round 4_
