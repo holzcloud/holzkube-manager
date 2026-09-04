@@ -65,6 +65,24 @@ const refusedRangesName = "REFUSED_RANGES"
 // somewhere in the file cannot satisfy this"; the same sentence is true of an
 // object literal, which is the gap this closes.
 //
+// The identifier ends where the pattern says it ends. What follows the name is
+// whitespace, then EITHER a type annotation that has to begin with a colon OR
+// the assignment straight away -- the required `:` or `=` IS the word boundary,
+// because `_` is neither. This is the correction round 5 measured: the fragment
+// that used to sit here allowed any run of characters without an `=`, so every
+// prefix extension of the identifier satisfied the anchor. Measured then:
+// `REFUSED_RANGES_LEGACY` -> `ranges=[{0 0}] err=<nil>` and `REFUSED_RANGESX`
+// -> `ranges=[{0 1}] err=<nil>`, both with no error at all. The damage that
+// buys is quiet: REFUSED_RANGES moves into another module, a prefixed leftover
+// stays behind in images.tsx, and this guard reports agreement over a set the
+// form no longer uses.
+//
+// The annotation is optional and colon-bound rather than free-form because
+// stringArrayLiteral chose assignment anchoring for exactly one reason -- the
+// annotation `readonly RefusedRange[]` carries a bracket pair of its own -- and
+// in TypeScript such an annotation always begins with a colon. Requiring the
+// colon keeps that case and drops every other continuation of the name.
+//
 // The body is captured non-greedily up to the first closing bracket. An entry
 // carrying a bracket inside a string would cut it short -- which is not silent,
 // because the count check below compares the entries found in the body against
@@ -82,7 +100,7 @@ var refusedRangesEntry = regexp.MustCompile(`\{[^{}]*\}`)
 
 var refusedRangesDecl = regexp.MustCompile(
 	`(?ms)^\s*(?:export\s+)?const\s+` + regexp.QuoteMeta(refusedRangesName) +
-		`\s*[^=\n]*=\s*\[(.*?)\]`)
+		`\s*(?::[^=\n]*)?=\s*\[(.*?)\]`)
 
 // TestBrowserRefusalSetEqualsTheServers is G-02-11's drift guard.
 //
@@ -239,7 +257,10 @@ func parseBrowserRefusalRanges(source string) ([]declaredRange, error) {
 			"comparisons inside an if is unreadable from here, and while it was one, the "+
 			"two sets drifted (G-02-11). Renamed, moved or deleted is the same as never "+
 			"having been there, and entry-shaped literals surviving elsewhere in the file "+
-			"do not make it better", refusedRangesName)
+			"do not make it better. A name that merely carries %s as a prefix -- "+
+			"%s_LEGACY, %sX -- is a different name and does not satisfy this guard "+
+			"either; that leftover is what stays behind when the real table moves away",
+			refusedRangesName, refusedRangesName, refusedRangesName, refusedRangesName)
 	}
 	body := decl[1]
 
