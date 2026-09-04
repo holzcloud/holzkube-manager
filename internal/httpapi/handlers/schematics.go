@@ -555,6 +555,32 @@ func refreshTheStoredVerdict(ctx context.Context, d httpapi.Deps, fresh model.Sc
 		return " The stored verdict was not refreshed, because " + archMismatchReason(stored.Arch, fresh.Arch) + "."
 	}
 
+	// The third condition: the stored record's Talos version is the one the
+	// fresh probe asked about.
+	//
+	// The verdict is version-scoped on exactly the evidence the architecture
+	// condition above cites for itself. ProbeBuildable asks one version's ISO
+	// URL, the extension catalog is version-scoped, and ProbeReason names
+	// `<version>/<arch>` in a single sentence -- the same proof, about the
+	// other half of the same sentence.
+	//
+	// And this record's identity cannot vary by version either: Canonical()
+	// emits owner, overlay and customization and no version, so two attempts
+	// differing only in talos_version are one record. A v1.13.9 verdict written
+	// onto a v1.12.0 record would therefore be unrecognisable afterwards, there
+	// being no second record to disagree with it (T-02-114) -- and the same
+	// write erases the ProbeReason that was the only place the disagreement was
+	// visible (T-02-115).
+	//
+	// Unlike Arch there is no empty-value case to exempt. TalosVersion has been
+	// required since the first schematic record, so an empty stored version is
+	// not a record written before the field existed, it is a record whose
+	// version is not known; the inequality declines it, which is correct.
+	if stored.TalosVersion != fresh.TalosVersion {
+		return " The stored verdict was not refreshed, because " +
+			versionMismatchReason(stored.TalosVersion, fresh.TalosVersion) + "."
+	}
+
 	stored.Usable = fresh.Usable
 	stored.ProbedAt = fresh.ProbedAt
 	stored.ProbeReason = fresh.ProbeReason
@@ -596,6 +622,15 @@ func archMismatchReason(stored, asked string) string {
 	}
 	return "this record holds the verdict for " + stored + " and this submission asked about " +
 		asked + ", and one stored customisation holds exactly one architecture's verdict"
+}
+
+// versionMismatchReason names both Talos versions, so an operator who meets the
+// declined refresh can tell it from the other two declining conditions -- this
+// one names versions where archMismatchReason names architectures.
+func versionMismatchReason(stored, asked string) string {
+	return "this record holds the verdict for Talos " + stored + " and this submission asked " +
+		"about Talos " + asked + ", and one stored customisation holds exactly one version's " +
+		"verdict"
 }
 
 func listSchematics(d httpapi.Deps) http.HandlerFunc {
