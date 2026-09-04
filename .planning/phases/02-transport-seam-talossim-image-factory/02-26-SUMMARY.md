@@ -56,7 +56,7 @@ requirements-completed: [FACT-01, FACT-06]
 # Coverage metadata (#1602)
 coverage:
   - id: D1
-    description: "Der Waechter liest die Browser-Ablehnungsmenge ausschliesslich aus der `REFUSED_RANGES`-Deklaration und scheitert, wenn sie fehlt, umbenannt oder verschoben ist"
+    description: "Der Waechter liest die Browser-Ablehnungsmenge ausschliesslich aus der `REFUSED_RANGES`-Deklaration und scheitert, wenn sie fehlt oder unter einem Namen steht, der `REFUSED_RANGES` nicht als Praefix traegt"
     requirement: "FACT-06"
     verification:
       - kind: unit
@@ -69,6 +69,26 @@ coverage:
         ref: "Lebendbeleg: REFUSED_RANGES im echten Baum umbenannt, TestBrowserRefusalSetEqualsTheServers gefahren, FAIL beobachtet, Datei byteweise wiederhergestellt (sha256 identisch, git diff leer)"
         status: pass
     human_judgment: false
+    correction: |
+      CORRECTION (Verifikation Runde 5 + Plan 02-28, 2026-09-04).
+      Der urspruengliche Wortlaut dieser description war woertlich: "Der Waechter liest die
+      Browser-Ablehnungsmenge ausschliesslich aus der `REFUSED_RANGES`-Deklaration und
+      scheitert, wenn sie fehlt, umbenannt oder verschoben ist". Er ist breiter als seine
+      Messung und fuer eine praefixierende Umbenennung gemessen falsch: `02-VERIFICATION.md`
+      `gaps[0]` hat am echten Baum `REFUSED_RANGES_LEGACY` -> `ranges=[{0 0}] err=<nil>`
+      gemessen, `REFUSED_RANGESX` -> `ranges=[{0 1}] err=<nil>`, und
+      `TestBrowserRefusalSetEqualsTheServers` blieb dabei gruen. Der alte Wortlaut steht hier
+      woertlich, statt geloescht zu werden, weil eine Korrektur etwas braucht, worauf sie
+      zeigen kann -- die Form aus `02-21-SUMMARY.md:345-358`.
+      Die drei `verification`-Eintraege bleiben unveraendert und `human_judgment` bleibt
+      `false`: die beiden Untertests und der Lebendbeleg sind gelaufen und bestanden. Falsch
+      war nicht ihr Ergebnis, sondern die Breite der Beschreibung darueber.
+      Aufgezeichnet als `.planning/WINDOWS.md` Eintrag 70 (`unmet-truth`, `open`), der Eintrag
+      69 ueberholt, ohne ihn zu bearbeiten, und dessen pruefbare Schliessbedingung in seinem
+      Text steht. Plan 02-27 hat den Anker inzwischen auf `:` oder `=` gebunden und die
+      gelesenen Grenzen gegen `utf8.MaxRune` validiert; ob die allquantifizierte Eigenschaft
+      damit gilt, stellt eine Verifikationsrunde fest. G-02-25 ist hier nicht als geschlossen
+      gemeldet.
   - id: D2
     description: "Ein eintragsfoermiges Literal ausserhalb der Deklaration wird nicht mehr in die Menge gefaltet und faellt als Abweichung der beiden Anzahlen auf"
     requirement: "FACT-06"
@@ -313,8 +333,51 @@ None - no external service configuration required.
 
 ## Next Phase Readiness
 
-- Die Luecke **G-02-25** (== `02-VERIFICATION.md` Runde 4, `gaps[1]`, rundenlokal G4-2 == `02-REVIEW.md` WR-04) ist geschlossen. Die Wahrheit "A guard reports a pass only when it measured the property it is named for" gilt jetzt fuer beide Waechter aus jener Runde: die kanonische Haelfte unter `internal/imagefactory/canonical_live_test.go:667-670` und den Browser-Ablehnungs-Waechter hier.
-- Zusammen mit Plan 02-25 (G-02-24) sind beide Luecken aus Verifikationsrunde 4 geschlossen. Der Ledger traegt beide Runden.
+- ~~Die Luecke G-02-25 ist geschlossen.~~ **— WITHDRAWN, das war falsch.**
+
+  > **CORRECTION (Verifikation Runde 5 + Plan 02-28, 2026-09-04).** Die durchgestrichene
+  > Aussage unten ist falsch und bleibt nur stehen, damit die Korrektur etwas hat, worauf sie
+  > zeigen kann.
+  >
+  > Gemessen: `02-VERIFICATION.md` fuehrt G-02-25 unter `re_verification.gaps_remaining` als
+  > "VERENGT, NICHT GESCHLOSSEN". Die Falsifikation lief in Runde 5 am echten Baum mit
+  > `REFUSED_RANGES_LEGACY` durch und liess sowohl `TestBrowserRefusalSetEqualsTheServers` als
+  > auch `TestBrowserRefusalGuardRefusesToPassWithoutItsDeclaration` mit allen vier Untertests
+  > **gruen**; gegen die reine Funktion gemessen: `ranges=[{0 0}] err=<nil>`.
+  >
+  > Runde 6 (Plan 02-27) hat vier Korrekturen geliefert — den auf `:` oder `=` gebundenen
+  > Anker, die Bound-Validierung gegen `utf8.MaxRune` und `from <= to`, die getrennte
+  > Abschneide-Diagnose und die drei Falsifikationstabellen mit 6, 3 und 2 Zeilen. **Das
+  > meldet G-02-25 nicht als geschlossen.** Ob die allquantifizierte Eigenschaft gilt, stellt
+  > eine Verifikationsrunde fest; die pruefbare Schliessbedingung steht im Text von
+  > `.planning/WINDOWS.md` Eintrag **70** (`unmet-truth`, `open`), der Eintrag 69 ueberholt,
+  > ohne ihn zu bearbeiten.
+  >
+  > Das war der Korrektur wert und nicht Kosmetik: `workflow.windows_enforce` liest den Ledger
+  > beim Ship und blockiert, solange `open_count > 0` — ein Leser dieser SUMMARY, der dem Satz
+  > unten glaubt, haelt eine offene Luecke fuer erledigt.
+
+  ~~Die Luecke **G-02-25** (== `02-VERIFICATION.md` Runde 4, `gaps[1]`, rundenlokal G4-2 == `02-REVIEW.md` WR-04) ist geschlossen. Die Wahrheit "A guard reports a pass only when it measured the property it is named for" gilt jetzt fuer beide Waechter aus jener Runde: die kanonische Haelfte unter `internal/imagefactory/canonical_live_test.go:667-670` und den Browser-Ablehnungs-Waechter hier.~~
+- ~~Beide Luecken aus Verifikationsrunde 4 sind geschlossen.~~ **— WITHDRAWN, das war halb falsch.**
+
+  > **CORRECTION (Verifikation Runde 5 + Plan 02-28, 2026-09-04).** Welche Haelfte welche ist:
+  >
+  > **G-02-24 IST geschlossen.** Runde 5 hat es nachgemessen und nicht erschlossen: die dritte
+  > Bedingung `if stored.TalosVersion != fresh.TalosVersion` ausgebaut,
+  > `TestConflictAtAnotherTalosVersionDeclinesTheRefresh` und
+  > `TestConflictAtAnotherTalosVersionErasesNoStoredRefusal` einzeln gefahren — beide **ROT** —,
+  > die Bedingung wieder eingesetzt, alle zehn `TestConflict*` gruen, der Arbeitsbaum danach
+  > byteweise identisch mit HEAD.
+  >
+  > **G-02-25 ist es nicht.** Runde 5 fuehrt ihn unter `re_verification.gaps_remaining` als
+  > "VERENGT, NICHT GESCHLOSSEN". Der Satz unten fasst beide Luecken zu einer Aussage zusammen
+  > und wird genau dadurch fuer G-02-25 falsch, waehrend er fuer G-02-24 richtig bleibt.
+  >
+  > Aufgezeichnet als `.planning/WINDOWS.md` Eintrag **70** (`unmet-truth`, `open`). Auch nach
+  > den vier Korrekturen aus Plan 02-27 gilt: G-02-25 wird hier nicht als geschlossen gemeldet
+  > — das stellt eine Verifikationsrunde fest.
+
+  ~~Zusammen mit Plan 02-25 (G-02-24) sind beide Luecken aus Verifikationsrunde 4 geschlossen. Der Ledger traegt beide Runden.~~
 - **Offen bleibt unveraendert G-02-9** (eine Probe, die trotz erhoehtem Budget ausbleibt, ist weiterhin dauerhaft — es gibt keine Re-Probe-Route). Eintraege 58 und 66 im Ledger; die strukturelle Antwort ist Option 1 aus `02-DECISION-probe-budget.md`, die der Betreiber nicht genommen hat.
 - **Offen bleibt Eintrag 56:** die SERVER-Ablehnungsmenge hinter dem Codepoint-Sweep ist nicht erschoepfend gemessen und erbt 02-14s Extrapolation. Der Waechter beweist, dass die beiden Schichten uebereinstimmen; er kann nicht beweisen, dass die Menge richtig ist. Das bleibt eine Frage an eine Runde, die `TestLiveFactory` gegen `factory.talos.dev` fahren kann.
 - Naechste freie Threat-Id: **T-02-121**.
