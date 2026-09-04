@@ -39,7 +39,7 @@ Die Requirements folgen der Phasenstruktur aus `.planning/research/SUMMARY.md`. 
 
 ### Image Factory (FACT)
 
-- [ ] **FACT-01**: Betreiber stellt ein Schematic zusammen — System-Extensions, Kernel-Args, META — über einen versions-skopierten Extension-Katalog, kein Freitextfeld
+- [x] **FACT-01**: Betreiber stellt ein Schematic zusammen — System-Extensions, Kernel-Args, META — über einen versions-skopierten Extension-Katalog, kein Freitextfeld
 - [ ] **FACT-02**: Extension-Namen werden **vor** dem POST validiert, und das Schematic gilt erst als brauchbar, nachdem ein Model-Build-Probe es bestätigt hat (ein POST liefert `200` auch für nicht existierende Extensions)
 - [ ] **FACT-03**: Betreiber bekommt die exakten URLs für ISO, Installer und PXE, mit korrekt aufgelöstem, versionsabhängigem Installer-Repo-Namen und ohne hartkodierte Architektur
 - [ ] **FACT-04**: Beim Autoren eines Schematics mit Kernel-Args oder META warnt die UI, dass `installer`/`initramfs` **nur** System-Extensions ehren — ISO und installiertes System driften sonst auseinander
@@ -224,7 +224,7 @@ Requirements mit **🚫** sind Release-Blocker.
 | **TRANS-06** 🚫 | Phase 2 | Complete |
 | TRANS-07 | Phase 2 | Gaps Found |
 | TRANS-08 | Phase 3 | Pending |
-| FACT-01 | Phase 2 | Gaps Found |
+| FACT-01 | Phase 2 | Complete |
 | FACT-02 | Phase 2 | Gaps Found |
 | FACT-03 | Phase 2 | Gaps Found |
 | FACT-04 | Phase 2 | Gaps Found |

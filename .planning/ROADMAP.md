@@ -78,7 +78,7 @@ Plans:
 **Parallel tracks**: 2 — (a) Transport-Naht + `pool` + `talossim`, (b) Image-Factory-Client. Track (b) hat **null** Talos-Abhängigkeit; das ist die Research-Parallelität *Phase 1 ∥ Phase 1b*, hier innerhalb einer Phase realisiert.
 **Release blockers owned**: TRANS-06 🚫
 **Note**: FOUND-12 (`--dry-run` für das ganze Binary) liegt hier statt in Phase 1, weil die Research es explizit in den Deliverables der Transport-Phase führt — ein Dry-Run ist erst sinnvoll, wenn Mutationen einen Node erreichen könnten.
-**Plans**: 28 plans (26/28 ausgeführt) in 7 waves (Wave 1: 2 parallele Tracer — Track (a) Transport-Naht, Track (b) Image Factory) + 5 Gap-Closure-Pläne der Runde 1 aus 02-UAT.md in 4 Wellen (Cluster B und C; Cluster A war auf `02-DECISION-probe-budget.md` blockiert) + 8 Gap-Closure-Pläne der Runde 2 in 6 Wellen (alle 14 Lücken G-02-10..G-02-23, voller Umfang in einer Runde) + 3 Gap-Closure-Pläne der Runde 4 in 3 Wellen (Cluster A, nachdem der Betreiber am 2026-09-03 Option 2 ratifiziert hat) + 2 Gap-Closure-Pläne der Runde 5 in 2 Wellen (G-02-24 die Regression, die Runde 4 eingeführt hat, und G-02-25 der unverankerte Drift-Wächter) + 2 Gap-Closure-Pläne der Runde 6 in 2 Wellen (G-02-25 der verbliebene Präfix-Anker und die unvalidierten Bounds; G-02-26 die `fixed`-Überbehauptung im Ledger und in `02-26-SUMMARY.md`, G-02-27 der letzte Zwei-Bedingungen-Verweis) — 26/28 ausgeführt, 02-27 und 02-28 geplant
+**Plans**: 27/28 plans executed (26/28 ausgeführt) in 7 waves (Wave 1: 2 parallele Tracer — Track (a) Transport-Naht, Track (b) Image Factory) + 5 Gap-Closure-Pläne der Runde 1 aus 02-UAT.md in 4 Wellen (Cluster B und C; Cluster A war auf `02-DECISION-probe-budget.md` blockiert) + 8 Gap-Closure-Pläne der Runde 2 in 6 Wellen (alle 14 Lücken G-02-10..G-02-23, voller Umfang in einer Runde) + 3 Gap-Closure-Pläne der Runde 4 in 3 Wellen (Cluster A, nachdem der Betreiber am 2026-09-03 Option 2 ratifiziert hat) + 2 Gap-Closure-Pläne der Runde 5 in 2 Wellen (G-02-24 die Regression, die Runde 4 eingeführt hat, und G-02-25 der unverankerte Drift-Wächter) + 2 Gap-Closure-Pläne der Runde 6 in 2 Wellen (G-02-25 der verbliebene Präfix-Anker und die unvalidierten Bounds; G-02-26 die `fixed`-Überbehauptung im Ledger und in `02-26-SUMMARY.md`, G-02-27 der letzte Zwei-Bedingungen-Verweis) — 26/28 ausgeführt, 02-27 und 02-28 geplant
 **UI hint**: yes
 
 Plans:
@@ -174,7 +174,7 @@ Plans:
 
 **Runde-6-Gap-Closure Wave 1**
 
-- [ ] 02-27-PLAN.md — G-02-25 (Verifikation Runde 5, `G5-1`, `status: partial`; weitergetragene Id, weil Runde 5 sie unter `gaps_remaining` als "VERENGT, NICHT GESCHLOSSEN" führt): der Browser-Ablehnungs-Wächter bindet an das Präfix seines Bezeichners statt an den Bezeichner — `REFUSED_RANGES_LEGACY` allein liefert `ranges=[{0 0}] err=<nil>`, und am echten Baum blieben beide Wächter-Tests grün gegen eine Deklaration, die es nicht mehr gab. Dazu unvalidierte Bounds, die zu `{-1 -1}` kollabieren und still übersprungen werden, und eine Leer-Diagnose, die über eine abgeschnittene Deklaration mit sechs Einträgen "leer" meldet. Dieser Plan bindet den Anker an `:` oder `=` hinter dem Namen, validiert gegen `utf8.MaxRune` und `from <= to`, trennt die Abschneide- von der Leer-Diagnose und kodiert jede der drei Eigenschaften als Tabellenzeile, die vorher rot war
+- [x] 02-27-PLAN.md — G-02-25 (Verifikation Runde 5, `G5-1`, `status: partial`; weitergetragene Id, weil Runde 5 sie unter `gaps_remaining` als "VERENGT, NICHT GESCHLOSSEN" führt): der Browser-Ablehnungs-Wächter bindet an das Präfix seines Bezeichners statt an den Bezeichner — `REFUSED_RANGES_LEGACY` allein liefert `ranges=[{0 0}] err=<nil>`, und am echten Baum blieben beide Wächter-Tests grün gegen eine Deklaration, die es nicht mehr gab. Dazu unvalidierte Bounds, die zu `{-1 -1}` kollabieren und still übersprungen werden, und eine Leer-Diagnose, die über eine abgeschnittene Deklaration mit sechs Einträgen "leer" meldet. Dieser Plan bindet den Anker an `:` oder `=` hinter dem Namen, validiert gegen `utf8.MaxRune` und `from <= to`, trennt die Abschneide- von der Leer-Diagnose und kodiert jede der drei Eigenschaften als Tabellenzeile, die vorher rot war
 
 **Runde-6-Gap-Closure Wave 2** *(blocked on Wave 1)*
 
@@ -427,7 +427,7 @@ Phasen laufen in numerischer Reihenfolge: 1 → 2 → 3 → 4 → 5 → 6 → 7 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Foundation Skeleton | 6/6 | Complete    | 2026-08-28 |
-| 2. Transport Seam, `talossim` & Image Factory | 26/26 | In Progress|  |
+| 2. Transport Seam, `talossim` & Image Factory | 27/28 | In Progress|  |
 | 3. Inventar, Cluster-Import & Health | 0/TBD | Not started | - |
 | 4. Walking Skeleton (Wegwerf) | 0/TBD | Not started | - |
 | 5. Streaming | 0/TBD | Not started | - |
