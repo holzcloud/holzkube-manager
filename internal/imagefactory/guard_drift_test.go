@@ -408,6 +408,20 @@ const SOME_OTHER_TABLE: readonly RefusedRange[] = [
 ]
 `
 
+	// A complete, correct declaration whose body opens with a comment carrying a
+	// closing bracket. The non-greedy body capture ends at that bracket, before
+	// the first entry: measured, the body is "\n  // see the table in
+	// RefusedRange[", so len(matches) == 0 while the source as a whole carries
+	// two. Round 5 measured the guard reporting THIS as the declaration being
+	// empty -- fail closed, but with a cause that sends the reader to the wrong
+	// place.
+	const truncated = `const REFUSED_RANGES: readonly RefusedRange[] = [
+  // see the table in RefusedRange[] above
+  { from: 0x0000, to: 0x001f, class: 'control character' },
+  { from: 0xfeff, to: 0xfeff, class: 'byte order mark' },
+]
+`
+
 	for _, tc := range []struct {
 		name       string
 		source     string
@@ -438,6 +452,11 @@ const SOME_OTHER_TABLE: readonly RefusedRange[] = [
 			name:    "the declaration renamed to a prefixed name",
 			source:  prefixed,
 			wantErr: "REFUSED_RANGES",
+		},
+		{
+			name:    "the body cut short by a bracket in a comment",
+			source:  truncated,
+			wantErr: "cut short before its first entry, but 2 entries are present in the source as a whole",
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
