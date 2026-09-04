@@ -27,11 +27,22 @@ import (
 	"github.com/holzcloud/holzkube-manager/internal/talos"
 )
 
-// catalogVersion is the one Talos version the fake Factory serves a catalog
-// for. Every other version answers 404, because that is what the real Factory
-// does: the catalog is version-scoped, and a version it does not know is not an
-// empty catalog.
+// catalogVersion is the primary Talos version the fake Factory serves a catalog
+// for. Every version other than this one and otherCatalogVersion answers 404,
+// because that is what the real Factory does: the catalog is version-scoped, and
+// a version it does not know is not an empty catalog.
 const catalogVersion = "v1.13.9"
+
+// otherCatalogVersion is the second version the fake serves the same catalog
+// for. It exists so a test can vary the Talos version across a store conflict:
+// Author fetches the version-scoped catalog before anything is POSTed, so while
+// the fake serves exactly one version, no test can reach the conflict path at a
+// second one at all. That missing line is why the cross-version refresh
+// regression shipped -- see 02-VERIFICATION.md round 4, gaps[0].
+//
+// v1.12.0 and not an arbitrary string, because the fake's /versions branch
+// already lists it.
+const otherCatalogVersion = "v1.12.0"
 
 // baseCatalog is the catalog the fake serves for catalogVersion.
 var baseCatalog = []string{
@@ -300,7 +311,10 @@ func (f *fakeFactory) serve(w http.ResponseWriter, r *http.Request) {
 
 	case r.Method == http.MethodGet && len(parts) == 4 &&
 		parts[0] == "version" && parts[2] == "extensions" && parts[3] == "official":
-		if parts[1] != catalogVersion {
+		// The fake knows two versions and every other one is still a 404: the
+		// real catalog is version-scoped, and a version it does not know is not
+		// an empty catalog.
+		if parts[1] != catalogVersion && parts[1] != otherCatalogVersion {
 			http.Error(w, "not found", http.StatusNotFound)
 			return
 		}
@@ -3112,6 +3126,41 @@ func TestConflictAtAnotherArchitectureDeclinesTheRefresh(t *testing.T) {
 		!strings.Contains(detail, string(imagefactory.ArchARM64)) {
 		t.Errorf("the 409 does not name both architectures, so the operator cannot tell why the "+
 			"verdict was left alone: %q", detail)
+	}
+}
+
+// TestConflictAtAnotherTalosVersionDeclinesTheRefresh is T-02-114, and the
+// twin of the architecture case above: the verdict is version-scoped, this
+// record's identity cannot vary by version, and a v1.12.0 verdict written onto
+// a v1.13.9 record would be undetectable afterwards.
+func TestConflictAtAnotherTalosVersionDeclinesTheRefresh(t *testing.T) {
+	s, f := conflictRefreshServer(t, &storeHook{})
+	c := operator(t, s)
+
+	created := coldCreate(t, c, f, "v1139-record", []string{"siderolabs/intel-ucode"})
+	id := mustString(t, created, "id")
+	before := storedRecord(t, c, id)
+
+	f.answerAfter("HEAD /image", 0)
+	body := createBody("other-version-attempt", []string{"siderolabs/intel-ucode"}, nil)
+	body["talos_version"] = otherCatalogVersion
+	resp, raw := c.do(http.MethodPost, "/api/v1/schematics", body)
+	if resp.StatusCode != http.StatusConflict {
+		t.Fatalf("second-version create: got %d, want 409 (body: %s)", resp.StatusCode, raw)
+	}
+
+	after := storedRecord(t, c, id)
+	if marshalRecord(t, after) != marshalRecord(t, before) {
+		t.Errorf("a %s verdict was written onto a %s record, and the record names only the "+
+			"version it was authored against, so nothing left could disagree with it:\n"+
+			" before %s\n after  %s",
+			otherCatalogVersion, catalogVersion, marshalRecord(t, before), marshalRecord(t, after))
+	}
+
+	detail := conflictDetailOf(t, raw)
+	if !strings.Contains(detail, catalogVersion) || !strings.Contains(detail, otherCatalogVersion) {
+		t.Errorf("the 409 does not name both Talos versions, so the operator can neither tell why "+
+			"the verdict was left alone nor tell this refusal from the architecture one: %q", detail)
 	}
 }
 
