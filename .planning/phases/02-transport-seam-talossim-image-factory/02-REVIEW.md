@@ -1,612 +1,468 @@
 ---
 phase: 02-transport-seam-talossim-image-factory
-reviewed: 2026-09-03T22:30:00Z
+reviewed: 2026-09-04T13:10:00Z
 depth: standard
-scope: gap-closure rounds 3-4 (diff base 575e747, plans 02-14 .. 02-24)
-files_reviewed: 42
+scope: gap-closure round 5 (Plaene 02-25 und 02-26, diff base 9eeadcd)
+files_reviewed: 5
 files_reviewed_list:
-  - .github/workflows/ci.yml
-  - .gitignore
-  - README.md
-  - Taskfile.yml
-  - cmd/holzkube-managerd/budget_test.go
-  - cmd/holzkube-managerd/main.go
   - docs/api-contract.md
-  - internal/httpapi/endtoend_test.go
-  - internal/httpapi/handlers/account_test.go
-  - internal/httpapi/handlers/budget_drift_test.go
   - internal/httpapi/handlers/schematics.go
   - internal/httpapi/handlers/schematics_test.go
-  - internal/httpapi/middleware/audit_test.go
-  - internal/httpapi/problem.go
-  - internal/httpapi/problem_test.go
-  - internal/imagefactory/canonical_live_test.go
-  - internal/imagefactory/client.go
-  - internal/imagefactory/client_test.go
-  - internal/imagefactory/fake_test.go
   - internal/imagefactory/guard_drift_test.go
-  - internal/imagefactory/installer.go
-  - internal/imagefactory/installer_export_test.go
-  - internal/imagefactory/installer_test.go
-  - internal/imagefactory/live_test.go
-  - internal/imagefactory/probe.go
-  - internal/imagefactory/schematicid.go
-  - internal/imagefactory/schematicid_test.go
-  - internal/imagefactory/tracer_test.go
-  - internal/imagefactory/warnings.go
-  - internal/imagefactory/warnings_test.go
   - internal/model/model.go
-  - web/package.json
-  - web/src/api.test.ts
-  - web/src/api.ts
-  - web/src/components/SudoDialog.test.tsx
-  - web/src/lib/problem.test.ts
-  - web/src/lib/problem.ts
-  - web/src/routes/images.browser.test.tsx
-  - web/src/routes/images.test.tsx
-  - web/src/routes/images.tsx
-  - web/src/test/problem-fixtures.ts
-  - web/vite.config.ts
 findings:
-  critical: 1
-  warning: 5
-  info: 5
-  total: 11
+  critical: 0
+  warning: 7
+  info: 7
+  total: 14
 status: issues_found
 ---
 
-# Phase 02: Code Review Report (gap-closure rounds 3-4)
+# Phase 02: Code Review Report (Runde 5, Plaene 02-25 und 02-26)
 
-**Reviewed:** 2026-09-03
+**Reviewed:** 2026-09-04
 **Depth:** standard
-**Diff base:** `575e747` (plans 02-14 .. 02-24)
-**Files Reviewed:** 42
+**Diff base:** `9eeadcd` (Commits `45420ee` .. `4adae38`)
+**Files Reviewed:** 5
 **Status:** issues_found
 
 ## Summary
 
-This delta is genuinely strong in the places it was aimed at. The concurrent
-candidate fan-out in `resolveInstallerRepo` (installer.go:613-707) is correctly
-built: one slot per candidate indexed by declared position, `close(done[i])` as
-the happens-before for `answers[i]`, cancel-then-wait so no goroutine outlives
-the call, and the short-circuit taken only when no earlier candidate is still
-outstanding. I could not construct a data race or an ordering inversion in it,
-and `go test ./internal/imagefactory/ -race -count=2` is clean. The raw-body
-surrogate refusal (`rawTextReason`, schematics.go:1079-1128) is the other place I
-tried hardest to break: I walked escaped backslashes, `\`, high halves at
-the end of the buffer, and well-formed pairs, and the scanner classifies every
-one of them correctly. The refusal set really is equal on both sides — the
-sweep in `guard_drift_test.go` compares behaviour rather than declarations, and
-`REFUSED_RANGES` and `NotRepresentableReason` agree codepoint for codepoint.
-The whole Go suite for the changed packages passes.
+**CR-01 ist geschlossen, und zwar vollstaendig.** Ich habe versucht, die dritte
+Bedingung zu umgehen, und bin nicht durchgekommen. Der Grund ist strukturell und
+nicht nur empirisch: `ProbeBuildable` (internal/imagefactory/probe.go:23-38)
+haengt an genau drei Groessen — der Schematic-ID, `talosVersion` und `arch` —
+und `Platform` ist dort auf `PlatformMetal` festgenagelt. Die ID ist der
+Konfliktschluessel, also decken die drei Vorbedingungen in
+`refreshTheStoredVerdict` (schematics.go:532, 554, 579) den Definitionsbereich
+des Urteils exakt ab. Es bleibt keine vierte Achse offen, an der ein Urteil
+ueber eine andere Frage auf diesen Record geschrieben werden koennte. Die beiden
+neuen Tests sind ausserdem trennscharf: beide POSTs laufen unter derselben
+`arch` (`createBody` setzt amd64 fest, schematics_test.go:517), also faellt ohne
+die Versionsbedingung die Arch-Bedingung nicht ein und der Record aendert sich —
+die Tests sind ohne den Fix rot. `go test ./internal/httpapi/handlers/
+./internal/imagefactory/` laeuft gruen.
 
-The one place this round introduced a new *write* to an existing record is where
-it fails. `refreshTheStoredVerdict` (schematics.go:513-587) guards the
-architecture with a page of argument and does not guard the Talos version at
-all — and the schematic id is the hash of a document that contains neither. The
-handler's own comment forty lines above says so out loud ("any two authoring
-attempts sharing a customisation land here regardless of name, cluster **or the
-version they were authored against**"), and then the refresh writes a verdict
-about one version onto a record that names another. That is G-02-8's lie in a
-new place, arriving through the mitigation built to close G-02-9.
+**WR-04 ist verengt, nicht geschlossen.** Das ist der Schwerpunkt dieses
+Reports. Der neue Anker `refusedRangesDecl` (guard_drift_test.go:83-85) bindet
+an ein *Namenspraefix* statt an den Namen: `parseBrowserRefusalRanges` liefert
+gegen eine Quelle, in der `REFUSED_RANGES` gar nicht vorkommt, sondern nur
+`REFUSED_RANGES_LEGACY`, fehlerfrei eine Range-Liste zurueck (gemessen, siehe
+WR-01). Genau die Aussage, die der Waechter in seinem eigenen Fehlertext trifft
+— "Renamed, moved or deleted is the same as never having been there",
+guard_drift_test.go:240-241 — ist damit falsch, und der neue
+Falsifikationstest deckt den Fall nicht ab, weil der Verifier auf
+`RENAMED_BY_VERIFIER` umbenannt hat statt auf einen praefixierten Namen. Dazu
+kommen drei weitere Stellen, an denen derselbe Waechter Zustimmung meldet, die
+er nie geprueft hat: ein `]` in einem Kommentar innerhalb der Deklaration
+(WR-02), Bounds ausserhalb des Unicode-Bereichs (WR-03), und der
+Surrogate-Bereich, der vom Sweep komplett uebersprungen und nur an seinen beiden
+Endpunkten geprueft wird (WR-04, vorbestehend).
 
-Per the scope note I have not re-filed anything on `.planning/WINDOWS.md`. In
-particular: the assets-row budget-table limitation (65), process-wide
-`writeTimeout` (59), `CreateRouteBudget` clipping (60), the audit outcome of a
-refreshing 409 (61), the missing progress indicator (62), `DisallowUnknownFields`
-on the catalog read (9), the META key-0 coercion (10), raw decoder errors
-reaching the client (16), the two unused warning-code constants (27/51), the
-SecureBoot example's missing `warnings` (25/50), the raw transport error in the
-fallback detail (24), and the un-run CI browser step (44) are all already
-recorded and are deliberately absent below.
+Auf der Handler-Seite bleiben zwei kleinere, aber konkrete Maengel: die neue
+`versionMismatchReason` hat keinen Leerwert-Zweig, obwohl der Kommentar zwei
+Zeilen darueber den Leerwert-Fall ausdruecklich als erreichbar beschreibt
+(WR-06), und der Kommentar in `createSchematic` verweist 54 Zeilen ueber der
+Funktion, die jetzt drei Bedingungen prueft, weiterhin auf "the two conditions"
+(WR-07) — die vierte Aussage im Baum, die der Plan uebersehen hat.
+
+Kein Critical: die Aenderungen dieser Runde erzeugen kein falsches Verhalten im
+Produktivpfad, keine Datenverlustgefahr und keine Sicherheitsluecke. Die sieben
+Warnings sind ueberwiegend Waechter-Zuverlaessigkeit, was hier ausdruecklich in
+Scope ist — ein gruener Waechter, der nichts prueft, ist die Defektklasse, die
+diese Runde schliessen wollte.
+
+Bereits in `.planning/WINDOWS.md` erfasste Punkte (Audit-Ausgang eines
+auffrischenden 409, Nummer 61; prozessweiter `writeTimeout`, 59;
+`CreateRouteBudget`-Clipping, 60) sind hier bewusst nicht erneut aufgefuehrt.
 
 ## Narrative Findings (AI reviewer)
 
-## Critical Issues
-
-### CR-01: A conflicting POST at a different Talos version overwrites the stored verdict with a verdict about a version the record does not name
-
-**File:** `internal/httpapi/handlers/schematics.go:513-587` (the missing guard belongs beside
-line 554), reached from `internal/httpapi/handlers/schematics.go:429-462`
-
-**Issue:** `refreshTheStoredVerdict` writes `Usable`, `ProbedAt` and `ProbeReason` onto the
-stored record after exactly two conditions:
-
-```go
-if fresh.ProbedAt.IsZero() { ... return }          // the fresh probe answered
-if stored.Arch != fresh.Arch { ... return }        // the architecture matches
-stored.Usable = fresh.Usable
-stored.ProbedAt = fresh.ProbedAt
-stored.ProbeReason = fresh.ProbeReason
-```
-
-There is no third condition on `TalosVersion`, and there needs to be, because the
-record's identity cannot vary by version either. `Schematic.Canonical()`
-(`internal/imagefactory/schematicid.go:125-178`) emits `owner`, `overlay` and
-`customization` and nothing else — no architecture *and no Talos version*. The id
-is the SHA-256 of those bytes, so two authoring attempts that differ only in
-`talos_version` are one record and collide on `store.ErrConflict`. The handler
-knows this: its own comment at lines 433-436 says the collision happens
-"regardless of name, cluster **or the version they were authored against**".
-
-The verdict, however, *is* version-scoped, on exactly the evidence the Arch guard
-cites for itself. `ProbeBuildable` takes `talosVersion` and probes that version's
-ISO URL, `Extensions` is version-scoped, and the refusal sentence the guard quotes
-as proof that the verdict is architecture-scoped —
-`<id> at <version>/<arch> answered HTTP <status>` (`probe.go:71`) — carries the
-version in the same breath as the architecture. `model.Schematic.TalosVersion`'s
-own doc comment already states that a stored verdict that does not name its
-version cannot be read back.
-
-Concrete sequence, both directions wrong:
-
-1. Operator authors *"workers with intel microcode"* at `v1.12.0`. The probe
-   succeeds. Record: `talos_version: v1.12.0`, `usable: true`, `probe_reason: ""`.
-2. Later they author the identical customisation at `v1.13.9` — an ordinary action;
-   the form's version selector is right there. `Author` fetches the `v1.13.9`
-   catalog (the extension is still in it, so validation passes), POSTs, gets the
-   *same* id back, and `ProbeBuildable` at `v1.13.9` is refused because the
-   extension is not built for that version yet → `ErrSchematicNotBuildable`.
-3. `probedAt` is stamped, `probeReason` is set, `Put` returns `ErrConflict`,
-   `refreshTheStoredVerdict` runs. `ProbedAt` is non-zero; `stored.Arch == fresh.Arch`
-   (both `amd64`). **The record is written to.**
-4. The stored record now reads `talos_version: v1.12.0`, `usable: false`,
-   `probe_reason: "<id> at v1.13.9/amd64 answered HTTP 400"`.
-
-`UsabilityVerdict` (`web/src/routes/images.tsx:874-960`) renders
-**"Not usable — the Factory refused to build it"** for a schematic that builds
-perfectly well at the only version the record names, and the detail dialog above
-it says "Authored against v1.12.0" beside a reason naming v1.13.9. An operator
-who deletes and re-authors on the strength of that badge has been sent to fix
-something that is not broken.
-
-The reverse ordering is the worse half. Author at `v1.13.9` where it is refused
-(`usable: false`), then re-POST the identical customisation at `v1.12.0` where it
-builds. The refresh writes `usable: true` onto a record whose `talos_version` is
-`v1.13.9`, and the screen asserts **"Usable — the build probe confirmed it"**
-about a version at which the probe did nothing of the kind. That is precisely the
-claim T-02-62 and G-02-1 exist to prevent, and it is now producible through the
-supported UI in two clicks.
-
-The refresh also silently rewrites the operator's `probe_reason` into a sentence
-about a version that appears nowhere else in the record, which is the only place
-the discrepancy is visible at all — and nothing surfaces it, because
-`refreshTheStoredVerdict`'s success clause reports "the stored verdict was
-refreshed. Nothing else about the record was changed."
-
-**Nothing catches this.** `TestConflictAtAnotherArchitectureDeclinesTheRefresh`
-(`schematics_test.go:3088`) covers the architecture guard;
-`createBody` (`schematics_test.go:483-494`) hardcodes `catalogVersion`, so no test
-anywhere varies the version across a conflict, and
-`TestConflictRefreshTouchesNothingButTheThreeProbeFields` deliberately excludes
-the three fields at issue.
-
-**Fix:** Add the version condition beside the architecture one and reuse the same
-shape, so a reader meets one rule stated twice rather than two rules:
-
-```go
-// The third condition: the stored record's Talos version is the one the fresh
-// probe asked about.
-//
-// The verdict is version-scoped for the same reason it is architecture-scoped,
-// and on the same evidence: ProbeBuildable probes one version's ISO, the
-// extension catalog is version-scoped, and ProbeReason names `<version>/<arch>`
-// in one sentence. This record's identity cannot vary by version either --
-// Canonical() emits no version -- so a v1.13.9 verdict written onto a v1.12.0
-// record would be undetectable afterwards, there being no second record to
-// disagree with it.
-if stored.TalosVersion != fresh.TalosVersion {
-    return " The stored verdict was not refreshed, because this record holds the verdict " +
-        "for " + stored.TalosVersion + " and this submission asked about " +
-        fresh.TalosVersion + ", and one stored customisation holds exactly one " +
-        "version's verdict."
-}
-```
-
-and add the regression test the architecture guard already has, in the register
-beside it:
-
-```go
-// TestConflictAtAnotherTalosVersionDeclinesTheRefresh
-body := createBody("later-version-attempt", []string{"siderolabs/intel-ucode"}, nil)
-body["talos_version"] = otherCatalogVersion
-// ... assert marshalRecord(after) == marshalRecord(before) and that the 409
-// detail names both versions.
-```
-
-If the project instead decides a cross-version refresh is *wanted*, that is a
-different change and a larger one: it needs a place on the record to hold a
-second version's verdict, which `model.Schematic` does not have — and
-`02-DECISION-schematic-identity.md` is where that has to be argued, not here.
-
 ## Warnings
 
-### WR-01: A malformed `secureboot` query value is silently read as `false`, on the one route whose own comments call that substitution undetectable
+### WR-01: `refusedRangesDecl` bindet an ein Namenspraefix statt an den Namen — WR-04 bleibt in verengter Form offen
 
-**File:** `internal/httpapi/handlers/schematics.go:942-944`
+**File:** `internal/imagefactory/guard_drift_test.go:83-85`, Anspruch bei `228-231` und `240-241`
 
-**Issue:**
-
-```go
-// Anything other than an explicit true is false. A parse error here would
-// be a 400 for a parameter whose absence is already meaningful.
-secureBoot, _ := strconv.ParseBool(q.Get("secureboot"))
-```
-
-`strconv.ParseBool` accepts only `1 t T TRUE true True 0 f F FALSE false False`.
-`secureboot=yes`, `secureboot=on`, `secureboot=Y`, or the plain typo
-`secureboot=ture` all return an error, the error is discarded, and the request is
-served as an **ordinary** (non-SecureBoot) request: five ordinary references, no
-SecureBoot warning, no indication that the parameter was not understood.
-
-That is the one outcome this route is written to make impossible. Forty lines
-above, `schematicAssets` (schematics.go:691-695) says a SecureBoot substitution
-"would be undetectable forever: SecureBoot is a query parameter that never
-reaches the stored record, so no later code, log or audit entry can re-derive
-that a substitution happened", and `docs/api-contract.md:735-741` repeats it. The
-resolution machinery goes to considerable lengths to refuse rather than
-substitute — and then the *parameter parse* substitutes for free.
-
-The asymmetry is the tell: every other parameter on this route answers `400` on a
-value it does not understand. `arch` does (line 916-920), `version` does (926-930),
-`platform` does (936-940). `secureboot` is the only one that guesses, and it is the
-only one whose wrong guess is unrecoverable.
-
-The comment's justification does not hold either: absence being meaningful is a
-reason to accept the *empty* string, not a reason to accept `yes`.
-
-**Fix:** Distinguish absent from malformed and refuse the second, in the register
-the other three parameters already use:
+**Issue:** Der Anker ist
 
 ```go
-secureBoot := false
-if raw := q.Get("secureboot"); raw != "" {
-    parsed, err := strconv.ParseBool(raw)
-    if err != nil {
-        return imagefactory.AssetRequest{}, httpapi.Validation(
-            "The SecureBoot selection is not a boolean, and it is never guessed: it is what "+
-                "selects the installer repository, and an ordinary installer served for a "+
-                "SecureBoot request is undetectable from the stored record afterwards.",
-            httpapi.FieldError{Field: "secureboot", Reason: "must be true or false"})
-    }
-    secureBoot = parsed
-}
-```
-
-Add the two-row table test (`?secureboot=yes` → 400, absent → 200 with ordinary
-references) and state the accepted values in `docs/api-contract.md` beside the
-`arch` and `version` bullets at line 708-741.
-
-### WR-02: `storeInstallerRepo` can permanently record the fallback repository name as proven while a concurrent resolver observed a 2xx from the preferred name
-
-**File:** `internal/imagefactory/installer.go:378-387`, with the branch that mints the
-conflicting entry at `installer.go:420-431`
-
-**Issue:** `storeInstallerRepo`'s rule is "a proven entry is never overwritten", and its
-doc comment justifies last-write-wins among *unproven* entries with an invariant:
-
-> "Among unproven entries the last write wins, and that is harmless: on one key they
-> carry the same repository name, because the candidate order is fixed and the first
-> 2xx wins."
-
-That invariant is true of every entry produced by a 2xx. It is **not** true of the
-entry produced by the `ErrSchematicNotBuildable` promotion branch, which mints a
-*proven* entry whose `repo` was chosen by an earlier, different walk:
-
-```go
-case errors.Is(err, ErrSchematicNotBuildable):
-    next = installerRepoEntry{repo: entry.repo, at: time.Now()}   // proven, no warning
-```
-
-So two resolvers on one key can hold two different proven answers, and the first
-to reach the mutex wins forever — proven entries never expire and are never
-re-questioned (`installerRepo`, line 294).
-
-Concretely, on key `metal/v1.13.9/secureboot=false` with a stale provisional entry
-`{repo:"installer", unresolved:["metal-installer"]}`:
-
-- Goroutine A re-questions `metal-installer` and gets `404` (a registry mid-publication,
-  a CDN miss, a shard that has not caught up). A promotes `{repo:"installer"}` to
-  **proven** and stores it.
-- Goroutine B re-questions the same name a moment later and gets `200`. B builds
-  `{repo:"metal-installer"}` — proven, by the preferred name, by a positive
-  observation — calls `storeInstallerRepo`, finds A's proven entry, discards its own
-  and is handed `installer`.
-
-The cache is now permanently `installer` for that key, chosen by a single negative
-observation, over a name that answered `2xx` in the same second, with the warning
-dropped. `InstallerImage`'s own doc comment states the cost of a wrong installer
-reference: an upgrade that reports success and silently drops every system
-extension the node was built with (P9(c)). Unlike the divergence
-`02-REVIEW-FIX.md` disclosed as acceptable, this one carries **no** warning — the
-promotion branch clears it — so there is nothing on the panel saying the answer
-was not the preferred name's.
-
-It needs contradictory answers from the registry, which is why this is a warning
-and not a blocker. It does not need concurrency to be *reachable* in a weaker
-form: a single transient `404` on a re-question promotes the fallback to proven
-forever with no expiry and no warning, on the strength of one observation the
-comment itself calls "exactly as fresh as any proven entry's own single 2xx" —
-which is an argument about the *name being usable*, not about the *preference
-order* the file spends 60 lines establishing.
-
-**Fix:** Do not let a negative observation mint a proven entry that outranks a
-positive one on the preferred name. Either keep the promotion but make it lose to
-a repo-preferring comparison:
-
-```go
-func (c *Client) storeInstallerRepo(key string, next installerRepoEntry) installerRepoEntry {
-    c.installerMu.Lock()
-    defer c.installerMu.Unlock()
-
-    current, ok := c.installerRepos[key]
-    // A proven entry is not overwritten by an unproven one, and a proven entry
-    // is not overwritten by another proven one UNLESS the newcomer names a
-    // candidate the declared order prefers. A name proven by its own 2xx beats a
-    // name promoted because a preferred candidate answered 404 once.
-    if ok && current.proven() && !prefers(next.repo, current.repo) {
-        return current
-    }
-    c.installerRepos[key] = next
-    return next
-}
-```
-
-or — the shape I would prefer, and which closes WINDOWS entry 22 in the same
-move — put a `singleflight.Group` keyed on `key` around the whole of
-`installerRepo`, so there is only ever one resolver per key and the question
-cannot be answered twice at once. Whichever is taken, the promotion branch should
-say in its comment that it is minting a proven entry from a *negative*
-observation, because that is the fact the current text elides.
-
-### WR-03: `REQUEST_CEILING_MS` transcribes `writeTimeout` across the language seam with no drift guard, while its two siblings have one
-
-**File:** `web/src/api.ts:453-475`
-
-**Issue:** The constant's own doc comment states its derivation as a fact about another
-file: *"The number it is above is `writeTimeout` in cmd/holzkube-managerd/main.go,
-130 seconds"*, and argues that a ceiling below it "would abort while the server is
-still working and replace an honest problem+json … with a generic network
-failure". That is a correct argument and nothing enforces it.
-
-This is the third Go→TypeScript transcription in the phase and the only one
-without a guard. `ASSETS_WAIT_SECONDS` and `CREATE_WAIT_SECONDS`
-(`images.tsx:220-233`) are pinned by
-`internal/httpapi/handlers/budget_drift_test.go`, which reads the literals out of
-`images.tsx` and fails in both directions. The warning sentences are pinned by
-`TestWarningDetailsMatchTheUI`. The installer names are pinned by
-`TestBrowserInstallerNamesEqualInstallerCandidates`. `REQUEST_CEILING_MS` is pinned
-by nothing.
-
-`TestRouteBudgetTableReadsTheRealConstants` does go red if `writeTimeout` moves,
-but its failure message sends the reader to `routeBudgets` in
-`cmd/holzkube-managerd/budget_test.go` and names no client-side constant, so the
-one file that has to move with it is the one nothing points at. Raising
-`writeTimeout` to 160s would leave every long create aborting at 150s with
-"The server did not answer within 150 seconds" in place of the problem+json the
-comment exists to protect.
-
-**Fix:** Add a third row to the guard that already reads this seam. It reads
-`images.tsx`; `api.ts` is beside it:
-
-```go
-// budget_drift_test.go
-const apiPath = "../../../web/src/api.ts"
-
-// TestTheClientCeilingSitsAboveTheServersResponseBudget reads REQUEST_CEILING_MS
-// out of web/src/api.ts and asserts it exceeds writeTimeout. A ceiling at or
-// below it aborts while the server is still working and replaces an honest
-// problem+json with a network failure.
-```
-
-`writeTimeout` is unexported in package `main`, so either export it (as the route
-budgets already were, for exactly this reason) or move the assertion into
-`cmd/holzkube-managerd/budget_test.go`, which already reads it and already has the
-table this row belongs in.
-
-### WR-04: The refusal-set drift guard is not anchored to the declaration it claims to read
-
-**File:** `internal/imagefactory/guard_drift_test.go:49-50`, used at `170-196`
-
-**Issue:**
-
-```go
-var browserRefusalRange = regexp.MustCompile(
-    `\{\s*from:\s*0x([0-9a-fA-F]+),\s*to:\s*0x([0-9a-fA-F]+)`)
-```
-
-`browserRefusalRanges` runs this over the whole of `images.tsx` and treats every
-match as an entry of `REFUSED_RANGES`. Nothing ties it to that identifier. Two
-failure modes follow, and both are silent:
-
-- Any *other* `{ from: 0x…, to: 0x… }` object literal added to `images.tsx` — a
-  second table, a fixture, a codepoint range for some future control — is folded
-  into the set this test believes the browser refuses. If it happens to cover a
-  codepoint the server accepts, the guard stops reporting a real over-refusal.
-- `REFUSED_RANGES` itself can be renamed, moved to another module, or deleted
-  without the `t.Fatalf` at line 176 firing, as long as one such literal survives
-  anywhere in the file. The Fatalf's own comment says "A guard that silently
-  passes when it can no longer find what it guards is worse than no guard" —
-  which is the property it does not have.
-
-This is the same anchoring discipline the sibling guard already applies:
-`budget_drift_test.go:89-90` anchors on `^\s*(?:export\s+)?const\s+NAME\s*=` and
-says why ("so a number that merely appears somewhere in the file cannot satisfy
-this"). One of the two guards written in the same round follows that rule and the
-other does not.
-
-**Fix:** Cut the declaration out first, then scan only inside it:
-
-```go
-// The declaration, not the file: an object literal with from/to elsewhere in
-// images.tsx is not part of the refusal set, and REFUSED_RANGES being renamed
-// or deleted has to be a failure rather than a shorter list.
 var refusedRangesDecl = regexp.MustCompile(
-    `(?s)const\s+REFUSED_RANGES\s*:[^=]*=\s*\[(.*?)\]`)
-
-decl := refusedRangesDecl.FindStringSubmatch(source)
-if decl == nil {
-    t.Fatalf("%s declares no REFUSED_RANGES this guard can read. …", imagesRoutePath)
-}
-matches := browserRefusalRange.FindAllStringSubmatch(decl[1], -1)
+	`(?ms)^\s*(?:export\s+)?const\s+` + regexp.QuoteMeta(refusedRangesName) +
+		`\s*[^=\n]*=\s*\[(.*?)\]`)
 ```
 
-While there: the entry regex silently skips any range written with a decimal
-literal or a named constant. Failing on an entry it cannot parse (as
-`stringArrayLiteral` and `exportedWarningCodes` both already do) is the honest
-answer.
+Nach dem eingesetzten Namen folgt `\s*[^=\n]*`, und `[^=\n]*` frisst jedes
+Zeichen ausser `=` und Zeilenumbruch — also auch die Fortsetzung eines laengeren
+Identifiers. Es gibt keine Wortgrenze und keine Forderung nach `:` oder `=`
+direkt hinter dem Namen. Gemessen gegen die echte Funktion:
 
-### WR-05: `allowedHosts`'s doc comment is attached to `ssoOnly`
+```
+REFUSED_RANGES absent, REFUSED_RANGES_LEGACY present -> ranges=[{0 0}] err=<nil>
+```
 
-**File:** `cmd/holzkube-managerd/main.go:288-306`
+`parseBrowserRefusalRanges` liefert also einen Erfolg fuer eine Quelle, in der
+`REFUSED_RANGES` nicht existiert. Der Pollution-Check (`whole != len(matches)`,
+Zeile 276-283) faengt das nicht ab, weil beide Zaehlungen dieselbe eine
+Fremd-Tabelle sehen. Der Fehlertext, der genau diesen Fall ausschliessen soll —
+"Renamed, moved or deleted is the same as never having been there, and
+entry-shaped literals surviving elsewhere in the file do not make it better" —
+wird nie erreicht.
 
-**Issue:** The comment block that documents `allowedHosts` — DNS rebinding, the
-self-referential CSRF preconditions, the agreement with the certificate's SANs —
-runs straight into `ssoOnly`'s own sentence with no blank line and no separating
-declaration, so it *is* `ssoOnly`'s doc comment:
+Der stille Schadensfall ist: `REFUSED_RANGES` wird in ein anderes Modul
+verschoben oder auf einen nicht praefixierten Namen umbenannt, waehrend eine
+praefixierte Rest-Tabelle in `images.tsx` stehenbleibt. Der Waechter liest dann
+die Rest-Tabelle, meldet Gleichheit, und die tatsaechlich verwendete Menge kann
+frei driften. `TestBrowserRefusalGuardRefusesToPassWithoutItsDeclaration` deckt
+das nicht ab, weil alle drei Negativ-Zeilen (`renamed`, `absent`, `polluted`)
+Namen verwenden, die kein Praefix von `REFUSED_RANGES` sind.
+
+**Fix:** Wortgrenze bzw. das Zeichen erzwingen, das auf den Namen folgen muss,
+und eine Zeile in die bestehende Tabelle nachziehen:
 
 ```go
-// allowedHosts is every Host header value this instance answers to.
-//
-// It closes DNS rebinding: …
-// The set is the bind address plus the loopback names, which is the same set
-// tlsx puts in the certificate's SANs — …
-// ssoOnly reports, for a Host header, whether the local password is refused
-// there. …
-func ssoOnly(cfg config.Config) func(string) bool {
+var refusedRangesDecl = regexp.MustCompile(
+	`(?ms)^\s*(?:export\s+)?const\s+` + regexp.QuoteMeta(refusedRangesName) +
+		`\s*(?::[^=\n]*)?=\s*\[(.*?)\]`)
 ```
 
-`godoc` and every editor hover therefore render a DNS-rebinding rationale above a
-function that has nothing to do with DNS rebinding, and `allowedHosts` (line 308)
-— the function that *does* close it, and the one a security reader will go
-looking for — is left undocumented. This is a security-relevant control whose
-entire justification now sits on the wrong symbol; the merge happened when the
-SSO work inserted `ssoOnly` between the comment and its function.
+```go
+// Umbenannt auf einen Namen, der REFUSED_RANGES als Praefix enthaelt. Der
+// Verifier hat RENAMED_BY_VERIFIER gewaehlt; das ist die Umbenennung, die
+// niemand vornimmt.
+const prefixed = `const REFUSED_RANGES_LEGACY: readonly RefusedRange[] = [
+  { from: 0x0000, to: 0x0000, class: 'nul' },
+]
+`
+// ... { name: "die Deklaration auf einen praefixierten Namen umbenannt",
+//       source: prefixed, wantErr: "REFUSED_RANGES" },
+```
 
-**Fix:** Move the block back onto `allowedHosts` and leave `ssoOnly` its own two
-sentences. `gofmt` will not catch this and `golangci-lint` does not either, so it
-is worth a `revive`/`godot`-adjacent rule or, failing that, a reviewer's eye at
-every insertion between a comment and its declaration.
+### WR-02: Ein `]` in einem Kommentar innerhalb der Deklaration schneidet den Body ab und erzeugt die falsche Diagnose
+
+**File:** `internal/imagefactory/guard_drift_test.go:83-85` (der `(.*?)\]`-Body), Meldung bei `265-269`, Anspruch bei `68-71`
+
+**Issue:** Der Body wird non-greedy bis zur ersten `]` gelesen. Der Kommentar
+oberhalb behauptet, das sei ungefaehrlich, "because the count check below
+compares the entries found in the body against the entries found in the whole
+source and fails on any difference". Das gilt nur, wenn der Schnitt *nach*
+mindestens einem Eintrag faellt. Faellt er davor, wird der Count-Check nie
+erreicht — der `len(matches) == 0`-Zweig greift vorher. Gemessen:
+
+```
+comment carrying a bracket -> ranges=[] err=REFUSED_RANGES is declared but
+carries no entries this guard can read. This is the declaration being empty,
+not the declaration being absent; ...
+```
+
+Die Quelle dieses Laufs war eine vollstaendige, korrekte Deklaration mit einem
+Kommentar `// see the table in RefusedRange[] above` als erster Zeile im Body.
+Der Waechter meldet "die Deklaration ist leer" ueber eine Deklaration mit sechs
+Eintraegen und schickt den Leser damit gezielt in die falsche Richtung — und der
+Typname `RefusedRange[]` ist in genau dieser Datei der wahrscheinlichste
+Kommentarinhalt ueberhaupt.
+
+**Fix:** Entweder den Body bis zur *letzten* `]` vor dem naechsten
+Top-Level-Statement lesen, oder — billiger und ehrlicher — die Meldung nicht
+mehr behaupten lassen, die Deklaration sei leer, wenn im Gesamt-Source Eintraege
+gefunden werden:
+
+```go
+matches := browserRefusalRange.FindAllStringSubmatch(body, -1)
+whole := len(browserRefusalRange.FindAllString(source, -1))
+if len(matches) == 0 && whole > 0 {
+	return nil, fmt.Errorf("the %s declaration body was read as empty while the source "+
+		"carries %d entries: the body was almost certainly cut short at a `]` inside a "+
+		"comment or a string before the first entry", refusedRangesName, whole)
+}
+```
+
+### WR-03: Die gelesenen Bounds werden nicht validiert — ein syntaktisch lesbarer Eintrag kann an keinem Vergleich teilnehmen
+
+**File:** `internal/imagefactory/guard_drift_test.go:286-299`
+
+**Issue:** `strconv.ParseUint(m[1], 16, 32)` akzeptiert alles bis
+`0xFFFFFFFF`, und `rune(from)` ist eine verlustbehaftete Konvertierung nach
+`int32`. Es gibt weder eine Pruefung `from <= to` noch `to <= utf8.MaxRune`.
+Gemessen:
+
+```
+out-of-range bound -> ranges=[{0 31} {-1 -1}] err=<nil>
+inverted bounds    -> ranges=[{31 0}]         err=<nil>
+```
+
+Der zweite Eintrag `{-1 -1}` deckt keinen einzigen Codepoint des Sweeps ab
+(`for r := rune(0); r <= 0x10FFFF`, Zeile 128) und wird still ignoriert. Das ist
+wortwoertlich die Eigenschaft, die der in dieser Runde ergaenzte
+Unlesbar-Eintrag-Check beseitigen sollte: "an entry it skips is a codepoint it
+reports agreement about without having compared it" (Zeile 253-256). Der neue
+Check ist rein syntaktisch — er fragt, ob `browserRefusalRange` das Literal
+matcht — und nicht semantisch. Die invertierte Variante wird durch den
+Set-Vergleich zufaellig noch laut (sie erzeugt `underRefused`), die
+Ueberlauf-Variante nicht.
+
+**Fix:** Nach dem Parsen pruefen, mit derselben Begruendung, die der
+Unlesbar-Check bereits traegt:
+
+```go
+if to > utf8.MaxRune || from > to {
+	return nil, fmt.Errorf("entry %d of %s spans 0x%X..0x%X, which is not a codepoint "+
+		"range this guard can compare: an entry that covers nothing is a codepoint set "+
+		"this guard reports agreement about without having compared it",
+		len(out), refusedRangesName, from, to)
+}
+```
+
+(`utf8` ist in der Datei bereits importiert.)
+
+### WR-04: Der Surrogate-Bereich wird nur an seinen beiden Endpunkten geprueft
+
+**File:** `internal/imagefactory/guard_drift_test.go:119-124` und `128-131`
+
+**Issue:** Der Sweep ueberspringt `0xD800..0xDFFF` vollstaendig (Zeile 129-131,
+korrekt begruendet: Go kann keinen unpaired surrogate in einem String halten).
+Als Ersatz steht genau eine Zusicherung:
+
+```go
+if !refusedByBrowser(surrogateLow) || !refusedByBrowser(surrogateHigh) {
+```
+
+Das prueft `0xD800` und `0xDFFF` und sonst nichts. Eine `REFUSED_RANGES`, die
+`{ from: 0xd800, to: 0xd800 }` und `{ from: 0xdfff, to: 0xdfff }` enthaelt —
+etwa nach einem verunglueckten Split der Range — ist gruen, waehrend der Browser
+2046 Codepoints akzeptiert, die `rawBodyRefusal` mit 400 beantwortet. Der
+Waechter, dessen erklaerte Aufgabe Mengengleichheit ist, prueft hier ein
+Intervall an zwei Punkten. Vorbestehend, aber in derselben Datei und derselben
+Defektklasse wie die uebrigen Befunde dieser Runde.
+
+**Fix:** Die Abdeckung des Intervalls pruefen statt seiner Raender:
+
+```go
+for r := rune(surrogateLow); r <= surrogateHigh; r++ {
+	if !refusedByBrowser(r) {
+		t.Fatalf("%s does not refuse %U. The surrogate range is the one range this "+
+			"guard cannot sweep behaviourally -- Go cannot hold an unpaired surrogate "+
+			"in a string -- so it has to be asserted whole rather than at its ends.",
+			imagesRoutePath, r)
+	}
+}
+```
+
+### WR-05: Der Doc-Kommentar von `refusedRangesDecl` haengt an `refusedRangesEntry`
+
+**File:** `internal/imagefactory/guard_drift_test.go:57-85`
+
+**Issue:** Zeile 57 beginnt `// refusedRangesDecl cuts the declaration out
+before anything is read from it.` Der Block laeuft ohne Leerzeile und ohne
+dazwischenliegende Deklaration bis Zeile 80 durch und endet auf `var
+refusedRangesEntry` (Zeile 81). `refusedRangesDecl` (Zeile 83-85) hat gar keinen
+Doc-Kommentar. Der Bruch ist an Zeile 71/72 sichtbar:
+
+```go
+// the entries found in the whole source and fails on any difference.
+// refusedRangesEntry matches one flat object literal inside the declaration
+```
+
+Damit haengt ausgerechnet die Begruendung der Anker-Entscheidung — der ganze
+inhaltliche Kern dieser Runde, inklusive der `budget_drift_test.go`-Praezedenz —
+am falschen Symbol, und `go doc` zeigt sie unter `refusedRangesEntry`. Das ist
+derselbe Defekt, den WR-05 der Vorrunde fuer `allowedHosts`/`ssoOnly` in
+`cmd/holzkube-managerd/main.go` festgehalten hat, in einer Datei, die diese
+Runde neu geschrieben hat.
+
+**Fix:** Den Block an Zeile 71 trennen und die beiden Haelften vor ihre
+jeweiligen Deklarationen ziehen:
+
+```go
+// refusedRangesEntry matches one flat object literal inside the declaration
+// body, whatever it is made of.
+//
+// Deliberately without nesting: ...
+var refusedRangesEntry = regexp.MustCompile(`\{[^{}]*\}`)
+
+// refusedRangesDecl cuts the declaration out before anything is read from it.
+//
+// Two precedents, and this takes one thing from each. ...
+var refusedRangesDecl = regexp.MustCompile(...)
+```
+
+### WR-06: `versionMismatchReason` hat keinen Leerwert-Zweig, obwohl der Kommentar daneben den Leerwert-Fall als erreichbar beschreibt
+
+**File:** `internal/httpapi/handlers/schematics.go:630-634`, Begruendung bei `575-578`
+
+**Issue:** Der Kommentar direkt ueber der Bedingung sagt ausdruecklich: "an
+empty stored version is not a record written before the field existed, it is a
+record whose version is not known; the inequality declines it, which is
+correct." Das Ablehnen ist korrekt. Der Satz, den der Operator daraufhin liest,
+ist es nicht:
+
+```
+... this record holds the verdict for Talos  and this submission asked about
+Talos v1.13.9, and one stored customisation holds exactly one version's verdict.
+```
+
+Ein leeres Subjekt und ein doppeltes Leerzeichen. `archMismatchReason`
+(schematics.go:617-625) hat fuer genau diesen Fall einen eigenen Zweig und
+formuliert ihn aus; die neue Zwillingsfunktion hat ihn nicht. Erreichbar ist der
+Leerwert ueber ein von Hand editiertes oder beschaedigtes Record-JSON im
+`fsstore` — der einzige Schreiber ist `createSchematic`, der `talos_version`
+validiert, aber der Store ist ein Verzeichnis mit JSON-Dateien und der Kommentar
+rechnet selbst mit dem Fall.
+
+**Fix:**
+
+```go
+func versionMismatchReason(stored, asked string) string {
+	if stored == "" {
+		return "this record does not name the Talos version its verdict is about, so there " +
+			"is nothing to match against, and this submission asked about Talos " + asked
+	}
+	return "this record holds the verdict for Talos " + stored + " and this submission asked " +
+		"about Talos " + asked + ", and one stored customisation holds exactly one version's " +
+		"verdict"
+}
+```
+
+### WR-07: Der Kommentar in `createSchematic` nennt weiterhin "the two conditions"
+
+**File:** `internal/httpapi/handlers/schematics.go:457-459`
+
+**Issue:**
+
+```go
+// Usable, ProbedAt and ProbeReason are therefore written and
+// nothing else is; see refreshTheStoredVerdict for the two
+// conditions and for why a failed refresh is silent.
+```
+
+Diese Aussage verweist auf eine Funktion 54 Zeilen weiter unten, die seit
+`d4ee1f5` drei Bedingungen prueft. Der Plan hat `docs/api-contract.md`,
+`model.go` (ID) und `model.go` (Arch) nachgezogen und die vierte Stelle
+uebersehen — die, die im selben File steht und direkt auf die geaenderte
+Funktion zeigt. Ein Leser, der dem Verweis folgt, faengt mit einer falschen
+Erwartung an; das ist genau die Klasse von Aussage, deren Pflege der Plan
+02-25 Task 3 zum Gate gemacht hat.
+
+**Fix:**
+
+```go
+// nothing else is; see refreshTheStoredVerdict for the three
+// conditions and for why a failed refresh is silent.
+```
 
 ## Info
 
-### IN-01: `PRESENTATION_BY_CODE` calls itself the full closed taxonomy and has no `upstream.` entry
+### IN-01: Bei gleichzeitigem Arch- und Version-Mismatch nennt das `detail` nur die Architektur
 
-**File:** `web/src/lib/problem.ts:89-109`
+**File:** `internal/httpapi/handlers/schematics.go:554-582`, `docs/api-contract.md:620`
 
-**Issue:** The comment says *"The full closed taxonomy from `docs/api-contract.md` §
-Error Taxonomy, one entry per code prefix"*. The list has thirteen entries and the
-`upstream.` family — four codes, and the single most-exercised family this phase
-produced — is not among them. Behaviour is fine: `presentationFor` falls through to
-`'toast'`, which is the right presentation. The claim is what is wrong, and it
-matters because this round *added* `CODE_UPSTREAM_FACTORY_UNAVAILABLE` and
-`CODE_UPSTREAM_FACTORY_REJECTED` twenty lines above it, so the file now names the
-family in one place and omits it from the list that says it is complete.
+**Issue:** Die drei Bedingungen werden sequenziell geprueft und die erste
+fehlschlagende gewinnt. Ein zweiter POST, der sowohl die Architektur als auch
+die Talos-Version aendert, bekommt ausschliesslich den Architektur-Satz. Der
+Contract verspricht, das `detail` sage, "why". Ein Operator, der daraufhin die
+Architektur korrigiert, laeuft in eine zweite Ablehnung mit einem neuen Grund.
 
-**Fix:** Add `['upstream.', 'toast']` before `['internal.', 'toast']`, so the list
-is what its comment says it is and a future decision to present an upstream
-failure differently has an anchor to change.
+**Fix:** Entweder beide Gruende sammeln und mit " und " verbinden, oder im
+Contract festhalten, dass das `detail` die erste fehlschlagende Bedingung nennt
+und nicht alle.
 
-### IN-02: Any abort is reported to the operator as the 150-second ceiling firing
+### IN-02: `model.go` sagt im Zweig "gleiche Version" weiterhin, die Talos-Version werde zurueckgewiesen
 
-**File:** `web/src/api.ts:512-517`, used at `561-566` and `583-589`
+**File:** `internal/model/model.go:104-107`
 
-**Issue:** `isCeilingAbort` returns true for `AbortError` as well as `TimeoutError`,
-and both paths then throw `ceilingError()`, whose sentence is *"The server did not
-answer within 150 seconds, so the request was given up on."* `AbortSignal.timeout`
-rejects with `TimeoutError`; `AbortError` comes from somewhere else — a page
-navigation, an extension, a browser-initiated cancel, or the first caller who
-threads an external signal through `send`. Any of those is reported as a
-150-second server timeout that did not happen, on a screen whose whole design
-principle is that a sentence must be true of what actually occurred.
+**Issue:** "At the same architecture *and the same Talos version* the 409 now
+refreshes Usable, ProbedAt and ProbeReason in place ..., and refuses the label,
+the cluster and the Talos version exactly as before." In dem Zweig, den der Satz
+beschreibt, ist die Talos-Version definitionsgemaess dieselbe; es gibt dort
+nichts zurueckzuweisen. Der Rest der Aufzaehlung (label, cluster) bleibt richtig.
 
-**Fix:** Match `TimeoutError` only, and let anything else propagate as itself:
+**Fix:** "and refuses the label and the cluster exactly as before" — die
+Talos-Version ist in diesem Zweig eine Vorbedingung und kein Refusal-Ziel mehr.
+
+### IN-03: `docs/api-contract.md:620` ueberlaedt "three"
+
+**File:** `docs/api-contract.md:620-621`
+
+**Issue:** "The refresh happens only when **all three** conditions hold, and the
+`409` `detail` says which of the three outcomes the caller got." Die beiden
+Dreien bezeichnen Verschiedenes (drei Bedingungen, drei Ergebnis-Zeilen) und
+stehen in einem Satz. Vor dieser Runde stand dort "both conditions ... which of
+the three outcomes", was die Kollision nicht hatte.
+
+**Fix:** "... says which of the three *outcomes* the caller got" umformulieren zu
+"... and the `409` `detail` reports the outcome: refreshed and usable, refreshed
+and refused, or not refreshed with the reason."
+
+### IN-04: Records, die der Defekt vor 02-25 bereits verfaelscht hat, werden weder erkannt noch benannt
+
+**File:** `internal/model/model.go:181-199`, `docs/api-contract.md:617-634`
+
+**Issue:** Zwischen `efb31da` (02-24, Einfuehrung des Refresh) und `d4ee1f5`
+(02-25, Versionsbedingung) konnte ein zweiter POST an einer anderen Version ein
+Urteil auf einen Record schreiben, dessen `talos_version` eine andere ist. Solche
+Records existieren nach dem Update weiter und tragen ein Urteil, dessen Subjekt
+nicht im Record steht. Der Erholungsweg existiert — ein POST an *der* Version,
+die der Record nennt, frischt korrekt auf — aber weder `model.go` noch der
+Contract sagen das, und es gibt keine Erkennung.
+
+**Fix:** Einen Satz in `TalosVersion`s Kommentar aufnehmen, der den Zeitraum
+nennt und den Erholungsweg ausspricht; eine Migration ist hier nicht angebracht,
+weil nichts im Record entscheidet, welches der beiden Urteile das gespeicherte
+ist.
+
+### IN-05: `wantRanges: 6` pinnt die Eintragszahl der echten Datei, die Begruendung spricht aber von den Zeilen der Tabelle
+
+**File:** `internal/imagefactory/guard_drift_test.go:340-353`
+
+**Issue:** Die Begruendung im Doc-Kommentar lautet "Each table's acceptance pins
+the number of its rows, and that number only holds while the tables stay apart."
+`wantRanges: 6` pinnt aber nicht die Zeilen der Testtabelle, sondern die Anzahl
+der Eintraege in `web/src/routes/images.tsx`. Ein legitimer siebter Range macht
+diesen Test rot, obwohl der eigentliche Drift-Waechter gruen bleibt — was
+vertretbar ist, aber nicht das ist, was der Kommentar behauptet.
+
+**Fix:** Die Begruendung an das anpassen, was die Zahl tatsaechlich festhaelt,
+oder gegen `len(REFUSED_RANGES) > 0` plus einen Vergleich mit dem
+Nicht-Synthetik-Lauf pruefen.
+
+### IN-06: "1 entries inside the ..."
+
+**File:** `internal/imagefactory/guard_drift_test.go:278-283`, gepinnt bei `368`
+
+**Issue:** `%d entries` erzeugt bei eins "1 entries". Der Testfall pinnt den
+Grammatikfehler wortwoertlich als `wantErr`, was ihn schwerer zu korrigieren
+macht als noetig.
+
+**Fix:** `%d entr%s` mit einem Plural-Helfer, oder neutral "entry count inside
+the %s declaration: %d, in the source as a whole: %d" — dann bleibt die
+`wantErr`-Zeile ein Substring ohne Zahlwort-Grammatik.
+
+### IN-07: Die Auffrischung hat keine Monotonie-Bedingung ueber `ProbedAt`
+
+**File:** `internal/httpapi/handlers/schematics.go:584-604`, Anspruch bei `450-455`
+
+**Issue:** Der Kommentar begruendet den Schreibvorgang damit, die Anfrage halte
+"a strictly better-informed answer to the same question than the stored one".
+Bei zwei nebenlaeufigen POSTs derselben Customisation gilt das nur, solange die
+Reihenfolge der `Put`-Aufrufe der Reihenfolge der `ProbedAt`-Stempel folgt. Wird
+Request A zwischen seinem `Get` und seinem `Put` verdraengt, nachdem B bereits
+geschrieben hat, ueberschreibt A ein neueres Urteil mit seinem aelteren, und
+`ProbedAt` laeuft rueckwaerts. Das CAS schuetzt nur den Fall, dass A *vor* B
+gelesen hat. Das Fenster ist sehr klein und beide Urteile beantworten dieselbe
+Frage `(id, version, arch)`, deshalb Info und nicht Warning.
+
+**Fix:** Eine Zeile vor dem Schreiben, die den Anspruch des Kommentars zur
+Bedingung macht:
 
 ```go
-function isCeilingAbort(cause: unknown): boolean {
-  return cause instanceof DOMException && cause.name === 'TimeoutError'
+if !stored.ProbedAt.Before(fresh.ProbedAt) {
+	return ""
 }
-```
-
-If a caller-supplied signal is added later, that abort deserves its own sentence
-rather than this one.
-
-### IN-03: The TypeScript problem-type base is a second unguarded transcription of `ProblemBaseURI`
-
-**File:** `web/src/test/problem-fixtures.ts:15`
-
-**Issue:** The file's own comment names the risk — *"the Go constant
-`httpapi.ProblemBaseURI` is its one authority; the web suite cannot import that, so
-this is the single place the string is spelled on this side of the seam"* — and
-nothing checks it. `.planning/WINDOWS.md` entry 46 records the same hazard for
-`audit_test.go:126` and does not name this file.
-
-The consequence is quieter than entry 46's and therefore easier to miss: a stale
-base here produces **no** red test, because `lib/problem.ts` branches on
-`problem.code` and never on `problem.type`. The fixtures simply stop representing
-what the server emits, and every assertion built on them keeps passing while
-describing a wire format that no longer exists.
-
-**Fix:** Either pin it from Go, in the register `budget_drift_test.go` already
-established (a five-line test reading the literal out of `problem-fixtures.ts` and
-comparing it to `httpapi.ProblemBaseURI`), or append a line to WINDOWS entry 46's
-successor naming this file too, so the next re-rooting has both spellings in one
-place.
-
-### IN-04: A whitespace-only schematic name passes both the form's guard and the server's
-
-**File:** `web/src/routes/images.tsx:379-393` and `578`, with the server's check at
-`internal/httpapi/handlers/schematics.go:795-799`
-
-**Issue:** `submit` trims kernel arguments and drops blank META rows, and sends `name`
-exactly as typed. The submit button is disabled on `name === ''` and the server
-refuses on `in.Name == ""`. `"   "` satisfies neither test, so a schematic can be
-created whose only human-readable label is three spaces — rendered as an empty
-cell in the saved table and as an empty `DialogTitle`. `validate`'s own reason
-string says a schematic "needs a label the operator can recognise it by", which a
-blank one is not.
-
-**Fix:** Compare on the trimmed value on both sides — `strings.TrimSpace(in.Name) == ""`
-on the server (which is the half that matters, since it is the contract), and
-`name.trim() === ''` in the disabled expression so the form does not offer a
-submission the server will refuse.
-
-### IN-05: `schematicAssets`'s budget comment still describes the serial candidate walk in the present tense
-
-**File:** `internal/httpapi/handlers/schematics.go:713-719`
-
-**Issue:**
-
-> "a cold `resolveInstallerRepo` **walks two candidates in series**, each with its own
-> manifest budget, and the sum of those two was the 60.000s worst case…"
-
-It does not, since plan 02-23. It asks every candidate at once
-(`installer.go:613-707`), and the constant this comment is justifying —
-`AssetsRouteBudget` at `schematics.go:60-83` — says so at length one screen above
-("One manifest budget and not two, because `resolveInstallerRepo` asks every
-candidate repository name at the same time"). The two comments in one file now
-contradict each other about the mechanism, and the stale one is the one a reader
-meets at the call site.
-
-This is the class of drift the file elsewhere treats as load-bearing: it is the
-same "a fact with an expiry date that nothing in the build checks" that
-`installerCandidates` deleted its digest literals over.
-
-**Fix:** Rewrite the clause in the past tense, matching what `AssetsRouteBudget`'s
-own comment already says:
-
-```go
-// One deadline over the whole resolution, for the same reason createSchematic
-// derives one. A cold resolveInstallerRepo used to walk its candidates in
-// series, each with its own manifest budget, and the sum of those two was the
-// 60.000s worst case that arrived against a 60s writeTimeout as a problem
-// document written to an expired socket. It now issues every candidate at once,
-// so the worst case is one manifest budget; the ceiling is what the route
-// declares and the sum only says whether it clips.
 ```
 
 ---
 
-_Reviewed: 2026-09-03_
+_Reviewed: 2026-09-04T13:10:00Z_
 _Reviewer: Claude (gsd-code-reviewer)_
 _Depth: standard_
+_Scope: Runde 5, Plaene 02-25 und 02-26 (diff base `9eeadcd`)_
