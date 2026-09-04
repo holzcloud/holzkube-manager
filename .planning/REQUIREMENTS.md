@@ -24,27 +24,27 @@ Die Requirements folgen der Phasenstruktur aus `.planning/research/SUMMARY.md`. 
 - [x] **FOUND-09**: Zustand trägt eine Schema-Version; Upgrades migrieren vorwärts und legen vorher ein Backup an
 - [x] **FOUND-10**: Alle Zustandsdateien liegen mit `0600` in einem `0700`-Verzeichnis; falsche Rechte werden beim Start bemängelt
 - [x] **FOUND-11**: API-Fehler kommen als RFC-9457 `problem+json` mit einer stabilen Fehlertaxonomie zurück
-- [x] **FOUND-12**: Betreiber kann das gesamte Binary mit `--dry-run` fahren; keine Mutation erreicht einen Node
+- [ ] **FOUND-12**: Betreiber kann das gesamte Binary mit `--dry-run` fahren; keine Mutation erreicht einen Node
 
 ### Transport & Sandbox (TRANS)
 
-- [x] **TRANS-01**: holzkube spricht die Talos machine API direkt per gRPC/mTLS an Node-IPs
-- [x] **TRANS-02**: Der Transport liegt hinter **zwei** Interfaces — `Dialer` (Identität → dialbare Adresse) und `DiscoverySource` (Scan / manuell / Tunnel-Registrierung) — damit ein Tunnel-Transport später nachrüstbar ist, obwohl er die Kontaktrichtung umkehrt
-- [x] **TRANS-03**: Cluster-Clients (mTLS) und Maintenance-Clients (unauthentifiziert) sind getrennte Typen und nicht verwechselbar
-- [x] **TRANS-04**: Jeder Node-Aufruf hat ein erzwungenes Deadline; Retries gibt es nur für eine Allowlist lesender Operationen
-- [x] **TRANS-05**: Ein nicht erreichbarer Node blockiert weder die UI noch andere Nodes (Circuit Breaker, Fan-out pro Node)
-- [x] **TRANS-06** 🚫: `talossim` — ein In-Process-Fake-Talos-Node mit echten Protobufs, echtem mTLS und echtem In-Memory-COSI-State, gegen den der unveränderte Produktions-Client spricht
-- [x] **TRANS-07**: `talossim` kann Fehlerszenarien skripten: `go_silent(90s)`, `reject_apply`, `second_bootstrap_returns_AlreadyExists`, `flap_connection`, `slow_log_consumer`, `ip_changes_on_reboot`, `etcd_down`, `k8s_down`, `version_out_of_supported_range`
+- [ ] **TRANS-01**: holzkube spricht die Talos machine API direkt per gRPC/mTLS an Node-IPs
+- [ ] **TRANS-02**: Der Transport liegt hinter **zwei** Interfaces — `Dialer` (Identität → dialbare Adresse) und `DiscoverySource` (Scan / manuell / Tunnel-Registrierung) — damit ein Tunnel-Transport später nachrüstbar ist, obwohl er die Kontaktrichtung umkehrt
+- [ ] **TRANS-03**: Cluster-Clients (mTLS) und Maintenance-Clients (unauthentifiziert) sind getrennte Typen und nicht verwechselbar
+- [ ] **TRANS-04**: Jeder Node-Aufruf hat ein erzwungenes Deadline; Retries gibt es nur für eine Allowlist lesender Operationen
+- [ ] **TRANS-05**: Ein nicht erreichbarer Node blockiert weder die UI noch andere Nodes (Circuit Breaker, Fan-out pro Node)
+- [ ] **TRANS-06** 🚫: `talossim` — ein In-Process-Fake-Talos-Node mit echten Protobufs, echtem mTLS und echtem In-Memory-COSI-State, gegen den der unveränderte Produktions-Client spricht
+- [ ] **TRANS-07**: `talossim` kann Fehlerszenarien skripten: `go_silent(90s)`, `reject_apply`, `second_bootstrap_returns_AlreadyExists`, `flap_connection`, `slow_log_consumer`, `ip_changes_on_reboot`, `etcd_down`, `k8s_down`, `version_out_of_supported_range`
 - [ ] **TRANS-08**: Contract-Tests laufen gegen Fake und gegen echten Talos, damit Fake-Drift auffällt
 
 ### Image Factory (FACT)
 
-- [x] **FACT-01**: Betreiber stellt ein Schematic zusammen — System-Extensions, Kernel-Args, META — über einen versions-skopierten Extension-Katalog, kein Freitextfeld
-- [x] **FACT-02**: Extension-Namen werden **vor** dem POST validiert, und das Schematic gilt erst als brauchbar, nachdem ein Model-Build-Probe es bestätigt hat (ein POST liefert `200` auch für nicht existierende Extensions)
-- [x] **FACT-03**: Betreiber bekommt die exakten URLs für ISO, Installer und PXE, mit korrekt aufgelöstem, versionsabhängigem Installer-Repo-Namen und ohne hartkodierte Architektur
-- [x] **FACT-04**: Beim Autoren eines Schematics mit Kernel-Args oder META warnt die UI, dass `installer`/`initramfs` **nur** System-Extensions ehren — ISO und installiertes System driften sonst auseinander
-- [x] **FACT-05**: Pre-Release-Versionen sind herausgefiltert und nur explizit wählbar; bekannt kaputte Versionen sind ausgegraut
-- [x] **FACT-06**: Die Schematic-ID wird lokal vorab berechnet und persistiert
+- [ ] **FACT-01**: Betreiber stellt ein Schematic zusammen — System-Extensions, Kernel-Args, META — über einen versions-skopierten Extension-Katalog, kein Freitextfeld
+- [ ] **FACT-02**: Extension-Namen werden **vor** dem POST validiert, und das Schematic gilt erst als brauchbar, nachdem ein Model-Build-Probe es bestätigt hat (ein POST liefert `200` auch für nicht existierende Extensions)
+- [ ] **FACT-03**: Betreiber bekommt die exakten URLs für ISO, Installer und PXE, mit korrekt aufgelöstem, versionsabhängigem Installer-Repo-Namen und ohne hartkodierte Architektur
+- [ ] **FACT-04**: Beim Autoren eines Schematics mit Kernel-Args oder META warnt die UI, dass `installer`/`initramfs` **nur** System-Extensions ehren — ISO und installiertes System driften sonst auseinander
+- [ ] **FACT-05**: Pre-Release-Versionen sind herausgefiltert und nur explizit wählbar; bekannt kaputte Versionen sind ausgegraut
+- [ ] **FACT-06**: Die Schematic-ID wird lokal vorab berechnet und persistiert
 
 ### Inventar, Import & Health (INV)
 
@@ -215,21 +215,21 @@ Requirements mit **🚫** sind Release-Blocker.
 | FOUND-09 | Phase 1 | Complete |
 | FOUND-10 | Phase 1 | Complete |
 | FOUND-11 | Phase 1 | Complete |
-| FOUND-12 | Phase 2 | Complete |
-| TRANS-01 | Phase 2 | Complete |
-| TRANS-02 | Phase 2 | Complete |
-| TRANS-03 | Phase 2 | Complete |
-| TRANS-04 | Phase 2 | Complete |
-| TRANS-05 | Phase 2 | Complete |
+| FOUND-12 | Phase 2 | Gaps Found |
+| TRANS-01 | Phase 2 | Gaps Found |
+| TRANS-02 | Phase 2 | Gaps Found |
+| TRANS-03 | Phase 2 | Gaps Found |
+| TRANS-04 | Phase 2 | Gaps Found |
+| TRANS-05 | Phase 2 | Gaps Found |
 | **TRANS-06** 🚫 | Phase 2 | Complete |
-| TRANS-07 | Phase 2 | Complete |
+| TRANS-07 | Phase 2 | Gaps Found |
 | TRANS-08 | Phase 3 | Pending |
-| FACT-01 | Phase 2 | Complete |
-| FACT-02 | Phase 2 | Complete |
-| FACT-03 | Phase 2 | Complete |
-| FACT-04 | Phase 2 | Complete |
-| FACT-05 | Phase 2 | Complete |
-| FACT-06 | Phase 2 | Complete |
+| FACT-01 | Phase 2 | Gaps Found |
+| FACT-02 | Phase 2 | Gaps Found |
+| FACT-03 | Phase 2 | Gaps Found |
+| FACT-04 | Phase 2 | Gaps Found |
+| FACT-05 | Phase 2 | Gaps Found |
+| FACT-06 | Phase 2 | Gaps Found |
 | **INV-01** 🚫 | Phase 3 | Pending |
 | INV-02 | Phase 3 | Pending |
 | **INV-03** 🚫 | Phase 3 | Pending |
