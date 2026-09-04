@@ -455,7 +455,7 @@ func createSchematic(d httpapi.Deps) http.HandlerFunc {
 			// away (G-02-9: HTTP 409 in 4.186898875s, the probe ran and
 			// succeeded, the record stayed usable=false with probed_at zero).
 			// Usable, ProbedAt and ProbeReason are therefore written and
-			// nothing else is; see refreshTheStoredVerdict for the two
+			// nothing else is; see refreshTheStoredVerdict for the three
 			// conditions and for why a failed refresh is silent.
 			httpapi.WriteProblem(w, r, httpapi.Conflict("store.conflict",
 				conflictDetail+refreshTheStoredVerdict(ctx, d, rec)))
