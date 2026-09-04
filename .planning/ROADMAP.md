@@ -78,7 +78,7 @@ Plans:
 **Parallel tracks**: 2 — (a) Transport-Naht + `pool` + `talossim`, (b) Image-Factory-Client. Track (b) hat **null** Talos-Abhängigkeit; das ist die Research-Parallelität *Phase 1 ∥ Phase 1b*, hier innerhalb einer Phase realisiert.
 **Release blockers owned**: TRANS-06 🚫
 **Note**: FOUND-12 (`--dry-run` für das ganze Binary) liegt hier statt in Phase 1, weil die Research es explizit in den Deliverables der Transport-Phase führt — ein Dry-Run ist erst sinnvoll, wenn Mutationen einen Node erreichen könnten.
-**Plans**: 25/26 plans executed in 5 waves (Wave 1: 2 parallele Tracer — Track (a) Transport-Naht, Track (b) Image Factory) + 5 Gap-Closure-Pläne der Runde 1 aus 02-UAT.md in 4 Wellen (Cluster B und C; Cluster A war auf `02-DECISION-probe-budget.md` blockiert) + 8 Gap-Closure-Pläne der Runde 2 in 6 Wellen (alle 14 Lücken G-02-10..G-02-23, voller Umfang in einer Runde) + 3 Gap-Closure-Pläne der Runde 4 in 3 Wellen (Cluster A, nachdem der Betreiber am 2026-09-03 Option 2 ratifiziert hat) + 2 Gap-Closure-Pläne der Runde 5 in 2 Wellen (G-02-24 die Regression, die Runde 4 eingeführt hat, und G-02-25 der unverankerte Drift-Wächter) — 24/26 ausgeführt
+**Plans**: 26/26 plans executed in 5 waves (Wave 1: 2 parallele Tracer — Track (a) Transport-Naht, Track (b) Image Factory) + 5 Gap-Closure-Pläne der Runde 1 aus 02-UAT.md in 4 Wellen (Cluster B und C; Cluster A war auf `02-DECISION-probe-budget.md` blockiert) + 8 Gap-Closure-Pläne der Runde 2 in 6 Wellen (alle 14 Lücken G-02-10..G-02-23, voller Umfang in einer Runde) + 3 Gap-Closure-Pläne der Runde 4 in 3 Wellen (Cluster A, nachdem der Betreiber am 2026-09-03 Option 2 ratifiziert hat) + 2 Gap-Closure-Pläne der Runde 5 in 2 Wellen (G-02-24 die Regression, die Runde 4 eingeführt hat, und G-02-25 der unverankerte Drift-Wächter) — 24/26 ausgeführt
 **UI hint**: yes
 
 Plans:
@@ -168,7 +168,7 @@ Plans:
 
 **Runde-5-Gap-Closure Wave 2** *(blocked on Wave 1)*
 
-- [ ] 02-26-PLAN.md — G-02-25 (Verifikation Runde 4, `G4-2`, `status: partial`; Code-Review WR-04): `browserRefusalRange` läuft über die ganze `images.tsx` und ist an keinen Bezeichner verankert — `REFUSED_RANGES` umbenennen ließ den Wächter grün (`ok … 0.546s`), also genau die Eigenschaft, die sein eigener `t.Fatalf`-Kommentar ausschließt. Dieser Plan verankert auf der Deklaration, macht ihr Fehlen und einen unlesbaren Eintrag zu Fehlschlägen, zieht die Prüfung in eine reine Funktion, deren Fehlerfälle selbst geprüft werden — und führt das Ledger beider Pläne dieser Runde
+- [x] 02-26-PLAN.md — G-02-25 (Verifikation Runde 4, `G4-2`, `status: partial`; Code-Review WR-04): `browserRefusalRange` läuft über die ganze `images.tsx` und ist an keinen Bezeichner verankert — `REFUSED_RANGES` umbenennen ließ den Wächter grün (`ok … 0.546s`), also genau die Eigenschaft, die sein eigener `t.Fatalf`-Kommentar ausschließt. Dieser Plan verankert auf der Deklaration, macht ihr Fehlen und einen unlesbaren Eintrag zu Fehlschlägen, zieht die Prüfung in eine reine Funktion, deren Fehlerfälle selbst geprüft werden — und führt das Ledger beider Pläne dieser Runde
 
 **Nicht in Runde 5**: die UI-Hälfte von SC 3 (TRANS-05) und TRANS-08 tragen beide `addressed_in: Phase 3` und bleiben dort. G-02-9 bleibt offen wie oben beschrieben; Plan 02-25 härtet dessen Minderung und schließt ihn nicht.
 
@@ -417,7 +417,7 @@ Phasen laufen in numerischer Reihenfolge: 1 → 2 → 3 → 4 → 5 → 6 → 7 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Foundation Skeleton | 6/6 | Complete    | 2026-08-28 |
-| 2. Transport Seam, `talossim` & Image Factory | 25/26 | In Progress|  |
+| 2. Transport Seam, `talossim` & Image Factory | 26/26 | In Progress|  |
 | 3. Inventar, Cluster-Import & Health | 0/TBD | Not started | - |
 | 4. Walking Skeleton (Wegwerf) | 0/TBD | Not started | - |
 | 5. Streaming | 0/TBD | Not started | - |
