@@ -365,6 +365,66 @@ const SOME_OTHER_TABLE: readonly RefusedRange[] = [
 	}
 }
 
+// TestBrowserRefusalGuardRefusesAnEntryItCannotRead pins the second half of
+// WR-04: an entry the entry pattern cannot read is a failure and not a skip.
+//
+// stringArrayLiteral and exportedWarningCodes already made this decision -- a
+// member computed at runtime is a member the guard cannot see, and failing is
+// the honest answer -- and WR-04 names both of them as the precedent. The
+// reason it matters here is that this guard compares SETS: an entry it does not
+// see is a codepoint it reports agreement about without ever having checked it.
+//
+// A separate table from
+// TestBrowserRefusalGuardRefusesToPassWithoutItsDeclaration on purpose. Each
+// table's acceptance pins the number of its rows, and that number only holds
+// while the tables stay apart. A table test whose rows quietly disappear is the
+// same defect as a guard that cannot find what it guards, one level up.
+func TestBrowserRefusalGuardRefusesAnEntryItCannotRead(t *testing.T) {
+	const decimal = `const REFUSED_RANGES: readonly RefusedRange[] = [
+  { from: 0, to: 31, class: 'control character' },
+]
+`
+
+	const namedConstants = `const REFUSED_RANGES: readonly RefusedRange[] = [
+  { from: SURROGATE_LOW, to: SURROGATE_HIGH, class: 'unpaired surrogate' },
+]
+`
+
+	for _, tc := range []struct {
+		name    string
+		source  string
+		wantErr []string
+	}{
+		{
+			name:    "an entry written in decimal",
+			source:  decimal,
+			wantErr: []string{`{ from: 0, to: 31, class: 'control character' }`},
+		},
+		{
+			name:   "an entry whose bounds are named constants",
+			source: namedConstants,
+			wantErr: []string{
+				`{ from: SURROGATE_LOW, to: SURROGATE_HIGH, class: 'unpaired surrogate' }`,
+				"SURROGATE_LOW",
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ranges, err := parseBrowserRefusalRanges(tc.source)
+			if err == nil {
+				t.Fatalf("no error; read %d ranges instead.\n"+
+					"An entry this guard skips is a codepoint it reports agreement "+
+					"about without having compared it.", len(ranges))
+			}
+			for _, want := range tc.wantErr {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("error does not quote %q:\n%v", want, err)
+				}
+			}
+		})
+	}
+}
+
 // stringArrayLiteral reads the single-quoted members of a named TypeScript
 // array. It is deliberately literal-only: a member computed at runtime is a
 // member this guard cannot see, and failing is the honest answer.
