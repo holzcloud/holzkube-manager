@@ -19,6 +19,7 @@ package imagefactory
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -113,6 +114,89 @@ var refusedRangesDecl = regexp.MustCompile(
 	`(?ms)^\s*(?:export\s+)?const\s+` + regexp.QuoteMeta(refusedRangesName) +
 		`\s*(?::[^=\n]*)?=\s*\[(.*?)\]`)
 
+// guardBlindSpot is one mechanism this guard does not see, carried as DATA so
+// that TestGuardBlindSpotsAreEachMeasured can bind it to a measured row.
+//
+// The list is kept by MECHANISM and not by FORM, and that is the whole design.
+// A list of forms was incomplete again after each of three verification rounds
+// -- round 4 found the rename, round 5 the prefixed leftover, round 6 the
+// comment -- because a form is a shape and shapes are unbounded. A mechanism
+// covers the shapes it can take, and the coverage test demands at least one
+// measured shape per mechanism. Whoever adds an entry here adds a row too, or
+// the coverage test goes red at them.
+type guardBlindSpot struct {
+	// id is the stable name a blindnessRow refers to.
+	id string
+	// mechanism says in ONE line why the guard is blind here, in terms of what
+	// its anchor binds to rather than in terms of a syntax it fails to parse.
+	mechanism string
+	// measured carries the output that evidences the entry. An entry without a
+	// measurement is a claim, and claims are what this file is here to stop.
+	measured string
+	// rowless is empty for every entry a row can measure. When it is not, it
+	// carries the reason why no row can. TestGuardBlindSpotsAreEachMeasured
+	// requires there to be EXACTLY ONE such entry -- otherwise this field is a
+	// hole through which a future entry escapes being measured at all.
+	rowless string
+}
+
+// guardBlindSpots is the written-down remainder: what a regular expression over
+// TypeScript source does not establish, one entry per mechanism.
+//
+// It is the replacement for a sentence that claimed the remainder was zero. The
+// ARITY of the remainder is what changes: a universally quantified claim has
+// infinitely many counterexamples and every one of them is a falsification; a
+// written list has finitely many entries and every new shape is an addition.
+var guardBlindSpots = []guardBlindSpot{
+	{
+		id: "text-not-code",
+		mechanism: "the anchor matches the identifier wherever it stands IN THE TEXT; " +
+			"whether the browser ever executes that text is not a question a regular " +
+			"expression can ask",
+		measured: "a declaration living only in a /* */ block, only in an indented {/* */} " +
+			"JSX comment, only in a template literal, or only as JSX text inside a <pre> " +
+			"block each read ranges=6 err=nil with the real import standing beside it; " +
+			"String.raw, a regex literal and a ${...} interpolation measured the same",
+	},
+	{
+		id: "surrogate-interior",
+		mechanism: "the codepoint sweep skips U+D800..U+DFFF and asserts the surrogate set " +
+			"at its two endpoints only, and its server-side twin rawBodyRefusal is never " +
+			"called from here -- so for the 2046 codepoints between those endpoints " +
+			"nothing at all is compared",
+		measured: "TestBrowserRefusalSetEqualsTheServers puts every codepoint from 0 to " +
+			"0x10FFFF through NotRepresentableReason except 0xD800..0xDFFF, which it " +
+			"skips with a continue, and asserts refusedByBrowser at 0xD800 and 0xDFFF only",
+		rowless: "it is a property of the SWEEP and not of the reader, and the blindness " +
+			"tables drive the reader. Go cannot hold an unpaired surrogate in a string at " +
+			"all -- string(rune(0xD800)) is U+FFFD -- so no fixture can make a row measure it",
+	},
+}
+
+// honestClaim renders what this guard establishes OUT OF the list of what it
+// does not, so that the two cannot drift apart.
+//
+// Rendered and not written beside guardBlindSpots on purpose: two lists of
+// different lengths would themselves be a drift risk, which is precisely the
+// genus this file guards against.
+func honestClaim() string {
+	var b strings.Builder
+	b.WriteString("What this guard is, stated where it matters:\n")
+	b.WriteString("It is a regular expression over TEXT and not over a program. Its anchor " +
+		"binds to a LITERAL and not to the VALUE an expression around it produces, and to " +
+		"an IDENTIFIER and not to CODE the browser executes. Not finding the declaration " +
+		"means the anchor did not match this text; it does not mean the table is gone. " +
+		"Finding it does not mean the browser runs it.\n")
+	b.WriteString("What it therefore does not see:\n")
+	for _, spot := range guardBlindSpots {
+		b.WriteString(fmt.Sprintf("  - %s: %s\n    measured: %s\n", spot.id, spot.mechanism, spot.measured))
+		if spot.rowless != "" {
+			b.WriteString(fmt.Sprintf("    no row can measure this: %s\n", spot.rowless))
+		}
+	}
+	return b.String()
+}
+
 // TestBrowserRefusalSetEqualsTheServers is G-02-11's drift guard.
 //
 // It compares behaviour and not two declarations, which is what makes it a
@@ -127,7 +211,7 @@ var refusedRangesDecl = regexp.MustCompile(
 // let an operator enter, with no way to work around it, which quietly makes the
 // form the authority instead of the contract.
 func TestBrowserRefusalSetEqualsTheServers(t *testing.T) {
-	ranges := browserRefusalRanges(t)
+	ranges := browserRefusalRanges(t, imagesRoutePath)
 
 	refusedByBrowser := func(r rune) bool {
 		for _, each := range ranges {
@@ -226,7 +310,7 @@ func TestBrowserInstallerNamesEqualInstallerCandidates(t *testing.T) {
 	}
 }
 
-// browserRefusalRanges reads the declared table out of the route.
+// browserRefusalRanges reads the declared table out of a route.
 //
 // An empty result is a failure and not a skip. A guard that silently passes
 // when it can no longer find what it guards is worse than no guard: it reports
@@ -234,18 +318,25 @@ func TestBrowserInstallerNamesEqualInstallerCandidates(t *testing.T) {
 //
 // The reading itself is parseBrowserRefusalRanges, which takes a string and
 // returns an error instead of taking a *testing.T. That split is the whole
-// point of this round: a guard whose failure nothing checks is exactly the
+// point of that round: a guard whose failure nothing checks is exactly the
 // class of defect being closed here, and with t.Fatalf inside the reader its
 // failure cases cannot be tested at all. Only the file read and the fatal stay
 // on this side of the line.
-func browserRefusalRanges(t *testing.T) []declaredRange {
+//
+// The path is a parameter and there is no wrapper that hardcodes one. That is
+// the point of this signature and not a side effect of it: the blindness
+// tables drive exactly this function, readSource included, so a preprocessing
+// step somebody later slides between the file and the expression becomes
+// VISIBLE in them instead of passing beside them. A table whose anti-red
+// promise can be evaded by moving work to the caller promises nothing.
+func browserRefusalRanges(t *testing.T, path string) []declaredRange {
 	t.Helper()
 
-	ranges, err := parseBrowserRefusalRanges(readSource(t, imagesRoutePath))
+	ranges, err := parseBrowserRefusalRanges(readSource(t, path))
 	if err != nil {
 		// The reason lives in the error, which is where it is testable now.
 		// This says only which file was read.
-		t.Fatalf("%s: %v", imagesRoutePath, err)
+		t.Fatalf("%s: %v", path, err)
 	}
 	return ranges
 }
@@ -255,23 +346,29 @@ func browserRefusalRanges(t *testing.T) []declaredRange {
 // It is pure so that its failure cases are themselves testable; see
 // browserRefusalRanges for why that matters.
 //
-// It reads the declaration and not the file. Renamed, moved or deleted is the
-// same as never having been there, and other entry-shaped literals surviving
-// elsewhere in the file does not make it better -- that is precisely the state
-// round 4 measured as a green run.
+// It reads the declaration and not the file, and what it establishes is a
+// property of the TEXT it was handed -- nothing beyond that. What it does NOT
+// establish about the rest of that text is written down in guardBlindSpots,
+// mechanism by mechanism with its measured output, and rendered into the
+// no-anchor failure by honestClaim. Three verification rounds each falsified a
+// wider sentence that used to stand here; a regular expression over TypeScript
+// source has a remainder that does not go to zero, so the claim is cut to what
+// is measured and the remainder is written down instead of denied.
 func parseBrowserRefusalRanges(source string) ([]declaredRange, error) {
 	decls := refusedRangesDecl.FindAllStringSubmatch(source, -1)
 	if len(decls) == 0 {
+		// honestClaim is appended HERE and to no other exit. This is the exit at
+		// which the guard says it found nothing, so it is the one place a reader
+		// has to know what not-finding means here and what it does not.
 		return nil, fmt.Errorf("no %s declared as an array literal.\n"+
 			"The browser's set has to be data -- a named array of {from: 0x.., to: 0x..} "+
 			"entries -- so that this guard can compare it to the server's. A chain of "+
 			"comparisons inside an if is unreadable from here, and while it was one, the "+
-			"two sets drifted (G-02-11). Renamed, moved or deleted is the same as never "+
-			"having been there, and entry-shaped literals surviving elsewhere in the file "+
-			"do not make it better. A name that merely carries %s as a prefix -- "+
+			"two sets drifted (G-02-11). A name that merely carries %s as a prefix -- "+
 			"%s_LEGACY, %sX -- is a different name and does not satisfy this guard "+
-			"either; that leftover is what stays behind when the real table moves away",
-			refusedRangesName, refusedRangesName, refusedRangesName, refusedRangesName)
+			"either; that leftover is what stays behind when the real table moves away.\n\n%s",
+			refusedRangesName, refusedRangesName, refusedRangesName, refusedRangesName,
+			honestClaim())
 	}
 
 	// The guard does not choose, it requires uniqueness. Reading one of two
@@ -836,6 +933,197 @@ func TestBrowserRefusalGuardRefusesABoundItCannotRepresent(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// blindnessRow is one measured shape of one guardBlindSpot: a synthetic source
+// the guard READS although the browser would never run what it read.
+type blindnessRow struct {
+	// name is the subtest name. It describes the shape, not the mechanism -- the
+	// mechanism is named once, in guardBlindSpots.
+	name string
+	// blindSpot is the id of the guardBlindSpots entry this row measures.
+	// TestGuardBlindSpotsAreEachMeasured fails on an id no entry carries.
+	blindSpot string
+	// source is written into a file under t.TempDir() and read back through the
+	// live path. Never a copy of the real route: a copy would be a second
+	// transcription, and this file exists to stop transcriptions nothing checks.
+	source string
+	// wantRanges is what the guard reads out of source today. The number is part
+	// of the measurement: a row that only demanded err == nil would stay green
+	// over a guard that read a different set.
+	wantRanges int
+}
+
+// The real table's six entries, copied verbatim out of web/src/routes/images.tsx
+// so the measured range count is the one the real route produces. Copied and
+// not read: the fixtures describe damage cases, and a fixture that read the
+// real file would move with it and stop describing anything.
+//
+// The declaration lives ONLY inside a plain block comment. The anchor allows
+// leading whitespace and asks nothing about what encloses the line, so a
+// comment satisfies it exactly as well as code does. The real table is imported
+// from another module beside it AND used -- without the use this fixture would
+// be a TypeScript error rather than a damage case, and a guard passing over a
+// file that does not compile proves nothing.
+const declarationOnlyInABlockComment = `import { REFUSED_RANGES } from '../lib/refusal-table'
+
+export function hasControlCharacter(value: string): boolean {
+  for (const character of value) {
+    const code = character.codePointAt(0) ?? 0
+    if (REFUSED_RANGES.some((range) => code >= range.from && code <= range.to)) {
+      return true
+    }
+  }
+  return false
+}
+
+/*
+The table moved to ../lib/refusal-table. This copy stays so the classes are
+readable beside the form. It is a comment; nothing executes it.
+
+const REFUSED_RANGES: readonly RefusedRange[] = [
+  { from: 0x0000, to: 0x001f, class: 'control character' },
+  { from: 0x007f, to: 0x009f, class: 'control character' },
+  { from: 0xd800, to: 0xdfff, class: 'unpaired surrogate' },
+  { from: 0x2028, to: 0x2029, class: 'line separator' },
+  { from: 0xfeff, to: 0xfeff, class: 'byte order mark' },
+  { from: 0xfffe, to: 0x10ffff, class: 'above U+FFFD' },
+]
+*/
+`
+
+// textNotCodeRows measures the "text-not-code" mechanism.
+var textNotCodeRows = []blindnessRow{
+	{
+		name:       "a declaration surviving only in a block comment",
+		blindSpot:  "text-not-code",
+		source:     declarationOnlyInABlockComment,
+		wantRanges: 6,
+	},
+}
+
+// allBlindnessRows is every blindness table in one place, for the coverage test.
+// A table that is not listed here is a table the coverage test cannot see, so
+// adding a table means adding it here -- which is why there is one function and
+// not a literal repeated at each use.
+func allBlindnessRows() [][]blindnessRow {
+	return [][]blindnessRow{textNotCodeRows}
+}
+
+// runBlindnessRows drives one blindness table over the LIVE read path.
+//
+// It calls browserRefusalRanges, which is the same function
+// TestBrowserRefusalSetEqualsTheServers calls, readSource included. That is
+// deliberate and load-bearing: a preprocessing step somebody later inserts
+// between the file and the expression turns these rows RED instead of slipping
+// past them, which is the one thing that keeps their promise from being
+// evadable.
+//
+// A failure of the reader falls out of browserRefusalRanges's own t.Fatalf,
+// carrying the guard's message -- and under reversed acceptance that message
+// is the news, not the noise.
+func runBlindnessRows(t *testing.T, rows []blindnessRow) {
+	t.Helper()
+
+	for _, row := range rows {
+		t.Run(row.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "images.tsx")
+			if err := os.WriteFile(path, []byte(row.source), 0o600); err != nil {
+				t.Fatalf("writing the fixture: %v", err)
+			}
+
+			ranges := browserRefusalRanges(t, path)
+			if len(ranges) != row.wantRanges {
+				t.Fatalf("read %d ranges, want %d.\n"+
+					"This row records what the guard reads out of a source the browser "+
+					"would never run. A different count is a different blindness, not the "+
+					"one guardBlindSpots %q describes -- re-measure before changing the number.",
+					len(ranges), row.wantRanges, row.blindSpot)
+			}
+		})
+	}
+}
+
+// TestBrowserRefusalGuardBindsToAnIdentifierAndNotToCode measures the
+// text-not-code mechanism of guardBlindSpots, shape by shape.
+//
+// REVERSED ACCEPTANCE, and it needs its instruction written here rather than in
+// a planning document the next person will not read:
+//
+// A RED HERE MEANS THE BLINDNESS HAS ENDED. The right answer is then to delete
+// the row, delete its guardBlindSpots entry once no row measures it any more,
+// and record both in .planning/WINDOWS.md. NEVER soften the guard until this
+// row is green again -- a green bought that way is the exact defect this file
+// has been chasing since round 3, one level up.
+//
+// A separate table from the three falsification tables above, for the reason
+// TestBrowserRefusalGuardRefusesAnEntryItCannotRead already gives: each table's
+// acceptance pins the number of its rows, and that number only holds while the
+// tables stay apart.
+func TestBrowserRefusalGuardBindsToAnIdentifierAndNotToCode(t *testing.T) {
+	runBlindnessRows(t, textNotCodeRows)
+}
+
+// TestGuardBlindSpotsAreEachMeasured binds the written claim to the measured
+// rows, in BOTH directions.
+//
+// A listed mechanism no row measures is a claim without evidence. A row naming
+// a mechanism the list does not carry is evidence the claim does not mention.
+// Either way the honest text and the measured behaviour have come apart, and
+// two lists coming apart is the genus this whole file exists to catch.
+func TestGuardBlindSpotsAreEachMeasured(t *testing.T) {
+	measuredBy := map[string][]string{}
+	for _, rows := range allBlindnessRows() {
+		for _, row := range rows {
+			measuredBy[row.blindSpot] = append(measuredBy[row.blindSpot], row.name)
+		}
+	}
+
+	listed := map[string]bool{}
+	var rowless []string
+	for _, spot := range guardBlindSpots {
+		if listed[spot.id] {
+			t.Errorf("guardBlindSpots lists %q twice; an id is what a row refers to, "+
+				"so two entries under one id make the reference ambiguous", spot.id)
+		}
+		listed[spot.id] = true
+
+		if spot.rowless != "" {
+			rowless = append(rowless, spot.id)
+			if rows := measuredBy[spot.id]; len(rows) > 0 {
+				t.Errorf("guardBlindSpots marks %q as unmeasurable by a row, and %d rows "+
+					"measure it: %v.\nOne of the two is wrong: either the reason in "+
+					"rowless no longer holds and the field goes, or the rows measure "+
+					"something else and name the wrong id",
+					spot.id, len(rows), rows)
+			}
+			continue
+		}
+
+		if len(measuredBy[spot.id]) == 0 {
+			t.Errorf("guardBlindSpots lists %q and no blindness row measures it.\n"+
+				"A listed mechanism without a measured shape is a claim without evidence, "+
+				"which is the thing this list replaced. Add a row that measures it, or "+
+				"mark it rowless with the reason no row can.", spot.id)
+		}
+	}
+
+	for id, rows := range measuredBy {
+		if !listed[id] {
+			t.Errorf("blindness rows %v name the mechanism %q, and guardBlindSpots does "+
+				"not carry it.\nThe rendered claim in honestClaim therefore does not "+
+				"mention a blindness this file measures -- the guard would understate "+
+				"itself, which is the same defect as overstating it with the sign flipped.",
+				rows, id)
+		}
+	}
+
+	if len(rowless) != 1 || rowless[0] != "surrogate-interior" {
+		t.Errorf("guardBlindSpots carries %d rowless entries (%v), want exactly one, "+
+			"surrogate-interior.\nThe rowless field is the one exemption from being "+
+			"measured, and an exemption more than one entry can take is a hole a future "+
+			"entry escapes measurement through.", len(rowless), rowless)
 	}
 }
 
