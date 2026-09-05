@@ -4,16 +4,16 @@ milestone: v1.14
 current_phase: 02
 current_phase_name: Transport Seam, `talossim` & Image Factory
 status: executing
-stopped_at: Completed 02-30-PLAN.md
-last_updated: "2026-09-05T09:06:33.864Z"
+stopped_at: Completed 02-31-PLAN.md
+last_updated: "2026-09-05T09:42:36.209Z"
 last_activity: 2026-09-05
-last_activity_desc: Phase 02 Runde-6-Gap-Closure ausgefuehrt, Verifikation gaps_found
-state_head: bcbf36cb7f5384fd8df2adbb4269298448a30eb8
+last_activity_desc: Phase 02 Runde 7 vollstaendig ausgefuehrt (02-29/30/31); Ledger bei 58 open / 74 total, Verifikation weiterhin gaps_found
+state_head: 26c3ddbaa188ea0b561dcc0bc21c8406edb571f3
 progress:
   total_phases: 10
   completed_phases: 1
   total_plans: 37
-  completed_plans: 36
+  completed_plans: 37
 ---
 
 # Project State
@@ -28,9 +28,9 @@ See: .planning/PROJECT.md (updated 2026-08-27)
 ## Current Position
 
 Phase: 02 (Transport Seam, `talossim` & Image Factory) — EXECUTING
-Plan: 30 of 31
-Status: Wellen 1 und 2 der Runde 7 ausgefuehrt — 02-29 und 02-30 sind fertig. Der Entscheidungs-Checkpoint von 02-30 wurde **vom Betreiber an den autonomen Lauf delegiert** ("entscheide du", 2026-09-05), der Lauf hat **Variante B** gewaehlt; **der Betreiber hat B nicht ratifiziert**. Offen: 02-31, das die Register fuehrt (WINDOWS.md, REQUIREMENTS.md) und die Delegations-Formel statt einer Ratifikation eintraegt. Verifikation Runde 6 steht weiter auf gaps_found (16/19 must-haves)
-Last activity: 2026-09-05 — 02-30 ausgefuehrt: der allquantifizierte Satz ist aus Doc-Kommentar und Fehlertext verschwunden, `guardBlindSpots` fuehrt vier nach Mechanismus skopierte Eintraege als Daten, `honestClaim` rendert die Behauptung daraus, sieben Blindheitszeilen messen ueber den Live-Lesepfad, und Punkt 6 der Schliessbedingung ist einmal ausgefuehrt (kein Fund). **G-02-29 ist VERENGT, NICHT GESCHLOSSEN — der Defekt bleibt. G-02-9 bleibt offen.** Ledger unberuehrt bei 71 Eintraegen; der Betreiber hat fuer den Rest der Runde reduzierte Verifikationstiefe gewuenscht
+Plan: 31 of 31
+Status: Runde 7 ist vollstaendig ausgefuehrt — 02-29, 02-30 und 02-31 sind fertig. Der Entscheidungs-Checkpoint von 02-30 wurde **vom Betreiber an den autonomen Lauf delegiert** ("entscheide du", 2026-09-05), der Lauf hat **Variante B** gewaehlt; **der Betreiber hat B nicht ratifiziert** — 02-31 hat die Delegations-Formel woertlich in Ledger-Eintrag 72 und in einen angehaengten Nachtrag an `02-DECISION-drift-guard-lexik.md` getragen, dessen Statusblock unveraendert `offen — vorgelegt, nicht ratifiziert` liest. Naechster Schritt: Verifikationsrunde 8. Verifikation Runde 6 steht weiter auf gaps_found (16/19 must-haves)
+Last activity: 2026-09-05 — 02-31 ausgefuehrt: drei neue **offene** Ledger-Eintraege — 72 amendiert 70 (das bleibt offen und woertlich unveraendert) mit der sechspunktigen Schliessbedingung, ohne Zeilennummer, zeigt auf `refusedRangesDecl`; 73 der an der Quelle gelesene und an einer Kopie reproduzierte Defekt an `requirements revert-phase`, der dekorierte Id-Zellen still ueberspringt (Reichweite: alle 16 Release-Blocker-Zeilen des Registers); 74 die drei Geschwister-Leser, jeder einzeln gemessen, wobei die Messung dem Entscheidungsdokument beim Budget-Anker widerspricht. Die TRANS-06-Zeile liest wieder `Gaps Found` — alle vierzehn Phase-2-Zeilen, keine `Complete`. **G-02-29 ist VERENGT, NICHT GESCHLOSSEN. G-02-9 bleibt offen.** Ledger: 58 open / 0 waived / 16 fixed / 74 total, kein `fixed`, kein `waive`, kein `overrides:`
 
 Progress: [█░░░░░░░░░] 1 of 10 phases
 
@@ -94,6 +94,7 @@ Progress: [█░░░░░░░░░] 1 of 10 phases
 | Phase 02 P28 | 16 min | 3 tasks | 3 files |
 | Phase 02 P29 | 9 min | 3 tasks | 1 files |
 | Phase 02 P30 | 19 min | 3 tasks | 1 files |
+| Phase 02 P31 | 14 min | 3 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -198,6 +199,9 @@ Recent decisions affecting current work:
 - [Phase 02]: Kein versionsuebergreifender Refresh — er ist eine Schema-Aenderung — model.Schematic hat Platz fuer genau ein Verdikt. Ein Datensatz, der die Verdikte zweier Versionen halten soll, braucht dieselbe Aenderung, die Option B fuer die Architektur beschreibt; argumentiert im angehaengten Vermerk von 02-DECISION-schematic-identity.md, nicht in einem Guard.
 - [Phase 02]: Die Leer/Abschneide-Unterscheidung des Browser-Ablehnungs-Waechters laeuft ueber strings.TrimSpace(body); die Abschneide-Meldung zitiert den Rumpf und traegt keine Dateizaehlung mehr — Eine Groesse beantwortet eine Frage. whole beantwortete zwei und war fuer eine wirklich leere Deklaration falsch; IN-01 (zwei Fundorte fuer die Eintragszahl) entfaellt als gemessene Nebenwirkung
 - [Phase 02]: Der Drift-Waechter verlangt genau eine Deklaration von REFUSED_RANGES und nennt die Zahl, wenn er mehrere findet; die Pruefung greift vor dem Lesen des Rumpfes — Der Anker erlaubt fuehrenden Leerraum, also erfuellt ihn auch eine eingerueckte Zweitdeklaration; die erste schweigend zu nehmen heisst, ueber die andere Uebereinstimmung zu melden, ohne sie verglichen zu haben
+- [Phase 02]: Die Wahl zwischen Variante B und A wurde vom Betreiber am 2026-09-05 ausdruecklich an den autonomen Lauf delegiert; der Lauf hat B gewaehlt. Der Betreiber hat B nicht selbst ratifiziert — Ledger-Eintrag 72 und der Nachtrag an 02-DECISION-drift-guard-lexik.md tragen die Formulierung woertlich, und der Statusblock des Dokuments bleibt "offen — vorgelegt, nicht ratifiziert".
+- [Phase 02]: Ledger-Eintrag 70 bleibt open und woertlich unveraendert; Eintrag 72 amendiert ihn als neuer Eintrag. Die Divergenz zwischen 70s geschriebener Schliessbedingung (von Runde 6 erfuellt) und seinem tatsaechlichen Offen-Grund wird durch den Text von 72 behoben, nicht durch ein fixed an 70 — ein fixed waere formal dieselbe Bewegung, die 70 an 69 als Fehler benennt.
+- [Phase 02]: Der Werkzeugdefekt an requirements revert-phase wird nicht in der GSD-Laufzeit repariert: ~/.claude/gsd-core/ liegt ausserhalb dieses Repositories. Gemessen an einer Kopie, als Eintrag 73 geledgert, und die eine Statuszelle der TRANS-06-Zeile von Hand korrigiert — die Id-Zelle behaelt ihre Dekoration, weil sie zu entfernen die Release-Blocker-Auszeichnung beschaedigte.
 
 ### Pending Todos
 
@@ -230,6 +234,7 @@ Keine.
 - talossims ip_changes_on_reboot kappt beim Rebind bestehende Verbindungen, also erreicht die Reboot-Antwort den Aufrufer moeglicherweise nicht — talosctl reboot antwortet auf echter Hardware. Der Simulator ist damit schwerer zu erfuellen als Hardware (erlaubte Richtung), aber ein Phase-6-Job, der das als Fehlschlag liest, laege falsch. WINDOWS.md Eintrag 7.
 - Jeder Schematic-Satz, der vor Plan 02-13 gespeichert wurde, traegt dauerhaft eine leere Architektur und zeigt sein Urteil unqualifiziert — genau die Saetze, die waehrend des G-02-8-Lecks entstanden sind. Aus dem Satz laesst sich nichts rekonstruieren; lesbar werden sie nur durch Loeschen und Neuanlegen. WINDOWS.md Eintrag 21.
 - Die Authoring-UI (web/src/routes/images.tsx) lehnt jetzt weniger ab als der Server: ihr hasControlCharacter-Guard deckt nur Runen unter U+0020, U+007F und einzelne Surrogate ab, der Kommentar darueber behauptet aber weiterhin, representable vollstaendig abzuschreiben. Ein Emoji, ein BOM oder U+2028 im Kernel-Argument erfaehrt der Betreiber jetzt erst aus dem 400 des Servers. Verhalten sicher, Datei gehoert Plan 02-20. SUMMARY 02-14 Ledger-Eintrag 2.
+- ROADMAP.md Zeile 81 traegt zwei Zahlenangaben fuer die ausgefuehrten Plaene der Phase 2: eine vom Werkzeug gefuehrte und eine von Hand geschriebene, nachgestellte. Die nachgestellte driftet nach jeder Welle erneut (Runde 6 hat dieselbe Form als Regression gemeldet). Plan 02-31 hat sie auf 31/31 nachgezogen; ob sie von Hand gefuehrt oder ganz entfernt werden soll, ist offen.
 
 ## Deferred Items
 
@@ -241,6 +246,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-09-05T09:06:33.760Z
-Stopped at: Completed 02-30-PLAN.md
+Last session: 2026-09-05T09:42:25.738Z
+Stopped at: Completed 02-31-PLAN.md
 Resume file: None
