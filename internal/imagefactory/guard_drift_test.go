@@ -385,16 +385,36 @@ func parseBrowserRefusalRanges(source string) ([]declaredRange, error) {
 		// would reject these itself, but with `value out of range`, which names
 		// neither the entry, nor the set, nor the reason. Here the message is
 		// the point and not the abort, so the width stays wide enough to read
-		// the literal and the check below says what is wrong with it.
-		if to > utf8.MaxRune || from > to {
-			return nil, fmt.Errorf("this entry of %s has bounds this guard cannot represent: "+
-				"from 0x%s to 0x%s.\n"+
-				"The upper bound has to be at most utf8.MaxRune and the lower bound at most the "+
-				"upper. This guard compares SETS by sweeping every codepoint upwards from "+
-				"rune(0), and rune(uint64) is lossy: a bound above utf8.MaxRune lands on a "+
-				"negative rune, so such an entry covers no codepoint at all and is passed over. "+
-				"An entry it passes over is a codepoint it reports agreement about without "+
-				"having compared it -- the same reason the unreadable-entry check above gives",
+		// the literal and the checks below say what is wrong with it.
+		//
+		// Two checks and not one, because the two causes are not the same cause
+		// and a message that names the wrong one is worse than no message. The
+		// round that wrote `none of them claims another's` about the three
+		// causes above put these two into a single `to > utf8.MaxRune ||
+		// from > to` with a single text: for { from: 0x001f, to: 0x0000 } both
+		// bounds are perfectly representable, and the operator was told his
+		// value sits above utf8.MaxRune and went looking there. The test row
+		// that was supposed to catch that pinned the wrong wording instead --
+		// a check written against the message it happens to produce rather than
+		// against the cause it is named for.
+		if to > utf8.MaxRune {
+			return nil, fmt.Errorf("this entry of %s has an upper bound this guard cannot "+
+				"represent: from 0x%s to 0x%s.\n"+
+				"The upper bound has to be at most utf8.MaxRune. rune(uint64) is lossy -- a "+
+				"bound above utf8.MaxRune lands on a negative rune -- so such an entry covers "+
+				"no codepoint at all in a sweep from rune(0) upwards and is passed over. An "+
+				"entry it passes over is a codepoint it reports agreement about without having "+
+				"compared it -- the same reason the unreadable-entry check above gives",
+				refusedRangesName, m[1], m[2])
+		}
+		if from > to {
+			return nil, fmt.Errorf("this entry of %s is inverted: from 0x%s to 0x%s.\n"+
+				"Both bounds are representable and the entry still covers nothing, because the "+
+				"sweep runs upwards from rune(0) and never enters a range whose lower bound "+
+				"sits above its upper. Nothing was lost in conversion here; the two numbers are "+
+				"in the wrong order. An entry it passes over is a codepoint it reports "+
+				"agreement about without having compared it -- the same reason the "+
+				"unreadable-entry check above gives",
 				refusedRangesName, m[1], m[2])
 		}
 
@@ -518,12 +538,12 @@ const SOME_OTHER_TABLE: readonly RefusedRange[] = [
 		{
 			name:    "the declaration renamed out of existence",
 			source:  renamed,
-			wantErr: []string{"REFUSED_RANGES"},
+			wantErr: []string{"no REFUSED_RANGES declared as an array literal"},
 		},
 		{
 			name:    "the declaration absent",
 			source:  absent,
-			wantErr: []string{"REFUSED_RANGES"},
+			wantErr: []string{"no REFUSED_RANGES declared as an array literal"},
 		},
 		{
 			name:    "an entry-shaped literal outside the declaration",
@@ -531,9 +551,12 @@ const SOME_OTHER_TABLE: readonly RefusedRange[] = [
 			wantErr: []string{"1 entries inside the REFUSED_RANGES declaration, 2 in the source as a whole"},
 		},
 		{
-			name:    "the declaration renamed to a prefixed name",
-			source:  prefixed,
-			wantErr: []string{"REFUSED_RANGES"},
+			name:   "the declaration renamed to a prefixed name",
+			source: prefixed,
+			wantErr: []string{
+				"no REFUSED_RANGES declared as an array literal",
+				"A name that merely carries REFUSED_RANGES as a prefix",
+			},
 		},
 		{
 			name:   "the body cut short by a bracket in a comment",
@@ -695,17 +718,17 @@ func TestBrowserRefusalGuardRefusesABoundItCannotRepresent(t *testing.T) {
 		{
 			name:    "an upper bound outside Unicode",
 			source:  upperOutsideUnicode,
-			wantErr: []string{"from 0x0000 to 0xFFFFFFFF", "cannot represent"},
+			wantErr: []string{"from 0x0000 to 0xFFFFFFFF", "has an upper bound this guard cannot represent"},
 		},
 		{
 			name:    "a real lower bound with an unrepresentable upper",
 			source:  realLowerUnrepresentableUpper,
-			wantErr: []string{"from 0x0061 to 0xFFFFFFFF", "cannot represent"},
+			wantErr: []string{"from 0x0061 to 0xFFFFFFFF", "has an upper bound this guard cannot represent"},
 		},
 		{
 			name:    "an inverted range",
 			source:  inverted,
-			wantErr: []string{"from 0x001f to 0x0000", "cannot represent"},
+			wantErr: []string{"from 0x001f to 0x0000", "is inverted"},
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
