@@ -224,9 +224,9 @@ func honestClaim() string {
 		"Finding it does not mean the browser runs it.\n")
 	b.WriteString("What it therefore does not see:\n")
 	for _, spot := range guardBlindSpots {
-		b.WriteString(fmt.Sprintf("  - %s: %s\n    measured: %s\n", spot.id, spot.mechanism, spot.measured))
+		fmt.Fprintf(&b, "  - %s: %s\n    measured: %s\n", spot.id, spot.mechanism, spot.measured)
 		if spot.rowless != "" {
-			b.WriteString(fmt.Sprintf("    no row can measure this: %s\n", spot.rowless))
+			fmt.Fprintf(&b, "    no row can measure this: %s\n", spot.rowless)
 		}
 	}
 	return b.String()
