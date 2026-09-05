@@ -91,9 +91,13 @@ const refusedRangesName = "REFUSED_RANGES"
 // That sentence was not true for a body cut short BEFORE its first entry: with
 // no entry left inside, the empty branch was reached first and reported the
 // declaration as empty, which round 5 measured against a declaration carrying
-// six of them. The whole-source count is now taken before that branch, so the
-// cut-short case carries its own message and the count check keeps the one it
-// can still explain.
+// six of them. The two are told apart by the SHAPE of the captured body --
+// empty once whitespace is removed, or carrying text no entry can be read from
+// -- so the cut-short case carries its own message and quotes the body it read,
+// while the count check keeps the one question it can answer on its own. Round
+// 6 borrowed the whole-source count for that separation instead, which is the
+// defect this replaces: a count over the file cannot see where the entries it
+// counted are.
 // refusedRangesEntry matches one flat object literal inside the declaration
 // body, whatever it is made of.
 //
@@ -290,35 +294,50 @@ func parseBrowserRefusalRanges(source string) ([]declaredRange, error) {
 
 	matches := browserRefusalRange.FindAllStringSubmatch(body, -1)
 
-	// Counted before the empty branch and not after it, because the empty
-	// branch needs the number to tell its two causes apart. While it was
-	// computed afterwards, a body cut short BEFORE its first entry reached the
-	// empty branch first and was reported as the declaration being empty --
-	// round 5 measured exactly that against a declaration carrying six entries.
-	// Fail closed, but a reader who follows the message looks in the wrong
-	// place.
-	whole := len(browserRefusalRange.FindAllString(source, -1))
-
-	// With the count in hand the three causes are three messages, and none of
-	// them claims another's: the readability loop above catches an unreadable
-	// entry INSIDE the declaration, this branch catches the body being cut off
+	// Three causes, three messages, and none of them claims another's: the
+	// readability loop above catches an unreadable entry INSIDE the
+	// declaration, this branch catches an empty declaration and a body cut off
 	// BEFORE the first entry, and the count check below catches an entry-shaped
 	// literal OUTSIDE the declaration.
-	if len(matches) == 0 && whole > 0 {
-		return nil, fmt.Errorf("the %s declaration body was cut short before its first entry, "+
-			"but %d entries are present in the source as a whole.\n"+
-			"The declaration is NOT empty. The body is captured non-greedily up to the first "+
-			"closing bracket, so a `]` inside a comment or a string before the first entry ends "+
-			"the capture there and nothing readable is left inside it. Look for that bracket, "+
-			"not for a missing table",
-			refusedRangesName, whole)
-	}
+	//
+	// The quantity that separates the two causes inside this branch is the
+	// SHAPE OF THE BODY and not a count over the file. Round 6 used the
+	// whole-source count for it, and a count over the file cannot see where the
+	// entries it counted are: a declaration that is literally `= []`, standing
+	// anywhere near a second entry-shaped table, was reported as cut short and
+	// the reader was sent after a bracket that does not exist. A property of
+	// the declaration is the only thing that can answer a question about the
+	// declaration.
+	//
+	// What the trim leaves behind, said here rather than in a footnote: a body
+	// made of nothing but a comment is not empty to TrimSpace, so it takes the
+	// cut-short branch although nothing was cut. That is the same genus of
+	// defect inside the change meant to remove it. It is smaller -- the message
+	// SHOWS with %q the body it read instead of asserting "the declaration is
+	// NOT empty", which was never established but merely inferred -- and it is
+	// not nothing. The row `a body carrying only a comment` pins it so it stays
+	// measured rather than remembered.
 	if len(matches) == 0 {
-		return nil, fmt.Errorf("%s is declared but carries no entries this guard can read.\n"+
-			"This is the declaration being empty, not the declaration being absent; "+
-			"the two are separate failures because they call for separate fixes",
-			refusedRangesName)
+		if strings.TrimSpace(body) == "" {
+			return nil, fmt.Errorf("%s is declared but carries no entries this guard can read.\n"+
+				"This is the declaration being empty, not the declaration being absent; "+
+				"the two are separate failures because they call for separate fixes",
+				refusedRangesName)
+		}
+		return nil, fmt.Errorf("the %s declaration body was cut short before its first entry.\n"+
+			"The captured body is %q -- it carries text, and no entry this guard can read. The "+
+			"body is captured non-greedily up to the first closing bracket, so a `]` inside a "+
+			"comment or a string before the first entry ends the capture there. Look for that "+
+			"bracket in the body quoted above, not for a missing table",
+			refusedRangesName, body)
 	}
+
+	// Counted here, at its one remaining use, and answering exactly one
+	// question: does an entry-shaped literal sit OUTSIDE the declaration. Round
+	// 6 had this same number answer a second one -- was the body cut short --
+	// and borrowing it was what made the answer wrong for a declaration that
+	// really was empty. One quantity, one question.
+	whole := len(browserRefusalRange.FindAllString(source, -1))
 
 	// The pollution direction, and the truncation direction that leaves entries
 	// inside the body, in one comparison. An entry-shaped literal outside the
@@ -453,10 +472,42 @@ const SOME_OTHER_TABLE: readonly RefusedRange[] = [
 ]
 `
 
+	// A declaration that is literally empty, with a second entry-shaped table
+	// beside it. Round 6 made the whole-source count the quantity that tells
+	// "empty" from "cut short" apart, and a count over the file cannot see
+	// where the entries it counted are: measured, this source produced
+	// `cut short before its first entry, but 1 entries are present in the
+	// source as a whole` -- the instruction to look for a bracket that does
+	// not exist, while the actual cause (somebody emptied the table) does not
+	// appear in the text at all. The difference to `truncated` above is the
+	// whole point: there the bracket is really there, here there is none.
+	// SOME_OTHER_TABLE is the same second table the `polluted` row already
+	// carries as realistic.
+	const emptyBesideASecondTable = `const REFUSED_RANGES: readonly RefusedRange[] = []
+
+const SOME_OTHER_TABLE: readonly RefusedRange[] = [
+  { from: 0x2028, to: 0x2029, class: 'line separator' },
+]
+`
+
+	// The remainder the body-shape distinction leaves behind, pinned rather
+	// than mentioned in a footnote. A body made of nothing but a comment is not
+	// empty to strings.TrimSpace, so it takes the cut-short branch although
+	// nothing was cut -- the same genus of defect inside the change that
+	// removes that genus. It is kept, and kept measured, because the new
+	// message SHOWS the body it read instead of asserting a property it never
+	// established: a reader sees "\n  // nothing yet\n" and needs no further
+	// explanation of what the guard found. Today this source reaches the empty
+	// branch instead, because no entry-shaped literal exists anywhere in it.
+	const commentOnlyBody = `const REFUSED_RANGES: readonly RefusedRange[] = [
+  // nothing yet
+]
+`
+
 	for _, tc := range []struct {
 		name       string
 		source     string
-		wantErr    string
+		wantErr    []string
 		wantRanges int
 	}{
 		{
@@ -467,33 +518,51 @@ const SOME_OTHER_TABLE: readonly RefusedRange[] = [
 		{
 			name:    "the declaration renamed out of existence",
 			source:  renamed,
-			wantErr: "REFUSED_RANGES",
+			wantErr: []string{"REFUSED_RANGES"},
 		},
 		{
 			name:    "the declaration absent",
 			source:  absent,
-			wantErr: "REFUSED_RANGES",
+			wantErr: []string{"REFUSED_RANGES"},
 		},
 		{
 			name:    "an entry-shaped literal outside the declaration",
 			source:  polluted,
-			wantErr: "1 entries inside the REFUSED_RANGES declaration, 2 in the source as a whole",
+			wantErr: []string{"1 entries inside the REFUSED_RANGES declaration, 2 in the source as a whole"},
 		},
 		{
 			name:    "the declaration renamed to a prefixed name",
 			source:  prefixed,
-			wantErr: "REFUSED_RANGES",
+			wantErr: []string{"REFUSED_RANGES"},
 		},
 		{
-			name:    "the body cut short by a bracket in a comment",
-			source:  truncated,
-			wantErr: "cut short before its first entry, but 2 entries are present in the source as a whole",
+			name:   "the body cut short by a bracket in a comment",
+			source: truncated,
+			wantErr: []string{
+				"cut short before its first entry",
+				`"\n  // see the table in RefusedRange["`,
+			},
+		},
+		{
+			name:   "a genuinely empty declaration beside a second table",
+			source: emptyBesideASecondTable,
+			wantErr: []string{
+				"REFUSED_RANGES is declared but carries no entries this guard can read",
+			},
+		},
+		{
+			name:   "a body carrying only a comment",
+			source: commentOnlyBody,
+			wantErr: []string{
+				"cut short before its first entry",
+				`"\n  // nothing yet\n"`,
+			},
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ranges, err := parseBrowserRefusalRanges(tc.source)
 
-			if tc.wantErr == "" {
+			if len(tc.wantErr) == 0 {
 				if err != nil {
 					t.Fatalf("unexpected error: %v", err)
 				}
@@ -508,8 +577,10 @@ const SOME_OTHER_TABLE: readonly RefusedRange[] = [
 					"A guard that reports a pass here reports agreement it never "+
 					"checked -- the property round 4 measured as absent.", len(ranges))
 			}
-			if !strings.Contains(err.Error(), tc.wantErr) {
-				t.Errorf("error does not name %q:\n%v", tc.wantErr, err)
+			for _, want := range tc.wantErr {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("error does not name %q:\n%v", want, err)
+				}
 			}
 		})
 	}
