@@ -370,3 +370,10 @@ Keine — dieser Plan aendert eine Testdatei und spricht mit keinem externen Die
 ---
 *Phase: 02-transport-seam-talossim-image-factory*
 *Completed: 2026-09-05*
+
+## Self-Check: PASSED
+
+- `internal/imagefactory/guard_drift_test.go` liegt auf der Platte.
+- `.planning/phases/02-transport-seam-talossim-image-factory/02-29-SUMMARY.md` liegt auf der Platte.
+- Die vier Commits `de04482`, `58dd247`, `abdd918`, `634d444` sind in `git log --oneline --all` auffindbar.
+- Alle Abnahmekriterien der drei Tasks und die Verifikation auf Plan-Ebene wurden nach dem letzten Task erneut gefahren und sind gruen (siehe Abschnitt Messungen).
