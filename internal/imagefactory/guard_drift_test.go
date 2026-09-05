@@ -159,6 +159,25 @@ var guardBlindSpots = []guardBlindSpot{
 			"String.raw, a regex literal and a ${...} interpolation measured the same",
 	},
 	{
+		id: "literal-not-value",
+		mechanism: "the anchor binds to the array LITERAL, while the form uses the VALUE " +
+			"the expression around that literal produces -- a filter, a slice or a spread " +
+			"between the two is invisible from here",
+		measured: "].filter((r) => r.class !== 'byte order mark') behind the literal reads " +
+			"ranges=6 err=nil while the form accepts U+FEFF again and the server keeps " +
+			"answering 400; [...REFUSED_RANGES, ...PLATFORM_RANGES] as the table the form " +
+			"really uses reads ranges=6 err=nil over a set the form does not use",
+	},
+	{
+		id: "declaration-not-use",
+		mechanism: "the anchor binds to the DECLARATION and not to the call site that makes " +
+			"it live; images.tsx has exactly one living reference to the table, and a table " +
+			"nothing calls is a well-formed, compiling, agreeing corpse",
+		measured: "an indented leftover declaration inside a function, beside the real " +
+			"table's import from another module, reads ranges=2 err=nil -- with no slash, " +
+			"backtick or quote anywhere in the shape",
+	},
+	{
 		id: "surrogate-interior",
 		mechanism: "the codepoint sweep skips U+D800..U+DFFF and asserts the surrogate set " +
 			"at its two endpoints only, and its server-side twin rawBodyRefusal is never " +
@@ -1001,6 +1020,24 @@ var textNotCodeRows = []blindnessRow{
 		source:     declarationOnlyInABlockComment,
 		wantRanges: 6,
 	},
+	{
+		name:       "a declaration surviving only in an indented JSX comment",
+		blindSpot:  "text-not-code",
+		source:     declarationOnlyInAnIndentedJSXComment,
+		wantRanges: 6,
+	},
+	{
+		name:       "a declaration surviving only in a template literal",
+		blindSpot:  "text-not-code",
+		source:     declarationOnlyInATemplateLiteral,
+		wantRanges: 6,
+	},
+	{
+		name:       "a declaration surviving only as JSX text in a pre block",
+		blindSpot:  "text-not-code",
+		source:     declarationOnlyAsJSXTextInAPreBlock,
+		wantRanges: 6,
+	},
 }
 
 // allBlindnessRows is every blindness table in one place, for the coverage test.
@@ -1008,7 +1045,7 @@ var textNotCodeRows = []blindnessRow{
 // adding a table means adding it here -- which is why there is one function and
 // not a literal repeated at each use.
 func allBlindnessRows() [][]blindnessRow {
-	return [][]blindnessRow{textNotCodeRows}
+	return [][]blindnessRow{textNotCodeRows, literalNotValueRows}
 }
 
 // runBlindnessRows drives one blindness table over the LIVE read path.
@@ -1043,6 +1080,218 @@ func runBlindnessRows(t *testing.T, rows []blindnessRow) {
 			}
 		})
 	}
+}
+
+// The declaration lives ONLY inside an indented {/* */} JSX comment. Indented
+// on purpose: the anchor starts at a line beginning followed by whitespace, so
+// indentation satisfies it -- and this comment form is established convention in
+// the real route, which carries five of them.
+const declarationOnlyInAnIndentedJSXComment = `import { REFUSED_RANGES } from '../lib/refusal-table'
+
+function refused(code: number): boolean {
+  return REFUSED_RANGES.some((range) => code >= range.from && code <= range.to)
+}
+
+export function SchematicNameField() {
+  return (
+    <div>
+      {/*
+      const REFUSED_RANGES: readonly RefusedRange[] = [
+      { from: 0x0000, to: 0x001f, class: 'control character' },
+      { from: 0x007f, to: 0x009f, class: 'control character' },
+      { from: 0xd800, to: 0xdfff, class: 'unpaired surrogate' },
+      { from: 0x2028, to: 0x2029, class: 'line separator' },
+      { from: 0xfeff, to: 0xfeff, class: 'byte order mark' },
+      { from: 0xfffe, to: 0x10ffff, class: 'above U+FFFD' },
+      ]
+      */}
+      <input onChange={(event) => refused(event.target.value.codePointAt(0) ?? 0)} />
+    </div>
+  )
+}
+`
+
+// The declaration lives ONLY inside a template literal, kept as documentation
+// beside the form.
+//
+// Written as an interpreted string with \n escapes and not as a raw string: the
+// fixture carries backticks, and a backtick inside a Go raw string would end it.
+// A backtick has no special meaning inside an interpreted string, so this is the
+// form that survives.
+const declarationOnlyInATemplateLiteral = "import { REFUSED_RANGES } from '../lib/refusal-table'\n" +
+	"\n" +
+	"export const REFUSAL_TABLE_DOC = `\n" +
+	"const REFUSED_RANGES: readonly RefusedRange[] = [\n" +
+	"{ from: 0x0000, to: 0x001f, class: 'control character' },\n" +
+	"  { from: 0x007f, to: 0x009f, class: 'control character' },\n" +
+	"  { from: 0xd800, to: 0xdfff, class: 'unpaired surrogate' },\n" +
+	"  { from: 0x2028, to: 0x2029, class: 'line separator' },\n" +
+	"  { from: 0xfeff, to: 0xfeff, class: 'byte order mark' },\n" +
+	"  { from: 0xfffe, to: 0x10ffff, class: 'above U+FFFD' },\n" +
+	"]\n" +
+	"`\n" +
+	"\n" +
+	"export function refused(code: number): boolean {\n" +
+	"  return REFUSED_RANGES.some((range) => code >= range.from && code <= range.to)\n" +
+	"}\n" +
+	"\n"
+
+// The declaration lives ONLY inside a <pre> block in the rendered help.
+//
+// Its children are a template literal and not raw JSX text, and that is a
+// correction to this plan's own fixture sketch rather than a convenience: in
+// TSX an unescaped { in JSX children opens an expression container, so a table
+// of { from: 0x.., to: 0x.. } entries as literal JSX text is a syntax error, not
+// a damage case. A fixture that does not compile proves nothing about a guard,
+// and the plan's own acceptance criterion says no fixture may be a mere
+// TypeScript error. The mechanism measured is unchanged -- the anchor sees text
+// the browser renders as characters on a page.
+const declarationOnlyAsJSXTextInAPreBlock = "import { REFUSED_RANGES } from '../lib/refusal-table'\n" +
+	"\n" +
+	"export function RefusalTableHelp() {\n" +
+	"  return (\n" +
+	"    <pre>{`\n" +
+	"const REFUSED_RANGES: readonly RefusedRange[] = [\n" +
+	"  { from: 0x0000, to: 0x001f, class: 'control character' },\n" +
+	"  { from: 0x007f, to: 0x009f, class: 'control character' },\n" +
+	"  { from: 0xd800, to: 0xdfff, class: 'unpaired surrogate' },\n" +
+	"  { from: 0x2028, to: 0x2029, class: 'line separator' },\n" +
+	"  { from: 0xfeff, to: 0xfeff, class: 'byte order mark' },\n" +
+	"  { from: 0xfffe, to: 0x10ffff, class: 'above U+FFFD' },\n" +
+	"]\n" +
+	"`}</pre>\n" +
+	"  )\n" +
+	"}\n" +
+	"\n" +
+	"export function refused(code: number): boolean {\n" +
+	"  return REFUSED_RANGES.some((range) => code >= range.from && code <= range.to)\n" +
+	"}\n"
+
+// The literal is real, complete and correct, and a filter sits between it and
+// the binding. The guard reads six ranges and reports agreement; the form
+// accepts U+FEFF again while the server keeps answering 400 to it.
+//
+// This is the dangerous direction and the reason the list is scoped by
+// mechanism: it is GREEN ON REAL DRIFT, on living, compiling, referenced code,
+// with no comment, string or template anywhere in it. A list of comment forms
+// would be closeable to the letter while this stayed open and unledgered.
+const literalFilteredBeforeItIsBound = `const REFUSED_RANGES: readonly RefusedRange[] = [
+  { from: 0x0000, to: 0x001f, class: 'control character' },
+  { from: 0x007f, to: 0x009f, class: 'control character' },
+  { from: 0xd800, to: 0xdfff, class: 'unpaired surrogate' },
+  { from: 0x2028, to: 0x2029, class: 'line separator' },
+  { from: 0xfeff, to: 0xfeff, class: 'byte order mark' },
+  { from: 0xfffe, to: 0x10ffff, class: 'above U+FFFD' },
+].filter((range) => range.class !== 'byte order mark')
+
+export function hasControlCharacter(value: string): boolean {
+  for (const character of value) {
+    const code = character.codePointAt(0) ?? 0
+    if (REFUSED_RANGES.some((range) => code >= range.from && code <= range.to)) {
+      return true
+    }
+  }
+  return false
+}
+`
+
+// The declaration is real and the form uses a different value: a spread of it
+// together with a derived table. The guard reads the six it can see and reports
+// agreement about a set the form does not consult.
+//
+// PLATFORM_RANGES is derived from a call rather than written as literals on
+// purpose -- entry-shaped literals outside the declaration are a case this guard
+// already reports, and this row is about the case it does not.
+const literalSpreadIntoTheTableTheFormUses = `const REFUSED_RANGES: readonly RefusedRange[] = [
+  { from: 0x0000, to: 0x001f, class: 'control character' },
+  { from: 0x007f, to: 0x009f, class: 'control character' },
+  { from: 0xd800, to: 0xdfff, class: 'unpaired surrogate' },
+  { from: 0x2028, to: 0x2029, class: 'line separator' },
+  { from: 0xfeff, to: 0xfeff, class: 'byte order mark' },
+  { from: 0xfffe, to: 0x10ffff, class: 'above U+FFFD' },
+]
+
+const PLATFORM_RANGES: readonly RefusedRange[] = platformRefusals()
+
+const ALL_REFUSED = [...REFUSED_RANGES, ...PLATFORM_RANGES]
+
+export function hasControlCharacter(value: string): boolean {
+  for (const character of value) {
+    const code = character.codePointAt(0) ?? 0
+    if (ALL_REFUSED.some((range) => code >= range.from && code <= range.to)) {
+      return true
+    }
+  }
+  return false
+}
+`
+
+// The real table moved into another module and is imported and used; an
+// indented leftover declaration stayed behind inside a function. The guard binds
+// to the declaration and not to the call site, so it reads the leftover.
+//
+// TWO ranges and not six, and the shorter number IS the damage: the guard would
+// then compare a two-entry set against the server's six and report on a table
+// the form never consults. No slash, backtick or quote is involved anywhere in
+// this shape -- a list of comment forms would not name it.
+const indentedLeftoverDeclaration = `import { REFUSED_RANGES } from '../lib/refusal-table'
+
+export function hasControlCharacter(value: string): boolean {
+  for (const character of value) {
+    const code = character.codePointAt(0) ?? 0
+    if (REFUSED_RANGES.some((range) => code >= range.from && code <= range.to)) {
+      return true
+    }
+  }
+  return false
+}
+
+export function legacyRefusal(code: number): boolean {
+  const REFUSED_RANGES: readonly RefusedRange[] = [
+    { from: 0x0000, to: 0x001f, class: 'control character' },
+    { from: 0xfeff, to: 0xfeff, class: 'byte order mark' },
+  ]
+  return REFUSED_RANGES.some((range) => code >= range.from && code <= range.to)
+}
+`
+
+// literalNotValueRows measures the "literal-not-value" and
+// "declaration-not-use" mechanisms.
+//
+// A table of its own, for the reason every table in this file gives: each
+// table's acceptance pins the number of its rows, and that number only holds
+// while the tables stay apart.
+var literalNotValueRows = []blindnessRow{
+	{
+		name:       "a declaration whose literal is filtered before it is bound",
+		blindSpot:  "literal-not-value",
+		source:     literalFilteredBeforeItIsBound,
+		wantRanges: 6,
+	},
+	{
+		name:       "a declaration spread into the table the form really uses",
+		blindSpot:  "literal-not-value",
+		source:     literalSpreadIntoTheTableTheFormUses,
+		wantRanges: 6,
+	},
+	{
+		name:       "an indented leftover declaration beside the real table's import",
+		blindSpot:  "declaration-not-use",
+		source:     indentedLeftoverDeclaration,
+		wantRanges: 2,
+	},
+}
+
+// TestBrowserRefusalGuardBindsToALiteralAndNotToTheValueTheFormUses measures the
+// two mechanisms that need no comment, no string and no template at all.
+//
+// REVERSED ACCEPTANCE, same instruction as the table above:
+//
+// A RED HERE MEANS THE BLINDNESS HAS ENDED. Delete the row, delete its
+// guardBlindSpots entry once nothing measures it, and record both in
+// .planning/WINDOWS.md. NEVER soften the guard to make this row green again.
+func TestBrowserRefusalGuardBindsToALiteralAndNotToTheValueTheFormUses(t *testing.T) {
+	runBlindnessRows(t, literalNotValueRows)
 }
 
 // TestBrowserRefusalGuardBindsToAnIdentifierAndNotToCode measures the
