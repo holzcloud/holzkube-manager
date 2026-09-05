@@ -221,7 +221,7 @@ Requirements mit **🚫** sind Release-Blocker.
 | TRANS-03 | Phase 2 | Gaps Found |
 | TRANS-04 | Phase 2 | Gaps Found |
 | TRANS-05 | Phase 2 | Gaps Found |
-| **TRANS-06** 🚫 | Phase 2 | Complete |
+| **TRANS-06** 🚫 | Phase 2 | Gaps Found |
 | TRANS-07 | Phase 2 | Gaps Found |
 | TRANS-08 | Phase 3 | Pending |
 | FACT-01 | Phase 2 | Gaps Found |
