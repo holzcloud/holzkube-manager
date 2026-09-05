@@ -147,6 +147,22 @@ type guardBlindSpot struct {
 // ARITY of the remainder is what changes: a universally quantified claim has
 // infinitely many counterexamples and every one of them is a falsification; a
 // written list has finitely many entries and every new shape is an addition.
+//
+// The list was ATTACKED once when it was written, and the attempt is recorded
+// here rather than only in a planning document, because an unrecorded attempt
+// cannot be told apart from an omitted one. Six shapes were put through the
+// shipped reader looking for one it reads that this list does not name:
+// String.raw, a regex literal and a ${...} interpolation were each READ
+// (ranges=6 err=nil) and are shapes of text-not-code, so no finding; an object
+// property and a re-export were correctly refused with "no REFUSED_RANGES
+// declared as an array literal"; two declarations with an indented inner one
+// first were refused with "2 declarations of REFUSED_RANGES in this source",
+// which is plan 02-29's check -- and that shape WAS a finding when this attempt
+// was first run while planning, and was fixed rather than listed.
+//
+// No shape was found that this list does not name. That is not a closure: an
+// attempt that only asks after the shapes already known would close itself. The
+// round that closes the ledger entry for this blindness has to run it again.
 var guardBlindSpots = []guardBlindSpot{
 	{
 		id: "text-not-code",
