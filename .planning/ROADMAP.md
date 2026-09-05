@@ -16,7 +16,7 @@ holzkube wächst von unten nach oben, aber mit einem frühen Loch durch alle Sch
 Decimal phases appear between their surrounding integers in numeric order.
 
 - [x] **Phase 1: Foundation Skeleton** - Store, Audit, Auth, HTTPS, Single Binary mit embedded UI — ohne jede Talos-Abhängigkeit (completed 2026-08-28)
-- [ ] **Phase 2: Transport Seam, `talossim` & Image Factory** - Die Naht zu Talos plus der Fake, gegen den alles Weitere getestet wird (BLOCKING)
+- [x] **Phase 2: Transport Seam, `talossim` & Image Factory** - Die Naht zu Talos plus der Fake, gegen den alles Weitere getestet wird (BLOCKING) (completed 2026-09-05)
 - [ ] **Phase 3: Inventar, Cluster-Import & Health** - Der bestehende Cluster wird importiert; das Inventar bleibt ehrlich, auch wenn alles tot ist
 - [ ] **Phase 4: Walking Skeleton (Wegwerf)** - Der hässliche End-to-End-Weg gegen QEMU, um die vier gefährlichsten Unbekannten zu entschärfen
 - [ ] **Phase 5: Streaming** - Live-Logs und `dmesg` über eine multiplexte SSE-Verbindung (DESIGNIERTE SCHNITTLINIE)
@@ -441,7 +441,7 @@ Phasen laufen in numerischer Reihenfolge: 1 → 2 → 3 → 4 → 5 → 6 → 7 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Foundation Skeleton | 6/6 | Complete    | 2026-08-28 |
-| 2. Transport Seam, `talossim` & Image Factory | 31/31 | In Progress|  |
+| 2. Transport Seam, `talossim` & Image Factory | 31/31 | Complete    | 2026-09-05 |
 | 3. Inventar, Cluster-Import & Health | 0/TBD | Not started | - |
 | 4. Walking Skeleton (Wegwerf) | 0/TBD | Not started | - |
 | 5. Streaming | 0/TBD | Not started | - |
