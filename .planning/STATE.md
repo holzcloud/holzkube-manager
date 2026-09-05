@@ -29,7 +29,7 @@ See: .planning/PROJECT.md (updated 2026-08-27)
 
 Phase: 02 (Transport Seam, `talossim` & Image Factory) — EXECUTING
 Plan: 28 of 31
-Status: Runde-7-Gap-Closure geplant (02-29, 02-30, 02-31 in drei Wellen) — Verifikation Runde 6 steht auf gaps_found (16/19 must-haves)
+Status: Runde-7-Gap-Closure geplant (02-29, 02-30, 02-31 in drei Wellen; **02-30 ist `autonomous: false`** und oeffnet mit einem blockierenden Entscheidungs-Checkpoint Variante B gegen A) — Verifikation Runde 6 steht auf gaps_found (16/19 must-haves)
 Last activity: 2026-09-05 — Runde-7-Gap-Closure geplant auf `02-DECISION-drift-guard-lexik.md` (Variante B, **nicht ratifiziert**); 02-29 ist richtungsunabhaengig, 02-30 haengt an der Richtung, 02-31 fuehrt die Register
 
 Progress: [█░░░░░░░░░] 1 of 10 phases
