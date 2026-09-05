@@ -1,528 +1,873 @@
 ---
 phase: 02-transport-seam-talossim-image-factory
-reviewed: 2026-09-04T20:15:00Z
+reviewed: 2026-09-05T12:00:00Z
 depth: standard
-scope: gap-closure round 6 (Plaene 02-27 und 02-28, diff base 78b2fe2)
-files_reviewed: 2
+scope: gap-closure round 7 (Plaene 02-29, 02-30 und 02-31, diff base a42387d)
+files_reviewed: 1
 files_reviewed_list:
   - internal/imagefactory/guard_drift_test.go
-  - internal/httpapi/handlers/schematics.go
 findings:
   critical: 0
-  warning: 5
-  info: 5
-  total: 10
+  warning: 12
+  info: 7
+  total: 19
 status: issues_found
 ---
 
-# Phase 02: Code Review Report (Runde 6, Plaene 02-27 und 02-28)
+# Phase 02: Code Review Report (Runde 7, Plaene 02-29 / 02-30 / 02-31)
 
-**Reviewed:** 2026-09-04
+**Reviewed:** 2026-09-05
 **Depth:** standard
-**Diff base:** `78b2fe2` (+211/−9 ueber zwei Dateien)
-**Files Reviewed:** 2
+**Diff base:** `a42387d` (+820/−83 in einer Datei)
+**Files Reviewed:** 1
 **Status:** issues_found
+
+## Methode
+
+Alle Aussagen unten sind gemessen, nicht erschlossen. Ausserhalb des Repositories
+liegt ein eigenstaendiges Go-Programm, das `browserRefusalRange`,
+`refusedRangesName`, `refusedRangesEntry`, `refusedRangesDecl`, `guardBlindSpots`,
+`honestClaim` und `parseBrowserRefusalRanges` **zeilenweise** aus
+`guard_drift_test.go` uebernimmt (`sed -n`-Auszuege, kein Nachbau). Kontrolle: gegen
+die echte `web/src/routes/images.tsx` liefert es
+
+```
+ranges=6 [{0 31} {127 159} {55296 57343} {8232 8233} {65279 65279} {65534 1114111}] err=nil
+```
+
+also genau das, was 02-29-SUMMARY als Messung gegen die echte Route fuehrt.
+23 synthetische Quellen wurden dagegen gefahren. `git status --porcelain` ist leer;
+`web/src/routes/images.tsx` wurde nicht angefasst.
 
 ## Summary
 
-### Was die vier Befunde der Runde 5 betrifft — einzeln beurteilt
+### Die fuenf Befunde der Runde 6 — einzeln beurteilt
 
-**WR-01 (Anker bindet an ein Namenspraefix): fuer Praefix-Erweiterungen
-geschlossen, als allquantifizierte Eigenschaft nicht.** Ich habe den neuen Anker
-gegen eine nachgebaute Fassung von `parseBrowserRefusalRanges` gefahren.
-`REFUSED_RANGES_LEGACY` liefert jetzt `err != nil` statt `ranges=[{0 0}]`; die
-Verengung wirkt genau dort, wo Runde 5 gemessen hat. Sie wirkt aber nur gegen
-*diese eine* Form von Leftover. Ein `REFUSED_RANGES`, das nur noch in einem
-`/* ... */`-Block oder in einem Template-Literal steht, erfuellt den Anker
-weiterhin und liefert `ranges=[{0 31}] err=<nil>` (WR-01, gemessen). Der Satz,
-den der Plan seiner eigenen Fehlermeldung neu hinzugefuegt hat — "that leftover
-is what stays behind when the real table moves away" — beschreibt damit
-weiterhin nicht alle Leftovers, die stehenbleiben.
+**WR-01 (Anker bindet an ein Namenspraefix / lexikalischer Rest): als Anspruch
+geschlossen, als Defekt bewusst nicht.** `grep -c 'Renamed, moved or deleted'`
+liefert 0. Der allquantifizierte Satz ist aus Doc-Kommentar und Fehlertext
+verschwunden und durch `guardBlindSpots` + `honestClaim` ersetzt. Das ist die
+richtige Antwort auf den Befund, und sie ist sauber gebaut: Liste als Daten, Text
+gerendert statt danebengeschrieben, Zeilen mit umgekehrter Abnahme, Abdeckungstest
+in beide Richtungen. **Die Frage dieser Runde ist damit eine neue: deckt sich die
+geschriebene Blindheit mit der tatsaechlichen?** Sie tut es nicht, in beide
+Richtungen (WR-01 bis WR-05 unten).
 
-**WR-02 (`]` im Kommentar erzeugt die falsche Diagnose): geschlossen, mit einem
-neuen Spiegel-Defekt.** Die gemessene Fehlausgabe der Runde 5 ist weg; der
-`truncated`-Testfall belegt sie rot-vor-gruen. Der Preis ist, dass der
-Leer-Zweig jetzt in der gespiegelten Lage falsch meldet: eine *tatsaechlich
-leere* Deklaration in einer Datei, die irgendwo sonst ein eintragsfoermiges
-Literal traegt, bekommt "the declaration body was cut short before its first
-entry" und die Anweisung "Look for that bracket" — nach einer Klammer, die es
-nicht gibt (WR-02, gemessen). Eine falsche Ursache ist gegen eine andere
-getauscht, nicht beseitigt.
+**WR-02 (Spiegel-Defekt: `whole` ueber die ganze Datei): geschlossen, gemessen.**
+Der Runde-6-Fall — `= []` neben einer zweiten eintragsfoermigen Tabelle — liefert
+jetzt
 
-**WR-03 (Bounds werden nicht validiert): geschlossen.** `to > utf8.MaxRune ||
-from > to` steht vor dem `append`, alle drei in Runde 5 gemessenen Werte
-erreichen den Sweep nicht mehr, und die drei Tabellenzeilen pruefen die
-gelesenen Grenzen als Teilzeichenketten der Meldung statt nur den Fehlschlag.
-Der Grenzfall stimmt: `{ from: 0xfffe, to: 0x10ffff }` aus der echten
-`images.tsx` wird nicht faelschlich abgelehnt. Zwei Reste: die Meldung nennt
-fuer die invertierte Range die falsche Ursache (WR-03), und die Begruendung
-fuer `ParseUint(..., 16, 32)` gilt nicht fuer Literale mit mehr als acht
-Hexziffern (IN-02).
+```
+ERR: REFUSED_RANGES is declared but carries no entries this guard can read.
+This is the declaration being empty, not the declaration being absent; ...
+```
 
-**WR-07 (`createSchematic` sagt "the two conditions"): geschlossen.**
-`schematics.go:458` sagt "the three conditions". Der Sweep aus 02-28
-(`grep -rn 'refreshTheStoredVerdict' ... | grep -c '\btwo\b'`) ergibt bei mir
-`0`, nachgemessen. Das ist die gesamte Aenderung an dieser Datei in dieser
-Runde, und sie ist korrekt.
+also die Leer-Diagnose und nicht mehr die Klammer-Anweisung. `whole` wird erst
+unmittelbar vor seiner einen Verwendung berechnet (Zeile 498) und beantwortet eine
+Frage. Der von 02-29 selbst benannte Rest (`commentOnlyBody`) ist gepinnt — aber der
+Kommentar an genau dieser Stelle widerspricht sich selbst (WR-11).
 
-### Was diese Runde neu eingebracht hat
+**WR-03 (eine Meldung fuer zwei Ursachen): geschlossen.** Zwei Zweige (Zeile 558
+und 568), `grep MaxRune` im Inversions-Zweig liefert 0, die drei Zeilen der
+Bound-Tabelle pinnen unterscheidende Teilzeichenketten. Die echte Route mit
+`{0xfffe, 0x10ffff}` wird nicht falsch-rot.
 
-Der Schwerpunkt bleibt der Waechter. Die zentrale Eigenschaft der Phase — *ein
-Waechter meldet einen Durchlauf nur, wenn er die Eigenschaft, nach der er
-benannt ist, wirklich gemessen hat* — ist nach dieser Runde enger, aber nicht
-hergestellt. Drei der fuenf Warnings betreffen sie unmittelbar: der
-Kommentar-Leftover kommt weiterhin durch (WR-01), die neue Testzeile fuer die
-praefixierende Umbenennung ist trivial erfuellbar, weil **jede** der sechs
-Fehlermeldungen dieser Funktion die Zeichenkette `REFUSED_RANGES` traegt und die
-Zeile genau diese als `wantErr` prueft (WR-04) — das ist woertlich die Regel,
-die `02-27-SUMMARY.md` unter `key-decisions` fuer die Bound-Meldung selbst
-aufgestellt und hier nicht angewendet hat — und die Bound-Meldung erklaert einen
-ihrer beiden Faelle mit der Ursache des anderen (WR-03).
+**WR-04 (`prefixed`-Zeile trivial erfuellt): geschlossen.**
+`grep 'wantErr: []string{"REFUSED_RANGES"}'` liefert 0 Treffer; alle drei Zeilen
+pinnen jetzt `"no REFUSED_RANGES declared as an array literal"` bzw.
+`"A name that merely carries REFUSED_RANGES as a prefix"`. Die Fail-first-Ersatz-
+Messung in 02-29-SUMMARY ist plausibel und passt zum Endstand.
 
-Dazu WR-05: der Doc-Kommentar, der die ganze inhaltliche Begruendung dieser
-Runde traegt, haengt weiterhin am falschen Symbol — und diese Runde hat ihm 25
-Zeilen hinzugefuegt, ohne die fehlende Leerzeile zu setzen. Runde 5 hat das als
-WR-05 festgehalten; der Plan hat in genau diesen Block hineingeschrieben.
+**WR-05 (Doc-Block am falschen Symbol): geschlossen.** Zeile 58 dokumentiert
+`refusedRangesEntry`, Zeile 69 `refusedRangesDecl`, mit Leerzeile dazwischen.
 
-**Kein Critical.** Die Aenderungen dieser Runde beruehren den Produktivpfad mit
-einer einzigen Kommentarzeile. Es gibt kein falsches Laufzeitverhalten, keine
-Datenverlustgefahr und keine Sicherheitsluecke. Die Warnings sind
-Waechter-Zuverlaessigkeit und Diagnose-Wahrheit, was in dieser Phase
-ausdruecklich in Scope ist.
+### Was diese Runde neu eingebracht hat, und wo sie sich verrechnet
+
+Die zentrale Eigenschaft der Phase heisst jetzt: *die geschriebene Blindheitsliste
+deckt sich mit der tatsaechlichen Blindheit.* Sie ist verletzt, und zwar in beiden
+Vorzeichen — das eine davon ist die Defektklasse dieser Phase mit umgedrehtem
+Vorzeichen und in dieser Runde neu.
+
+**Unterbehauptung (der Waechter ist blind, die Liste nennt es nicht):** Gemessen,
+`ranges=6 err=nil` auf lebendem, referenziertem Code —
+
+- ein **auskommentierter Eintrag INNERHALB einer lebenden Deklaration** (WR-01).
+  Der Waechter liest sechs Bereiche, das Formular wendet fuenf an. Das ist woertlich
+  der G-02-11-Schaden, auf dem realistischsten Weg, den es gibt: jemand nimmt einen
+  Bereich voruebergehend heraus.
+- **das Zugehoerigkeitspraedikat und jedes Entry-Feld ausser `from`/`to`** (WR-02).
+  `code > r.from && code < r.to` liest `ranges=6 err=nil`; `!REFUSED_RANGES.some(...)`
+  ebenso; ein `enabled: false`-Feld, das das Formular auswertet, ebenso.
+
+Beide sind weder `text-not-code` (der Mechanismus spricht ausdruecklich vom Anker
+und vom Bezeichner, und alle vier gemessenen Auspraegungen sind Deklarationen, die
+ganz in einem Kommentar stehen) noch `literal-not-value` (zwischen Literal und
+Bindung steht nichts) noch `declaration-not-use` (die Tabelle wird benutzt).
+
+**Ueberbehauptung (die Liste nennt eine Blindheit, die der Waechter nicht hat):**
+`text-not-code` sagt *"the anchor matches the identifier wherever it stands IN THE
+TEXT"*. Gemessen: eine Deklaration in einem `//`-Zeilenkommentar und eine in einem
+einzeiligen String werden **korrekt abgelehnt** (WR-03). `honestClaim` traegt
+denselben zu breiten Satz in jede Kein-Anker-Meldung.
+
+**Belege, die etwas anderes belegen als sie sagen:** `guardBlindSpots[0].measured`
+nennt *"only as JSX text inside a <pre> block"*; die Fixture traegt ein
+Template-Literal in einem `<pre>` (WR-04) — 02-30 hat das im Fixture-Kommentar
+korrekt festgehalten und im `measured`-Text nicht nachgezogen. Zwei weitere
+Belegsaetze werden von ihren eigenen Fixtures widerlegt: *"with no slash, backtick
+or quote anywhere in the shape"* ueber eine Fixture, die `from '../lib/refusal-table'`
+enthaelt, und *"living, compiling, referenced code, with no comment, string or
+template anywhere in it"* ueber eine Fixture mit `class: 'control character'`, die
+ausserdem nicht kompiliert (WR-05, WR-06).
+
+**Kein Critical.** Diese Runde aendert eine Testdatei; kein Produktivpfad, kein
+Laufzeitverhalten, keine Datenverlustgefahr, keine Angriffsflaeche. Die Warnings
+sind Waechter-Zuverlaessigkeit und Wahrhaftigkeit der Diagnose, was in dieser Phase
+ausdruecklich in Scope ist. Das ist dieselbe Einordnung wie in Runde 6.
+
+### Die zwei konkret nachgeprueften Punkte aus dem Auftrag
+
+**Duplikatspruefung:** greift, mit eigener Ursache, vor jeder Rumpfpruefung. Ein
+eingerueckter innerer `const REFUSED_RANGES` vor der echten Tabelle liefert
+`2 declarations of REFUSED_RANGES in this source`. Die echte `images.tsx` hat genau
+einen Ankertreffer (gemessen: `ranges=6 err=nil`, also `len(decls) == 1`), die
+Pruefung kann dort nicht falsch-rot werden. **Nebenwirkung, ungenannt:** dieselbe
+Pruefung wird jetzt rot, wenn die alte Tabelle als Blockkommentar stehenbleibt und
+die neue daneben steht (WR-08).
+
+**02-30s selbstgemeldete Abweichung (eine statt zwei Funktionen, die die Route
+lesen):** die geschuetzte Eigenschaft haelt. `browserRefusalRanges(t, path)` nimmt
+den Pfad als Parameter, es gibt keinen Wrapper mit hartkodiertem Pfad, und die
+02-30 gemessene Rot-Ausgabe zeigt, dass eine Vorverarbeitung in diesem Pfad die
+Blindheitszeilen rot faerbt. Der zweite Leser ist die Runde-4-Zeile `the real
+route`, die `readSource` direkt aufruft; sie kann keine Vorverarbeitung verbergen,
+weil sie keine Zwischenschicht ist (Rest als IN-07).
 
 ### Nicht erneut verhandelt
 
-WR-04 (Surrogate-Bereich nur an seinen Endpunkten geprueft), WR-06
-(`versionMismatchReason` ohne Leerwert-Zweig) und IN-01…IN-04, IN-05, IN-07 der
-Runde 5 sind vom Diff nicht beruehrt und bleiben unveraendert offen. IN-06 der
-Runde 5 ("1 entries") ist beruehrt: die neue Abschneide-Meldung erzeugt einen
-zweiten Fundort desselben Fehlers, deshalb steht er hier als IN-01.
-
-Eine Beobachtung ausserhalb der Datei-Scope: `.planning/WINDOWS.md` Eintrag 70,
-von 02-28 angelegt, verweist auf `internal/imagefactory/guard_drift_test.go`
-Zeile **83**. Der Anker, den der Eintrag beschreibt, steht nach 02-27 in den
-Zeilen 108–110; Zeile 83 liegt mitten in einem Kommentarabsatz. Der Eintrag
-wurde nach 02-27 geschrieben und traegt die Zeilennummer von davor.
+`IN-02` (Begruendung fuer `ParseUint(..., 16, 32)`), `IN-03` (mehrzeilige
+Annotation und `let` -> "keine Deklaration") und `IN-04` (`0x10FFFF` gegen
+`utf8.MaxRune`) der Runde 6 sind unveraendert und stehen laut 02-29-SUMMARY unter
+einer Policy-Entscheidung des Betreibers. Ich habe sie nachgemessen und fuehre sie
+als IN-05 zusammengefasst weiter, ohne neue Argumente. `IN-01` der Runde 6 ist
+tatsaechlich entfallen. `IN-05` der Runde 6 (`WINDOWS.md` Zeilennummer) ist laut
+02-31 behoben; `.planning/` liegt ausserhalb des Datei-Scope dieses Reviews.
 
 ## Narrative Findings (AI reviewer)
 
 ## Warnings
 
-### WR-01: Ein `REFUSED_RANGES` in einem Blockkommentar oder Template-Literal erfuellt den Anker weiterhin — der Waechter meldet Zustimmung ueber eine Tabelle, die der Browser nie ausfuehrt
+### WR-01: Ein auskommentierter Eintrag INNERHALB einer lebenden Deklaration wird als lebend gelesen — und kein Mechanismus der Liste nennt das
 
-**File:** `internal/imagefactory/guard_drift_test.go:108-110`, Anspruch bei `265-270`
+**File:** `internal/imagefactory/guard_drift_test.go:167-176` (der Mechanismus), Ausgang bei `498-513`
 
-**Issue:** Der neue Anker ist
-
-```go
-`(?ms)^\s*(?:export\s+)?const\s+` + regexp.QuoteMeta(refusedRangesName) +
-	`\s*(?::[^=\n]*)?=\s*\[(.*?)\]`
-```
-
-Er verlangt `:` oder `=` hinter dem Namen — das schliesst die praefixierende
-Umbenennung aus, und das wirkt. Was er nach wie vor nicht verlangt, ist, dass
-die getroffene Zeile ausfuehrbarer TypeScript-Code ist. `^\s*` steht mit `(?m)`
-am Zeilenanfang und kennt weder Blockkommentare noch Zeichenketten. Gemessen
-gegen eine byteweise nachgebaute Fassung der Funktion:
-
-```
-A1 block-commented-out decl only        ranges=[{0 31}] err=<nil>
-A10 decl inside a template literal      ranges=[{0 31}] err=<nil>
-```
-
-Die Quelle von A1 war:
+**Issue:** Gemessen gegen den ausgelieferten Leser:
 
 ```ts
-/*
+const REFUSED_RANGES: readonly RefusedRange[] = [
+  { from: 0x0000, to: 0x001f, class: 'control character' },
+  { from: 0x007f, to: 0x009f, class: 'control character' },
+  { from: 0xd800, to: 0xdfff, class: 'unpaired surrogate' },
+  { from: 0x2028, to: 0x2029, class: 'line separator' },
+  // Temporarily relaxed while the Factory ticket is open:
+  // { from: 0xfeff, to: 0xfeff, class: 'byte order mark' },
+  { from: 0xfffe, to: 0x10ffff, class: 'above U+FFFD' },
+]
+```
+
+```
+ranges=6 [{0 31} {127 159} {55296 57343} {8232 8233} {65279 65279} {65534 1114111}] err=nil
+```
+
+Der Waechter liest **sechs** Bereiche, das Formular wendet **fuenf** an. U+FEFF wird
+vom Browser wieder angenommen, der Server antwortet weiter 400 — der Schaden, fuer
+den `TestBrowserRefusalSetEqualsTheServers` geschrieben wurde, und der Waechter
+bleibt gruen. Der Zaehlcheck faengt es nicht: der auskommentierte Eintrag liegt
+INNERHALB des Rumpfes, also sind `matches` und `whole` beide 6.
+
+Kein Eintrag der Liste nennt diesen Mechanismus. `text-not-code` ist ausdruecklich
+in Begriffen des Ankers und des Bezeichners formuliert (*"the anchor matches the
+identifier"*), und alle vier gemessenen Auspraegungen sind **Deklarationen, die
+ganz in einem Kommentar stehen** — die Fixtures heissen woertlich
+`declarationOnlyInABlockComment`, `declarationOnlyInAnIndentedJSXComment`,
+`declarationOnlyInATemplateLiteral`, `declarationOnlyAsJSXTextInAPreBlock`. Eine
+lebende Deklaration mit einem toten Eintrag ist keine Auspraegung davon.
+`literal-not-value` trifft nicht (zwischen Literal und Bindung steht nichts),
+`declaration-not-use` trifft nicht (die Tabelle wird benutzt).
+
+Der Doc-Kommentar von `guardBlindSpots` (Zeile 152-165) protokolliert einen
+Punkt-6-Versuch mit sechs Formen. Alle sechs fragen nach der **Deklaration**; keine
+nach dem **Eintrag**. Der Versuch hat die Ebene nicht gewechselt, auf der der Anker
+seine zweite Bindung hat.
+
+**Fix:** Entweder einen fuenften Eintrag mit eigenem Mechanismus aufnehmen, etwa
+
+```go
+{
+	id: "entry-text-not-entry",
+	mechanism: "the entry pattern reads every {from: 0x.., to: 0x..} SHAPE inside the " +
+		"captured body; whether that shape is an entry of the array or a line the " +
+		"browser never evaluates is the same question one level down from text-not-code",
+	measured: "a live declaration with one entry commented out inside it reads " +
+		"ranges=6 err=nil while the form applies five -- the count check cannot see " +
+		"it because the dead entry lies inside the body and is counted in both numbers",
+},
+```
+
+samt einer messenden Zeile in `textNotCodeRows` (die Fixture oben, `wantRanges: 6`)
+— oder den Mechanismus von `text-not-code` so umformulieren, dass er die
+Eintragsebene mitnimmt, und eine Zeile dieser Form ergaenzen. Ohne eine der beiden
+Aenderungen behauptet `honestClaim` eine Vollstaendigkeit, die nicht besteht.
+
+### WR-02: Das Zugehoerigkeitspraedikat und jedes Entry-Feld ausser `from`/`to` werden angenommen, nie gelesen — und stehen in keinem Mechanismus
+
+**File:** `internal/imagefactory/guard_drift_test.go:251-258` (die Annahme), `166-209` (die Liste)
+
+**Issue:** `refusedByBrowser` in `TestBrowserRefusalSetEqualsTheServers` ist
+
+```go
+if r >= each.from && r <= each.to {
+```
+
+Das ist eine **Annahme** darueber, wie das Formular seine Tabelle auswertet. Nichts
+liest sie aus der Quelle. Drei Messungen, alle `err=nil`, alle auf lebendem,
+referenziertem Code:
+
+| Quelle | gemessen |
+|---|---|
+| `REFUSED_RANGES.some((r) => code > r.from && code < r.to)` (exklusiv) | `ranges=6 err=nil` |
+| `!REFUSED_RANGES.some((r) => code >= r.from && code <= r.to)` (negiert) | `ranges=1 err=nil` |
+| Entry mit `enabled: false`, Formular prueft `r.enabled && ...` | `ranges=6 err=nil` |
+
+Im ersten Fall lehnt der Browser U+0000 und U+001F nicht mehr ab, obwohl die Tabelle
+sie fuehrt; der Server antwortet 400. Im dritten laesst das Formular U+FEFF durch.
+Der Waechter meldet in beiden Faellen Uebereinstimmung mit der Servermenge.
+
+Der Test heisst `TestBrowserRefusalSetEqualsTheServers`. Was er vergleicht, ist die
+Servermenge gegen eine Menge, die er aus zwei Feldern **rekonstruiert**, unter einer
+Semantik, die er selbst mitbringt. `honestClaim` sagt dazu nichts. Die naechste
+Formulierung von `literal-not-value` — *"a filter, a slice or a spread between the
+two"* — beschreibt Ausdruecke **um** das Literal herum, nicht die Auswertung der
+Elemente an der Verwendungsstelle.
+
+**Fix:** Ein eigener Eintrag, mit einer messenden Zeile pro Auspraegung:
+
+```go
+{
+	id: "fields-not-predicate",
+	mechanism: "the reader takes from and to out of each entry and the sweep supplies " +
+		"the membership test itself (r >= from && r <= to); the comparison the form " +
+		"actually performs, and every entry field the form consults besides those two, " +
+		"are never read",
+	measured: "code > r.from && code < r.to reads ranges=6 err=nil while the browser " +
+		"stops refusing both endpoints of every range; an entry field enabled: false " +
+		"that the form honours reads ranges=6 err=nil over a set the form applies with five",
+},
+```
+
+Die billige Teilverschaerfung — die eine Zeile, an der das Formular vergleicht, per
+Ausdruck an die erwartete Form binden — schliesst den Fall nicht, macht ihn aber
+teurer; sie gehoert dann ihrerseits gemessen und nicht behauptet.
+
+### WR-03: `text-not-code` behauptet eine Blindheit, die der Waechter nicht hat — `//`-Zeilenkommentar und einzeiliger String werden korrekt abgelehnt
+
+**File:** `internal/imagefactory/guard_drift_test.go:169-171`, gerendert bei `220-224`
+
+**Issue:** Der Mechanismus sagt
+
+```
+"the anchor matches the identifier wherever it stands IN THE TEXT"
+```
+
+Das ist zu breit. `refusedRangesDecl` verlangt `(?m)^\s*(?:export\s+)?const\s+` —
+also einen Zeilenanfang, gefolgt nur von Leerraum. Gemessen:
+
+```ts
+import { REFUSED_RANGES } from '../lib/refusal-table'
+
+// const REFUSED_RANGES: readonly RefusedRange[] = [{ from: 0x0000, to: 0x001f, class: 'c' }]
+```
+
+```
+ERR: no REFUSED_RANGES declared as an array literal.
+```
+
+Ebenso eine Deklaration in einem einzeiligen String-Literal
+(`const DOC = 'see: const REFUSED_RANGES ... = [{ ... }]'`) — abgelehnt. Der
+Waechter ist in beiden Faellen **nicht** blind; die Liste fuehrt sie trotzdem als
+Loch, und `honestClaim` schreibt denselben zu breiten Satz in jede
+Kein-Anker-Meldung: *"Its anchor binds ... to an IDENTIFIER and not to CODE the
+browser executes"*.
+
+Das ist genau die Defektklasse, die diese Runde beseitigen soll, mit umgedrehtem
+Vorzeichen: ein Satz, der breiter ist als die Messung. Er wirkt in die andere
+Richtung — er macht den Waechter schlechter, als er ist — aber die Regel dieser
+Datei lautet nicht "nicht ueberschaetzen", sondern "nicht behaupten, was nicht
+gemessen ist".
+
+**Fix:** Den Mechanismus an die Ankerform binden, statt an "den Text":
+
+```go
+mechanism: "the anchor matches an identifier that OPENS A LINE, whatever encloses " +
+	"that line; a block comment, a JSX comment and a template literal satisfy it as " +
+	"well as code does. Whether the browser executes that line is not a question a " +
+	"regular expression can ask. A // line comment does NOT satisfy it, because the " +
+	"slashes stand where the anchor requires whitespace -- that is a limit of the " +
+	"anchor and not a second blindness",
+```
+
+und den Satz in `honestClaim` entsprechend verengen. Alternativ eine Zeile mit
+umgekehrter Abnahme fuer den `//`-Fall aufnehmen — dann waere gemessen, dass er
+abgelehnt wird, und die Grenze der Blindheit stuende in einer Tabelle statt in Prosa.
+
+### WR-04: `measured` nennt eine Auspraegung, die die Fixture nicht traegt — "JSX text inside a `<pre>` block" ist ein Template-Literal
+
+**File:** `internal/imagefactory/guard_drift_test.go:172-176` gegen `1155-1184`, Zeilenname bei `1052-1055`
+
+**Issue:** Der Belegtext sagt
+
+```
+"a declaration living only in a /* */ block, only in an indented {/* */} JSX comment,
+ only in a template literal, or only as JSX text inside a <pre> block each read ranges=6"
+```
+
+Die vierte Fixture ist
+
+```
+"    <pre>{`\n" +
+"const REFUSED_RANGES: readonly RefusedRange[] = [\n" +
+...
+"`}</pre>\n" +
+```
+
+also ein **Template-Literal in einem Ausdrucks-Container**, nicht JSX-Text. Der
+Fixture-Kommentar (Zeile 1157-1164) sagt das ausdruecklich und begruendet es
+richtig: eine Tabelle aus `{ from: … }`-Eintraegen als roher JSX-Textknoten ist in
+TSX ein Syntaxfehler, weil `{` einen Ausdrucks-Container oeffnet. 02-30 hat das als
+Deviation 1 protokolliert — und den `measured`-Text und den Zeilennamen
+(`a declaration surviving only as JSX text in a pre block`) nicht nachgezogen.
+
+Folge: von den vier aufgezaehlten Auspraegungen sind drei und vier **dieselbe
+Form** (Deklaration in einem Template-Literal). Die Liste zaehlt vier Belege und
+traegt drei. Und der einzige Ort, an dem der Widerspruch aufgeloest ist, ist ein
+Kommentar 900 Zeilen weiter unten — der Text, den `honestClaim` einem Leser in die
+Fehlermeldung schreibt, traegt die falsche Angabe.
+
+**Fix:** Beides an die Fixture anpassen:
+
+```go
+measured: "a declaration living only in a /* */ block, only in an indented {/* */} " +
+	"JSX comment, or only in a template literal -- including one rendered inside a " +
+	"<pre> block -- each read ranges=6 err=nil with the real import standing beside " +
+	"it; String.raw, a regex literal and a ${...} interpolation measured the same. A " +
+	"table as raw JSX text is not among them: in TSX an unescaped { opens an " +
+	"expression container, so that shape does not compile and is no damage case",
+```
+
+und den Zeilennamen auf `a declaration surviving only in a template literal inside a
+pre block` ziehen. Der `blindnessRow`-Doc sagt selbst: *"name is the subtest name.
+It describes the shape"*.
+
+### WR-05: Zwei Belegsaetze werden von ihren eigenen Fixtures widerlegt
+
+**File:** `internal/imagefactory/guard_drift_test.go:193-194` gegen `1253-1272`, und `1191-1193` gegen `1194-1212`
+
+**Issue:** Erstens, `declaration-not-use`:
+
+```
+"reads ranges=2 err=nil -- with no slash, backtick or quote anywhere in the shape"
+```
+
+Die Fixture `indentedLeftoverDeclaration` beginnt mit
+
+```ts
+import { REFUSED_RANGES } from '../lib/refusal-table'
+```
+
+— zwei Schraegstriche und zwei Anfuehrungszeichen in der ersten Zeile, dazu
+`class: 'control character'` in jedem Eintrag.
+
+Zweitens, der Kommentar an `literalFilteredBeforeItIsBound`:
+
+```
+// it is GREEN ON REAL DRIFT, on living, compiling, referenced code,
+// with no comment, string or template anywhere in it.
+```
+
+Die Fixture traegt `class: 'control character'`, `class: 'byte order mark'` und
+`range.class !== 'byte order mark'` — drei String-Literale — und sie kompiliert
+nicht (siehe WR-06).
+
+Die Absicht ist in beiden Faellen erkennbar: gemeint ist "kein Kommentar, String
+oder Template, **der die Deklaration traegt**". Geschrieben steht etwas anderes, und
+zwar in einer Datei, deren erklaerter Zweck es ist, dass ein Satz nicht breiter ist
+als seine Messung. Der erste der beiden steht ausserdem in `guardBlindSpots` und
+wird damit von `honestClaim` in Fehlermeldungen ausgegeben.
+
+**Fix:** Beide Saetze auf das einschraenken, was gilt: `-- and no comment, string or
+template CARRIES the declaration here; the shape is ordinary code` bzw.
+`with nothing that carries the table standing in a comment, a string or a template`.
+
+### WR-06: Drei der sieben Blindheits-Fixtures sind blosse TypeScript-Fehler — genau das Kriterium, mit dem 02-30 die `<pre>`-Fixture umgeschrieben hat
+
+**File:** `internal/imagefactory/guard_drift_test.go:1194`, `1221`, `1253`
+
+**Issue:** 02-30 Deviation 1 begruendet die Aenderung der `<pre>`-Fixture damit,
+dass *"ein Abnahmekriterium desselben Plans verlangt, dass keine Fixture ein blosser
+TypeScript-Fehler ist"* — *"a fixture that does not compile proves nothing about a
+guard"*. Dieselbe Regel ist bei drei anderen Fixtures nicht angewandt:
+
+| Fixture | undefinierte Bezeichner |
+|---|---|
+| `literalFilteredBeforeItIsBound` (1194) | `RefusedRange` |
+| `literalSpreadIntoTheTableTheFormUses` (1221) | `RefusedRange`, `platformRefusals` |
+| `indentedLeftoverDeclaration` (1253) | `RefusedRange` |
+
+Keine der drei deklariert oder importiert `type RefusedRange`. Die vier
+`text-not-code`-Fixtures sind sauber (dort steht `RefusedRange` nur innerhalb des
+Kommentars bzw. des Template-Literals). Betroffen sind ausgerechnet die drei Zeilen,
+die das Argument dieser Runde tragen — `literalFilteredBeforeItIsBound` ist im
+Kommentar als *"the dangerous direction"* und als *"GREEN ON REAL DRIFT, on living,
+**compiling**, referenced code"* bezeichnet.
+
+Erschwerend: nichts im Repository typprueft diese Fixtures. Sie sind Go-Strings; die
+Regel ist unerzwungen und wird deshalb weiter driften.
+
+**Fix:** Jeder Fixture, die eine Typannotation benutzt, die Typzeile voranstellen
+(so wie `renamed` bei Zeile 602 es bereits tut) und `platformRefusals` importieren
+oder deklarieren:
+
+```go
+const literalFilteredBeforeItIsBound = `type RefusedRange = { from: number; to: number; class: string }
+
+const REFUSED_RANGES: readonly RefusedRange[] = [
+...
+```
+
+Und, weil eine unerzwungene Regel wieder bricht: entweder die Fixtures unter einen
+`tsc --noEmit`-Lauf stellen (teuer, aber der einzige Weg, der die Regel misst), oder
+den Anspruch in den Kommentaren auf das reduzieren, was nachgehalten wird.
+
+### WR-07: Der Doc-Kommentar verspricht, dass ein abgeschnittener Rumpf "nicht still" ist — gemessen ist er still
+
+**File:** `internal/imagefactory/guard_drift_test.go:98-101`, Zaehlcheck bei `498-513`
+
+**Issue:** Der Kommentar an `refusedRangesDecl` sagt:
+
+```
+// The body is captured non-greedily up to the first closing bracket. An entry
+// carrying a bracket inside a string would cut it short -- which is not silent,
+// because the count check below compares the entries found in the body against
+// the entries found in the whole source and fails on any difference.
+```
+
+Gemessen mit einer Quelle, deren zweiter Eintrag eine Klammer im String vor `from:`
+traegt:
+
+```ts
+const REFUSED_RANGES: readonly RefusedRange[] = [
+  { from: 0x0000, to: 0x001f, class: 'control character' },
+  { class: 'line separator ] pair', from: 0x2028, to: 0x2029 },
+]
+```
+
+```
+ranges=1 [{0 31}] err=nil
+```
+
+Kein Fehler. Der Rumpf wurde nach dem ersten Eintrag gekappt, der Waechter liest
+**einen** von **zwei** deklarierten Bereichen und meldet keinen Fehlschlag. Der
+Grund: `browserRefusalRange` zaehlt in beiden Zahlen dasselbe. Der abgeschnittene
+zweite Eintrag beginnt mit `{ class:` und wird von `browserRefusalRange` weder im
+Rumpf noch in der ganzen Quelle gezaehlt — `matches == whole == 1`, der Vergleich
+ist strukturell nicht in der Lage, diesen Abschnitt zu sehen.
+
+Die Gegenprobe zeigt dieselbe Blindheit von der anderen Seite: steht die Klammer im
+String **hinter** `from`/`to` (`class: 'bom ] mark'` am Ende des Eintrags), zaehlt
+`browserRefusalRange` den halben Eintrag in beiden Zahlen mit und der Waechter liest
+zufaellig richtig (`ranges=2 err=nil`). In beiden Faellen misst der Zaehlcheck nicht,
+was der Kommentar ihm zuschreibt.
+
+Der Fehlertext bei Zeile 507-512 nennt dieselbe Ursache (*"or the declaration body
+was cut short because an entry carries a closing bracket inside a string"*), also
+zweimal derselbe unbelegte Anspruch.
+
+**Fix:** Den Satz auf das einschraenken, was der Vergleich kann — `an entry carrying
+a bracket inside a string can cut it short, and the count check below sees that only
+when the truncation changes the number of {from: 0x.., to: 0x..} shapes` — und den
+Fall als eigene Zeile in `TestBrowserRefusalGuardRefusesToPassWithoutItsDeclaration`
+messen. Wer es schliessen statt beschreiben will: `matches` gegen
+`refusedRangesEntry.FindAllString(body, -1)` vergleichen; ein halber Eintrag hat
+keine schliessende Klammer und faellt dann auf.
+
+### WR-08: Zwei Pruefungen lesen Kommentare als Code und gehen mit falscher Ursache rot — die Liste nennt nur die gruene Richtung dieser Blindheit
+
+**File:** `internal/imagefactory/guard_drift_test.go:426-432` und `498-513`
+
+**Issue:** `guardBlindSpots` fuehrt die Unfaehigkeit, Text von Code zu
+unterscheiden, ausschliesslich als **gruene** Blindheit. Dieselbe Unfaehigkeit macht
+zwei andere Pruefungen **falsch rot**, mit einer Ursache, die es nicht gibt.
+Gemessen:
+
+```ts
+/**
+ * The first range is { from: 0x0000, to: 0x001f, class: 'control character' }.
+ */
 const REFUSED_RANGES: readonly RefusedRange[] = [
   { from: 0x0000, to: 0x001f, class: 'control character' },
 ]
-*/
-export function hasControlCharacter(v: string) { return false }
 ```
 
-Es gibt in dieser Datei keine lebende Ablehnungstabelle. Der Waechter liest die
-auskommentierte, findet Rumpf- und Dateizahl gleich (beide 1), vergleicht die
-Server-Menge gegen eine Menge, die der Browser nie benutzt, und meldet einen
-Durchlauf. Das ist derselbe Schaden, den WR-01 der Runde 5 beschrieben hat, in
-der Leftover-Form, die beim Verschieben einer Tabelle mindestens so haeufig
-entsteht wie die Umbenennung: man kommentiert das Alte aus, statt es zu
-loeschen. Der Fehlertext, den dieser Plan neu geschrieben hat, behauptet die
-Gegenrichtung ausdruecklich ("that leftover is what stays behind when the real
-table moves away") und wird in diesem Fall nie erreicht.
+```
+ERR: 1 entries inside the REFUSED_RANGES declaration, 2 in the source as a whole.
+Either an entry-shaped literal sits outside the declaration ... or the declaration
+body was cut short because an entry carries a closing bracket inside a string
+```
 
-Der Pollution-Check faengt es nicht: `whole` zaehlt ueber dieselbe Quelle, in
-der nur die auskommentierten Eintraege stehen, also sind beide Zahlen gleich.
-Erst wenn eine echte Tabelle *zusaetzlich* existiert, wird es laut — gemessen
-als `COUNT: 1 inside, 3 whole` — und dann nennt die Meldung "Pollution oder
-Abschneiden" und nicht die tatsaechliche Ursache.
+Weder das eine noch das andere ist der Fall. Die Datei ist korrekt; ein Doc-Kommentar
+zitiert einen Eintrag. Das ist keine Theorie: die echte `images.tsx` traegt
+unmittelbar ueber der Tabelle einen langen Doc-Block (Zeilen ~85-104), der die
+Bereiche in Prosa beschreibt. Ein einziges hinzugefuegtes Beispiel legt den Waechter
+lahm, und die Meldung schickt den Leser nach einem Streu-Literal oder einer
+Klammer.
 
-**Fix:** Kommentare und Zeichenketten vor dem Anker aus der Quelle entfernen,
-statt den Anker weiter zu verfeinern — der Anker kann diese Unterscheidung
-strukturell nicht treffen. Eine billige, in dieser Datei ausreichende Fassung:
+Zweiter Fall, dieselbe Ursache: die alte Tabelle bleibt als Blockkommentar stehen,
+die neue steht daneben.
+
+```
+ERR: 2 declarations of REFUSED_RANGES in this source, and this guard reads one.
+```
+
+Es gibt genau eine Deklaration; die zweite ist ein Kommentar. Die Meldung sagt
+*"Until exactly one declaration of this name is left, there is no set to compare"* —
+der Leser soll etwas entfernen, das kein Code ist.
+
+Beide Faelle sind fail-closed und daher kein Critical. Sie sind trotzdem genau die
+Sorte falscher Ursache, die diese Datei seit Runde 3 verfolgt, und keiner der vier
+Mechanismen nennt sie: die Liste beschreibt nur, was der Waechter faelschlich
+**liest**, nicht, was er faelschlich **anzeigt**.
+
+**Fix:** Kurzfristig beide Meldungen um die dritte moegliche Ursache ergaenzen
+(*"...or the shape you see stands in a comment, which this guard cannot tell from
+code -- see the blind spots below"*) und `honestClaim` an den Duplikat- und den
+Zaehl-Ausgang haengen, nicht nur an den Kein-Anker-Ausgang. Sauberer: einen fuenften
+Eintrag `text-not-code, red direction` mit einer Zeile mit **normaler** Abnahme
+(`wantErr`) in `TestBrowserRefusalGuardRefusesToPassWithoutItsDeclaration`, damit
+der Fall gemessen dasteht statt unerwaehnt.
+
+### WR-09: Nichts pinnt, dass `honestClaim` in der Meldung landet oder dass ein Blindheits-Eintrag ueberhaupt einen Beleg traegt
+
+**File:** `internal/imagefactory/guard_drift_test.go:406`, `1334-1394`, Vertrag bei `132-140`
+
+**Issue:** Zwei Luecken derselben Art:
+
+1. `honestClaim()` hat genau eine Aufrufstelle (Zeile 406). Kein Test prueft, dass
+   die Kein-Anker-Meldung sie traegt. Die drei `wantErr`-Zeilen `renamed`, `absent`
+   und `prefixed` pinnen ausschliesslich Teilzeichenketten des statischen
+   Meldungstextes. Loescht jemand `honestClaim()` aus dem `Errorf`-Aufruf oder laesst
+   die Funktion `""` zurueckgeben, bleibt die gesamte Suite gruen. Der Kernbeleg von
+   02-30 fuer diese Bindung ist eine einmalige, wieder zurueckgenommene Rot-Messung —
+   also genau die Art Beleg, die diese Datei bei anderen als "Behauptung" verwirft.
+
+2. `TestGuardBlindSpotsAreEachMeasured` prueft Id-Eindeutigkeit, die
+   `rowless`-Ausnahme und die Abdeckung in beide Richtungen. Es prueft **nicht**,
+   dass `mechanism` und `measured` nichtleer sind. Der Vertrag des Feldes sagt
+   woertlich:
+
+   ```go
+   // measured carries the output that evidences the entry. An entry without a
+   // measurement is a claim, and claims are what this file is here to stop.
+   ```
+
+   Ein Eintrag mit `measured: ""` besteht den Test, sobald irgendeine Zeile seine Id
+   nennt, und `honestClaim` rendert dafuer `measured: ` mit nichts dahinter.
+
+**Fix:** Beides in `TestGuardBlindSpotsAreEachMeasured`:
 
 ```go
-// Kommentare und Template-Literale sind kein Code. Ein REFUSED_RANGES, das nur
-// noch in einem /* ... */ steht, ist ein Leftover und keine Deklaration -- und
-// der Fehlertext unten behauptet genau das bereits.
-var tsNonCode = regexp.MustCompile("(?s)/\\*.*?\\*/|//[^\n]*|`[^`]*`")
-
-func stripNonCode(source string) string {
-	return tsNonCode.ReplaceAllStringFunc(source, func(s string) string {
-		return strings.Repeat("\n", strings.Count(s, "\n"))
-	})
+claim := honestClaim()
+for _, spot := range guardBlindSpots {
+	if strings.TrimSpace(spot.mechanism) == "" || strings.TrimSpace(spot.measured) == "" {
+		t.Errorf("guardBlindSpots %q carries an empty mechanism or measurement; "+
+			"an entry without a measurement is the claim this list replaced", spot.id)
+	}
+	if !strings.Contains(claim, spot.id) {
+		t.Errorf("honestClaim does not render %q", spot.id)
+	}
 }
 ```
 
-und `parseBrowserRefusalRanges` auf `stripNonCode(source)` laufen lassen — fuer
-**beide** Zaehlungen, sonst kippt das Verhaeltnis `whole != len(matches)`. Dazu
-eine siebte Tabellenzeile mit der A1-Quelle und einem `wantErr`, das nicht bloss
-`REFUSED_RANGES` ist (siehe WR-04).
+und eine Zeile in der Falsifikationstabelle, deren `wantErr` einen Satz aus
+`honestClaim` fuehrt (etwa `"Finding it does not mean the browser runs it"`), damit
+die Anbindung an den Kein-Anker-Ausgang gemessen ist statt erinnert.
 
-Falls das als zu teuer gilt, ist die ehrliche Alternative, den Satz "Renamed,
-moved or deleted is the same as never having been there" in der Fehlermeldung
-und in `.planning/WINDOWS.md` Eintrag 70 auf das einzuschraenken, was gemessen
-ist — sonst behauptet die Meldung weiterhin eine Eigenschaft, die der Waechter
-nicht hat.
+### WR-10: Der Abdeckungstest zaehlt Zeilen, die kein Test ausfuehren muss
 
-### WR-02: Die neue Abschneide-Diagnose meldet Abschneiden fuer eine tatsaechlich leere Deklaration
+**File:** `internal/imagefactory/guard_drift_test.go:1059-1065`, `1301-1331`, `1334-1394`
 
-**File:** `internal/imagefactory/guard_drift_test.go:300-321`
-
-**Issue:** Die Reihenfolge ist jetzt
+**Issue:** `TestGuardBlindSpotsAreEachMeasured` baut `measuredBy` aus
+`allBlindnessRows()` und **fuehrt keine einzige Zeile aus**. Ausgefuehrt werden sie
+von zwei separaten Funktionen, die die Slices direkt bei Namen nehmen:
 
 ```go
-whole := len(browserRefusalRange.FindAllString(source, -1))
-
-if len(matches) == 0 && whole > 0 { /* "cut short before its first entry" */ }
-if len(matches) == 0             { /* "declared but carries no entries"  */ }
+func allBlindnessRows() [][]blindnessRow {
+	return [][]blindnessRow{textNotCodeRows, literalNotValueRows}
+}
+...
+func TestBrowserRefusalGuardBindsToALiteralAndNotToTheValueTheFormUses(t *testing.T) {
+	runBlindnessRows(t, literalNotValueRows)
+}
 ```
 
-`whole` zaehlt ueber die **ganze Datei** und nicht ueber das, was ausserhalb der
-Deklaration liegt. Damit entscheidet der erste Zweig nicht "abgeschnitten oder
-leer", sondern "traegt die Datei irgendwo ein eintragsfoermiges Literal".
-Gemessen:
+Loescht jemand eine der beiden `Test…`-Funktionen, bleibt der Abdeckungstest gruen:
+die Ids sind weiterhin "gemessen", weil die Zeilen weiterhin in der Liste stehen —
+nur laeuft niemand mehr ueber sie. Das ist woertlich die Eigenschaft, die diese Datei
+seit sieben Runden verfolgt, eine Ebene ueber dem Waechter: eine Zusicherung, die
+einen Durchlauf meldet, ohne die Eigenschaft gemessen zu haben, nach der sie benannt
+ist. Der Kommentar ueber `allBlindnessRows` benennt nur die andere Haelfte des
+Risikos (*"A table that is not listed here is a table the coverage test cannot
+see"*).
+
+**Fix:** Die Ausfuehrung an dieselbe Liste haengen, aus der gezaehlt wird — dann ist
+"gelistet" und "gefahren" dieselbe Aussage:
+
+```go
+func TestBlindnessRowsAllRun(t *testing.T) {
+	for _, rows := range allBlindnessRows() {
+		runBlindnessRows(t, rows)
+	}
+}
+```
+
+Die beiden benannten Tests koennen bleiben (ihre Namen tragen die Anti-Rot-
+Anweisung), oder ihre Doc-Kommentare wandern an die Slice-Deklarationen und die
+beiden Funktionen entfallen. Ohne die Bindung ist `allBlindnessRows` ein zweites
+Register, das mit dem ersten driften kann.
+
+### WR-11: Der Kommentar zu `commentOnlyBody` widerspricht seiner eigenen Testzeile und der Messung
+
+**File:** `internal/imagefactory/guard_drift_test.go:671-683`
+
+**Issue:** Derselbe Kommentarblock sagt zweimal Verschiedenes ueber denselben Zweig:
+
+```go
+// A body made of nothing but a comment is not
+// empty to strings.TrimSpace, so it takes the cut-short branch although
+// nothing was cut ...
+// ... Today this source reaches the empty
+// branch instead, because no entry-shaped literal exists anywhere in it.
+```
+
+Gemessen gegen den ausgelieferten Stand:
 
 ```
-A3 genuinely empty + foreign literal
-ranges=[] err=CUT-SHORT: body cut short before its first entry, but 1 entries in source as a whole
+ERR: the REFUSED_RANGES declaration body was cut short before its first entry.
+The captured body is "\n  // nothing yet\n" -- it carries text, and no entry this
+guard can read. ... Look for that bracket in the body quoted above, not for a
+missing table
 ```
 
-Die Quelle war:
+Also der **Abschneide-Zweig**, wie die Testzeile darunter (`wantErr:
+"cut short before its first entry"`) es auch verlangt. Der letzte Satz beschreibt
+das Verhalten von HEAD `a42387d`, das Task 1 dieses Plans gerade ersetzt hat; er ist
+mit der Aenderung nicht mitgezogen worden. 02-29 hat einen anderen Absatz genau
+dieser Sorte als Deviation 2 selbst gefunden und korrigiert — diesen nicht.
+
+Nebenbei bestaetigt die Messung den vom Plan benannten Rest: die Anweisung *"Look
+for that bracket in the body quoted above"* steht ueber einem Rumpf ohne Klammer.
+Das ist der Runde-6-Spiegel-Defekt, verkleinert und offengelegt, aber nicht weg.
+
+**Fix:** Den letzten Satz streichen und durch die Messung ersetzen: `Measured on the
+shipped reader, this source takes the cut-short branch and the message quotes
+"\n  // nothing yet\n" -- which is why the row pins the quoted body and not the
+diagnosis word.`
+
+### WR-12: Die einzige Ausnahme von der Messpflicht ist mit einem Grund begruendet, der nicht traegt
+
+**File:** `internal/imagefactory/guard_drift_test.go:205-207`, Assertion bei `1387-1391`
+
+**Issue:** `surrogate-interior` ist der eine Eintrag, der von der Belegpflicht
+befreit ist. Die Begruendung:
+
+```
+rowless: "it is a property of the SWEEP and not of the reader, and the blindness
+tables drive the reader. Go cannot hold an unpaired surrogate in a string at all --
+string(rune(0xD800)) is U+FFFD -- so no fixture can make a row measure it",
+```
+
+Der erste Halbsatz traegt. Der zweite nicht, und er ist der, der Unmoeglichkeit
+behauptet. Die Blindheit ist eine Eigenschaft der **Browser-Seite** und laesst sich
+mit einer gewoehnlichen Fixture zeigen, ohne einen Surrogat in einem Go-String zu
+halten:
 
 ```ts
-const REFUSED_RANGES: readonly RefusedRange[] = []
-
-const SOME_OTHER_TABLE: readonly RefusedRange[] = [
-  { from: 0x2028, to: 0x2029, class: 'line separator' },
+const REFUSED_RANGES: readonly RefusedRange[] = [
+  { from: 0xd800, to: 0xd800, class: 'unpaired surrogate' },
+  { from: 0xdfff, to: 0xdfff, class: 'unpaired surrogate' },
+  ...
 ]
 ```
 
-Die Deklaration ist woertlich leer. Nichts ist abgeschnitten. Die Meldung sagt
-"The declaration is NOT empty" — sie ist es — und schickt den Leser mit "Look
-for that bracket, not for a missing table" nach einer Klammer, die nicht
-existiert, waehrend die eigentliche Ursache (jemand hat die Tabelle geleert) im
-Text nicht vorkommt. Das ist dieselbe Defektklasse wie WR-02 der Runde 5, nur
-gespiegelt; `SOME_OTHER_TABLE` ist ausserdem genau die Quelle, die die
-`polluted`-Zeile derselben Tabelle bereits als realistisch fuehrt.
+Diese Tabelle lehnt 2 von 2048 Surrogaten ab. Die Zusicherung in Zeile 267 prueft
+`refusedByBrowser(surrogateLow) && refusedByBrowser(surrogateHigh)` — beide sind
+Mitglieder — und der Sweep ueberspringt den Rest. Der Waechter bliebe gruen.
 
-Nebenwirkung: der woertlich erhaltene Leer-Zweig ist ab sofort nur noch in einer
-Datei erreichbar, die **kein einziges** `{ from: 0x.., to: 0x.. }` mehr traegt.
-Die Messung in `02-27-SUMMARY.md`, die seine Erreichbarkeit belegt, wurde genau
-gegen eine solche Ein-Zeilen-Quelle gefahren und deckt den realistischen Fall
-nicht ab.
+Warum keine Zeile das misst, ist folglich kein Naturgesetz, sondern eine
+Entwurfsentscheidung dieser Runde: `browserRefusalRanges` wurde parametrisiert und
+wrapper-frei gemacht, damit die Tabellen den Live-Pfad fahren — der **Sweep**
+dagegen steht mit `imagesRoutePath` fest in `TestBrowserRefusalSetEqualsTheServers`
+(Zeile 249) und ist nicht ueber eine Quelle fahrbar. Genau die Behandlung, die der
+Leser bekommen hat, hat der Sweep nicht bekommen, und der `rowless`-Text verbucht
+das Ergebnis als Unmoeglichkeit.
 
-**Fix:** Die unterscheidende Groesse ist nicht "Eintraege in der Datei", sondern
-"Eintraege hinter dem Ende des gekappten Rumpfes, aber vor dem Ende der
-Deklaration". Billiger und ausreichend: die Entscheidung an der Form des Rumpfes
-festmachen statt an einer Zaehlung ueber die ganze Datei.
+Dazu, kleiner: die Assertion nagelt die Id woertlich fest.
 
 ```go
-// Ein Rumpf, der nach dem Entfernen von Leerraum leer ist, ist eine leere
-// Deklaration. Ein Rumpf, der Text traegt, aus dem dieser Waechter keinen
-// Eintrag lesen kann, wurde abgeschnitten -- die beiden sind an dieser
-// Eigenschaft unterscheidbar und nicht an einer Zaehlung ueber die ganze Datei.
-if len(matches) == 0 {
-	if strings.TrimSpace(body) == "" {
-		return nil, fmt.Errorf("%s is declared but carries no entries this guard can read.\n"+
-			"This is the declaration being empty, not the declaration being absent; "+
-			"the two are separate failures because they call for separate fixes",
-			refusedRangesName)
-	}
-	return nil, fmt.Errorf("the %s declaration body was cut short before its first entry.\n"+
-		"The captured body is %q, which carries no entry this guard can read while the "+
-		"source as a whole carries %d. The body is captured non-greedily up to the first "+
-		"closing bracket, so a `]` inside a comment or a string before the first entry "+
-		"ends the capture there",
-		refusedRangesName, body, whole)
-}
+if len(rowless) != 1 || rowless[0] != "surrogate-interior" {
 ```
 
-Der gekappte Rumpf `"\n  // see the table in RefusedRange["` erfuellt den
-zweiten Zweig, `""` den ersten, und die A3-Quelle landet wieder korrekt im
-Leer-Zweig. Die bestehende `truncated`-Zeile bleibt gruen, wenn ihr `wantErr`
-auf `"cut short before its first entry"` gekuerzt wird; die Zahl gehoert dann
-nicht mehr in die Zusicherung.
+Wird die Blindheit eines Tages geschlossen und der Eintrag korrekt geloescht, geht
+dieser Test rot und seine Meldung liest sich wie ein Verstoss, waehrend ueber beiden
+Blindheitstabellen die Anweisung steht, dass Rot bei einer geschlossenen Blindheit
+das Loeschen der Zeile bedeutet und nicht das Aufweichen. Diese Anweisung fehlt hier.
 
-### WR-03: Die Bound-Meldung erklaert die invertierte Range mit der Ursache der nicht darstellbaren
-
-**File:** `internal/imagefactory/guard_drift_test.go:370-380`, gepinnt bei `634-638`
-
-**Issue:** Eine Bedingung, zwei Ursachen, eine Meldung:
-
-```go
-if to > utf8.MaxRune || from > to {
-	return nil, fmt.Errorf("this entry of %s has bounds this guard cannot represent: ...
-		"The upper bound has to be at most utf8.MaxRune and the lower bound at most the "+
-		"upper. This guard compares SETS by sweeping every codepoint upwards from "+
-		"rune(0), and rune(uint64) is lossy: a bound above utf8.MaxRune lands on a "+
-		"negative rune, ...
-```
-
-Fuer `{ from: 0x001f, to: 0x0000 }` sind beide Grenzen einwandfrei
-darstellbar. Der Kopfsatz ("bounds this guard cannot represent") ist falsch, und
-der gesamte erklaerende Absatz beschreibt eine verlustbehaftete Konvertierung,
-die hier nicht stattfindet; die zutreffende Ursache steht in einem Nebensatz
-("and the lower bound at most the upper"). Ein Operator liest, sein Wert liege
-oberhalb `utf8.MaxRune`, und sucht dort.
-
-Das ist bemerkenswert, weil derselbe Plan drei Zeilen weiter oben genau das
-Gegenteil als Prinzip formuliert und umsetzt: "With the count in hand the three
-causes are three messages, and none of them claims another's"
-(guard_drift_test.go:301-306). Die Bound-Pruefung ist der eine Ort, an dem
-dieselbe Runde zwei Ursachen in einer Meldung zusammenlegt. Die Testzeile
-`an inverted range` (Zeile 634-638) nagelt die unzutreffende Formulierung mit
-`wantErr: []string{"from 0x001f to 0x0000", "cannot represent"}` fest.
-
-**Fix:** Zwei Zweige, wie an der Abschneide-Diagnose vorgemacht, und die
-Testzeile auf das umstellen, was die Meldung dann sagt:
-
-```go
-if to > utf8.MaxRune {
-	return nil, fmt.Errorf("this entry of %s has an upper bound this guard cannot "+
-		"represent: from 0x%s to 0x%s.\n"+
-		"The upper bound has to be at most utf8.MaxRune. rune(uint64) is lossy -- a bound "+
-		"above utf8.MaxRune lands on a negative rune -- so such an entry covers no "+
-		"codepoint in a sweep from rune(0) upwards and is passed over. An entry it passes "+
-		"over is a codepoint it reports agreement about without having compared it",
-		refusedRangesName, m[1], m[2])
-}
-if from > to {
-	return nil, fmt.Errorf("this entry of %s is inverted: from 0x%s to 0x%s.\n"+
-		"Both bounds are representable and the range still covers nothing, because the "+
-		"sweep runs upwards from rune(0). An entry that covers nothing is a codepoint set "+
-		"this guard reports agreement about without having compared it",
-		refusedRangesName, m[1], m[2])
-}
-```
-
-### WR-04: Die neue Testzeile fuer die praefixierende Umbenennung ist trivial erfuellt — sie unterscheidet den erwarteten Fehlschlag von keinem anderen
-
-**File:** `internal/imagefactory/guard_drift_test.go:483-487`
-
-**Issue:**
-
-```go
-{
-	name:    "the declaration renamed to a prefixed name",
-	source:  prefixed,
-	wantErr: "REFUSED_RANGES",
-},
-```
-
-`parseBrowserRefusalRanges` hat sechs Fehlerausgaenge (Zeilen 261, 283, 308,
-317, 330, 371). **Jeder** von ihnen formatiert `refusedRangesName` in seinen
-Text; nachgezaehlt an den Aufrufstellen 270, 288, 314, 320, 335, 379. Damit ist
-`strings.Contains(err.Error(), "REFUSED_RANGES")` fuer jeden moeglichen
-Fehlschlag dieser Funktion wahr, und die Zeile prueft nach `err != nil` nichts
-weiter. Ein kuenftiger Anker, der `REFUSED_RANGES_LEGACY` wieder trifft, dann
-aber an der Zaehlpruefung oder an der Bound-Validierung scheitert, laesst diese
-Zeile gruen — waehrend die Eigenschaft, nach der die Zeile benannt ist ("der
-Waechter findet seine Deklaration nur unter ihrem genauen Namen"), verletzt ist.
-
-Das ist woertlich die Regel, die derselbe Plan unter `key-decisions` fuer die
-Bound-Meldung aufgestellt hat: "Der statische Text einer Fehlermeldung enthaelt
-keine Literale, die eine Tabellenzeile als Teilzeichenkette prueft — sonst ist
-die Zeile trivial erfuellt und prueft die Meldung nicht mehr." Fuer die drei
-Bound-Zeilen wurde sie eingehalten, fuer die neue Praefix-Zeile nicht. Die
-beiden Altzeilen `renamed` und `absent` teilen den Mangel, wurden von dieser
-Runde aber nicht angefasst; die Praefix-Zeile ist neu und traegt die
-Kernbehauptung dieses Plans.
-
-**Fix:** Auf den Satz pruefen, den nur der Kein-Anker-Ausgang traegt, und die
-neue Praefix-Formulierung mitnehmen:
-
-```go
-{
-	name:   "the declaration renamed to a prefixed name",
-	source: prefixed,
-	wantErr: "A name that merely carries REFUSED_RANGES as a prefix",
-},
-```
-
-Sinnvollerweise gleich fuer `renamed` und `absent` auf
-`"no REFUSED_RANGES declared as an array literal"` umstellen — dieser Praefix
-ist dem Kein-Anker-Ausgang eigen.
-
-### WR-05: Der Doc-Kommentar von `refusedRangesDecl` haengt weiterhin an `refusedRangesEntry` — und diese Runde hat ihm 25 Zeilen hinzugefuegt
-
-**File:** `internal/imagefactory/guard_drift_test.go:57-110`
-
-**Issue:** Runde 5 hat das als WR-05 festgehalten. Der Plan hat in genau diesen
-Block hineingeschrieben, ohne ihn zu trennen. Der Bruch steht jetzt bei Zeile
-96/97:
-
-```go
-// cut-short case carries its own message and the count check keeps the one it
-// can still explain.
-// refusedRangesEntry matches one flat object literal inside the declaration
-// body, whatever it is made of.
-```
-
-Ohne Leerzeile laeuft der Block von Zeile 57 durch bis Zeile 105 und
-dokumentiert `var refusedRangesEntry` (Zeile 106). `var refusedRangesDecl`
-(Zeile 108-110) hat gar keinen Doc-Kommentar. Damit steht die gesamte
-Begruendung dieser Runde — der `:`-gebundene Anker, die gemessenen
-Praefix-Werte, die `budget_drift_test.go`-Praezedenz, die Erklaerung der
-geteilten Diagnose — unter dem Symbol, das sie nicht betrifft, waehrend das
-Symbol, um das es geht, unkommentiert daneben steht. `go doc` zeigt es
-entsprechend. Der Befund ist damit nicht nur offen, sondern in dieser Runde
-gewachsen: 25 der 49 Kommentarzeilen sind neu.
-
-**Fix:** Eine Leerzeile bei Zeile 96/97 und die beiden Haelften vor ihre
-jeweiligen Deklarationen ziehen:
-
-```go
-// refusedRangesEntry matches one flat object literal inside the declaration
-// body, whatever it is made of.
-//
-// Deliberately without nesting: ...
-var refusedRangesEntry = regexp.MustCompile(`\{[^{}]*\}`)
-
-// refusedRangesDecl cuts the declaration out before anything is read from it.
-//
-// Two precedents, and this takes one thing from each. ...
-var refusedRangesDecl = regexp.MustCompile(
-	`(?ms)^\s*(?:export\s+)?const\s+` + regexp.QuoteMeta(refusedRangesName) +
-		`\s*(?::[^=\n]*)?=\s*\[(.*?)\]`)
-```
+**Fix:** Den `rowless`-Text auf den ersten Halbsatz kuerzen und die
+Entwurfsentscheidung benennen (`the sweep hardcodes imagesRoutePath and is not
+driveable over a source the way the reader is; parameterising it would make this
+measurable`). Die Assertion um dieselbe Anti-Rot-Anweisung ergaenzen, die die
+Tabellen tragen, und den Sonderfall `len(rowless) == 0` mit einer eigenen Meldung
+begruessen (*"a rowless entry disappeared -- if the blindness ended, this is the
+right red; delete this expectation with it"*).
 
 ## Info
 
-### IN-01: Die neue Abschneide-Meldung erzeugt einen zweiten Fundort von "1 entries"
+### IN-01: `wantRanges` pinnt nur eine Zahl, und dieselben sechs Bereiche stehen achtmal in der Datei
 
-**File:** `internal/imagefactory/guard_drift_test.go:308-314`
+**File:** `internal/imagefactory/guard_drift_test.go:986-990`, Kopien bei `1020`, `1115`, `1140`, `1170`, `1194`, `1221`, `702`, `725`
 
-**Issue:** `"but %d entries are present in the source as a whole"` liefert bei
-eins "but 1 entries are present". Gemessen:
+**Issue:** Der Doc von `wantRanges` sagt: *"a row that only demanded err == nil
+would stay green over a guard that read a different set"*. Eine Anzahl ist nur
+geringfuegig staerker: ein Waechter, der sechs **andere** Bereiche liest, bleibt
+ebenfalls gruen. Gleichzeitig sind die sechs Bereiche der echten Route in acht
+Fixtures woertlich kopiert, und keine Zusicherung vergleicht den Inhalt — die Kopien
+koennen von `images.tsx` wegdriften, ohne dass eine Zeile rot wird. Die Begruendung
+*"so the measured range count is the one the real route produces"* verlangt nur die
+Zahl.
 
-```
-A9 cut short, exactly one whole entry
-CUT-SHORT: body cut short before its first entry, but 1 entries in source as a whole
-```
+**Fix:** Entweder `wantRanges []declaredRange` statt `wantRanges int`, oder einen
+Konstanten-String `realSixEntries` einmal definieren und in die Fixtures einsetzen —
+dann ist die Kopie einmal vorhanden und einmal zu pflegen.
 
-`02-27-SUMMARY.md` zeigt dieselbe Ausgabe in ihrem eigenen Messprotokoll.
-IN-06 der Runde 5 hat den Fehler an der Zaehlpruefung (Zeile 330) festgehalten;
-diese Runde hat einen zweiten angelegt, und die `truncated`-Testzeile pinnt ihn
-wie schon die `polluted`-Zeile woertlich als `wantErr`.
+### IN-02: Review-Ids der Form `WR-04` werden als dauerhafte Codereferenz benutzt und sind rundenabhaengig
 
-**Fix:** Ein Plural-Helfer fuer beide Stellen, oder die Zahl aus der Zusicherung
-nehmen (siehe WR-02) und neutral formulieren: "entry count in the source as a
-whole: %d".
+**File:** `internal/imagefactory/guard_drift_test.go:66`, `834-836`
 
-### IN-02: Die Begruendung fuer `ParseUint(..., 16, 32)` gilt nicht fuer Literale mit mehr als acht Hexziffern
+**Issue:** Zwei Stellen verweisen auf `WR-04`. In Runde 5 war WR-04 der
+Surrogat-Endpunkt-Befund, in Runde 6 die trivial erfuellte `prefixed`-Testzeile,
+gemeint ist offenbar ein aelterer Befund ueber unlesbare Eintraege. Ohne
+Rundenangabe ist die Referenz nicht aufloesbar — in einer Datei, deren Thema die
+Aufloesbarkeit von Behauptungen ist.
 
-**File:** `internal/imagefactory/guard_drift_test.go:365-369`, Ausgang bei `340-347`
+**Fix:** `WR-04 (Runde N)` schreiben, oder auf die stabile G-Nummer bzw. den
+Ledger-Eintrag verweisen.
 
-**Issue:** Der neue Kommentar begruendet die Bitbreite so: "At 21 ParseUint
-would reject these itself, but with `value out of range`, which names neither
-the entry, nor the set, nor the reason. Here the message is the point and not
-the abort." Das gilt bis `0xFFFFFFFF`. Darueber tut `ParseUint` bei 32 genau
-das, wogegen der Absatz argumentiert. Gemessen:
+### IN-03: `surrogate-interior` verletzt den Vertrag des Feldes, in dem es steht
 
-```
-A7 nine-hex-digit bound
-PARSE-END "1FFFFFFFF": strconv.ParseUint: parsing "1FFFFFFFF": value out of range
-```
+**File:** `internal/imagefactory/guard_drift_test.go:129-131`, `143-144`, `196-208`, gerendert bei `406`
 
-`browserRefusalRange` erlaubt `0x([0-9a-fA-F]+)` ohne Laengengrenze, also ist
-der Fall erreichbar, und der Leser bekommt genau die Meldung, die der Kommentar
-als unbrauchbar bezeichnet.
+**Issue:** Der Doc von `guardBlindSpots` sagt *"what a regular expression over
+TypeScript source does not establish"*, und `mechanism` verlangt eine Begruendung
+*"in terms of what its anchor binds to"*. `surrogate-interior` ist weder das eine
+noch das andere — es ist eine Eigenschaft des Sweeps. Praktische Folge: `honestClaim`
+haengt am Kein-Anker-Ausgang von `parseBrowserRefusalRanges`, einer Funktion, die
+mit dem Sweep nichts zu tun hat, und erzaehlt dem Leser dort von 2046 nicht
+verglichenen Codepunkten.
 
-**Fix:** Den `ParseUint`-Fehlerausgang auf dieselbe Meldung leiten wie die
-Bound-Pruefung, statt `%w` durchzureichen — dann stimmt die Begruendung fuer
-jeden Eingabewert:
+**Fix:** Entweder den Vertrag oeffnen (`mechanism` beschreibt, woran der Waechter
+bindet **oder** was seine Vergleichsschleife auslaesst) oder die Sweep-Blindheit in
+eine zweite, eigene Liste ziehen, die an der Sweep-Fehlermeldung gerendert wird.
 
-```go
-from, err := strconv.ParseUint(m[1], 16, 32)
-if err != nil {
-	return nil, boundsError(m[1], m[2])
-}
-```
+### IN-04: Ein unicode-escapter Bezeichner ist derselbe Name und bekommt die Praefix-Erklaerung
 
-### IN-03: Eine mehrzeilige Typannotation oder eine `let`-Deklaration wird als "keine Deklaration vorhanden" gemeldet
+**File:** `internal/imagefactory/guard_drift_test.go:398-406`
 
-**File:** `internal/imagefactory/guard_drift_test.go:108-110`
-
-**Issue:** `(?::[^=\n]*)?` schliesst den Zeilenumbruch aus, `const` ist fest
-verlangt. Gemessen:
+**Issue:** Gemessen mit `const REFUSED_RANGES: readonly RefusedRange[] = [...]`
+— fuer den Compiler ist das `REFUSED_RANGES`:
 
 ```
-A4 multi-line type annotation   err=NO-DECL
-A6 let instead of const         err=NO-DECL
+ERR: no REFUSED_RANGES declared as an array literal. ... A name that merely carries
+REFUSED_RANGES as a prefix -- REFUSED_RANGES_LEGACY, REFUSED_RANGESX -- is a
+different name ...
 ```
 
-Die Quelle von A4 war eine vollstaendige, korrekte Deklaration, deren
-Annotation umgebrochen war. Der Waechter meldet daraufhin "no REFUSED_RANGES
-declared as an array literal ... Renamed, moved or deleted is the same as never
-having been there" ueber eine Deklaration, die unveraendert dasteht — fail
-closed mit falscher Ursache, dieselbe Klasse wie WR-02.
+Fail closed, mit einer Ursache, die nicht zutrifft: der Name ist weder praefixiert
+noch verschieden. Erreichbarkeit gering (biome schreibt so nichts), deshalb Info.
 
-Die Erreichbarkeit ist heute gering und deshalb Info und nicht Warning: `biome`
-formatiert mit `lineWidth: 100` (biome.json), und `images.tsx:105` ist 49
-Zeichen lang. Sie waechst, sobald die Annotation waechst (etwa
-`readonly (RefusedRange & { readonly class: RefusalClass })[]`).
+**Fix:** Keine Codeaenderung noetig; `honestClaim` deckt es bereits mit *"Not
+finding the declaration means the anchor did not match this text"* ab. Wenn es
+genannt werden soll, gehoert es zu dem Mechanismus, der die Ankerform beschreibt
+(siehe WR-03).
 
-**Fix:** `[^=\n]*` auf `[^=]*` zuruecknehmen — die Wortgrenze traegt hier der
-verlangte Doppelpunkt und nicht das Newline-Verbot — und im Kommentar
-festhalten, dass `const` verlangt ist und warum.
+### IN-05: Die drei Info-Befunde der Runde 6 sind unveraendert, nachgemessen
 
-### IN-04: Der Sweep nennt `0x10FFFF`, die neue Validierung `utf8.MaxRune`
+**File:** `internal/imagefactory/guard_drift_test.go:113-115`, `276`, `517-524`
 
-**File:** `internal/imagefactory/guard_drift_test.go:153` gegen `370`
+**Issue:** Gemessen: `let REFUSED_RANGES = [...]` und eine ueber zwei Zeilen
+umgebrochene Typannotation liefern beide `no REFUSED_RANGES declared as an array
+literal` ueber eine unveraendert dastehende Deklaration (Runde 6 IN-03). `0x10FFFF`
+steht in Zeile 276 gegen `utf8.MaxRune` in Zeile 558 (IN-04). `ParseUint(..., 16,
+32)` liefert fuer neun Hexziffern weiterhin `value out of range` (IN-02), also genau
+die Meldung, die der Kommentar bei Zeile 542-546 als unbrauchbar bezeichnet.
 
-**Issue:**
+Neu ist nur, dass die Kein-Anker-Meldung jetzt `honestClaim` traegt und damit
+wenigstens sagt, dass Nichtfinden nicht Nichtdasein heisst. Die falsche Ursache
+bleibt.
 
-```go
-for r := rune(0); r <= 0x10FFFF; r++ {      // Zeile 153
-...
-if to > utf8.MaxRune || from > to {          // Zeile 370
+**Fix:** Siehe Runde-6-Review IN-02, IN-03, IN-04. Sie stehen laut 02-29-SUMMARY
+unter einer Policy-Entscheidung des Betreibers; ich fuehre sie hier nur als
+nachgemessen weiter.
+
+### IN-06: Die Eigenschaftsreihenfolge im Eintrag ist tragend
+
+**File:** `internal/imagefactory/guard_drift_test.go:50-51`
+
+**Issue:** `browserRefusalRange` verlangt `{` unmittelbar gefolgt von `from:`.
+Gemessen mit `{ class: 'control character', from: 0x0000, to: 0x001f }`:
+
+```
+ERR: this entry of REFUSED_RANGES cannot be read by this guard: { class: ... }
 ```
 
-Zwei Schreibweisen derselben Obergrenze in einer Datei, deren erklaerter Zweck
-es ist, zwei Schreibungen einer Menge aneinander zu binden. Sie stimmen heute
-ueberein; die Datei selbst ist der Beleg dafuer, dass das kein Argument ist.
+Fail closed mit korrekter Ursache — aber eine reine Umsortierung der Felder, die in
+TypeScript nichts bedeutet, legt den Waechter lahm. Das ist heute unwahrscheinlich
+(biome sortiert keine Objektschluessel) und deshalb Info.
 
-**Fix:** `for r := rune(0); r <= utf8.MaxRune; r++` — `utf8` ist importiert, und
-die Bound-Validierung ist damit sichtbar dieselbe Grenze wie der Sweep, den sie
-schuetzt.
+**Fix:** `\{[^{}]*?from:\s*0x([0-9a-fA-F]+)[^{}]*?to:\s*0x([0-9a-fA-F]+)` — oder
+die Reihenfolge als bewusste Anforderung im Kommentar festhalten, damit sie eine
+Entscheidung ist und kein Zufall.
 
-### IN-05: `.planning/WINDOWS.md` Eintrag 70 verweist auf eine Zeilennummer von vor 02-27
+### IN-07: Der zweite Leser der echten Route umgeht `browserRefusalRanges`
 
-**File:** `.planning/WINDOWS.md:87` (ausserhalb der Datei-Scope dieses Reviews)
+**File:** `internal/imagefactory/guard_drift_test.go:598` gegen `367-377`
 
-**Issue:** Der Eintrag zeigt auf
-`internal/imagefactory/guard_drift_test.go` Zeile **83** und beschreibt den
-Anker. Nach 02-27 steht `refusedRangesDecl` in den Zeilen 108-110; Zeile 83
-liegt im Kommentarabsatz ueber die doppelpunkt-gebundene Annotation. 02-28 wurde
-nach 02-27 ausgefuehrt und haette die verschobene Nummer sehen koennen.
+**Issue:** 02-30 meldet selbst, dass das Kriterium *"genau eine Funktion liest die
+Route"* nicht buchstaeblich erfuellt ist. Die geschuetzte Eigenschaft haelt — es gibt
+keinen Wrapper mit hartkodiertem Pfad, und eine Vorverarbeitung in
+`browserRefusalRanges` faerbt die Blindheitszeilen rot (von 02-30 gemessen). Der
+Rest ist umgekehrt: die Zeile `the real route` ruft `readSource` direkt und geht an
+`parseBrowserRefusalRanges`, also **an `browserRefusalRanges` vorbei**. Sie ist
+damit der einzige Leser, der eine Regression in `browserRefusalRanges` selbst nicht
+bemerken wuerde. Praktisch folgenlos, weil `TestBrowserRefusalSetEqualsTheServers`
+und alle sieben Blindheitszeilen ueber den Wrapper laufen.
 
-**Fix:** Die Zeilennummer auf 108 ziehen, oder — haltbarer — auf den
-Symbolnamen `refusedRangesDecl` statt auf eine Zeile verweisen.
+**Fix:** Kein Handlungsbedarf. Wenn das Kriterium buchstaeblich erfuellt werden
+soll, `the real route` auf `browserRefusalRanges(t, imagesRoutePath)` umstellen —
+dann verliert die Zeile aber ihre Faehigkeit, den Fehlertext zu pruefen, weshalb sie
+so bleiben sollte, wie sie ist. Der bessere Zug ist, das Kriterium zu korrigieren.
 
 ---
 
-_Reviewed: 2026-09-04T20:15:00Z_
+_Reviewed: 2026-09-05T12:00:00Z_
 _Reviewer: Claude (gsd-code-reviewer)_
 _Depth: standard_
-_Scope: Runde 6, Plaene 02-27 und 02-28 (diff base `78b2fe2`)_
+_Scope: Runde 7, Plaene 02-29, 02-30 und 02-31 (diff base `a42387d`)_
