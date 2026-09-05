@@ -4,16 +4,16 @@ milestone: v1.14
 current_phase: 02
 current_phase_name: Transport Seam, `talossim` & Image Factory
 status: executing
-stopped_at: Completed 02-28-PLAN.md
-last_updated: "2026-09-04T19:41:05.742Z"
-last_activity: 2026-09-04
+stopped_at: Completed 02-29-PLAN.md
+last_updated: "2026-09-05T08:43:44.462Z"
+last_activity: 2026-09-05
 last_activity_desc: Phase 02 Runde-6-Gap-Closure ausgefuehrt, Verifikation gaps_found
-state_head: 37816395b93889de3517a5512dbd28d6a51f2bb5
+state_head: 634d444690b49f9581f2858a1a21450ccf4abb12
 progress:
   total_phases: 10
   completed_phases: 1
-  total_plans: 34
-  completed_plans: 34
+  total_plans: 37
+  completed_plans: 35
 ---
 
 # Project State
@@ -28,9 +28,9 @@ See: .planning/PROJECT.md (updated 2026-08-27)
 ## Current Position
 
 Phase: 02 (Transport Seam, `talossim` & Image Factory) — EXECUTING
-Plan: 28 of 31
-Status: Runde-7-Gap-Closure geplant (02-29, 02-30, 02-31 in drei Wellen; **02-30 ist `autonomous: false`** und oeffnet mit einem blockierenden Entscheidungs-Checkpoint Variante B gegen A) — Verifikation Runde 6 steht auf gaps_found (16/19 must-haves)
-Last activity: 2026-09-05 — Runde-7-Gap-Closure geplant auf `02-DECISION-drift-guard-lexik.md` (Variante B, **nicht ratifiziert**); 02-29 ist richtungsunabhaengig, 02-30 haengt an der Richtung, 02-31 fuehrt die Register
+Plan: 29 of 31
+Status: Welle 1 der Runde 7 ausgefuehrt — 02-29 (richtungsunabhaengig) ist fertig; **02-30 ist `autonomous: false`** und oeffnet mit einem blockierenden Entscheidungs-Checkpoint Variante B gegen A, 02-31 fuehrt danach die Register. Verifikation Runde 6 steht weiter auf gaps_found (16/19 must-haves)
+Last activity: 2026-09-05 — 02-29 ausgefuehrt: G-02-28 (Spiegel-Defekt) geschlossen, WR-03/04/05 mit erledigt, Duplikatspruefung neu. **G-02-29 und G-02-9 bleiben offen**; die Richtungsentscheidung in `02-DECISION-drift-guard-lexik.md` ist weiterhin **nicht ratifiziert** und blockiert nur 02-30
 
 Progress: [█░░░░░░░░░] 1 of 10 phases
 
@@ -92,6 +92,7 @@ Progress: [█░░░░░░░░░] 1 of 10 phases
 | Phase 02 P26 | 10 min | 3 tasks | 2 files |
 | Phase 02 P27 | 10 min | 3 tasks | 1 files |
 | Phase 02 P28 | 16 min | 3 tasks | 3 files |
+| Phase 02 P29 | 9 min | 3 tasks | 1 files |
 
 ## Accumulated Context
 
@@ -194,6 +195,8 @@ Recent decisions affecting current work:
 - [Phase 02]: G-02-9 bleibt offen und wird als WINDOWS-Eintrag 58 gefuehrt -- die Erholung ist eine Wiedervorlage, die als Fehler beantwortet wird, keine Nachsondier-Route (Option 1 wurde nicht genommen)
 - [Phase 02]: Kein Sonderfall fuer eine leere gespeicherte TalosVersion im Refresh-Guard — Arch wurde additiv nachgeruestet, TalosVersion ist seit dem ersten Schematic-Datensatz Pflichtfeld: eine leere gespeicherte Version ist kein Alt-Datensatz, sondern ein Datensatz, dessen Version nicht bekannt ist — die Ungleichheitspruefung lehnt ihn korrekt ab.
 - [Phase 02]: Kein versionsuebergreifender Refresh — er ist eine Schema-Aenderung — model.Schematic hat Platz fuer genau ein Verdikt. Ein Datensatz, der die Verdikte zweier Versionen halten soll, braucht dieselbe Aenderung, die Option B fuer die Architektur beschreibt; argumentiert im angehaengten Vermerk von 02-DECISION-schematic-identity.md, nicht in einem Guard.
+- [Phase 02]: Die Leer/Abschneide-Unterscheidung des Browser-Ablehnungs-Waechters laeuft ueber strings.TrimSpace(body); die Abschneide-Meldung zitiert den Rumpf und traegt keine Dateizaehlung mehr — Eine Groesse beantwortet eine Frage. whole beantwortete zwei und war fuer eine wirklich leere Deklaration falsch; IN-01 (zwei Fundorte fuer die Eintragszahl) entfaellt als gemessene Nebenwirkung
+- [Phase 02]: Der Drift-Waechter verlangt genau eine Deklaration von REFUSED_RANGES und nennt die Zahl, wenn er mehrere findet; die Pruefung greift vor dem Lesen des Rumpfes — Der Anker erlaubt fuehrenden Leerraum, also erfuellt ihn auch eine eingerueckte Zweitdeklaration; die erste schweigend zu nehmen heisst, ueber die andere Uebereinstimmung zu melden, ohne sie verglichen zu haben
 
 ### Pending Todos
 
@@ -237,6 +240,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-09-04T19:41:05.648Z
-Stopped at: Completed 02-28-PLAN.md
+Last session: 2026-09-05T08:43:20.735Z
+Stopped at: Completed 02-29-PLAN.md
 Resume file: None
