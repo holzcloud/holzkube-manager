@@ -54,6 +54,17 @@ var browserRefusalRange = regexp.MustCompile(
 // same string the anchor looks for.
 const refusedRangesName = "REFUSED_RANGES"
 
+// refusedRangesEntry matches one flat object literal inside the declaration
+// body, whatever it is made of.
+//
+// Deliberately without nesting: the entries are flat, and a nested one would
+// itself be a case this guard has to report rather than interpret. Every
+// literal it collects has to be readable by browserRefusalRange, which is the
+// same decision stringArrayLiteral and exportedWarningCodes already made -- a
+// member expressed as something other than a literal is a member the guard
+// cannot see, and failing is the honest answer. WR-04 names both as precedent.
+var refusedRangesEntry = regexp.MustCompile(`\{[^{}]*\}`)
+
 // refusedRangesDecl cuts the declaration out before anything is read from it.
 //
 // Two precedents, and this takes one thing from each. stringArrayLiteral
@@ -98,17 +109,6 @@ const refusedRangesName = "REFUSED_RANGES"
 // 6 borrowed the whole-source count for that separation instead, which is the
 // defect this replaces: a count over the file cannot see where the entries it
 // counted are.
-// refusedRangesEntry matches one flat object literal inside the declaration
-// body, whatever it is made of.
-//
-// Deliberately without nesting: the entries are flat, and a nested one would
-// itself be a case this guard has to report rather than interpret. Every
-// literal it collects has to be readable by browserRefusalRange, which is the
-// same decision stringArrayLiteral and exportedWarningCodes already made -- a
-// member expressed as something other than a literal is a member the guard
-// cannot see, and failing is the honest answer. WR-04 names both as precedent.
-var refusedRangesEntry = regexp.MustCompile(`\{[^{}]*\}`)
-
 var refusedRangesDecl = regexp.MustCompile(
 	`(?ms)^\s*(?:export\s+)?const\s+` + regexp.QuoteMeta(refusedRangesName) +
 		`\s*(?::[^=\n]*)?=\s*\[(.*?)\]`)
@@ -260,8 +260,8 @@ func browserRefusalRanges(t *testing.T) []declaredRange {
 // elsewhere in the file does not make it better -- that is precisely the state
 // round 4 measured as a green run.
 func parseBrowserRefusalRanges(source string) ([]declaredRange, error) {
-	decl := refusedRangesDecl.FindStringSubmatch(source)
-	if decl == nil {
+	decls := refusedRangesDecl.FindAllStringSubmatch(source, -1)
+	if len(decls) == 0 {
 		return nil, fmt.Errorf("no %s declared as an array literal.\n"+
 			"The browser's set has to be data -- a named array of {from: 0x.., to: 0x..} "+
 			"entries -- so that this guard can compare it to the server's. A chain of "+
@@ -273,7 +273,33 @@ func parseBrowserRefusalRanges(source string) ([]declaredRange, error) {
 			"either; that leftover is what stays behind when the real table moves away",
 			refusedRangesName, refusedRangesName, refusedRangesName, refusedRangesName)
 	}
-	body := decl[1]
+
+	// The guard does not choose, it requires uniqueness. Reading one of two
+	// declarations of the same name is reporting agreement about the other
+	// without ever having compared it -- the readability loop's reason, one
+	// level up, at the declaration instead of at the entry.
+	//
+	// The counterfactual is not theoretical, and it is not exotic either: an
+	// indented second declaration is the shape a table has for as long as it
+	// exists in two places during a move, and the anchor allows leading
+	// whitespace, so it satisfies it exactly as well as the real one does.
+	// Measured before this check existed, with an inner declaration standing
+	// before the real six-entry table: `1 entries inside the REFUSED_RANGES
+	// declaration, 7 in the source as a whole` -- fail closed, with the cause
+	// of a different defect, sending the reader after a stray literal while the
+	// real table sat unread below. With the inner one empty it was worse after
+	// the body-shape branch above: a table of six entries reported as empty.
+	// This runs BEFORE the body is read so that neither of those later checks
+	// can overwrite the cause with its own.
+	if len(decls) > 1 {
+		return nil, fmt.Errorf("%d declarations of %s in this source, and this guard reads one.\n"+
+			"Which of them the browser actually uses is not this guard's to guess: taking the "+
+			"first is reporting agreement about the others without having compared them. Until "+
+			"exactly one declaration of this name is left, there is no set to compare",
+			len(decls), refusedRangesName)
+	}
+
+	body := decls[0][1]
 
 	// Before the count check and not after it, because this case would trip
 	// that one too and explain it wrongly: an unreadable entry INSIDE the
@@ -524,6 +550,56 @@ const SOME_OTHER_TABLE: readonly RefusedRange[] = [
 ]
 `
 
+	// Two declarations of the guarded identifier, an indented inner one first.
+	// The anchor is `^` with leading whitespace allowed, so an indented
+	// declaration satisfies it just as well as a top-level one, and the guard
+	// took the first match without ever asking whether there was a second.
+	// Measured before the count check existed: `1 entries inside the
+	// REFUSED_RANGES declaration, 7 in the source as a whole` -- fail closed,
+	// but with the cause of a different defect. The reader is sent looking for
+	// a stray literal outside the declaration while the real table sits
+	// unread below. The outer table carries the six ranges of the real route so
+	// the number in that measured message is the one the real file produces.
+	const shadowedByAnInnerTable = `function buildRefusalTable() {
+  const REFUSED_RANGES: readonly RefusedRange[] = [
+    { from: 0x2028, to: 0x2029, class: 'line separator' },
+  ]
+  return REFUSED_RANGES
+}
+
+const REFUSED_RANGES: readonly RefusedRange[] = [
+  { from: 0x0000, to: 0x001f, class: 'control character' },
+  { from: 0x007f, to: 0x009f, class: 'control character' },
+  { from: 0xd800, to: 0xdfff, class: 'unpaired surrogate' },
+  { from: 0x2028, to: 0x2029, class: 'line separator' },
+  { from: 0xfeff, to: 0xfeff, class: 'byte order mark' },
+  { from: 0xfffe, to: 0x10ffff, class: 'above U+FFFD' },
+]
+`
+
+	// The same shape with an empty inner declaration, and its wrong cause is
+	// one this plan created. Before the body-shape distinction of task 1 this
+	// source produced the cut-short message; after it, the guard reads the
+	// empty inner body, finds nothing in it, and reports `REFUSED_RANGES is
+	// declared but carries no entries this guard can read` about a file whose
+	// real table carries six. A correction that leaves a new wrong cause behind
+	// is the reason this check belongs in the same round as that correction and
+	// not in the next one.
+	const shadowedByAnEmptyInnerTable = `function buildRefusalTable() {
+  const REFUSED_RANGES: readonly RefusedRange[] = []
+  return REFUSED_RANGES
+}
+
+const REFUSED_RANGES: readonly RefusedRange[] = [
+  { from: 0x0000, to: 0x001f, class: 'control character' },
+  { from: 0x007f, to: 0x009f, class: 'control character' },
+  { from: 0xd800, to: 0xdfff, class: 'unpaired surrogate' },
+  { from: 0x2028, to: 0x2029, class: 'line separator' },
+  { from: 0xfeff, to: 0xfeff, class: 'byte order mark' },
+  { from: 0xfffe, to: 0x10ffff, class: 'above U+FFFD' },
+]
+`
+
 	for _, tc := range []struct {
 		name       string
 		source     string
@@ -579,6 +655,20 @@ const SOME_OTHER_TABLE: readonly RefusedRange[] = [
 			wantErr: []string{
 				"cut short before its first entry",
 				`"\n  // nothing yet\n"`,
+			},
+		},
+		{
+			name:   "two declarations, an indented inner one first",
+			source: shadowedByAnInnerTable,
+			wantErr: []string{
+				"2 declarations of REFUSED_RANGES in this source",
+			},
+		},
+		{
+			name:   "an empty inner declaration before the real one",
+			source: shadowedByAnEmptyInnerTable,
+			wantErr: []string{
+				"2 declarations of REFUSED_RANGES in this source",
 			},
 		},
 	} {
