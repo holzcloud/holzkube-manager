@@ -28,9 +28,9 @@ See: .planning/PROJECT.md (updated 2026-08-27)
 ## Current Position
 
 Phase: 02 (Transport Seam, `talossim` & Image Factory) — EXECUTING
-Plan: 28 of 28
-Status: Verifikation Runde 6 — gaps_found (16/19 must-haves)
-Last activity: 2026-09-04 — Runde-6-Gap-Closure (02-27, 02-28) ausgefuehrt; Verifikation Runde 6: gaps_found
+Plan: 28 of 31
+Status: Runde-7-Gap-Closure geplant (02-29, 02-30, 02-31 in drei Wellen) — Verifikation Runde 6 steht auf gaps_found (16/19 must-haves)
+Last activity: 2026-09-05 — Runde-7-Gap-Closure geplant auf `02-DECISION-drift-guard-lexik.md` (Variante B, **nicht ratifiziert**); 02-29 ist richtungsunabhaengig, 02-30 haengt an der Richtung, 02-31 fuehrt die Register
 
 Progress: [█░░░░░░░░░] 1 of 10 phases
 
