@@ -2,10 +2,27 @@
 phase: 02-transport-seam-talossim-image-factory
 verified: 2026-09-05T12:40:00Z
 verified_at_commit: 5495949
-status: gaps_found
+status: passed
 score: 28/30 must-haves verified
 behavior_unverified: 1
-overrides_applied: 0
+overrides_applied: 1
+overrides:
+  - must_have: "A guard reports a pass only when it measured the property it is named for"
+    reason: >-
+      Variante B ratifiziert: die Behauptung des Waechters ist auf das verengt, was ein regulaerer
+      Ausdruck ueber TypeScript-Quelltext messen kann; der lexikalische Rest wird als offener
+      Ledger-Eintrag 72 mit pruefbarer, sechspunktiger Schliessbedingung gefuehrt statt behauptet.
+      Vier Mechanismen sind als Daten gelistet, sieben Zeilen messen sie ueber den Live-Lesepfad
+      mit umgekehrter Abnahme, und der Abdeckungstest bindet Liste und Zeilen in beide Richtungen.
+      Die Eintraege 72, 74 und 75 bleiben ausdruecklich open und bremsen /gsd-ship weiter; die
+      Ratifikation nimmt die Ausnahme an, sie versteckt sie nicht.
+    accepted_by: "Betreiber"
+    accepted_at: "2026-09-05T10:16:50Z"
+    accepted_how: >-
+      Ausdrueckliche Antwort des Betreibers auf die Ratifikationsfrage der Runde 8 am 2026-09-05
+      (Ja, B ratifizieren). Zu unterscheiden von der Richtungswahl am selben Tag, die der Betreiber
+      mit entscheide du an den autonomen Lauf delegiert hatte und die der Lauf korrekt NICHT als
+      Ratifikation verbucht hat.
 re_verification:
   round: 8
   previous_status: gaps_found
@@ -231,9 +248,9 @@ human_verification:
 testbar; Schematics und Image-URLs sind korrekt und nachweislich brauchbar herleitbar.
 **Verified:** 2026-09-05T12:40:00Z bei `5495949` (Branch `main`; alle sechs Falsifikationen, die
 Anti-Umgehungs-Probe und beide eigenen Sonden zurueckgenommen, `git status` am Ende leer)
-**Status:** gaps_found — die Buchhaltungsregression der Runde 6 ist vollstaendig geschlossen, der
+**Status:** passed (override) — die Buchhaltungsregression der Runde 6 ist vollstaendig geschlossen, der
 Spiegel-Defekt ist beseitigt statt getauscht, die Behauptung des Waechters ist ehrlich verengt, und
-die Wahrheit selbst haengt an genau einem Satz, den nur der Betreiber sprechen kann
+und die Wahrheit selbst hing an genau einem Satz, den nur der Betreiber sprechen kann — er ist am 2026-09-05 gesprochen worden (siehe overrides im Frontmatter)
 **Re-verification:** Ja — Runde 8 ueber die Plaene 02-29, 02-30 und 02-31, den Runde-6-Bericht bei
 `2211c80` ueberschreibend.
 
