@@ -498,3 +498,90 @@ zitierten Saetze aus dem Baum bleiben englisch.
 Wird ratifiziert, gehoert die Ratifikation in den Statusblock oben und in den Text von Eintrag 72 —
 und ein Nachtrag an dieses Dokument wird angehaengt, nicht eingearbeitet, mit der Byte-Integritaet
 des entschiedenen Bereichs, wie `02-DECISION-probe-budget.md:131-137` es vormacht.
+
+---
+
+# Nachtrag vom 2026-09-05
+
+*Angehaengt von Plan 02-31, nicht eingearbeitet. Alles oberhalb dieser Ueberschrift ist die
+Entscheidungsvorlage in dem Zustand, in dem Runde 7 sie vorgefunden hat, und ist byteweise
+unveraendert: die ersten 34626 Bytes dieser Datei hashen weiterhin auf
+`16d106e88b5e3b3ceafe1c80be6c1cbe89972729fd23951b4fceb6db1a75b5b1`. Nachgemessen mit*
+
+```
+head -c 34626 .planning/phases/02-transport-seam-talossim-image-factory/02-DECISION-drift-guard-lexik.md | shasum -a 256
+```
+
+*Dieser Abschnitt ist ein Anhang und nichts anderes. Insbesondere bleibt der Statusblock oben
+unveraendert: `offen` — `vorgelegt, nicht ratifiziert`.*
+
+## Die Provenienz: delegiert, nicht ratifiziert
+
+**Die Wahl zwischen B und A wurde vom Betreiber am 2026-09-05 ausdruecklich an den autonomen Lauf
+delegiert; der Lauf hat B gewaehlt. Der Betreiber hat B nicht selbst ratifiziert.**
+
+Konkret: der Betreiber hat den Entscheidungs-Checkpoint von Plan 02-30 gelesen und mit *"entscheide
+du"* geantwortet. Der Lauf hat daraufhin Variante B gewaehlt — auf diesen Gruenden: es ist die
+Empfehlung des Panels; die Plaene 02-30 und 02-31 waren bereits fuer B geschrieben, waehrend A eine
+Neuplanung verlangt haette; und zwei Pruef-Linsen hatten Variante A's Lexer gebaut und besiegt (eine
+Tabelle als JSX-Textknoten in einem `<pre>`-Block, und der in `02-REVIEW.md:164-180` entworfene
+`stripNonCode` gegen eine `${…}`-Interpolation).
+
+**Der Abschnitt "Ratifikation" oben sieht vor, dass eine Ratifikation in den Statusblock dieses
+Dokuments und in den Text von Eintrag 72 wandert. Das ist nicht der eingetretene Fall.** Eine
+delegierte Wahl als Ratifikation zu verbuchen waere eine Behauptung, die breiter ist als ihre
+Messung — genau der Defekt, den diese Runde schliessen soll, begangen von der Runde, die ihn
+schliesst. Der Statusblock bleibt deshalb unangetastet, und **Ledger-Eintrag 72** (`unmet-truth`,
+`open`, ohne Zeilennummer, zeigt auf `refusedRangesDecl`) traegt die Formulierung oben woertlich.
+
+Ebenfalls festzuhalten, damit ein spaeterer Leser die Beweisdichte dieser Runde richtig einordnet:
+**der Betreiber hat fuer den Rest dieser Runde ausdruecklich um schnelleres Vorgehen mit weniger
+Verifikation gebeten.** Die Evidenz der Runde 7 ist duenner als die der Runden 5 bis 7 zuvor; es
+wurde gemessen, was die `<verify>`-Bloecke und `<acceptance_criteria>` der Plaene verlangen, und
+nichts darueber hinaus.
+
+## Welcher Plan welchen Teil traegt
+
+| Teil der Empfehlung | Plan | richtungsabhaengig? |
+|---|---|---|
+| Spiegel-Defekt ueber die Form des Rumpfes beseitigt (`strings.TrimSpace(body)`), Leer- und Abschneide-Zweig mit je eigener Ursache | 02-29 | nein — unbedingter Teil |
+| WR-03: `to > utf8.MaxRune` und `from > to` als zwei Zweige mit zwei Ursachen | 02-29 | nein |
+| WR-04: die drei `wantErr: "REFUSED_RANGES"`-Zeilen auf unterscheidende Teilzeichenketten gehoben | 02-29 | nein |
+| WR-05: der 49-zeilige Kommentarblock geteilt, jede Regexp-Deklaration mit eigenem Doc-Kommentar | 02-29 | nein |
+| Duplikatspruefung: mehr als eine `REFUSED_RANGES`-Deklaration ist ein eigener Fehlerausgang | 02-29 | nein — beim Planen ueber Punkt 6 gefunden |
+| Der allquantifizierte Satz aus Doc-Kommentar und Fehlertext entfernt; Behauptung aus `guardBlindSpots` gerendert (`honestClaim`) | 02-30 | **ja — B** |
+| Blindheit nach **Mechanismus** skopiert, nicht als "non-code" | 02-30 | **ja — B** |
+| Blindheitstabellen ueber den Live-Lesepfad (`browserRefusalRanges(t, path)`, wrapper-frei) | 02-30 | **ja — B** |
+| Fuenfter Ausschluss `surrogate-interior`, als `rowless` mit Grund gefuehrt | 02-30 | **ja — B** |
+| Punkt 6 einmal ausgefuehrt und protokolliert (Ergebnis: kein Fund) | 02-30 | **ja — B** |
+| IN-05: Eintrag 72 zeigt auf ein Symbol, Zeilenspalte leer; 70s Zeiger auf Zeile 83 damit erledigt | 02-31 | nein |
+| Ledger-Eintrag 72, amendierend, `open`, mit der sechspunktigen Schliessbedingung | 02-31 | **ja — B** |
+| `overrides:` nicht benutzt, `waived_count` bleibt 0 | 02-31 | nein |
+
+Was ein Wechsel auf **Variante A** heute kostet: die Arbeit von Plan 02-30 an
+`internal/imagefactory/guard_drift_test.go` waere neu zu planen, und Eintrag 72 beschriebe einen
+anderen Stand — seine Abschnitte ueber die Ausschlussliste entfielen zugunsten einer Beschreibung
+dessen, was ein Lexer schliesst und was nicht. Der unbedingte Teil (Plan 02-29 vollstaendig, plus
+IN-05) bliebe unberuehrt. Der Satz aus dem Abschnitt "Ratifikation", der Wechsel koste *"einen
+Satz"*, galt vor der Ausfuehrung; seit dem 2026-09-05 kostet er zusaetzlich einen Plan.
+
+## Zahlenkorrektur: 2048 → 2046
+
+Der Abschnitt "Was B in Runde 7 anders bekommen muss" schreibt oben *"Fuer 2048 Codepoints wird
+nichts verglichen"*. **Nachgemessen ist die Zahl um zwei zu hoch.** U+D800..U+DFFF sind 2048
+Codepoints, aber der Waechter behauptet **beide Endpunkte einzeln**, bevor der Sweep den Bereich mit
+einem `continue` ueberspringt. Verglichen wird also nichts fuer die **2046** Codepoints *dazwischen*.
+
+**Es gilt 2046.** Die Plaene 02-29, 02-30 und 02-31 dieser Runde, der `surrogate-interior`-Eintrag in
+`guardBlindSpots` und der Text von Ledger-Eintrag 72 tragen durchgaengig 2046. Der Satz im Koerper
+dieses Dokuments **bleibt unveraendert stehen** — korrigiert wird durch Anhaengen, nicht durch
+Einarbeiten, genau wie beim Ledger, der ebenfalls kein Aenderungs-Verb kennt. Diese Notiz existiert,
+damit ein Leser, der von Eintrag 72 auf dieses Dokument weitergeht, nicht auf einen Widerspruch
+stoesst und die genauere Zahl fuer einen Tippfehler haelt.
+
+## Was dieser Nachtrag nicht tut
+
+Er ratifiziert nichts, er hebt den Statusblock nicht, und er schliesst Eintrag 70 nicht. **Eintrag 70
+bleibt `open`**, Eintrag 72 amendiert ihn als neuer Eintrag, und **G-02-9 ist offen** — die Eintraege
+58 und 66 tragen ihn unberuehrt. Eintrag 56 (die SERVER-Menge ist nicht erschoepfend gegen
+`factory.talos.dev` gemessen) wird von keiner Variante um ein Byte besser und bleibt daneben offen.
