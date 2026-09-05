@@ -1,10 +1,12 @@
 # Entscheidung: was der Browser-Ablehnungs-Waechter ueber `REFUSED_RANGES` behaupten darf
 
-Status: **offen** — vorgelegt, nicht ratifiziert. Empfehlung: Variante B (den Anspruch verengen);
-Variante A (Lexer vor dem Anker) liegt **punktgleich** daneben, 7,0 gegen 7,0
+Status: **ratifiziert** am 2026-09-05 durch den Betreiber — **Variante B** (den Anspruch verengen).
+Variante A (Lexer vor dem Anker) lag **punktgleich** daneben, 7,0 gegen 7,0; die Wahl ist damit
+getroffen und nicht mehr offen. Der Verlauf steht unveraendert weiter unten und im Nachtrag.
 Raised by: `02-VERIFICATION.md` (2026-09-04), Runde 6, `gaps[0]` und Human-Verification-Punkt 1
 Erarbeitet von: einem autonomen Lauf am 2026-09-05 — vier Entwuerfe, je vier Linsen, jede zitierte
-Messung von der pruefenden Linse nachgefahren; **kein Betreiber hat das ratifiziert**
+Messung von der pruefenden Linse nachgefahren. Bei der Vorlage hatte kein Betreiber ratifiziert; die
+Ratifikation ist am 2026-09-05 nachgefolgt (siehe Statusblock und Nachtrag)
 Konsequenz: WINDOWS-Eintrag 70 wird von **keiner** der vier Varianten geschlossen. Er bleibt `open`
 und bekommt einen amendierenden Eintrag 72, kein `fixed`.
 
@@ -585,3 +587,28 @@ Er ratifiziert nichts, er hebt den Statusblock nicht, und er schliesst Eintrag 7
 bleibt `open`**, Eintrag 72 amendiert ihn als neuer Eintrag, und **G-02-9 ist offen** — die Eintraege
 58 und 66 tragen ihn unberuehrt. Eintrag 56 (die SERVER-Menge ist nicht erschoepfend gegen
 `factory.talos.dev` gemessen) wird von keiner Variante um ein Byte besser und bleibt daneben offen.
+
+
+---
+
+# Nachtrag vom 2026-09-05 — Ratifikation
+
+**Der Betreiber hat Variante B am 2026-09-05 ausdruecklich ratifiziert.** Auf die Ratifikationsfrage
+der Verifikationsrunde 8 lautete die Antwort *"Ja, B ratifizieren"*. Damit ist der dritte Schritt des
+Weges (b), den Runde 6 ausgeschrieben hatte — verengen, ledgern, **ratifizieren** — vollzogen, und
+`02-VERIFICATION.md` traegt den `overrides:`-Block mit `accepted_by: Betreiber` und dem Zeitstempel
+2026-09-05T10:17:16Z.
+
+**Diese Ratifikation ist von der Delegation desselben Tages zu unterscheiden, und das ist kein
+Formalismus.** Am 2026-09-05 hat der Betreiber die RICHTUNGSWAHL mit *"entscheide du"* an den
+autonomen Lauf delegiert; der Lauf hat B gewaehlt und sich geweigert, das als Ratifikation zu
+verbuchen. Die Verifikation der Runde 8 hat diese Weigerung geprueft, bestaetigt und *"die beste
+Einzelentscheidung der Runde"* genannt — und zugleich festgestellt, dass genau sie der Grund war,
+warum die Phase nicht schliessen konnte. Der Betreiber wurde daraufhin einmal gefragt und hat
+geantwortet. Eine Wahl unter Delegation und eine Annahme durch den Verantwortlichen sind zwei
+verschiedene Handlungen; hier haben beide stattgefunden, nacheinander, und beide stehen im Register.
+
+**Was die Ratifikation NICHT tut.** Sie schliesst keinen Ledger-Eintrag. 72 (der lexikalische Rest),
+74 (die Geschwister-Leser) und 75 (die dreimal gedriftete Planzahl) bleiben `open` und bremsen
+`/gsd-ship` weiter. Die Ausnahme wird angenommen, nicht versteckt — das ist der Unterschied zwischen
+einer Ratifikation und einem `fixed`, und Eintrag 69 ist der Grund, warum diese Phase ihn kennt.
