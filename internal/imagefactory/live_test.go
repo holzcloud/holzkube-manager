@@ -661,7 +661,10 @@ func liveNewestSupportedRow(ctx context.Context, t *testing.T, client *imagefact
 		// The prerelease filter is separate because that predicate admits
 		// v1.14.0-rc.2, and a release candidate is not what "the newest
 		// version inside the range" should mean to an operator.
-		if talos.CheckSupportedVersion(v) == nil && !imagefactory.IsPrerelease(v) {
+		// The opt-in is passed as true because the pre-release filter on the
+		// right is what this loop uses for that question; passing false would
+		// ask the same thing twice, in two vocabularies.
+		if talos.CheckSupportedVersion(v, true) == nil && !imagefactory.IsPrerelease(v) {
 			inRange = append(inRange, v)
 		}
 	}
