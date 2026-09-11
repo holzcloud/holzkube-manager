@@ -649,7 +649,12 @@ func (c *ClusterClient) Probe(ctx context.Context) (string, error) {
 // seam's reason: the machinery client is the implementation of this package,
 // not a type that travels above it.
 type LogStream struct {
-	s machine.MachineService_LogsClient
+	// Exactly one of the two is set. They are separate fields rather than one
+	// interface because the two generated clients have no common named type
+	// and inventing one here would be inventing a machinery abstraction inside
+	// the package whose job is to contain machinery.
+	s     machine.MachineService_LogsClient
+	dmesg machine.MachineService_DmesgClient
 
 	// cancel releases the stream and everything derived beneath it.
 	//
@@ -689,9 +694,41 @@ func (c *ClusterClient) Logs(ctx context.Context, service string) (*LogStream, e
 	return &LogStream{s: s, cancel: cancel}, nil
 }
 
+// Dmesg opens a follow stream of the node's kernel ring buffer.
+//
+// It returns the same LogStream type as Logs, and that is not laziness: both
+// are a follow stream of length-delimited chunks with the same deadline class
+// and the same release obligation, and two types with identical method sets
+// would be two places to fix the cancellation bug this one already has fixed.
+// What differs is the RPC, and that difference is here.
+//
+// tail is how many existing lines to replay before following. A node's ring
+// buffer holds the whole boot, and an operator opening dmesg during an
+// incident almost always wants what is already there -- an empty panel that
+// fills only when something new happens is indistinguishable from a broken
+// one.
+func (c *ClusterClient) Dmesg(ctx context.Context, tail bool) (*LogStream, error) {
+	streamCtx, cancel := context.WithCancel(ctx)
+
+	s, err := c.conn.c.Dmesg(streamCtx, true, tail)
+	if err != nil {
+		cancel()
+		return nil, err
+	}
+	return &LogStream{dmesg: s, cancel: cancel}, nil
+}
+
 // Recv returns the next chunk of log output. It returns io.EOF at the end of a
 // bounded stream, which is not a failure.
 func (l *LogStream) Recv() ([]byte, error) {
+	if l.dmesg != nil {
+		data, err := l.dmesg.Recv()
+		if err != nil {
+			return nil, err
+		}
+		return data.GetBytes(), nil
+	}
+
 	data, err := l.s.Recv()
 	if err != nil {
 		return nil, err

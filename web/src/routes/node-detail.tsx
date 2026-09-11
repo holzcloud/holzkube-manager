@@ -1,9 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { createRoute, Link, useNavigate } from '@tanstack/react-router'
 import { RefreshCw, Trash2 } from 'lucide-react'
-import type { ReactNode } from 'react'
-import { api, type Field } from '@/api'
+import { type ReactNode, useState } from 'react'
+import { api, type Field, type Machine } from '@/api'
 import { HealthField, StageBadge } from '@/components/HealthField'
+import { LogPanel } from '@/components/LogPanel'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -15,6 +16,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
+import { useStream } from '@/hooks/useStream'
 import { authenticatedRoute } from '@/routes/__root'
 import { MACHINE_POLL_INTERVAL_MS } from '@/routes/nodes'
 
@@ -142,7 +144,7 @@ export function NodeDetailPage() {
                 label="Schematic"
                 field={m.schematic_id}
                 mono
-                render={(v) => (v ? v.slice(0, 16) + '…' : '')}
+                render={(v) => (v ? `${v.slice(0, 16)}…` : '')}
               />
               <Row label="Manufacturer" field={m.manufacturer} />
               <Row label="Product" field={m.product_name} />
@@ -240,6 +242,15 @@ export function NodeDetailPage() {
           </CardContent>
         </Card>
 
+        <Card className="lg:col-span-2">
+          <CardHeader>
+            <CardTitle className="text-base">Live output</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <NodeStreams machine={m} />
+          </CardContent>
+        </Card>
+
         <Card>
           <CardHeader>
             <CardTitle className="text-base">Services</CardTitle>
@@ -287,6 +298,89 @@ export function NodeDetailPage() {
     </section>
   )
 }
+
+/**
+ * The live panels for one node, on one connection.
+ *
+ * Which services to offer comes from the node's own service list rather than
+ * from a hardcoded set: a node that does not run etcd has no etcd log, and a
+ * panel for it would sit at "nothing yet" forever, which reads as broken. A
+ * node whose service list is stale still gets the services it last reported —
+ * the log may be empty, but the list is the honest one.
+ */
+function NodeStreams({ machine }: { machine: Machine }) {
+  const services = (machine.services.value ?? [])
+    .map((s) => s.id)
+    .filter((id) => STREAMABLE_SERVICES.has(id))
+
+  const [open, setOpen] = useState<string[]>(() => ['dmesg'])
+
+  // Panel name -> topic, so the render below never indexes one array with
+  // another's position. Two parallel arrays kept in step by hand is a bug
+  // waiting for somebody to filter one of them.
+  const topicOf = (name: string) =>
+    name === 'dmesg' ? `dmesg:${machine.id}` : `logs:${machine.id}:${name}`
+
+  const { lines, connection } = useStream(open.map(topicOf))
+
+  const available = ['dmesg', ...services]
+
+  return (
+    <div className="space-y-3">
+      <div className="flex flex-wrap gap-2">
+        {available.map((name) => (
+          <Button
+            key={name}
+            size="sm"
+            variant={open.includes(name) ? 'secondary' : 'outline'}
+            onClick={() =>
+              setOpen((prev) =>
+                prev.includes(name) ? prev.filter((n) => n !== name) : [...prev, name],
+              )
+            }
+          >
+            {name}
+          </Button>
+        ))}
+      </div>
+
+      {open.length === 0 && (
+        <p className="text-sm text-muted-foreground">
+          No panels open. Every panel above shares one connection to this instance, and one stream
+          per topic from the node — four panels on one service is one read, not four.
+        </p>
+      )}
+
+      <div className="grid gap-3 xl:grid-cols-2">
+        {open.map((name) => (
+          <LogPanel
+            key={name}
+            title={name}
+            lines={lines[topicOf(name)] ?? []}
+            connection={connection}
+          />
+        ))}
+      </div>
+    </div>
+  )
+}
+
+/**
+ * The Talos services whose logs are worth offering.
+ *
+ * A list rather than "everything the node reports", because the service list
+ * includes things whose log is empty by construction, and a panel that can
+ * never fill is indistinguishable from one that is broken.
+ */
+const STREAMABLE_SERVICES = new Set([
+  'apid',
+  'containerd',
+  'cri',
+  'etcd',
+  'kubelet',
+  'machined',
+  'trustd',
+])
 
 function Row<T>({
   label,
