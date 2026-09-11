@@ -96,6 +96,22 @@ func (h *heldResponse) Write(b []byte) (int, error) {
 // action from a refused one.
 func (h *heldResponse) Status() int { return h.status }
 
+// Unwrap exposes the writer underneath.
+//
+// This one is a sharp edge and it is worth naming rather than leaving for
+// somebody to find. The whole point of heldResponse is that the response is
+// *not* written until the sudo window has been refreshed; a handler that
+// reaches through this with http.ResponseController and flushes has defeated
+// that, and the window will not refresh.
+//
+// It is implemented anyway, because the alternative is worse: without it,
+// ResponseController fails with ErrNotSupported on a destructive route, which
+// is a capability lost silently rather than a rule stated. The rule is stated
+// instead, and it is enforced where it can be -- httpapi.New refuses to
+// register a route that is both Destructive and Streaming, so this link never
+// wraps a handler that streams.
+func (h *heldResponse) Unwrap() http.ResponseWriter { return h.ResponseWriter }
+
 func (h *heldResponse) flush() {
 	h.ResponseWriter.WriteHeader(h.status)
 	if h.body.Len() > 0 {

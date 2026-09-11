@@ -24,7 +24,9 @@ import (
 	"github.com/holzcloud/holzkube-manager/internal/imagefactory"
 	"github.com/holzcloud/holzkube-manager/internal/inventory"
 	"github.com/holzcloud/holzkube-manager/internal/model"
+	"github.com/holzcloud/holzkube-manager/internal/nodestream"
 	"github.com/holzcloud/holzkube-manager/internal/store/fsstore"
+	"github.com/holzcloud/holzkube-manager/internal/streamhub"
 	"github.com/holzcloud/holzkube-manager/internal/talos"
 	"github.com/holzcloud/holzkube-manager/internal/tlsx"
 )
@@ -190,6 +192,25 @@ func run(args []string) error {
 	})
 	defer inv.Close()
 
+	// The stream fan-out and the readers that feed it.
+	//
+	// The hub is one reader per topic and a bounded ring buffer, so a browser
+	// tab that stops reading loses events -- visibly, as a gap -- rather than
+	// applying backpressure to a Talos node. The manager reference-counts the
+	// readers, so four panels on one node's kubelet log are one follow stream
+	// and not four.
+	hub := streamhub.New()
+	defer hub.Close()
+
+	nodeStreams := nodestream.New(nodestream.Deps{
+		Hub:    hub,
+		Logger: logger,
+		Open: func(ctx context.Context, id model.MachineID) (*talos.ClusterClient, error) {
+			return inv.Connect(ctx, id)
+		},
+	})
+	defer nodeStreams.Close()
+
 	// The identity provider, if one is configured. New performs no network I/O:
 	// discovery happens on first use, so that a provider which is down -- quite
 	// possibly because it runs on the cluster this tool exists to repair --
@@ -219,9 +240,11 @@ func run(args []string) error {
 		// flag lost that way would be the worst instance of it: the endpoint
 		// would report "live" while the transport refused everything, or the
 		// reverse.
-		Factory:   factory,
-		TalosMode: talosMode,
-		Inventory: inv,
+		Factory:     factory,
+		TalosMode:   talosMode,
+		Inventory:   inv,
+		Hub:         hub,
+		NodeStreams: nodeStreams,
 		// The per-cluster read-only lock, read by the route middleware rather
 		// than by each handler (D-22). Inside the literal for the reason the
 		// comment above states: Deps is copied by value into every …Routes
@@ -257,6 +280,7 @@ func run(args []string) error {
 		handlers.AuditRoutes(deps),
 		handlers.SchematicRoutes(deps),
 		handlers.InventoryRoutes(deps),
+		handlers.StreamRoutes(deps),
 	)
 
 	// Start observing before the listener opens. A supervisor that only runs

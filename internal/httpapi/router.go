@@ -17,7 +17,9 @@ import (
 	"github.com/holzcloud/holzkube-manager/internal/httpapi/middleware"
 	"github.com/holzcloud/holzkube-manager/internal/imagefactory"
 	"github.com/holzcloud/holzkube-manager/internal/inventory"
+	"github.com/holzcloud/holzkube-manager/internal/nodestream"
 	"github.com/holzcloud/holzkube-manager/internal/store"
+	"github.com/holzcloud/holzkube-manager/internal/streamhub"
 	"github.com/holzcloud/holzkube-manager/internal/talos"
 )
 
@@ -44,6 +46,18 @@ type Route struct {
 	// Action is the stable audit token for this route, e.g. "auth.login".
 	// A mutating route without one would execute unlogged.
 	Action string
+
+	// Streaming declares that this route writes a response over time rather
+	// than at once -- an SSE stream today, and whatever phase 6 hangs job
+	// progress on.
+	//
+	// It is declarative for the same reason Destructive is: what it turns off
+	// is the process-wide write deadline, and a route that quietly needed that
+	// and did not say so would work in development and die after two minutes
+	// in production. New refuses a route that is both Streaming and
+	// Destructive, because the sudo gate holds a response back until the
+	// window has been refreshed and a held response is not a stream.
+	Streaming bool
 
 	// ClusterScope names the cluster a mutating route acts on, so that the
 	// per-cluster read-only lock can be enforced at the route rather than
@@ -137,6 +151,12 @@ type Deps struct {
 	// neither, and those handlers answer 502 rather than panicking if it is.
 	Inventory *inventory.Service
 
+	// Hub is the stream fan-out and NodeStreams owns the readers that feed it.
+	// Both are nil in a deployment that serves no streams, and the stream
+	// route answers 502 rather than panicking if they are.
+	Hub         *streamhub.Hub
+	NodeStreams *nodestream.Manager
+
 	// ClusterLocked reports whether a cluster refuses mutation. It is nil in a
 	// deployment with no inventory, and the lock link is then inert -- which
 	// is correct, because there are no clusters to protect.
@@ -171,6 +191,16 @@ func New(d Deps) http.Handler {
 	seen := make(map[string]bool, len(d.Routes))
 
 	for _, rt := range d.Routes {
+		// A composition-time panic, not a returned error. This runs once, at
+		// startup, from the one place that assembles the table; a route table
+		// that contradicts itself is a programming error and the right moment
+		// to find it is before the listener opens.
+		if rt.Streaming && rt.Destructive {
+			panic("httpapi: route " + rt.Method + " " + rt.Pattern +
+				" is both Streaming and Destructive. The sudo gate buffers a response until the " +
+				"window has been refreshed, so a held response cannot be a stream.")
+		}
+
 		handler := d.wrapRoute(rt)
 		mux.Handle(rt.Method+" "+rt.Pattern, handler)
 

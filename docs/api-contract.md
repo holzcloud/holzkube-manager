@@ -1138,3 +1138,101 @@ way forever in an archive with no deletion path.
 **`talosconfig` is deliberately absent from the allowlist**: it carries a client
 private key, and the fail-closed default writes `<redacted>` for it. That is the
 whole reason `internal/audit/redact.go` is an allowlist and not a denylist.
+
+## Streaming
+
+### One connection per tab, not per panel
+
+`GET /api/v1/stream?topic=…&topic=…` is the only streaming route, and it
+carries every panel a browser tab has open.
+
+A connection per panel would be simpler and wrong in a way that only shows up
+in use: browsers cap concurrent connections per origin at six, and a node
+detail page with kubelet, etcd, apid and dmesg open is already four of them.
+The seventh panel would silently never connect.
+
+At most **12 topics** per connection. Each is a follow stream against a node,
+so this is a limit on what one browser tab can ask a cluster to do.
+
+### Topics
+
+| shape | meaning |
+|---|---|
+| `dmesg:<machine-uuid>` | the node's kernel ring buffer |
+| `logs:<machine-uuid>:<service>` | one Talos service's log output |
+
+The spelling is a contract: a client sends these strings back on every
+reconnect. An unrecognised topic is `400 validation.*` **before any bytes are
+written** — an error inside a `200` the client has already begun parsing is
+worse than no answer.
+
+### Frames
+
+```
+event: message
+id: dmesg:abc=41,logs:abc:kubelet=12
+data: {"topic":"dmesg:abc","payload":{"line":"…","at":"2026-09-11T…"}}
+```
+
+`event` is `message` for output and `gap` for a dropped range. The payload of a
+`gap` is `{"missed":N,"through":M}`.
+
+**`id` is the whole cursor set, not this topic's position.** SSE gives a client
+exactly one string to hand back, and this connection carries several topics at
+different positions — so the browser's own automatic reconnect replays each
+topic from where *that* topic stood. A per-topic id would resume one stream
+correctly and silently truncate the rest.
+
+A client may send `Last-Event-ID` itself in the same `topic=id,topic=id` form.
+An entry that does not parse is skipped rather than refusing the connection: a
+malformed cursor should cost a replay from the start of the buffer, not the
+whole stream.
+
+### What a gap means, and why it is not optional
+
+The server holds a bounded ring buffer per topic and never blocks on a
+subscriber — a browser tab that stopped reading must not be able to apply
+backpressure to a Talos node. A subscriber that falls behind therefore loses
+events, and **the newest event wins**: the oldest queued one is discarded, so a
+slow panel keeps tailing instead of quietly becoming a replay it can never
+catch up from.
+
+Every lost event is counted and reported as a `gap`. A client that does not
+render it is showing a log with an invisible hole in it, to somebody using that
+log to diagnose an outage. That produces confident wrong conclusions, which is
+worse than showing no log at all.
+
+### Connection state is *in* the stream
+
+"Nothing is arriving" has four causes that call for four different reactions:
+
+| state | meaning |
+|---|---|
+| `live` | the upstream stream is open and delivering |
+| `reconnecting` | it broke and is being reopened; the node may be fine |
+| `rebooting` | the node ended the stream and is expected back — wait, do not investigate |
+| `disconnected` | nothing is running and nothing is trying |
+
+They arrive as ordinary events on the same stream (`payload.state`, with a
+`payload.reason`), so they are ordered against the log lines around them. A
+state carried out of band would arrive whenever it arrived, and
+"reconnecting" would appear above lines that predate it.
+
+### The two things that had to land first
+
+The chain could not stream at all before this phase, and it failed *silently* —
+the wrappers buffered, the handler looked fine, and the panel never filled.
+
+1. Every `ResponseWriter` wrapper in the middleware chain implements
+   `Unwrap()`, so `http.ResponseController` reaches the real connection. Only
+   `Unwrap` — not hand-written `Flush` and `Hijack` — so the capability is
+   exactly the connection's and there is no reimplementation to get wrong.
+2. The streaming route clears the process-wide write deadline for its own
+   connection with `SetWriteDeadline(time.Time{})`. That timeout is sized for
+   argon2id and the login rate limiter and has nothing to say about a stream;
+   left in place it kills every stream at the same age.
+
+A route declares `Streaming: true`, and `httpapi.New` **panics at composition
+time** if a route is both `Streaming` and `Destructive`: the sudo gate holds a
+response back until the window has been refreshed, and a held response is not a
+stream.

@@ -182,3 +182,34 @@ func (s *Service) AddManual(ctx context.Context, cluster model.ClusterID, addr s
 		slog.String("machine", string(rec.ID)), slog.String("addr", addr))
 	return rec, nil
 }
+
+// Connect opens a cluster client to one machine in the inventory.
+//
+// It is the one way anything outside this package reaches a node, and that is
+// deliberate: the credentials belong to the cluster, the address is a hint on
+// the machine record, and a caller that assembled either itself would be a
+// second answer to "how do we reach a node" that nothing keeps in step with
+// the first. The stream readers are the first such caller; phase 6's jobs are
+// the next.
+//
+// The caller owns the returned client and must Close it.
+func (s *Service) Connect(ctx context.Context, id model.MachineID) (*talos.ClusterClient, error) {
+	rec, err := s.deps.Store.Machines().Get(ctx, id)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+
+	creds, err := s.clusterCreds(ctx, rec.Cluster)
+	if err != nil {
+		return nil, err
+	}
+
+	return talos.NewClusterClient(ctx, s.deps.Dialer, talos.Target{
+		Cluster: rec.Cluster,
+		Machine: rec.ID,
+		Addr:    rec.Addr,
+	}, creds, s.deps.Mode)
+}

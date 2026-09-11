@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -25,7 +26,10 @@ import (
 	"github.com/holzcloud/holzkube-manager/internal/httpapi/handlers"
 	"github.com/holzcloud/holzkube-manager/internal/inventory"
 	"github.com/holzcloud/holzkube-manager/internal/model"
+	"github.com/holzcloud/holzkube-manager/internal/nodestream"
 	"github.com/holzcloud/holzkube-manager/internal/store/fsstore"
+	"github.com/holzcloud/holzkube-manager/internal/streamhub"
+	"github.com/holzcloud/holzkube-manager/internal/talos"
 )
 
 const (
@@ -40,6 +44,8 @@ type harness struct {
 	logger  *audit.Logger
 	store   *fsstore.Store
 	inv     *inventory.Service
+	hub     *streamhub.Hub
+	streams *nodestream.Manager
 }
 
 // harnessOpt adjusts the object graph before it is served.
@@ -52,11 +58,17 @@ type harnessOpt func(*harnessConfig)
 
 type harnessConfig struct {
 	inventory func(store *fsstore.Store) *inventory.Service
+	streaming bool
 }
 
 // withInventory adds an inventory service built over the harness's store.
 func withInventory(build func(store *fsstore.Store) *inventory.Service) harnessOpt {
 	return func(c *harnessConfig) { c.inventory = build }
+}
+
+// withStreaming adds the hub, the node-stream manager and the stream route.
+func withStreaming() harnessOpt {
+	return func(c *harnessConfig) { c.streaming = true }
 }
 
 // newHarness wires the same object graph as cmd/holzkube-managerd against a throwaway
@@ -111,6 +123,8 @@ func newHarness(t *testing.T, opts ...harnessOpt) *harness {
 		SudoWindow: 5 * time.Minute,
 		AuditChain: httpapi.ChainStatus{OK: chainOK, BrokenAtLine: brokenLine, File: chainFile},
 	}
+	h2 := &harness{}
+
 	var inv *inventory.Service
 	if cfg.inventory != nil {
 		inv = cfg.inventory(st)
@@ -126,6 +140,32 @@ func newHarness(t *testing.T, opts ...harnessOpt) *harness {
 		}
 	}
 
+	if cfg.streaming {
+		hub := streamhub.New()
+		t.Cleanup(func() { _ = hub.Close() })
+
+		ns := nodestream.New(nodestream.Deps{
+			Hub:    hub,
+			Logger: deps.Logger,
+			Open: func(ctx context.Context, id model.MachineID) (*talos.ClusterClient, error) {
+				if inv == nil {
+					return nil, errors.New("no inventory")
+				}
+				return inv.Connect(ctx, id)
+			},
+			// Short, so a test that closes a panel and asserts the reader
+			// stopped does not wait half a minute for it.
+			Linger:       50 * time.Millisecond,
+			RetryBackoff: 50 * time.Millisecond,
+		})
+		t.Cleanup(func() { _ = ns.Close() })
+
+		deps.Hub = hub
+		deps.NodeStreams = ns
+		h2.hub = hub
+		h2.streams = ns
+	}
+
 	deps.Routes = slices.Concat(
 		handlers.SystemRoutes(deps),
 		handlers.SetupRoutes(deps),
@@ -133,6 +173,7 @@ func newHarness(t *testing.T, opts ...harnessOpt) *harness {
 		handlers.AccountRoutes(deps),
 		handlers.AuditRoutes(deps),
 		handlers.InventoryRoutes(deps),
+		handlers.StreamRoutes(deps),
 	)
 
 	srv := httptest.NewTLSServer(httpapi.New(deps))
@@ -150,7 +191,13 @@ func newHarness(t *testing.T, opts ...harnessOpt) *harness {
 		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
 	}
 
-	return &harness{srv: srv, client: client, dataDir: dir, logger: al, store: st, inv: inv}
+	h2.srv = srv
+	h2.client = client
+	h2.dataDir = dir
+	h2.logger = al
+	h2.store = st
+	h2.inv = inv
+	return h2
 }
 
 func (h *harness) sessionCookie(t *testing.T) string {

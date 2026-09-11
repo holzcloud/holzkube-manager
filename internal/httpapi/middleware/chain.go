@@ -87,3 +87,25 @@ func (r *responseRecorder) Write(b []byte) (int, error) {
 
 // Status reports the status code the inner handler produced.
 func (r *responseRecorder) Status() int { return r.status }
+
+// Unwrap exposes the writer underneath, which is what makes streaming possible
+// through this chain at all.
+//
+// http.ResponseController walks Unwrap() to find a Flusher, a Hijacker or a
+// deadline setter. Without it, a wrapper that implements neither silently
+// swallows the capability: a streaming handler calling Flush gets
+// ErrNotSupported, or -- worse, before ResponseController existed -- a type
+// assertion that fails and a handler that buffers the whole stream and looks
+// like a hang.
+//
+// That was the entry blocker phase 2 recorded rather than worked around: none
+// of the three wrappers in this chain implemented it, so no SSE route could be
+// built on the chain and phase 2 deliberately built none. This is the line
+// that lifts it.
+//
+// Only Unwrap is implemented, not Flush and Hijack directly, and that is the
+// smaller and stricter choice. ResponseController reaches through Unwrap to
+// the real writer, so the capability is exactly the real writer's -- there is
+// no reimplementation here to get subtly wrong, and nothing that claims a
+// capability the connection underneath does not have.
+func (r *responseRecorder) Unwrap() http.ResponseWriter { return r.ResponseWriter }
