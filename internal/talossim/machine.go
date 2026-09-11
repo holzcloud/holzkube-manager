@@ -46,6 +46,16 @@ type nodeState struct {
 	reboots  int
 	lastBoot time.Time
 
+	// images is what ImagePull has put on this node. Upgrade refuses a
+	// reference that is not here, which is what makes the two-call shape the
+	// real LifecycleService requires testable rather than a claim in a
+	// comment.
+	images map[string]bool
+
+	// removedMembers is what EtcdRemoveMemberByID has taken out of this node's
+	// idea of the membership.
+	removedMembers map[uint64]bool
+
 	resets     int
 	poweredOff bool
 
@@ -102,6 +112,66 @@ func newNodeState(opts Options) *nodeState {
 }
 
 // snapshot returns the current state as a value.
+// pullImage records that an image is on the node.
+func (n *nodeState) pullImage(ref string) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	if n.images == nil {
+		n.images = map[string]bool{}
+	}
+	n.images[ref] = true
+}
+
+// hasImage reports whether an image has been pulled.
+func (n *nodeState) hasImage(ref string) bool {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	return n.images[ref]
+}
+
+// upgradeTo is what makes an upgrade observable.
+//
+// It changes what Version reports, and the reason it is a state change rather
+// than a streamed line is the whole of UPG-07: a node that streamed an
+// upgrade's output and then reported the same version it reported before has
+// not upgraded, and nothing about the stream says so. A simulator that only
+// streamed could not tell the two apart, and neither could a test written
+// against it.
+//
+// The reboot counter advances too, because a node that has installed a new
+// system reboots into it -- and the uptime that follows from it is what the
+// reboot job's own verification reads.
+func (n *nodeState) upgradeTo(version string) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	n.version = version
+	n.reboots++
+	n.lastBoot = n.now()
+}
+
+// removeMember drops a member from this node's idea of the etcd membership.
+func (n *nodeState) removeMember(id uint64) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	if n.removedMembers == nil {
+		n.removedMembers = map[uint64]bool{}
+	}
+	n.removedMembers[id] = true
+}
+
+// leaveEtcd stops etcd on this node.
+//
+// The node stops reporting itself as bootstrapped, which makes every Etcd*
+// read refuse exactly as it does on a node that was never bootstrapped. Those
+// two states are genuinely indistinguishable from outside on a real node, and
+// a simulator that distinguished them would let a test rely on a difference
+// that is not there.
+func (n *nodeState) leaveEtcd() {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	n.bootstrapped = false
+}
+
 func (n *nodeState) snapshot() NodeState {
 	n.mu.Lock()
 	defer n.mu.Unlock()
@@ -281,6 +351,13 @@ func actorID() string {
 // real client cannot reach.
 func (s *Server) registerNodeServices(srv *grpc.Server) {
 	machine.RegisterMachineServiceServer(srv, &machineService{server: s})
+
+	// The third service, added in phase 9. Talos v1.13 moved install and
+	// upgrade off MachineService onto LifecycleService, and the streaming
+	// upgrade is the one internal/talos calls -- so a simulator that served
+	// only the first two would answer Unimplemented to the one RPC the
+	// upgrade path depends on.
+	machine.RegisterLifecycleServiceServer(srv, &lifecycleService{server: s})
 	storage.RegisterStorageServiceServer(srv, &storageService{server: s})
 }
 

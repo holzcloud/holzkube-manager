@@ -138,7 +138,15 @@ type Server struct {
 	streams *Streamer
 
 	pki *pki
-	srv *grpc.Server
+
+	// The phase-9 node states: an etcd alarm, a lost quorum and an installer
+	// that refuses. They are guarded by the Server's own mutex and are set
+	// directly rather than through Registry -- see the note in upgrade.go on
+	// why they are not scenarios.
+	etcdAlarmType  string
+	etcdNoQuorum   bool
+	upgradeRefuses bool
+	srv            *grpc.Server
 
 	pipe *bufconn.Listener
 

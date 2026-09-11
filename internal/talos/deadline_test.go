@@ -60,6 +60,7 @@ func TestClassTable(t *testing.T) {
 		m = "/machine.MachineService/"
 		s = "/storage.StorageService/"
 		c = "/cosi.resource.State/"
+		l = "/machine.LifecycleService/"
 	)
 
 	policy := map[talos.DeadlineClass][]string{
@@ -83,6 +84,14 @@ func TestClassTable(t *testing.T) {
 			m + "Logs", m + "Dmesg", m + "Events", m + "Read", m + "Copy", m + "List",
 			m + "DiskUsage", m + "ImageList", m + "EtcdSnapshot", m + "PacketCapture",
 			c + "Watch",
+			// Phase 9. The streaming upgrade is deliberately here and not
+			// under Mutation, where its deprecated MachineService twin sits:
+			// the node writes installer output for as long as the install
+			// takes, and a thirty-second total deadline would kill an upgrade
+			// that is working. The first-byte deadline and the idle timeout
+			// ask the right question instead -- a node that has said nothing
+			// for a minute has stopped installing.
+			l + "Upgrade",
 		},
 	}
 
@@ -160,6 +169,19 @@ func TestClassTableNamesOnlyRealRPCs(t *testing.T) {
 	}
 	for _, sd := range storage.StorageService_ServiceDesc.Streams {
 		known[sSvc+sd.StreamName] = true
+	}
+
+	// The third service, added in phase 9. Talos v1.13 moved install and
+	// upgrade off MachineService onto LifecycleService, and the deprecated
+	// MachineService.Upgrade is the one this package does not call -- so a
+	// guard that only knew the first two services would reject the entry for
+	// the RPC that actually runs an upgrade.
+	lSvc := "/" + machine.LifecycleService_ServiceDesc.ServiceName + "/"
+	for _, md := range machine.LifecycleService_ServiceDesc.Methods {
+		known[lSvc+md.MethodName] = true
+	}
+	for _, sd := range machine.LifecycleService_ServiceDesc.Streams {
+		known[lSvc+sd.StreamName] = true
 	}
 
 	checked := 0
