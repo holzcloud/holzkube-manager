@@ -4,12 +4,14 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"slices"
 	"strings"
 	"syscall"
@@ -27,6 +29,7 @@ import (
 	"github.com/holzcloud/holzkube-manager/internal/machineconfig"
 	"github.com/holzcloud/holzkube-manager/internal/model"
 	"github.com/holzcloud/holzkube-manager/internal/nodestream"
+	"github.com/holzcloud/holzkube-manager/internal/provision"
 	"github.com/holzcloud/holzkube-manager/internal/store/fsstore"
 	"github.com/holzcloud/holzkube-manager/internal/streamhub"
 	"github.com/holzcloud/holzkube-manager/internal/talos"
@@ -245,6 +248,79 @@ func run(args []string) error {
 		Mode: talosMode,
 	})
 
+	// Provisioning: the wizard's reads, and the etcd bootstrap lease.
+	//
+	// The lease directory lives in the data directory rather than in /tmp or
+	// in memory, and that is the whole of mechanism 2 and 3: a lease that did
+	// not survive a restart would not be a lease, and an intent record that
+	// did not survive a crash would not be a record of the one thing a crash
+	// makes unknowable.
+	bootstrapper, err := provision.NewBootstrapper(filepath.Join(cfg.DataDir, "bootstrap"))
+	if err != nil {
+		return err
+	}
+
+	// A machine in maintenance mode has no cluster PKI, so there is nothing to
+	// verify against and the connection verifies nothing. The fingerprint the
+	// operator read off the machine's console is carried on Creds for the pin
+	// the transport seam performs; MaintenanceWarning is what the screen says
+	// about what this is and is not worth (PROV-04).
+	maintenanceCreds := func(fingerprint string) talos.Creds {
+		return talos.Creds{
+			Kind:        talos.CredMaintenance,
+			Fingerprint: fingerprint,
+			TLS: &tls.Config{
+				InsecureSkipVerify: true, //nolint:gosec // maintenance mode has no PKI; see above
+				MinVersion:         tls.VersionTLS12,
+			},
+		}
+	}
+
+	provisionSvc := provision.NewService(dialer, maintenanceCreds, inv.KnownAt, bootstrapper,
+		inv.ControlPlaneCount)
+
+	provision.Register(engine, provision.Deps{
+		Dialer:           dialer,
+		MaintenanceCreds: maintenanceCreds,
+		ClusterCreds:     inv.ClusterCreds,
+		Secrets: func(ctx context.Context, id model.ClusterID) (model.ClusterSecrets, error) {
+			return st.ClusterSecrets().Get(ctx, id)
+		},
+		Cluster: func(ctx context.Context, id model.ClusterID) (model.Cluster, error) {
+			return st.Clusters().Get(ctx, id)
+		},
+		PatchBodies: func(ctx context.Context, ids []string) ([]string, error) {
+			out := make([]string, 0, len(ids))
+			for _, id := range ids {
+				rec, err := st.Patches().Get(ctx, model.PatchID(id))
+				if err != nil {
+					return nil, err
+				}
+				if rec.Superseded {
+					return nil, fmt.Errorf(
+						"provision: patch %s version %d has been superseded; name the current version",
+						rec.Name, rec.Version)
+				}
+				out = append(out, rec.Body)
+			}
+			return out, nil
+		},
+		// A machine that has come back as a cluster node is filed by the same
+		// path an operator's manual add takes: it connects with the cluster's
+		// credentials, reads the node's own facts, and records what the node
+		// said. Writing the record from what the wizard was told instead would
+		// be filing the plan rather than the machine.
+		Record: func(ctx context.Context, cluster model.ClusterID, addr string, _ bool) error {
+			_, err := inv.AddManual(ctx, cluster, addr)
+			return err
+		},
+		// The cluster's own Kubernetes version, read off the nodes it already
+		// has. A cluster with no observed node yet -- the very first one --
+		// has no answer, and the job fails with that sentence rather than
+		// generating a configuration at a version nobody chose.
+		KubernetesVersion: inv.KubernetesVersion,
+	})
+
 	// The identity provider, if one is configured. New performs no network I/O:
 	// discovery happens on first use, so that a provider which is down -- quite
 	// possibly because it runs on the cluster this tool exists to repair --
@@ -282,6 +358,7 @@ func run(args []string) error {
 		Jobs:        engine,
 		Confirmer:   confirmer,
 		Config:      configSvc,
+		Provision:   provisionSvc,
 		// The per-cluster read-only lock, read by the route middleware rather
 		// than by each handler (D-22). Inside the literal for the reason the
 		// comment above states: Deps is copied by value into every …Routes
@@ -320,6 +397,7 @@ func run(args []string) error {
 		handlers.StreamRoutes(deps),
 		handlers.JobRoutes(deps),
 		handlers.ConfigRoutes(deps),
+		handlers.ProvisionRoutes(deps),
 	)
 
 	// Start observing before the listener opens. A supervisor that only runs

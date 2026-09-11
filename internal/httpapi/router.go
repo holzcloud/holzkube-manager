@@ -20,6 +20,7 @@ import (
 	"github.com/holzcloud/holzkube-manager/internal/jobs"
 	"github.com/holzcloud/holzkube-manager/internal/machineconfig"
 	"github.com/holzcloud/holzkube-manager/internal/nodestream"
+	"github.com/holzcloud/holzkube-manager/internal/provision"
 	"github.com/holzcloud/holzkube-manager/internal/store"
 	"github.com/holzcloud/holzkube-manager/internal/streamhub"
 	"github.com/holzcloud/holzkube-manager/internal/talos"
@@ -171,6 +172,12 @@ type Deps struct {
 	// handlers answer 502 rather than panicking if it is.
 	Config *machineconfig.Service
 
+	// Provision is the provisioning wizard's service: scanning, inspecting,
+	// planning and the etcd bootstrap lease. It is nil in a deployment that
+	// provisions nothing, and those handlers answer 502 rather than panicking
+	// if it is.
+	Provision *provision.Service
+
 	// ClusterLocked reports whether a cluster refuses mutation. It is nil in a
 	// deployment with no inventory, and the lock link is then inert -- which
 	// is correct, because there are no clusters to protect.
@@ -285,6 +292,17 @@ func (d Deps) wrapRoute(rt Route) http.Handler {
 		// operator that the prompt means nothing.
 		middleware.ClusterLock(rt.ClusterScope, d.ClusterLocked,
 			func(w http.ResponseWriter, r *http.Request, err error) {
+				// A cluster that does not exist is not a locked cluster.
+				// Answering "locked read-only" to a request naming a cluster
+				// nobody has adopted sends the operator to find an unlock
+				// button for something that is not there -- and hides the
+				// actual mistake, which is a wrong or stale cluster id.
+				if errors.Is(err, inventory.ErrNotFound) {
+					WriteProblem(w, r, NotFound("notfound.cluster",
+						"No such cluster. The request names a cluster this installation does "+
+							"not have a record of."))
+					return
+				}
 				WriteProblem(w, r, ClusterLocked(err.Error()))
 			}),
 		middleware.Sudo(rt.Destructive,

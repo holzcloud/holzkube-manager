@@ -185,6 +185,15 @@ func TestOpenRefusesAWideOpenDataDirectory(t *testing.T) {
 //     next to the store rather than a store entity. Routing an append-only
 //     hash chain through a rev-CAS record store would mean rewriting the whole
 //     log on every line.
+//   - internal/provision/bootstrap.go — and only that file. The etcd bootstrap
+//     lease is not a record that happens to live in a file; the file *is* the
+//     lease. `O_CREAT|O_EXCL` is atomic in the kernel, which is what makes two
+//     operators clicking at the same moment decidable rather than a race, and
+//     an fsynced intent record written before the call is the only thing that
+//     survives a crash mid-call. A rev-CAS record store provides neither, and
+//     bootstrapping etcd twice destroys a cluster. The exemption is per-file
+//     rather than per-directory so that the rest of internal/provision stays
+//     under the rule.
 //   - _test.go files — tests legitimately plant fixtures and inspect results.
 func TestNoDirectFileAccessOutsideFsstore(t *testing.T) {
 	root := filepath.Join("..", "..", "..")
@@ -194,6 +203,13 @@ func TestNoDirectFileAccessOutsideFsstore(t *testing.T) {
 		filepath.Join("internal", "tlsx"),
 		filepath.Join("internal", "config"),
 		filepath.Join("internal", "audit"),
+	}
+
+	// Named one file at a time, because each is a file whose whole purpose is
+	// a filesystem primitive the store cannot express. Adding to this list is
+	// meant to be an argument, which is why it is not a directory.
+	exemptFiles := map[string]bool{
+		filepath.Join("internal", "provision", "bootstrap.go"): true,
 	}
 
 	// os functions that read, write, enumerate or move a file. MkdirAll and
@@ -255,6 +271,9 @@ func TestNoDirectFileAccessOutsideFsstore(t *testing.T) {
 				if strings.HasPrefix(rel, ex+string(filepath.Separator)) {
 					return nil
 				}
+			}
+			if exemptFiles[rel] {
+				return nil
 			}
 			scan(p, false)
 			return nil

@@ -29,6 +29,7 @@ import (
 	"github.com/holzcloud/holzkube-manager/internal/machineconfig"
 	"github.com/holzcloud/holzkube-manager/internal/model"
 	"github.com/holzcloud/holzkube-manager/internal/nodestream"
+	"github.com/holzcloud/holzkube-manager/internal/provision"
 	"github.com/holzcloud/holzkube-manager/internal/store/fsstore"
 	"github.com/holzcloud/holzkube-manager/internal/streamhub"
 	"github.com/holzcloud/holzkube-manager/internal/talos"
@@ -64,6 +65,7 @@ type harnessConfig struct {
 	streaming bool
 	jobs      bool
 	config    bool
+	provision func(*harness) *provision.Service
 }
 
 // withInventory adds an inventory service built over the harness's store.
@@ -79,6 +81,16 @@ func withStreaming() harnessOpt {
 // withConfig adds the machine-configuration service and its routes.
 func withConfig() harnessOpt {
 	return func(c *harnessConfig) { c.config = true }
+}
+
+// withProvision adds the provisioning service and its routes. It implies jobs,
+// because an apply is a job submission and nothing else.
+func withProvision(build func(*harness) *provision.Service) harnessOpt {
+	return func(c *harnessConfig) {
+		c.provision = build
+		c.jobs = true
+		c.streaming = true
+	}
 }
 
 // withJobs adds the job engine, the confirmer and the node-action routes. It
@@ -217,6 +229,13 @@ func newHarness(t *testing.T, opts ...harnessOpt) *harness {
 		})
 	}
 
+	h2.dataDir = dir
+	h2.store = st
+	h2.inv = inv
+	if cfg.provision != nil {
+		deps.Provision = cfg.provision(h2)
+	}
+
 	deps.Routes = slices.Concat(
 		handlers.SystemRoutes(deps),
 		handlers.SetupRoutes(deps),
@@ -227,6 +246,7 @@ func newHarness(t *testing.T, opts ...harnessOpt) *harness {
 		handlers.StreamRoutes(deps),
 		handlers.JobRoutes(deps),
 		handlers.ConfigRoutes(deps),
+		handlers.ProvisionRoutes(deps),
 	)
 
 	srv := httptest.NewTLSServer(httpapi.New(deps))
