@@ -133,10 +133,14 @@ func TestMethodCoverageProbeRecognisesBothCallShapes(t *testing.T) {
 		method      string
 		implemented bool
 	}{
-		{method: "Version", implemented: true},       // unary, written
-		{method: "Logs", implemented: true},          // streaming, written
-		{method: "Containers", implemented: false},   // unary, inherited
-		{method: "EtcdSnapshot", implemented: false}, // streaming, inherited
+		{method: "Version", implemented: true},     // unary, written
+		{method: "Logs", implemented: true},        // streaming, written
+		{method: "Containers", implemented: false}, // unary, inherited
+		// Streaming and inherited. EtcdSnapshot used to hold this slot and
+		// stopped being inherited in phase 9; the control has to be a method
+		// the simulator genuinely does not write, or it stops being a negative
+		// control and starts being a second copy of the positive one.
+		{method: "PacketCapture", implemented: false},
 	} {
 		target, ok := rpcs[tc.method]
 		if !ok {
@@ -176,7 +180,18 @@ func (r rpcTarget) path() string { return "/" + r.service + "/" + r.method }
 func serviceRPCs() map[string]rpcTarget {
 	rpcs := make(map[string]rpcTarget)
 
-	for _, desc := range []*grpc.ServiceDesc{&machine.MachineService_ServiceDesc, &storage.StorageService_ServiceDesc} {
+	// MachineService last, deliberately. The map is keyed by method name and
+	// two services now carry an `Upgrade`: MachineService's is the deprecated
+	// unary one this product does not call, and LifecycleService's is the
+	// streaming one it does. Listing MachineService last would make its
+	// deprecated twin win the key and send the probe at a method nobody calls;
+	// listing it first lets the later services overwrite, which is why the
+	// order here is load-bearing rather than alphabetical.
+	for _, desc := range []*grpc.ServiceDesc{
+		&machine.MachineService_ServiceDesc,
+		&storage.StorageService_ServiceDesc,
+		&machine.LifecycleService_ServiceDesc,
+	} {
 		for _, m := range desc.Methods {
 			rpcs[m.MethodName] = rpcTarget{service: desc.ServiceName, method: m.MethodName}
 		}
@@ -289,6 +304,15 @@ func machineryCallSites(t *testing.T) (methods []string, packages, files int) {
 		}
 		packages++
 
+		// Parsed whole, then walked, because a Go package is one scope and
+		// this detection used to pretend it was one file per scope. The field
+		// that holds the machinery client is declared in client.go; a file
+		// added later that calls through it -- upgrade.go and etcd.go in phase
+		// 9 -- does not import the client package at all, so a per-file
+		// resolution found no holders there and reported *no call sites* for
+		// files full of them. The guard did not fail; it went quiet, which is
+		// the failure mode it was written to prevent in the simulator.
+		parsed := make([]*ast.File, 0, len(entries))
 		for _, entry := range entries {
 			name := entry.Name()
 			if entry.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
@@ -302,8 +326,18 @@ func machineryCallSites(t *testing.T) (methods []string, packages, files int) {
 				t.Fatalf("parse %s: %v", path, err)
 			}
 			files++
+			parsed = append(parsed, file)
+		}
 
-			for _, m := range callsIn(file) {
+		holders := map[string]bool{}
+		for _, file := range parsed {
+			for name := range clientHolders(file) {
+				holders[name] = true
+			}
+		}
+
+		for _, file := range parsed {
+			for _, m := range callsIn(file, holders) {
 				found[m] = true
 			}
 		}
@@ -323,11 +357,19 @@ func machineryCallSites(t *testing.T) (methods []string, packages, files int) {
 var clientAccessors = map[string]bool{
 	"MachineClient": true,
 	"StorageClient": true,
+
+	// Phase 9. Talos v1.13 moved install and upgrade onto a third service, and
+	// the client exposes it as another field: a call through
+	// c.LifecycleClient.Upgrade reaches a node exactly as the other two do.
+	"LifecycleClient": true,
 }
 
-func callsIn(file *ast.File) []string {
-	holders := clientHolders(file)
-
+// callsIn reports the method names one file calls on a machinery client.
+//
+// holders is resolved across the whole package rather than from this file, for
+// the reason machineryCallSites states: the field that holds the client is
+// declared in one file and called through from several.
+func callsIn(file *ast.File, holders map[string]bool) []string {
 	var methods []string
 
 	ast.Inspect(file, func(n ast.Node) bool {
