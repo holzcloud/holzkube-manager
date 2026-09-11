@@ -23,6 +23,8 @@ import (
 	"github.com/holzcloud/holzkube-manager/internal/auth"
 	"github.com/holzcloud/holzkube-manager/internal/httpapi"
 	"github.com/holzcloud/holzkube-manager/internal/httpapi/handlers"
+	"github.com/holzcloud/holzkube-manager/internal/inventory"
+	"github.com/holzcloud/holzkube-manager/internal/model"
 	"github.com/holzcloud/holzkube-manager/internal/store/fsstore"
 )
 
@@ -36,12 +38,36 @@ type harness struct {
 	client  *http.Client
 	dataDir string
 	logger  *audit.Logger
+	store   *fsstore.Store
+	inv     *inventory.Service
+}
+
+// harnessOpt adjusts the object graph before it is served.
+//
+// It exists so that a test about the inventory can add the inventory service
+// and its routes without a second copy of this wiring: the point of the
+// harness is that it is the same graph cmd/holzkube-managerd builds, and two copies of
+// that claim would drift.
+type harnessOpt func(*harnessConfig)
+
+type harnessConfig struct {
+	inventory func(store *fsstore.Store) *inventory.Service
+}
+
+// withInventory adds an inventory service built over the harness's store.
+func withInventory(build func(store *fsstore.Store) *inventory.Service) harnessOpt {
+	return func(c *harnessConfig) { c.inventory = build }
 }
 
 // newHarness wires the same object graph as cmd/holzkube-managerd against a throwaway
 // data directory and serves it over real TLS.
-func newHarness(t *testing.T) *harness {
+func newHarness(t *testing.T, opts ...harnessOpt) *harness {
 	t.Helper()
+
+	var cfg harnessConfig
+	for _, o := range opts {
+		o(&cfg)
+	}
 
 	// t.TempDir creates its numbered subdirectory with 0777&^umask, which is
 	// 0755 on a normal host. The store's permission guard refuses to open a
@@ -85,12 +111,28 @@ func newHarness(t *testing.T) *harness {
 		SudoWindow: 5 * time.Minute,
 		AuditChain: httpapi.ChainStatus{OK: chainOK, BrokenAtLine: brokenLine, File: chainFile},
 	}
+	var inv *inventory.Service
+	if cfg.inventory != nil {
+		inv = cfg.inventory(st)
+		t.Cleanup(func() { _ = inv.Close() })
+
+		// Inside the struct, deliberately: Deps is copied by value into each
+		// …Routes call below, so a field assigned after this point would be
+		// nil in every handler closure with no compile error -- and the lock
+		// would silently not exist.
+		deps.Inventory = inv
+		deps.ClusterLocked = func(r *http.Request, cluster string) error {
+			return inv.CheckLock(r.Context(), model.ClusterID(cluster))
+		}
+	}
+
 	deps.Routes = slices.Concat(
 		handlers.SystemRoutes(deps),
 		handlers.SetupRoutes(deps),
 		handlers.AuthRoutes(deps),
 		handlers.AccountRoutes(deps),
 		handlers.AuditRoutes(deps),
+		handlers.InventoryRoutes(deps),
 	)
 
 	srv := httptest.NewTLSServer(httpapi.New(deps))
@@ -108,7 +150,7 @@ func newHarness(t *testing.T) *harness {
 		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
 	}
 
-	return &harness{srv: srv, client: client, dataDir: dir, logger: al}
+	return &harness{srv: srv, client: client, dataDir: dir, logger: al, store: st, inv: inv}
 }
 
 func (h *harness) sessionCookie(t *testing.T) string {

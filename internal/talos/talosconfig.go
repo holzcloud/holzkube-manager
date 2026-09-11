@@ -173,6 +173,14 @@ func ServerFingerprint(ctx context.Context, d Dialer, t Target) (string, error) 
 		return "", err
 	}
 
+	// The probe class, the same budget D-05 gives the liveness check, and for
+	// the same reason: this is one handshake against a node that either
+	// answers promptly or is not there. An unbounded dial here would be the
+	// one call in the adoption with no ceiling of its own, and the route's
+	// budget would be the only thing between it and the response deadline.
+	ctx, cancel := context.WithTimeout(ctx, ClassProbe.Deadline())
+	defer cancel()
+
 	dialer := &net.Dialer{}
 	conn, err := tls.DialWithDialer(dialer, "tcp", addr, &tls.Config{
 		// The connection exists to read a certificate nobody trusts yet.

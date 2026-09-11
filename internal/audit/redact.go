@@ -75,6 +75,37 @@ var allowlist = map[string][]string{
 	// A deletion carries its id in the path, not in the body: there is nothing
 	// here worth writing in clear.
 	"schematic.delete": {},
+
+	// The inventory, phase 3.
+	//
+	// cluster.import is the entry this table was most at risk of getting
+	// wrong, and the risk runs in one direction only. Its body carries a
+	// talosconfig: a certificate authority, a client certificate and a client
+	// *private key*. That field is deliberately absent from this list, so the
+	// fail-closed default writes `<redacted>` for it -- which is the whole
+	// reason this file is an allowlist. Permitted here are the cluster's name,
+	// the address the operator named and the fingerprint they confirmed:
+	// an operator-chosen label and two facts that are already public to
+	// anybody who can reach the node.
+	"cluster.import":      {"name", "endpoint", "fingerprint"},
+	"cluster.fingerprint": {"endpoint"},
+
+	// Whether the lock was opened or closed is the entire content of the
+	// event, and it is not a secret. A lock change with a redacted direction
+	// would be a record that says something happened and not what.
+	"cluster.lock": {"locked"},
+
+	// The cluster this machine was added to and the address it was found at.
+	// Neither is a credential; the credentials are the cluster's, and they are
+	// not in this body at all.
+	"machine.add": {"cluster", "addr"},
+
+	// Listed with nothing permitted, so the table shows the full set of
+	// mutations rather than leaving any of them to the default. Each carries
+	// its id in the path.
+	"cluster.forget":  {},
+	"machine.forget":  {},
+	"machine.refresh": {},
 }
 
 // Params returns the parameters as they may be written to the log.

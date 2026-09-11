@@ -22,6 +22,8 @@ import (
 	"github.com/holzcloud/holzkube-manager/internal/httpapi"
 	"github.com/holzcloud/holzkube-manager/internal/httpapi/handlers"
 	"github.com/holzcloud/holzkube-manager/internal/imagefactory"
+	"github.com/holzcloud/holzkube-manager/internal/inventory"
+	"github.com/holzcloud/holzkube-manager/internal/model"
 	"github.com/holzcloud/holzkube-manager/internal/store/fsstore"
 	"github.com/holzcloud/holzkube-manager/internal/talos"
 	"github.com/holzcloud/holzkube-manager/internal/tlsx"
@@ -170,6 +172,24 @@ func run(args []string) error {
 	// of them can inherit the wrong one (D-03, FOUND-12).
 	talosMode := talos.Mode{DryRun: cfg.DryRun}
 
+	// The transport. It is built here for the same reason the mode is: this is
+	// the only place that has read the configuration, and a dialer constructed
+	// inside a handler would be a second answer to "how do we reach a node"
+	// that nothing keeps in step with the first.
+	dialer := talos.NewDirectDialer(talos.ApidPort)
+
+	// The inventory. Its supervisors are started after the store and the audit
+	// log are open and before the server listens, so that the first request to
+	// arrive finds an inventory that has already begun observing rather than
+	// one that starts observing because somebody looked (D-17).
+	inv := inventory.New(inventory.Deps{
+		Store:  st,
+		Dialer: dialer,
+		Mode:   talosMode,
+		Logger: logger,
+	})
+	defer inv.Close()
+
 	// The identity provider, if one is configured. New performs no network I/O:
 	// discovery happens on first use, so that a provider which is down -- quite
 	// possibly because it runs on the cluster this tool exists to repair --
@@ -201,6 +221,16 @@ func run(args []string) error {
 		// reverse.
 		Factory:   factory,
 		TalosMode: talosMode,
+		Inventory: inv,
+		// The per-cluster read-only lock, read by the route middleware rather
+		// than by each handler (D-22). Inside the literal for the reason the
+		// comment above states: Deps is copied by value into every …Routes
+		// call below, and a lock function assigned afterwards would be nil in
+		// every handler closure, with no compile error -- which is to say the
+		// lock would silently not exist.
+		ClusterLocked: func(r *http.Request, cluster string) error {
+			return inv.CheckLock(r.Context(), model.ClusterID(cluster))
+		},
 		// Public strips the directory: this verdict is served by an endpoint
 		// that answers before authentication, and chainFile is absolute. The
 		// operator-facing copy of the path is the log line above, which stays
@@ -226,7 +256,15 @@ func run(args []string) error {
 		handlers.AccountRoutes(deps),
 		handlers.AuditRoutes(deps),
 		handlers.SchematicRoutes(deps),
+		handlers.InventoryRoutes(deps),
 	)
+
+	// Start observing before the listener opens. A supervisor that only runs
+	// while somebody is looking makes the dashboard slow exactly when it is
+	// needed, and makes stale_since meaningless on the first load.
+	if err := inv.Start(context.Background()); err != nil {
+		return err
+	}
 
 	srv := &http.Server{
 		Addr:              cfg.Listen,
