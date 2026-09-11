@@ -11,7 +11,10 @@ import (
 	"strings"
 	"time"
 
+	cryptox509 "github.com/siderolabs/crypto/x509"
 	clientconfig "github.com/siderolabs/talos/pkg/machinery/client/config"
+	"github.com/siderolabs/talos/pkg/machinery/config/generate/secrets"
+	"github.com/siderolabs/talos/pkg/machinery/role"
 
 	"github.com/holzcloud/holzkube-manager/internal/tlsx"
 )
@@ -219,4 +222,36 @@ func decodeField(v string) ([]byte, error) {
 		return nil, err
 	}
 	return out, nil
+}
+
+// RenderTalosconfig writes an admin client configuration for a cluster.
+//
+// It lives here rather than in the inventory for the reason ParseTalosconfig
+// does: the file format is machinery's, the certificate it carries is minted
+// from a certificate authority, and everything above this package deals in
+// bytes and in Creds. One package knows what a talosconfig is.
+//
+// The certificate is issued fresh rather than being the one holzkube-manager dials
+// with. Two consumers sharing one credential means revoking either revokes
+// both, and holzkube-manager's own access is the one that has to keep working when
+// everything else has stopped.
+func RenderTalosconfig(contextName, endpoint string, osCACrt, osCAKey []byte, ttl time.Duration) ([]byte, error) {
+	bundle := &secrets.Bundle{
+		Clock: secrets.NewClock(),
+		Certs: &secrets.Certs{
+			OS: &cryptox509.PEMEncodedCertificateAndKey{Crt: osCACrt, Key: osCAKey},
+		},
+	}
+
+	pair, err := bundle.GenerateTalosAPIClientCertificateWithTTL(role.MakeSet(role.Admin), ttl)
+	if err != nil {
+		return nil, fmt.Errorf("talos: issue a talosconfig certificate: %w", err)
+	}
+
+	cfg := clientconfig.NewConfig(contextName, []string{endpoint}, osCACrt, pair)
+	raw, err := cfg.Bytes()
+	if err != nil {
+		return nil, fmt.Errorf("talos: encode talosconfig: %w", err)
+	}
+	return raw, nil
 }

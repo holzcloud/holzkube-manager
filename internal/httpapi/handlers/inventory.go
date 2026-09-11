@@ -109,6 +109,19 @@ func InventoryRoutes(d httpapi.Deps) []httpapi.Route {
 		},
 		{
 			Method:          http.MethodPost,
+			Pattern:         "/api/v1/clusters/create",
+			RequiresSession: true,
+			Action:          "cluster.create",
+			Handler:         handler(createCluster(d)),
+		},
+		{
+			Method:          http.MethodGet,
+			Pattern:         "/api/v1/clusters/{id}/talosconfig",
+			RequiresSession: true,
+			Handler:         handler(clusterTalosconfig(d)),
+		},
+		{
+			Method:          http.MethodPost,
 			Pattern:         "/api/v1/clusters/{id}/lock",
 			RequiresSession: true,
 			Destructive:     true,
@@ -367,6 +380,98 @@ func importCluster(d httpapi.Deps) http.HandlerFunc {
 			return
 		}
 		writeJSON(w, http.StatusCreated, view)
+	}
+}
+
+// createCluster is the *other* path onto a cluster record, and the only one
+// that mints certificate authorities (INV-02, D-07).
+//
+// It is a separate route and not a mode of the adoption route on purpose: the
+// separation is what a test can check, and what it prevents is an adoption
+// that quietly generated its own PKI and produced a cluster that looks right
+// and opens nothing.
+func createCluster(d httpapi.Deps) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if p := inventoryConfigured(d); p != nil {
+			httpapi.WriteProblem(w, r, p)
+			return
+		}
+
+		var body struct {
+			Name     string `json:"name"`
+			Endpoint string `json:"endpoint"`
+		}
+		if err := decodeJSON(w, r, &body); err != nil {
+			httpapi.WriteProblem(w, r, httpapi.Validation(err.Error()))
+			return
+		}
+
+		var missing []httpapi.FieldError
+		if strings.TrimSpace(body.Name) == "" {
+			missing = append(missing, httpapi.FieldError{Field: "name", Reason: "required"})
+		}
+		if strings.TrimSpace(body.Endpoint) == "" {
+			missing = append(missing, httpapi.FieldError{
+				Field:  "endpoint",
+				Reason: "the Kubernetes endpoint this cluster will present, e.g. https://10.0.0.1:6443",
+			})
+		}
+		if len(missing) > 0 {
+			httpapi.WriteProblem(w, r, httpapi.Validation("A new cluster needs a name and an endpoint.", missing...))
+			return
+		}
+
+		// No upstream budget: this route reaches no node. It generates a
+		// certificate authority locally and writes two records.
+		c, err := d.Inventory.Create(r.Context(), inventory.CreateRequest{
+			Name:     body.Name,
+			Endpoint: body.Endpoint,
+		})
+		if err != nil {
+			writeInventoryError(w, r, d, err)
+			return
+		}
+
+		view, err := d.Inventory.Cluster(r.Context(), c.ID)
+		if err != nil {
+			httpapi.WriteInternal(w, r, d.Logger, err)
+			return
+		}
+		writeJSON(w, http.StatusCreated, view)
+	}
+}
+
+// clusterTalosconfig hands the operator an admin client configuration.
+//
+// The certificate in it is minted fresh from the stored bundle and is not the
+// one holzkube-manager dials with: two consumers sharing one credential means
+// revoking either revokes both, and holzkube-manager's own access is the one that has
+// to keep working when everything else has stopped.
+//
+// It is a read route and not a destructive one, and that is a decision worth
+// stating rather than leaving implicit: what it hands out is a *new*
+// credential, minted on demand, so there is nothing here to destroy. It is
+// still a credential, which is why it requires a session and appears in the
+// audit archive like everything else.
+func clusterTalosconfig(d httpapi.Deps) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if p := inventoryConfigured(d); p != nil {
+			httpapi.WriteProblem(w, r, p)
+			return
+		}
+
+		raw, err := d.Inventory.Talosconfig(r.Context(), model.ClusterID(r.PathValue("id")))
+		if err != nil {
+			writeInventoryError(w, r, d, err)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/yaml")
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Header().Set("Cache-Control", "no-store")
+		w.Header().Set("Content-Disposition", `attachment; filename="talosconfig"`)
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(raw)
 	}
 }
 

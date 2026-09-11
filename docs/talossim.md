@@ -117,3 +117,30 @@ from the un-injected baseline**.
 A scenario that is registered, documented and inert is the worst outcome
 available here: it would make plan 02-05's contract suite pass against nothing.
 Asserting "no panic" would not catch it. Comparing against a baseline does.
+
+## Simulated clusters (phase 3)
+
+`talossim.NewCluster(name, endpoint)` generates a real secrets bundle with
+machinery's own generator and derives from it the two machine configurations a
+node of each role serves, plus an admin talosconfig.
+
+A node built with `Options.Cluster` set issues its certificates from **that
+cluster's Talos OS certificate authority** rather than from a fresh one. That is
+what makes the adoption path testable end to end: holzkube-manager derives the bundle
+from the configuration it read, mints itself a client certificate from that CA,
+and reconnects. Against a node with an unrelated authority, the second
+connection would fail for a reason that has nothing to do with whether the
+derivation was correct — and the connectivity proof would be untestable.
+
+`Options.ControlPlane` selects which of the two configurations the node serves.
+The difference is the one D-05 turns on: only a control-plane node's
+configuration carries the OS CA *private key*, and an import aimed at a worker
+must be refused by name rather than half-completed.
+
+### What `k8s_down` removes
+
+Every resource `seedKubernetes` creates, so that the scenario and its restore
+stay each other's exact inverse: `k8s.Nodename` and `k8s.KubeletSpec`. The
+kubelet spec joined the list in phase 3 because that is where a node's
+Kubernetes version is read from — leaving it behind would mean a node with
+Kubernetes down still confidently reporting a Kubernetes version.

@@ -17,7 +17,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 
 - [x] **Phase 1: Foundation Skeleton** - Store, Audit, Auth, HTTPS, Single Binary mit embedded UI — ohne jede Talos-Abhängigkeit (completed 2026-08-28)
 - [x] **Phase 2: Transport Seam, `talossim` & Image Factory** - Die Naht zu Talos plus der Fake, gegen den alles Weitere getestet wird (BLOCKING) (completed 2026-09-05)
-- [ ] **Phase 3: Inventar, Cluster-Import & Health** - Der bestehende Cluster wird importiert; das Inventar bleibt ehrlich, auch wenn alles tot ist
+- [x] **Phase 3: Inventar, Cluster-Import & Health** - Der bestehende Cluster wird importiert; das Inventar bleibt ehrlich, auch wenn alles tot ist (completed 2026-09-11)
 - [ ] **Phase 4: Walking Skeleton (Wegwerf)** - Der hässliche End-to-End-Weg gegen QEMU, um die vier gefährlichsten Unbekannten zu entschärfen
 - [ ] **Phase 5: Streaming** - Live-Logs und `dmesg` über eine multiplexte SSE-Verbindung (DESIGNIERTE SCHNITTLINIE)
 - [ ] **Phase 6: Jobs-Engine & Node-Aktionen** - Persistierte, crash-feste Jobs; Reboot, Shutdown und das Reset-Dialog
@@ -213,8 +213,9 @@ Plans:
 **Parallel tracks**: 2 — Backend ∥ Frontend, sobald die `Field[T]`-Response-Shape festgezurrt ist.
 **Release blockers owned**: INV-01 🚫, INV-03 🚫, INV-04 🚫, INV-05 🚫, INV-07 🚫
 **Note**: TRANS-08 liegt hier statt in Phase 2, weil "gegen echtes Talos" erst ausführbar ist, sobald Tier 1 existiert. Die Suite selbst und ihre Fake-Hälfte entstehen in Phase 2.
-**Plans**: TBD
+**Plans**: ausgeführt als eine durchgehende Runde statt als Wellen; siehe `03-SUMMARY.md`
 **UI hint**: yes
+**Outcome**: Kriterien 1–4 erfüllt, Kriterium 5 **nicht**: der Tier-1-Provisioner (`sandbox/cmd/talos-sandbox`) und der reale Transport (`internal/talos/contract_real_test.go`) existieren und überspringen sich sichtbar, wurden aber nie ausgeführt — kein laufender Docker-Daemon. Fenster 76 führt das samt der zweiten Einschränkung: sieben der neun Szenarien sind auf einem echten Node ohnehin nicht induzierbar.
 
 ### Phase 4: Walking Skeleton (Wegwerf)
 

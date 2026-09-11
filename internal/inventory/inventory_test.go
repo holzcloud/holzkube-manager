@@ -413,3 +413,53 @@ func TestAddManualRecordsANodeByAddress(t *testing.T) {
 		t.Errorf("Cluster = %q, want %q", rec.Cluster, c.ID)
 	}
 }
+
+// TestCreateMintsItsOwnAuthorityAndIsNotLocked is the other half of INV-02 and
+// the asymmetry D-21 is about: a created cluster did not exist a second ago, so
+// there is nothing yet to protect from a mistake.
+func TestCreateMintsItsOwnAuthorityAndIsNotLocked(t *testing.T) {
+	t.Parallel()
+
+	ctx := testContext(t)
+	f := newFixture(t, talossim.Options{ControlPlane: true})
+
+	c, err := f.svc.Create(ctx, inventory.CreateRequest{
+		Name:     "fresh",
+		Endpoint: "https://10.0.0.1:6443",
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	if c.Origin != model.OriginCreated {
+		t.Errorf("Origin = %q, want %q", c.Origin, model.OriginCreated)
+	}
+	if c.Locked {
+		t.Error("a created cluster is locked; the lock exists for clusters the operator already depends on")
+	}
+
+	sec, err := f.store.ClusterSecrets().Get(ctx, c.ID)
+	if err != nil {
+		t.Fatalf("the created cluster has no secrets bundle: %v", err)
+	}
+	if len(sec.OSCAKey) == 0 || len(sec.K8sCAKey) == 0 {
+		t.Error("the generated bundle is missing a certificate authority private key")
+	}
+
+	// And it is genuinely its own authority, not the simulated cluster's.
+	if string(sec.OSCACrt) == string(f.cluster.Secrets.Certs.OS.Crt) {
+		t.Fatal("the created cluster reused an existing certificate authority")
+	}
+
+	raw, err := f.svc.Talosconfig(ctx, c.ID)
+	if err != nil {
+		t.Fatalf("Talosconfig: %v", err)
+	}
+	tc, err := talos.ParseTalosconfig(raw)
+	if err != nil {
+		t.Fatalf("the rendered talosconfig does not parse: %v", err)
+	}
+	if tc.NotAfter.IsZero() {
+		t.Error("the rendered talosconfig carries no expiry")
+	}
+}

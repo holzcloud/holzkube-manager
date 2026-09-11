@@ -961,6 +961,21 @@ export const api = {
       sendJSON('POST', '/api/v1/clusters', clusterSchema, input),
 
     /**
+     * The *other* path onto a cluster record, and the only one that mints a
+     * certificate authority. It is a separate route and not a mode of the
+     * import for a reason a test can check: an import that quietly generated
+     * its own PKI would produce a cluster that looks right and opens nothing.
+     */
+    create: (name: string, endpoint: string): Promise<Cluster> =>
+      sendJSON('POST', '/api/v1/clusters/create', clusterSchema, { name, endpoint }),
+
+    /** Where the browser downloads an admin talosconfig for a cluster. The
+     * certificate in it is minted on demand and is not the one holzkube-manager
+     * dials with. */
+    talosconfigPath: (id: string): string =>
+      `/api/v1/clusters/${encodeURIComponent(id)}/talosconfig`,
+
+    /**
      * Unlocking is destructive: it is what makes every other destructive route
      * reachable on this cluster. The 428 interceptor opens the password prompt
      * and replays this request, so this screen needs no confirmation of its

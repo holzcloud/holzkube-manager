@@ -1012,3 +1012,129 @@ archive is append-only and kept forever (D-16) with no deletion path — so one
 kernel argument written in clear is written in clear permanently. The allowlist
 default is redact-everything, which means this entry can only be got wrong by
 adding to it.
+
+## Inventory
+
+The inventory is two flat resources — `clusters` and `machines` — and the
+machines are deliberately **not nested under the clusters**. A machine that
+belongs to no cluster is an ordinary state, not an error: it is every machine in
+maintenance mode, and every machine whose cluster was removed. Nesting would
+make the ordinary case a special one in the URL as well as in the store.
+
+### `Field<T>`: every fact carries its provenance
+
+Every fact a node reported is served as the same object, and nothing about it is
+optional reading:
+
+```json
+{
+  "value": "v1.13.9",
+  "level": "node",
+  "available": true,
+  "stale_since": null,
+  "unavailable_reason": ""
+}
+```
+
+- `level` is `"none" | "node" | "etcd" | "k8s"` — **a string, always**. The Go
+  type is an `iota`; the order of those constants is an implementation detail and
+  serialising the number would publish it as a contract.
+- `value` is **omitted when it is the type's zero**. A client must treat an
+  absent `value` as the zero value, not as an error.
+- The three states are distinguishable and **all three are meant to be
+  rendered**:
+
+  | `available` | `stale_since` | meaning | how it is shown |
+  |---|---|---|---|
+  | `true` | `null` | confirmed right now | the value |
+  | `false` | set | known, but old | the value, muted, plus its age |
+  | `false` | `null` | never read | an em dash plus `unavailable_reason` |
+
+`available` means "this value is confirmed right now", not "this value exists".
+**A stale field keeps its `value`.** Dropping it is indistinguishable from `null`
+to a client, and that is exactly how the empty dashboard INV-08 forbids comes
+about — on the screen that exists for the outage, during the outage.
+
+The **age is computed by the client** from `stale_since`. The server holds no
+staleness threshold of its own, deliberately: a server-side threshold would be a
+second truth beside the timestamp, and the two would drift.
+
+### Routes
+
+| Method | Path | Destructive | Action | Notes |
+|---|---|---|---|---|
+| `GET` | `/api/v1/clusters` | no | — | `{ "clusters": [...] }`, never `null` |
+| `GET` | `/api/v1/clusters/{id}` | no | — | |
+| `POST` | `/api/v1/clusters/fingerprint` | no | `cluster.fingerprint` | step one of adoption |
+| `POST` | `/api/v1/clusters` | no | `cluster.import` | step two; `201` |
+| `POST` | `/api/v1/clusters/{id}/lock` | **yes** | `cluster.lock` | `{ "locked": bool }` |
+| `DELETE` | `/api/v1/clusters/{id}` | **yes** | `cluster.forget` | `204`; machines survive, unassigned |
+| `GET` | `/api/v1/machines` | no | — | `{ "machines": [...] }` |
+| `GET` | `/api/v1/machines/{id}` | no | — | |
+| `POST` | `/api/v1/machines` | no | `machine.add` | cluster-scoped; `201` |
+| `POST` | `/api/v1/machines/{id}/refresh` | no | `machine.refresh` | one observation pass |
+| `DELETE` | `/api/v1/machines/{id}` | **yes** | `machine.forget` | `204`; the machine is not touched |
+
+Importing is mutating and is **not** destructive: it creates and destroys
+nothing. Unlocking is destructive because it is what makes every other
+destructive route reachable on that cluster. Forgetting a record is destructive
+because there is no way to get it back.
+
+### Adoption is two calls, and the split is the contract
+
+`POST /api/v1/clusters/fingerprint` opens one TLS connection to the named
+address, reads the certificate, and throws the connection away. It trusts
+nothing and stores nothing.
+
+`POST /api/v1/clusters` then carries the `talosconfig`, the address and that
+fingerprint together. **The server re-reads the certificate and refuses outright
+if it no longer matches**, so the confirmation is a gate rather than a ceremony.
+
+The `talosconfig` travels in the request body — uploaded or pasted. There is no
+field for a path on the server, and there will not be one: that would be an
+arbitrary file read under the server's uid.
+
+What the server then does, in order, is the whole of the adoption:
+
+1. connect with the supplied credentials,
+2. read that node's own machine configuration,
+3. derive the cluster's secrets bundle from it,
+4. mint itself a client certificate from that bundle,
+5. reconnect under it and call `Version`.
+
+**Nothing is written before step 5 succeeds.** A half-adopted cluster is a state
+this product refuses to have. An imported cluster comes back `locked: true`.
+
+### The per-cluster read-only lock
+
+A cluster-scoped mutating route is refused with `403` and
+`forbidden.cluster-locked` while the cluster is locked. The check is
+**server-side and declarative**: a route declares how to find the cluster it acts
+on, and middleware asks. Nothing pattern-matches on the URL, and a lock the UI
+merely honours is not a lock.
+
+The check sits **inside** the audit link — an attempt to change a cluster
+somebody adopted read-only belongs in the archive — and **outside** the sudo
+gate, because asking for a password and then refusing anyway teaches an operator
+that the prompt means nothing.
+
+### Codes minted here
+
+| code | HTTP | when |
+|---|---|---|
+| `validation.node-not-controlplane` | 400 | the adoption named a node whose configuration carries no control-plane material |
+| `validation.talosconfig-invalid` | 400 | the uploaded file is not a usable talosconfig |
+| `validation.fingerprint-mismatch` | 400 | the node presented a certificate other than the confirmed one |
+| `forbidden.cluster-locked` | 403 | the cluster was adopted read-only and this request would have changed something |
+
+Each is minted deliberately, in the commit that first emits it. The alternative
+is not a missing code: it is every one of these failures arriving as
+`internal.unexpected` — which by contract carries no detail — and staying that
+way forever in an archive with no deletion path.
+
+### Audit
+
+`cluster.import` permits `name`, `endpoint` and `fingerprint` in clear.
+**`talosconfig` is deliberately absent from the allowlist**: it carries a client
+private key, and the fail-closed default writes `<redacted>` for it. That is the
+whole reason `internal/audit/redact.go` is an allowlist and not a denylist.

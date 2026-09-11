@@ -54,6 +54,7 @@ export function ClustersPage() {
       </div>
 
       <ImportWizard />
+      <CreateCluster />
     </section>
   )
 }
@@ -131,6 +132,14 @@ function ClusterCard({ cluster }: { cluster: Cluster }) {
             )}
           </dd>
         </dl>
+
+        <a
+          href={api.clusters.talosconfigPath(cluster.id)}
+          className="inline-block text-sm underline"
+          title="An admin client configuration for talosctl. The certificate in it is minted on demand and is not the one holzkube-manager dials with, so losing your copy does not affect this instance's access."
+        >
+          Download a talosconfig
+        </a>
 
         <Button
           size="sm"
@@ -303,6 +312,84 @@ function ImportWizard() {
           onClick={() => adopt.mutate()}
         >
           Import cluster
+        </Button>
+      </CardContent>
+    </Card>
+  )
+}
+
+/**
+ * Creating a cluster from nothing.
+ *
+ * This is the only path in the product that mints a certificate authority
+ * (INV-02), and it is deliberately a separate form from the import rather than
+ * a mode of it. The reason is not tidiness: an import that could fall back to
+ * generating its own PKI would produce a cluster record indistinguishable from
+ * the real one that cannot enter a single one of that cluster's nodes. A test
+ * holds the separation; this form is the half an operator sees.
+ *
+ * A created cluster has no nodes. Provisioning them is phase 8 — this writes
+ * the secrets a joining node's configuration will be built from.
+ */
+function CreateCluster() {
+  const queryClient = useQueryClient()
+  const [name, setName] = useState('')
+  const [endpoint, setEndpoint] = useState('')
+  const [failure, setFailure] = useState('')
+
+  const create = useMutation({
+    mutationFn: () => api.clusters.create(name, endpoint),
+    onSuccess: () => {
+      setName('')
+      setEndpoint('')
+      setFailure('')
+      void queryClient.invalidateQueries({ queryKey: ['clusters'] })
+    },
+    onError: (e: Error) => setFailure(e.message),
+  })
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-base">Create a new cluster</CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <p className="max-w-prose text-sm text-muted-foreground">
+          For a cluster that does not exist yet. holzkube-manager generates its certificate
+          authorities and joining tokens, and keeps them. It has no nodes until you provision one. A
+          created cluster is <strong>not</strong> locked — there is nothing yet to protect from a
+          mistake.
+        </p>
+
+        <div className="grid gap-3 sm:grid-cols-2">
+          <div className="space-y-1">
+            <Label htmlFor="new-cluster-name">Name</Label>
+            <Input
+              id="new-cluster-name"
+              value={name}
+              placeholder="lab"
+              onChange={(e) => setName(e.target.value)}
+            />
+          </div>
+          <div className="space-y-1">
+            <Label htmlFor="new-cluster-endpoint">Kubernetes endpoint</Label>
+            <Input
+              id="new-cluster-endpoint"
+              value={endpoint}
+              placeholder="https://10.0.0.1:6443"
+              onChange={(e) => setEndpoint(e.target.value)}
+            />
+          </div>
+        </div>
+
+        {failure !== '' && <p className="text-sm text-destructive">{failure}</p>}
+
+        <Button
+          variant="secondary"
+          disabled={create.isPending || name === '' || endpoint === ''}
+          onClick={() => create.mutate()}
+        >
+          Create cluster
         </Button>
       </CardContent>
     </Card>
