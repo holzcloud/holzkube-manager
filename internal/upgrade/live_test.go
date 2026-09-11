@@ -434,3 +434,86 @@ func TestTheSchematicIsReadFromTheNodeAndNeverGuessed(t *testing.T) {
 		t.Errorf("the sentence %q does not mention what happens to the extensions", verdict.Sentence)
 	}
 }
+
+// TestKernelArgDriftBlocksTheOneClickPath is UPG-04.
+//
+// The upgrade RPC carries an installer image and nothing else -- kernel
+// arguments are written at install time from the machine configuration -- so
+// there are two sources of truth for them and only one travels with an
+// upgrade. A node whose bootloader has an argument its configuration does not
+// is a node where this path silently discards it.
+func TestKernelArgDriftBlocksTheOneClickPath(t *testing.T) {
+	t.Parallel()
+
+	cl, err := talossim.NewCluster("homelab", "https://10.0.0.10:6443")
+	if err != nil {
+		t.Fatalf("NewCluster: %v", err)
+	}
+	sim, err := talossim.New(talossim.Options{
+		Hostname: "cp-1", Cluster: cl, ControlPlane: true,
+		// On the bootloader and not in the configuration: the exact shape the
+		// check exists for.
+		KernelArgs: []string{"nvidia.NVreg_PreserveVideoMemoryAllocations=1"},
+	})
+	if err != nil {
+		t.Fatalf("talossim.New: %v", err)
+	}
+	t.Cleanup(func() { _ = sim.Close() })
+
+	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+	defer cancel()
+
+	cc, err := talos.NewClusterClient(ctx, sim.Dialer(), talos.Target{
+		Cluster: "c1", Machine: "00000000-0000-4000-8000-000000000001", Addr: sim.Host(),
+	}, sim.ClientCreds(), talos.Mode{})
+	if err != nil {
+		t.Fatalf("NewClusterClient: %v", err)
+	}
+	defer cc.Close() //nolint:errcheck // the drift is the verdict
+
+	drift, err := upgrade.ReadKernelArgDrift(ctx, cc)
+	if err != nil {
+		t.Fatalf("ReadKernelArgDrift: %v", err)
+	}
+	if !drift.Drifted {
+		t.Fatalf("an argument on the bootloader and not in the configuration was not reported "+
+			"as drift: %+v", drift)
+	}
+	if len(drift.OnlyOnNode) != 1 || !strings.Contains(drift.OnlyOnNode[0], "nvidia") {
+		t.Errorf("the difference is %v, want the one argument that is only on the node",
+			drift.OnlyOnNode)
+	}
+
+	// Both lists travel, because a diff an operator cannot see is a diff they
+	// have to take on trust.
+	if len(drift.OnNode) == 0 {
+		t.Error("the drift carries no record of what the node is actually running")
+	}
+	if !strings.Contains(drift.Sentence, "install time") {
+		t.Errorf("the sentence %q does not say why an upgrade would lose it", drift.Sentence)
+	}
+}
+
+// TestTalosOwnArgumentsAreNotDrift is the other half, and without it the check
+// above would block every node in every cluster.
+//
+// Talos sets a dozen arguments for itself and carries none of them in the
+// machine configuration. A check that flagged them is a check somebody
+// switches off.
+func TestTalosOwnArgumentsAreNotDrift(t *testing.T) {
+	t.Parallel()
+
+	_, cc := liveNode(t)
+
+	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+	defer cancel()
+
+	drift, err := upgrade.ReadKernelArgDrift(ctx, cc)
+	if err != nil {
+		t.Fatalf("ReadKernelArgDrift: %v", err)
+	}
+	if drift.Drifted {
+		t.Fatalf("an ordinary node was reported as drifted: only on node %v, only in config %v",
+			drift.OnlyOnNode, drift.OnlyInConfig)
+	}
+}

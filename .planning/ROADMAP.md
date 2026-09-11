@@ -23,7 +23,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 6: Jobs-Engine & Node-Aktionen** - Persistierte, crash-feste Jobs; Reboot, Shutdown und das Reset-Dialog (completed 2026-09-11)
 - [x] **Phase 7: Config-Domain** - Ansehen, redigieren, patchen, diffen, anwenden — mit berechnetem Apply-Modus (completed 2026-09-11)
 - [~] **Phase 8: Provisioning — der Core Value** - Blanke Maschine wird gesunder Cluster-Node, ohne Terminal
-- [ ] **Phase 9: Upgrades & etcd-Verwaltung** - Rollende Talos-/K8s-Upgrades hinter einem Gate, das lieber blockiert als strandet
+- [x] **Phase 9: Upgrades & etcd-Verwaltung** - Rollende Talos-/K8s-Upgrades hinter einem Gate, das lieber blockiert als strandet
 - [ ] **Phase 10: Härtung & echter Hardware-Durchlauf** - Backup/Restore, Docker/Compose, Versionsrange — und ein Durchlauf auf echtem amd64
 
 ## Phase Details
@@ -339,6 +339,8 @@ Plans:
 **Research**: **Ja** (Research-Flag Phase 7) — Kubernetes-Upgrade-Orchestrierung (prepull → static pods → kube-proxy → kubelet) wurde nicht vertieft; die Kompatibilitätsmatrix braucht eine gepflegte Datenquelle; Talos v1.14's Upgrade-Oberfläche ist ungeprüft.
 **Parallel tracks**: 2 — etcd-Verwaltung (UPG-10 … UPG-13) ∥ Upgrade-Orchestrierung (UPG-01 … UPG-09, UPG-14).
 **Release blockers owned**: UPG-02 🚫, UPG-03 🚫, UPG-06 🚫, UPG-07 🚫
+**Plans**: ausgeführt als eine Runde; siehe `09-SUMMARY.md`
+**Outcome**: **Alle fünf Kriterien erfüllt**, gegen `talossim` ausgeführt. Kein Upgrade lief auf echter Hardware (Fenster 85): die Form von `LifecycleService.Upgrade` in echtem Talos, die Wiederauftauch-Zeit und die kuratierte Liste der Talos-eigenen Kernel-Argumente sind ungeprüft. Der Kubernetes-Pfad schreibt die Images in die MachineConfig statt über die Kubernetes-API zu orchestrieren — dasselbe, was Talos beim Anwenden einer Config tut, und nicht dieselbe Orchestrierung wie `talosctl upgrade-k8s` (Fenster 86).
 **Note**: Constraints #4 und #5 — Cluster-Übersicht/etcd-Health und die Talos↔K8s-Matrix liegen bereits in Phase 3; ohne sie könnte das Health-Gate hier nicht existieren und die Reihenfolge würde siderolabs/talos#12398 selbst herstellen.
 **Plans**: TBD
 **UI hint**: yes

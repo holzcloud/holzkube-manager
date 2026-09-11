@@ -1000,6 +1000,20 @@ export const nodePlanSchema = z.object({
   installer: z.string().default(''),
   skipped: z.boolean().default(false),
   skip_reason: z.string().default(''),
+  /** UPG-04: both lists, because a diff an operator cannot see is a diff they
+   * have to take on trust. The upgrade call carries an installer image and
+   * nothing else — kernel arguments are written at install time from the
+   * machine configuration — so a difference here is silently discarded. */
+  kernel_args: z
+    .object({
+      drifted: z.boolean(),
+      in_config: z.array(z.string()).nullish(),
+      on_node: z.array(z.string()).nullish(),
+      only_on_node: z.array(z.string()).nullish(),
+      only_in_config: z.array(z.string()).nullish(),
+      sentence: z.string().default(''),
+    })
+    .nullish(),
   blocked: z.boolean().default(false),
   block_reason: z.string().default(''),
 })
