@@ -1,13 +1,13 @@
 ---
 gsd_state_version: 1.0
 milestone: v1.14
-current_phase: 4
-current_phase_name: Walking Skeleton (Wegwerf)
+current_phase: 5
+current_phase_name: Streaming
 status: executing
-stopped_at: Phase 3 complete
-last_updated: "2026-09-11T16:35:00.000Z"
+stopped_at: Phase 4 instrument built, measurement open
+last_updated: "2026-09-11T16:50:00.000Z"
 last_activity: 2026-09-11
-last_activity_desc: Phase 03 complete, transitioned to Phase 4
+last_activity_desc: Phase 04 instrument built (measurement open), transitioned to Phase 5
 state_head: a474d2522823cbfb436ee720dee35494890281a3
 progress:
   total_phases: 10
@@ -23,16 +23,25 @@ progress:
 See: .planning/PROJECT.md (updated 2026-08-27)
 
 **Core value:** Eine neue Maschine wird komplett in der UI zum Cluster-Node — ohne `talosctl`, ohne Omni.
-**Current focus:** Phase 04 — Walking Skeleton (Wegwerf)
+**Current focus:** Phase 05 — Streaming
 
 ## Current Position
 
-Phase: 4 — Walking Skeleton (Wegwerf)
+Phase: 5 — Streaming
 Plan: Not started
 Status: Ready to plan
-Last activity: 2026-09-11 — Phase 03 complete, transitioned to Phase 4
+Last activity: 2026-09-11 — Phase 04 instrument built, transitioned to Phase 5
 
-Progress: [███░░░░░░░] 3 of 10 phases
+Progress: [███▓░░░░░░] 3 of 10 phases, plus Phase 4 partially
+
+**Phase 4 ist nicht abgehakt.** Ihr Produkt ist eine Messung, und niemand hat
+gemessen: der Ausführungshost hat weder QEMU noch `/dev/kvm` noch verschachtelte
+Virtualisierung. Gebaut sind `sandbox/cmd/walking-skeleton` und
+`talos-sandbox --provider qemu`; gelaufen sind sie nie. Die vier Unbekannten,
+die Phase 4 für Phase 8 entschärfen sollte, sind weiterhin Unbekannte —
+insbesondere die Installationsstille, um die herum Phase 8 einen
+Fortschrittsindikator entwerfen muss. Fenster 80 und 81; `04-SUMMARY.md` nennt
+den Befehl, der beide schließt.
 
 **Phase 3, was offen bleibt:** Erfolgskriterium 5 (TRANS-08) ist **nicht**
 erfüllt. Der Tier-1-Provisioner und der reale Contract-Transport existieren und

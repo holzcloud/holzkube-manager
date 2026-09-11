@@ -18,7 +18,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 1: Foundation Skeleton** - Store, Audit, Auth, HTTPS, Single Binary mit embedded UI — ohne jede Talos-Abhängigkeit (completed 2026-08-28)
 - [x] **Phase 2: Transport Seam, `talossim` & Image Factory** - Die Naht zu Talos plus der Fake, gegen den alles Weitere getestet wird (BLOCKING) (completed 2026-09-05)
 - [x] **Phase 3: Inventar, Cluster-Import & Health** - Der bestehende Cluster wird importiert; das Inventar bleibt ehrlich, auch wenn alles tot ist (completed 2026-09-11)
-- [ ] **Phase 4: Walking Skeleton (Wegwerf)** - Der hässliche End-to-End-Weg gegen QEMU, um die vier gefährlichsten Unbekannten zu entschärfen
+- [~] **Phase 4: Walking Skeleton (Wegwerf)** - Der hässliche End-to-End-Weg gegen QEMU, um die vier gefährlichsten Unbekannten zu entschärfen (Instrument gebaut 2026-09-11, **Messung offen** — Fenster 80/81)
 - [ ] **Phase 5: Streaming** - Live-Logs und `dmesg` über eine multiplexte SSE-Verbindung (DESIGNIERTE SCHNITTLINIE)
 - [ ] **Phase 6: Jobs-Engine & Node-Aktionen** - Persistierte, crash-feste Jobs; Reboot, Shutdown und das Reset-Dialog
 - [ ] **Phase 7: Config-Domain** - Ansehen, redigieren, patchen, diffen, anwenden — mit berechnetem Apply-Modus
@@ -234,7 +234,8 @@ Plans:
 **Release blockers owned**: keine — aber diese Phase entschärft PROV-05 🚫, PROV-09 🚫 und PROV-10 🚫, bevor sie in Phase 8 gebaut werden.
 **Note**: Diese Phase trägt **absichtlich kein Requirement**. Sie ist Wegwerf-Gerüst zur Risikoentschärfung, nicht die vorgezogene Erfüllung des Core Value. Jedes Requirement, das sie berührt, wird in Phase 6, 7 oder 8 ordentlich gebaut. Sie ist **nicht** die Provisioning-Phase, und ein grüner Skeleton ist **kein** Grund, Phase 8 zu kürzen. Abweichung von der Research-Struktur auf ausdrückliche Entscheidung des Betreibers: "Horizontal Layers *plus* early walking skeleton".
 **Note**: Der QEMU-Aufbau (Tier 2) zieht hierher vor. Research verlangt ihn "vor Phase 6 declared done" — früher ist strikt stärker und verletzt Constraint #10 nicht.
-**Plans**: TBD
+**Plans**: ausgeführt als eine Runde; siehe `04-SUMMARY.md`
+**Outcome**: **Kriterium 5 erfüllt, 1–4 nicht.** Das Messgerät steht (`sandbox/cmd/walking-skeleton`, `talos-sandbox --provider qemu`), gelaufen ist es nie: der Ausführungshost hat weder QEMU noch `/dev/kvm` noch verschachtelte Virtualisierung. Die vier Unbekannten sind damit weiterhin Unbekannte und Phase 8 trägt sie. Fenster 80 (Messung offen) und 81 (Tier 2 nie ausgeführt) führen das; `04-SUMMARY.md` nennt den Befehl, der sie schließt.
 
 ### Phase 5: Streaming
 
