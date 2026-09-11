@@ -8,6 +8,7 @@ import (
 
 	"github.com/holzcloud/holzkube-manager/internal/httpapi/handlers"
 	"github.com/holzcloud/holzkube-manager/internal/imagefactory"
+	"github.com/holzcloud/holzkube-manager/internal/talos"
 )
 
 // This file is the composition guard 02-DECISION-probe-budget.md asks for under
@@ -111,6 +112,14 @@ const (
 	jsonCall     callClass = "json"
 	probeCall    callClass = "probe"
 	manifestCall callClass = "manifest"
+
+	// The two node classes, added in phase 3. They are a different family from
+	// the three above -- those are the Image Factory's, these are a Talos
+	// node's -- and they are read out of internal/talos's own class table for
+	// the reason this whole file exists: a guard that restates the number it
+	// guards guards nothing.
+	nodeProbeCall    callClass = "node-probe"
+	nodeFastReadCall callClass = "node-fast-read"
 )
 
 // upstreamCall is one call a route makes in series: what it is, and which
@@ -131,6 +140,10 @@ func (u upstreamCall) budget() (time.Duration, bool) {
 		return imagefactory.ProbeTimeout, true
 	case manifestCall:
 		return imagefactory.ManifestTimeout, true
+	case nodeProbeCall:
+		return talos.ClassProbe.Deadline(), true
+	case nodeFastReadCall:
+		return talos.ClassFastRead.Deadline(), true
 	default:
 		return 0, false
 	}
@@ -177,6 +190,34 @@ type routeBudget struct {
 	// check it against the handler rather than trusting it.
 	why string
 }
+
+// nodeFactsCalls is the fixed series of resource reads talos.NodeFacts
+// performs. It is a function because three rows make the same walk, and three
+// hand-copied lists would drift from each other before they drifted from the
+// code.
+func nodeFactsCalls() []upstreamCall {
+	return []upstreamCall{
+		{name: "NodeFacts: SystemInformation Get", class: nodeFastReadCall},
+		{name: "NodeFacts: NodeAddress Get (filtered)", class: nodeFastReadCall},
+		{name: "NodeFacts: NodeAddress Get (unfiltered fallback)", class: nodeFastReadCall},
+		{name: "NodeFacts: Processor List", class: nodeFastReadCall},
+		{name: "NodeFacts: MemoryModule List", class: nodeFastReadCall},
+		{name: "NodeFacts: Disk List", class: nodeFastReadCall},
+		{name: "NodeFacts: LinkStatus List", class: nodeFastReadCall},
+		{name: "NodeFacts: ExtensionStatus List", class: nodeFastReadCall},
+		{name: "NodeFacts: KubeletSpec Get", class: nodeFastReadCall},
+		{name: "NodeFacts: Nodename Get", class: nodeFastReadCall},
+		{name: "NodeFacts: HostnameStatus Get", class: nodeFastReadCall},
+	}
+}
+
+// nodeReadClippingRationale is the argument the two node-read rows owe.
+const nodeReadClippingRationale = "Every fast read here is a node answering out of state it already holds, which " +
+	"takes milliseconds; the ten-second class deadline is a ceiling for a node that " +
+	"is barely answering, not an expectation. A dozen of them at their ceiling is a " +
+	"node that cannot serve its own resource state, and being cut there is the right " +
+	"outcome: what the operator needs then is the record marked unconfirmed, which is " +
+	"exactly what a cut produces."
 
 var routeBudgets = []routeBudget{
 	{
@@ -228,6 +269,85 @@ var routeBudgets = []routeBudget{
 			"case: it is reached only on a 405 or a 501, which is an answer arriving quickly, " +
 			"never a budget expiring. CreateRouteBudget is the ceiling over all three and the " +
 			"composition is computed here rather than asserted.",
+	},
+	{
+		route: "POST /api/v1/clusters",
+		calls: append([]upstreamCall{
+			{name: "ServerFingerprint: pre-trust TLS handshake", class: nodeProbeCall},
+			{name: "NewClusterClient under the uploaded talosconfig: Version", class: nodeProbeCall},
+			{name: "MachineConfigYAML: COSI Get", class: nodeFastReadCall},
+			{name: "NewClusterClient under the minted certificate: Version", class: nodeProbeCall},
+			{name: "connectivity proof: Version", class: nodeProbeCall},
+		}, append(nodeFactsCalls(),
+			upstreamCall{name: "adoptMembers/Members: cluster.Member List", class: nodeFastReadCall})...),
+		routeDeadline: handlers.ImportRouteBudget,
+		verdict:       withinBudget,
+		clipping:      clipped,
+		clippingRationale: "Every fast read here is a node answering out of state it already " +
+			"holds, which takes milliseconds; the ten-second class deadline is a ceiling for " +
+			"a node that is barely answering, not an expectation. Twelve of them at their " +
+			"ceiling is a node that cannot serve its own resource state, and an adoption " +
+			"that is still reading hardware facts ninety seconds in has not adopted " +
+			"anything -- being cut there is the correct outcome and not a lost one. What " +
+			"the clipping must not cut is the part that writes, and it cannot: the store " +
+			"writes happen before adoptMembers runs, so a cut during the membership walk " +
+			"leaves an adopted cluster whose inventory the supervisors fill in on their " +
+			"next pass.",
+		why: "inventory.Import makes these in series: the fingerprint probe, one connection " +
+			"under the uploaded talosconfig (whose constructor proves itself with Version), " +
+			"the single machine-configuration read this phase performs, a second connection " +
+			"under the certificate minted from the derived bundle, that connection's own " +
+			"Version as the D-04 connectivity proof, and then adoptMembers -- which is " +
+			"NodeFacts, itself a fixed walk over the resource state, followed by the " +
+			"membership list. The two NodeAddress reads are declared as two because the " +
+			"unfiltered one is a fallback that runs when the filtered one came back empty, " +
+			"which is the worst case this list is about. Whoever changes readNodeFacts has " +
+			"to come back and revisit this count; nothing derives it.",
+	},
+	{
+		route: "POST /api/v1/clusters/fingerprint",
+		calls: []upstreamCall{
+			{name: "ServerFingerprint: pre-trust TLS handshake", class: nodeProbeCall},
+		},
+		routeDeadline: handlers.FingerprintRouteBudget,
+		verdict:       withinBudget,
+		clipping:      uncut,
+		why: "clusterFingerprint opens one TLS connection to read the certificate the " +
+			"operator is about to confirm, and reads nothing else. ServerFingerprint " +
+			"carries the probe class itself, so the route ceiling is that plus room for " +
+			"the handler's own work rather than a number chosen independently.",
+	},
+	{
+		route: "POST /api/v1/machines",
+		calls: append([]upstreamCall{
+			{name: "NewClusterClient: Version", class: nodeProbeCall},
+		}, append(nodeFactsCalls(), upstreamCall{name: "Members: cluster.Member List", class: nodeFastReadCall})...),
+		routeDeadline:     handlers.NodeReadRouteBudget,
+		verdict:           withinBudget,
+		clipping:          clipped,
+		clippingRationale: nodeReadClippingRationale,
+		why: "inventory.AddManual connects, reads the node's facts and then asks for the " +
+			"membership so the machine's role is read rather than guessed. The two " +
+			"NodeAddress reads are declared as two because the unfiltered one runs when " +
+			"the filtered one came back empty, which is the worst case. Whoever changes " +
+			"readNodeFacts has to come back and revisit this count; nothing derives it.",
+	},
+	{
+		route: "POST /api/v1/machines/{id}/refresh",
+		calls: append([]upstreamCall{
+			{name: "NewClusterClient: Version", class: nodeProbeCall},
+		}, append(nodeFactsCalls(),
+			upstreamCall{name: "Version", class: nodeFastReadCall},
+			upstreamCall{name: "ServiceList", class: nodeFastReadCall},
+			upstreamCall{name: "EtcdMemberList (control-plane nodes only)", class: nodeFastReadCall},
+		)...),
+		routeDeadline:     handlers.NodeReadRouteBudget,
+		verdict:           withinBudget,
+		clipping:          clipped,
+		clippingRationale: nodeReadClippingRationale,
+		why: "inventory.Refresh connects, walks the resource state, and then asks the three " +
+			"typed RPCs that have no resource behind them. EtcdMemberList is in the list " +
+			"because a control-plane node is the worst case; a worker skips it.",
 	},
 	{
 		route:         "GET /api/v1/schematics",
