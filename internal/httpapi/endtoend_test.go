@@ -33,6 +33,7 @@ import (
 	"github.com/holzcloud/holzkube-manager/internal/store/fsstore"
 	"github.com/holzcloud/holzkube-manager/internal/streamhub"
 	"github.com/holzcloud/holzkube-manager/internal/talos"
+	"github.com/holzcloud/holzkube-manager/internal/upgrade"
 )
 
 const (
@@ -72,6 +73,7 @@ type harnessConfig struct {
 	config               bool
 	provision            func(*harness) *provision.Service
 	registerProvisionJob func(*jobs.Engine, *harness)
+	upgrade              func(*harness) *upgrade.Service
 }
 
 // withInventory adds an inventory service built over the harness's store.
@@ -104,6 +106,16 @@ func withProvision(build func(*harness) *provision.Service) harnessOpt {
 // need the steps, and registering them would run a machine install.
 func withProvisionJob(register func(*jobs.Engine, *harness)) harnessOpt {
 	return func(c *harnessConfig) { c.registerProvisionJob = register }
+}
+
+// withUpgrade adds the rolling-upgrade and etcd-management service. It implies
+// jobs, because an upgrade is a job submission.
+func withUpgrade(build func(*harness) *upgrade.Service) harnessOpt {
+	return func(c *harnessConfig) {
+		c.upgrade = build
+		c.jobs = true
+		c.streaming = true
+	}
 }
 
 // withJobs adds the job engine, the confirmer and the node-action routes. It
@@ -248,6 +260,9 @@ func newHarness(t *testing.T, opts ...harnessOpt) *harness {
 	if cfg.provision != nil {
 		deps.Provision = cfg.provision(h2)
 	}
+	if cfg.upgrade != nil {
+		deps.Upgrade = cfg.upgrade(h2)
+	}
 	if cfg.registerProvisionJob != nil && h2.jobs != nil {
 		cfg.registerProvisionJob(h2.jobs, h2)
 	}
@@ -263,6 +278,7 @@ func newHarness(t *testing.T, opts ...harnessOpt) *harness {
 		handlers.JobRoutes(deps),
 		handlers.ConfigRoutes(deps),
 		handlers.ProvisionRoutes(deps),
+		handlers.UpgradeRoutes(deps),
 	)
 
 	srv := httptest.NewTLSServer(httpapi.New(deps))

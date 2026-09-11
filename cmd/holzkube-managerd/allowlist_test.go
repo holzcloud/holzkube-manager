@@ -5,7 +5,6 @@ import (
 
 	"github.com/holzcloud/holzkube-manager/internal/audit"
 	"github.com/holzcloud/holzkube-manager/internal/httpapi"
-	"github.com/holzcloud/holzkube-manager/internal/httpapi/handlers"
 )
 
 // This file closes the half of internal/audit/redact.go's claim that package
@@ -96,32 +95,21 @@ func TestEveryAllowlistedActionIsAReachableRoute(t *testing.T) {
 	}
 }
 
-// allRoutes assembles the table the way main does, with a zero Deps.
+// allRoutes is main's own route table, with a zero Deps.
 //
-// The dependencies are nil, which is exactly right for this: nothing here calls
-// a handler. What is being read is the declaration each route carries -- its
+// It calls routeTable rather than re-listing the handler packages, and that is
+// the correction this file needed: when it kept its own list, phase 9's
+// upgrade routes were added to main and not to the test, so the guard walked
+// every route except the new ones and passed. A guard with its own copy of the
+// thing it is guarding is a guard that goes quiet exactly when something is
+// added.
+//
+// The dependencies are nil, which is exactly right for this: nothing here
+// calls a handler. What is read is the declaration each route carries -- its
 // method, its pattern and its action -- and those are literals in the Routes
 // functions, independent of what the handlers close over.
 func allRoutes() []httpapi.Route {
-	var d httpapi.Deps
-	var out []httpapi.Route
-	for _, set := range [][]httpapi.Route{
-		handlers.SystemRoutes(d),
-		handlers.SetupRoutes(d),
-		handlers.AuthRoutes(d),
-		handlers.OIDCRoutes(d),
-		handlers.AccountRoutes(d),
-		handlers.AuditRoutes(d),
-		handlers.SchematicRoutes(d),
-		handlers.InventoryRoutes(d),
-		handlers.StreamRoutes(d),
-		handlers.JobRoutes(d),
-		handlers.ConfigRoutes(d),
-		handlers.ProvisionRoutes(d),
-	} {
-		out = append(out, set...)
-	}
-	return out
+	return routeTable(httpapi.Deps{})
 }
 
 func join(lines []string) string {

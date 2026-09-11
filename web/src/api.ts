@@ -768,6 +768,11 @@ export const machineSchema = z.object({
   /** The cluster's client certificate has expired. This is not a dead node,
    * and showing it as one sends the operator to the wrong repair. */
   certificate_expired: z.boolean().default(false),
+  /** Rolling operations skip this node (UPG-14). Not a Field: it is
+   * holzkube-manager's own note about what it should not do, and it is true
+   * whether or not the node is answering — which is when it matters most. */
+  locked: z.boolean().default(false),
+  lock_reason: z.string().default(''),
   adopted_at: z.string(),
 
   hostname: fieldSchema(z.string()),
@@ -932,6 +937,117 @@ export const bootstrapRecoverySchema = z.object({
 })
 
 export const noticesSchema = z.object({ notices: z.array(z.string()).default([]) })
+
+/* ---------------------------------------------------------------------- */
+/* Upgrades and etcd                                                       */
+/* ---------------------------------------------------------------------- */
+
+export const upgradeStepSchema = z.object({
+  to: z.object({
+    Major: z.number(),
+    Minor: z.number(),
+    Patch: z.number(),
+    Pre: z.string().default(''),
+  }),
+  /** Why this step exists. The middle steps of a chain are the ones an
+   * operator asks about, because they are not the version anybody wanted —
+   * they are the version Talos requires passing through. */
+  why: z.string(),
+})
+
+export const strandCheckSchema = z.object({
+  blocked: z.boolean(),
+  sentence: z.string(),
+  remedy: z.string().default(''),
+})
+
+export const etcdStatusSchema = z.object({
+  MemberID: z.number().optional(),
+  Leader: z.number().optional(),
+  RaftIndex: z.number().optional(),
+  RaftAppliedIndex: z.number().optional(),
+  IsLearner: z.boolean().optional(),
+  Errors: z.array(z.string()).nullish(),
+})
+
+export const gateVerdictSchema = z.object({
+  ok: z.boolean(),
+  reason: z.string().default(''),
+  /** What the gate read. It is always present, including when the gate says
+   * yes: "why did it let that through" deserves the same answer as "why did it
+   * not". */
+  input: z.object({
+    members: z
+      .array(z.object({ ID: z.number(), Hostname: z.string(), IsLearner: z.boolean() }))
+      .nullish(),
+    voting: z.number().default(0),
+    statuses: z.record(z.string(), etcdStatusSchema).nullish(),
+    unreachable: z.array(z.string()).nullish(),
+    alarms: z.array(z.object({ MemberID: z.number(), Type: z.string() })).nullish(),
+    max_raft_lag: z.number().default(0),
+  }),
+})
+
+export const nodePlanSchema = z.object({
+  machine: z.string(),
+  hostname: z.string().default(''),
+  role: z.string(),
+  from: z.string().default(''),
+  schematic: z.string().default(''),
+  schematic_sentence: z.string().default(''),
+  /** The exact installer this node's upgrade will use. Per node, because two
+   * nodes in one cluster can have been built from different schematics. */
+  installer: z.string().default(''),
+  skipped: z.boolean().default(false),
+  skip_reason: z.string().default(''),
+  blocked: z.boolean().default(false),
+  block_reason: z.string().default(''),
+})
+
+export const upgradePlanSchema = z.object({
+  cluster: z.string(),
+  to: z.string(),
+  /** Every version that has to be passed through. A target more than one minor
+   * away is several runs, and this is the list of them. */
+  chain: z.array(upgradeStepSchema).nullish(),
+  strand: strandCheckSchema,
+  gate_preview: gateVerdictSchema,
+  nodes: z.array(nodePlanSchema).default([]),
+  blocked: z.boolean().default(false),
+  block_reason: z.string().default(''),
+})
+
+export type UpgradePlan = z.infer<typeof upgradePlanSchema>
+export type NodePlan = z.infer<typeof nodePlanSchema>
+export type GateVerdict = z.infer<typeof gateVerdictSchema>
+
+export const etcdMemberSchema = z.object({
+  /** Hex, as a string. A 64-bit member id does not survive a JSON number in a
+   * browser, so the string is the canonical form above the seam. */
+  id: z.string(),
+  /** Hostname first, the hex id behind it. An operator asked to confirm the
+   * removal of "8e9e05c52164694d" is confirming a string, not a machine. */
+  name: z.string(),
+  machine: z.string().default(''),
+  learner: z.boolean().default(false),
+  voting: z.boolean().default(false),
+})
+
+export const etcdMemberListSchema = z.object({
+  members: z.array(etcdMemberSchema).default([]),
+  voting_count: z.number().default(0),
+  /** How many members may be lost before the cluster stops accepting writes. */
+  tolerates: z.number().default(0),
+  sentence: z.string().default(''),
+})
+
+export type EtcdMemberList = z.infer<typeof etcdMemberListSchema>
+export type EtcdMember = z.infer<typeof etcdMemberSchema>
+
+export const releasesSchema = z.object({
+  releases: z.array(z.string()).default([]),
+  notice: z.string().default(''),
+})
 
 /* ---------------------------------------------------------------------- */
 /* Jobs and node actions                                                   */
@@ -1385,6 +1501,18 @@ export const api = {
       ),
   },
 
+  machineLock: {
+    /** A lock is holzkube-manager's own note about what it should not do, so it
+     * works on a node that is down — which is precisely when somebody wants to
+     * set one. The reason is required: a lock nobody can explain is a lock the
+     * next person clears because it is in the way. */
+    set: (machine: string, locked: boolean, reason: string): Promise<Machine> =>
+      sendJSON('POST', `/api/v1/machines/${encodeURIComponent(machine)}/lock`, machineSchema, {
+        locked,
+        reason,
+      }),
+  },
+
   patches: {
     list: async (): Promise<Patch[]> =>
       (await sendJSON('GET', '/api/v1/patches', patchesSchema)).patches,
@@ -1454,6 +1582,74 @@ export const api = {
         z.object({ cluster: z.string(), bootstrapped: z.boolean() }),
         { bootstrapped, note },
       ),
+  },
+
+  upgrades: {
+    /** No "latest", and no pre-releases. Both absences are the server's, and
+     * the notice it returns says why. */
+    releases: () => sendJSON('GET', '/api/v1/upgrade/releases', releasesSchema),
+
+    plan: (cluster: string, to: string): Promise<UpgradePlan> =>
+      sendJSON(
+        'POST',
+        `/api/v1/clusters/${encodeURIComponent(cluster)}/upgrade/plan`,
+        upgradePlanSchema,
+        { to },
+      ),
+
+    planKubernetes: (cluster: string, to: string): Promise<UpgradePlan> =>
+      sendJSON(
+        'POST',
+        `/api/v1/clusters/${encodeURIComponent(cluster)}/upgrade/kubernetes/plan`,
+        upgradePlanSchema,
+        { to },
+      ),
+
+    /** What is typed is the cluster's name. A rolling upgrade is not about one
+     * machine, so there is no hostname to type — what is at risk is the
+     * cluster. */
+    confirm: (
+      cluster: string,
+      kind: string,
+      to: string,
+      typed: string,
+    ): Promise<{ token: string; expires: string }> =>
+      sendJSON(
+        'POST',
+        `/api/v1/clusters/${encodeURIComponent(cluster)}/upgrade/confirm`,
+        confirmationSchema,
+        { kind, to, typed },
+      ),
+
+    start: (cluster: string, to: string, confirmation: string, kubernetes = false) =>
+      sendJSON(
+        'POST',
+        `/api/v1/clusters/${encodeURIComponent(cluster)}/upgrade${kubernetes ? '/kubernetes' : ''}`,
+        acceptedJobSchema,
+        { to, confirmation },
+      ),
+  },
+
+  etcd: {
+    members: (cluster: string): Promise<EtcdMemberList> =>
+      sendJSON(
+        'GET',
+        `/api/v1/clusters/${encodeURIComponent(cluster)}/etcd/members`,
+        etcdMemberListSchema,
+      ),
+
+    removeMember: async (cluster: string, id: string): Promise<void> => {
+      await sendJSON(
+        'DELETE',
+        `/api/v1/clusters/${encodeURIComponent(cluster)}/etcd/members/${encodeURIComponent(id)}`,
+        z.unknown(),
+      )
+    },
+
+    /** The snapshot is bytes, not JSON. It is a link rather than a fetch: the
+     * browser streams it to disk instead of holding a database in memory. */
+    snapshotURL: (cluster: string) =>
+      `/api/v1/clusters/${encodeURIComponent(cluster)}/etcd/snapshot`,
   },
 
   jobs: {

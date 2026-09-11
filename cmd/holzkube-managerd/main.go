@@ -34,6 +34,7 @@ import (
 	"github.com/holzcloud/holzkube-manager/internal/streamhub"
 	"github.com/holzcloud/holzkube-manager/internal/talos"
 	"github.com/holzcloud/holzkube-manager/internal/tlsx"
+	"github.com/holzcloud/holzkube-manager/internal/upgrade"
 )
 
 const (
@@ -321,6 +322,36 @@ func run(args []string) error {
 		KubernetesVersion: inv.KubernetesVersion,
 	})
 
+	// Rolling upgrades and etcd management.
+	//
+	// The gate is built from the same connector everything else uses and from
+	// the inventory's own control-plane list, because the question it answers
+	// -- "does this cluster survive losing that node" -- is about every
+	// control-plane node and not about the one being upgraded.
+	upgradeDeps := upgrade.Deps{
+		Connect: func(ctx context.Context, id model.MachineID) (*talos.ClusterClient, error) {
+			return inv.Connect(ctx, id)
+		},
+		Machines: inv.MachinesOf,
+		Record: func(ctx context.Context, id model.MachineID) error {
+			inv.Refresh(ctx, id)
+			return nil
+		},
+	}
+	upgradeDeps.Gate = upgrade.NewGate(upgradeDeps.Connect, inv.ControlPlanesOf)
+
+	upgrade.Register(engine, upgradeDeps)
+
+	// The release list comes from the Image Factory, which is also where the
+	// installer images come from -- so the versions offered and the versions
+	// installable are the same set by construction rather than by agreement.
+	upgradeSvc := upgrade.NewService(upgradeDeps, func(ctx context.Context) ([]string, error) {
+		if factory == nil {
+			return nil, errors.New("this instance was started without an Image Factory client")
+		}
+		return factory.Versions(ctx)
+	})
+
 	// The identity provider, if one is configured. New performs no network I/O:
 	// discovery happens on first use, so that a provider which is down -- quite
 	// possibly because it runs on the cluster this tool exists to repair --
@@ -359,6 +390,7 @@ func run(args []string) error {
 		Confirmer:   confirmer,
 		Config:      configSvc,
 		Provision:   provisionSvc,
+		Upgrade:     upgradeSvc,
 		// The per-cluster read-only lock, read by the route middleware rather
 		// than by each handler (D-22). Inside the literal for the reason the
 		// comment above states: Deps is copied by value into every …Routes
@@ -382,23 +414,9 @@ func run(args []string) error {
 		IsSSOOnly:    ssoOnly(cfg),
 	}
 
-	// The route table is assembled here, from each handler package's own Routes
-	// function. A wave-2 plan adds its routes in its handler file and adds one
-	// line here; router.go stays untouched.
-	deps.Routes = slices.Concat(
-		handlers.SystemRoutes(deps),
-		handlers.SetupRoutes(deps),
-		handlers.AuthRoutes(deps),
-		handlers.OIDCRoutes(deps),
-		handlers.AccountRoutes(deps),
-		handlers.AuditRoutes(deps),
-		handlers.SchematicRoutes(deps),
-		handlers.InventoryRoutes(deps),
-		handlers.StreamRoutes(deps),
-		handlers.JobRoutes(deps),
-		handlers.ConfigRoutes(deps),
-		handlers.ProvisionRoutes(deps),
-	)
+	// The route table is assembled by routeTable, which is the one place it is
+	// written down.
+	deps.Routes = routeTable(deps)
 
 	// Start observing before the listener opens. A supervisor that only runs
 	// while somebody is looking makes the dashboard slow exactly when it is
@@ -511,4 +529,35 @@ func allowedHosts(cfg config.Config) []string {
 		}
 	}
 	return hosts
+}
+
+// routeTable assembles the whole HTTP surface, from each handler package's own
+// Routes function.
+//
+// It is a function rather than an expression inside run() because it is not
+// only main that needs the list: allowlist_test.go walks every route to assert
+// that each audited action has an entry in the redaction allowlist, and a
+// second copy of this list in the test was a second place to forget a route
+// set. It already had been forgotten once -- the guard passed over a handler
+// nobody had added to it, which is the exact shape of the failure it exists to
+// catch.
+//
+// A new plan adds its routes in its handler file and adds one line here;
+// router.go stays untouched.
+func routeTable(deps httpapi.Deps) []httpapi.Route {
+	return slices.Concat(
+		handlers.SystemRoutes(deps),
+		handlers.SetupRoutes(deps),
+		handlers.AuthRoutes(deps),
+		handlers.OIDCRoutes(deps),
+		handlers.AccountRoutes(deps),
+		handlers.AuditRoutes(deps),
+		handlers.SchematicRoutes(deps),
+		handlers.InventoryRoutes(deps),
+		handlers.StreamRoutes(deps),
+		handlers.JobRoutes(deps),
+		handlers.ConfigRoutes(deps),
+		handlers.ProvisionRoutes(deps),
+		handlers.UpgradeRoutes(deps),
+	)
 }
