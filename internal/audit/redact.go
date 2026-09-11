@@ -177,7 +177,11 @@ var allowlist = map[string][]string{
 	// reset's disks are: "a scan happened" and "this installation scanned
 	// 10.0.0.0/24" are different events, and the second is the one somebody
 	// reviewing an unexpected connection on their network is looking for.
-	"provision.scan":    {"cidr", "addrs[]"},
+	"provision.scan": {"cidr", "addrs[]"},
+	"provision.confirm": {
+		"cluster", "addr", "uuid", "control_plane", "install_disk",
+		"schematic_id", "talos_version", "fingerprint", "hostname", "patch_ids[]",
+	},
 	"provision.inspect": {"addr", "fingerprint"},
 
 	// The plan and the apply take the same body, so they permit the same

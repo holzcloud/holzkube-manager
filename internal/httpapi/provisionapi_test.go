@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/holzcloud/holzkube-manager/internal/inventory"
+	"github.com/holzcloud/holzkube-manager/internal/jobs"
 	"github.com/holzcloud/holzkube-manager/internal/model"
 	"github.com/holzcloud/holzkube-manager/internal/provision"
 	"github.com/holzcloud/holzkube-manager/internal/store/fsstore"
@@ -55,14 +56,29 @@ func newProvisionHarness(t *testing.T) *provisionHarness {
 				Logger: slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError})),
 			})
 		}),
+		// The kind is registered so that the engine accepts a submission. The
+		// steps are the real ones; the simulated machine is what they act on.
+		withProvisionJob(func(e *jobs.Engine, h *harness) {
+			provision.Register(e, provision.Deps{
+				Dialer:           dialer,
+				MaintenanceCreds: func(string) talos.Creds { return blank.MaintenanceCreds() },
+				ClusterCreds:     h.inv.ClusterCreds,
+				Secrets: func(ctx context.Context, id model.ClusterID) (model.ClusterSecrets, error) {
+					return h.store.ClusterSecrets().Get(ctx, id)
+				},
+				Cluster: func(ctx context.Context, id model.ClusterID) (model.Cluster, error) {
+					return h.store.Clusters().Get(ctx, id)
+				},
+				PatchBodies:       func(context.Context, []string) ([]string, error) { return nil, nil },
+				Record:            func(context.Context, model.ClusterID, string, bool) error { return nil },
+				Bootstrapper:      bootstrapper(t, h),
+				KubernetesVersion: h.inv.KubernetesVersion,
+			})
+		}),
 		withProvision(func(h *harness) *provision.Service {
-			b, err := provision.NewBootstrapper(h.dataDir + "/bootstrap")
-			if err != nil {
-				t.Fatalf("NewBootstrapper: %v", err)
-			}
 			return provision.NewService(dialer,
 				func(string) talos.Creds { return blank.MaintenanceCreds() },
-				h.inv.KnownAt, b, h.inv.ControlPlaneCount)
+				h.inv.KnownAt, bootstrapper(t, h), h.inv.ControlPlaneCount)
 		}),
 	)
 
@@ -90,6 +106,23 @@ func newProvisionHarness(t *testing.T) *provisionHarness {
 	}
 
 	return &provisionHarness{harness: h, blank: blank}
+}
+
+// bootstrapper opens the harness's lease directory, once per harness: the
+// service and the job steps must share it, because a second Bootstrapper over
+// the same directory would be a second lease-holder and the lease is the
+// mechanism.
+func bootstrapper(t *testing.T, h *harness) *provision.Bootstrapper {
+	t.Helper()
+
+	if h.bootstrap == nil {
+		b, err := provision.NewBootstrapper(h.dataDir + "/bootstrap")
+		if err != nil {
+			t.Fatalf("NewBootstrapper: %v", err)
+		}
+		h.bootstrap = b
+	}
+	return h.bootstrap
 }
 
 // TestTheWizardFindsAMachineAndReadsIt walks the two read steps an operator
@@ -371,5 +404,110 @@ func TestTheAuditRecordOfAScanNamesTheSubnet(t *testing.T) {
 	}
 	if !strings.Contains(string(raw), h.blank.Host()) {
 		t.Errorf("the audit record of a scan does not name what was scanned: %s", raw)
+	}
+}
+
+// TestAConfirmedApplyIsAcceptedAsAJob is JOB-09 for the provisioning path: the
+// operation has been accepted and has not happened yet, and answering 200
+// would be claiming otherwise.
+//
+// It also pins the confirmation this path uses, which is deliberately not the
+// machine-scoped one: a machine being provisioned is not in the inventory, so
+// there is no hostname to type. What is typed is the disk that gets written.
+func TestAConfirmedApplyIsAcceptedAsAJob(t *testing.T) {
+	t.Parallel()
+
+	h := newProvisionHarness(t)
+
+	resp, raw := h.do(t, http.MethodPost, "/api/v1/provision/inspect",
+		map[string]any{"addr": h.blank.Host()})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("inspect: %d (%s)", resp.StatusCode, raw)
+	}
+	var candidate provision.Candidate
+	if err := json.Unmarshal(raw, &candidate); err != nil {
+		t.Fatalf("decode candidate: %v", err)
+	}
+
+	req := map[string]any{
+		"cluster":       string(testProvisionCluster),
+		"addr":          h.blank.Host(),
+		"uuid":          string(candidate.UUID),
+		"control_plane": true,
+		"install_disk":  candidate.Disks[0].Device,
+		"talos_version": "v1.13.9",
+	}
+
+	resp, raw = h.do(t, http.MethodPost, "/api/v1/auth/sudo", map[string]string{"password": testPass})
+	if resp.StatusCode != http.StatusNoContent && resp.StatusCode != http.StatusOK {
+		t.Fatalf("sudo: %d (%s)", resp.StatusCode, raw)
+	}
+
+	// The wrong device: refused, so a client that skipped the box cannot get a
+	// token at all.
+	wrong := map[string]any{"typed": "/dev/sdz"}
+	for k, v := range req {
+		wrong[k] = v
+	}
+	resp, raw = h.do(t, http.MethodPost, "/api/v1/provision/confirm", wrong)
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("a confirmation naming the wrong disk answered %d (%s)", resp.StatusCode, raw)
+	}
+
+	body := map[string]any{"typed": candidate.Disks[0].Device}
+	for k, v := range req {
+		body[k] = v
+	}
+	resp, raw = h.do(t, http.MethodPost, "/api/v1/provision/confirm", body)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("confirm: %d (%s)", resp.StatusCode, raw)
+	}
+	var confirmation struct {
+		Token string `json:"token"`
+	}
+	if err := json.Unmarshal(raw, &confirmation); err != nil {
+		t.Fatalf("decode confirmation: %v", err)
+	}
+
+	// A token is bound to the parameters it was issued for. Submitting a
+	// different disk with it is refused, which is what makes the dialog a gate
+	// rather than decoration.
+	tampered := map[string]any{"confirmation": confirmation.Token}
+	for k, v := range req {
+		tampered[k] = v
+	}
+	tampered["install_disk"] = "/dev/sdz"
+	resp, raw = h.do(t, http.MethodPost, "/api/v1/provision/apply", tampered)
+	if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("an apply with a token for a different disk answered %d (%s)", resp.StatusCode, raw)
+	}
+
+	apply := map[string]any{"confirmation": confirmation.Token}
+	for k, v := range req {
+		apply[k] = v
+	}
+	resp, raw = h.do(t, http.MethodPost, "/api/v1/provision/apply", apply)
+	if resp.StatusCode != http.StatusAccepted {
+		t.Fatalf("apply: %d (%s)", resp.StatusCode, raw)
+	}
+	if loc := resp.Header.Get("Location"); !strings.HasPrefix(loc, "/api/v1/jobs/") {
+		t.Errorf("the acceptance does not say where to watch the run: Location = %q", loc)
+	}
+
+	var accepted struct {
+		Job struct {
+			ID   string `json:"id"`
+			Kind string `json:"kind"`
+		} `json:"job"`
+		Topic string `json:"topic"`
+	}
+	if err := json.Unmarshal(raw, &accepted); err != nil {
+		t.Fatalf("decode acceptance: %v", err)
+	}
+	if accepted.Job.ID == "" || accepted.Topic == "" {
+		t.Fatalf("the acceptance carries no job to watch: %s", raw)
+	}
+	if accepted.Job.Kind != string(provision.JobKindProvision) {
+		t.Errorf("the accepted job is a %q", accepted.Job.Kind)
 	}
 }
