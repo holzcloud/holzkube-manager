@@ -22,7 +22,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 5: Streaming** - Live-Logs und `dmesg` über eine multiplexte SSE-Verbindung (DESIGNIERTE SCHNITTLINIE) (completed 2026-09-11)
 - [x] **Phase 6: Jobs-Engine & Node-Aktionen** - Persistierte, crash-feste Jobs; Reboot, Shutdown und das Reset-Dialog (completed 2026-09-11)
 - [x] **Phase 7: Config-Domain** - Ansehen, redigieren, patchen, diffen, anwenden — mit berechnetem Apply-Modus (completed 2026-09-11)
-- [ ] **Phase 8: Provisioning — der Core Value** - Blanke Maschine wird gesunder Cluster-Node, ohne Terminal
+- [~] **Phase 8: Provisioning — der Core Value** - Blanke Maschine wird gesunder Cluster-Node, ohne Terminal
 - [ ] **Phase 9: Upgrades & etcd-Verwaltung** - Rollende Talos-/K8s-Upgrades hinter einem Gate, das lieber blockiert als strandet
 - [ ] **Phase 10: Härtung & echter Hardware-Durchlauf** - Backup/Restore, Docker/Compose, Versionsrange — und ein Durchlauf auf echtem amd64
 
@@ -319,7 +319,8 @@ Plans:
   Diese Phase wird nicht begonnen, solange beides nicht steht.
 **Release blockers owned**: PROV-05 🚫, PROV-09 🚫, PROV-10 🚫
 **Note**: Constraint #3 — der Cluster-Import gehört **nicht** hierher, sondern liegt bereits in Phase 3. Diese Phase konsumiert das importierte Bundle, sie erzeugt keins.
-**Plans**: TBD
+**Plans**: ausgeführt als eine Runde; siehe `08-SUMMARY.md`
+**Outcome**: **Kriterien 2–5 erfüllt, 1 unverifiziert.** Beide Eintrittsbedingungen sind unerfüllt geblieben (Fenster 80 und 81), und die Phase wurde trotzdem gebaut: alles außer dem binären Abnahmetest ist gegen `talossim` ausführbar, und nicht zu bauen hätte den Core Value nicht näher gebracht. Was fehlt, ist die Maschine — Fenster 82 nennt die drei Annahmen, die `talossim` bestätigt, weil `talossim` sie eingebaut hat, und Fenster 84 die Konfiguration, die als Dokument geprüft und als Anweisung an eine Maschine ungeprüft ist. `ReappearBudget` ist weiterhin Phase 4s Platzhalter.
 **UI hint**: yes
 
 ### Phase 9: Upgrades & etcd-Verwaltung

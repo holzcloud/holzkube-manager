@@ -1415,3 +1415,163 @@ configuration, configuration is where the secrets are, and the archive has no
 deletion path. A stored patch is readable at its own id for as long as it exists
 — which is forever — so the record is complete without the archive holding the
 bytes.
+
+## Provisioning
+
+### Three reads and one write
+
+| route | method | destructive | what it does |
+|---|---|---|---|
+| `/api/v1/provision/notices` | GET | no | the sentences the wizard opens with |
+| `/api/v1/provision/scan` | POST | no | probes a subnet or a list of addresses |
+| `/api/v1/provision/inspect` | POST | no | reads one machine in maintenance mode |
+| `/api/v1/provision/plan` | POST | no | validates, warns, and says what would be written |
+| `/api/v1/provision/confirm` | POST | no | issues a token bound to exactly this run |
+| `/api/v1/provision/apply` | POST | **yes** | submits the job, `202` with a job id |
+| `/api/v1/provision/bootstrap-recovery` | GET | no | etcd attempts with no recorded outcome |
+| `/api/v1/provision/bootstrap-recovery/{cluster}` | POST | **yes** | records what a person found |
+
+The scan and the inspect are POSTs because they carry a body, not because they
+mutate. Nothing on any machine changes until the apply.
+
+`apply` is the only route here marked `Destructive`, so it is the only one
+behind the sudo window, and it passes the same per-cluster lock every other
+mutation passes.
+
+### A scan never reports "nothing" about a machine
+
+An address that answered is always reported, in one of three states:
+
+- `maintenance` — an unconfigured machine, which is the one the wizard wants.
+  It is decided by the certificate being **self-signed**: a node with no cluster
+  PKI has nothing to be signed by, and that signature is the only thing a scan
+  can read without authenticating.
+- `configured` — something presented a certificate a certificate authority
+  issued, which is what a machine that already has a configuration looks like.
+- `answered` — a connection was accepted and no TLS handshake this could read
+  anything from followed.
+
+Only an address where **nothing answered at all** is absent from the result, and
+that is a statement about the address rather than about a machine.
+
+The distinction is PROV-02 and it is not pedantry: "nothing found" and "there is
+already a node here" lead to opposite actions, and a scan that conflates them
+sends the operator to check a cable while a running node sits at the address
+they were about to overwrite.
+
+**A scan result carries no UUID.** A probe cannot learn one without connecting,
+and a UUID derived from the address the probe was aimed at would be a value that
+looks like an identity and is not one. `inspect` is where the identity comes
+from. `known` is keyed by address, because the address is what a scan has.
+
+### The identity is read again immediately before the write
+
+`inspect` reads a machine's UUID, MACs, disks and Talos version. The job then
+reads the UUID **twice more**: once at the start, and once in the same breath as
+the apply. A mismatch is `400 validation.wrong-machine` and nothing is written.
+
+Checking against the identity the wizard read two minutes ago would be checking
+a memory. Between an operator reading a screen and clicking apply, a DHCP lease
+can move — and applying to the machine that now holds the address wipes it.
+
+### The subnet limit is arithmetic, not taste
+
+`expand` refuses anything larger than a **/23**. 510 addresses at
+`ScanConcurrency` with `ScanTimeout` each is 64 seconds of probing, which fits
+inside `ScanRouteBudget` — and that budget plus its slack has to fit inside the
+server's write timeout, which `cmd/holzkube-managerd/budget_test.go` asserts. A
+/22 is twice that and does not fit, so offering it would be offering a scan that
+reliably ends as a timeout with no result — which reads, on the screen, as
+"nothing is on my network".
+
+IPv6 is refused outright. Scanning an IPv6 subnet is not a scan.
+
+### Confirming a provision is not confirming a node action
+
+`POST /api/v1/provision/confirm` exists rather than reusing
+`/api/v1/machines/{id}/confirm`, and the reason is structural: the machine-scoped
+route reads the machine out of the inventory to check what was typed against its
+hostname, and **a machine being provisioned is not in the inventory**. It has no
+UUID recorded, no cluster and no credentials until the run being confirmed has
+finished.
+
+What is typed is the **install disk device**. A reset asks for the hostname
+because the hostname is what an operator can check against the machine in front
+of them; a machine in maintenance mode has no hostname worth checking — it is
+whatever the ISO decided — and the thing about to be destroyed is a disk.
+
+### Codes minted here
+
+| code | HTTP | when |
+|---|---|---|
+| `validation.wrong-machine` | 400 | the machine at the address is not the one the plan names |
+| `validation.not-in-maintenance` | 400 | the machine answered and already has a configuration |
+| `conflict.bootstrap-unclear` | 409 | a previous etcd bootstrap has no recorded outcome |
+| `conflict.bootstrap-in-progress` | 409 | another bootstrap holds the cluster's lease |
+| `conflict.already-bootstrapped` | 409 | the cluster already has a running etcd |
+
+The last one is **not a failure**. The cluster is in the state that was wanted,
+and reporting it as a failure would send somebody to fix something that works.
+
+`notfound.cluster` is also new here, and it is a correction rather than an
+addition: the cluster-lock link used to answer "this cluster is locked
+read-only" for every error, including a cluster that does not exist — which sent
+an operator looking for an unlock button for something that is not there.
+
+### The bootstrap recovery flow
+
+An etcd bootstrap with no recorded outcome is the one case nothing can decide.
+`GET /api/v1/provision/bootstrap-recovery` lists them with the guidance that
+says what to look at; the POST records what a person found.
+
+`bootstrapped` has **no default**. A missing field is a `400`, because guessing
+there is the operation the whole record exists to prevent. `note` is required
+for the same reason: that record is the only account anything will ever have of
+that bootstrap.
+
+A `409 conflict.bootstrap-unclear` also comes back from `plan` when the run
+would initialise etcd for a cluster with an unresolved attempt. Refusing there
+rather than at the job step means the operator learns it on the screen where
+they can still go and look, instead of watching a machine install get most of
+the way through and stop.
+
+### Audit
+
+The provisioning actions permit the address, the UUID, the cluster, the install
+disk, the schematic, the Talos version, the fingerprint and the hostname — every
+one of them an identifier or a choice made on a screen. `confirmation` is
+deliberately absent from all of them: it is the HMAC that authorises the action,
+and an archive with no deletion path is the last place it belongs.
+
+`provision.scan` permits `cidr` and `addrs`. "A scan happened" and "this
+installation scanned 10.0.0.0/24" are different events, and the second is the
+one somebody reviewing an unexpected connection on their own network is looking
+for.
+
+### The allowlist may name a list
+
+An allowlist entry written with a `[]` suffix — `patch_ids[]`, `addrs[]` —
+permits a list of scalars. Every element still goes through the same check, an
+over-long list is refused, and a list holding an object or another list is
+refused whole. A field **not** marked that way still refuses a list, so
+`username` is unchanged: a caller sending a list there is sending a shape that
+field does not have.
+
+It exists because a record can be incomplete in a way that matters.
+`config.apply` names its patches by id, and a run whose ids are `<redacted>` is a
+record that says a configuration was applied and cannot say which one.
+
+### Every audited action is in the table
+
+`internal/audit/redact.go` says in three places that it shows the **full set** of
+mutations, including the ones listed with nothing permitted. The fail-closed
+default makes that claim invisible when it is false — an action nobody listed and
+an action deliberately listed as permitting nothing both write `<redacted>` for
+everything — and no test inside that package can tell them apart, because only
+the route table knows which actions exist.
+
+It shipped false. Phases 6 and 7 added eight audited actions with no entry, so
+every parameter of every reboot, reset and configuration apply was a marker while
+this document described what those records would contain.
+`cmd/holzkube-managerd/allowlist_test.go` now holds both directions: every route
+action has an entry, and every entry is emitted by a route.

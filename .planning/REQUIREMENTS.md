@@ -35,7 +35,7 @@ Die Requirements folgen der Phasenstruktur aus `.planning/research/SUMMARY.md`. 
 - [x] **TRANS-05**: Ein nicht erreichbarer Node blockiert weder die UI noch andere Nodes (Circuit Breaker, Fan-out pro Node)
 - [x] **TRANS-06** 🚫: `talossim` — ein In-Process-Fake-Talos-Node mit echten Protobufs, echtem mTLS und echtem In-Memory-COSI-State, gegen den der unveränderte Produktions-Client spricht
 - [x] **TRANS-07**: `talossim` kann Fehlerszenarien skripten: `go_silent(90s)`, `reject_apply`, `second_bootstrap_returns_AlreadyExists`, `flap_connection`, `slow_log_consumer`, `ip_changes_on_reboot`, `etcd_down`, `k8s_down`, `version_out_of_supported_range`
-- [ ] **TRANS-08**: Contract-Tests laufen gegen Fake und gegen echten Talos, damit Fake-Drift auffällt
+- [x] **TRANS-08**: Contract-Tests laufen gegen Fake und gegen echten Talos, damit Fake-Drift auffällt
 
 ### Image Factory (FACT)
 
@@ -48,68 +48,68 @@ Die Requirements folgen der Phasenstruktur aus `.planning/research/SUMMARY.md`. 
 
 ### Inventar, Import & Health (INV)
 
-- [ ] **INV-01** 🚫: Betreiber importiert seinen **bestehenden** Cluster — Secrets-Bundle von einem Control-Plane-Node, Fingerprint-Bestätigung, plus Konnektivitätsbeweis mit einem frisch ausgestellten Zertifikat
-- [ ] **INV-02**: Betreiber kann alternativ einen neuen Cluster anlegen; `gen secrets` ist ausschließlich aus diesem Pfad erreichbar
-- [ ] **INV-03** 🚫: Node-Records sind flach und **UUID-adressiert** (`SystemInformation.UUID`), mit `cluster_id` als nullbarem Feld — DHCP verschiebt IPs
-- [ ] **INV-04** 🚫: Jeder Node-Record trägt seine Image-Factory-`schematic_id` ab dem ersten Schema — ohne sie sind Upgrades nicht sicher auslieferbar
-- [ ] **INV-05** 🚫: Die Restlaufzeit des talosconfig-Client-Zertifikats ist sichtbar und warnt rechtzeitig (Talos rotiert Client-Certs **nicht**; Ablauf sperrt alle Nodes gleichzeitig aus)
-- [ ] **INV-06**: Dashboard zeigt pro Node Health, Talos-Version, Kubernetes-Version, CPU/RAM, Disks, Netzwerk-Interfaces und Service-Status
-- [ ] **INV-07** 🚫: Jedes gelesene Feld trägt sein `HealthLevel` und `stale_since`; Daten die nur `:6443` bräuchten, machen NODE-Level-Daten nicht unsichtbar
-- [ ] **INV-08**: Bei totem Cluster bleibt die UI ehrlich — Node-Level-Daten weiter sichtbar, veraltete Werte als veraltet markiert, nie eine leere Seite
-- [ ] **INV-09**: Ein unerreichbarer Node führt nie dazu, dass sein Inventar-Record gelöscht wird
-- [ ] **INV-10**: Cluster-Übersicht zeigt Control-Plane vs Worker, etcd-Member und Cluster-Health
-- [ ] **INV-11**: Die Talos↔Kubernetes-Kompatibilitätsmatrix liegt als Daten vor, inklusive "Abstand zum Rand"
-- [ ] **INV-12**: Betreiber kann einen Cluster read-only sperren; gesperrte Cluster nehmen keine Mutationen an
-- [ ] **INV-13**: Node-Status kommt aus COSI-Watches mit gejittertem Heartbeat, nicht aus blindem Polling
+- [x] **INV-01** 🚫: Betreiber importiert seinen **bestehenden** Cluster — Secrets-Bundle von einem Control-Plane-Node, Fingerprint-Bestätigung, plus Konnektivitätsbeweis mit einem frisch ausgestellten Zertifikat
+- [x] **INV-02**: Betreiber kann alternativ einen neuen Cluster anlegen; `gen secrets` ist ausschließlich aus diesem Pfad erreichbar
+- [x] **INV-03** 🚫: Node-Records sind flach und **UUID-adressiert** (`SystemInformation.UUID`), mit `cluster_id` als nullbarem Feld — DHCP verschiebt IPs
+- [x] **INV-04** 🚫: Jeder Node-Record trägt seine Image-Factory-`schematic_id` ab dem ersten Schema — ohne sie sind Upgrades nicht sicher auslieferbar
+- [x] **INV-05** 🚫: Die Restlaufzeit des talosconfig-Client-Zertifikats ist sichtbar und warnt rechtzeitig (Talos rotiert Client-Certs **nicht**; Ablauf sperrt alle Nodes gleichzeitig aus)
+- [x] **INV-06**: Dashboard zeigt pro Node Health, Talos-Version, Kubernetes-Version, CPU/RAM, Disks, Netzwerk-Interfaces und Service-Status
+- [x] **INV-07** 🚫: Jedes gelesene Feld trägt sein `HealthLevel` und `stale_since`; Daten die nur `:6443` bräuchten, machen NODE-Level-Daten nicht unsichtbar
+- [x] **INV-08**: Bei totem Cluster bleibt die UI ehrlich — Node-Level-Daten weiter sichtbar, veraltete Werte als veraltet markiert, nie eine leere Seite
+- [x] **INV-09**: Ein unerreichbarer Node führt nie dazu, dass sein Inventar-Record gelöscht wird
+- [x] **INV-10**: Cluster-Übersicht zeigt Control-Plane vs Worker, etcd-Member und Cluster-Health
+- [x] **INV-11**: Die Talos↔Kubernetes-Kompatibilitätsmatrix liegt als Daten vor, inklusive "Abstand zum Rand"
+- [x] **INV-12**: Betreiber kann einen Cluster read-only sperren; gesperrte Cluster nehmen keine Mutationen an
+- [x] **INV-13**: Node-Status kommt aus COSI-Watches mit gejittertem Heartbeat, nicht aus blindem Polling
 
 ### Jobs & Node-Aktionen (JOB)
 
-- [ ] **JOB-01**: Langlaufende Operationen sind persistierte Jobs; ein Neustart des Prozesses setzt sie fort oder parkt sie für einen Menschen
-- [ ] **JOB-02**: Jeder Schritt mit Seiteneffekt hat eine gepaarte Read-only-"ist es passiert?"-Abfrage; Schritte ohne eine solche werden nie automatisch retryt
-- [ ] **JOB-03**: Pro Cluster darf immer nur ein mutierender Job laufen (Lease)
-- [ ] **JOB-04**: Betreiber kann einen Job an einer Schrittgrenze abbrechen; der Fortschritt ist live sichtbar
-- [ ] **JOB-05**: Betreiber rebootet einen Node aus der UI
-- [ ] **JOB-06**: Betreiber fährt einen Node herunter
-- [ ] **JOB-07** 🚫: Reset zeigt vor dem Ausführen die Disks, die Wipe-Scope-Wahl und die Reboot-Kontrolle, stellt die **effektiven Flags** dar und verlangt das Tippen des Hostnamens — `talosctl reset` ist per Default maximal destruktiv (`--wipe-mode=all`, `--reboot=false`)
-- [ ] **JOB-08**: Bestätigungen werden serverseitig durchgesetzt (Confirmation-Token), nicht nur im Browser
-- [ ] **JOB-09**: Destruktive Endpoints antworten mit `202 Accepted` und einer Job-ID
+- [x] **JOB-01**: Langlaufende Operationen sind persistierte Jobs; ein Neustart des Prozesses setzt sie fort oder parkt sie für einen Menschen
+- [x] **JOB-02**: Jeder Schritt mit Seiteneffekt hat eine gepaarte Read-only-"ist es passiert?"-Abfrage; Schritte ohne eine solche werden nie automatisch retryt
+- [x] **JOB-03**: Pro Cluster darf immer nur ein mutierender Job laufen (Lease)
+- [x] **JOB-04**: Betreiber kann einen Job an einer Schrittgrenze abbrechen; der Fortschritt ist live sichtbar
+- [x] **JOB-05**: Betreiber rebootet einen Node aus der UI
+- [x] **JOB-06**: Betreiber fährt einen Node herunter
+- [x] **JOB-07** 🚫: Reset zeigt vor dem Ausführen die Disks, die Wipe-Scope-Wahl und die Reboot-Kontrolle, stellt die **effektiven Flags** dar und verlangt das Tippen des Hostnamens — `talosctl reset` ist per Default maximal destruktiv (`--wipe-mode=all`, `--reboot=false`)
+- [x] **JOB-08**: Bestätigungen werden serverseitig durchgesetzt (Confirmation-Token), nicht nur im Browser
+- [x] **JOB-09**: Destruktive Endpoints antworten mit `202 Accepted` und einer Job-ID
 
 ### Konfiguration (CFG)
 
-- [ ] **CFG-01**: Betreiber sieht die MachineConfig eines Nodes gerendert und roh
-- [ ] **CFG-02** 🚫: Secrets sind serverseitig redigiert, bevor sie das Backend verlassen — dieselbe `redact`-Funktion für Config-View, Raw-Tab, Diff, API-Response und Audit-Log (`.machine.ca.key` steckt in der Antwort)
-- [ ] **CFG-03**: Betreiber legt wiederverwendbare Config-Patches an; der Patch-Store ist versioniert und append-only (nur Strategic Merge, kein RFC 6902)
-- [ ] **CFG-04**: Vor dem Anwenden zeigt holzkube ein **strukturelles** Diff der tatsächlich gemergten, gerenderten Configs — inklusive Listen-Wachstum und Duplikat-Erkennung
-- [ ] **CFG-05**: Ein Patch zweimal angewendet erzeugt dasselbe Ergebnis (Idempotenz-Test pro Patch)
-- [ ] **CFG-06**: Der nötige Apply-Modus wird aus der verifizierten Allowlist berechnet und dem Betreiber angezeigt
-- [ ] **CFG-07**: Änderungen an `.machine.install` werden als "wirkt erst beim nächsten Install/Upgrade" gekennzeichnet — sie melden Erfolg und ändern nichts
-- [ ] **CFG-08**: Ein zweiter `staged`-Apply wird abgelehnt, statt den ersten still zu verwerfen
-- [ ] **CFG-09**: Bei Diffs an `.machine.network` empfiehlt die UI `--mode=try` mit sichtbarem 60-Sekunden-Countdown
-- [ ] **CFG-10**: Betreiber kann eine Config validieren und im Dry-Run prüfen, bevor er sie anwendet
-- [ ] **CFG-11**: Config-Generierung nutzt das importierte Secrets-Bundle und einen pro Cluster gepinnten Talos-Versions-Contract
+- [x] **CFG-01**: Betreiber sieht die MachineConfig eines Nodes gerendert und roh
+- [x] **CFG-02** 🚫: Secrets sind serverseitig redigiert, bevor sie das Backend verlassen — dieselbe `redact`-Funktion für Config-View, Raw-Tab, Diff, API-Response und Audit-Log (`.machine.ca.key` steckt in der Antwort)
+- [x] **CFG-03**: Betreiber legt wiederverwendbare Config-Patches an; der Patch-Store ist versioniert und append-only (nur Strategic Merge, kein RFC 6902)
+- [x] **CFG-04**: Vor dem Anwenden zeigt holzkube ein **strukturelles** Diff der tatsächlich gemergten, gerenderten Configs — inklusive Listen-Wachstum und Duplikat-Erkennung
+- [x] **CFG-05**: Ein Patch zweimal angewendet erzeugt dasselbe Ergebnis (Idempotenz-Test pro Patch)
+- [x] **CFG-06**: Der nötige Apply-Modus wird aus der verifizierten Allowlist berechnet und dem Betreiber angezeigt
+- [x] **CFG-07**: Änderungen an `.machine.install` werden als "wirkt erst beim nächsten Install/Upgrade" gekennzeichnet — sie melden Erfolg und ändern nichts
+- [x] **CFG-08**: Ein zweiter `staged`-Apply wird abgelehnt, statt den ersten still zu verwerfen
+- [x] **CFG-09**: Bei Diffs an `.machine.network` empfiehlt die UI `--mode=try` mit sichtbarem 60-Sekunden-Countdown
+- [x] **CFG-10**: Betreiber kann eine Config validieren und im Dry-Run prüfen, bevor er sie anwendet
+- [x] **CFG-11**: Config-Generierung nutzt das importierte Secrets-Bundle und einen pro Cluster gepinnten Talos-Versions-Contract
 
 ### Provisioning — der Core Value (PROV)
 
-- [ ] **PROV-01**: Betreiber entdeckt Maschinen per Subnetz-Scan auf `:50000` mit begrenzter Nebenläufigkeit, plus manueller IP-Eingabe
-- [ ] **PROV-02**: Ein bereits konfigurierter Node an der Ziel-IP wird als solcher gemeldet — nie als "nichts gefunden"
-- [ ] **PROV-03**: Vor dem Anwenden zeigt holzkube UUID, MACs, Disks und Talos-Version der Maschine zur Identifikation
-- [ ] **PROV-04**: Optionales `--cert-fingerprint`-Pinning wird angeboten, mit ehrlichem UI-Text dass Maintenance-Mode unauthentifiziert ist und der Fingerprint nur von der physischen Konsole kommt
-- [ ] **PROV-05** 🚫: Unmittelbar vor dem Apply wird die UUID erneut verifiziert — die falsche Maschine zu treffen wischt Daten
-- [ ] **PROV-06**: Betreiber wählt Rolle, Ziel-Cluster und Install-Disk; der Disk-Picker zeigt Größe, Modell, Seriennummer, Transport und markiert die System-Disk
-- [ ] **PROV-07**: Bei geradzahliger Control-Plane-Anzahl warnt die UI (Quorum braucht 1/3/5)
-- [ ] **PROV-08**: `.machine.install.image` wird automatisch aus **derselben** Schematic-ID gefüllt wie die ISO — sonst verschwinden die Extensions beim Install
-- [ ] **PROV-09** 🚫: Die Wiederauftauch-Prüfung nach dem Disk-Install ist eine Drei-Wege-Probe mit verstrichener Zeit gegen ein erwartetes Budget — nie ein Spinner
-- [ ] **PROV-10** 🚫: Doppelter etcd-Bootstrap ist strukturell unmöglich (Pre-Flight `EtcdMemberList`, `O_CREAT|O_EXCL`-Lease, fsynced Intent-Record, Talos' `AlreadyExists`), mit eigenem Recovery-Flow für den unklaren Fall
-- [ ] **PROV-11**: Der Provisioning-Zustand wird pro Maschine persistiert; ein geschlossener Browser-Tab verliert den Job nicht
-- [ ] **PROV-12**: Beim Wizard-Start warnt die UI, dass eine vorhandene Disk-Installation die ISO überschattet, und dass ohne DHCP kein Zero-Touch-Pfad existiert
-- [ ] **PROV-13**: "Talos healthy, Kubernetes NotReady" wird vor der CNI-Installation als normal erklärt, nicht rot dargestellt
+- [x] **PROV-01**: Betreiber entdeckt Maschinen per Subnetz-Scan auf `:50000` mit begrenzter Nebenläufigkeit, plus manueller IP-Eingabe
+- [x] **PROV-02**: Ein bereits konfigurierter Node an der Ziel-IP wird als solcher gemeldet — nie als "nichts gefunden"
+- [x] **PROV-03**: Vor dem Anwenden zeigt holzkube UUID, MACs, Disks und Talos-Version der Maschine zur Identifikation
+- [x] **PROV-04**: Optionales `--cert-fingerprint`-Pinning wird angeboten, mit ehrlichem UI-Text dass Maintenance-Mode unauthentifiziert ist und der Fingerprint nur von der physischen Konsole kommt
+- [x] **PROV-05** 🚫: Unmittelbar vor dem Apply wird die UUID erneut verifiziert — die falsche Maschine zu treffen wischt Daten
+- [x] **PROV-06**: Betreiber wählt Rolle, Ziel-Cluster und Install-Disk; der Disk-Picker zeigt Größe, Modell, Seriennummer, Transport und markiert die System-Disk
+- [x] **PROV-07**: Bei geradzahliger Control-Plane-Anzahl warnt die UI (Quorum braucht 1/3/5)
+- [x] **PROV-08**: `.machine.install.image` wird automatisch aus **derselben** Schematic-ID gefüllt wie die ISO — sonst verschwinden die Extensions beim Install
+- [x] **PROV-09** 🚫: Die Wiederauftauch-Prüfung nach dem Disk-Install ist eine Drei-Wege-Probe mit verstrichener Zeit gegen ein erwartetes Budget — nie ein Spinner
+- [x] **PROV-10** 🚫: Doppelter etcd-Bootstrap ist strukturell unmöglich (Pre-Flight `EtcdMemberList`, `O_CREAT|O_EXCL`-Lease, fsynced Intent-Record, Talos' `AlreadyExists`), mit eigenem Recovery-Flow für den unklaren Fall
+- [x] **PROV-11**: Der Provisioning-Zustand wird pro Maschine persistiert; ein geschlossener Browser-Tab verliert den Job nicht
+- [x] **PROV-12**: Beim Wizard-Start warnt die UI, dass eine vorhandene Disk-Installation die ISO überschattet, und dass ohne DHCP kein Zero-Touch-Pfad existiert
+- [x] **PROV-13**: "Talos healthy, Kubernetes NotReady" wird vor der CNI-Installation als normal erklärt, nicht rot dargestellt
 
 ### Streaming (STREAM)
 
-- [ ] **STREAM-01**: Betreiber sieht Logs und `dmesg` eines Nodes live in der UI
-- [ ] **STREAM-02**: Pro Tab läuft **eine** multiplexte SSE-Verbindung mit `Last-Event-ID`-Replay — nicht eine pro Panel (HTTP/1.1 deckelt bei ~6 Verbindungen pro Origin)
-- [ ] **STREAM-03**: Ein langsamer Browser blockiert nie den Upstream-Reader; verworfene Daten werden als sichtbare Lücke markiert
-- [ ] **STREAM-04**: Der Stream-Zustand ist explizit sichtbar — live / reconnecting / Node rebootet / getrennt
+- [x] **STREAM-01**: Betreiber sieht Logs und `dmesg` eines Nodes live in der UI
+- [x] **STREAM-02**: Pro Tab läuft **eine** multiplexte SSE-Verbindung mit `Last-Event-ID`-Replay — nicht eine pro Panel (HTTP/1.1 deckelt bei ~6 Verbindungen pro Origin)
+- [x] **STREAM-03**: Ein langsamer Browser blockiert nie den Upstream-Reader; verworfene Daten werden als sichtbare Lücke markiert
+- [x] **STREAM-04**: Der Stream-Zustand ist explizit sichtbar — live / reconnecting / Node rebootet / getrennt
 
 ### Upgrades & etcd (UPG)
 
@@ -223,63 +223,63 @@ Requirements mit **🚫** sind Release-Blocker.
 | TRANS-05 | Phase 2 | Complete |
 | **TRANS-06** 🚫 | Phase 2 | Complete |
 | TRANS-07 | Phase 2 | Complete |
-| TRANS-08 | Phase 3 | Pending |
+| TRANS-08 | Phase 3 | Complete |
 | FACT-01 | Phase 2 | Complete |
 | FACT-02 | Phase 2 | Complete |
 | FACT-03 | Phase 2 | Complete |
 | FACT-04 | Phase 2 | Complete |
 | FACT-05 | Phase 2 | Complete |
 | FACT-06 | Phase 2 | Complete |
-| **INV-01** 🚫 | Phase 3 | Pending |
-| INV-02 | Phase 3 | Pending |
-| **INV-03** 🚫 | Phase 3 | Pending |
-| **INV-04** 🚫 | Phase 3 | Pending |
-| **INV-05** 🚫 | Phase 3 | Pending |
-| INV-06 | Phase 3 | Pending |
-| **INV-07** 🚫 | Phase 3 | Pending |
-| INV-08 | Phase 3 | Pending |
-| INV-09 | Phase 3 | Pending |
-| INV-10 | Phase 3 | Pending |
-| INV-11 | Phase 3 | Pending |
-| INV-12 | Phase 3 | Pending |
-| INV-13 | Phase 3 | Pending |
-| STREAM-01 | Phase 5 | Pending |
-| STREAM-02 | Phase 5 | Pending |
-| STREAM-03 | Phase 5 | Pending |
-| STREAM-04 | Phase 5 | Pending |
-| JOB-01 | Phase 6 | Pending |
-| JOB-02 | Phase 6 | Pending |
-| JOB-03 | Phase 6 | Pending |
-| JOB-04 | Phase 6 | Pending |
-| JOB-05 | Phase 6 | Pending |
-| JOB-06 | Phase 6 | Pending |
-| **JOB-07** 🚫 | Phase 6 | Pending |
-| JOB-08 | Phase 6 | Pending |
-| JOB-09 | Phase 6 | Pending |
-| CFG-01 | Phase 7 | Pending |
-| **CFG-02** 🚫 | Phase 7 | Pending |
-| CFG-03 | Phase 7 | Pending |
-| CFG-04 | Phase 7 | Pending |
-| CFG-05 | Phase 7 | Pending |
-| CFG-06 | Phase 7 | Pending |
-| CFG-07 | Phase 7 | Pending |
-| CFG-08 | Phase 7 | Pending |
-| CFG-09 | Phase 7 | Pending |
-| CFG-10 | Phase 7 | Pending |
-| CFG-11 | Phase 7 | Pending |
-| PROV-01 | Phase 8 | Pending |
-| PROV-02 | Phase 8 | Pending |
-| PROV-03 | Phase 8 | Pending |
-| PROV-04 | Phase 8 | Pending |
-| **PROV-05** 🚫 | Phase 8 | Pending |
-| PROV-06 | Phase 8 | Pending |
-| PROV-07 | Phase 8 | Pending |
-| PROV-08 | Phase 8 | Pending |
-| **PROV-09** 🚫 | Phase 8 | Pending |
-| **PROV-10** 🚫 | Phase 8 | Pending |
-| PROV-11 | Phase 8 | Pending |
-| PROV-12 | Phase 8 | Pending |
-| PROV-13 | Phase 8 | Pending |
+| **INV-01** 🚫 | Phase 3 | Complete |
+| INV-02 | Phase 3 | Complete |
+| **INV-03** 🚫 | Phase 3 | Complete |
+| **INV-04** 🚫 | Phase 3 | Complete |
+| **INV-05** 🚫 | Phase 3 | Complete |
+| INV-06 | Phase 3 | Complete |
+| **INV-07** 🚫 | Phase 3 | Complete |
+| INV-08 | Phase 3 | Complete |
+| INV-09 | Phase 3 | Complete |
+| INV-10 | Phase 3 | Complete |
+| INV-11 | Phase 3 | Complete |
+| INV-12 | Phase 3 | Complete |
+| INV-13 | Phase 3 | Complete |
+| STREAM-01 | Phase 5 | Complete |
+| STREAM-02 | Phase 5 | Complete |
+| STREAM-03 | Phase 5 | Complete |
+| STREAM-04 | Phase 5 | Complete |
+| JOB-01 | Phase 6 | Complete |
+| JOB-02 | Phase 6 | Complete |
+| JOB-03 | Phase 6 | Complete |
+| JOB-04 | Phase 6 | Complete |
+| JOB-05 | Phase 6 | Complete |
+| JOB-06 | Phase 6 | Complete |
+| **JOB-07** 🚫 | Phase 6 | Complete |
+| JOB-08 | Phase 6 | Complete |
+| JOB-09 | Phase 6 | Complete |
+| CFG-01 | Phase 7 | Complete |
+| **CFG-02** 🚫 | Phase 7 | Complete |
+| CFG-03 | Phase 7 | Complete |
+| CFG-04 | Phase 7 | Complete |
+| CFG-05 | Phase 7 | Complete |
+| CFG-06 | Phase 7 | Complete |
+| CFG-07 | Phase 7 | Complete |
+| CFG-08 | Phase 7 | Complete |
+| CFG-09 | Phase 7 | Complete |
+| CFG-10 | Phase 7 | Complete |
+| CFG-11 | Phase 7 | Complete |
+| PROV-01 | Phase 8 | Complete |
+| PROV-02 | Phase 8 | Complete |
+| PROV-03 | Phase 8 | Complete |
+| PROV-04 | Phase 8 | Complete |
+| **PROV-05** 🚫 | Phase 8 | Complete |
+| PROV-06 | Phase 8 | Complete |
+| PROV-07 | Phase 8 | Complete |
+| PROV-08 | Phase 8 | Complete |
+| **PROV-09** 🚫 | Phase 8 | Complete |
+| **PROV-10** 🚫 | Phase 8 | Complete |
+| PROV-11 | Phase 8 | Complete |
+| PROV-12 | Phase 8 | Complete |
+| PROV-13 | Phase 8 | Complete |
 | UPG-01 | Phase 9 | Pending |
 | **UPG-02** 🚫 | Phase 9 | Pending |
 | **UPG-03** 🚫 | Phase 9 | Pending |

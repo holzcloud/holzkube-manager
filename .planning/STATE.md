@@ -1,19 +1,19 @@
 ---
 gsd_state_version: 1.0
 milestone: v1.14
-current_phase: 8
-current_phase_name: "Provisioning — der Core Value"
+current_phase: 9
+current_phase_name: "Upgrades & etcd-Verwaltung"
 status: executing
-stopped_at: Phase 7 complete
-last_updated: "2026-09-11T16:50:00.000Z"
+stopped_at: Phase 8 built; criterion 1 unverified (window 82)
+last_updated: "2026-09-11T18:15:00.000Z"
 last_activity: 2026-09-11
-last_activity_desc: Phase 07 complete, transitioned to Phase 8
+last_activity_desc: Phase 08 built and executed against talossim, transitioned to Phase 9
 state_head: a474d2522823cbfb436ee720dee35494890281a3
 progress:
   total_phases: 10
-  completed_phases: 6
-  total_plans: 37
-  completed_plans: 37
+  completed_phases: 7
+  total_plans: 38
+  completed_plans: 38
 ---
 
 # Project State
@@ -23,16 +23,34 @@ progress:
 See: .planning/PROJECT.md (updated 2026-08-27)
 
 **Core value:** Eine neue Maschine wird komplett in der UI zum Cluster-Node — ohne `talosctl`, ohne Omni.
-**Current focus:** Phase 08 — Provisioning (der Core Value)
+**Current focus:** Phase 09 — Upgrades & etcd-Verwaltung
 
 ## Current Position
 
-Phase: 8 — Provisioning (der Core Value)
+Phase: 9 — Upgrades & etcd-Verwaltung
 Plan: Not started
 Status: Ready to plan
-Last activity: 2026-09-11 — Phase 07 complete, transitioned to Phase 8
+Last activity: 2026-09-11 — Phase 08 built and executed against `talossim`
 
-Progress: [██████▓░░░] 6 of 10 phases, plus Phase 4 partially
+Progress: [███████▓░░] 7 of 10 phases, plus Phase 4 partially
+
+**Phase 8 ist gebaut und Erfolgskriterium 1 ist unverifiziert.** Die beiden
+Eintrittsbedingungen der Phase — QEMU aus Phase 4, und eine Maschine, die blank
+sein darf — sind unerfüllt geblieben, und die Phase wurde trotzdem gebaut, weil
+alles außer dem binären Abnahmetest gegen `talossim` ausführbar ist. Keine
+blanke Maschine ist irgendwo zu einem Node geworden. Fenster 82 nennt die drei
+Annahmen, die `talossim` bestätigt, weil `talossim` sie eingebaut hat
+(Ressourcen-Sensitivität im Maintenance-Mode, die Länge der Installationsstille,
+die Form von Talos' `AlreadyExists`); Fenster 84 nennt die Konfiguration, die
+als Dokument geprüft und als Anweisung an eine Maschine ungeprüft ist.
+`ReappearBudget` ist weiterhin Phase 4s Platzhalter von acht Minuten.
+
+**Ein Befund aus Phase 8 betrifft Phase 6 und 7 rückwirkend:** acht auditierte
+Aktionen hatten keinen Allowlist-Eintrag, also wurde jeder Parameter jedes
+Reboots, Resets und Config-Applys als `<redacted>` archiviert — unter anderem
+der Wipe-Umfang eines Resets. Der Mechanismus ist repariert und durch einen
+Test an der Routen-Tabelle gehalten; die bereits geschriebenen Zeilen bleiben
+inhaltslos, weil D-16 keinen Löschpfad definiert. Fenster 83.
 
 **Phase 4 ist nicht abgehakt.** Ihr Produkt ist eine Messung, und niemand hat
 gemessen: der Ausführungshost hat weder QEMU noch `/dev/kvm` noch verschachtelte
@@ -55,7 +73,7 @@ Ziel-Go-Version ist und nicht lief.
 
 **Velocity:**
 
-- Total plans completed: 37
+- Total plans completed: 38
 - Average duration: —
 - Total execution time: 0.0 hours
 
@@ -264,6 +282,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-09-05T10:51:26.592Z
-Stopped at: Phase 3 context gathered
-Resume file: .planning/phases/03-inventar-cluster-import-health/03-CONTEXT.md
+Last session: 2026-09-11T18:15:00.000Z
+Stopped at: Phase 8 built and executed against `talossim`
+Resume file: .planning/phases/08-provisioning/08-SUMMARY.md
