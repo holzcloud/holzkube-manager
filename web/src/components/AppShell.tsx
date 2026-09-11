@@ -1,4 +1,5 @@
 import { Navigate, Outlet } from '@tanstack/react-router'
+import { CertificateBanner } from '@/components/CertificateBanner'
 import { ChainBannerContainer } from '@/components/ChainBanner'
 import { DryRunBannerContainer } from '@/components/DryRunBanner'
 import { Header } from '@/components/Header'
@@ -45,6 +46,12 @@ export function AppShell() {
           the process is in is a fact about every screen, not about one
           (FOUND-12). Both can apply at once and both are then shown. */}
       <DryRunBannerContainer />
+
+      {/* And the third fact that is about every screen rather than one: a
+          cluster whose client certificate is about to expire. When it does,
+          every node in that cluster goes unreachable in the same second, and
+          the operator who was not warned reads that as a dead cluster (D-23). */}
+      <CertificateBanner className="px-4 pt-2" />
 
       <div className="flex min-h-0 flex-1">
         <Sidebar />

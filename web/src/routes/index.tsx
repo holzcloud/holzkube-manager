@@ -17,12 +17,35 @@ import { useSystemStatus } from '@/hooks/useSession'
 import { authenticatedRoute } from '@/routes/__root'
 
 /**
- * The phase-1 dashboard: a short status card, not a node dashboard. Nodes
- * arrive in phase 3, and inventing a preview of them here would be
- * indistinguishable from a broken real one later.
+ * The fleet overview (D-29).
+ *
+ * Phase 3 turned this from an instance status card into the page an operator
+ * opens during an incident: one tile per cluster, a fleet-wide count of nodes
+ * by condition, and only then the instance's own status.
+ *
+ * The instance status moved into a supporting role and deliberately did not
+ * disappear. The audit chain-break warning is the one thing on this page that
+ * says holzkube-manager's own record-keeping cannot be trusted, and a page that
+ * dropped it while gaining cluster tiles would have traded the more important
+ * fact for the more interesting one (D-15 from phase 1).
  */
 function Dashboard() {
   const status = useSystemStatus()
+
+  const clusters = useQuery({
+    queryKey: ['clusters'],
+    queryFn: () => api.clusters.list(),
+    refetchInterval: 30_000,
+  })
+
+  const machines = useQuery({
+    queryKey: ['machines'],
+    queryFn: () => api.machines.list(),
+    refetchInterval: 30_000,
+  })
+
+  const fleet = machines.data ?? []
+  const unassigned = fleet.filter((m) => m.cluster === '')
 
   // The only real data flow phase 1 has, and therefore the proof that
   // store -> API -> UI works on records rather than on placeholders (D-13).
@@ -35,10 +58,89 @@ function Dashboard() {
     <div className="space-y-6">
       <div>
         <h1 className="font-heading text-2xl font-semibold tracking-tight">Dashboard</h1>
-        <p className="text-sm text-muted-foreground">
-          Instance status. Cluster and node views arrive in phase 3.
-        </p>
+        <p className="text-sm text-muted-foreground">The fleet, as holzkube-manager last saw it.</p>
       </div>
+
+      {clusters.isSuccess && clusters.data.length === 0 && (
+        <Card className="max-w-2xl">
+          <CardHeader>
+            <CardTitle>No clusters yet</CardTitle>
+            <CardDescription>
+              Import the cluster you already run. holzkube-manager reads a control-plane node's own
+              configuration and fills the inventory from the cluster's membership.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Button asChild>
+              <Link to="/clusters">Import a cluster</Link>
+            </Button>
+          </CardContent>
+        </Card>
+      )}
+
+      {clusters.isSuccess && clusters.data.length > 0 && (
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+          {clusters.data.map((c) => (
+            <Card key={c.id}>
+              <CardHeader>
+                <CardTitle className="flex items-center justify-between gap-2 text-base">
+                  {c.name}
+                  {c.locked && (
+                    <Badge
+                      variant="outline"
+                      className="border-amber-600/40 text-amber-700 dark:text-amber-300"
+                    >
+                      read-only
+                    </Badge>
+                  )}
+                </CardTitle>
+                <CardDescription className="font-mono text-xs">{c.endpoint}</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-1 text-sm">
+                <p>
+                  {c.nodes} node{c.nodes === 1 ? '' : 's'} — {c.control_plane} control plane,{' '}
+                  {c.workers} worker
+                </p>
+                {/* Three counts and not one health verdict: "the cluster is
+                    degraded" hides which of the two failures it is, and the
+                    difference decides what the operator does next. */}
+                <p>
+                  <span className="text-emerald-700 dark:text-emerald-300">
+                    {c.healthy} healthy
+                  </span>
+                  {', '}
+                  <span className="text-amber-700 dark:text-amber-300">{c.degraded} degraded</span>
+                  {', '}
+                  <span className="text-red-700 dark:text-red-300">{c.down} not answering</span>
+                </p>
+                <Button asChild variant="secondary" size="sm" className="mt-2">
+                  <Link to="/clusters">Open</Link>
+                </Button>
+              </CardContent>
+            </Card>
+          ))}
+
+          {unassigned.length > 0 && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Not in a cluster</CardTitle>
+                <CardDescription>
+                  Machines holzkube-manager knows about that belong to no cluster. This is an
+                  ordinary state, not an error.
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <p className="text-sm">
+                  {unassigned.length} machine{unassigned.length === 1 ? '' : 's'}
+                </p>
+                <Button asChild variant="secondary" size="sm" className="mt-2">
+                  <Link to="/nodes">Open the node list</Link>
+                </Button>
+              </CardContent>
+            </Card>
+          )}
+        </div>
+      )}
 
       <Card className="max-w-2xl">
         <CardHeader>
