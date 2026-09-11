@@ -148,6 +148,34 @@ const (
 	// a refusal of a whole category.
 	CodePatchInvalid      = "validation.patch-invalid"
 	CodePatchNotStrategic = "validation.patch-not-strategic"
+
+	// CodeWrongMachine: the machine at the address is not the one the
+	// provisioning plan names (PROV-05). It has its own code because it is the
+	// only refusal in this product that means "the thing you were about to
+	// wipe is somebody else's", and a client showing it as a generic
+	// validation failure would show it as a typo.
+	CodeWrongMachine = "validation.wrong-machine"
+
+	// CodeNotInMaintenance: the machine answered and already has a
+	// configuration. Separate from wrong-machine because the remedy is the
+	// opposite: that one means check the address, this one means this machine
+	// is in use.
+	CodeNotInMaintenance = "validation.not-in-maintenance"
+
+	// CodeBootstrapUnclear: a previous etcd bootstrap has no recorded outcome
+	// (PROV-10). It is a conflict rather than a validation failure because
+	// nothing about the request is wrong -- the cluster's recorded state is
+	// undecided, and the remedy is a person looking at the node, never a
+	// retry.
+	CodeBootstrapUnclear = "conflict.bootstrap-unclear"
+
+	// CodeBootstrapInProgress and CodeAlreadyBootstrapped are the two
+	// bootstrap refusals that are not a fault: one means wait, the other means
+	// the cluster is already in the state that was wanted. They are separate
+	// codes because a client showing "already bootstrapped" as a failure would
+	// send somebody to fix something that works.
+	CodeBootstrapInProgress = "conflict.bootstrap-in-progress"
+	CodeAlreadyBootstrapped = "conflict.already-bootstrapped"
 )
 
 // ClusterLocked reports a mutation refused by a cluster's read-only lock.

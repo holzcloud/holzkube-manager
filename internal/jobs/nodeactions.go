@@ -53,6 +53,18 @@ func RegisterNodeActions(e *Engine, connect Connector) {
 			{
 				Name: "reboot the node",
 				Do: func(ctx context.Context, job *model.Job) error {
+					// The mutation class budget, applied here because a job's
+					// context deliberately has none: a job outlives the
+					// request that asked for it. Without this the call is
+					// refused outright by the deadline gate -- which a test
+					// found, and which would otherwise have been a reboot
+					// button that never worked.
+					ctx, cancel, err := talos.WithClassDeadline(ctx, talos.MethodReboot)
+					if err != nil {
+						return err
+					}
+					defer cancel()
+
 					cc, err := connect(ctx, job.Machine)
 					if err != nil {
 						return err
@@ -81,6 +93,12 @@ func RegisterNodeActions(e *Engine, connect Connector) {
 			{
 				Name: "shut the node down",
 				Do: func(ctx context.Context, job *model.Job) error {
+					ctx, cancel, err := talos.WithClassDeadline(ctx, talos.MethodShutdown)
+					if err != nil {
+						return err
+					}
+					defer cancel()
+
 					cc, err := connect(ctx, job.Machine)
 					if err != nil {
 						return err
@@ -116,6 +134,12 @@ func RegisterNodeActions(e *Engine, connect Connector) {
 			{
 				Name: "wipe the node",
 				Do: func(ctx context.Context, job *model.Job) error {
+					ctx, cancel, err := talos.WithClassDeadline(ctx, talos.MethodReset)
+					if err != nil {
+						return err
+					}
+					defer cancel()
+
 					cc, err := connect(ctx, job.Machine)
 					if err != nil {
 						return err

@@ -25,6 +25,7 @@ package talossim
 
 import (
 	"context"
+	"crypto/tls"
 	"crypto/x509"
 	"errors"
 	"fmt"
@@ -216,7 +217,7 @@ func New(opts Options) (*Server, error) {
 		}}
 	}
 
-	p, err := newPKI(opts.Hostname, opts.NodeIP, clusterOSCA(opts.Cluster))
+	p, err := newPKI(opts.Hostname, opts.NodeIP, clusterOSCA(opts.Cluster), opts.Maintenance)
 	if err != nil {
 		return nil, err
 	}
@@ -376,6 +377,25 @@ func (s *Server) ClientCreds() talos.Creds {
 	return talos.Creds{Kind: talos.CredCluster, TLS: s.pki.clientTLS()}
 }
 
+// MaintenanceCreds are what a client brings to a node in maintenance mode:
+// nothing. There is no cluster authority to trust and no client certificate to
+// present, so the configuration verifies nothing -- which is what
+// `talosctl --insecure` does and the reason MaintenanceWarning exists.
+//
+// It is a method on the simulator rather than a value a test writes out because
+// a test that wrote its own tls.Config could quietly keep trusting this node's
+// authority, and would then be proving the maintenance path against a node that
+// still has cluster PKI.
+func (s *Server) MaintenanceCreds() talos.Creds {
+	return talos.Creds{
+		Kind: talos.CredMaintenance,
+		TLS: &tls.Config{
+			InsecureSkipVerify: true, //nolint:gosec // maintenance mode has no PKI; that is the point
+			MinVersion:         tls.VersionTLS12,
+		},
+	}
+}
+
 // UntrustedClientCreds are credentials whose client certificate comes from an
 // unrelated authority. They trust this node's server certificate, so a
 // handshake made with them fails for exactly one reason: the node cannot verify
@@ -384,7 +404,7 @@ func (s *Server) UntrustedClientCreds() (talos.Creds, error) {
 	// Deliberately nil rather than the cluster's authority: an "unrelated
 	// authority" that happened to be the cluster's would verify, and the
 	// negative control would prove nothing.
-	foreign, err := newPKI(s.opts.Hostname, s.opts.NodeIP, nil)
+	foreign, err := newPKI(s.opts.Hostname, s.opts.NodeIP, nil, false)
 	if err != nil {
 		return talos.Creds{}, err
 	}
