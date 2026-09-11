@@ -1,17 +1,17 @@
 ---
 gsd_state_version: 1.0
 milestone: v1.14
-current_phase: 3
-current_phase_name: Inventar, Cluster-Import & Health
-status: planning
-stopped_at: Phase 3 context gathered
-last_updated: "2026-09-05T10:51:26.793Z"
-last_activity: 2026-09-05
-last_activity_desc: Phase 02 complete, transitioned to Phase 3
+current_phase: 4
+current_phase_name: Walking Skeleton (Wegwerf)
+status: executing
+stopped_at: Phase 3 complete
+last_updated: "2026-09-11T16:35:00.000Z"
+last_activity: 2026-09-11
+last_activity_desc: Phase 03 complete, transitioned to Phase 4
 state_head: a474d2522823cbfb436ee720dee35494890281a3
 progress:
   total_phases: 10
-  completed_phases: 2
+  completed_phases: 3
   total_plans: 37
   completed_plans: 37
 ---
@@ -23,16 +23,24 @@ progress:
 See: .planning/PROJECT.md (updated 2026-08-27)
 
 **Core value:** Eine neue Maschine wird komplett in der UI zum Cluster-Node — ohne `talosctl`, ohne Omni.
-**Current focus:** Phase 02 — Transport Seam, `talossim` & Image Factory
+**Current focus:** Phase 04 — Walking Skeleton (Wegwerf)
 
 ## Current Position
 
-Phase: 3 — Inventar, Cluster-Import & Health
+Phase: 4 — Walking Skeleton (Wegwerf)
 Plan: Not started
 Status: Ready to plan
-Last activity: 2026-09-05 — Phase 02 complete, transitioned to Phase 3
+Last activity: 2026-09-11 — Phase 03 complete, transitioned to Phase 4
 
-Progress: [█░░░░░░░░░] 1 of 10 phases
+Progress: [███░░░░░░░] 3 of 10 phases
+
+**Phase 3, was offen bleibt:** Erfolgskriterium 5 (TRANS-08) ist **nicht**
+erfüllt. Der Tier-1-Provisioner und der reale Contract-Transport existieren und
+überspringen sich sichtbar; ausgeführt wurden sie nie, weil in dieser Umgebung
+kein Docker-Daemon läuft. Fenster 76 führt das, samt der Einschränkung, dass
+sieben der neun Szenarien auf einem echten Node ohnehin nicht induzierbar sind.
+Fenster 77 führt, dass `golangci-lint` in dieser Umgebung zu alt für die
+Ziel-Go-Version ist und nicht lief.
 
 ## Performance Metrics
 

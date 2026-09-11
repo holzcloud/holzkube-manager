@@ -60,6 +60,15 @@ const ACTION_TOKENS = [
   'auth.logout',
   'auth.sudo',
   'account.password',
+  'schematic.create',
+  'schematic.delete',
+  'cluster.fingerprint',
+  'cluster.import',
+  'cluster.lock',
+  'cluster.forget',
+  'machine.add',
+  'machine.refresh',
+  'machine.forget',
 ] as const
 
 interface Filters {

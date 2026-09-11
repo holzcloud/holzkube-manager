@@ -90,6 +90,11 @@ var allowlist = map[string][]string{
 	"cluster.import":      {"name", "endpoint", "fingerprint"},
 	"cluster.fingerprint": {"endpoint"},
 
+	// A created cluster names itself and its Kubernetes endpoint. Neither is a
+	// secret; what this action generates is, and that never enters a request
+	// body at all.
+	"cluster.create": {"name", "endpoint"},
+
 	// Whether the lock was opened or closed is the entire content of the
 	// event, and it is not a secret. A lock change with a redacted direction
 	// would be a record that says something happened and not what.
