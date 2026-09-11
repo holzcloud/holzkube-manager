@@ -648,6 +648,185 @@ function auditQueryString(query: AuditQuery): string {
   return encoded === '' ? '' : `?${encoded}`
 }
 
+/* ---------------------------------------------------------------------- */
+/* Inventory                                                               */
+/* ---------------------------------------------------------------------- */
+
+/**
+ * The level a fact depends on, as a string on the wire.
+ *
+ * The server's Go type is an iota, and it is deliberately not serialised as a
+ * number: the order of the constants is an implementation detail, and a number
+ * here would publish it as a contract.
+ */
+export const healthLevelSchema = z.enum(['none', 'node', 'etcd', 'k8s'])
+
+export type HealthLevel = z.infer<typeof healthLevelSchema>
+
+/** The observer's state machine. `degraded` and `down` differ in what they
+ * claim, not in how bad they are: a degraded node is answering with some of
+ * its layers gone, a down node is answering nothing. */
+export const stageSchema = z.enum(['unknown', 'connecting', 'watching', 'degraded', 'down'])
+
+export type Stage = z.infer<typeof stageSchema>
+
+/**
+ * One fact, with its provenance.
+ *
+ * The three states are distinguishable and all three are meant to be rendered:
+ *
+ * - `available: true`  — confirmed right now.
+ * - `available: false` with `stale_since` — known but old. **The value is still
+ *   there and must still be shown**, muted, with its age. Hiding it is
+ *   indistinguishable from null, and that is exactly how the empty dashboard
+ *   INV-08 forbids comes about.
+ * - `available: false` with `stale_since: null` — never read. Render an em dash
+ *   and the `unavailable_reason` beside it.
+ *
+ * The age is computed here, from `stale_since`. The server deliberately holds
+ * no staleness threshold of its own: two clocks would disagree.
+ */
+export function fieldSchema<T extends z.ZodType>(value: T) {
+  return z.object({
+    // Absent when the value is the type's zero, because the server omits it.
+    // The default keeps every consumer from having to think about that.
+    value: value.optional(),
+    level: healthLevelSchema,
+    available: z.boolean(),
+    stale_since: z.string().nullish(),
+    unavailable_reason: z.string().default(''),
+  })
+}
+
+export interface Field<T> {
+  value?: T
+  level: HealthLevel
+  available: boolean
+  stale_since?: string | null
+  unavailable_reason: string
+}
+
+export const cpuSchema = z.object({
+  /** The board slot. It is the only field that tells two identical processors
+   * apart, which is why a list of them can be keyed on it. */
+  socket: z.string().default(''),
+  manufacturer: z.string().default(''),
+  product_name: z.string().default(''),
+  cores: z.number().default(0),
+  threads: z.number().default(0),
+  max_speed_mhz: z.number().default(0),
+})
+
+export const diskSchema = z.object({
+  device: z.string(),
+  size: z.number().default(0),
+  pretty_size: z.string().default(''),
+  model: z.string().default(''),
+  serial: z.string().default(''),
+  transport: z.string().default(''),
+  rotational: z.boolean().default(false),
+  readonly: z.boolean().default(false),
+  cdrom: z.boolean().default(false),
+})
+
+export const interfaceSchema = z.object({
+  name: z.string(),
+  hardware_addr: z.string().default(''),
+  mtu: z.number().default(0),
+  up: z.boolean().default(false),
+  speed_mbit: z.number().default(0),
+  addresses: z.array(z.string()).default([]),
+  driver: z.string().default(''),
+  kind: z.string().default(''),
+})
+
+export const serviceSchema = z.object({
+  id: z.string(),
+  running: z.boolean().default(false),
+  healthy: z.boolean().default(false),
+  state: z.string().default(''),
+  /** "does not report health" is not "reported unhealthy". Collapsing the two
+   * paints a healthy node red. */
+  health_unknown: z.boolean().default(false),
+})
+
+export const compatibilitySchema = z.object({
+  known: z.boolean(),
+  supported: z.boolean(),
+  headroom_minors: z.number(),
+  sentence: z.string(),
+})
+
+export const machineSchema = z.object({
+  id: z.string(),
+  cluster: z.string().default(''),
+  role: z.string(),
+  stage: stageSchema,
+  /** A different machine answered at this one's last known address. It is the
+   * explanation for a node that stopped being found without anything breaking. */
+  lost_addr: z.boolean().default(false),
+  /** The cluster's client certificate has expired. This is not a dead node,
+   * and showing it as one sends the operator to the wrong repair. */
+  certificate_expired: z.boolean().default(false),
+  adopted_at: z.string(),
+
+  hostname: fieldSchema(z.string()),
+  addr: fieldSchema(z.string()),
+  talos_version: fieldSchema(z.string()),
+  kubernetes_version: fieldSchema(z.string()),
+  schematic_id: fieldSchema(z.string()),
+  manufacturer: fieldSchema(z.string()),
+  product_name: fieldSchema(z.string()),
+  serial_number: fieldSchema(z.string()),
+  memory_mib: fieldSchema(z.number()),
+  cpus: fieldSchema(z.array(cpuSchema)),
+  disks: fieldSchema(z.array(diskSchema)),
+  interfaces: fieldSchema(z.array(interfaceSchema)),
+  services: fieldSchema(z.array(serviceSchema)),
+  etcd_member: fieldSchema(z.boolean()),
+  compatibility: fieldSchema(compatibilitySchema),
+})
+
+export type Machine = z.infer<typeof machineSchema>
+
+export const clusterSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  origin: z.string(),
+  endpoint: z.string(),
+  locked: z.boolean(),
+  created_at: z.string(),
+  client_cert_not_after: z.string(),
+  /** May be negative: that is the expired state, and it is not the same thing
+   * as a cluster that is down. */
+  client_cert_days_left: z.number(),
+  certificate_warning: z.string().default(''),
+  certificate_urgency: z.enum(['none', 'badge', 'banner', 'critical']),
+  nodes: z.number(),
+  control_plane: z.number(),
+  workers: z.number(),
+  healthy: z.number(),
+  degraded: z.number(),
+  down: z.number(),
+})
+
+export type Cluster = z.infer<typeof clusterSchema>
+
+export const clustersSchema = z.object({ clusters: z.array(clusterSchema) })
+export const machinesSchema = z.object({ machines: z.array(machineSchema) })
+
+export const fingerprintSchema = z.object({
+  endpoint: z.string(),
+  fingerprint: z.string(),
+})
+
+export interface ImportInput {
+  name: string
+  talosconfig: string
+  endpoint: string
+  fingerprint: string
+}
+
 export const api = {
   status: (): Promise<SystemStatus> =>
     sendJSON('GET', '/api/v1/system/status', systemStatusSchema, undefined, {
@@ -758,6 +937,62 @@ export const api = {
      */
     remove: async (id: string): Promise<void> => {
       await send('DELETE', `/api/v1/schematics/${encodeURIComponent(id)}`)
+    },
+  },
+
+  clusters: {
+    list: async (): Promise<Cluster[]> =>
+      (await sendJSON('GET', '/api/v1/clusters', clustersSchema)).clusters,
+
+    get: (id: string): Promise<Cluster> =>
+      sendJSON('GET', `/api/v1/clusters/${encodeURIComponent(id)}`, clusterSchema),
+
+    /**
+     * Step one of the adoption: read the certificate the operator is about to
+     * trust. Nothing is stored and nothing is trusted by this call — it exists
+     * so that what they confirm is the certificate that will actually be used.
+     */
+    fingerprint: (endpoint: string): Promise<{ endpoint: string; fingerprint: string }> =>
+      sendJSON('POST', '/api/v1/clusters/fingerprint', fingerprintSchema, { endpoint }),
+
+    /** Step two. The talosconfig travels in the body, uploaded or pasted;
+     * there is deliberately no way to name a path on the server. */
+    import: (input: ImportInput): Promise<Cluster> =>
+      sendJSON('POST', '/api/v1/clusters', clusterSchema, input),
+
+    /**
+     * Unlocking is destructive: it is what makes every other destructive route
+     * reachable on this cluster. The 428 interceptor opens the password prompt
+     * and replays this request, so this screen needs no confirmation of its
+     * own.
+     */
+    setLock: (id: string, locked: boolean): Promise<Cluster> =>
+      sendJSON('POST', `/api/v1/clusters/${encodeURIComponent(id)}/lock`, clusterSchema, {
+        locked,
+      }),
+
+    forget: async (id: string): Promise<void> => {
+      await send('DELETE', `/api/v1/clusters/${encodeURIComponent(id)}`)
+    },
+  },
+
+  machines: {
+    list: async (): Promise<Machine[]> =>
+      (await sendJSON('GET', '/api/v1/machines', machinesSchema)).machines,
+
+    get: (id: string): Promise<Machine> =>
+      sendJSON('GET', `/api/v1/machines/${encodeURIComponent(id)}`, machineSchema),
+
+    add: (cluster: string, addr: string): Promise<Machine> =>
+      sendJSON('POST', '/api/v1/machines', machineSchema, { cluster, addr }),
+
+    /** One observation pass, now. It never fails because the node is down: an
+     * unreachable node comes back as a record whose fields are stale. */
+    refresh: (id: string): Promise<Machine> =>
+      sendJSON('POST', `/api/v1/machines/${encodeURIComponent(id)}/refresh`, machineSchema),
+
+    forget: async (id: string): Promise<void> => {
+      await send('DELETE', `/api/v1/machines/${encodeURIComponent(id)}`)
     },
   },
 }

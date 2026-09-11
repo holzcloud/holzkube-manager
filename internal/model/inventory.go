@@ -206,6 +206,10 @@ type MachineSnapshot struct {
 
 // CPU is one processor as the node reports it.
 type CPU struct {
+	// Socket is the board slot the processor sits in. It is carried because it
+	// is the only field that distinguishes two identical processors from each
+	// other, which a list keyed on anything else cannot do.
+	Socket       string `json:"socket,omitempty"`
 	Manufacturer string `json:"manufacturer,omitempty"`
 	ProductName  string `json:"product_name,omitempty"`
 	Cores        uint32 `json:"cores,omitempty"`

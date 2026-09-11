@@ -120,6 +120,7 @@ func (f NodeFacts) KubernetesVersion() string {
 
 // CPU is one processor.
 type CPU struct {
+	Socket       string
 	Manufacturer string
 	ProductName  string
 	Cores        uint32
@@ -229,6 +230,7 @@ func readNodeFacts(ctx context.Context, st state.State) (NodeFacts, error) {
 		func(p *hardware.Processor) {
 			s := p.TypedSpec()
 			facts.CPUs = append(facts.CPUs, CPU{
+				Socket:       cpuSocket(s.Socket, p.Metadata().ID()),
 				Manufacturer: s.Manufacturer,
 				ProductName:  s.ProductName,
 				Cores:        s.CoreCount,
@@ -391,6 +393,16 @@ func eachResource[T resource.Resource](
 		fn(item)
 	}
 	return nil
+}
+
+// cpuSocket falls back to the resource's own id when SMBIOS reports no socket
+// name. Something unique per processor is needed -- two identical processors
+// are otherwise indistinguishable -- and the id is unique by construction.
+func cpuSocket(socket, id string) string {
+	if socket != "" {
+		return socket
+	}
+	return id
 }
 
 func prefixesToStrings(in []netip.Prefix) []string {

@@ -244,6 +244,7 @@ func (s *Service) Refresh(ctx context.Context, id model.MachineID) {
 
 	for _, c := range facts.CPUs {
 		snap.CPUs = append(snap.CPUs, model.CPU{
+			Socket:       c.Socket,
 			Manufacturer: c.Manufacturer,
 			ProductName:  c.ProductName,
 			Cores:        c.Cores,

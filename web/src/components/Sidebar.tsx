@@ -54,7 +54,7 @@ export const NAV_AREAS: NavArea[] = [
     path: '/nodes',
     label: 'Nodes',
     icon: Server,
-    phase: 3,
+    phase: null,
     description:
       'Every machine holzkube-manager knows about, with its Talos version, its role and an honest health state — including the machines that are not answering.',
   },
@@ -62,7 +62,7 @@ export const NAV_AREAS: NavArea[] = [
     path: '/clusters',
     label: 'Clusters',
     icon: Boxes,
-    phase: 3,
+    phase: null,
     description:
       'Imported clusters, their control planes, their etcd members and the certificate expiry dates that decide whether any of it still works next month.',
   },
