@@ -21,7 +21,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [~] **Phase 4: Walking Skeleton (Wegwerf)** - Der hässliche End-to-End-Weg gegen QEMU, um die vier gefährlichsten Unbekannten zu entschärfen (Instrument gebaut 2026-09-11, **Messung offen** — Fenster 80/81)
 - [x] **Phase 5: Streaming** - Live-Logs und `dmesg` über eine multiplexte SSE-Verbindung (DESIGNIERTE SCHNITTLINIE) (completed 2026-09-11)
 - [x] **Phase 6: Jobs-Engine & Node-Aktionen** - Persistierte, crash-feste Jobs; Reboot, Shutdown und das Reset-Dialog (completed 2026-09-11)
-- [ ] **Phase 7: Config-Domain** - Ansehen, redigieren, patchen, diffen, anwenden — mit berechnetem Apply-Modus
+- [x] **Phase 7: Config-Domain** - Ansehen, redigieren, patchen, diffen, anwenden — mit berechnetem Apply-Modus (completed 2026-09-11)
 - [ ] **Phase 8: Provisioning — der Core Value** - Blanke Maschine wird gesunder Cluster-Node, ohne Terminal
 - [ ] **Phase 9: Upgrades & etcd-Verwaltung** - Rollende Talos-/K8s-Upgrades hinter einem Gate, das lieber blockiert als strandet
 - [ ] **Phase 10: Härtung & echter Hardware-Durchlauf** - Backup/Restore, Docker/Compose, Versionsrange — und ein Durchlauf auf echtem amd64
@@ -294,7 +294,8 @@ Plans:
 **Research**: Nicht nötig — `machinery` liefert Merge, Diff und Validierung. Die Arbeit ist Verdrahtung plus Redaction-Test, keine Entdeckung. Research-Flag: *skip*.
 **Release blockers owned**: CFG-02 🚫
 **Note**: Constraint #6 — CFG-02 (Redaction) liegt zwingend in **derselben** Phase wie CFG-01 (Config-View). Die View *ist* das Leck; Redaction danach zu sequenzieren heißt, das Leck einmal auszuliefern.
-**Plans**: TBD
+**Plans**: ausgeführt als eine Runde; siehe `07-SUMMARY.md`
+**Outcome**: alle fünf Kriterien erfüllt. Die Redaction steht vor der View statt hinter ihr, ist zweistufig (schema-bewusst plus PEM-Sweep), und der Entropie-Walk über alle fünf Ausgänge ist grün — einschließlich eines absichtlich in ein unbekanntes Feld geschmuggelten Schlüssels.
 **UI hint**: yes
 
 ### Phase 8: Provisioning — der Core Value

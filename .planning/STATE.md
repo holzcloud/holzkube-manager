@@ -1,17 +1,17 @@
 ---
 gsd_state_version: 1.0
 milestone: v1.14
-current_phase: 7
-current_phase_name: Config-Domain
+current_phase: 8
+current_phase_name: "Provisioning — der Core Value"
 status: executing
-stopped_at: Phase 6 complete
+stopped_at: Phase 7 complete
 last_updated: "2026-09-11T16:50:00.000Z"
 last_activity: 2026-09-11
-last_activity_desc: Phase 06 complete, transitioned to Phase 7
+last_activity_desc: Phase 07 complete, transitioned to Phase 8
 state_head: a474d2522823cbfb436ee720dee35494890281a3
 progress:
   total_phases: 10
-  completed_phases: 5
+  completed_phases: 6
   total_plans: 37
   completed_plans: 37
 ---
@@ -23,16 +23,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-08-27)
 
 **Core value:** Eine neue Maschine wird komplett in der UI zum Cluster-Node — ohne `talosctl`, ohne Omni.
-**Current focus:** Phase 07 — Config-Domain
+**Current focus:** Phase 08 — Provisioning (der Core Value)
 
 ## Current Position
 
-Phase: 7 — Config-Domain
+Phase: 8 — Provisioning (der Core Value)
 Plan: Not started
 Status: Ready to plan
-Last activity: 2026-09-11 — Phase 06 complete, transitioned to Phase 7
+Last activity: 2026-09-11 — Phase 07 complete, transitioned to Phase 8
 
-Progress: [█████▓░░░░] 5 of 10 phases, plus Phase 4 partially
+Progress: [██████▓░░░] 6 of 10 phases, plus Phase 4 partially
 
 **Phase 4 ist nicht abgehakt.** Ihr Produkt ist eine Messung, und niemand hat
 gemessen: der Ausführungshost hat weder QEMU noch `/dev/kvm` noch verschachtelte
