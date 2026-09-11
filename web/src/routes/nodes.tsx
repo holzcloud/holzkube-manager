@@ -146,6 +146,37 @@ function MachineRow({ machine }: { machine: Machine }) {
             certificate
           </Badge>
         )}
+        {/* OPS-03. Red for outside the range and amber for a pre-release,
+            because they mean opposite things about what to do: one is a node
+            to change, the other is a node this instance can accept once
+            somebody says so. */}
+        {machine.unsupported_version && (
+          <Badge
+            variant="outline"
+            className="ml-2 border-red-600/40 text-red-700 dark:text-red-300"
+            title={machine.version_notice}
+          >
+            unsupported
+          </Badge>
+        )}
+        {!machine.unsupported_version && machine.pre_release && (
+          <Badge
+            variant="outline"
+            className="ml-2 border-amber-600/40 text-amber-700 dark:text-amber-300"
+            title={machine.version_notice}
+          >
+            pre-release
+          </Badge>
+        )}
+        {machine.locked && (
+          <Badge
+            variant="outline"
+            className="ml-2"
+            title={machine.lock_reason || 'Rolling operations skip this node.'}
+          >
+            locked
+          </Badge>
+        )}
       </TableCell>
       <TableCell className="text-sm">{machine.role}</TableCell>
       <TableCell className="font-mono text-xs">

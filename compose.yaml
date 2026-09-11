@@ -1,0 +1,87 @@
+# holzkube-manager under Compose (OPS-04).
+#
+# It runs **outside** the cluster it manages, and that is the whole point of
+# this file existing rather than a Kubernetes manifest: a management tool that
+# lived in the cluster would be unreachable in exactly the situation it exists
+# for. A small always-on host -- the NAS, a Raspberry Pi, the machine the
+# backups already run on -- is where this belongs.
+
+services:
+  holzkube-manager:
+    image: ghcr.io/holzcloud/holzkube-manager:latest
+    # Or, from a checkout:
+    # build:
+    #   context: .
+    #   args: { VERSION: dev }
+
+    restart: unless-stopped
+
+    # The uid the image runs as. It is repeated here rather than left to the
+    # image because the volume's ownership has to match it, and the two being
+    # in one file is what makes that checkable.
+    user: "65532:65532"
+
+    ports:
+      # Bound to the host's loopback by default. Publishing this on a LAN
+      # address is a deliberate act: the dashboard shows every node's state and
+      # the API can wipe a machine.
+      - "127.0.0.1:8443:8443"
+
+    volumes:
+      - holzkube-manager-data:/data
+      # The TLS material. A certificate this product generates for itself lives
+      # in the data volume; mount a real one here when there is one.
+      # - ./tls:/tls:ro
+
+    environment:
+      # The data directory inside the container. The volume above is what makes
+      # it survive a restart.
+      HOLZKUBE_MANAGER_DATA_DIR: /data
+
+      # TLS. holzkube-manager generates a self-signed certificate into the data
+      # directory when none is configured, and prints its fingerprint at
+      # startup so the first connection can be checked rather than clicked
+      # through.
+      # HOLZKUBE_MANAGER_TLS_CERT: /tls/cert.pem
+      # HOLZKUBE_MANAGER_TLS_KEY: /tls/key.pem
+
+      # Uncomment to accept nodes running a Talos pre-release (OPS-03). It is
+      # off by default because every guarantee this product makes about a node
+      # is a claim about released Talos.
+      # HOLZKUBE_MANAGER_ALLOW_PRERELEASE: "true"
+
+      # Uncomment to refuse every mutating node call at the transport. Useful
+      # for a first run against a cluster somebody else depends on.
+      # HOLZKUBE_MANAGER_DRY_RUN: "true"
+
+    # The container needs nothing root can do. Dropping everything is not
+    # caution here: the process opens one listening socket and writes one
+    # directory, and a capability it never uses is a capability an exploit
+    # inherits.
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
+    # The data directory is the only thing that is written. Everything else
+    # being read-only means a compromised process cannot leave anything behind
+    # that survives a restart.
+    read_only: true
+
+    healthcheck:
+      # The status endpoint answers before authentication, on purpose: a health
+      # check that needed a session would be a health check that fails for the
+      # wrong reason. `--spider` because there is nothing in the image to write
+      # a body to.
+      test: ["CMD", "/holzkube-managerd", "verify-audit"]
+      interval: 5m
+      timeout: 30s
+      retries: 3
+      start_period: 30s
+
+volumes:
+  holzkube-manager-data:
+    # Left to Docker rather than bind-mounted to a host path, because a bind
+    # mount's ownership is the host's and a directory owned by the wrong uid is
+    # the single most common way this setup fails. A named volume is chowned to
+    # the container's user by Docker on first use.

@@ -1059,7 +1059,9 @@ func gateProbes() map[talossim.ScenarioName]gateProbe {
 					t.Fatalf("Version: %v", err)
 				}
 				tag := resp.GetMessages()[0].GetVersion().GetTag()
-				if err := talos.CheckSupportedVersion(tag); err != nil {
+				// true: this probe is about the *range*, and the scenario it
+				// serves injects a version outside it rather than a pre-release.
+				if err := talos.CheckSupportedVersion(tag, true); err != nil {
 					return "outside the supported range"
 				}
 				return "inside the supported range"

@@ -89,6 +89,17 @@ func main() {
 }
 
 func run(args []string) error {
+	// The subcommands first. An invocation with no subcommand -- which is what
+	// every existing systemd unit and Docker entrypoint does -- falls through
+	// to the server below, so adding these changed nothing for anybody already
+	// running one.
+	if handled, err := dispatch(args); handled {
+		if errors.Is(err, config.ErrHelp) {
+			return nil
+		}
+		return err
+	}
+
 	// The level is behind a LevelVar because the level itself is configuration:
 	// the logger has to exist before --log-level has been resolved.
 	level := new(slog.LevelVar)
@@ -178,7 +189,7 @@ func run(args []string) error {
 	// carried into the handlers rather than consulted from a package variable,
 	// so every future node call has to be handed the mode explicitly and none
 	// of them can inherit the wrong one (D-03, FOUND-12).
-	talosMode := talos.Mode{DryRun: cfg.DryRun}
+	talosMode := talos.Mode{DryRun: cfg.DryRun, AllowPreRelease: cfg.AllowPreRelease}
 
 	// The transport. It is built here for the same reason the mode is: this is
 	// the only place that has read the configuration, and a dialer constructed

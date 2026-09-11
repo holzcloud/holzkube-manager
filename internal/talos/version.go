@@ -34,22 +34,54 @@ const (
 // downgraded.
 var ErrUnsupportedVersion = errors.New("talos: unsupported Talos version")
 
+// ErrPreRelease reports a node running an alpha, beta or release candidate
+// while this instance has not opted into them (OPS-03).
+//
+// It is separate from ErrUnsupportedVersion because the remedy is the opposite
+// kind of thing. An unsupported version is a fact about the node and the
+// answer is to change the node; a pre-release is a fact about *this
+// installation's* settings, and the answer is a decision the operator makes
+// once -- so a client showing them as the same refusal would send somebody to
+// reinstall a node they deliberately put a release candidate on.
+var ErrPreRelease = errors.New("talos: this node runs a Talos pre-release and this instance has not opted into pre-releases")
+
 // CheckSupportedVersion reports whether a node's reported version tag is one
 // holzkube-manager supports.
 //
 // The comparison is major.minor only and is implemented here rather than by
 // importing golang.org/x/mod/semver, for the reason plan 02-04 gives for the
 // same choice: the whole comparison is two integers against two integers, and
-// a module added for that is a module in the graph forever. The prerelease
-// component is stripped before comparing, so v1.14.0-rc.2 is inside the range
-// -- opting into a release candidate is a separate decision from being inside
-// the supported window, and conflating them would refuse a node the operator
-// deliberately chose.
-func CheckSupportedVersion(version string) error {
+// a module added for that is a module in the graph forever.
+//
+// # Pre-releases are opt-in (OPS-03)
+//
+// The prerelease component is stripped before the range comparison, so
+// v1.14.0-rc.2 is *inside* the window -- and it is then refused separately
+// unless allowPreRelease is set. The two checks are separate because the
+// answers to them are: "this node is outside the supported range" is a fact
+// about the node, and "this instance does not accept pre-releases" is a
+// setting, and an operator who deliberately put a release candidate on a node
+// needs to be told which of the two they are looking at.
+//
+// The default is to refuse, and that is the direction the requirement asks
+// for. The reason it is the right default rather than a cautious one: a
+// pre-release is software its own project does not call finished, and every
+// guarantee this product makes about a node -- the apply modes, the
+// compatibility window, the resource paths the inventory reads -- is a claim
+// about released Talos. Accepting one silently would be extending those
+// claims to something nobody tested them against.
+func CheckSupportedVersion(version string, allowPreRelease bool) error {
 	major, minor, err := parseMajorMinor(version)
 	if err != nil {
 		return fmt.Errorf("%w: cannot read a version from %q; holzkube-manager supports %s to %s",
 			ErrUnsupportedVersion, version, MinSupportedVersion, MaxSupportedVersion)
+	}
+
+	if pre := preRelease(version); pre != "" && !allowPreRelease {
+		return fmt.Errorf("%w: it reports %s. Start holzkube-manager with --allow-prerelease (or "+
+			"HOLZKUBE_MANAGER_ALLOW_PRERELEASE=true) if that is deliberate; everything this "+
+			"product guarantees about a node is a claim about released Talos",
+			ErrPreRelease, version)
 	}
 
 	// The bounds are parsed rather than hard-coded as integers so that the
@@ -104,4 +136,53 @@ func parseMajorMinor(version string) (int, int, error) {
 		return 0, 0, fmt.Errorf("talos: minor component of %q: %w", version, err)
 	}
 	return major, minor, nil
+}
+
+// preRelease returns the prerelease component of a version tag, or the empty
+// string.
+//
+// Build metadata after a `+` is not a prerelease: `v1.14.0+dirty` is a release
+// built from a modified tree, which is a different thing from `v1.14.0-rc.2`
+// and must not be refused as one.
+func preRelease(version string) string {
+	v := strings.TrimSpace(version)
+	if i := strings.IndexByte(v, '+'); i >= 0 {
+		v = v[:i]
+	}
+	if i := strings.IndexByte(v, '-'); i >= 0 {
+		return v[i+1:]
+	}
+	return ""
+}
+
+// IsPreRelease reports whether a version tag names an alpha, beta or release
+// candidate.
+//
+// It is exported because the inventory marks such a node on the screen
+// (OPS-03), and that marking has to work on a node this instance refused to
+// connect to -- which is precisely the node an operator is looking for.
+func IsPreRelease(version string) bool { return preRelease(version) != "" }
+
+// InSupportedRange reports whether a version tag is inside the window,
+// ignoring any prerelease component.
+//
+// It exists alongside CheckSupportedVersion because a *screen* needs the
+// answer without needing a refusal: the machine list marks a node outside the
+// range whether or not anything has tried to connect to it, and a marking that
+// depended on a failed connection would be missing exactly when the node is
+// down for an unrelated reason.
+func InSupportedRange(version string) bool {
+	major, minor, err := parseMajorMinor(version)
+	if err != nil {
+		return false
+	}
+	minMajor, minMinor, err := parseMajorMinor(MinSupportedVersion)
+	if err != nil {
+		return false
+	}
+	maxMajor, maxMinor, err := parseMajorMinor(MaxSupportedVersion)
+	if err != nil {
+		return false
+	}
+	return !before(major, minor, minMajor, minMinor) && !before(maxMajor, maxMinor, major, minor)
 }
