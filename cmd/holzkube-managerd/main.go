@@ -23,6 +23,7 @@ import (
 	"github.com/holzcloud/holzkube-manager/internal/httpapi/handlers"
 	"github.com/holzcloud/holzkube-manager/internal/imagefactory"
 	"github.com/holzcloud/holzkube-manager/internal/inventory"
+	"github.com/holzcloud/holzkube-manager/internal/jobs"
 	"github.com/holzcloud/holzkube-manager/internal/model"
 	"github.com/holzcloud/holzkube-manager/internal/nodestream"
 	"github.com/holzcloud/holzkube-manager/internal/store/fsstore"
@@ -211,6 +212,28 @@ func run(args []string) error {
 	})
 	defer nodeStreams.Close()
 
+	// The job engine. Node actions are jobs because they take minutes and can
+	// be interrupted, and a record is the only thing that can say where one
+	// was when the process died.
+	engine := jobs.New(jobs.Deps{
+		Store:  st,
+		Logger: logger,
+		Hub:    hub,
+	})
+	defer engine.Close()
+
+	jobs.RegisterNodeActions(engine, func(ctx context.Context, id model.MachineID) (*talos.ClusterClient, error) {
+		return inv.Connect(ctx, id)
+	})
+
+	// The confirmation signing key is generated here and lives only in memory.
+	// A confirmation that survived a restart would be a decision about a fleet
+	// that may since have changed.
+	confirmer, err := jobs.NewConfirmer()
+	if err != nil {
+		return err
+	}
+
 	// The identity provider, if one is configured. New performs no network I/O:
 	// discovery happens on first use, so that a provider which is down -- quite
 	// possibly because it runs on the cluster this tool exists to repair --
@@ -245,6 +268,8 @@ func run(args []string) error {
 		Inventory:   inv,
 		Hub:         hub,
 		NodeStreams: nodeStreams,
+		Jobs:        engine,
+		Confirmer:   confirmer,
 		// The per-cluster read-only lock, read by the route middleware rather
 		// than by each handler (D-22). Inside the literal for the reason the
 		// comment above states: Deps is copied by value into every …Routes
@@ -281,12 +306,22 @@ func run(args []string) error {
 		handlers.SchematicRoutes(deps),
 		handlers.InventoryRoutes(deps),
 		handlers.StreamRoutes(deps),
+		handlers.JobRoutes(deps),
 	)
 
 	// Start observing before the listener opens. A supervisor that only runs
 	// while somebody is looking makes the dashboard slow exactly when it is
 	// needed, and makes stale_since meaningless on the first load.
 	if err := inv.Start(context.Background()); err != nil {
+		return err
+	}
+
+	// Resume before the listener opens, so that a job interrupted by the last
+	// shutdown is continued or parked before anybody can submit a second one
+	// against the same cluster. This is the single most consequential call in
+	// the startup sequence: it is where "a kill -9 never produces a doubled
+	// side effect" is actually decided.
+	if err := engine.Resume(context.Background()); err != nil {
 		return err
 	}
 

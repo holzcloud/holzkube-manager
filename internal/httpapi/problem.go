@@ -116,6 +116,21 @@ const (
 	// CodeClusterLocked: the cluster was adopted read-only and this request
 	// would have changed something (INV-12, D-22).
 	CodeClusterLocked = "forbidden.cluster-locked"
+
+	// CodeClusterBusy: another mutating job holds this cluster's lease
+	// (JOB-03). It is a conflict rather than a refusal: the request is fine,
+	// the moment is not, and retrying later is the remedy.
+	CodeClusterBusy = "store.cluster-busy"
+
+	// CodeJobFinished: a cancel arrived for a job that has already finished.
+	CodeJobFinished = "store.job-finished"
+
+	// CodeConfirmationInvalid and CodeConfirmationExpired are the two ways a
+	// confirmation fails (JOB-08). They are separate codes because the
+	// remedies differ: expired means read the dialog again, invalid means the
+	// request is not the one that was confirmed.
+	CodeConfirmationInvalid = "forbidden.confirmation-invalid"
+	CodeConfirmationExpired = "forbidden.confirmation-expired"
 )
 
 // ClusterLocked reports a mutation refused by a cluster's read-only lock.
