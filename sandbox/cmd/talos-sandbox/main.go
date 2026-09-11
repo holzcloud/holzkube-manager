@@ -20,8 +20,15 @@
 //
 // Usage:
 //
-//	talos-sandbox up   [--state DIR] [--name NAME] [--image REF]
-//	talos-sandbox down [--state DIR] [--name NAME]
+//	talos-sandbox up   [--provider docker|qemu] [--state DIR] [--name NAME]
+//	                   [--image REF] [--iso PATH] [--disk GIB]
+//	talos-sandbox down [--provider docker|qemu] [--state DIR] [--name NAME]
+//
+// The docker provider is Tier 1: fast, always available where a daemon runs,
+// and a container rather than a machine — it never installs and never reboots.
+// The qemu provider is Tier 2: a real virtual machine that boots an ISO,
+// installs to a disk and comes back, which is the only tier on which phase 4's
+// four unknowns can be measured at all.
 package main
 
 import (
@@ -39,7 +46,7 @@ import (
 	"github.com/siderolabs/talos/pkg/machinery/config/generate"
 	"github.com/siderolabs/talos/pkg/machinery/config/machine"
 	"github.com/siderolabs/talos/pkg/provision"
-	"github.com/siderolabs/talos/pkg/provision/providers/docker"
+	"github.com/siderolabs/talos/pkg/provision/providers"
 )
 
 // Defaults. The image tag tracks the machinery version the product is pinned
@@ -71,9 +78,21 @@ func run() error {
 	fs := flag.NewFlagSet(os.Args[1], flag.ExitOnError)
 	name := fs.String("name", defaultName, "cluster name")
 	state := fs.String("state", defaultStateDir(), "state directory")
-	image := fs.String("image", defaultImage, "Talos container image")
+	image := fs.String("image", defaultImage, "Talos container image (docker provider)")
+	provider := fs.String("provider", "docker", "docker (Tier 1) or qemu (Tier 2)")
+	iso := fs.String("iso", "", "path to a Talos ISO (qemu provider; required there)")
+	diskGiB := fs.Int("disk", 10, "node disk size in GiB (qemu provider)")
 	if err := fs.Parse(os.Args[2:]); err != nil {
 		return err
+	}
+
+	opts := upOptions{
+		name:     *name,
+		stateDir: *state,
+		image:    *image,
+		provider: *provider,
+		isoPath:  *iso,
+		diskGiB:  *diskGiB,
 	}
 
 	// No deadline on the outer context: bringing a cluster up pulls an image
@@ -84,9 +103,9 @@ func run() error {
 
 	switch os.Args[1] {
 	case "up":
-		return up(ctx, *name, *state, *image)
+		return up(ctx, opts)
 	case "down":
-		return down(ctx, *name, *state)
+		return down(ctx, *provider, *name, *state)
 	default:
 		return fmt.Errorf("unknown command %q", os.Args[1])
 	}
@@ -103,14 +122,33 @@ func defaultStateDir() string {
 	return filepath.Join(home, ".holzkube", "sandbox")
 }
 
-func up(ctx context.Context, name, stateDir, image string) error {
+// upOptions is what `up` was given. It is a struct rather than six parameters
+// because two providers want different subsets of it and a positional list
+// would make the difference invisible at the call site.
+type upOptions struct {
+	name     string
+	stateDir string
+	image    string
+	provider string
+	isoPath  string
+	diskGiB  int
+}
+
+func up(ctx context.Context, o upOptions) error {
+	name, stateDir := o.name, o.stateDir
+
+	if o.provider == "qemu" && o.isoPath == "" {
+		return errors.New("the qemu provider needs --iso: a Talos ISO to boot from.\n" +
+			"Get one from the Images screen, or from https://factory.talos.dev")
+	}
+
 	if err := os.MkdirAll(stateDir, 0o700); err != nil {
 		return fmt.Errorf("create state directory: %w", err)
 	}
 
-	p, err := docker.NewProvisioner(ctx)
+	p, err := providers.Factory(ctx, o.provider)
 	if err != nil {
-		return fmt.Errorf("docker provisioner: %w", err)
+		return fmt.Errorf("%s provisioner: %w", o.provider, err)
 	}
 	defer p.Close() //nolint:errcheck // a teardown error does not change the run's verdict
 
@@ -141,21 +179,30 @@ func up(ctx context.Context, name, stateDir, image string) error {
 	// One node, not three. Tier 1 exists to check the fake against real Talos,
 	// and every assertion the contract suite makes is about one node's
 	// behaviour: three would triple the time and the memory for nothing.
+	node := provision.NodeRequest{
+		Name:     name + "-controlplane-1",
+		IPs:      []netip.Addr{controlPlaneIP},
+		Type:     machine.TypeControlPlane,
+		Config:   cpConfig,
+		Memory:   2048 * 1024 * 1024,
+		NanoCPUs: 2_000_000_000,
+	}
+	if o.provider == "qemu" {
+		// A QEMU node boots from the ISO and installs onto a disk; a Docker
+		// node has neither. The two provisioners read entirely different
+		// fields off the same request, which is why this is a branch and not a
+		// set of defaults.
+		node.Disks = []*provision.Disk{{Size: uint64(o.diskGiB) << 30}}
+		node.Memory = 4096 * 1024 * 1024
+	}
+
 	req := provision.ClusterRequest{
 		Name:           name,
 		Network:        network,
-		Image:          image,
+		Image:          o.image,
+		ISOPath:        o.isoPath,
 		StateDirectory: stateDir,
-		Nodes: provision.NodeRequests{
-			{
-				Name:     name + "-controlplane-1",
-				IPs:      []netip.Addr{controlPlaneIP},
-				Type:     machine.TypeControlPlane,
-				Config:   cpConfig,
-				Memory:   2048 * 1024 * 1024,
-				NanoCPUs: 2_000_000_000,
-			},
-		},
+		Nodes:          provision.NodeRequests{node},
 	}
 
 	cluster, err := p.Create(ctx, req, provision.WithBootlader(true))
@@ -194,10 +241,10 @@ func up(ctx context.Context, name, stateDir, image string) error {
 	return nil
 }
 
-func down(ctx context.Context, name, stateDir string) error {
-	p, err := docker.NewProvisioner(ctx)
+func down(ctx context.Context, provider, name, stateDir string) error {
+	p, err := providers.Factory(ctx, provider)
 	if err != nil {
-		return fmt.Errorf("docker provisioner: %w", err)
+		return fmt.Errorf("%s provisioner: %w", provider, err)
 	}
 	defer p.Close() //nolint:errcheck // as above
 
