@@ -96,6 +96,9 @@ last_updated: 2026-09-11T16:50:00.000Z
 | 79 | 03 | deviation | internal/inventory/observe.go |  | Die Supervisors sind Heartbeat-Poller ueber COSI-Reads, keine COSI-Watches. INV-13 und D-19 verlangen 'Watch primaer, Poll als Heartbeat'; gebaut ist der Heartbeat mit Jitter (45s +/-20%) ueber genau die Ressourcen, die ein Watch beobachten wuerde. Die Leserichtung stimmt -- Ressourcenzustand statt unaerer RPCs, was das eigentliche Verbot von INV-13 ist -- und die Antwortform (health.Field[T]) ist | open |  | 2026-09-11T16:30:00.000Z |  |
 | 80 | 04 | unrun-verify | sandbox/cmd/walking-skeleton/main.go |  | DIE INSTALLATIONSSTILLE IST UNGEMESSEN, und damit sind die vier Unbekannten, die Phase 4 zu entschaerfen hatte, weiterhin Unbekannte. Gebaut ist das Messgeraet: walking-skeleton appliziert eine generierte MachineConfig auf eine von Hand genannte Maintenance-Mode-IP, misst die Stille danach unter CLUSTER-Zugangsdaten (nicht unter den Maintenance-Daten -- gemessen wird 'antwortet der Knoten, den die | open |  | 2026-09-11T16:50:00.000Z |  |
 | 81 | 04 | unrun-verify | sandbox/cmd/talos-sandbox/main.go |  | TIER 2 (QEMU) WURDE NIE AUSGEFUEHRT, und das ist eine andere Luecke als Fenster 76 (Tier 1/Docker). Der --provider qemu-Pfad ist gebaut und uebersetzt, aber der Ausfuehrungshost hat weder qemu-system-* noch /dev/kvm noch vmx im cpuinfo: ein Container ohne verschachtelte Virtualisierung. ERFOLGSKRITERIUM 1 VERLANGT AUSDRUECKLICH MEHR als 'es uebersetzt': entweder ein reproduzierbarer Lauf auf darwi | open |  | 2026-09-11T16:50:00.000Z |  |
+| 82 | 08 | unrun-verify | internal/provision/job.go |  | DER BINAERE ABNAHMETEST VON PHASE 8 IST NICHT AUSGEFUEHRT: eine blanke Maschine wurde nirgends zu einem gesunden Cluster-Node. Die beiden Eintrittsbedingungen der Phase -- 'QEMU (Tier 2) funktioniert, nachgewiesen in Phase 4' und 'eine Maschine, die blank sein darf' -- sind beide unerfuellt (Fenster 80 und 81), und die Phase wurde trotzdem gebaut,  | open |  | 2026-09-11T18:10:00.000Z |  |
+| 83 | 08 | deviation | internal/audit/redact.go |  | PHASE 6 UND 7 HABEN ACHT AUDITIERTE AKTIONEN OHNE ALLOWLIST-EINTRAG AUSGELIEFERT, und dieses Fenster haelt fest, was dabei fuer immer verloren ist. Von der Einfuehrung der Node-Aktionen bis zu dieser Runde wurde jeder Parameter jedes Reboots, jedes Shutdowns, jedes Resets, jeder Bestaetigung, jedes Job-Cancels, jedes config.plan, jedes config.apply | open |  | 2026-09-11T18:10:00.000Z |  |
+| 84 | 08 | unrun-verify | internal/provision/job.go |  | DIE MACHINE-CONFIG DER PROVISIONIERUNG IST NIE GEGEN ECHTES TALOS APPLIZIERT WORDEN. provision.buildConfig baut die Konfiguration aus dem in Phase 3 abgeleiteten Bundle, haengt den Install-Patch (.machine.install.disk und .image aus derselben Schematic-ID) und optional den Hostnamen an, und uebergibt alles an machineconfig.Generate unter dem pro Cl | open |  | 2026-09-11T18:10:00.000Z |  |
 
 ````json
 [
@@ -1069,6 +1072,42 @@ last_updated: 2026-09-11T16:50:00.000Z
     "status": "open",
     "reason": "",
     "recorded_at": "2026-09-11T16:50:00.000Z",
+    "resolved_at": null
+  },
+  {
+    "id": 82,
+    "kind": "unrun-verify",
+    "phase": "08",
+    "file": "internal/provision/job.go",
+    "line": null,
+    "description": "DER BINAERE ABNAHMETEST VON PHASE 8 IST NICHT AUSGEFUEHRT: eine blanke Maschine wurde nirgends zu einem gesunden Cluster-Node. Die beiden Eintrittsbedingungen der Phase -- 'QEMU (Tier 2) funktioniert, nachgewiesen in Phase 4' und 'eine Maschine, die blank sein darf' -- sind beide unerfuellt (Fenster 80 und 81), und die Phase wurde trotzdem gebaut, weil alles ausser diesem einen Kriterium gegen talossim ausfuehrbar ist. Konkret unverifiziert bleibt dreierlei, und jedes davon ist eine Annahme, die talossim bestaetigt, weil talossim sie eingebaut hat: (a) ob eine echte Maschine im Maintenance-Mode dieselben COSI-Ressourcen unauthentifiziert herausgibt, auf denen provision.Inspect steht -- das sensitivity-Feld sitzt auf den Resource-Definitionen und ist nur an einem echten Node feststellbar; (b) wie lange die Installations-Stille wirklich dauert, weshalb ReappearBudget weiterhin Phase 4s Platzhalter von 8 Minuten ist und die Drei-Wege-Probe gegen eine geratene Zahl misst; (c) ob Talos' eigenes AlreadyExists beim zweiten Bootstrap die Form hat, die isAlreadyExists erkennt -- Mechanismus 4 der vier ist damit der einzige, dessen Ausloeser ungeprueft ist. SCHLIESSBEDINGUNG: ein protokollierter Durchlauf des Wizards gegen eine QEMU-VM oder eine echte Maschine, der bei 'blank' anfaengt und bei einem Node endet, den /api/v1/machines als gesund fuehrt, plus die gemessene Stille als Ersatz fuer ReappearBudget.",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-09-11T18:10:00.000Z",
+    "resolved_at": null
+  },
+  {
+    "id": 83,
+    "kind": "deviation",
+    "phase": "08",
+    "file": "internal/audit/redact.go",
+    "line": null,
+    "description": "PHASE 6 UND 7 HABEN ACHT AUDITIERTE AKTIONEN OHNE ALLOWLIST-EINTRAG AUSGELIEFERT, und dieses Fenster haelt fest, was dabei fuer immer verloren ist. Von der Einfuehrung der Node-Aktionen bis zu dieser Runde wurde jeder Parameter jedes Reboots, jedes Shutdowns, jedes Resets, jeder Bestaetigung, jedes Job-Cancels, jedes config.plan, jedes config.apply und jedes patch.create als <redacted> ins Archiv geschrieben -- unter anderem der Wipe-Umfang eines Resets, also genau der Unterschied zwischen 'ein Reset ist passiert' und 'jede Disk dieser Maschine wurde geloescht'. D-16 haelt das Archiv fuer immer und definiert keinen Loeschpfad, also gibt es auch keinen Nachtragspfad: diese Eintraege bleiben inhaltslos. Repariert ist der Mechanismus (alle acht eingetragen, cmd/holzkube-managerd/allowlist_test.go haelt beide Richtungen), nicht die Vergangenheit. KEINE SCHLIESSBEDINGUNG fuer die bereits geschriebenen Zeilen -- das Fenster bleibt als Befund offen, bis jemand ausdruecklich entscheidet, dass ein Archiv mit inhaltslosen Eintraegen aus dieser Zeitspanne akzeptiert ist; die Alternative waere eine Migration, die die Hash-Kette bricht, und die ist schlimmer als der Verlust.",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-09-11T18:10:00.000Z",
+    "resolved_at": null
+  },
+  {
+    "id": 84,
+    "kind": "unrun-verify",
+    "phase": "08",
+    "file": "internal/provision/job.go",
+    "line": null,
+    "description": "DIE MACHINE-CONFIG DER PROVISIONIERUNG IST NIE GEGEN ECHTES TALOS APPLIZIERT WORDEN. provision.buildConfig baut die Konfiguration aus dem in Phase 3 abgeleiteten Bundle, haengt den Install-Patch (.machine.install.disk und .image aus derselben Schematic-ID) und optional den Hostnamen an, und uebergibt alles an machineconfig.Generate unter dem pro Cluster gepinnten Versions-Contract. Ausgefuehrt wird sie gegen talossim, dessen ApplyConfiguration die Bytes entgegennimmt und keinen Installer startet -- die Konfiguration ist also als Dokument geprueft und als Anweisung an eine Maschine nicht. Unbekannt bleibt insbesondere, ob der Install-Patch in genau dieser Form von Talos akzeptiert wird und ob die Kubernetes-Version, die aus den bestehenden Nodes des Clusters gelesen wird, mit dem Contract vertraeglich ist, den derselbe Cluster gepinnt hat. SCHLIESSBEDINGUNG: derselbe Durchlauf, der Fenster 82 schliesst -- diese beiden Luecken schliessen gemeinsam oder gar nicht.",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-09-11T18:10:00.000Z",
     "resolved_at": null
   }
 ]
