@@ -67,6 +67,13 @@ type Options struct {
 	// DefaultTalosVersion.
 	TalosVersion string
 
+	// KernelArgs are extra kernel arguments this node booted with, on top of
+	// the ones Talos sets for itself. They are what UPG-04's drift check reads
+	// on the node's side: a node whose bootloader carries an argument its
+	// configuration does not is the case the check exists for, and setting one
+	// here is how a test produces it.
+	KernelArgs []string
+
 	// Maintenance makes the node report itself as running the maintenance-mode
 	// API surface.
 	Maintenance bool

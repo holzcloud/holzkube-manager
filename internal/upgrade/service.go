@@ -56,6 +56,11 @@ type NodePlan struct {
 	Skipped    bool   `json:"skipped"`
 	SkipReason string `json:"skip_reason,omitempty"`
 
+	// KernelArgs is the comparison when it found a difference (UPG-04). Both
+	// lists travel, because a diff an operator cannot see is a diff they have
+	// to take on trust.
+	KernelArgs *KernelArgDrift `json:"kernel_args,omitempty"`
+
 	// Blocked and BlockReason are the per-node refusals that can be known
 	// before the run: an unreadable schematic, kernel-argument drift.
 	Blocked     bool   `json:"blocked"`
@@ -177,17 +182,32 @@ func (s *Service) PlanTalos(ctx context.Context, cluster model.ClusterID, to str
 		}
 
 		verdict, serr := CheckSchematic(ctx, cc)
-		_ = cc.Close()
 		if serr != nil {
+			_ = cc.Close()
 			node.Blocked = true
 			node.BlockReason = serr.Error()
 			plan.Nodes = append(plan.Nodes, node)
 			continue
 		}
+		cc2 := cc
 
 		node.Schematic = verdict.ID
 		node.SchematicSentence = verdict.Sentence
 		node.Installer = InstallerFor(verdict.ID, target)
+
+		// UPG-04, on the same connection. The upgrade RPC carries an installer
+		// image and nothing else -- kernel arguments are written at install
+		// time from the machine configuration -- so a node whose bootloader
+		// has arguments its configuration does not is a node where this path
+		// silently discards them.
+		drift, derr := ReadKernelArgDrift(ctx, cc2)
+		_ = cc2.Close()
+		if derr == nil && drift.Drifted {
+			node.Blocked = true
+			node.BlockReason = drift.Sentence
+			node.KernelArgs = &drift
+		}
+
 		plan.Nodes = append(plan.Nodes, node)
 	}
 

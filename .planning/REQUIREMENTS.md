@@ -113,20 +113,20 @@ Die Requirements folgen der Phasenstruktur aus `.planning/research/SUMMARY.md`. 
 
 ### Upgrades & etcd (UPG)
 
-- [ ] **UPG-01**: Betreiber fährt ein rollendes Talos-Upgrade über `LifecycleClient.Upgrade` (streaming), Node für Node
-- [ ] **UPG-02** 🚫: Das Health-Gate schließt Learner aus, prüft Raft-Konvergenz und Alarme, verweigert bei ≤2 stimmberechtigten Membern, zeigt seine Eingaben an und wird **vor jedem** Node neu bewertet
-- [ ] **UPG-03** 🚫: Ein Node mit unbekannter `schematic_id` wird nicht geupgradet; holzkube bietet an, sie vom Node zu lesen
-- [ ] **UPG-04**: Kernel-Args-/GRUB-Drift blockiert den Ein-Klick-Pfad — die Upgrade-RPC kann Kernel-Args strukturell nicht tragen, also gibt es zwei Quellen der Wahrheit die synchron bleiben müssen
-- [ ] **UPG-05**: Die nötige Kette an Zwischen-Minor-Versionen wird berechnet; es gibt keinen "latest"-Knopf und Pre-Releases sind gefiltert
-- [ ] **UPG-06** 🚫: Ein Kubernetes-Forward-Kompatibilitäts-Gate blockiert Talos-Upgrades, die den Cluster stranden würden
-- [ ] **UPG-07** 🚫: Nach jedem Upgrade wird deklariert-gegen-beobachtet verifiziert — "die API sagte OK" gilt nicht als Beweis
-- [ ] **UPG-08**: Betreiber kann nach dem aktuellen Node stoppen; der UI-Text sagt ehrlich, was schon passiert ist
-- [ ] **UPG-09**: Betreiber fährt ein Kubernetes-Upgrade
-- [ ] **UPG-10**: Betreiber listet etcd-Member mit Hostname und UUID — nie mit rohen Hex-IDs
-- [ ] **UPG-11**: Betreiber entfernt ein etcd-Member
-- [ ] **UPG-12**: Betreiber zieht einen etcd-Snapshot, mit dokumentiertem Fallback ohne Quorum
-- [ ] **UPG-13**: Betreiber entfernt einen Node aus dem Cluster (cordon/drain → reset → aus dem Inventar)
-- [ ] **UPG-14**: Betreiber kann einen Node sperren, damit Upgrades ihn überspringen
+- [x] **UPG-01**: Betreiber fährt ein rollendes Talos-Upgrade über `LifecycleClient.Upgrade` (streaming), Node für Node
+- [x] **UPG-02** 🚫: Das Health-Gate schließt Learner aus, prüft Raft-Konvergenz und Alarme, verweigert bei ≤2 stimmberechtigten Membern, zeigt seine Eingaben an und wird **vor jedem** Node neu bewertet
+- [x] **UPG-03** 🚫: Ein Node mit unbekannter `schematic_id` wird nicht geupgradet; holzkube bietet an, sie vom Node zu lesen
+- [x] **UPG-04**: Kernel-Args-/GRUB-Drift blockiert den Ein-Klick-Pfad — die Upgrade-RPC kann Kernel-Args strukturell nicht tragen, also gibt es zwei Quellen der Wahrheit die synchron bleiben müssen
+- [x] **UPG-05**: Die nötige Kette an Zwischen-Minor-Versionen wird berechnet; es gibt keinen "latest"-Knopf und Pre-Releases sind gefiltert
+- [x] **UPG-06** 🚫: Ein Kubernetes-Forward-Kompatibilitäts-Gate blockiert Talos-Upgrades, die den Cluster stranden würden
+- [x] **UPG-07** 🚫: Nach jedem Upgrade wird deklariert-gegen-beobachtet verifiziert — "die API sagte OK" gilt nicht als Beweis
+- [x] **UPG-08**: Betreiber kann nach dem aktuellen Node stoppen; der UI-Text sagt ehrlich, was schon passiert ist
+- [x] **UPG-09**: Betreiber fährt ein Kubernetes-Upgrade
+- [x] **UPG-10**: Betreiber listet etcd-Member mit Hostname und UUID — nie mit rohen Hex-IDs
+- [x] **UPG-11**: Betreiber entfernt ein etcd-Member
+- [x] **UPG-12**: Betreiber zieht einen etcd-Snapshot, mit dokumentiertem Fallback ohne Quorum
+- [x] **UPG-13**: Betreiber entfernt einen Node aus dem Cluster (cordon/drain → reset → aus dem Inventar)
+- [x] **UPG-14**: Betreiber kann einen Node sperren, damit Upgrades ihn überspringen
 
 ### Betrieb & Härtung (OPS)
 
@@ -280,20 +280,20 @@ Requirements mit **🚫** sind Release-Blocker.
 | PROV-11 | Phase 8 | Complete |
 | PROV-12 | Phase 8 | Complete |
 | PROV-13 | Phase 8 | Complete |
-| UPG-01 | Phase 9 | Pending |
-| **UPG-02** 🚫 | Phase 9 | Pending |
-| **UPG-03** 🚫 | Phase 9 | Pending |
-| UPG-04 | Phase 9 | Pending |
-| UPG-05 | Phase 9 | Pending |
-| **UPG-06** 🚫 | Phase 9 | Pending |
-| **UPG-07** 🚫 | Phase 9 | Pending |
-| UPG-08 | Phase 9 | Pending |
-| UPG-09 | Phase 9 | Pending |
-| UPG-10 | Phase 9 | Pending |
-| UPG-11 | Phase 9 | Pending |
-| UPG-12 | Phase 9 | Pending |
-| UPG-13 | Phase 9 | Pending |
-| UPG-14 | Phase 9 | Pending |
+| UPG-01 | Phase 9 | Complete |
+| **UPG-02** 🚫 | Phase 9 | Complete |
+| **UPG-03** 🚫 | Phase 9 | Complete |
+| UPG-04 | Phase 9 | Complete |
+| UPG-05 | Phase 9 | Complete |
+| **UPG-06** 🚫 | Phase 9 | Complete |
+| **UPG-07** 🚫 | Phase 9 | Complete |
+| UPG-08 | Phase 9 | Complete |
+| UPG-09 | Phase 9 | Complete |
+| UPG-10 | Phase 9 | Complete |
+| UPG-11 | Phase 9 | Complete |
+| UPG-12 | Phase 9 | Complete |
+| UPG-13 | Phase 9 | Complete |
+| UPG-14 | Phase 9 | Complete |
 | OPS-01 | Phase 10 | Pending |
 | OPS-02 | Phase 10 | Pending |
 | OPS-03 | Phase 10 | Pending |
