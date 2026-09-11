@@ -17,6 +17,7 @@ import (
 	"github.com/holzcloud/holzkube-manager/internal/httpapi/middleware"
 	"github.com/holzcloud/holzkube-manager/internal/imagefactory"
 	"github.com/holzcloud/holzkube-manager/internal/inventory"
+	"github.com/holzcloud/holzkube-manager/internal/jobs"
 	"github.com/holzcloud/holzkube-manager/internal/nodestream"
 	"github.com/holzcloud/holzkube-manager/internal/store"
 	"github.com/holzcloud/holzkube-manager/internal/streamhub"
@@ -156,6 +157,13 @@ type Deps struct {
 	// route answers 502 rather than panicking if they are.
 	Hub         *streamhub.Hub
 	NodeStreams *nodestream.Manager
+
+	// Jobs is the engine long-running operations run on, and Confirmer issues
+	// and checks the tokens that gate the destructive ones. Both are nil in a
+	// deployment that offers no node actions, and those handlers answer 502
+	// rather than panicking if they are.
+	Jobs      *jobs.Engine
+	Confirmer *jobs.Confirmer
 
 	// ClusterLocked reports whether a cluster refuses mutation. It is nil in a
 	// deployment with no inventory, and the lock link is then inert -- which

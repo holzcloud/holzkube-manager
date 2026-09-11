@@ -59,6 +59,11 @@ type Store interface {
 	ClusterSecrets() ClusterSecretStore
 	Machines() MachineStore
 
+	// Jobs holds long-running operations. They are records and not goroutines
+	// because the engine's whole claim is that a restart can say where a job
+	// was, and a goroutine that died says nothing.
+	Jobs() JobStore
+
 	Close() error
 }
 
@@ -82,6 +87,14 @@ type ClusterSecretStore interface {
 	Get(ctx context.Context, id model.ClusterID) (model.ClusterSecrets, error)
 	Put(ctx context.Context, rec model.ClusterSecrets) (model.ClusterSecrets, error)
 	Delete(ctx context.Context, id model.ClusterID) error
+}
+
+// JobStore holds long-running operations.
+type JobStore interface {
+	Get(ctx context.Context, id model.JobID) (model.Job, error)
+	List(ctx context.Context) ([]model.Job, error)
+	Put(ctx context.Context, rec model.Job) (model.Job, error)
+	Delete(ctx context.Context, id model.JobID) error
 }
 
 // MachineStore holds the node inventory, flat and keyed by UUID (D-10).

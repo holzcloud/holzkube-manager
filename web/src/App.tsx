@@ -4,6 +4,7 @@ import { auditRoute } from '@/routes/audit'
 import { clustersRoute } from '@/routes/clusters'
 import { imagesRoute } from '@/routes/images'
 import { indexRoute } from '@/routes/index'
+import { jobsRoute } from '@/routes/jobs'
 import { loginRoute } from '@/routes/login'
 import { nodeDetailRoute } from '@/routes/node-detail'
 import { nodesRoute } from '@/routes/nodes'
@@ -29,6 +30,7 @@ const routeTree = rootRoute.addChildren([
     nodesRoute,
     nodeDetailRoute,
     clustersRoute,
+    jobsRoute,
     ...placeholderRoutes,
   ]),
 ])

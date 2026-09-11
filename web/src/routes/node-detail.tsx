@@ -5,6 +5,7 @@ import { type ReactNode, useState } from 'react'
 import { api, type Field, type Machine } from '@/api'
 import { HealthField, StageBadge } from '@/components/HealthField'
 import { LogPanel } from '@/components/LogPanel'
+import { NodeActions } from '@/components/NodeActions'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -86,7 +87,8 @@ export function NodeDetailPage() {
           </p>
         </div>
 
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
+          <NodeActions machine={m} />
           <Button
             variant="outline"
             size="sm"
