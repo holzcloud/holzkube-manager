@@ -24,6 +24,7 @@ import (
 	"github.com/holzcloud/holzkube-manager/internal/store"
 	"github.com/holzcloud/holzkube-manager/internal/streamhub"
 	"github.com/holzcloud/holzkube-manager/internal/talos"
+	"github.com/holzcloud/holzkube-manager/internal/upgrade"
 )
 
 // Route is one entry in the route table.
@@ -177,6 +178,11 @@ type Deps struct {
 	// provisions nothing, and those handlers answer 502 rather than panicking
 	// if it is.
 	Provision *provision.Service
+
+	// Upgrade is the rolling-upgrade and etcd-management service. It is nil in
+	// a deployment that upgrades nothing, and those handlers answer 502 rather
+	// than panicking if it is.
+	Upgrade *upgrade.Service
 
 	// ClusterLocked reports whether a cluster refuses mutation. It is nil in a
 	// deployment with no inventory, and the lock link is then inert -- which

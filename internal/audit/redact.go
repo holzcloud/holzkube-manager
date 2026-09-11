@@ -201,6 +201,41 @@ var allowlist = map[string][]string{
 	// nothing could decide, and redacting the note would leave the archive
 	// saying that somebody decided, without what they decided or why.
 	"provision.bootstrap-resolve": {"bootstrapped", "note"},
+
+	// Upgrades and etcd management, phase 9.
+	//
+	// The version is the whole content of an upgrade record. "A Talos upgrade
+	// was run on this cluster" and "this cluster was taken from 1.13.9 to
+	// 1.14.0 on the eleventh" are different events, and only the second one
+	// answers the question somebody asks six months later about when a
+	// behaviour changed.
+	//
+	// `confirmation` is absent from the two that carry one, as it is
+	// everywhere: it is the HMAC that authorises the run.
+	"upgrade.plan":            {"to"},
+	"upgrade.plan-kubernetes": {"to"},
+	"upgrade.confirm":         {"kind", "to"},
+	"upgrade.talos":           {"to"},
+	"upgrade.kubernetes":      {"to"},
+
+	// The member removal names its member in the path and the cluster in the
+	// path; there is no body worth permitting anything out of. It is listed so
+	// the table shows it.
+	"etcd.remove-member": {},
+
+	// A snapshot is a GET: no body, nothing to permit. It is listed for the
+	// same reason -- and because "somebody took a copy of this cluster's etcd"
+	// is exactly the kind of event an archive exists to hold, even when the
+	// record is only that it happened.
+	"etcd.snapshot": {},
+
+	// Whether a node was locked, and why. The reason is the content: a lock
+	// record that says a lock happened and not why is a record of nothing, and
+	// the reason is an operator's own sentence about their own fleet.
+	"machine.lock": {"locked", "reason"},
+
+	// The cluster a node was removed from. The node is in the path.
+	"node.remove-from-cluster": {"cluster"},
 }
 
 // Listed reports whether an action has an entry in the table.

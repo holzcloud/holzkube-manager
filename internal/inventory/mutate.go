@@ -57,6 +57,52 @@ func (s *Service) CheckLock(ctx context.Context, id model.ClusterID) error {
 	return nil
 }
 
+// SetMachineLock marks a node upgrades skip, or clears the mark (UPG-14).
+//
+// It is deliberately **not** gated behind the cluster's read-only lock, and
+// that is the one thing worth arguing about here. A locked cluster refuses
+// mutation *of its nodes*; this changes nothing on any node. It is a note
+// holzkube-manager keeps about what it should not do, and refusing to let an
+// operator write that note on a cluster they have marked read-only would be
+// refusing them the safer of the two states.
+//
+// A lock carries a reason because a lock nobody can explain is a lock the next
+// person clears because it is in the way.
+func (s *Service) SetMachineLock(
+	ctx context.Context,
+	id model.MachineID,
+	locked bool,
+	reason string,
+) (MachineView, error) {
+	rec, err := s.deps.Store.Machines().Get(ctx, id)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return MachineView{}, ErrNotFound
+		}
+		return MachineView{}, err
+	}
+
+	rec.Locked = locked
+	rec.LockReason = reason
+	if !locked {
+		// Cleared rather than kept: a reason left behind on an unlocked node
+		// reads as a lock that is still in force.
+		rec.LockReason = ""
+	}
+
+	saved, err := s.deps.Store.Machines().Put(ctx, rec)
+	if err != nil {
+		return MachineView{}, err
+	}
+
+	s.deps.Logger.Info("machine lock changed",
+		slog.String("machine", string(id)),
+		slog.Bool("locked", locked),
+		slog.String("reason", reason))
+
+	return s.viewOf(saved), nil
+}
+
 // ClusterOfMachine reports which cluster a machine belongs to, so that a route
 // scoped to a node can be checked against its cluster's lock.
 func (s *Service) ClusterOfMachine(ctx context.Context, id model.MachineID) (model.ClusterID, error) {

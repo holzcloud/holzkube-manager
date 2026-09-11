@@ -95,7 +95,7 @@ export const NAV_AREAS: NavArea[] = [
     path: '/upgrades',
     label: 'Upgrades',
     icon: ArrowUpCircle,
-    phase: 9,
+    phase: null,
     description:
       'Rolling Talos and Kubernetes upgrades behind a health gate that would rather refuse than strand a cluster.',
   },

@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/holzcloud/holzkube-manager/internal/httpapi"
 	"github.com/holzcloud/holzkube-manager/internal/httpapi/handlers"
 	"github.com/holzcloud/holzkube-manager/internal/imagefactory"
 	"github.com/holzcloud/holzkube-manager/internal/talos"
@@ -463,6 +464,203 @@ var routeBudgets = []routeBudget{
 			"one place that is written down.",
 	},
 	{
+		route: "POST /api/v1/clusters/{id}/upgrade/plan",
+		calls: append([]upstreamCall{
+			{name: "NewClusterClient: Version (per node)", class: nodeProbeCall},
+		}, append(nodeFactsCalls(),
+			upstreamCall{name: "gate: EtcdStatus (per control-plane node)", class: nodeFastReadCall},
+			upstreamCall{name: "gate: EtcdMemberList (per control-plane node)", class: nodeFastReadCall},
+			upstreamCall{name: "gate: EtcdAlarmList (per control-plane node)", class: nodeFastReadCall},
+		)...),
+		routeDeadline:     handlers.UpgradeReadRouteBudget,
+		verdict:           withinBudget,
+		clipping:          clipped,
+		clippingRationale: nodeReadClippingRationale,
+		why: "The most expensive read in this product, and still a read: it connects to every " +
+			"node to read the schematic Talos recorded at install time, then runs the health " +
+			"gate's three etcd reads against every control-plane node. The declared calls are " +
+			"what *one* node costs in series; the ceiling covers a homelab-sized cluster of " +
+			"them, which is the size this product is for. A cluster large enough to exceed it " +
+			"is a cluster whose plan should be built a few nodes at a time, and the ceiling " +
+			"saying so is better than a request that never ends.",
+	},
+	{
+		route: "POST /api/v1/clusters/{id}/upgrade/kubernetes/plan",
+		calls: []upstreamCall{
+			{name: "gate: NewClusterClient Version (per control-plane node)", class: nodeProbeCall},
+			{name: "gate: EtcdStatus", class: nodeFastReadCall},
+			{name: "gate: EtcdMemberList", class: nodeFastReadCall},
+			{name: "gate: EtcdAlarmList", class: nodeFastReadCall},
+		},
+		routeDeadline: handlers.UpgradeReadRouteBudget,
+		verdict:       withinBudget,
+		clipping:      uncut,
+		why: "Shorter than the Talos plan by exactly the reads that do not apply: a Kubernetes " +
+			"upgrade writes no installer image, so there is no schematic to read off each node. " +
+			"What is left is the health gate and the versions already in the store. It shares " +
+			"the Talos plan's ceiling because it is the same screen.",
+	},
+	{
+		route: "POST /api/v1/clusters/{id}/upgrade",
+		calls: append([]upstreamCall{
+			{name: "NewClusterClient: Version (per node)", class: nodeProbeCall},
+		}, append(nodeFactsCalls(),
+			upstreamCall{name: "gate: EtcdStatus (per control-plane node)", class: nodeFastReadCall},
+			upstreamCall{name: "gate: EtcdMemberList (per control-plane node)", class: nodeFastReadCall},
+			upstreamCall{name: "gate: EtcdAlarmList (per control-plane node)", class: nodeFastReadCall},
+		)...),
+		routeDeadline:     handlers.UpgradeReadRouteBudget,
+		verdict:           withinBudget,
+		clipping:          clipped,
+		clippingRationale: nodeReadClippingRationale,
+		why: "The submission rebuilds the plan before accepting it -- what the job walks has to " +
+			"be what the server just checked -- so it pays the plan route's reads and then " +
+			"submits a job. Every call the upgrade itself makes happens inside that job, on " +
+			"the engine's context and not on this request's: the ImagePull, the streaming " +
+			"upgrade and the verification are all after this response has been written.",
+	},
+	{
+		route: "POST /api/v1/clusters/{id}/upgrade/kubernetes",
+		calls: []upstreamCall{
+			{name: "gate: NewClusterClient Version (per control-plane node)", class: nodeProbeCall},
+			{name: "gate: EtcdStatus", class: nodeFastReadCall},
+			{name: "gate: EtcdMemberList", class: nodeFastReadCall},
+			{name: "gate: EtcdAlarmList", class: nodeFastReadCall},
+		},
+		routeDeadline: handlers.UpgradeReadRouteBudget,
+		verdict:       withinBudget,
+		clipping:      uncut,
+		why: "As the Talos submission, against the shorter plan: rebuild, check the " +
+			"confirmation, submit. The rolling apply happens in the job.",
+	},
+	{
+		route: "POST /api/v1/clusters/{id}/upgrade/confirm",
+		calls: append([]upstreamCall{
+			{name: "NewClusterClient: Version (per node)", class: nodeProbeCall},
+		}, append(nodeFactsCalls(),
+			upstreamCall{name: "gate: EtcdStatus (per control-plane node)", class: nodeFastReadCall},
+			upstreamCall{name: "gate: EtcdMemberList (per control-plane node)", class: nodeFastReadCall},
+			upstreamCall{name: "gate: EtcdAlarmList (per control-plane node)", class: nodeFastReadCall},
+		)...),
+		routeDeadline:     handlers.UpgradeReadRouteBudget,
+		verdict:           withinBudget,
+		clipping:          clipped,
+		clippingRationale: nodeReadClippingRationale,
+		why: "It builds the same plan the submission will, and that is the point rather than an " +
+			"inefficiency: a token issued against one plan and a run built from another would " +
+			"be a confirmation of something that did not happen.",
+	},
+	{
+		route: "GET /api/v1/clusters/{id}/etcd/members",
+		calls: []upstreamCall{
+			{name: "NewClusterClient: Version", class: nodeProbeCall},
+			{name: "EtcdMemberList", class: nodeFastReadCall},
+		},
+		routeDeadline: handlers.EtcdRouteBudget,
+		verdict:       withinBudget,
+		clipping:      uncut,
+		why: "One connection to the first control-plane node that answers, and one read. It " +
+			"tries the next node when one does not answer, which is why the ceiling has room " +
+			"for more than one attempt.",
+	},
+	{
+		route: "DELETE /api/v1/clusters/{id}/etcd/members/{member}",
+		calls: []upstreamCall{
+			{name: "NewClusterClient: Version", class: nodeProbeCall},
+			{name: "EtcdMemberList (to decide whether the quorum survives)", class: nodeFastReadCall},
+			{name: "NewClusterClient: Version (a different node -- a member cannot remove itself)", class: nodeProbeCall},
+			{name: "EtcdRemoveMemberByID", class: nodeMutationCall},
+		},
+		routeDeadline: handlers.EtcdRouteBudget,
+		verdict:       withinBudget,
+		clipping:      clipped,
+		clippingRationale: "The mutation's thirty-second budget is a ceiling for a node that is " +
+			"barely answering, and the two probes and the read in front of it take milliseconds " +
+			"on a node that is well. Forty-five seconds covers the realistic series; a run that " +
+			"reaches the ceiling is a control plane that cannot answer a membership read, and " +
+			"being cut there is right -- what the operator needs then is to know the cluster is " +
+			"not well, not a removal that eventually goes through.",
+		why: "The membership is read before the removal because the decision -- would this leave " +
+			"the cluster without a quorum -- is about the membership as it is now. The second " +
+			"connection is to a different node, because a member cannot remove itself.",
+	},
+	{
+		route:         "GET /api/v1/clusters/{id}/etcd/snapshot",
+		calls:         nil,
+		routeDeadline: 0,
+		verdict:       withinBudget,
+		clipping:      uncut,
+		why: "A stream, and the only row here that declares no ceiling for a route that does " +
+			"reach a node. That is deliberate: EtcdSnapshot is in the stream deadline class, " +
+			"which carries a first-byte deadline and an idle timeout rather than a total one, " +
+			"and a multi-gigabyte etcd on a slow disk takes as long as it takes. A total " +
+			"deadline here would fail the backups that most need to succeed. The route is " +
+			"marked Streaming, so the write timeout does not apply to it either.",
+	},
+	{
+		route:         "POST /api/v1/machines/{id}/lock",
+		calls:         nil,
+		routeDeadline: 0,
+		verdict:       withinBudget,
+		clipping:      uncut,
+		why: "store-only: a lock is holzkube-manager's own note about what it should not do, and " +
+			"writing it reaches no node. That is why it works on a node that is down, which is " +
+			"precisely when somebody wants to set one.",
+	},
+	{
+		route: "POST /api/v1/machines/{id}/remove-from-cluster",
+		calls: []upstreamCall{
+			{name: "NewClusterClient: Version", class: nodeProbeCall},
+			{name: "EtcdLeaveCluster (control-plane nodes only)", class: nodeMutationCall},
+			{name: "Reset", class: nodeMutationCall},
+		},
+		routeDeadline: handlers.EtcdRouteBudget,
+		verdict:       withinBudget,
+		clipping:      clipped,
+		clippingRationale: "Two mutations in series, each with a thirty-second ceiling, and the " +
+			"route gives them forty-five between them. That is not a route hoping they are " +
+			"quick: both are calls that *initiate* -- the etcd leave returns when the member " +
+			"has been removed from the membership, and the reset returns when the node has " +
+			"accepted it, neither waits for the work -- so the ceilings are for a node that is " +
+			"barely answering. A removal cut at forty-five seconds is a node that could not be " +
+			"told to leave etcd, and stopping there is better than wiping it anyway.",
+		why: "The node leaves etcd and is then wiped, in that order and on one connection. " +
+			"Doing the removal from another node while this one still runs leaves a member " +
+			"that believes it is in a cluster that has forgotten it.",
+	},
+	{
+		route:         "GET /api/v1/upgrade/releases",
+		calls:         []upstreamCall{{name: "Factory: versions", class: jsonCall}},
+		routeDeadline: handlers.EtcdRouteBudget,
+		verdict:       withinBudget,
+		clipping:      uncut,
+		why: "One Image Factory call. It shares the etcd ceiling rather than declaring a third " +
+			"number, because both are 'one upstream call plus room for the handler'.",
+	},
+	{
+		route: "POST /api/v1/clusters/create",
+		calls: []upstreamCall{
+			{name: "NewClusterClient: Version", class: nodeProbeCall},
+		},
+		routeDeadline: handlers.ImportRouteBudget,
+		verdict:       withinBudget,
+		clipping:      uncut,
+		why: "Creating a cluster mints its PKI locally and then proves the credentials reach " +
+			"something: the connectivity check D-04 asks for is one connection, whose Version " +
+			"probe is the proof. It shares the import route's ceiling because it is the second " +
+			"half of the same operation -- this row exists because the completeness guard found " +
+			"that it never had one.",
+	},
+	{
+		route:         "GET /api/v1/clusters/{id}/talosconfig",
+		calls:         nil,
+		routeDeadline: 0,
+		verdict:       withinBudget,
+		clipping:      uncut,
+		why: "store-only: the talosconfig is rendered from the stored bundle and reaches no " +
+			"node. Found by the completeness guard along with the row above.",
+	},
+	{
 		route:         "GET /api/v1/schematics",
 		calls:         nil,
 		routeDeadline: 0,
@@ -472,6 +670,79 @@ var routeBudgets = []routeBudget{
 			"the table so the table demonstrably distinguishes a route that talks upstream " +
 			"from one that does not -- and so R0 has a row that must *not* declare a ceiling.",
 	},
+}
+
+// TestEveryRouteThatReachesUpstreamHasABudgetRow closes the same hole
+// allowlist_test.go closed.
+//
+// The table above is hand-declared, and it has to be: no static analysis
+// available here can count sequential upstream calls through a handler. What
+// *can* be derived is the set of routes, and a row that nobody wrote for a
+// route that exists is the failure mode of every hand-maintained list -- the
+// table keeps passing while the route it does not know about composes to
+// whatever it composes to.
+//
+// It does not demand a row for every route. A read that touches nothing has
+// nothing to budget, and demanding a row for each of them would make the table
+// a list of the whole API and stop anybody reading it. What it demands is that
+// a route either has a row or is named below as one that needs none.
+func TestEveryRouteThatReachesUpstreamHasABudgetRow(t *testing.T) {
+	t.Parallel()
+
+	declared := map[string]bool{}
+	for _, row := range routeBudgets {
+		declared[row.route] = true
+	}
+
+	// Routes that reach no node and no upstream service: authentication, the
+	// store-backed reads and writes, the stream fan-out. Each is named rather
+	// than matched by prefix, so that adding one is a deliberate edit here.
+	noUpstream := map[string]bool{}
+	for _, r := range []string{
+		"GET /api/v1/system/status", "GET /api/v1/system/dry-run",
+		"POST /api/v1/setup", "GET /api/v1/setup",
+		"POST /api/v1/auth/login", "POST /api/v1/auth/logout", "POST /api/v1/auth/sudo",
+		"GET /api/v1/auth/me",
+		"GET /api/v1/auth/oidc/start", "GET /api/v1/auth/oidc/callback",
+		"POST /api/v1/account/password",
+		"GET /api/v1/audit",
+		"GET /api/v1/schematics/{id}", "DELETE /api/v1/schematics/{id}",
+		"GET /api/v1/machines", "GET /api/v1/machines/{id}",
+		"GET /api/v1/clusters", "GET /api/v1/clusters/{id}",
+		"POST /api/v1/clusters/{id}/lock",
+		"DELETE /api/v1/clusters/{id}", "DELETE /api/v1/machines/{id}",
+		"GET /api/v1/stream",
+		"GET /api/v1/jobs", "GET /api/v1/jobs/{id}", "POST /api/v1/jobs/{id}/cancel",
+		"GET /api/v1/machines/{id}/reset-preview", "POST /api/v1/machines/{id}/confirm",
+		"POST /api/v1/machines/{id}/reboot", "POST /api/v1/machines/{id}/shutdown",
+		"POST /api/v1/machines/{id}/reset",
+		"GET /api/v1/patches", "POST /api/v1/patches", "GET /api/v1/patches/{id}",
+		"GET /api/v1/provision/notices", "POST /api/v1/provision/scan",
+		"POST /api/v1/provision/inspect", "POST /api/v1/provision/plan",
+		"POST /api/v1/provision/confirm", "POST /api/v1/provision/apply",
+		"GET /api/v1/provision/bootstrap-recovery",
+		"POST /api/v1/provision/bootstrap-recovery/{cluster}",
+		"GET /api/v1/factory/versions", "GET /api/v1/factory/extensions",
+	} {
+		noUpstream[r] = true
+	}
+
+	var missing []string
+	for _, route := range routeTable(httpapi.Deps{}) {
+		name := route.Method + " " + route.Pattern
+		if declared[name] || noUpstream[name] {
+			continue
+		}
+		missing = append(missing, name)
+	}
+
+	if len(missing) > 0 {
+		t.Fatalf("these routes have no row in the budget table and are not named as reaching "+
+			"nothing:\n  %s\n\nEither add a row -- with its sequential upstream calls and the "+
+			"ceiling it declares -- or name it above as a route that reaches no node. A route "+
+			"the table does not know about composes to whatever it composes to, which is the "+
+			"failure this guard exists to catch.", strings.Join(missing, "\n  "))
+	}
 }
 
 // decompose is the per-call arithmetic a failure message prints, so a reader can

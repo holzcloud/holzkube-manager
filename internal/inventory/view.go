@@ -42,6 +42,14 @@ type MachineView struct {
 	// dead fleet and sends the operator to the wrong repair (D-23).
 	CertificateExpired bool `json:"certificate_expired"`
 
+	// Locked and LockReason are UPG-14: this node is skipped by rolling
+	// operations. They are not Fields, because they are holzkube-manager's own
+	// note about what it should not do rather than something a node said --
+	// and they are true whether or not the node is answering, which is
+	// precisely when the note matters most.
+	Locked     bool   `json:"locked"`
+	LockReason string `json:"lock_reason,omitempty"`
+
 	AdoptedAt time.Time `json:"adopted_at"`
 
 	Hostname health.Field[string] `json:"hostname"`
@@ -178,6 +186,8 @@ func (s *Service) viewOf(rec model.Machine) MachineView {
 		Stage:              stage,
 		LostAddr:           !rec.LostAddrAt.IsZero(),
 		CertificateExpired: s.expiredCertificate(rec.ID),
+		Locked:             rec.Locked,
+		LockReason:         rec.LockReason,
 		AdoptedAt:          rec.AdoptedAt,
 	}
 

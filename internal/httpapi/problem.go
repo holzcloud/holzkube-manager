@@ -176,6 +176,43 @@ const (
 	// send somebody to fix something that works.
 	CodeBootstrapInProgress = "conflict.bootstrap-in-progress"
 	CodeAlreadyBootstrapped = "conflict.already-bootstrapped"
+
+	// CodeUpgradeBlocked: the plan this run was built from has something
+	// standing in the way (UPG-02, UPG-03, UPG-04, UPG-06). It is one code
+	// rather than four because the plan document carries which, and a client
+	// showing the plan does not need the code to tell it what to render.
+	CodeUpgradeBlocked = "conflict.upgrade-blocked"
+
+	// CodeWouldStrand: this upgrade would leave the running Kubernetes version
+	// outside what the target Talos supports (UPG-06). It has its own code
+	// because it is the one refusal here that is about a state with no good
+	// way out -- the upgrade that would fix it is performed by the same Talos
+	// that no longer supports the version it is upgrading from.
+	CodeWouldStrand = "conflict.would-strand-kubernetes"
+
+	// CodeLastVotingMember: removing this etcd member would leave the cluster
+	// without a quorum (UPG-11). Distinct from upgrade-blocked because a
+	// removal has no node coming back afterwards.
+	CodeLastVotingMember = "conflict.last-voting-member"
+
+	// CodeUnknownSchematic: this node's Image Factory schematic could not be
+	// read, so an upgrade would install a stock system and silently remove
+	// every extension it has (UPG-03).
+	CodeUnknownSchematic = "conflict.unknown-schematic"
+
+	// CodeNotUpgraded: the node came back running something other than what
+	// was installed (UPG-07). It is the code for "the API said OK and the node
+	// disagrees", which is the whole reason that check exists.
+	CodeNotUpgraded = "conflict.not-upgraded"
+
+	// CodeNodeRefused: the node answered and the answer was no. It exists
+	// because talos.KindRejected deliberately has no upstream code -- "the
+	// node refused" is not an availability problem -- and without a code of
+	// its own every such refusal arrived as internal.unexpected, which by
+	// contract carries no detail. On the etcd routes it almost always means
+	// etcd is not running on the node that was asked, and that sentence is
+	// worth keeping.
+	CodeNodeRefused = "conflict.node-refused"
 )
 
 // ClusterLocked reports a mutation refused by a cluster's read-only lock.
