@@ -356,6 +356,22 @@ func (c *ClusterClient) Members(ctx context.Context) ([]Member, error) {
 // tokens, so a caller that logs them, returns them or puts them in an error
 // message has leaked the cluster -- which is why nothing above the import
 // service ever sees the return value of this method.
+// KernelCmdline is the command line the node actually booted with.
+//
+// It is read separately from NodeFacts and not folded into it, because only
+// one caller needs it and it is the expensive kind of fact: a fact whose whole
+// value is being compared against a *different* source of truth. NodeFacts is
+// the node describing itself; this is evidence for an argument about a
+// disagreement (UPG-04).
+func (c *ClusterClient) KernelCmdline(ctx context.Context) (string, error) {
+	cmdline, err := safe.StateGetByID[*runtimeres.KernelCmdline](
+		ctx, c.COSI(), runtimeres.KernelCmdlineID)
+	if err != nil {
+		return "", err
+	}
+	return cmdline.TypedSpec().Cmdline, nil
+}
+
 func (c *ClusterClient) MachineConfigYAML(ctx context.Context) ([]byte, error) {
 	cfg, err := safe.StateGetByID[*configres.MachineConfig](ctx, c.COSI(), configres.ActiveID)
 	if err != nil {

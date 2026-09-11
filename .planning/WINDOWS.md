@@ -99,6 +99,8 @@ last_updated: 2026-09-11T16:50:00.000Z
 | 82 | 08 | unrun-verify | internal/provision/job.go |  | DER BINAERE ABNAHMETEST VON PHASE 8 IST NICHT AUSGEFUEHRT: eine blanke Maschine wurde nirgends zu einem gesunden Cluster-Node. Die beiden Eintrittsbedingungen der Phase -- 'QEMU (Tier 2) funktioniert, nachgewiesen in Phase 4' und 'eine Maschine, die blank sein darf' -- sind beide unerfuellt (Fenster 80 und 81), und die Phase wurde trotzdem gebaut,  | open |  | 2026-09-11T18:10:00.000Z |  |
 | 83 | 08 | deviation | internal/audit/redact.go |  | PHASE 6 UND 7 HABEN ACHT AUDITIERTE AKTIONEN OHNE ALLOWLIST-EINTRAG AUSGELIEFERT, und dieses Fenster haelt fest, was dabei fuer immer verloren ist. Von der Einfuehrung der Node-Aktionen bis zu dieser Runde wurde jeder Parameter jedes Reboots, jedes Shutdowns, jedes Resets, jeder Bestaetigung, jedes Job-Cancels, jedes config.plan, jedes config.apply | open |  | 2026-09-11T18:10:00.000Z |  |
 | 84 | 08 | unrun-verify | internal/provision/job.go |  | DIE MACHINE-CONFIG DER PROVISIONIERUNG IST NIE GEGEN ECHTES TALOS APPLIZIERT WORDEN. provision.buildConfig baut die Konfiguration aus dem in Phase 3 abgeleiteten Bundle, haengt den Install-Patch (.machine.install.disk und .image aus derselben Schematic-ID) und optional den Hostnamen an, und uebergibt alles an machineconfig.Generate unter dem pro Cl | open |  | 2026-09-11T18:10:00.000Z |  |
+| 85 | 09 | unrun-verify | internal/upgrade/job.go |  | KEIN UPGRADE IST JE AUF ECHTER HARDWARE GELAUFEN, und dieses Fenster fuehrt, was talossim deshalb bestaetigt, weil talossim es eingebaut hat. Dreierlei konkret: (a) ob LifecycleService.Upgrade in Talos v1.13 die Form hat, gegen die hier gebaut wurde -- die Request verlangt ein Image, das bereits per ImagePull auf dem Node liegt, und ob ein echter N | open |  | 2026-09-11T18:55:00.000Z |  |
+| 86 | 09 | deviation | internal/upgrade/job.go |  | DAS KUBERNETES-UPGRADE SCHREIBT DIE IMAGES IN DIE MACHINE-CONFIG UND SPRICHT NICHT MIT KUBERNETES. talosctl upgrade-k8s orchestriert ueber die Kubernetes-API: prepull, dann die Static Pods einzeln, dann kube-proxy, dann die Kubelets, jeweils mit Health-Checks dazwischen. Dieser Pfad setzt stattdessen .machine.kubelet.image und die drei .cluster.*.i | open |  | 2026-09-11T18:55:00.000Z |  |
 
 ````json
 [
@@ -1108,6 +1110,30 @@ last_updated: 2026-09-11T16:50:00.000Z
     "status": "open",
     "reason": "",
     "recorded_at": "2026-09-11T18:10:00.000Z",
+    "resolved_at": null
+  },
+  {
+    "id": 85,
+    "kind": "unrun-verify",
+    "phase": "09",
+    "file": "internal/upgrade/job.go",
+    "line": null,
+    "description": "KEIN UPGRADE IST JE AUF ECHTER HARDWARE GELAUFEN, und dieses Fenster fuehrt, was talossim deshalb bestaetigt, weil talossim es eingebaut hat. Dreierlei konkret: (a) ob LifecycleService.Upgrade in Talos v1.13 die Form hat, gegen die hier gebaut wurde -- die Request verlangt ein Image, das bereits per ImagePull auf dem Node liegt, und ob ein echter Node eine nicht gezogene Referenz genauso ablehnt wie der Simulator, ist ungeprueft; (b) wie lange ein echter Node nach einem Upgrade zum Wiederauftauchen braucht, weshalb upgrade.ReappearBudget mit 12 Minuten dieselbe geratene Zahl ist wie Phase 8s 8 Minuten und die Drei-Wege-Probe gegen eine Erwartung misst, die niemand gemessen hat; (c) ob der Kernel-Args-Vergleich gegen eine echte /proc/cmdline das Richtige tut -- talosOwnedArg ist eine kuratierte Liste der Argumente, die Talos sich selbst setzt, und sie ist nie gegen eine echte Kommandozeile gehalten worden. Ein fehlender Eintrag dort meldet Drift, wo keine ist, und blockiert den Ein-Klick-Pfad fuer jeden Node im Cluster; ein zu vieler verschweigt echte Drift. SCHLIESSBEDINGUNG: ein protokollierter rollender Upgrade ueber mindestens zwei Nodes auf echter Hardware oder QEMU, mit der gemessenen Wiederauftauch-Zeit und einer echten /proc/cmdline, gegen die talosOwnedArg geprueft wurde.",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-09-11T18:55:00.000Z",
+    "resolved_at": null
+  },
+  {
+    "id": 86,
+    "kind": "deviation",
+    "phase": "09",
+    "file": "internal/upgrade/job.go",
+    "line": null,
+    "description": "DAS KUBERNETES-UPGRADE SCHREIBT DIE IMAGES IN DIE MACHINE-CONFIG UND SPRICHT NICHT MIT KUBERNETES. talosctl upgrade-k8s orchestriert ueber die Kubernetes-API: prepull, dann die Static Pods einzeln, dann kube-proxy, dann die Kubelets, jeweils mit Health-Checks dazwischen. Dieser Pfad setzt stattdessen .machine.kubelet.image und die drei .cluster.*.image-Felder per ApplyConfiguration im no-reboot-Modus und wartet darauf, dass der Node die neue Kubelet-Version meldet. Das ist derselbe Mechanismus, den Talos selbst verwendet, wenn eine Config angewendet wird, und es ist NICHT dieselbe Orchestrierung: es gibt keinen Prepull (der erste Node zieht die Images, waehrend seine Static Pods bereits neustarten sollen), keine Reihenfolge zwischen apiServer, controllerManager und scheduler innerhalb eines Nodes, und keinen kube-proxy-Schritt ueberhaupt -- kube-proxy ist ein DaemonSet und lebt in der Kubernetes-API, die dieses Produkt per Constraint nicht spricht. KONSEQUENZ: ein Kubernetes-Upgrade ueber diesen Pfad kann laenger dauern und waehrend des Uebergangs mehr Unruhe erzeugen als talosctl upgrade-k8s, und ein Cluster mit kube-proxy bleibt auf der alten kube-proxy-Version, bis jemand das DaemonSet selbst anfasst. SCHLIESSBEDINGUNG: entweder ein ausdruecklicher Betreiber-Entscheid, dass dieser Pfad fuer 5-20 Nodes genuegt und der kube-proxy-Hinweis im UI steht, oder V2 mit einem Kubernetes-API-Client.",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-09-11T18:55:00.000Z",
     "resolved_at": null
   }
 ]

@@ -356,6 +356,24 @@ function NodeTable({ nodes }: { nodes: NodePlan[] }) {
                   {n.skip_reason || n.block_reason}
                 </p>
               )}
+              {/* UPG-04: both lists, so the operator can see the difference
+                  rather than take it on trust. */}
+              {n.kernel_args?.drifted && (
+                <dl className="mt-1 space-y-0.5 text-xs">
+                  {n.kernel_args.only_on_node && n.kernel_args.only_on_node.length > 0 && (
+                    <div>
+                      <dt className="inline text-muted-foreground">Only on the node: </dt>
+                      <dd className="inline font-mono">{n.kernel_args.only_on_node.join(' ')}</dd>
+                    </div>
+                  )}
+                  {n.kernel_args.only_in_config && n.kernel_args.only_in_config.length > 0 && (
+                    <div>
+                      <dt className="inline text-muted-foreground">Only in the configuration: </dt>
+                      <dd className="inline font-mono">{n.kernel_args.only_in_config.join(' ')}</dd>
+                    </div>
+                  )}
+                </dl>
+              )}
             </TableCell>
             <TableCell>{n.role}</TableCell>
             <TableCell className="font-mono text-xs">{n.from || '—'}</TableCell>
@@ -421,7 +439,13 @@ function EtcdPanel({ cluster }: { cluster: string }) {
   )
 }
 
-export function MemberTable({ list, onRemove }: { list: EtcdMemberList; onRemove: (id: string) => void }) {
+export function MemberTable({
+  list,
+  onRemove,
+}: {
+  list: EtcdMemberList
+  onRemove: (id: string) => void
+}) {
   return (
     <div className="space-y-2">
       <p className="text-sm text-muted-foreground">{list.sentence}</p>

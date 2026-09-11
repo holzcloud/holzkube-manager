@@ -1,6 +1,7 @@
 package upgrade
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -9,6 +10,7 @@ import (
 	"github.com/holzcloud/holzkube-manager/internal/model"
 	"github.com/holzcloud/holzkube-manager/internal/provision"
 	"github.com/holzcloud/holzkube-manager/internal/talos"
+	"gopkg.in/yaml.v3"
 )
 
 // The three checks that are about what a node *is* rather than about what the
@@ -126,6 +128,66 @@ type KernelArgDrift struct {
 	OnlyInConfig []string `json:"only_in_config,omitempty"`
 
 	Sentence string `json:"sentence,omitempty"`
+}
+
+// ReadKernelArgDrift reads both sides and compares them (UPG-04).
+//
+// Both sides come from the node, which is the only place either of them can be
+// read honestly: the command line from /proc/cmdline as the node reports it,
+// and the configured arguments from the configuration the node is actually
+// running rather than from whatever this installation last wrote.
+func ReadKernelArgDrift(ctx context.Context, cc *talos.ClusterClient) (KernelArgDrift, error) {
+	cmdlineCtx, cancel, err := talos.WithClassDeadline(ctx, talos.MethodCOSIGet)
+	if err != nil {
+		return KernelArgDrift{}, err
+	}
+	cmdline, err := cc.KernelCmdline(cmdlineCtx)
+	cancel()
+	if err != nil {
+		return KernelArgDrift{}, err
+	}
+
+	configCtx, cancel, err := talos.WithClassDeadline(ctx, talos.MethodCOSIGet)
+	if err != nil {
+		return KernelArgDrift{}, err
+	}
+	raw, err := cc.MachineConfigYAML(configCtx)
+	cancel()
+	if err != nil {
+		return KernelArgDrift{}, err
+	}
+
+	return CheckKernelArgs(configuredKernelArgs(raw), strings.Fields(cmdline)), nil
+}
+
+// configuredKernelArgs reads .machine.install.extraKernelArgs out of a machine
+// configuration.
+//
+// It is parsed out of the YAML rather than through machinery's config loader,
+// because the loader validates the whole document and a node running a
+// configuration this build's loader rejects is exactly the node somebody is
+// trying to upgrade. A list this cannot read comes back empty, which reports
+// no drift -- the conservative direction: a false "no drift" costs a check, a
+// false "drift" blocks an upgrade that is fine.
+func configuredKernelArgs(raw []byte) []string {
+	var doc struct {
+		Machine struct {
+			Install struct {
+				ExtraKernelArgs []string `yaml:"extraKernelArgs"`
+			} `yaml:"install"`
+		} `yaml:"machine"`
+	}
+
+	// Only the first document: a machine configuration's later documents are
+	// the multi-doc extensions, and none of them carries install options.
+	first := raw
+	if i := bytes.Index(raw, []byte("\n---")); i >= 0 {
+		first = raw[:i]
+	}
+	if err := yaml.Unmarshal(first, &doc); err != nil {
+		return nil
+	}
+	return doc.Machine.Install.ExtraKernelArgs
 }
 
 // CheckKernelArgs compares a node's running kernel command line against what

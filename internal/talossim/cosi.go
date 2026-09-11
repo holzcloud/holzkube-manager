@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/netip"
 	"strconv"
+	"strings"
 
 	cosiapi "github.com/cosi-project/runtime/api/v1alpha1"
 	"github.com/cosi-project/runtime/pkg/state"
@@ -102,6 +103,9 @@ func (s *Server) seedCOSI(ctx context.Context) error {
 	if err := s.seedHardware(ctx); err != nil {
 		return err
 	}
+	if err := s.seedKernelCmdline(ctx); err != nil {
+		return err
+	}
 	if err := s.seedExtensions(ctx); err != nil {
 		return err
 	}
@@ -180,6 +184,31 @@ func (s *Server) seedHardware(ctx context.Context) error {
 // absence is the point: it is what a node not installed from a Factory image
 // looks like, and holzkube-manager has to report it as "none" rather than derive one
 // from the Talos version (D-12).
+// seedKernelCmdline puts the node's own boot command line into the state.
+//
+// It is what UPG-04's comparison reads on one side, and the simulator has to
+// serve it for that check to be a check rather than an error nobody sees: the
+// drift comparison treats a read it cannot perform as "no drift", which is the
+// conservative direction and is also silent.
+//
+// The default carries the arguments Talos sets for itself, so a node with no
+// KernelArgs option configured shows *no* drift -- if it showed drift, every
+// node in every cluster would be blocked and the check would be switched off.
+func (s *Server) seedKernelCmdline(ctx context.Context) error {
+	args := append([]string{
+		"init_on_alloc=1", "slab_nomerge", "pti=on", "consoleblank=0",
+		"talos.platform=metal", "printk.devkmsg=on",
+	}, s.opts.KernelArgs...)
+
+	cmdline := runtimeres.NewKernelCmdline()
+	cmdline.TypedSpec().Cmdline = strings.Join(args, " ")
+
+	if err := s.COSI().Create(ctx, cmdline); err != nil {
+		return fmt.Errorf("talossim: seed %s: %w", runtimeres.KernelCmdlineType, err)
+	}
+	return nil
+}
+
 func (s *Server) seedExtensions(ctx context.Context) error {
 	if s.opts.SchematicID == "" {
 		return nil

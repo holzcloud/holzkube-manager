@@ -1575,3 +1575,213 @@ every parameter of every reboot, reset and configuration apply was a marker whil
 this document described what those records would contain.
 `cmd/holzkube-managerd/allowlist_test.go` now holds both directions: every route
 action has an entry, and every entry is emitted by a route.
+
+## Upgrades and etcd
+
+### There is no "latest"
+
+No route accepts it and no screen offers it. "Latest" is a promise this server
+cannot keep: the newest Talos release may be two minors away, Talos upgrades one
+minor at a time, and an endpoint that quietly did two upgrades in a row would do
+the second against a cluster nobody looked at — with the health gate between
+them, which is the check that matters most.
+
+`POST /api/v1/clusters/{id}/upgrade/plan` returns the **chain** instead: every
+intermediate minor, each with the sentence saying why it exists. A run installs
+one of them; the rest are the runs that follow.
+
+`GET /api/v1/upgrade/releases` filters pre-releases out entirely. A chain that
+routed a cluster through a release candidate would route it through software its
+own project does not call finished.
+
+### The plan is the screen
+
+| field | what it is |
+|---|---|
+| `chain` | every version to pass through (UPG-05) |
+| `strand` | whether this would take Kubernetes out of support (UPG-06) |
+| `gate_preview` | the health gate **as it stands now**, with its inputs (UPG-02) |
+| `nodes[]` | the walk order, control plane first |
+| `nodes[].installer` | the exact installer this node will use (UPG-03) |
+| `nodes[].skip_reason` | why a locked node is walked past (UPG-14) |
+| `blocked` / `block_reason` | whether this can be submitted at all |
+
+`gate_preview` is named that because it is not the gate that decides. **The gate
+runs inside every node's step**, immediately before that node is touched.
+Evaluating it once at the start would be evaluating it against a cluster the
+previous node has since changed — which is exactly the cluster UPG-02 is about.
+
+A gate that could not be evaluated is a **refusal**, never a blank. A verdict
+with neither `ok` nor a `reason` would be the most important check on the screen
+silently saying nothing.
+
+### The gate shows its inputs, whether it passes or refuses
+
+`gate_preview.input` carries the membership, the voting count, each member's
+raft status, the unreachable members and etcd's own alarms. It is present when
+the gate says yes as well: "why did it let that through" deserves the same
+answer as "why did it not".
+
+The gate refuses on, in order: an etcd alarm, an unreachable member, fewer than
+three voting members, raft lag past `MaxRaftLag`, no leader, and any error a
+member reports about itself.
+
+**A learner is not a voter.** A cluster of three members with one learner
+reports three members everywhere a member count is shown, and has two votes.
+Counting the learner is how a rolling upgrade takes down the second of two
+voters while believing it is taking down the first of three.
+
+**A single-node cluster is the deliberate exception.** It has no quorum to lose,
+and refusing it would make the smallest homelab unupgradeable.
+
+### Two voters is the number that decides
+
+Three voting members survive losing one. Two survive losing none: the remaining
+member holds one vote out of two, which is not a majority, and the cluster stops
+accepting writes until the other comes back. There is no command that recovers
+from the second loss without a snapshot — which is why this gate refuses rather
+than warns.
+
+### A Talos upgrade that would strand Kubernetes is blocked
+
+`409 conflict.would-strand-kubernetes`, with a remedy rather than only a
+complaint. The state it prevents has no good way out: the node comes back on the
+new Talos, the cluster is then running a Kubernetes version that Talos does not
+support, and the Kubernetes upgrade that would fix it is performed by that same
+Talos.
+
+An **unknown** Talos version is blocked too. An extrapolated compatibility window
+is an upgrade that is allowed to strand a cluster.
+
+### The schematic is read from the node, never guessed
+
+`nodes[].installer` is built from the schematic Talos recorded at install time
+and read back off the node on every plan — not from the stored snapshot, not
+from a sibling node, not from what the operator last typed. Two nodes in one
+cluster can legitimately have been built from different schematics.
+
+The failure this prevents is silent and permanent: an upgrade to a stock
+installer on a node built from a Factory image succeeds, the node comes back,
+joins, reports healthy — and every system extension it had is gone. Nothing
+reports it. A node whose schematic cannot be read blocks the run.
+
+### "The API said OK" is not proof
+
+The upgrade RPC is `LifecycleService.Upgrade`, a **stream**, not the deprecated
+unary `MachineService.Upgrade`. The unary one returns as soon as the node has
+accepted the request, so everything the installer says afterwards — which is
+everything that says what went wrong — is lost.
+
+The stream ending is the node **leaving**, not the upgrade succeeding: a node
+rebooting into what it just wrote and a node that fell over look identical from
+here. What settles it is a separate read afterwards, against the node, for three
+things: the version that was installed, the schematic that was installed, and
+its own services running. A node on the right version with the wrong image is
+the case that check exists for.
+
+### The image is pulled before anything is replaced
+
+`ImagePull` then `Upgrade`, in that order, because the API requires it — and
+keeping the two calls visible rather than hiding them behind one wrapper is
+deliberate. A wrong installer reference, an unreachable registry or a schematic
+that does not exist fails at the pull, while the node is still running the system
+it is running. Failing there costs nothing.
+
+### Confirming an upgrade types the cluster's name
+
+Not a hostname. A rolling upgrade is not about one machine — there is no single
+hostname to type — and the thing being put at risk is the cluster.
+
+The confirmation and the submission both rebuild the plan server-side and refuse
+if it is blocked. A token issued against one plan and a run built from another
+would be a confirmation of something that did not happen.
+
+### etcd members are named by hostname
+
+`GET /api/v1/clusters/{id}/etcd/members` returns each member as
+`"cp-1 (id 8e9e05c52164694d)"`. The id is carried because the removal RPC needs
+it, and it is never the only thing on offer: an operator asked to confirm the
+removal of `8e9e05c52164694d` is confirming a string, not a machine.
+
+The id travels as a **hex string**, not a number. A 64-bit member id does not
+survive a JSON number in a browser, and a screen showing a member id that is not
+any member's is worse than one showing none.
+
+`tolerates` is derived once here rather than in every client: a majority of *n*
+is *n/2+1*, so the number that may be lost is *n − (n/2+1)*.
+
+Removing a voter from a cluster that cannot spare one is `409
+conflict.last-voting-member`. A removal is not an upgrade — there is no node
+coming back afterwards — so it is the last point at which anything can say no.
+
+### The snapshot fallback is stated, not hidden
+
+`GET /api/v1/clusters/{id}/etcd/snapshot` streams bytes. It needs a **quorum**:
+the member has to confirm with the others that what it is reading is current, and
+a cluster that has lost quorum cannot answer that, so the RPC fails there.
+
+What is still available then is the member's own database file, copied off the
+node. That is a snapshot of what one member believed — which is what you restore
+from when there is nothing better, and it is not the same thing. The refusal says
+so, on both the call's error and the stream's, because for a server stream the
+refusal arrives on the first read rather than when the stream is opened.
+
+A snapshot that wrote **zero bytes** is refused rather than reported as success.
+A zero-length file looks like a backup in a directory listing.
+
+### Removing a node from a cluster
+
+`POST /api/v1/machines/{id}/remove-from-cluster` does three things in an order
+where each one is there because skipping it leaves something behind: the node
+leaves etcd (from the node itself, so it forfeits leadership and removes itself
+rather than being removed by a peer while still running), it is reset to its
+system disk, and it is forgotten from the inventory.
+
+**Cordon and drain are not performed**, and the response says so. holzkube-manager
+speaks the Talos machine API and not the Kubernetes API. Anything still scheduled
+on the node stops when it does.
+
+### The per-node lock
+
+`POST /api/v1/machines/{id}/lock` marks a node rolling operations skip (UPG-14).
+A locked node is walked past, not failed: the lock is somebody saying "not this
+one", and stopping a whole upgrade because of it would make the lock a blunt
+instrument nobody uses.
+
+It requires a **reason**. A lock nobody can explain is a lock the next person
+clears because it is in the way.
+
+It is deliberately **not** behind the cluster's read-only lock and it reaches no
+node, so it works on a machine that is down — which is precisely when somebody
+wants to set one.
+
+### Codes minted here
+
+| code | HTTP | when |
+|---|---|---|
+| `conflict.upgrade-blocked` | 409 | the plan this run was built from has something in the way |
+| `conflict.would-strand-kubernetes` | 409 | this upgrade would leave Kubernetes unsupported |
+| `conflict.last-voting-member` | 409 | removing this member would leave etcd without a quorum |
+| `conflict.unknown-schematic` | 409 | the node's Image Factory schematic could not be read |
+| `conflict.not-upgraded` | 409 | the node came back running something other than what was installed |
+| `conflict.node-refused` | 409 | the node answered and the answer was no |
+
+`conflict.node-refused` exists because `talos.KindRejected` deliberately has no
+upstream code — "the node refused" is not an availability problem — and without
+one every such refusal arrived as `internal.unexpected`, which by contract
+carries no detail. On the etcd routes it almost always means etcd is not running
+on the node that was asked.
+
+### Two guards that had holes
+
+`cmd/holzkube-managerd/allowlist_test.go` kept its **own copy** of the route
+table, so this phase's routes were added to `main` and not to the test: the guard
+walked every route except the new ones and passed. There is now one `routeTable`
+function and the test calls it.
+
+`budget_test.go` had no completeness check at all, so a route with upstream calls
+and no row composed to whatever it composed to. The new guard found two routes
+from phase 3 — cluster create and talosconfig — that had never had a row.
+
+Both are the same failure: a guard with its own copy of the thing it guards goes
+quiet exactly when something is added.

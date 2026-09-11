@@ -1,19 +1,19 @@
 ---
 gsd_state_version: 1.0
 milestone: v1.14
-current_phase: 9
-current_phase_name: "Upgrades & etcd-Verwaltung"
+current_phase: 10
+current_phase_name: "Härtung & echter Hardware-Durchlauf"
 status: executing
-stopped_at: Phase 8 built; criterion 1 unverified (window 82)
-last_updated: "2026-09-11T18:15:00.000Z"
+stopped_at: Phase 9 complete against talossim; no upgrade on real hardware (window 85)
+last_updated: "2026-09-11T18:55:00.000Z"
 last_activity: 2026-09-11
-last_activity_desc: Phase 08 built and executed against talossim, transitioned to Phase 9
+last_activity_desc: Phase 09 complete, transitioned to Phase 10
 state_head: a474d2522823cbfb436ee720dee35494890281a3
 progress:
   total_phases: 10
-  completed_phases: 7
-  total_plans: 38
-  completed_plans: 38
+  completed_phases: 8
+  total_plans: 39
+  completed_plans: 39
 ---
 
 # Project State
@@ -23,16 +23,25 @@ progress:
 See: .planning/PROJECT.md (updated 2026-08-27)
 
 **Core value:** Eine neue Maschine wird komplett in der UI zum Cluster-Node — ohne `talosctl`, ohne Omni.
-**Current focus:** Phase 09 — Upgrades & etcd-Verwaltung
+**Current focus:** Phase 10 — Härtung & echter Hardware-Durchlauf
 
 ## Current Position
 
-Phase: 9 — Upgrades & etcd-Verwaltung
+Phase: 10 — Härtung & echter Hardware-Durchlauf
 Plan: Not started
 Status: Ready to plan
-Last activity: 2026-09-11 — Phase 08 built and executed against `talossim`
+Last activity: 2026-09-11 — Phase 09 complete against `talossim`
 
-Progress: [███████▓░░] 7 of 10 phases, plus Phase 4 partially
+Progress: [████████▓░] 8 of 10 phases, plus Phase 4 partially
+
+**Phase 9 ist erfüllt und auf keiner echten Maschine gelaufen.** Alle fünf
+Erfolgskriterien sind gegen `talossim` ausgeführt; kein rollendes Upgrade hat je
+eine Maschine berührt. Fenster 85 nennt die drei Annahmen, die davon abhängen —
+die Form von `LifecycleService.Upgrade` in echtem Talos, die Wiederauftauch-Zeit
+(`ReappearBudget` ist wie Phase 8s eine geratene Zahl) und die kuratierte Liste
+der Kernel-Argumente, die Talos sich selbst setzt. Fenster 86 hält fest, dass
+der Kubernetes-Pfad die Images in die MachineConfig schreibt statt über die
+Kubernetes-API zu orchestrieren, was kube-proxy unberührt lässt.
 
 **Phase 8 ist gebaut und Erfolgskriterium 1 ist unverifiziert.** Die beiden
 Eintrittsbedingungen der Phase — QEMU aus Phase 4, und eine Maschine, die blank
@@ -73,7 +82,7 @@ Ziel-Go-Version ist und nicht lief.
 
 **Velocity:**
 
-- Total plans completed: 38
+- Total plans completed: 39
 - Average duration: —
 - Total execution time: 0.0 hours
 
@@ -282,6 +291,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 ## Session Continuity
 
-Last session: 2026-09-11T18:15:00.000Z
-Stopped at: Phase 8 built and executed against `talossim`
-Resume file: .planning/phases/08-provisioning/08-SUMMARY.md
+Last session: 2026-09-11T18:55:00.000Z
+Stopped at: Phase 9 complete against `talossim`
+Resume file: .planning/phases/09-upgrades-etcd/09-SUMMARY.md
