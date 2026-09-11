@@ -87,6 +87,52 @@ const (
 	CodeUpstreamFactoryRejected = "upstream.factory-rejected"
 )
 
+// The codes phase 3 mints, under types the taxonomy already closes over.
+//
+// They are minted deliberately and in the same commit as the routes that emit
+// them, because the alternative is not a missing code: it is every one of
+// these failures arriving as internal.unexpected, which by contract carries no
+// detail at all, and being kept that way forever in an archive with no
+// deletion path.
+const (
+	// CodeNotControlPlane: the adoption was aimed at a node whose machine
+	// configuration carries no control-plane material. The remedy is specific
+	// and nothing else implies it -- name a control-plane node -- which is why
+	// it is not folded into the generic validation code (D-05).
+	CodeNotControlPlane = "validation.node-not-controlplane"
+
+	// CodeTalosconfigInvalid: the uploaded file is not a usable talosconfig.
+	// One code for "not YAML", "no context" and "no client certificate": all
+	// three mean the wrong file was uploaded, and distinguishing them would
+	// narrow a guess for somebody who should not be guessing.
+	CodeTalosconfigInvalid = "validation.talosconfig-invalid"
+
+	// CodeFingerprintMismatch: the node presented a certificate other than the
+	// one the operator confirmed. It is a validation failure rather than an
+	// upstream one because what is wrong is the value that was submitted --
+	// or, worse, what is answering at that address.
+	CodeFingerprintMismatch = "validation.fingerprint-mismatch"
+
+	// CodeClusterLocked: the cluster was adopted read-only and this request
+	// would have changed something (INV-12, D-22).
+	CodeClusterLocked = "forbidden.cluster-locked"
+)
+
+// ClusterLocked reports a mutation refused by a cluster's read-only lock.
+//
+// It carries a detail, unlike Unauthenticated: there is nothing to conceal
+// from a caller who already holds a session, and "this cluster is locked" is
+// useless without "and here is how it got that way".
+func ClusterLocked(detail string) *Problem {
+	return &Problem{
+		Type:   TypeForbidden,
+		Title:  "The cluster is locked read-only",
+		Status: http.StatusForbidden,
+		Detail: detail,
+		Code:   CodeClusterLocked,
+	}
+}
+
 // FieldError names one failed field inside a validation problem.
 type FieldError struct {
 	Field  string `json:"field"`

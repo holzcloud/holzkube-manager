@@ -391,3 +391,25 @@ func TestCertificateLadderNamesTheState(t *testing.T) {
 		}
 	}
 }
+
+// TestAddManualRecordsANodeByAddress is D-08's second way in: after the
+// membership has filled the inventory, an operator can still name an address,
+// and that path must work on a cluster that is not locked.
+func TestAddManualRecordsANodeByAddress(t *testing.T) {
+	t.Parallel()
+
+	ctx := testContext(t)
+	f := newFixture(t, talossim.Options{ControlPlane: true})
+	c := f.importCluster(t, ctx)
+
+	rec, err := f.svc.AddManual(ctx, c.ID, f.sim.Host())
+	if err != nil {
+		t.Fatalf("AddManual: %v", err)
+	}
+	if rec.Addr != f.sim.Host() {
+		t.Errorf("Addr = %q, want %q", rec.Addr, f.sim.Host())
+	}
+	if rec.Cluster != c.ID {
+		t.Errorf("Cluster = %q, want %q", rec.Cluster, c.ID)
+	}
+}

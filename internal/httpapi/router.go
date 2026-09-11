@@ -16,6 +16,7 @@ import (
 	"github.com/holzcloud/holzkube-manager/internal/auth/oidc"
 	"github.com/holzcloud/holzkube-manager/internal/httpapi/middleware"
 	"github.com/holzcloud/holzkube-manager/internal/imagefactory"
+	"github.com/holzcloud/holzkube-manager/internal/inventory"
 	"github.com/holzcloud/holzkube-manager/internal/store"
 	"github.com/holzcloud/holzkube-manager/internal/talos"
 )
@@ -43,6 +44,17 @@ type Route struct {
 	// Action is the stable audit token for this route, e.g. "auth.login".
 	// A mutating route without one would execute unlogged.
 	Action string
+
+	// ClusterScope names the cluster a mutating route acts on, so that the
+	// per-cluster read-only lock can be enforced at the route rather than
+	// inside every handler (D-22, INV-12).
+	//
+	// It is a function on the route rather than a pattern this file matches,
+	// for the same reason Destructive is a flag: the route knows where its
+	// cluster id comes from -- a path segment, a body field, the machine the
+	// request names -- and nothing else should have to guess. A nil value
+	// means the route is not cluster-scoped, which is every read route.
+	ClusterScope func(*http.Request) (string, error)
 }
 
 // ChainStatus is the audit hash-chain verdict as the UI consumes it.
@@ -119,6 +131,16 @@ type Deps struct {
 	// authenticates with the local password only. The OIDC routes are not
 	// registered at all when it is nil.
 	OIDC *oidc.Provider
+
+	// Inventory is the node and cluster inventory the read routes and the
+	// adoption route speak through. It is nil in a deployment that serves
+	// neither, and those handlers answer 502 rather than panicking if it is.
+	Inventory *inventory.Service
+
+	// ClusterLocked reports whether a cluster refuses mutation. It is nil in a
+	// deployment with no inventory, and the lock link is then inert -- which
+	// is correct, because there are no clusters to protect.
+	ClusterLocked func(r *http.Request, cluster string) error
 
 	// IsSSOOnly reports whether a Host header names an address on which the
 	// local password is refused. It is nil when no host is SSO-only, which is
@@ -211,6 +233,15 @@ func (d Deps) wrapRoute(rt Route) http.Handler {
 		middleware.Audit(auditAdapter{deps: d}, rt.Action, middleware.IsMutating(rt.Method),
 			func(w http.ResponseWriter, r *http.Request, err error) {
 				WriteInternal(w, r, d.Logger, err)
+			}),
+		// The lock sits between the archive and the password prompt. Inside
+		// audit, because an attempt to change a cluster somebody adopted
+		// read-only is precisely what the archive is for. Outside sudo,
+		// because asking for a password and then refusing anyway teaches an
+		// operator that the prompt means nothing.
+		middleware.ClusterLock(rt.ClusterScope, d.ClusterLocked,
+			func(w http.ResponseWriter, r *http.Request, err error) {
+				WriteProblem(w, r, ClusterLocked(err.Error()))
 			}),
 		middleware.Sudo(rt.Destructive,
 			func(r *http.Request) bool { return d.Auth.IsSudoOpen(r.Context(), d.SudoWindow) },
