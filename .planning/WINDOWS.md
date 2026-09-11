@@ -1,10 +1,10 @@
 ---
 schema_version: 1
-open_count: 63
+open_count: 65
 waived_count: 0
 fixed_count: 16
-total_count: 79
-last_updated: 2026-09-11T16:30:00.000Z
+total_count: 81
+last_updated: 2026-09-11T16:50:00.000Z
 ---
 
 # Broken Windows Ledger
@@ -94,6 +94,8 @@ last_updated: 2026-09-11T16:30:00.000Z
 | 77 | 03 | unrun-verify | Taskfile.yml |  | 'task lint:go' (golangci-lint run) konnte in dieser Sitzung nicht ausgefuehrt werden: das installierte golangci-lint ist mit go1.25 gebaut und weigert sich gegen ein go1.26.7-Ziel zu laufen ('the Go language version used to build golangci-lint is lower than the targeted Go version'). gofmt -l und go vet sind ueber cmd/ und internal/ sauber, und die Go- sowie Web-Testsuiten sind gruen. Derselbe Ris | open |  | 2026-09-11T16:30:00.000Z |  |
 | 78 | 03 | todo | internal/inventory/observe.go |  | Refresh liest den Machine-Record, baut den Snapshot und schreibt zurueck -- ohne die Rev-Kollision zu behandeln. Zwei Ereignisse koennen sie ausloesen: der Supervisor-Heartbeat und ein manuelles POST /machines/{id}/refresh treffen zusammen, oder ein Refresh laeuft waehrend recordMachine denselben Record anfasst. Der Verlierer bekommt store.ErrConflict, der Fehlschlag wird geloggt und der Snapshot  | open |  | 2026-09-11T16:30:00.000Z |  |
 | 79 | 03 | deviation | internal/inventory/observe.go |  | Die Supervisors sind Heartbeat-Poller ueber COSI-Reads, keine COSI-Watches. INV-13 und D-19 verlangen 'Watch primaer, Poll als Heartbeat'; gebaut ist der Heartbeat mit Jitter (45s +/-20%) ueber genau die Ressourcen, die ein Watch beobachten wuerde. Die Leserichtung stimmt -- Ressourcenzustand statt unaerer RPCs, was das eigentliche Verbot von INV-13 ist -- und die Antwortform (health.Field[T]) ist | open |  | 2026-09-11T16:30:00.000Z |  |
+| 80 | 04 | unrun-verify | sandbox/cmd/walking-skeleton/main.go |  | DIE INSTALLATIONSSTILLE IST UNGEMESSEN, und damit sind die vier Unbekannten, die Phase 4 zu entschaerfen hatte, weiterhin Unbekannte. Gebaut ist das Messgeraet: walking-skeleton appliziert eine generierte MachineConfig auf eine von Hand genannte Maintenance-Mode-IP, misst die Stille danach unter CLUSTER-Zugangsdaten (nicht unter den Maintenance-Daten -- gemessen wird 'antwortet der Knoten, den die | open |  | 2026-09-11T16:50:00.000Z |  |
+| 81 | 04 | unrun-verify | sandbox/cmd/talos-sandbox/main.go |  | TIER 2 (QEMU) WURDE NIE AUSGEFUEHRT, und das ist eine andere Luecke als Fenster 76 (Tier 1/Docker). Der --provider qemu-Pfad ist gebaut und uebersetzt, aber der Ausfuehrungshost hat weder qemu-system-* noch /dev/kvm noch vmx im cpuinfo: ein Container ohne verschachtelte Virtualisierung. ERFOLGSKRITERIUM 1 VERLANGT AUSDRUECKLICH MEHR als 'es uebersetzt': entweder ein reproduzierbarer Lauf auf darwi | open |  | 2026-09-11T16:50:00.000Z |  |
 
 ````json
 [
@@ -1043,6 +1045,30 @@ last_updated: 2026-09-11T16:30:00.000Z
     "status": "open",
     "reason": "",
     "recorded_at": "2026-09-11T16:30:00.000Z",
+    "resolved_at": null
+  },
+  {
+    "id": 80,
+    "kind": "unrun-verify",
+    "phase": "04",
+    "file": "sandbox/cmd/walking-skeleton/main.go",
+    "line": null,
+    "description": "DIE INSTALLATIONSSTILLE IST UNGEMESSEN, und damit sind die vier Unbekannten, die Phase 4 zu entschaerfen hatte, weiterhin Unbekannte. Gebaut ist das Messgeraet: walking-skeleton appliziert eine generierte MachineConfig auf eine von Hand genannte Maintenance-Mode-IP, misst die Stille danach unter CLUSTER-Zugangsdaten (nicht unter den Maintenance-Daten -- gemessen wird 'antwortet der Knoten, den diese Konfiguration gemacht hat', nicht 'lauscht da etwas'), bootstrappt zweimal und appliziert einmal auf eine falsche Adresse, und schreibt alles als Markdown-Protokoll. Ausgefuehrt wurde es nie. KONSEQUENZ FUER PHASE 8: der Fortschrittsindikator fuer das Provisioning hat keine Zahl, um die herum er entworfen werden koennte, und talossims Behauptung 'zweiter Bootstrap ist AlreadyExists' ist gegen echtes Talos ungeprueft. SCHLIESSBEDINGUNG: der in 04-SUMMARY.md genannte Befehl einmal auf einem Host mit QEMU ausgefuehrt und das entstehende 04-MEASUREMENTS.md committet.",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-09-11T16:50:00.000Z",
+    "resolved_at": null
+  },
+  {
+    "id": 81,
+    "kind": "unrun-verify",
+    "phase": "04",
+    "file": "sandbox/cmd/talos-sandbox/main.go",
+    "line": null,
+    "description": "TIER 2 (QEMU) WURDE NIE AUSGEFUEHRT, und das ist eine andere Luecke als Fenster 76 (Tier 1/Docker). Der --provider qemu-Pfad ist gebaut und uebersetzt, aber der Ausfuehrungshost hat weder qemu-system-* noch /dev/kvm noch vmx im cpuinfo: ein Container ohne verschachtelte Virtualisierung. ERFOLGSKRITERIUM 1 VERLANGT AUSDRUECKLICH MEHR als 'es uebersetzt': entweder ein reproduzierbarer Lauf auf darwin/arm64, oder der dokumentierte Fallback ueber eine verschachtelte Linux-VM (Lima/Colima/UTM) MIT festgehaltener Begruendung. Keines von beidem ist geschehen, und welcher der beiden Wege auf dem Rechner des Betreibers funktioniert, ist genau die Frage, die der Research-Flag dieser Phase stellt (sudo und vmnet-shared koennen schmerzhaft sein). SCHLIESSBEDINGUNG: ein protokollierter Lauf auf einem der beiden Wege, samt der Begruendung, falls es der Fallback wurde.",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-09-11T16:50:00.000Z",
     "resolved_at": null
   }
 ]
