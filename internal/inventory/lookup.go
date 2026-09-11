@@ -150,3 +150,44 @@ func compareVersions(a, b string) int {
 	}
 	return 0
 }
+
+// MachinesOf lists a cluster's machines.
+//
+// It returns the stored records rather than the views, because the callers are
+// the upgrade domain and the health gate: both need the role, the lock and the
+// last-known versions, and none of them needs the provenance a view carries.
+func (s *Service) MachinesOf(ctx context.Context, id model.ClusterID) ([]model.Machine, error) {
+	recs, err := s.deps.Store.Machines().List(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]model.Machine, 0, len(recs))
+	for _, rec := range recs {
+		if rec.Cluster == id {
+			out = append(out, rec)
+		}
+	}
+	return out, nil
+}
+
+// ControlPlanesOf lists a cluster's control-plane machines.
+//
+// A machine whose role is unknown is not included, and that is the
+// conservative reading in the direction that matters: the health gate asks
+// every member it is given, and a member it was not given shows up as one it
+// could not ask, which refuses. Including a node that turns out not to run
+// etcd would make the gate refuse for a reason that is not true; leaving it
+// out makes the gate refuse for a reason that is.
+func (s *Service) ControlPlanesOf(ctx context.Context, id model.ClusterID) ([]model.Machine, error) {
+	machines, err := s.MachinesOf(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]model.Machine, 0, len(machines))
+	for _, m := range machines {
+		if m.Role == model.RoleControlPlane {
+			out = append(out, m)
+		}
+	}
+	return out, nil
+}

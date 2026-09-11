@@ -171,7 +171,13 @@ function ScanStep({ onChoose }: { onChoose: (c: Candidate) => void }) {
   )
 }
 
-export function FoundTable({ found, onInspect }: { found: Found[]; onInspect: (f: Found) => void }) {
+export function FoundTable({
+  found,
+  onInspect,
+}: {
+  found: Found[]
+  onInspect: (f: Found) => void
+}) {
   if (found.length === 0) {
     return (
       <p className="text-sm text-muted-foreground">
