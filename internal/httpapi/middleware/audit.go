@@ -236,3 +236,12 @@ func ClientIP(r *http.Request) string {
 	}
 	return host
 }
+
+// Unwrap exposes the writer underneath, so http.ResponseController can reach
+// the real connection to flush or to set a deadline. See responseRecorder's
+// Unwrap in chain.go for why this is the whole of the streaming fix.
+//
+// The sniffer keeps working across it: it observes the status and the body on
+// the way past, and a handler that flushes through ResponseController flushes
+// bytes this link has already seen.
+func (s *problemSniffer) Unwrap() http.ResponseWriter { return s.ResponseWriter }
