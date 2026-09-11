@@ -241,8 +241,17 @@ var deadlineClasses = map[string]DeadlineClass{
 	MethodDiskUsage:              ClassStream,
 	machineService + "ImageList": ClassStream,
 	MethodEtcdSnapshot:           ClassStream,
-	MethodPacketCapture:          ClassStream,
-	MethodCOSIWatch:              ClassStream,
+
+	// The streaming upgrade, added in phase 9. It takes the stream class and
+	// not the mutation class, and the difference is the whole reason it is on
+	// LifecycleService: the node writes installer output for as long as the
+	// install takes -- minutes on a slow disk -- and a thirty-second total
+	// deadline would kill an upgrade that is working. What bounds it is the
+	// first-byte deadline and the idle timeout, which is the right question:
+	// a node that has said nothing for that long has stopped installing.
+	MethodLifecycleUpgrade: ClassStream,
+	MethodPacketCapture:    ClassStream,
+	MethodCOSIWatch:        ClassStream,
 }
 
 // DeadlineClasses returns a copy of the class table, so a reviewer -- and

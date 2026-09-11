@@ -150,6 +150,20 @@ type Machine struct {
 	// somewhere else.
 	Addr string `json:"addr"`
 
+	// Locked marks a node upgrades skip (UPG-14).
+	//
+	// It is per machine and is a different thing from the cluster's read-only
+	// lock: that one refuses every mutation against every node in the cluster,
+	// this one says "not this one, for now" about a rolling operation that
+	// walks nodes. A node with a workload that must not move, or one somebody
+	// is already looking at, is the ordinary case -- and stopping a whole
+	// upgrade because of it would make this a blunt instrument nobody uses.
+	Locked bool `json:"locked,omitempty"`
+
+	// LockReason is why, written by whoever set it. A lock nobody can explain
+	// is a lock that gets cleared by the next person who finds it in the way.
+	LockReason string `json:"lock_reason,omitempty"`
+
 	// LostAddrAt marks that a *different* machine answered at Addr. The record
 	// is never overwritten in that case and a new one is created for the
 	// stranger (D-10); this field is what lets the screen say why this machine
