@@ -4,6 +4,7 @@ import {
   Boxes,
   Disc3,
   FileCog,
+  HardDriveDownload,
   LayoutDashboard,
   ListChecks,
   type LucideIcon,
@@ -81,6 +82,14 @@ export const NAV_AREAS: NavArea[] = [
     phase: null,
     description:
       'Long-running and dangerous operations as persisted jobs that survive a restart of holzkube-manager itself.',
+  },
+  {
+    path: '/provision',
+    label: 'Provision',
+    icon: HardDriveDownload,
+    phase: null,
+    description:
+      'A blank machine becomes a cluster node: find it, confirm it is the one you mean, choose the disk, and watch it come back.',
   },
   {
     path: '/upgrades',

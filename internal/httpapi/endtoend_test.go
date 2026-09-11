@@ -50,6 +50,11 @@ type harness struct {
 	hub     *streamhub.Hub
 	streams *nodestream.Manager
 	jobs    *jobs.Engine
+
+	// bootstrap is the etcd lease directory, shared by the provisioning
+	// service and the job steps. One per harness, for the reason the lease
+	// exists at all.
+	bootstrap *provision.Bootstrapper
 }
 
 // harnessOpt adjusts the object graph before it is served.
@@ -61,11 +66,12 @@ type harness struct {
 type harnessOpt func(*harnessConfig)
 
 type harnessConfig struct {
-	inventory func(store *fsstore.Store) *inventory.Service
-	streaming bool
-	jobs      bool
-	config    bool
-	provision func(*harness) *provision.Service
+	inventory            func(store *fsstore.Store) *inventory.Service
+	streaming            bool
+	jobs                 bool
+	config               bool
+	provision            func(*harness) *provision.Service
+	registerProvisionJob func(*jobs.Engine, *harness)
 }
 
 // withInventory adds an inventory service built over the harness's store.
@@ -91,6 +97,13 @@ func withProvision(build func(*harness) *provision.Service) harnessOpt {
 		c.jobs = true
 		c.streaming = true
 	}
+}
+
+// withProvisionJob teaches the harness's engine how to run a provisioning job.
+// It is separate from withProvision because a test about the routes does not
+// need the steps, and registering them would run a machine install.
+func withProvisionJob(register func(*jobs.Engine, *harness)) harnessOpt {
+	return func(c *harnessConfig) { c.registerProvisionJob = register }
 }
 
 // withJobs adds the job engine, the confirmer and the node-action routes. It
@@ -234,6 +247,9 @@ func newHarness(t *testing.T, opts ...harnessOpt) *harness {
 	h2.inv = inv
 	if cfg.provision != nil {
 		deps.Provision = cfg.provision(h2)
+	}
+	if cfg.registerProvisionJob != nil && h2.jobs != nil {
+		cfg.registerProvisionJob(h2.jobs, h2)
 	}
 
 	deps.Routes = slices.Concat(

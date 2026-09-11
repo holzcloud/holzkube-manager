@@ -10,6 +10,7 @@ import { loginRoute } from '@/routes/login'
 import { nodeDetailRoute } from '@/routes/node-detail'
 import { nodesRoute } from '@/routes/nodes'
 import { placeholderRoutes } from '@/routes/placeholders'
+import { provisionRoute } from '@/routes/provision'
 import { setupRoute } from '@/routes/setup'
 
 /**
@@ -33,6 +34,7 @@ const routeTree = rootRoute.addChildren([
     clustersRoute,
     jobsRoute,
     configRoute,
+    provisionRoute,
     ...placeholderRoutes,
   ]),
 ])

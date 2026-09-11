@@ -828,6 +828,112 @@ export interface ImportInput {
 }
 
 /* ---------------------------------------------------------------------- */
+/* Provisioning                                                            */
+/* ---------------------------------------------------------------------- */
+
+/**
+ * What a scan found at one address.
+ *
+ * `state` is never "nothing" for an address that answered, and that is the
+ * finding this whole scan exists to get right: "nothing found" and "there is
+ * already a node here" lead to opposite actions, and a screen that conflated
+ * them would send an operator to check a cable while a running node sits at
+ * the address they were about to overwrite.
+ */
+export const foundSchema = z.object({
+  addr: z.string(),
+  state: z.enum(['maintenance', 'configured', 'answered']),
+  /** The name on the certificate the machine presented. Nothing has verified
+   * it — see the maintenance notice. */
+  hostname: z.string().default(''),
+  fingerprint: z.string().default(''),
+  /** This installation already manages a machine at this address. */
+  known: z.boolean().default(false),
+  detail: z.string().default(''),
+})
+
+export type Found = z.infer<typeof foundSchema>
+
+export const scanSchema = z.object({
+  found: z.array(foundSchema).default([]),
+  notices: z.array(z.string()).default([]),
+})
+
+export const candidateDiskSchema = z.object({
+  device: z.string(),
+  size: z.number().default(0),
+  pretty_size: z.string().default(''),
+  model: z.string().default(''),
+  serial: z.string().default(''),
+  transport: z.string().default(''),
+  /** Talos is, or would be, installed here. Shown rather than pre-selected. */
+  system: z.boolean().default(false),
+})
+
+export const candidateSchema = z.object({
+  addr: z.string(),
+  uuid: z.string(),
+  talos_version: z.string().default(''),
+  hostname: z.string().default(''),
+  fingerprint: z.string().default(''),
+  /** The identifier printed on a label, for telling two identical machines
+   * apart when the UUID cannot be read off either of them. */
+  macs: z.array(z.string()).default([]),
+  disks: z.array(candidateDiskSchema).default([]),
+  warnings: z.array(z.string()).default([]),
+})
+
+export type Candidate = z.infer<typeof candidateSchema>
+export type CandidateDisk = z.infer<typeof candidateDiskSchema>
+
+export const previewProvisionSchema = z.object({
+  warnings: z.array(z.string()).default([]),
+  /** The exact `.machine.install.image` this plan writes. Shown because its
+   * failure is silent: the install succeeds, the node joins, and the system
+   * extensions are simply gone. */
+  install_image: z.string(),
+  control_plane_after: z.number().default(0),
+  /** This run initialises etcd, which is the one irreversible thing in it that
+   * is not about this machine. */
+  bootstrap: z.boolean().default(false),
+  cni_notice: z.string().default(''),
+  maintenance_warning: z.string().default(''),
+})
+
+export type ProvisionPreview = z.infer<typeof previewProvisionSchema>
+
+export interface ProvisionRequest {
+  cluster: string
+  addr: string
+  uuid: string
+  control_plane: boolean
+  install_disk: string
+  schematic_id?: string
+  talos_version: string
+  fingerprint?: string
+  hostname?: string
+  patch_ids?: string[]
+}
+
+export const bootstrapIntentSchema = z.object({
+  cluster: z.string(),
+  machine: z.string().default(''),
+  addr: z.string().default(''),
+  started_at: z.string().default(''),
+  outcome: z.string().default(''),
+  detail: z.string().default(''),
+})
+
+export type BootstrapIntent = z.infer<typeof bootstrapIntentSchema>
+
+export const bootstrapRecoverySchema = z.object({
+  pending: z.array(bootstrapIntentSchema).default([]),
+  guidance: z.string().default(''),
+})
+
+export const noticesSchema = z.object({ notices: z.array(z.string()).default([]) })
+
+/* ---------------------------------------------------------------------- */
 /* Jobs and node actions                                                   */
 /* ---------------------------------------------------------------------- */
 
@@ -1302,6 +1408,52 @@ export const api = {
         description: input.description ?? '',
         parent: input.parent ?? '',
       }),
+  },
+
+  provision: {
+    /** The sentences the wizard opens with. They describe how a machine boots
+     * rather than anything this product does, so they come from the server:
+     * a copy in this bundle is a copy that drifts from the behaviour it
+     * describes. */
+    notices: async (): Promise<string[]> =>
+      (await sendJSON('GET', '/api/v1/provision/notices', noticesSchema)).notices,
+
+    /** A POST because it carries a subnet and a list of addresses, not because
+     * it mutates. Nothing on any machine changes. */
+    scan: (cidr: string, addrs: string[] = []) =>
+      sendJSON('POST', '/api/v1/provision/scan', scanSchema, { cidr, addrs }),
+
+    /** The provisioning path's own confirmation. It is a separate route and
+     * not the machine-scoped one because a machine being provisioned is not in
+     * the inventory: there is no hostname to type, and what is typed is the
+     * disk that gets written. */
+    confirm: (req: ProvisionRequest, typed: string): Promise<{ token: string; expires: string }> =>
+      sendJSON('POST', '/api/v1/provision/confirm', confirmationSchema, { ...req, typed }),
+
+    inspect: (addr: string, fingerprint = ''): Promise<Candidate> =>
+      sendJSON('POST', '/api/v1/provision/inspect', candidateSchema, { addr, fingerprint }),
+
+    /** The last screen before the apply. It validates, warns, and says exactly
+     * what would be written — and it writes nothing. */
+    plan: (req: ProvisionRequest): Promise<ProvisionPreview> =>
+      sendJSON('POST', '/api/v1/provision/plan', previewProvisionSchema, req),
+
+    apply: (req: ProvisionRequest, confirmation: string): Promise<AcceptedJob> =>
+      sendJSON('POST', '/api/v1/provision/apply', acceptedJobSchema, { ...req, confirmation }),
+
+    recovery: () =>
+      sendJSON('GET', '/api/v1/provision/bootstrap-recovery', bootstrapRecoverySchema),
+
+    /** `bootstrapped` is what a person found by looking. There is no default:
+     * guessing here is the operation the whole bootstrap record exists to
+     * prevent. */
+    resolve: (cluster: string, bootstrapped: boolean, note: string) =>
+      sendJSON(
+        'POST',
+        `/api/v1/provision/bootstrap-recovery/${encodeURIComponent(cluster)}`,
+        z.object({ cluster: z.string(), bootstrapped: z.boolean() }),
+        { bootstrapped, note },
+      ),
   },
 
   jobs: {

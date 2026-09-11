@@ -102,6 +102,19 @@ func ProvisionRoutes(d httpapi.Deps) []httpapi.Route {
 			Handler:         handler(provisionPlan(d)),
 		},
 		{
+			// Provisioning needs its own confirmation route, and the reason is
+			// not symmetry: the machine-scoped one reads the machine out of
+			// the inventory to check what was typed against its hostname, and
+			// a machine being provisioned is not in the inventory. It cannot
+			// be -- it has no UUID recorded, no cluster and no credentials
+			// until the run that is being confirmed has finished.
+			Method:          http.MethodPost,
+			Pattern:         "/api/v1/provision/confirm",
+			RequiresSession: true,
+			Action:          "provision.confirm",
+			Handler:         handler(provisionConfirm(d)),
+		},
+		{
 			Method:          http.MethodPost,
 			Pattern:         "/api/v1/provision/apply",
 			RequiresSession: true,
@@ -335,6 +348,73 @@ func provisionApply(d httpapi.Deps) http.HandlerFunc {
 		writeJSON(w, http.StatusAccepted, map[string]any{
 			"job":   j,
 			"topic": string(jobs.Topic(j.ID)),
+		})
+	}
+}
+
+// provisionConfirm issues a token for exactly the run described.
+//
+// What the operator types is the **install disk device**, and that is the
+// choice worth arguing about. A reset asks for the machine's hostname because
+// the hostname is what they can check against the machine in front of them. A
+// machine in maintenance mode has no hostname worth checking -- it is whatever
+// the ISO decided -- and the thing that is actually about to be destroyed is a
+// disk. Typing `/dev/nvme0n1` is the operator saying which device they mean on
+// a screen that lists three of them with their sizes, models and serials.
+func provisionConfirm(d httpapi.Deps) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if p := provisionConfigured(d); p != nil {
+			httpapi.WriteProblem(w, r, p)
+			return
+		}
+		if p := jobsConfigured(d); p != nil {
+			httpapi.WriteProblem(w, r, p)
+			return
+		}
+
+		var body struct {
+			provisionRequestBody
+			// Typed is what the operator typed into the confirmation box. It
+			// is checked here, once, so that a client that skipped the box
+			// cannot get a token at all.
+			Typed string `json:"typed"`
+		}
+		if err := decodeJSON(w, r, &body); err != nil {
+			httpapi.WriteProblem(w, r, httpapi.Validation(err.Error()))
+			return
+		}
+
+		req := body.request()
+
+		// Validated before a token is issued, so that a token cannot exist for
+		// a run that would be refused anyway.
+		if _, err := d.Provision.Plan(r.Context(), req); err != nil {
+			writeProvisionError(w, r, d, err)
+			return
+		}
+
+		if strings.TrimSpace(body.Typed) != req.InstallDisk {
+			httpapi.WriteProblem(w, r, httpapi.Validation(
+				"Type the device Talos will install to, exactly as it is listed. It is the disk "+
+					"that gets written, and typing it is how this screen knows you mean that one.",
+				httpapi.FieldError{Field: "typed", Reason: "does not match the install disk"}))
+			return
+		}
+
+		params := req.Params()
+		token, expires := d.Confirmer.Issue(jobs.Intent{
+			Action:  string(provision.JobKindProvision),
+			Machine: string(req.UUID),
+			Params:  params,
+		})
+
+		writeJSON(w, http.StatusOK, map[string]any{
+			"token":   token,
+			"expires": expires.Format(time.RFC3339),
+			// Echoed back so the client can show exactly what this token
+			// authorises rather than what it believes it asked for.
+			"action": string(provision.JobKindProvision),
+			"params": params,
 		})
 	}
 }
