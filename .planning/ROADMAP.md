@@ -20,7 +20,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 3: Inventar, Cluster-Import & Health** - Der bestehende Cluster wird importiert; das Inventar bleibt ehrlich, auch wenn alles tot ist (completed 2026-09-11)
 - [~] **Phase 4: Walking Skeleton (Wegwerf)** - Der hässliche End-to-End-Weg gegen QEMU, um die vier gefährlichsten Unbekannten zu entschärfen (Instrument gebaut 2026-09-11, **Messung offen** — Fenster 80/81)
 - [x] **Phase 5: Streaming** - Live-Logs und `dmesg` über eine multiplexte SSE-Verbindung (DESIGNIERTE SCHNITTLINIE) (completed 2026-09-11)
-- [ ] **Phase 6: Jobs-Engine & Node-Aktionen** - Persistierte, crash-feste Jobs; Reboot, Shutdown und das Reset-Dialog
+- [x] **Phase 6: Jobs-Engine & Node-Aktionen** - Persistierte, crash-feste Jobs; Reboot, Shutdown und das Reset-Dialog (completed 2026-09-11)
 - [ ] **Phase 7: Config-Domain** - Ansehen, redigieren, patchen, diffen, anwenden — mit berechnetem Apply-Modus
 - [ ] **Phase 8: Provisioning — der Core Value** - Blanke Maschine wird gesunder Cluster-Node, ohne Terminal
 - [ ] **Phase 9: Upgrades & etcd-Verwaltung** - Rollende Talos-/K8s-Upgrades hinter einem Gate, das lieber blockiert als strandet
@@ -274,7 +274,8 @@ Plans:
 **Research**: Nicht geflaggt.
 **Release blockers owned**: JOB-07 🚫
 **Note**: Constraint #2 — die Engine muss vor dem schwersten Job auf ihr existieren. Der wertvollste Test des Projekts liegt hier: Prozess mitten im Schritt töten, korrektes Resume-oder-Park behaupten.
-**Plans**: TBD
+**Plans**: ausgeführt als eine Runde; siehe `06-SUMMARY.md`
+**Outcome**: alle fünf Kriterien erfüllt. Der genannte Test ist grün in allen drei Zweigen (übersprungen / erneut ausgeführt / geparkt), gegen den echten fsstore, und kein Schritt läuft zweimal.
 **UI hint**: yes
 
 ### Phase 7: Config-Domain
