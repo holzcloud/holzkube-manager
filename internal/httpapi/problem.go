@@ -131,6 +131,23 @@ const (
 	// request is not the one that was confirmed.
 	CodeConfirmationInvalid = "forbidden.confirmation-invalid"
 	CodeConfirmationExpired = "forbidden.confirmation-expired"
+
+	// CodeStagedPending: a second staged apply arrived while one is already
+	// waiting for the node's next boot (CFG-08). Talos would replace the first
+	// without saying so, and exactly one of the two changes would happen.
+	CodeStagedPending = "store.staged-pending"
+
+	// CodeDryRun: this instance was started with --dry-run and applies
+	// nothing. It is a forbidden rather than an internal, because the request
+	// is fine and the instance is the reason.
+	CodeDryRun = "forbidden.dry-run"
+
+	// CodePatchInvalid and CodePatchNotStrategic are the two ways a patch is
+	// refused. They are separate because the remedies differ: invalid means
+	// fix the patch, not-strategic means rewrite it in the other form and is
+	// a refusal of a whole category.
+	CodePatchInvalid      = "validation.patch-invalid"
+	CodePatchNotStrategic = "validation.patch-not-strategic"
 )
 
 // ClusterLocked reports a mutation refused by a cluster's read-only lock.

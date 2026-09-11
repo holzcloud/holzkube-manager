@@ -41,6 +41,7 @@ type Store struct {
 	clusterSecrets *clusterSecretStore
 	machines       *machineStore
 	jobs           *jobStore
+	patches        *patchStore
 }
 
 // Open prepares dir as a holzkube-manager data directory and returns a Store over it.
@@ -99,10 +100,11 @@ func Open(dir string) (s *Store, err error) {
 	s.clusterSecrets = newClusterSecretStore(filepath.Join(abs, kindClusterSecrets), s.entityMu)
 	s.machines = newMachineStore(filepath.Join(abs, kindMachines), s.entityMu)
 	s.jobs = newJobStore(filepath.Join(abs, kindJobs), s.entityMu)
+	s.patches = newPatchStore(filepath.Join(abs, kindPatches), s.entityMu)
 
 	for _, sub := range []string{
 		s.users.dir, s.sessions.dir, s.schematics.dir,
-		s.clusters.dir, s.clusterSecrets.inner.dir, s.machines.dir, s.jobs.dir,
+		s.clusters.dir, s.clusterSecrets.inner.dir, s.machines.dir, s.jobs.dir, s.patches.dir,
 	} {
 		if err := os.MkdirAll(sub, dirPerm); err != nil {
 			return nil, fmt.Errorf("fsstore: create %s: %w", sub, err)
@@ -152,6 +154,9 @@ func (s *Store) Machines() store.MachineStore { return s.machines }
 // Jobs returns the long-running-operation entity.
 func (s *Store) Jobs() store.JobStore { return s.jobs }
 
+// Patches returns the reusable-configuration-patch entity.
+func (s *Store) Patches() store.PatchStore { return s.patches }
+
 // Close releases the process lock. After Close another instance may open the
 // same data directory.
 func (s *Store) Close() error {
@@ -175,6 +180,7 @@ const (
 	kindClusterSecrets = "cluster-secrets"
 	kindMachines       = "machines"
 	kindJobs           = "jobs"
+	kindPatches        = "patches"
 
 	// settingsKey is the id half of the lock key for the settings singleton.
 	settingsKey = "singleton"

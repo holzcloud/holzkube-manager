@@ -196,6 +196,16 @@ func clusterFromBody(r *http.Request) (string, error) {
 	return body.Cluster, nil
 }
 
+// budgetedContext applies a route's upstream ceiling to the request context.
+//
+// It exists because a Talos call on a context with no deadline is refused
+// outright, and an inbound request context has no deadline: the server's write
+// timeout is not one. Every route in this package that reaches a node goes
+// through it.
+func budgetedContext(r *http.Request, budget time.Duration) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(r.Context(), budget)
+}
+
 // peekJSON decodes a request body and puts it back.
 //
 // The lock link runs before the handler and needs one field out of the body;

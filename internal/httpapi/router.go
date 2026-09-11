@@ -18,6 +18,7 @@ import (
 	"github.com/holzcloud/holzkube-manager/internal/imagefactory"
 	"github.com/holzcloud/holzkube-manager/internal/inventory"
 	"github.com/holzcloud/holzkube-manager/internal/jobs"
+	"github.com/holzcloud/holzkube-manager/internal/machineconfig"
 	"github.com/holzcloud/holzkube-manager/internal/nodestream"
 	"github.com/holzcloud/holzkube-manager/internal/store"
 	"github.com/holzcloud/holzkube-manager/internal/streamhub"
@@ -164,6 +165,11 @@ type Deps struct {
 	// rather than panicking if they are.
 	Jobs      *jobs.Engine
 	Confirmer *jobs.Confirmer
+
+	// Config is the machine-configuration domain: viewing, diffing and
+	// applying. It is nil in a deployment that serves none of those, and those
+	// handlers answer 502 rather than panicking if it is.
+	Config *machineconfig.Service
 
 	// ClusterLocked reports whether a cluster refuses mutation. It is nil in a
 	// deployment with no inventory, and the lock link is then inert -- which

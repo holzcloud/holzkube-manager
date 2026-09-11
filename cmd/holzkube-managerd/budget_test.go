@@ -120,6 +120,7 @@ const (
 	// guards guards nothing.
 	nodeProbeCall    callClass = "node-probe"
 	nodeFastReadCall callClass = "node-fast-read"
+	nodeMutationCall callClass = "node-mutation"
 )
 
 // upstreamCall is one call a route makes in series: what it is, and which
@@ -144,6 +145,8 @@ func (u upstreamCall) budget() (time.Duration, bool) {
 		return talos.ClassProbe.Deadline(), true
 	case nodeFastReadCall:
 		return talos.ClassFastRead.Deadline(), true
+	case nodeMutationCall:
+		return talos.ClassMutation.Deadline(), true
 	default:
 		return 0, false
 	}
@@ -303,6 +306,56 @@ var routeBudgets = []routeBudget{
 			"unfiltered one is a fallback that runs when the filtered one came back empty, " +
 			"which is the worst case this list is about. Whoever changes readNodeFacts has " +
 			"to come back and revisit this count; nothing derives it.",
+	},
+	{
+		route: "GET /api/v1/machines/{id}/config",
+		calls: []upstreamCall{
+			{name: "NewClusterClient: Version", class: nodeProbeCall},
+			{name: "MachineConfigYAML: COSI Get", class: nodeFastReadCall},
+		},
+		routeDeadline: handlers.ConfigRouteBudget,
+		verdict:       withinBudget,
+		clipping:      uncut,
+		why: "machineconfig.Service.Get connects and reads the active MachineConfig resource, " +
+			"then redacts and re-renders locally. The redaction and the rendering are CPU and " +
+			"touch no node, so they are not upstream calls -- which is why this row is two " +
+			"entries and not four.",
+	},
+	{
+		route: "POST /api/v1/machines/{id}/config/plan",
+		calls: []upstreamCall{
+			{name: "NewClusterClient: Version", class: nodeProbeCall},
+			{name: "MachineConfigYAML: COSI Get", class: nodeFastReadCall},
+		},
+		routeDeadline: handlers.ConfigRouteBudget,
+		verdict:       withinBudget,
+		clipping:      uncut,
+		why: "A plan is the same single read as the view. Everything after it -- merging the " +
+			"patches, diffing, computing the apply mode, validating, checking idempotence by " +
+			"merging a second time -- happens in this process against bytes it already has.",
+	},
+	{
+		route: "POST /api/v1/machines/{id}/config/apply",
+		calls: []upstreamCall{
+			{name: "read: NewClusterClient Version", class: nodeProbeCall},
+			{name: "read: MachineConfigYAML COSI Get", class: nodeFastReadCall},
+			{name: "apply: NewClusterClient Version", class: nodeProbeCall},
+			{name: "ApplyConfiguration", class: nodeMutationCall},
+		},
+		routeDeadline: handlers.ConfigRouteBudget,
+		verdict:       withinBudget,
+		clipping:      clipped,
+		clippingRationale: "The mutation class is thirty seconds to *initiate*, and this ceiling is " +
+			"thirty seconds for the whole route -- so the apply is clipped by whatever the read " +
+			"before it consumed. That is the right direction for this route and not a compromise: " +
+			"an apply whose read took twenty-nine seconds is an apply against a node that is " +
+			"barely answering, and initiating a configuration change on such a node is the thing " +
+			"to avoid rather than the thing to make more time for. The read happens first and " +
+			"fails first.",
+		why: "Service.Apply reads the current configuration, merges the patches locally, connects " +
+			"again and applies. The second connection is a second Version probe because " +
+			"NewClusterClient proves itself; it is not shared with the read's, because the read " +
+			"closes its client before the merge.",
 	},
 	{
 		route: "POST /api/v1/clusters/fingerprint",

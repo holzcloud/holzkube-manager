@@ -23,7 +23,7 @@ import (
 )
 
 // CurrentVersion is the schema version this binary understands.
-const CurrentVersion = 4
+const CurrentVersion = 5
 
 const (
 	// VersionFileName holds the schema version of a data directory.
@@ -116,6 +116,22 @@ var migrations = []Migration{
 		To:   4,
 		Apply: func(dir string) error {
 			path := filepath.Join(dir, "jobs")
+			if err := os.MkdirAll(path, dirPerm); err != nil {
+				return fmt.Errorf("create %s: %w", path, err)
+			}
+			return nil
+		},
+	},
+	{
+		// Reusable configuration patches. The directory is ordinary; what the
+		// records in it are not is deletable in the normal course of things --
+		// an edit writes a new version and marks the old superseded, because
+		// "what exactly was applied in March" only has an answer if the thing
+		// applied still exists.
+		From: 4,
+		To:   5,
+		Apply: func(dir string) error {
+			path := filepath.Join(dir, "patches")
 			if err := os.MkdirAll(path, dirPerm); err != nil {
 				return fmt.Errorf("create %s: %w", path, err)
 			}

@@ -64,6 +64,12 @@ type Store interface {
 	// was, and a goroutine that died says nothing.
 	Jobs() JobStore
 
+	// Patches holds reusable configuration patches. The entity is ordinary;
+	// what is not is that nothing ever deletes from it in the normal course of
+	// things -- an edit writes a new version and marks the old superseded, so
+	// that "what exactly was applied in March" has an answer.
+	Patches() PatchStore
+
 	Close() error
 }
 
@@ -95,6 +101,14 @@ type JobStore interface {
 	List(ctx context.Context) ([]model.Job, error)
 	Put(ctx context.Context, rec model.Job) (model.Job, error)
 	Delete(ctx context.Context, id model.JobID) error
+}
+
+// PatchStore holds reusable configuration patches.
+type PatchStore interface {
+	Get(ctx context.Context, id model.PatchID) (model.Patch, error)
+	List(ctx context.Context) ([]model.Patch, error)
+	Put(ctx context.Context, rec model.Patch) (model.Patch, error)
+	Delete(ctx context.Context, id model.PatchID) error
 }
 
 // MachineStore holds the node inventory, flat and keyed by UUID (D-10).
