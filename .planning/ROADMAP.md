@@ -19,7 +19,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 2: Transport Seam, `talossim` & Image Factory** - Die Naht zu Talos plus der Fake, gegen den alles Weitere getestet wird (BLOCKING) (completed 2026-09-05)
 - [x] **Phase 3: Inventar, Cluster-Import & Health** - Der bestehende Cluster wird importiert; das Inventar bleibt ehrlich, auch wenn alles tot ist (completed 2026-09-11)
 - [~] **Phase 4: Walking Skeleton (Wegwerf)** - Der hässliche End-to-End-Weg gegen QEMU, um die vier gefährlichsten Unbekannten zu entschärfen (Instrument gebaut 2026-09-11, **Messung offen** — Fenster 80/81)
-- [ ] **Phase 5: Streaming** - Live-Logs und `dmesg` über eine multiplexte SSE-Verbindung (DESIGNIERTE SCHNITTLINIE)
+- [x] **Phase 5: Streaming** - Live-Logs und `dmesg` über eine multiplexte SSE-Verbindung (DESIGNIERTE SCHNITTLINIE) (completed 2026-09-11)
 - [ ] **Phase 6: Jobs-Engine & Node-Aktionen** - Persistierte, crash-feste Jobs; Reboot, Shutdown und das Reset-Dialog
 - [ ] **Phase 7: Config-Domain** - Ansehen, redigieren, patchen, diffen, anwenden — mit berechnetem Apply-Modus
 - [ ] **Phase 8: Provisioning — der Core Value** - Blanke Maschine wird gesunder Cluster-Node, ohne Terminal
@@ -254,7 +254,8 @@ Plans:
 **🚧 ENTRY BLOCKER (aus Phase 2, Plan 02-05, Nutzerentscheidung `option-a` vom 2026-08-29)**: Die HTTP-Kette kann heute **nicht streamen**, und das scheitert still. Bevor die erste SSE-Route gebaut wird, müssen zwei Dinge landen: (1) alle drei `ResponseWriter`-Wrapper in der Middleware-Kette implementieren `Flush`, `Unwrap` und `Hijack` — heute tut es keiner, also puffert ein Streaming-Handler auf dieser Kette lautlos; (2) `WriteTimeout = 60 s` in `cmd/holzkubed/main.go` ist prozessweit und mit argon2id plus Login-Ratelimit begründet, nicht mit Upstream-Calls — es muss pro Route ausgenommen oder über `http.ResponseController.SetWriteDeadline` überschrieben werden, sonst stirbt jeder Stream nach 60 s. Phase 2 hat die Stream-Deadline-Policy (kein Gesamt-Deadline, 10 s First-Byte, 60 s Idle) bewusst nur in der Transportschicht umgesetzt und **keine** streamende HTTP-Route gebaut, damit die Kollision hier nicht zuschlägt. Details: `.planning/phases/02-transport-seam-talossim-image-factory/02-CONTEXT.md` § `<deadline_policy>`.
 **⚠️ DESIGNIERTE SCHNITTLINIE**: Diese Phase ist echt wertvoll und liegt echt **neben** dem Core-Value-Pfad. Wenn v1 in Gefahr gerät, wird **diese** Phase gekürzt oder gestrichen — nicht Phase 8. Beim Kürzen bleibt der `streamhub`-Kern (Topics, Ring-Buffer, non-blocking Fan-out) erhalten, weil JOB-04 in Phase 6 darauf reitet; gestrichen werden dann Log-/`dmesg`-Viewer und xterm.js.
 **Note**: Research führt Streaming ∥ Jobs. Als sequenzielle GSD-Phasen ist diese Parallelität bewusst aufgegeben, um die Kürzbarkeit zu erhalten — eine mit der Jobs-Engine verschmolzene Streaming-Phase wäre nicht mehr sauber herauszuschneiden. Streaming steht vorn, weil `streamhub` das Fan-out-Substrat für den Job-Fortschritt ist.
-**Plans**: TBD
+**Plans**: ausgeführt als eine Runde; siehe `05-SUMMARY.md`
+**Outcome**: alle vier Kriterien erfüllt. Der Entry-Blocker ist geschlossen: alle drei Wrapper tragen `Unwrap`, die Route löscht ihren eigenen Write-Deadline, und `Route.Streaming` ist deklarativ — `httpapi.New` panickt zur Kompositionszeit, wenn eine Route zugleich `Destructive` ist.
 **UI hint**: yes
 
 ### Phase 6: Jobs-Engine & Node-Aktionen
