@@ -50,7 +50,46 @@ type Store interface {
 	Settings() SettingsStore
 	Sessions() SessionStore
 	Schematics() SchematicStore
+
+	// Clusters, ClusterSecrets and Machines are the inventory (D-09's seam,
+	// second use). They are three entities and not one because a cluster's
+	// secrets must be reachable only by code that asks for them by name: a
+	// handler that serialises a Cluster cannot leak PKI it never loaded.
+	Clusters() ClusterStore
+	ClusterSecrets() ClusterSecretStore
+	Machines() MachineStore
+
 	Close() error
+}
+
+// ClusterStore holds the managed clusters.
+type ClusterStore interface {
+	Get(ctx context.Context, id model.ClusterID) (model.Cluster, error)
+	List(ctx context.Context) ([]model.Cluster, error)
+	Put(ctx context.Context, rec model.Cluster) (model.Cluster, error)
+	Delete(ctx context.Context, id model.ClusterID) error
+}
+
+// ClusterSecretStore holds cluster PKI and joining material, keyed by the same
+// id as the cluster it belongs to.
+//
+// It has no List, and the absence is the point: nothing legitimately needs
+// every cluster's secrets at once, and a method that hands them out in bulk is
+// a method some future screen will call. Deleting a cluster deletes its
+// secrets through the cluster service, which is the only caller that knows
+// both ids are the same one.
+type ClusterSecretStore interface {
+	Get(ctx context.Context, id model.ClusterID) (model.ClusterSecrets, error)
+	Put(ctx context.Context, rec model.ClusterSecrets) (model.ClusterSecrets, error)
+	Delete(ctx context.Context, id model.ClusterID) error
+}
+
+// MachineStore holds the node inventory, flat and keyed by UUID (D-10).
+type MachineStore interface {
+	Get(ctx context.Context, id model.MachineID) (model.Machine, error)
+	List(ctx context.Context) ([]model.Machine, error)
+	Put(ctx context.Context, rec model.Machine) (model.Machine, error)
+	Delete(ctx context.Context, id model.MachineID) error
 }
 
 // UserStore holds operator accounts.

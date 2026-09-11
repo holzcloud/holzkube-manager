@@ -357,14 +357,19 @@ func TestMigrateRefusesVersionZero(t *testing.T) {
 	}
 }
 
-// TestMigrateVersionOneGainsTheSchematicsDirectory drives the first real
-// migration in the table, with the real Run rather than a synthetic one.
+// TestMigrateVersionOneGainsTheSchematicsDirectory drives the real table from
+// its first version to the current one, with the real Run rather than a
+// synthetic one.
 //
 // The ordering assertion is the point: the tarball must be a copy of the
 // directory as it was found, so it must NOT contain the schematics directory
 // the migration goes on to create. Checking the tarball's contents proves the
 // backup happened first in a way that checking for the tarball's existence
 // afterwards cannot.
+//
+// It also pins that a multi-step run is one backup and not one per step: a
+// version-1 directory now crosses two migrations, and a tarball per step would
+// mean the second one is a copy of a directory the first has already changed.
 func TestMigrateVersionOneGainsTheSchematicsDirectory(t *testing.T) {
 	dir := copyFixture(t, "version-1")
 
@@ -372,8 +377,8 @@ func TestMigrateVersionOneGainsTheSchematicsDirectory(t *testing.T) {
 		t.Fatalf("Run on a version-1 directory: %v", err)
 	}
 
-	if got := readVersionFile(t, dir); got != "2" {
-		t.Fatalf("VERSION = %q, want 2", got)
+	if got := readVersionFile(t, dir); got != strconv.Itoa(CurrentVersion) {
+		t.Fatalf("VERSION = %q, want %d", got, CurrentVersion)
 	}
 
 	info, err := os.Stat(filepath.Join(dir, "schematics"))
@@ -401,6 +406,50 @@ func TestMigrateVersionOneGainsTheSchematicsDirectory(t *testing.T) {
 	}
 	if slices.ContainsFunc(names, func(n string) bool { return strings.Contains(n, "schematics") }) {
 		t.Errorf("the backup contains the schematics directory, so it was taken after the migration ran: %v", names)
+	}
+}
+
+// TestMigrateVersionTwoGainsTheInventoryDirectories drives the 2 -> 3 step.
+//
+// The permission assertion is not decoration: cluster-secrets holds the
+// cluster CA private key, and a directory created one mode wider than the rest
+// would be caught by the permission guard on the *next* start rather than
+// here -- which is to say, after the key had already been written into it.
+func TestMigrateVersionTwoGainsTheInventoryDirectories(t *testing.T) {
+	dir := copyFixture(t, "version-2")
+
+	if err := Run(dir); err != nil {
+		t.Fatalf("Run on a version-2 directory: %v", err)
+	}
+
+	if got := readVersionFile(t, dir); got != strconv.Itoa(CurrentVersion) {
+		t.Fatalf("VERSION = %q, want %d", got, CurrentVersion)
+	}
+
+	for _, name := range []string{"clusters", "cluster-secrets", "machines"} {
+		info, err := os.Stat(filepath.Join(dir, name))
+		if err != nil {
+			t.Fatalf("the %s directory was not created: %v", name, err)
+		}
+		if !info.IsDir() {
+			t.Fatalf("%s is not a directory", name)
+		}
+		if perm := info.Mode().Perm(); perm != 0o700 {
+			t.Errorf("%s is %04o, want 0700", name, perm)
+		}
+	}
+
+	if _, err := os.Stat(filepath.Join(dir, "users", "alice.json")); err != nil {
+		t.Fatalf("the existing record did not survive the migration: %v", err)
+	}
+
+	files := backupFiles(t, dir)
+	if len(files) != 1 {
+		t.Fatalf("backups = %v, want exactly one pre-migration tarball", files)
+	}
+	names := tarballEntries(t, filepath.Join(dir, BackupsDirName, files[0]))
+	if slices.ContainsFunc(names, func(n string) bool { return strings.Contains(n, "cluster-secrets") }) {
+		t.Errorf("the backup contains cluster-secrets, so it was taken after the migration ran: %v", names)
 	}
 }
 

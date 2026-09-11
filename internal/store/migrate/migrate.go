@@ -23,7 +23,7 @@ import (
 )
 
 // CurrentVersion is the schema version this binary understands.
-const CurrentVersion = 2
+const CurrentVersion = 3
 
 const (
 	// VersionFileName holds the schema version of a data directory.
@@ -85,6 +85,24 @@ var migrations = []Migration{
 			path := filepath.Join(dir, "schematics")
 			if err := os.MkdirAll(path, dirPerm); err != nil {
 				return fmt.Errorf("create %s: %w", path, err)
+			}
+			return nil
+		},
+	},
+	{
+		// The inventory (D-09's seam, second use): clusters, their secrets and
+		// the machines. Three directories rather than one, because
+		// cluster-secrets holds cluster PKI and nothing else does -- a
+		// directory of its own is what makes "the secrets were never loaded"
+		// a fact about the code path rather than a hope about the handler.
+		From: 2,
+		To:   3,
+		Apply: func(dir string) error {
+			for _, name := range []string{"clusters", "cluster-secrets", "machines"} {
+				path := filepath.Join(dir, name)
+				if err := os.MkdirAll(path, dirPerm); err != nil {
+					return fmt.Errorf("create %s: %w", path, err)
+				}
 			}
 			return nil
 		},
