@@ -1,0 +1,21 @@
+# What must not reach the build context.
+#
+# The first two entries are the ones that matter: a .git directory in a build
+# context is every secret anybody ever committed and then removed, and
+# node_modules is both enormous and platform-specific -- the image installs its
+# own from the lockfile.
+.git
+web/node_modules
+
+# Build outputs. The image builds its own; copying a host build in would
+# produce an image whose binary nobody can reproduce.
+holzkube-managerd
+dist
+web/dist
+internal/httpapi/dist
+
+# Anything an operator might have left in a checkout.
+*.tar.gz
+*.pem
+*.key
+.planning

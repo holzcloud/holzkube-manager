@@ -77,6 +77,14 @@ type conn struct {
 	// deliberately random, and a test that means to count what the retry loop
 	// decided cannot count it against a random variable. See conn.nextBackoff.
 	backoff func(attempt int) time.Duration
+
+	// mode is the process's operating decisions, carried down so that the
+	// liveness probe can consult AllowPreRelease. DryRun is not read here --
+	// it is installed as an interceptor at dial time, which is the structural
+	// version of the same idea -- and keeping the whole Mode rather than one
+	// copied boolean means the next decision that has to reach this far does
+	// not need a second field.
+	mode Mode
 }
 
 // dial is the one place either client type reaches a node.
@@ -101,7 +109,7 @@ func dial(ctx context.Context, d Dialer, t Target, c Creds, m Mode) (*conn, erro
 		return nil, fmt.Errorf("talos: dial options for %s: %w", t.Machine, err)
 	}
 
-	n := &conn{target: t, dialer: d, now: time.Now, backoff: retryBackoff}
+	n := &conn{target: t, dialer: d, now: time.Now, backoff: retryBackoff, mode: m}
 
 	// The policy interceptors are appended after the transport's own options,
 	// so a Dialer cannot displace them: a transport chooses how bytes travel,
@@ -490,7 +498,7 @@ func (n *conn) proveAnswering(ctx context.Context, version func(context.Context)
 		return fmt.Errorf("talos: %s did not answer the liveness probe: %w", n.target.Machine, err)
 	}
 
-	if err := CheckSupportedVersion(v); err != nil {
+	if err := CheckSupportedVersion(v, n.mode.AllowPreRelease); err != nil {
 		_ = n.c.Close()
 		return fmt.Errorf("talos: refusing to build a client for %s: %w", n.target.Machine, err)
 	}

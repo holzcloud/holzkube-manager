@@ -4,6 +4,7 @@ import (
 	"net/http"
 
 	"github.com/holzcloud/holzkube-manager/internal/httpapi"
+	"github.com/holzcloud/holzkube-manager/internal/talos"
 )
 
 type systemStatus struct {
@@ -20,6 +21,21 @@ type systemStatus struct {
 	// establish by trying: the routes themselves already answer differently.
 	OIDCEnabled   bool `json:"oidc_enabled"`
 	PasswordLogin bool `json:"password_login"`
+
+	// TalosRange is the version window this build was tested against, and
+	// AllowPreRelease whether this instance accepts a pre-release inside it
+	// (OPS-03).
+	//
+	// Both are served rather than written into the browser bundle, for the
+	// reason every other constant on a screen is: a copy in the bundle drifts
+	// from the constants that enforce it, and the whole value of this pair is
+	// that the screen and the refusal agree.
+	//
+	// Neither discloses anything: the range is in the release notes and the
+	// setting is visible to anybody who connects a node running a release
+	// candidate.
+	TalosRange      string `json:"talos_range"`
+	AllowPreRelease bool   `json:"allow_prerelease"`
 }
 
 // SystemRoutes serves the instance status the UI polls before rendering
@@ -84,7 +100,9 @@ func SystemRoutes(d httpapi.Deps) []httpapi.Route {
 					// string Internal(err) exists to strip. The operator does
 					// not need the directory they configured; they deal with a
 					// break by hand on a host they are already logged in to.
-					AuditChain: chain.Public(),
+					AuditChain:      chain.Public(),
+					TalosRange:      talos.MinSupportedVersion + " to " + talos.MaxSupportedVersion,
+					AllowPreRelease: d.TalosMode.AllowPreRelease,
 				})
 			}),
 		},

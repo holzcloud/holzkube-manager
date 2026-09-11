@@ -51,6 +51,15 @@ type Mode struct {
 	// before it reaches the wire. Reads and streams are unaffected: the mode
 	// disables mutations, not the product.
 	DryRun bool
+
+	// AllowPreRelease accepts nodes running an alpha, beta or release
+	// candidate (OPS-03).
+	//
+	// It sits here rather than on a config struct for the reason DryRun does:
+	// it is a property of the process that has to reach the constructor, and
+	// the constructor is where the refusal happens. A second copy of the
+	// answer somewhere else would be a second copy to disagree with this one.
+	AllowPreRelease bool
 }
 
 // dryRunInterceptor is the pair of gRPC client interceptors that enforce

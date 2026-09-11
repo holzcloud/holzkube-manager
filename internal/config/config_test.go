@@ -170,6 +170,7 @@ func TestEveryOptionIsSettableByFlagAndByEnvironment(t *testing.T) {
 		"tls-key":                 "/tls/key.pem",
 		"insecure-http":           "true",
 		"dry-run":                 "true",
+		"allow-prerelease":        "true",
 		"sudo-window":             "7m0s",
 		"session-lifetime":        "48h0m0s",
 		"oidc-issuer":             "https://idp.example.com/application/o/holzkube-manager/",

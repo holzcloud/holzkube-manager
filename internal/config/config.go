@@ -112,6 +112,7 @@ type Config struct {
 	TLSKey          string
 	InsecureHTTP    bool
 	DryRun          bool
+	AllowPreRelease bool
 	SudoWindow      time.Duration
 	SessionLifetime time.Duration
 	LogLevel        slog.Level
@@ -298,6 +299,32 @@ func optionTable(defaultDataDir string) []option {
 				return nil
 			},
 			render: func(c Config) string { return strconv.FormatBool(c.DryRun) },
+		},
+		{
+			// OPS-03. The refusal is in internal/talos, on the liveness probe
+			// every client constructor runs, so a node running a pre-release
+			// is refused wherever it is reached from rather than at whichever
+			// entry points somebody remembered. This entry is only how the
+			// operator opts in.
+			//
+			// It is opt-in and not opt-out because every guarantee this
+			// product makes about a node -- the apply modes, the
+			// compatibility window, the resource paths the inventory reads --
+			// is a claim about released Talos, and accepting a pre-release
+			// silently would extend those claims to something nobody tested
+			// them against.
+			name: "allow-prerelease", env: "ALLOW_PRERELEASE", def: "false", boolean: true,
+			usage: "accept nodes running a Talos alpha, beta or release candidate (env " +
+				EnvPrefix + "ALLOW_PRERELEASE)",
+			apply: func(c *Config, raw string) error {
+				v, err := strconv.ParseBool(raw)
+				if err != nil {
+					return errors.New("not a boolean")
+				}
+				c.AllowPreRelease = v
+				return nil
+			},
+			render: func(c Config) string { return strconv.FormatBool(c.AllowPreRelease) },
 		},
 		{
 			name: "sudo-window", env: "SUDO_WINDOW", def: "5m0s",

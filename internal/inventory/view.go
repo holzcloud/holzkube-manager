@@ -3,6 +3,7 @@ package inventory
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sort"
 	"time"
 
@@ -10,6 +11,7 @@ import (
 	"github.com/holzcloud/holzkube-manager/internal/health"
 	"github.com/holzcloud/holzkube-manager/internal/model"
 	"github.com/holzcloud/holzkube-manager/internal/store"
+	"github.com/holzcloud/holzkube-manager/internal/talos"
 )
 
 // The read model is the API's answer shape, and it is the same shape whether
@@ -41,6 +43,28 @@ type MachineView struct {
 	// from a node that died. Without it, an expired certificate looks like a
 	// dead fleet and sends the operator to the wrong repair (D-23).
 	CertificateExpired bool `json:"certificate_expired"`
+
+	// UnsupportedVersion marks a node running a Talos version outside the range
+	// this build was tested against (OPS-03).
+	//
+	// It is derived from the last version the node reported rather than from a
+	// failed connection, and that is the point: a node outside the range is
+	// *refused* at connect time, so if this depended on connecting it would be
+	// blank for exactly the nodes it exists to mark. What it reads is the
+	// snapshot, which survives the node being unreachable for any reason.
+	UnsupportedVersion bool `json:"unsupported_version"`
+
+	// PreRelease marks a node running an alpha, beta or release candidate. It
+	// is separate from UnsupportedVersion because the two mean opposite
+	// things about what to do: one is a node to change, the other is a node
+	// this instance can accept once somebody says so.
+	PreRelease bool `json:"pre_release"`
+
+	// VersionNotice is the sentence for either, or empty. It is here rather
+	// than assembled in the browser because it is a statement about what this
+	// build supports, and a copy in the bundle is a copy that drifts from the
+	// constants it describes.
+	VersionNotice string `json:"version_notice,omitempty"`
 
 	// Locked and LockReason are UPG-14: this node is skipped by rolling
 	// operations. They are not Fields, because they are holzkube-manager's own
@@ -176,6 +200,8 @@ func (s *Service) Machine(ctx context.Context, id model.MachineID) (MachineView,
 // indistinguishable from null, and that is how the empty dashboard INV-08
 // forbids comes about.
 func (s *Service) viewOf(rec model.Machine) MachineView {
+	unsupported, preRelease, notice := versionStanding(rec.Snapshot.TalosVersion)
+
 	stage, levels := s.status(rec.ID, rec.Snapshot.ObservedAt)
 	snap := rec.Snapshot
 
@@ -188,6 +214,9 @@ func (s *Service) viewOf(rec model.Machine) MachineView {
 		CertificateExpired: s.expiredCertificate(rec.ID),
 		Locked:             rec.Locked,
 		LockReason:         rec.LockReason,
+		UnsupportedVersion: unsupported,
+		PreRelease:         preRelease,
+		VersionNotice:      notice,
 		AdoptedAt:          rec.AdoptedAt,
 	}
 
@@ -368,4 +397,38 @@ func certificateLadder(clusterName string, left time.Duration) (urgency, warning
 	default:
 		return UrgencyNone, ""
 	}
+}
+
+// versionStanding is OPS-03's marking, computed from what the node last said.
+//
+// Three answers rather than two, because "we have never heard a version from
+// this node" is not "this node is fine": a machine whose snapshot carries no
+// version is left unmarked and gets no notice, which is the honest reading --
+// it is a node nothing has read yet, and inventing a verdict about it would be
+// the marking saying something nobody knows.
+func versionStanding(version string) (unsupported, preRelease bool, notice string) {
+	if version == "" {
+		return false, false, ""
+	}
+
+	preRelease = talos.IsPreRelease(version)
+	unsupported = !talos.InSupportedRange(version)
+
+	switch {
+	case unsupported:
+		return true, preRelease, fmt.Sprintf(
+			"This node reports Talos %s, and this build of holzkube-manager is tested against %s "+
+				"to %s. Every version-dependent action against it is refused: the client library "+
+				"would happily talk to it, which is the problem -- an untested API surface that "+
+				"answers is worse than one that refuses, because the divergence surfaces later, "+
+				"on a cluster.",
+			version, talos.MinSupportedVersion, talos.MaxSupportedVersion)
+	case preRelease:
+		return false, true, fmt.Sprintf(
+			"This node reports Talos %s, which is a pre-release. It is inside the supported "+
+				"range, and this instance accepts it only when started with --allow-prerelease: "+
+				"everything this product guarantees about a node is a claim about released Talos.",
+			version)
+	}
+	return false, false, ""
 }

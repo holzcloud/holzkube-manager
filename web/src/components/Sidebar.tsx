@@ -118,7 +118,7 @@ export const NAV_AREAS: NavArea[] = [
     path: '/settings',
     label: 'Settings',
     icon: Settings,
-    phase: 10,
+    phase: null,
     description:
       'Backup and restore of the data directory, the supported Talos version range, and the rest of the operational settings.',
   },

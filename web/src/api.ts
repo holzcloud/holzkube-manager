@@ -59,6 +59,13 @@ export const systemStatusSchema = z.object({
   // form it has always shown instead of offering nothing at all.
   oidc_enabled: z.boolean().default(false),
   password_login: z.boolean().default(true),
+
+  /** The Talos version window this build was tested against, and whether this
+   * instance accepts a pre-release inside it (OPS-03). Served rather than
+   * written here, because a copy in this bundle drifts from the constants that
+   * enforce it. */
+  talos_range: z.string().default(''),
+  allow_prerelease: z.boolean().default(false),
 })
 
 export type SystemStatus = z.infer<typeof systemStatusSchema>
@@ -773,6 +780,13 @@ export const machineSchema = z.object({
    * whether or not the node is answering — which is when it matters most. */
   locked: z.boolean().default(false),
   lock_reason: z.string().default(''),
+  /** OPS-03. Derived from the last version this node reported, not from a
+   * failed connection: a node outside the range is refused at connect time, so
+   * a marking that depended on connecting would be blank for exactly the nodes
+   * it exists to mark. */
+  unsupported_version: z.boolean().default(false),
+  pre_release: z.boolean().default(false),
+  version_notice: z.string().default(''),
   adopted_at: z.string(),
 
   hostname: fieldSchema(z.string()),

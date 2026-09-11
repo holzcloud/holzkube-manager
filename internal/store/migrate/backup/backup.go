@@ -51,13 +51,29 @@ func Create(dir string, from, to int) (path string, err error) {
 		"-" + time.Now().UTC().Format(time.RFC3339) + ".tar.gz"
 	path = filepath.Join(backupDir, name)
 
+	return path, writeArchive(path, dir)
+}
+
+// writeArchive is the tarball, shared by the pre-migration snapshot and the
+// operator's own backup.
+//
+// One implementation on purpose: the exclusions, the 0600, the fsync and the
+// remove-on-failure are the properties that make a backup a backup, and two
+// copies of them would be two places for one of the four to go missing.
+//
+// O_EXCL: a backup that overwrote an existing file would be a backup that
+// destroyed a backup, and the names carry a timestamp precisely so that never
+// has to happen.
+func writeArchive(path, dir string) (err error) {
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, filePerm)
 	if err != nil {
-		return "", fmt.Errorf("backup: create %s: %w", path, err)
+		return fmt.Errorf("backup: create %s: %w", path, err)
 	}
 	defer func() {
 		if err != nil {
 			_ = f.Close()
+			// A partial tarball left on disk is worse than none: it is a file
+			// with a plausible name that restores to a truncated directory.
 			_ = os.Remove(path)
 		}
 	}()
@@ -66,21 +82,21 @@ func Create(dir string, from, to int) (path string, err error) {
 	tw := tar.NewWriter(gz)
 
 	if err = writeTree(tw, dir); err != nil {
-		return "", err
+		return err
 	}
 	if err = tw.Close(); err != nil {
-		return "", fmt.Errorf("backup: close tar: %w", err)
+		return fmt.Errorf("backup: close tar: %w", err)
 	}
 	if err = gz.Close(); err != nil {
-		return "", fmt.Errorf("backup: close gzip: %w", err)
+		return fmt.Errorf("backup: close gzip: %w", err)
 	}
 	if err = f.Sync(); err != nil {
-		return "", fmt.Errorf("backup: fsync %s: %w", path, err)
+		return fmt.Errorf("backup: fsync %s: %w", path, err)
 	}
 	if err = f.Close(); err != nil {
-		return "", fmt.Errorf("backup: close %s: %w", path, err)
+		return fmt.Errorf("backup: close %s: %w", path, err)
 	}
-	return path, nil
+	return nil
 }
 
 func writeTree(tw *tar.Writer, root string) error {

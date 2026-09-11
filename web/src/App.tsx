@@ -11,6 +11,7 @@ import { nodeDetailRoute } from '@/routes/node-detail'
 import { nodesRoute } from '@/routes/nodes'
 import { placeholderRoutes } from '@/routes/placeholders'
 import { provisionRoute } from '@/routes/provision'
+import { settingsRoute } from '@/routes/settings'
 import { setupRoute } from '@/routes/setup'
 import { upgradesRoute } from '@/routes/upgrades'
 
@@ -37,6 +38,7 @@ const routeTree = rootRoute.addChildren([
     configRoute,
     provisionRoute,
     upgradesRoute,
+    settingsRoute,
     ...placeholderRoutes,
   ]),
 ])
