@@ -152,6 +152,8 @@ const (
 	MethodApplyConfiguration = machineService + "ApplyConfiguration"
 	MethodBootstrap          = machineService + "Bootstrap"
 	MethodReboot             = machineService + "Reboot"
+	MethodShutdown           = machineService + "Shutdown"
+	MethodReset              = machineService + "Reset"
 	MethodLogs               = machineService + "Logs"
 	MethodEtcdSnapshot       = machineService + "EtcdSnapshot"
 	MethodPacketCapture      = machineService + "PacketCapture"
@@ -207,9 +209,9 @@ var deadlineClasses = map[string]DeadlineClass{
 	// Mutation: thirty seconds to *initiate*. Never retried.
 	MethodApplyConfiguration:                 ClassMutation,
 	MethodBootstrap:                          ClassMutation,
-	machineService + "Reset":                 ClassMutation,
+	MethodReset:                              ClassMutation,
 	MethodReboot:                             ClassMutation,
-	machineService + "Shutdown":              ClassMutation,
+	MethodShutdown:                           ClassMutation,
 	machineService + "Upgrade":               ClassMutation,
 	machineService + "Rollback":              ClassMutation,
 	machineService + "MetaWrite":             ClassMutation,

@@ -41,6 +41,11 @@ type pki struct {
 
 	server tls.Certificate
 	client tls.Certificate
+
+	// maintenance records that this node is serving the pre-configuration
+	// world: a self-signed certificate and no client certificate asked for.
+	// See newPKI.
+	maintenance bool
 }
 
 // newPKI builds the node's certificate material.
@@ -53,7 +58,17 @@ type pki struct {
 // verified against some other authority, that second connection would fail for
 // a reason that has nothing to do with whether the derivation was correct --
 // and the connectivity proof D-04 asks for would be untestable.
-func newPKI(hostname, nodeIP string, osCA *pemPair) (*pki, error) {
+//
+// maintenance makes the node present what an unconfigured machine presents: a
+// **self-signed** server certificate, and no request for a client certificate.
+// That is not a detail of the fake. A node in maintenance mode has no cluster
+// PKI at all, so it has nothing to be signed by and nothing to verify a client
+// against -- and the self-signature is the single observable a scan can read
+// without authenticating, which is how Dialer.Probe decides whether a machine
+// is waiting for a configuration. A simulator that announced itself as being
+// in maintenance mode while serving a CA-issued certificate would let a test of
+// the provisioning path pass against a node no real machine resembles.
+func newPKI(hostname, nodeIP string, osCA *pemPair, maintenance bool) (*pki, error) {
 	caCert, caKey, err := authority(osCA)
 	if err != nil {
 		return nil, err
@@ -84,12 +99,31 @@ func newPKI(hostname, nodeIP string, osCA *pemPair) (*pki, error) {
 		return nil, fmt.Errorf("talossim: client certificate: %w", err)
 	}
 
-	return &pki{
-		caCert: caCert,
-		caKey:  caKey,
-		server: tls.Certificate{Certificate: [][]byte{serverDER}, PrivateKey: serverKey, Leaf: mustLeaf(serverDER)},
-		client: tls.Certificate{Certificate: [][]byte{clientDER}, PrivateKey: clientKey, Leaf: mustLeaf(clientDER)},
-	}, nil
+	p := &pki{
+		caCert:      caCert,
+		caKey:       caKey,
+		server:      tls.Certificate{Certificate: [][]byte{serverDER}, PrivateKey: serverKey, Leaf: mustLeaf(serverDER)},
+		client:      tls.Certificate{Certificate: [][]byte{clientDER}, PrivateKey: clientKey, Leaf: mustLeaf(clientDER)},
+		maintenance: maintenance,
+	}
+	if !maintenance {
+		return p, nil
+	}
+
+	// Self-signed, and issued for the same names, so that everything about the
+	// node except who vouched for it is unchanged.
+	selfKey, selfDER, err := issue(nil, nil, &x509.Certificate{
+		Subject:     pkix.Name{CommonName: ServerName, Organization: []string{"talossim"}},
+		KeyUsage:    x509.KeyUsageDigitalSignature,
+		ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+		DNSNames:    dedupe(ServerName, hostname),
+		IPAddresses: ips,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("talossim: maintenance-mode node certificate: %w", err)
+	}
+	p.server = tls.Certificate{Certificate: [][]byte{selfDER}, PrivateKey: selfKey, Leaf: mustLeaf(selfDER)}
+	return p, nil
 }
 
 // pemPair is a PEM-encoded certificate and its private key. It is talossim's
@@ -216,12 +250,21 @@ func (p *pki) pool() *x509.CertPool {
 // a test claiming to prove mTLS pass against a server that ignores client
 // certificates entirely (T-02-06).
 func (p *pki) serverTLS() *tls.Config {
-	return &tls.Config{
+	cfg := &tls.Config{
 		Certificates: []tls.Certificate{p.server},
 		ClientAuth:   tls.RequireAndVerifyClientCert,
 		ClientCAs:    p.pool(),
 		MinVersion:   tls.VersionTLS12,
 	}
+	if p.maintenance {
+		// A node with no cluster PKI has no authority to verify a client
+		// against, so it asks for nothing. This is the reason maintenance mode
+		// serves the method set it does rather than the full one (D-06): the
+		// connection is unauthenticated in both directions.
+		cfg.ClientAuth = tls.NoClientCert
+		cfg.ClientCAs = nil
+	}
+	return cfg
 }
 
 // clientTLS is the configuration a client uses to reach this node: it trusts

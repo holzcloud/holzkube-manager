@@ -36,6 +36,12 @@ const (
 	maxParamLen = 256
 
 	truncationMarker = "…(truncated)"
+
+	// maxParamItems caps a permitted list. An allowlisted field that is a list
+	// is a list of identifiers -- patch ids, addresses to scan -- and a
+	// hundred of them is not a longer record, it is somebody using an
+	// allowlisted name as storage in an archive nothing removes.
+	maxParamItems = 32
 )
 
 // allowlist maps an action token to the parameter paths that may appear in
@@ -105,12 +111,122 @@ var allowlist = map[string][]string{
 	// not in this body at all.
 	"machine.add": {"cluster", "addr"},
 
+	// The three audited *reads*. They are GETs, so there is no body to permit
+	// anything out of, and the table lists them with nothing rather than
+	// leaving them to the default -- which is the distinction this table
+	// claims to make about itself and which cmd/holzkube-managerd's
+	// allowlist_test.go is what actually holds.
+	"system.status": {},
+	"auth.me":       {},
+	"audit.list":    {},
+
 	// Listed with nothing permitted, so the table shows the full set of
 	// mutations rather than leaving any of them to the default. Each carries
 	// its id in the path.
 	"cluster.forget":  {},
 	"machine.forget":  {},
 	"machine.refresh": {},
+
+	// Node actions, phase 6.
+	//
+	// The *scope of a wipe* is the single most important thing this archive
+	// can hold about a reset: "a reset happened on node X" and "every disk on
+	// node X was wiped" are different events, and a record that cannot tell
+	// them apart is a record nobody can answer a question with. None of these
+	// is a credential -- they are the choices an operator made on a screen.
+	//
+	// `confirmation` is deliberately absent from every one of them. It is an
+	// HMAC over the intent, it is the thing that authorises the action, and an
+	// archive with no deletion path is the last place it belongs.
+	"node.reboot":   {"cluster"},
+	"node.shutdown": {"cluster"},
+	"node.reset": {
+		"cluster",
+		"params.mode", "params.graceful", "params.reboot", "params.disks[]",
+	},
+
+	// What was confirmed, so that a token issued and never used still leaves a
+	// record of what somebody was about to do. `typed` is absent: it is the
+	// machine's hostname, which the record already carries, and writing back
+	// what a person typed into a box is a habit worth not starting.
+	"action.confirm": {"action", "params.mode", "params.graceful", "params.reboot"},
+
+	// A cancel names its job in the path.
+	"job.cancel": {},
+
+	// Machine configuration, phase 7.
+	//
+	// The patch *ids* are permitted and the patch *bodies* are not. A body is
+	// arbitrary configuration, configuration is where the secrets are, and
+	// this archive is kept forever. A stored patch stays readable at its own
+	// id for as long as it exists -- which is also forever -- so the record is
+	// complete without the archive holding the bytes.
+	"config.plan":  {"cluster", "patch_ids[]"},
+	"config.apply": {"cluster", "mode", "patch_ids[]"},
+
+	// The patch's name, and deliberately not its body, for the reason above.
+	"patch.create": {"name"},
+
+	// Provisioning, phase 8.
+	//
+	// Everything here is an address, an identifier or a choice the operator
+	// made on a screen, and the one field that could be a credential --
+	// `confirmation` -- is absent, as it is for every node action.
+	//
+	// The scan's own addresses are worth keeping in clear for the reason the
+	// reset's disks are: "a scan happened" and "this installation scanned
+	// 10.0.0.0/24" are different events, and the second is the one somebody
+	// reviewing an unexpected connection on their network is looking for.
+	"provision.scan":    {"cidr", "addrs[]"},
+	"provision.inspect": {"addr", "fingerprint"},
+
+	// The plan and the apply take the same body, so they permit the same
+	// fields: what was shown on the screen is what was submitted, and a record
+	// where the two differ in shape would be a record that cannot be compared.
+	"provision.plan": {
+		"cluster", "addr", "uuid", "control_plane", "install_disk",
+		"schematic_id", "talos_version", "fingerprint", "hostname", "patch_ids[]",
+	},
+	"provision.apply": {
+		"cluster", "addr", "uuid", "control_plane", "install_disk",
+		"schematic_id", "talos_version", "fingerprint", "hostname", "patch_ids[]",
+	},
+
+	// The operator's verdict on an unclear bootstrap, and what they looked at.
+	// This record is the only account anything will ever have of a bootstrap
+	// nothing could decide, and redacting the note would leave the archive
+	// saying that somebody decided, without what they decided or why.
+	"provision.bootstrap-resolve": {"bootstrapped", "note"},
+}
+
+// Listed reports whether an action has an entry in the table.
+//
+// It is not used by the redaction -- an action with no entry redacts
+// everything, which is the fail-closed default and is correct. It exists so
+// that the composition root can assert the other half of the claim this table
+// makes about itself: that it shows the **full set** of mutations, including
+// the ones that permit nothing.
+//
+// The difference matters because the two look identical from inside this
+// package. An action deliberately listed as permitting nothing and an action
+// whose author never read this file both redact everything; only the table can
+// tell them apart, and only something that knows every action there is can
+// tell whether the table is complete.
+func Listed(action string) bool {
+	_, ok := allowlist[action]
+	return ok
+}
+
+// ListedActions returns every action the table names, in no particular order.
+//
+// It is for the guard described on Listed, in the other direction: an entry for
+// an action nothing emits is a decision about a field that no longer exists.
+func ListedActions() []string {
+	out := make([]string, 0, len(allowlist))
+	for action := range allowlist {
+		out = append(out, action)
+	}
+	return out
 }
 
 // Params returns the parameters as they may be written to the log.
@@ -126,9 +242,15 @@ func Params(action string, raw map[string]any) map[string]any {
 	// also permitted a body sending the flat key {"user.name": "..."}. JSON
 	// object keys may contain dots and readBody decodes whatever arrives, so
 	// the two namespaces have to be kept apart.
-	permitted := make([][]string, 0, len(allowlist[action]))
+	permitted := make([]leafRule, 0, len(allowlist[action]))
 	for _, f := range allowlist[action] {
-		permitted = append(permitted, strings.Split(f, "."))
+		rule := leafRule{}
+		if strings.HasSuffix(f, listSuffix) {
+			rule.list = true
+			f = strings.TrimSuffix(f, listSuffix)
+		}
+		rule.path = strings.Split(f, ".")
+		permitted = append(permitted, rule)
 	}
 
 	out := make(map[string]any, len(raw))
@@ -138,19 +260,36 @@ func Params(action string, raw map[string]any) map[string]any {
 	return out
 }
 
+// leafRule is one allowlist entry, parsed.
+//
+// list records that the entry was written with a `[]` suffix, which is the
+// author saying this field holds a list of identifiers rather than one. It is
+// spelled out per entry rather than inferred from what arrives, because
+// "username" is a scalar field and a caller sending a list there is a caller
+// sending a shape that field does not have -- which is exactly the smuggling
+// the allowlist is for.
+type leafRule struct {
+	path []string
+	list bool
+}
+
+// listSuffix marks an allowlist entry as naming a list of scalars.
+const listSuffix = "[]"
+
 // redactValue decides one node of the parameter tree.
 //
 // There is no branch that returns an unrecognised value unchanged. Everything
 // either matches an allowlisted leaf path and is a scalar, or is a container on
 // the way to one, or becomes the marker.
-func redactValue(segments []string, permitted [][]string, v any) any {
-	if isPermittedLeaf(segments, permitted) {
-		if s, ok := permittedScalar(v); ok {
+func redactValue(segments []string, permitted []leafRule, v any) any {
+	if leaf, ok := permittedLeaf(segments, permitted); ok {
+		if s, ok := permittedValue(v, leaf.list); ok {
 			return s
 		}
-		// An allowlist entry names a leaf. A caller that sends an object or a
-		// list where a string was expected would otherwise smuggle arbitrary
-		// content past the list under a permitted name.
+		// An allowlist entry names a leaf. A caller that sends an object where
+		// a string was expected would otherwise smuggle arbitrary content past
+		// the list under a permitted name -- and walking it would publish its
+		// shape, which for a secrets bundle is itself a map of where to look.
 		return RedactedMarker
 	}
 
@@ -172,28 +311,44 @@ func redactValue(segments []string, permitted [][]string, v any) any {
 	return RedactedMarker
 }
 
-// isPermittedLeaf reports whether segments names an allowlisted leaf exactly.
-func isPermittedLeaf(segments []string, permitted [][]string) bool {
+// permittedLeaf returns the rule for an allowlisted leaf named exactly.
+func permittedLeaf(segments []string, permitted []leafRule) (leafRule, bool) {
 	for _, p := range permitted {
-		if slices.Equal(p, segments) {
-			return true
+		if slices.Equal(p.path, segments) {
+			return p, true
 		}
 	}
-	return false
+	return leafRule{}, false
 }
 
 // leadsToPermitted reports whether any allowlisted path continues below here.
-func leadsToPermitted(segments []string, permitted [][]string) bool {
+func leadsToPermitted(segments []string, permitted []leafRule) bool {
 	for _, p := range permitted {
-		if len(p) > len(segments) && slices.Equal(p[:len(segments)], segments) {
+		if len(p.path) > len(segments) && slices.Equal(p.path[:len(segments)], segments) {
 			return true
 		}
 	}
 	return false
 }
 
-// permittedScalar accepts the leaf kinds a record can carry, capped in length.
-func permittedScalar(v any) (any, bool) {
+// permittedValue accepts what a leaf may carry.
+//
+// list is the entry's own `[]` marking. A field marked as a list accepts a
+// list of scalars, and the reason it exists at all is a record that is
+// otherwise incomplete: `config.apply` names its patches by id, and a run
+// whose ids are `<redacted>` is a record that says a configuration was applied
+// and cannot say which one. It is not an exemption from the rule -- every
+// element goes through this function itself, an over-long list is refused, and
+// a list holding an object or another list is refused whole.
+//
+// A field not marked as a list refuses one, exactly as before: "username" is a
+// scalar field, and a caller sending a list there is sending a shape that
+// field does not have.
+//
+// An object under a permitted name is always the marker, marked or not:
+// walking it would publish its shape, and the shape of a secrets bundle is
+// itself a map of where to look.
+func permittedValue(v any, list bool) (any, bool) {
 	switch t := v.(type) {
 	case nil:
 		return nil, true
@@ -205,6 +360,24 @@ func permittedScalar(v any) (any, bool) {
 		return t, true
 	case string:
 		return capLength(t), true
+	case []any:
+		if !list || len(t) > maxParamItems {
+			return nil, false
+		}
+		out := make([]any, 0, len(t))
+		for _, item := range t {
+			// Never `list` again: a list of lists is a structure, and this
+			// permits one list of scalars rather than a tree of them.
+			s, ok := permittedValue(item, false)
+			if !ok {
+				// One element that is not a scalar refuses the whole list
+				// rather than a list with a marker in it: a partially redacted
+				// list reads as a complete one.
+				return nil, false
+			}
+			out = append(out, s)
+		}
+		return out, true
 	default:
 		return nil, false
 	}

@@ -403,6 +403,66 @@ var routeBudgets = []routeBudget{
 			"because a control-plane node is the worst case; a worker skips it.",
 	},
 	{
+		route: "POST /api/v1/provision/scan",
+		calls: []upstreamCall{
+			{name: "Dialer.Probe: TLS handshake (per address, bounded by ScanTimeout)", class: nodeProbeCall},
+			{name: "ServerFingerprint: second handshake, per address that answered", class: nodeProbeCall},
+		},
+		routeDeadline: handlers.ScanRouteBudget,
+		verdict:       withinBudget,
+		clipping:      uncut,
+		why: "A scan is the one row here whose worst case is not the sum of its calls: the " +
+			"addresses are probed ScanConcurrency at a time, each bounded by " +
+			"provision.ScanTimeout, which is far shorter than the probe class. The two " +
+			"declared calls are what *one* address costs in series -- a handshake to see " +
+			"what is there and a second to read the certificate the operator will compare " +
+			"against the console. The route ceiling covers a full /22 at that concurrency, " +
+			"which is why it is the largest number in this table and why it is declared " +
+			"here rather than inferred from the two classes.",
+	},
+	{
+		route: "POST /api/v1/provision/inspect",
+		calls: append([]upstreamCall{
+			{name: "NewMaintenanceClient: Version", class: nodeProbeCall},
+		}, append(nodeFactsCalls(),
+			upstreamCall{name: "Version", class: nodeFastReadCall},
+			upstreamCall{name: "Disks", class: nodeFastReadCall},
+			upstreamCall{name: "ServerFingerprint: pre-trust TLS handshake", class: nodeProbeCall},
+		)...),
+		routeDeadline:     handlers.InspectRouteBudget,
+		verdict:           withinBudget,
+		clipping:          clipped,
+		clippingRationale: nodeReadClippingRationale,
+		why: "provision.Inspect connects to a machine in maintenance mode, walks the same " +
+			"resource state an adopted node's read walks, asks for the disk list the picker " +
+			"is built from, and reads the certificate fingerprint on its own connection. " +
+			"The fingerprint is a separate handshake on purpose: a value the operator " +
+			"confirms has to come from the connection they are about to trust.",
+	},
+	{
+		route:         "POST /api/v1/provision/plan",
+		calls:         nil,
+		routeDeadline: 0,
+		verdict:       withinBudget,
+		clipping:      uncut,
+		why: "The plan reads the cluster's control-plane count out of fsstore and then works " +
+			"locally: it validates, warns and renders the install image. No ceiling, because " +
+			"there is no upstream call to put one over -- the same shape as the schematic " +
+			"list below.",
+	},
+	{
+		route:         "POST /api/v1/provision/apply",
+		calls:         nil,
+		routeDeadline: 0,
+		verdict:       withinBudget,
+		clipping:      uncut,
+		why: "The apply validates the same plan, checks the confirmation and submits a job, and " +
+			"then answers. Every node call provisioning makes happens inside that job, on " +
+			"the engine's own context and not on this request's -- which is the whole " +
+			"reason a provisioning run survives a closed tab (PROV-11). This row is the " +
+			"one place that is written down.",
+	},
+	{
 		route:         "GET /api/v1/schematics",
 		calls:         nil,
 		routeDeadline: 0,
