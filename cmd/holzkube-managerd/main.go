@@ -24,6 +24,7 @@ import (
 	"github.com/holzcloud/holzkube-manager/internal/imagefactory"
 	"github.com/holzcloud/holzkube-manager/internal/inventory"
 	"github.com/holzcloud/holzkube-manager/internal/jobs"
+	"github.com/holzcloud/holzkube-manager/internal/machineconfig"
 	"github.com/holzcloud/holzkube-manager/internal/model"
 	"github.com/holzcloud/holzkube-manager/internal/nodestream"
 	"github.com/holzcloud/holzkube-manager/internal/store/fsstore"
@@ -234,6 +235,16 @@ func run(args []string) error {
 		return err
 	}
 
+	// The config domain. It takes the same connector the jobs take, and the
+	// transport mode, because whether this process may apply anything is a
+	// property of the process rather than of the request.
+	configSvc := machineconfig.New(machineconfig.Deps{
+		Connect: func(ctx context.Context, id model.MachineID) (*talos.ClusterClient, error) {
+			return inv.Connect(ctx, id)
+		},
+		Mode: talosMode,
+	})
+
 	// The identity provider, if one is configured. New performs no network I/O:
 	// discovery happens on first use, so that a provider which is down -- quite
 	// possibly because it runs on the cluster this tool exists to repair --
@@ -270,6 +281,7 @@ func run(args []string) error {
 		NodeStreams: nodeStreams,
 		Jobs:        engine,
 		Confirmer:   confirmer,
+		Config:      configSvc,
 		// The per-cluster read-only lock, read by the route middleware rather
 		// than by each handler (D-22). Inside the literal for the reason the
 		// comment above states: Deps is copied by value into every …Routes
@@ -307,6 +319,7 @@ func run(args []string) error {
 		handlers.InventoryRoutes(deps),
 		handlers.StreamRoutes(deps),
 		handlers.JobRoutes(deps),
+		handlers.ConfigRoutes(deps),
 	)
 
 	// Start observing before the listener opens. A supervisor that only runs

@@ -1321,3 +1321,97 @@ The lease is per cluster, not global — one slow node must not stop the fleet �
 and it is held in memory rather than in the store. A lease that survived a crash
 would block every job on that cluster until somebody cleared it by hand, and the
 record a crashed job leaves behind already says what happened.
+
+## Machine configuration
+
+### Nothing leaves this package unredacted
+
+A machine configuration contains the cluster's certificate-authority private
+key. "Look at a node's config" is therefore the same feature as "hand the
+cluster over" unless every path out goes through one redaction function — and
+"every path" is five: the rendered view, the raw tab, the diff, the API
+response and the audit log.
+
+The redaction is **in front of the view rather than applied by whoever
+remembers**: `machineconfig` hands back redacted views and the handlers have
+nothing else to serialise. There is no `?raw=true`, no "show secrets" toggle and
+no endpoint behind one.
+
+It is two passes, because they fail in different directions. Machinery's own
+`RedactSecrets` knows the schema and removes the fields it names; a sweep for
+PEM private-key blocks knows nothing about the schema and catches a key in a
+field this build has never heard of. Neither alone is enough — the first misses
+what upstream adds after this build, the second misses anything that is a secret
+without looking like one. A configuration that does not *parse* still gets the
+second pass and is returned with an error alongside, because refusing to show it
+would hide the problem and showing it unredacted would hand over the key.
+
+### Routes
+
+| Method | Path | Destructive | Notes |
+|---|---|---|---|
+| `GET` | `/api/v1/machines/{id}/config` | no | `raw` and `rendered`, both redacted |
+| `POST` | `/api/v1/machines/{id}/config/plan` | no | reads, merges locally, changes nothing |
+| `POST` | `/api/v1/machines/{id}/config/apply` | **yes** | cluster-scoped; `mode` required |
+| `GET` / `POST` | `/api/v1/patches` | no | list, create-or-edit |
+| `GET` | `/api/v1/patches/{id}` | no | including superseded versions |
+
+`plan` is a `POST` because it carries the patches, not because it mutates.
+
+### The diff is structural
+
+A text diff of two YAML documents reports reordering and reindentation as
+changes, and reports a list that grew from three entries to four as "one line
+added" — which is exactly the change that matters, because it is the shape a
+strategic merge patch applied twice produces.
+
+So two findings are named rather than left in the noise:
+
+- `list-changed` carries `len_before` and `len_after`;
+- `duplicates` carries the values that appear twice **after** the merge.
+
+`idempotent: false` on a plan is the same finding one step earlier: applying the
+set twice differs from applying it once, which is nearly always an append.
+
+### The apply mode is computed, not chosen
+
+`verdict.mode` comes from the changed paths against a curated whitelist, and
+anything not on the whitelist is reported as needing a reboot — the conservative
+direction, because the alternative is a change that claims to take effect and
+does not.
+
+Three cases are called out by name:
+
+- **`.machine.install`** applies, reports success, and changes nothing until the
+  next install or upgrade. It is deliberately *not* on the no-reboot list, because
+  "no reboot needed" would read as "takes effect now".
+- **`.machine.network`** gets `try` and `try_seconds`. A network change that is
+  wrong makes the node unreachable, and an unreachable node cannot be told to
+  undo it. The countdown is the same number the node uses, or the screen is lying
+  about how long is left.
+- **a second `staged` apply** is refused with `409 store.staged-pending`. Talos
+  accepts it and silently replaces the first, so the operator staged two changes
+  and exactly one happens with nothing saying which. The guard is per process and
+  in memory — a stored flag would be a claim about the node that only the node can
+  answer, and it would go stale the moment somebody rebooted outside holzkube-manager.
+
+### Patches are strategic merge only, and append-only
+
+RFC 6902 addresses list entries by index. An index is a claim about a list as it
+happened to be when the patch was written; applied to a node whose list is one
+longer it edits the wrong entry and reports success. It is refused with its own
+code, `validation.patch-not-strategic`, so a client can tell "fix this patch"
+from "use the other form".
+
+Editing a patch writes a **new version** and marks the old one `superseded`. The
+old body stays readable, because "what exactly was applied to this node in March"
+only has an answer if the thing applied still exists.
+
+### Audit
+
+`config.apply` permits the cluster, the mode and the **patch ids**. Patch
+*bodies* are deliberately absent from the allowlist: a body is arbitrary
+configuration, configuration is where the secrets are, and the archive has no
+deletion path. A stored patch is readable at its own id for as long as it exists
+— which is forever — so the record is complete without the archive holding the
+bytes.

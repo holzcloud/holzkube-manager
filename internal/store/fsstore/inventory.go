@@ -146,6 +146,10 @@ type jobStore struct {
 	recordStore[model.JobID, model.Job]
 }
 
+type patchStore struct {
+	recordStore[model.PatchID, model.Patch]
+}
+
 type clusterSecretStore struct {
 	inner recordStore[model.ClusterID, model.ClusterSecrets]
 }
@@ -195,6 +199,18 @@ func newJobStore(dir string, locks *store.EntityLocks) *jobStore {
 		key:    func(j model.Job) model.JobID { return j.ID },
 		rev:    func(j model.Job) uint64 { return j.Rev },
 		setRev: func(j *model.Job, v uint64) { j.Rev = v },
+	}}
+}
+
+func newPatchStore(dir string, locks *store.EntityLocks) *patchStore {
+	return &patchStore{recordStore[model.PatchID, model.Patch]{
+		locks:  locks,
+		dir:    dir,
+		kind:   kindPatches,
+		noun:   "patch",
+		key:    func(p model.Patch) model.PatchID { return p.ID },
+		rev:    func(p model.Patch) uint64 { return p.Rev },
+		setRev: func(p *model.Patch, v uint64) { p.Rev = v },
 	}}
 }
 
