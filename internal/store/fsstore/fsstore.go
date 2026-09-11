@@ -36,6 +36,10 @@ type Store struct {
 	settings   *settingsStore
 	sessions   *sessionStore
 	schematics *schematicStore
+
+	clusters       *clusterStore
+	clusterSecrets *clusterSecretStore
+	machines       *machineStore
 }
 
 // Open prepares dir as a holzkube-manager data directory and returns a Store over it.
@@ -90,8 +94,14 @@ func Open(dir string) (s *Store, err error) {
 	s.settings = &settingsStore{path: filepath.Join(abs, "settings.json"), locks: s.entityMu}
 	s.sessions = &sessionStore{dir: filepath.Join(abs, "sessions"), locks: s.entityMu}
 	s.schematics = &schematicStore{dir: filepath.Join(abs, kindSchematics), locks: s.entityMu}
+	s.clusters = newClusterStore(filepath.Join(abs, kindClusters), s.entityMu)
+	s.clusterSecrets = newClusterSecretStore(filepath.Join(abs, kindClusterSecrets), s.entityMu)
+	s.machines = newMachineStore(filepath.Join(abs, kindMachines), s.entityMu)
 
-	for _, sub := range []string{s.users.dir, s.sessions.dir, s.schematics.dir} {
+	for _, sub := range []string{
+		s.users.dir, s.sessions.dir, s.schematics.dir,
+		s.clusters.dir, s.clusterSecrets.inner.dir, s.machines.dir,
+	} {
 		if err := os.MkdirAll(sub, dirPerm); err != nil {
 			return nil, fmt.Errorf("fsstore: create %s: %w", sub, err)
 		}
@@ -127,6 +137,16 @@ func (s *Store) Sessions() store.SessionStore { return s.sessions }
 // Schematics returns the Image Factory schematic entity.
 func (s *Store) Schematics() store.SchematicStore { return s.schematics }
 
+// Clusters returns the managed-cluster entity.
+func (s *Store) Clusters() store.ClusterStore { return s.clusters }
+
+// ClusterSecrets returns the cluster PKI entity. Every record it holds is a
+// secret; see model.ClusterSecrets for what that forbids.
+func (s *Store) ClusterSecrets() store.ClusterSecretStore { return s.clusterSecrets }
+
+// Machines returns the node inventory entity.
+func (s *Store) Machines() store.MachineStore { return s.machines }
+
 // Close releases the process lock. After Close another instance may open the
 // same data directory.
 func (s *Store) Close() error {
@@ -145,6 +165,10 @@ const (
 	kindSettings   = "settings"
 	kindSessions   = "sessions"
 	kindSchematics = "schematics"
+
+	kindClusters       = "clusters"
+	kindClusterSecrets = "cluster-secrets"
+	kindMachines       = "machines"
 
 	// settingsKey is the id half of the lock key for the settings singleton.
 	settingsKey = "singleton"

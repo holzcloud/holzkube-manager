@@ -81,10 +81,18 @@ func TestMaintenanceClientRejectsClusterOnlyCall(t *testing.T) {
 //
 // Maintenance mode realistically serves ApplyConfiguration, Version, Disks and
 // COSI reads and nothing else, so the type serves exactly those, plus Close.
+//
+// NodeFacts is the sixth, added in phase 3, and it is the deliberate edit this
+// test exists to demand rather than an exception to it. It is a COSI read and
+// nothing else -- the same function the cluster client uses, against the same
+// resource state -- so it adds no API surface the type did not already have.
+// What it does add is a caller that does not have to know which of half a
+// dozen resources a node's identity lives in, which is what a maintenance-mode
+// discovery in phase 8 will need.
 func TestMaintenanceClientMethodSetIsClosed(t *testing.T) {
 	t.Parallel()
 
-	want := []string{"ApplyConfiguration", "COSI", "Close", "Disks", "Version"}
+	want := []string{"ApplyConfiguration", "COSI", "Close", "Disks", "NodeFacts", "Version"}
 
 	typ := reflect.TypeOf(&talos.MaintenanceClient{})
 	var got []string

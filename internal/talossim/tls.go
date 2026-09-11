@@ -1,12 +1,14 @@
 package talossim
 
 import (
+	"crypto"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"encoding/pem"
 	"fmt"
 	"math/big"
 	"net"
@@ -35,24 +37,26 @@ const certValidity = time.Hour
 // stay true.
 type pki struct {
 	caCert *x509.Certificate
+	caKey  crypto.Signer
 
 	server tls.Certificate
 	client tls.Certificate
 }
 
-func newPKI(hostname, nodeIP string) (*pki, error) {
-	caKey, caDER, err := issue(nil, nil, &x509.Certificate{
-		Subject:               pkix.Name{CommonName: "talossim CA", Organization: []string{"talossim"}},
-		KeyUsage:              x509.KeyUsageCertSign | x509.KeyUsageCRLSign | x509.KeyUsageDigitalSignature,
-		BasicConstraintsValid: true,
-		IsCA:                  true,
-	})
+// newPKI builds the node's certificate material.
+//
+// osCA, when supplied, is the cluster's own Talos OS certificate authority --
+// the one that appears in the machine configuration this node serves. Using it
+// rather than a fresh authority is what makes the adoption path testable end
+// to end: holzkube-manager derives the bundle from the configuration it read, mints
+// itself a client certificate from that CA, and reconnects. If the node
+// verified against some other authority, that second connection would fail for
+// a reason that has nothing to do with whether the derivation was correct --
+// and the connectivity proof D-04 asks for would be untestable.
+func newPKI(hostname, nodeIP string, osCA *pemPair) (*pki, error) {
+	caCert, caKey, err := authority(osCA)
 	if err != nil {
-		return nil, fmt.Errorf("talossim: certificate authority: %w", err)
-	}
-	caCert, err := x509.ParseCertificate(caDER)
-	if err != nil {
-		return nil, fmt.Errorf("talossim: parse certificate authority: %w", err)
+		return nil, err
 	}
 
 	ips := []net.IP{net.IPv4(127, 0, 0, 1), net.IPv6loopback}
@@ -82,9 +86,59 @@ func newPKI(hostname, nodeIP string) (*pki, error) {
 
 	return &pki{
 		caCert: caCert,
+		caKey:  caKey,
 		server: tls.Certificate{Certificate: [][]byte{serverDER}, PrivateKey: serverKey, Leaf: mustLeaf(serverDER)},
 		client: tls.Certificate{Certificate: [][]byte{clientDER}, PrivateKey: clientKey, Leaf: mustLeaf(clientDER)},
 	}, nil
+}
+
+// pemPair is a PEM-encoded certificate and its private key. It is talossim's
+// own two-field shape rather than machinery's x509 type so that this file
+// stays a file about certificates and not about Talos configuration.
+type pemPair struct {
+	Crt []byte
+	Key []byte
+}
+
+// authority returns the certificate authority the node issues from: the
+// cluster's, when one was supplied, and a fresh self-signed one otherwise.
+func authority(osCA *pemPair) (*x509.Certificate, crypto.Signer, error) {
+	if osCA == nil {
+		key, der, err := issue(nil, nil, &x509.Certificate{
+			Subject:               pkix.Name{CommonName: "talossim CA", Organization: []string{"talossim"}},
+			KeyUsage:              x509.KeyUsageCertSign | x509.KeyUsageCRLSign | x509.KeyUsageDigitalSignature,
+			BasicConstraintsValid: true,
+			IsCA:                  true,
+		})
+		if err != nil {
+			return nil, nil, fmt.Errorf("talossim: certificate authority: %w", err)
+		}
+		cert, err := x509.ParseCertificate(der)
+		if err != nil {
+			return nil, nil, fmt.Errorf("talossim: parse certificate authority: %w", err)
+		}
+		return cert, key, nil
+	}
+
+	pair, err := tls.X509KeyPair(osCA.Crt, osCA.Key)
+	if err != nil {
+		return nil, nil, fmt.Errorf("talossim: load cluster certificate authority: %w", err)
+	}
+	cert, err := x509.ParseCertificate(pair.Certificate[0])
+	if err != nil {
+		return nil, nil, fmt.Errorf("talossim: parse cluster certificate authority: %w", err)
+	}
+	signer, ok := pair.PrivateKey.(crypto.Signer)
+	if !ok {
+		return nil, nil, fmt.Errorf("talossim: cluster authority key of type %T cannot sign", pair.PrivateKey)
+	}
+	return cert, signer, nil
+}
+
+// caPEM returns the authority's certificate in PEM form, which is what a
+// client needs in order to trust this node.
+func (p *pki) caPEM() []byte {
+	return pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: p.caCert.Raw})
 }
 
 // issue fills in the parts of a template that are the same for every
@@ -93,7 +147,7 @@ func newPKI(hostname, nodeIP string) (*pki, error) {
 //
 // The key, serial and validity construction follows internal/tlsx/selfsigned.go
 // so that there is one shape of certificate generation in this repository.
-func issue(parent *x509.Certificate, parentKey *ecdsa.PrivateKey, tmpl *x509.Certificate) (*ecdsa.PrivateKey, []byte, error) {
+func issue(parent *x509.Certificate, parentKey crypto.Signer, tmpl *x509.Certificate) (*ecdsa.PrivateKey, []byte, error) {
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		return nil, nil, fmt.Errorf("generate key: %w", err)
@@ -110,9 +164,9 @@ func issue(parent *x509.Certificate, parentKey *ecdsa.PrivateKey, tmpl *x509.Cer
 	tmpl.NotBefore = now.Add(-time.Minute)
 	tmpl.NotAfter = now.Add(certValidity)
 
-	signer := parentKey
+	var signer crypto.Signer = parentKey
 	issuer := parent
-	if signer == nil {
+	if parentKey == nil {
 		signer = key
 		issuer = tmpl
 	}

@@ -75,6 +75,42 @@ type Options struct {
 	// purpose -- see Streamer.
 	StreamMessages int
 
+	// Cluster, when set, makes this node a member of a simulated cluster: it
+	// serves that cluster's machine configuration, and its certificate
+	// authority is the cluster's own OS CA rather than a fresh one. A node
+	// without it is a node holzkube-manager can talk to but cannot adopt, which is the
+	// right shape for every test that is not about adoption.
+	Cluster *Cluster
+
+	// ControlPlane selects which of the cluster's two configurations this node
+	// serves. It is the difference D-05 turns on: only a control-plane node's
+	// configuration carries the OS CA private key, and an import aimed at a
+	// worker must be refused by name rather than half-completed.
+	ControlPlane bool
+
+	// Members is the cluster membership this node's discovery reports. Leaving
+	// it empty is the truthful simulation of a cluster whose discovery service
+	// is switched off -- which is a supported configuration and must not look
+	// like a broken one.
+	Members []MemberFixture
+
+	// SchematicID is served as the virtual schematic system extension. Empty
+	// means the node was not installed from a Factory image and reports no
+	// schematic, which is a fact holzkube-manager has to be able to show as "none"
+	// rather than guess at (D-12).
+	SchematicID string
+
+	// KubeletImage is what the KubeletSpec resource carries, and therefore
+	// where the node's Kubernetes version comes from. Defaults to the pinned
+	// DefaultKubernetesVersion.
+	KubeletImage string
+
+	// The hardware the node claims. The defaults describe a small mini-PC,
+	// because that is the hardware this product was written for.
+	CPUs      int
+	MemoryMiB uint64
+	Disks     []DiskFixture
+
 	// Now is the clock the node stamps its state with. It is a field rather
 	// than a call to time.Now for the same reason auth.Service carries one: a
 	// test that has to assert "the service last changed at the last boot"
@@ -165,7 +201,22 @@ func New(opts Options) (*Server, error) {
 		opts.Now = time.Now
 	}
 
-	p, err := newPKI(opts.Hostname, opts.NodeIP)
+	if opts.KubeletImage == "" {
+		opts.KubeletImage = "ghcr.io/siderolabs/kubelet:v" + DefaultKubernetesVersion
+	}
+	if opts.CPUs == 0 {
+		opts.CPUs = 1
+	}
+	if opts.MemoryMiB == 0 {
+		opts.MemoryMiB = 16384
+	}
+	if opts.Disks == nil {
+		opts.Disks = []DiskFixture{{
+			Device: "nvme0n1", Size: 512 << 30, Model: "SIMULATED NVMe", Transport: "nvme",
+		}}
+	}
+
+	p, err := newPKI(opts.Hostname, opts.NodeIP, clusterOSCA(opts.Cluster))
 	if err != nil {
 		return nil, err
 	}
@@ -330,7 +381,10 @@ func (s *Server) ClientCreds() talos.Creds {
 // handshake made with them fails for exactly one reason: the node cannot verify
 // the client. That is the negative control for the mTLS claim.
 func (s *Server) UntrustedClientCreds() (talos.Creds, error) {
-	foreign, err := newPKI(s.opts.Hostname, s.opts.NodeIP)
+	// Deliberately nil rather than the cluster's authority: an "unrelated
+	// authority" that happened to be the cluster's would verify, and the
+	// negative control would prove nothing.
+	foreign, err := newPKI(s.opts.Hostname, s.opts.NodeIP, nil)
 	if err != nil {
 		return talos.Creds{}, err
 	}
