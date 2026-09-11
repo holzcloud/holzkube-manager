@@ -26,6 +26,7 @@ import (
 	"github.com/holzcloud/holzkube-manager/internal/httpapi/handlers"
 	"github.com/holzcloud/holzkube-manager/internal/inventory"
 	"github.com/holzcloud/holzkube-manager/internal/jobs"
+	"github.com/holzcloud/holzkube-manager/internal/machineconfig"
 	"github.com/holzcloud/holzkube-manager/internal/model"
 	"github.com/holzcloud/holzkube-manager/internal/nodestream"
 	"github.com/holzcloud/holzkube-manager/internal/store/fsstore"
@@ -62,6 +63,7 @@ type harnessConfig struct {
 	inventory func(store *fsstore.Store) *inventory.Service
 	streaming bool
 	jobs      bool
+	config    bool
 }
 
 // withInventory adds an inventory service built over the harness's store.
@@ -72,6 +74,11 @@ func withInventory(build func(store *fsstore.Store) *inventory.Service) harnessO
 // withStreaming adds the hub, the node-stream manager and the stream route.
 func withStreaming() harnessOpt {
 	return func(c *harnessConfig) { c.streaming = true }
+}
+
+// withConfig adds the machine-configuration service and its routes.
+func withConfig() harnessOpt {
+	return func(c *harnessConfig) { c.config = true }
 }
 
 // withJobs adds the job engine, the confirmer and the node-action routes. It
@@ -199,6 +206,17 @@ func newHarness(t *testing.T, opts ...harnessOpt) *harness {
 		h2.jobs = engine
 	}
 
+	if cfg.config {
+		deps.Config = machineconfig.New(machineconfig.Deps{
+			Connect: func(ctx context.Context, id model.MachineID) (*talos.ClusterClient, error) {
+				if inv == nil {
+					return nil, errors.New("no inventory")
+				}
+				return inv.Connect(ctx, id)
+			},
+		})
+	}
+
 	deps.Routes = slices.Concat(
 		handlers.SystemRoutes(deps),
 		handlers.SetupRoutes(deps),
@@ -208,6 +226,7 @@ func newHarness(t *testing.T, opts ...harnessOpt) *harness {
 		handlers.InventoryRoutes(deps),
 		handlers.StreamRoutes(deps),
 		handlers.JobRoutes(deps),
+		handlers.ConfigRoutes(deps),
 	)
 
 	srv := httptest.NewTLSServer(httpapi.New(deps))

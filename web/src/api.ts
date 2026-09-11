@@ -930,6 +930,99 @@ export const resetPreviewSchema = z.object({
 
 export type ResetPreview = z.infer<typeof resetPreviewSchema>
 
+/* ---------------------------------------------------------------------- */
+/* Machine configuration                                                   */
+/* ---------------------------------------------------------------------- */
+
+export const configViewSchema = z.object({
+  machine: z.string(),
+  /**
+   * Both forms are **already redacted by the server**. There is no unredacted
+   * field and no flag that produces one: a machine configuration carries the
+   * cluster CA private key, so "look at a node's config" would otherwise be
+   * the same feature as "hand the cluster over".
+   */
+  raw: z.string(),
+  rendered: z.string(),
+  read_at: z.string(),
+  /** A configuration is waiting for this node's next boot, as far as this
+   * process knows. The qualifier is real: the record is in memory, so a
+   * restart forgets it and a reboot outside holzkube-manager clears it on the node
+   * without clearing it here. */
+  staged_pending: z.boolean().default(false),
+  staged_at: z.string().optional(),
+})
+
+export type ConfigView = z.infer<typeof configViewSchema>
+
+export const changeSchema = z.object({
+  path: z.string(),
+  kind: z.enum(['added', 'removed', 'modified', 'list-changed']),
+  before: z.string().default(''),
+  after: z.string().default(''),
+  len_before: z.number().default(0),
+  len_after: z.number().default(0),
+  /** Values that appear twice in the list after the change. Nearly always a
+   * patch that was applied a second time. */
+  duplicates: z.array(z.string()).default([]),
+})
+
+export const verdictSchema = z.object({
+  mode: z.enum(['no-reboot', 'reboot', 'staged', 'try']),
+  reboot_required: z.boolean(),
+  reboot_paths: z.array(z.string()).default([]),
+  /** Paths under .machine.install: they apply and change nothing until the
+   * next install or upgrade. */
+  install_only: z.array(z.string()).default([]),
+  network_paths: z.array(z.string()).default([]),
+  /** The countdown for a `try` apply. It is the same number the node uses, or
+   * the screen would be lying about how long is left. */
+  try_seconds: z.number().default(0),
+  sentences: z.array(z.string()).default([]),
+})
+
+export const previewSchema = z.object({
+  machine: z.string(),
+  diff: z.object({
+    changes: z.array(changeSchema).default([]),
+    paths: z.array(z.string()).default([]),
+    duplicates: z.boolean().default(false),
+  }),
+  verdict: verdictSchema,
+  result: z.string(),
+  /** False is nearly always a patch that appends to a list. */
+  idempotent: z.boolean(),
+  valid: z.boolean(),
+  validation: z.array(z.string()).default([]),
+})
+
+export type ConfigPreview = z.infer<typeof previewSchema>
+
+export const patchSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  cluster: z.string().default(''),
+  version: z.number(),
+  parent: z.string().default(''),
+  /** Marked, never deleted: "what exactly was applied in March" only has an
+   * answer if the thing applied still exists. */
+  superseded: z.boolean().default(false),
+  body: z.string(),
+  description: z.string().default(''),
+  author: z.string().default(''),
+  created_at: z.string(),
+  rev: z.number(),
+})
+
+export type Patch = z.infer<typeof patchSchema>
+
+export const patchesSchema = z.object({ patches: z.array(patchSchema) })
+
+export const applyResultSchema = z.object({
+  mode: z.string(),
+  details: z.string().default(''),
+})
+
 export const api = {
   status: (): Promise<SystemStatus> =>
     sendJSON('GET', '/api/v1/system/status', systemStatusSchema, undefined, {
@@ -1154,6 +1247,60 @@ export const api = {
         confirmation,
         params,
         cluster,
+      }),
+  },
+
+  config: {
+    get: (machine: string): Promise<ConfigView> =>
+      sendJSON('GET', `/api/v1/machines/${encodeURIComponent(machine)}/config`, configViewSchema),
+
+    /** Reads the node, merges locally, and answers with the diff, the apply
+     * mode and the validation. It changes nothing. */
+    plan: (machine: string, patches: string[], patchIDs: string[] = []): Promise<ConfigPreview> =>
+      sendJSON(
+        'POST',
+        `/api/v1/machines/${encodeURIComponent(machine)}/config/plan`,
+        previewSchema,
+        { patches, patch_ids: patchIDs, cluster: '', mode: '' },
+      ),
+
+    apply: (
+      machine: string,
+      patches: string[],
+      mode: string,
+      cluster: string,
+      patchIDs: string[] = [],
+    ): Promise<{ mode: string; details: string }> =>
+      sendJSON(
+        'POST',
+        `/api/v1/machines/${encodeURIComponent(machine)}/config/apply`,
+        applyResultSchema,
+        { patches, patch_ids: patchIDs, mode, cluster },
+      ),
+  },
+
+  patches: {
+    list: async (): Promise<Patch[]> =>
+      (await sendJSON('GET', '/api/v1/patches', patchesSchema)).patches,
+
+    get: (id: string): Promise<Patch> =>
+      sendJSON('GET', `/api/v1/patches/${encodeURIComponent(id)}`, patchSchema),
+
+    /** Creating with a `parent` is an edit: it writes a new version and marks
+     * the old one superseded rather than rewriting it. */
+    create: (input: {
+      name: string
+      body: string
+      cluster?: string
+      description?: string
+      parent?: string
+    }): Promise<Patch> =>
+      sendJSON('POST', '/api/v1/patches', patchSchema, {
+        name: input.name,
+        body: input.body,
+        cluster: input.cluster ?? '',
+        description: input.description ?? '',
+        parent: input.parent ?? '',
       }),
   },
 

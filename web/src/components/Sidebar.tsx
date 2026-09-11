@@ -70,7 +70,7 @@ export const NAV_AREAS: NavArea[] = [
     path: '/config',
     label: 'Config',
     icon: FileCog,
-    phase: 7,
+    phase: null,
     description:
       'Machine configuration: view it with secrets redacted on the server, diff it, patch it, and see which apply mode a change actually needs.',
   },

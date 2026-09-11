@@ -904,6 +904,56 @@ func (m *MaintenanceClient) Disks(ctx context.Context) ([]Disk, error) {
 	return out, nil
 }
 
+// ApplyConfigurationWithMode hands a configured node a new configuration in a
+// named mode.
+//
+// The mode is a string rather than a typed constant here because the
+// vocabulary belongs to the config domain, which is where the decision about
+// which mode a change needs is made -- this package's job is to carry it to
+// the node, and a second enumeration of the same four names would be a second
+// place for them to drift.
+//
+// An unknown mode is refused here rather than sent, because Talos's own
+// default for an unrecognised value is `auto`, which usually means a reboot:
+// a typo would reboot a node.
+func (c *ClusterClient) ApplyConfigurationWithMode(ctx context.Context, cfg []byte, mode string) (ApplyResult, error) {
+	m, ok := applyMode(mode)
+	if !ok {
+		return ApplyResult{}, fmt.Errorf("talos: %q is not an apply mode", mode)
+	}
+
+	resp, err := c.conn.c.ApplyConfiguration(ctx, &machine.ApplyConfigurationRequest{
+		Data: cfg,
+		Mode: m,
+	})
+	if err != nil {
+		return ApplyResult{}, err
+	}
+	if len(resp.GetMessages()) == 0 {
+		return ApplyResult{}, fmt.Errorf("talos: %s returned an empty apply response", c.conn.target.Machine)
+	}
+
+	msg := resp.GetMessages()[0]
+	return ApplyResult{Mode: msg.GetMode().String(), Details: msg.GetModeDetails()}, nil
+}
+
+func applyMode(name string) (machine.ApplyConfigurationRequest_Mode, bool) {
+	switch name {
+	case "no-reboot":
+		return machine.ApplyConfigurationRequest_NO_REBOOT, true
+	case "reboot":
+		return machine.ApplyConfigurationRequest_REBOOT, true
+	case "staged":
+		return machine.ApplyConfigurationRequest_STAGED, true
+	case "try":
+		return machine.ApplyConfigurationRequest_TRY, true
+	case "auto":
+		return machine.ApplyConfigurationRequest_AUTO, true
+	default:
+		return 0, false
+	}
+}
+
 // ApplyConfiguration hands an unconfigured node its machine configuration. It
 // is the one thing maintenance mode exists for.
 func (m *MaintenanceClient) ApplyConfiguration(ctx context.Context, cfg []byte) (ApplyResult, error) {
