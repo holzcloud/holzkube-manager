@@ -25,6 +25,7 @@ import (
 	"github.com/holzcloud/holzkube-manager/internal/httpapi"
 	"github.com/holzcloud/holzkube-manager/internal/httpapi/handlers"
 	"github.com/holzcloud/holzkube-manager/internal/inventory"
+	"github.com/holzcloud/holzkube-manager/internal/jobs"
 	"github.com/holzcloud/holzkube-manager/internal/model"
 	"github.com/holzcloud/holzkube-manager/internal/nodestream"
 	"github.com/holzcloud/holzkube-manager/internal/store/fsstore"
@@ -46,6 +47,7 @@ type harness struct {
 	inv     *inventory.Service
 	hub     *streamhub.Hub
 	streams *nodestream.Manager
+	jobs    *jobs.Engine
 }
 
 // harnessOpt adjusts the object graph before it is served.
@@ -59,6 +61,7 @@ type harnessOpt func(*harnessConfig)
 type harnessConfig struct {
 	inventory func(store *fsstore.Store) *inventory.Service
 	streaming bool
+	jobs      bool
 }
 
 // withInventory adds an inventory service built over the harness's store.
@@ -69,6 +72,15 @@ func withInventory(build func(store *fsstore.Store) *inventory.Service) harnessO
 // withStreaming adds the hub, the node-stream manager and the stream route.
 func withStreaming() harnessOpt {
 	return func(c *harnessConfig) { c.streaming = true }
+}
+
+// withJobs adds the job engine, the confirmer and the node-action routes. It
+// implies streaming, because job progress rides on the same hub.
+func withJobs() harnessOpt {
+	return func(c *harnessConfig) {
+		c.jobs = true
+		c.streaming = true
+	}
 }
 
 // newHarness wires the same object graph as cmd/holzkube-managerd against a throwaway
@@ -166,6 +178,27 @@ func newHarness(t *testing.T, opts ...harnessOpt) *harness {
 		h2.streams = ns
 	}
 
+	if cfg.jobs {
+		engine := jobs.New(jobs.Deps{Store: st, Logger: deps.Logger, Hub: deps.Hub})
+		t.Cleanup(func() { _ = engine.Close() })
+
+		jobs.RegisterNodeActions(engine, func(ctx context.Context, id model.MachineID) (*talos.ClusterClient, error) {
+			if inv == nil {
+				return nil, errors.New("no inventory")
+			}
+			return inv.Connect(ctx, id)
+		})
+
+		confirmer, err := jobs.NewConfirmer()
+		if err != nil {
+			t.Fatalf("NewConfirmer: %v", err)
+		}
+
+		deps.Jobs = engine
+		deps.Confirmer = confirmer
+		h2.jobs = engine
+	}
+
 	deps.Routes = slices.Concat(
 		handlers.SystemRoutes(deps),
 		handlers.SetupRoutes(deps),
@@ -174,6 +207,7 @@ func newHarness(t *testing.T, opts ...harnessOpt) *harness {
 		handlers.AuditRoutes(deps),
 		handlers.InventoryRoutes(deps),
 		handlers.StreamRoutes(deps),
+		handlers.JobRoutes(deps),
 	)
 
 	srv := httptest.NewTLSServer(httpapi.New(deps))

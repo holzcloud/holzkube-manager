@@ -142,6 +142,10 @@ type machineStore struct {
 	recordStore[model.MachineID, model.Machine]
 }
 
+type jobStore struct {
+	recordStore[model.JobID, model.Job]
+}
+
 type clusterSecretStore struct {
 	inner recordStore[model.ClusterID, model.ClusterSecrets]
 }
@@ -179,6 +183,18 @@ func newClusterSecretStore(dir string, locks *store.EntityLocks) *clusterSecretS
 		key:    func(s model.ClusterSecrets) model.ClusterID { return s.Cluster },
 		rev:    func(s model.ClusterSecrets) uint64 { return s.Rev },
 		setRev: func(s *model.ClusterSecrets, v uint64) { s.Rev = v },
+	}}
+}
+
+func newJobStore(dir string, locks *store.EntityLocks) *jobStore {
+	return &jobStore{recordStore[model.JobID, model.Job]{
+		locks:  locks,
+		dir:    dir,
+		kind:   kindJobs,
+		noun:   "job",
+		key:    func(j model.Job) model.JobID { return j.ID },
+		rev:    func(j model.Job) uint64 { return j.Rev },
+		setRev: func(j *model.Job, v uint64) { j.Rev = v },
 	}}
 }
 

@@ -827,6 +827,109 @@ export interface ImportInput {
   fingerprint: string
 }
 
+/* ---------------------------------------------------------------------- */
+/* Jobs and node actions                                                   */
+/* ---------------------------------------------------------------------- */
+
+export const jobStateSchema = z.enum([
+  'pending',
+  'running',
+  /**
+   * The state that makes this engine worth having. A job interrupted inside a
+   * step that cannot be checked afterwards is neither resumed nor failed — a
+   * person decides, because both guesses are wrong in a way that matters:
+   * retrying a reset wipes twice, failing reports an intact node that is not.
+   */
+  'parked',
+  'succeeded',
+  'failed',
+  'cancelled',
+])
+
+export type JobState = z.infer<typeof jobStateSchema>
+
+export const stepStateSchema = z.enum(['pending', 'running', 'done', 'failed', 'skipped'])
+
+export const jobStepSchema = z.object({
+  name: z.string(),
+  state: stepStateSchema,
+  /** Whether this step had a paired "did it happen?" check when it ran. A step
+   * without one parks the job if it is interrupted. */
+  verifiable: z.boolean().default(false),
+  started_at: z.string().optional(),
+  finished_at: z.string().optional(),
+  detail: z.string().default(''),
+})
+
+export const jobSchema = z.object({
+  id: z.string(),
+  kind: z.string(),
+  cluster: z.string().default(''),
+  machine: z.string().default(''),
+  state: jobStateSchema,
+  steps: z.array(jobStepSchema).default([]),
+  current: z.number().default(0),
+  params: z.record(z.string(), z.string()).default({}),
+  cancel_requested: z.boolean().default(false),
+  actor: z.string().default(''),
+  /** What a person has to decide. Empty unless the job is parked. */
+  parked_reason: z.string().default(''),
+  created_at: z.string(),
+  started_at: z.string().optional(),
+  finished_at: z.string().optional(),
+  rev: z.number(),
+})
+
+export type Job = z.infer<typeof jobSchema>
+
+export const jobsSchema = z.object({ jobs: z.array(jobSchema) })
+
+export const acceptedJobSchema = z.object({
+  job: jobSchema,
+  /** Where to watch this job's progress on the event stream. */
+  topic: z.string(),
+})
+
+export type AcceptedJob = z.infer<typeof acceptedJobSchema>
+
+export const confirmationSchema = z.object({
+  token: z.string(),
+  expires: z.string(),
+  /** Echoed back, so the screen can show what this token authorises rather
+   * than what it believes it asked for. */
+  action: z.string(),
+  params: z.record(z.string(), z.string()).default({}),
+})
+
+export const resetModeSchema = z.object({
+  mode: z.string(),
+  label: z.string(),
+  description: z.string(),
+  needs_disks: z.boolean().default(false),
+})
+
+export const resetPreviewSchema = z.object({
+  machine: z.string(),
+  hostname: z.string(),
+  /** What has to be typed: the machine's own name, because that is the thing
+   * an operator can check against the machine in front of them. */
+  confirm_phrase: z.string(),
+  disks: z.array(diskSchema).default([]),
+  /** Least destructive first. A list whose first option wipes the machine is a
+   * list somebody will click through. */
+  modes: z.array(resetModeSchema),
+  defaults: z.object({
+    mode: z.string(),
+    graceful: z.boolean(),
+    reboot: z.boolean(),
+  }),
+  /** How talosctl's own defaults differ, said out loud: it defaults to wiping
+   * every disk and leaving the machine off. */
+  talos_default_warning: z.string(),
+})
+
+export type ResetPreview = z.infer<typeof resetPreviewSchema>
+
 export const api = {
   status: (): Promise<SystemStatus> =>
     sendJSON('GET', '/api/v1/system/status', systemStatusSchema, undefined, {
@@ -1009,5 +1112,63 @@ export const api = {
     forget: async (id: string): Promise<void> => {
       await send('DELETE', `/api/v1/machines/${encodeURIComponent(id)}`)
     },
+
+    resetPreview: (id: string): Promise<ResetPreview> =>
+      sendJSON(
+        'GET',
+        `/api/v1/machines/${encodeURIComponent(id)}/reset-preview`,
+        resetPreviewSchema,
+      ),
+
+    /**
+     * Ask the server to confirm an action.
+     *
+     * The token that comes back is bound to this action, this machine and
+     * these exact parameters. Submitting anything else with it is refused —
+     * which is what makes the dialog a gate rather than decoration.
+     */
+    confirm: (
+      id: string,
+      action: string,
+      params: Record<string, string>,
+      typed: string,
+    ): Promise<{ token: string; expires: string }> =>
+      sendJSON('POST', `/api/v1/machines/${encodeURIComponent(id)}/confirm`, confirmationSchema, {
+        action,
+        params,
+        typed,
+      }),
+
+    /**
+     * Every node action answers 202 with a job id. Nothing has happened yet
+     * when this resolves; the job is where it happens.
+     */
+    action: (
+      id: string,
+      kind: 'reboot' | 'shutdown' | 'reset',
+      confirmation: string,
+      params: Record<string, string> = {},
+      cluster = '',
+    ): Promise<AcceptedJob> =>
+      sendJSON('POST', `/api/v1/machines/${encodeURIComponent(id)}/${kind}`, acceptedJobSchema, {
+        confirmation,
+        params,
+        cluster,
+      }),
+  },
+
+  jobs: {
+    list: async (): Promise<Job[]> => (await sendJSON('GET', '/api/v1/jobs', jobsSchema)).jobs,
+
+    get: (id: string): Promise<Job> =>
+      sendJSON('GET', `/api/v1/jobs/${encodeURIComponent(id)}`, jobSchema),
+
+    /**
+     * Stop at the next step boundary. Deliberately not a destructive route:
+     * an operator watching something go wrong should not have to find their
+     * password before they can stop it.
+     */
+    cancel: (id: string): Promise<Job> =>
+      sendJSON('POST', `/api/v1/jobs/${encodeURIComponent(id)}/cancel`, jobSchema),
   },
 }

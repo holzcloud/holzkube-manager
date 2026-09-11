@@ -629,6 +629,106 @@ func (c *ClusterClient) Reboot(ctx context.Context) error {
 	return c.conn.c.Reboot(ctx)
 }
 
+// Uptime reports how long the node has been running.
+//
+// It is the read that makes a reboot resumable: a node whose uptime is shorter
+// than the age of the request has booted since the request was made, and that
+// is the difference between resuming a reboot and rebooting a second time.
+func (c *ClusterClient) Uptime(ctx context.Context) (time.Duration, error) {
+	resp, err := c.conn.c.MachineClient.SystemStat(ctx, &emptypb.Empty{})
+	if err != nil {
+		return 0, err
+	}
+	if len(resp.GetMessages()) == 0 {
+		return 0, fmt.Errorf("talos: %s returned an empty system stat response", c.conn.target.Machine)
+	}
+
+	boot := resp.GetMessages()[0].GetBootTime()
+	if boot == 0 {
+		return 0, fmt.Errorf("talos: %s reports no boot time", c.conn.target.Machine)
+	}
+	// BootTime is seconds since the epoch, so the uptime is the difference.
+	// Deriving it here rather than handing the caller a timestamp keeps the
+	// one question this is asked -- "has it rebooted since?" -- a subtraction
+	// the caller does not have to get right.
+	return time.Since(time.Unix(int64(boot), 0)), nil //nolint:gosec // a boot time cannot overflow int64
+}
+
+// Shutdown powers a node off.
+//
+// It is separate from Reboot rather than a flag on it, because the two are
+// different decisions with different consequences: a rebooted node comes back
+// by itself, and a node that was shut down needs somebody to walk to it. A
+// boolean would make the difference a parameter somebody can get wrong.
+func (c *ClusterClient) Shutdown(ctx context.Context) error {
+	_, err := c.conn.c.MachineClient.Shutdown(ctx, &machine.ShutdownRequest{})
+	return err
+}
+
+// ResetOptions is what a reset actually does, spelled out.
+//
+// Every field is required at the call site -- there is no zero value that
+// means "the usual" -- and that is the point. `talosctl reset` defaults to
+// wiping everything and not rebooting, which is the most destructive
+// combination there is, and a Go zero value would reproduce exactly that
+// default for a caller who forgot a field (JOB-07).
+type ResetOptions struct {
+	// Mode is which devices are wiped: "all", "system-disk" or "user-disks".
+	Mode string
+
+	// Graceful makes the node leave etcd first, with the etcd health checks
+	// that implies. Ungraceful on a control-plane node of a three-node cluster
+	// is how quorum is lost.
+	Graceful bool
+
+	// Reboot makes the node come back up after wiping. Without it the node
+	// halts and somebody has to power it on.
+	Reboot bool
+
+	// UserDisksToWipe names specific block devices, and applies only to the
+	// user-disks mode.
+	UserDisksToWipe []string
+}
+
+// ResetWipeModes is the vocabulary, in the order a screen should offer it:
+// least destructive first.
+//
+// That order is not cosmetic either. A list that puts "all" first is a list
+// whose first option wipes the machine.
+func ResetWipeModes() []string { return []string{"user-disks", "system-disk", "all"} }
+
+// Reset wipes a node.
+//
+// It is the most destructive thing this product does, and the one call whose
+// options this package refuses to default.
+func (c *ClusterClient) Reset(ctx context.Context, opts ResetOptions) error {
+	mode, ok := wipeMode(opts.Mode)
+	if !ok {
+		return fmt.Errorf("talos: %q is not a wipe mode; one of %v", opts.Mode, ResetWipeModes())
+	}
+
+	_, err := c.conn.c.MachineClient.Reset(ctx, &machine.ResetRequest{
+		Graceful:        opts.Graceful,
+		Reboot:          opts.Reboot,
+		Mode:            mode,
+		UserDisksToWipe: opts.UserDisksToWipe,
+	})
+	return err
+}
+
+func wipeMode(name string) (machine.ResetRequest_WipeMode, bool) {
+	switch name {
+	case "all":
+		return machine.ResetRequest_ALL, true
+	case "system-disk":
+		return machine.ResetRequest_SYSTEM_DISK, true
+	case "user-disks":
+		return machine.ResetRequest_USER_DISKS, true
+	default:
+		return 0, false
+	}
+}
+
 // Probe is the D-05 liveness check: the same Version RPC under the probe class
 // budget rather than the fast read one.
 //

@@ -23,7 +23,7 @@ import (
 )
 
 // CurrentVersion is the schema version this binary understands.
-const CurrentVersion = 3
+const CurrentVersion = 4
 
 const (
 	// VersionFileName holds the schema version of a data directory.
@@ -103,6 +103,21 @@ var migrations = []Migration{
 				if err := os.MkdirAll(path, dirPerm); err != nil {
 					return fmt.Errorf("create %s: %w", path, err)
 				}
+			}
+			return nil
+		},
+	},
+	{
+		// Jobs gain their own entity directory. A long-running operation is a
+		// record rather than a goroutine, because the engine's whole claim is
+		// that a restart can say where a job was -- and a goroutine that died
+		// says nothing.
+		From: 3,
+		To:   4,
+		Apply: func(dir string) error {
+			path := filepath.Join(dir, "jobs")
+			if err := os.MkdirAll(path, dirPerm); err != nil {
+				return fmt.Errorf("create %s: %w", path, err)
 			}
 			return nil
 		},

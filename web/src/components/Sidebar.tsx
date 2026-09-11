@@ -78,7 +78,7 @@ export const NAV_AREAS: NavArea[] = [
     path: '/jobs',
     label: 'Jobs',
     icon: ListChecks,
-    phase: 6,
+    phase: null,
     description:
       'Long-running and dangerous operations as persisted jobs that survive a restart of holzkube-manager itself.',
   },

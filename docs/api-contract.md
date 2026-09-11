@@ -1236,3 +1236,88 @@ A route declares `Streaming: true`, and `httpapi.New` **panics at composition
 time** if a route is both `Streaming` and `Destructive`: the sudo gate holds a
 response back until the window has been refreshed, and a held response is not a
 stream.
+
+## Jobs and node actions
+
+### Every destructive endpoint answers 202
+
+`POST /api/v1/machines/{id}/reboot`, `/shutdown` and `/reset` all answer
+**`202 Accepted`** with a job id, a `Location` header and the stream topic to
+watch — never a `200` with a result.
+
+That is not a style choice. A reboot takes a minute and a reset several, and an
+endpoint that waits is an endpoint whose progress nobody can watch and whose
+failure arrives as a timeout with no record of how far it got.
+
+### Confirmation is server-side, and it is bound to the parameters
+
+Two calls, always:
+
+1. `POST /api/v1/machines/{id}/confirm` with `{action, params, typed}` returns
+   `{token, expires, action, params}`.
+2. The action endpoint carries that token plus the same `params`.
+
+**The server rebuilds the intent from what was submitted and compares.** A
+confirmation for `wipe_mode=user-disks` cannot authorise `wipe_mode=all`,
+because the two produce different tokens. A token that carried its own
+description would authorise whatever it said while the request did something
+else.
+
+The signing key lives in memory and is generated at startup, so a confirmation
+does not survive a restart. That is correct: it is a statement about a decision
+somebody is making now, and one that outlived its process would be a decision
+about a fleet that may have changed.
+
+`typed` is required for a reset and checked against the machine's hostname. It
+is deliberately not required for a reboot: asking somebody to type a hostname
+before every reboot is how they learn to paste it without reading, and then the
+typing means nothing on the one screen where it matters.
+
+| code | HTTP | when |
+|---|---|---|
+| `forbidden.confirmation-invalid` | 403 | no token, a forged one, or one for a different action or parameters |
+| `forbidden.confirmation-expired` | 403 | the token verified and is too old — read the dialog again |
+| `store.cluster-busy` | 409 | another mutating job holds this cluster's lease |
+| `store.job-finished` | 409 | a cancel arrived for a job that already ended |
+
+### `GET /api/v1/machines/{id}/reset-preview`
+
+What the machine has, what each scope would do, and what has to be typed. It is
+a read, so it is neither destructive nor confirmed — and it is the screen the
+confirmation is issued from.
+
+The wipe scopes come back **least destructive first**: a list whose first option
+wipes the machine is a list somebody will click through. The pre-selected flags
+are `user-disks`, `graceful: true`, `reboot: true` — each the opposite of what
+`talosctl reset` does unprompted, and `talos_default_warning` says so on the
+screen rather than leaving an operator who knows that tool to assume.
+
+### Job states, and what "parked" means
+
+| state | meaning |
+|---|---|
+| `pending` | created, waiting for the cluster's lease |
+| `running` | executing a step |
+| `parked` | **interrupted in a step that cannot be checked; a person has to decide** |
+| `succeeded` / `failed` / `cancelled` | terminal |
+
+Parked is not a failure mode of the engine. It is the engine's most important
+output.
+
+Each step carries a `verifiable` flag, recorded when the job was submitted. A
+verifiable step has a paired read-only "did this already happen?" query, so an
+interrupted run of it is resumed by asking. An unverifiable step has none —
+nothing a node can be asked distinguishes "wiped five seconds ago and booting"
+from "booting for another reason" — so an interrupted run parks the job and
+`parked_reason` says what to check.
+
+`POST /api/v1/jobs/{id}/cancel` stops at the **next step boundary**. It is
+mutating and deliberately **not** destructive: an operator watching something go
+wrong should not have to find their password before they can stop it.
+
+### One mutating job per cluster
+
+The lease is per cluster, not global — one slow node must not stop the fleet —
+and it is held in memory rather than in the store. A lease that survived a crash
+would block every job on that cluster until somebody cleared it by hand, and the
+record a crashed job leaves behind already says what happened.

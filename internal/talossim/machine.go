@@ -425,6 +425,26 @@ func (m *machineService) ServiceList(_ context.Context, _ *emptypb.Empty) (*mach
 // A node that already has an etcd data directory refuses, exactly as a real
 // one does. Answering a second bootstrap with success would make this
 // simulator easier to satisfy than the hardware it stands in for.
+// SystemStat answers with the node's boot time.
+//
+// It exists here because the product asks for it, and it asks for exactly one
+// field: a reboot job's paired "did it happen?" check is "has this node been
+// up for less time than the request has existed". The simulator therefore has
+// to move lastBoot when it reboots, which it already does -- which is what
+// makes the check testable at all rather than only assertable against
+// hardware.
+func (m *machineService) SystemStat(_ context.Context, _ *emptypb.Empty) (*machine.SystemStatResponse, error) {
+	state := m.server.node.snapshot()
+
+	return &machine.SystemStatResponse{
+		Messages: []*machine.SystemStat{{
+			Metadata: m.server.node.metadata(),
+			//nolint:gosec // a boot time in seconds since the epoch cannot be negative
+			BootTime: uint64(state.LastBoot.Unix()),
+		}},
+	}, nil
+}
+
 func (m *machineService) Bootstrap(_ context.Context, _ *machine.BootstrapRequest) (*machine.BootstrapResponse, error) {
 	if err := m.server.node.up(); err != nil {
 		return nil, err
