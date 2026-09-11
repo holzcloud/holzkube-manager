@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/cosi-project/runtime/pkg/resource"
 	"github.com/cosi-project/runtime/pkg/state"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -86,9 +87,19 @@ func (s *Server) startSecondBootstrapAlreadyExists(_ Scenario) (func(), error) {
 func (s *Server) startK8sDown(_ Scenario) (func(), error) {
 	ctx := context.Background()
 
-	md := k8s.NewNodename(k8s.NamespaceName, k8s.NodenameID).Metadata()
-	if err := s.cosi.Destroy(ctx, md); err != nil && !state.IsNotFoundError(err) {
-		return nil, fmt.Errorf("talossim: k8s_down: remove %s: %w", k8s.NodenameType, err)
+	// Every resource seedKubernetes creates, so that the scenario and its
+	// restore stay each other's exact inverse. The kubelet spec joined the
+	// list in phase 3 because that is where the node's Kubernetes version is
+	// read from: leaving it behind would mean a node with Kubernetes down
+	// still confidently reporting a Kubernetes version, which is the silent
+	// divergence the whole level vocabulary exists to prevent.
+	for _, md := range []resource.Pointer{
+		k8s.NewNodename(k8s.NamespaceName, k8s.NodenameID).Metadata(),
+		k8s.NewKubeletSpec(k8s.NamespaceName, k8s.KubeletID).Metadata(),
+	} {
+		if err := s.cosi.Destroy(ctx, md); err != nil && !state.IsNotFoundError(err) {
+			return nil, fmt.Errorf("talossim: k8s_down: remove %s: %w", md.Type(), err)
+		}
 	}
 
 	return func() {
