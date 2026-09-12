@@ -130,10 +130,10 @@ Die Requirements folgen der Phasenstruktur aus `.planning/research/SUMMARY.md`. 
 
 ### Betrieb & Härtung (OPS)
 
-- [ ] **OPS-01**: Betreiber sichert und restauriert den holzkube-Zustand per Subcommand
-- [ ] **OPS-02**: Betreiber verifiziert die Integrität der Audit-Hash-Kette
-- [ ] **OPS-03**: Die unterstützte Talos-Versionsrange (v1.12–v1.14) wird als getesteter Check durchgesetzt; RCs sind Opt-in
-- [ ] **OPS-04**: holzkube läuft als Docker-/Compose-Setup mit non-root-Container und korrekten Volume-Rechten
+- [x] **OPS-01**: Betreiber sichert und restauriert den holzkube-Zustand per Subcommand
+- [x] **OPS-02**: Betreiber verifiziert die Integrität der Audit-Hash-Kette
+- [x] **OPS-03**: Die unterstützte Talos-Versionsrange (v1.12–v1.14) wird als getesteter Check durchgesetzt; RCs sind Opt-in
+- [x] **OPS-04**: holzkube läuft als Docker-/Compose-Setup mit non-root-Container und korrekten Volume-Rechten
 - [ ] **OPS-05** 🚫: Ein Verifikationsdurchlauf auf echter amd64-Hardware ist erfolgt
 
 ---
@@ -294,11 +294,11 @@ Requirements mit **🚫** sind Release-Blocker.
 | UPG-12 | Phase 9 | Complete |
 | UPG-13 | Phase 9 | Complete |
 | UPG-14 | Phase 9 | Complete |
-| OPS-01 | Phase 10 | Pending |
-| OPS-02 | Phase 10 | Pending |
-| OPS-03 | Phase 10 | Pending |
-| OPS-04 | Phase 10 | Pending |
-| **OPS-05** 🚫 | Phase 10 | Pending |
+| OPS-01 | Phase 10 | Complete |
+| OPS-02 | Phase 10 | Complete |
+| OPS-03 | Phase 10 | Complete |
+| OPS-04 | Phase 10 | Complete (unbuilt, window 88) |
+| **OPS-05** 🚫 | Phase 10 | **Open — window 87** |
 
 **Verteilung pro Phase:**
 

@@ -6,6 +6,22 @@ holzkube wächst von unten nach oben, aber mit einem frühen Loch durch alle Sch
 
 **Struktur-Herkunft:** Die Phasenstruktur stammt aus `.planning/research/SUMMARY.md` § *Suggested phase structure* und respektiert alle zehn harten Ordering-Constraints aus § *Hard ordering constraints*. Zwei bewusste Abweichungen sind unten unter [Abweichungen von der Research-Struktur](#abweichungen-von-der-research-struktur) begründet.
 
+## Stand des Milestones v1.14
+
+Zehn Phasen gebaut, acht abgehakt, zwei mit einem offenen Kriterium — und
+**keine Zeile davon ist je auf einer echten Maschine gelaufen**. Alles unten ist
+gegen `internal/talossim` ausgeführt.
+
+Der eine offene Release-Blocker ist **OPS-05**: der Verifikationsdurchlauf auf
+echter amd64-Hardware, den Phase 10 als nicht verhandelbare Eintrittsbedingung
+führt. Er hat nicht stattgefunden, weil dem Ausführungshost Homelab, QEMU,
+`/dev/kvm` und ein Docker-Daemon fehlen.
+
+Vier Fenster schließen gemeinsam oder gar nicht und beschreiben zusammen einen
+einzigen Durchlauf — 82 (Provisioning-Abnahme), 84 (die generierte MachineConfig
+als Anweisung), 85 (Upgrade) und 87 (OPS-05 selbst). `.planning/WINDOWS.md`
+führt sie und die vier weiteren, die gebaut-und-nie-ausgeführt festhalten.
+
 ## Phases
 
 **Phase Numbering:**
@@ -22,9 +38,9 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 5: Streaming** - Live-Logs und `dmesg` über eine multiplexte SSE-Verbindung (DESIGNIERTE SCHNITTLINIE) (completed 2026-09-11)
 - [x] **Phase 6: Jobs-Engine & Node-Aktionen** - Persistierte, crash-feste Jobs; Reboot, Shutdown und das Reset-Dialog (completed 2026-09-11)
 - [x] **Phase 7: Config-Domain** - Ansehen, redigieren, patchen, diffen, anwenden — mit berechnetem Apply-Modus (completed 2026-09-11)
-- [~] **Phase 8: Provisioning — der Core Value** - Blanke Maschine wird gesunder Cluster-Node, ohne Terminal
-- [x] **Phase 9: Upgrades & etcd-Verwaltung** - Rollende Talos-/K8s-Upgrades hinter einem Gate, das lieber blockiert als strandet
-- [ ] **Phase 10: Härtung & echter Hardware-Durchlauf** - Backup/Restore, Docker/Compose, Versionsrange — und ein Durchlauf auf echtem amd64
+- [~] **Phase 8: Provisioning — der Core Value** - Blanke Maschine wird gesunder Cluster-Node, ohne Terminal (gebaut 2026-09-11, **Abnahme offen** — Fenster 82/84)
+- [x] **Phase 9: Upgrades & etcd-Verwaltung** - Rollende Talos-/K8s-Upgrades hinter einem Gate, das lieber blockiert als strandet (completed 2026-09-11, kein Lauf auf echter Hardware — Fenster 85)
+- [~] **Phase 10: Härtung & echter Hardware-Durchlauf** - Backup/Restore, Docker/Compose, Versionsrange — und ein Durchlauf auf echtem amd64 (gebaut 2026-09-11, **OPS-05 offen** — Fenster 87)
 
 ## Phase Details
 
@@ -361,7 +377,8 @@ Plans:
 **Research**: Nicht geflaggt.
 **⚠️ ENTRY REQUIREMENT (nicht verhandelbar, kein Stretch Goal)**: **Ein Verifikationsdurchlauf auf echter amd64-Hardware.** Der Dev-Host ist `darwin/arm64`; QEMU läuft dort arm64-Talos nativ und kann amd64-Installer-Pfade **strukturell nicht** ausüben. Ohne Zugriff auf das Homelab ist diese Phase nicht abschließbar — das ist die einzige Phase, die das Homelab zwingend braucht.
 **Release blockers owned**: OPS-05 🚫
-**Plans**: TBD
+**Plans**: ausgeführt als eine Runde; siehe `10-SUMMARY.md`
+**Outcome**: **Kriterien 2, 4 und 5 erfüllt, 3 teilweise, 1 nicht.** Die Eintrittsbedingung — ein Verifikationsdurchlauf auf echter amd64-Hardware — ist nicht erfüllt und war es nie: dieser Ausführungshost hat kein Homelab, kein QEMU und keinen Docker-Daemon. **OPS-05 🚫 bleibt offen**, Fenster 87 ist der Sammelpunkt und schließt gemeinsam mit 82, 84 und 85. Das Container-Image ist geschrieben und nie gebaut (Fenster 88), weshalb Kriterium 3 als teilweise geführt wird: die Eigenschaften sind aus den Dateien geprüft, „im Dauerbetrieb" ist unbelegt.
 
 ## Abweichungen von der Research-Struktur
 
