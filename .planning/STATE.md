@@ -3,11 +3,11 @@ gsd_state_version: 1.0
 milestone: v1.15
 current_phase: 3
 current_phase_name: "Prometheus-/metrics (v1.15)"
-status: milestone-complete
+status: milestone-closed
 stopped_at: v1.15 vollstaendig; Lint und Testlauf erstmals gruen (Fenster 77, 89 zu). OPS-05 bleibt der einzige Release-Blocker (Fenster 87)
-last_updated: "2026-09-12T17:15:00.000Z"
+last_updated: "2026-09-12T17:30:00.000Z"
 last_activity: 2026-09-12
-last_activity_desc: v1.15 complete; lint run closed windows 77 and 89 and found an unverified certificate pin
+last_activity_desc: v1.15 closed out; v1.15.0-beta.1 amd64 built, container verified, artifact delivered
 state_head: a474d2522823cbfb436ee720dee35494890281a3
 progress:
   total_phases: 3
@@ -28,8 +28,8 @@ See: .planning/PROJECT.md (updated 2026-08-27)
 ## Current Position
 
 Phase: v1.15 abgeschlossen — alle drei Phasen
-Plan: siehe `.planning/MILESTONE-v1.15.md`
-Status: fertig
+Plan: `.planning/MILESTONE-v1.15.md`, Abschluss in `.planning/MILESTONE-v1.15-CLOSEOUT.md`
+Status: abgeschlossen; `v1.15.0-beta.1` (linux/amd64) gebaut und übergeben
 Last activity: 2026-09-12 — v1.15 Phase 3 (Prometheus-`/metrics`) abgeschlossen
 
 Progress: v1.15 [███] 3 of 3 phases · v1.14 [█████████▓] gebaut, OPS-05 offen
