@@ -227,37 +227,74 @@ Everything lives in one directory, `0700`, with `0600` contents:
 ```
 cert.pem  key.pem      TLS material
 settings.json          instance settings
+VERSION                the schema version, for forward-only migrations
 users/                 operator accounts
 sessions/              server-side sessions
 audit/                 append-only JSONL, one file per day
+clusters/              the clusters this instance manages
+cluster-secrets/       each cluster's PKI, separate from the cluster record
+machines/              the node inventory, flat and keyed by UUID
+jobs/                  long-running operations, so a restart resumes them
+patches/               reusable configuration patches, versioned
+bootstrap/             the etcd bootstrap lease and its intent records
+backups/               tarballs, from a migration or from `backup`
 ```
 
-It is plain files on purpose: readable, and backed up with `cp`.
+It is plain files on purpose: readable, and backed up with `cp` — or with the
+subcommand below, which excludes the things that should not be in a backup.
 
 The directory is created with `0700` if it does not exist. An existing directory
 is left exactly as it is — the store refuses to start on a data directory that is
 group- or world-accessible, and quietly fixing it would hide the mistake instead
 of reporting it.
 
+### Backups
+
+```sh
+holzkube-managerd backup            # writes a tarball into the data directory
+holzkube-managerd backups           # lists what is there, newest first
+holzkube-managerd restore FILE      # backs up what is there, then unpacks
+holzkube-managerd verify-audit      # checks the audit hash chain
+```
+
+They are subcommands of the same binary because the backup format, the
+permission rules and the chain's hashing all live in this build. A backup
+written by one version and refused by another is not a backup.
+
+**A backup is safe to take while holzkube-manager is running.** Every record is
+written atomically — temporary file, fsync, rename — so a tarball taken
+mid-write captures either the old record or the new one and never half of one.
+
+**A restore is not.** It refuses while another instance holds the data
+directory, and it backs up what is there before it starts: a restore that went
+wrong without one would have replaced a working installation with a broken one
+and left nothing to go back to. Every entry in the archive is checked against
+the destination before a byte is written, because `../../../etc/shadow` is a
+valid tar entry.
+
+A backup contains every secret in the data directory verbatim. It is `0600`
+inside the `0700` directory; copying it somewhere else copies those secrets.
+
 ### In a container
 
-`HOLZKUBE_MANAGER_DATA_DIR` is the volume path. Mount a named volume or bind mount there,
-give it to the non-root user the container runs as, and nothing else needs
-configuring — every option is an environment variable:
+`compose.yaml` in this repository is the whole setup. The image runs as uid
+65532 from `scratch`, the data directory is a declared volume, and the published
+port is bound to loopback by default — the dashboard shows every node's state
+and the API can wipe a machine, so putting it on a LAN address is a deliberate
+act.
 
-```yaml
-services:
-  holzkube-manager:
-    image: holzkube-manager
-    user: "1000:1000"
-    environment:
-      HOLZKUBE_MANAGER_DATA_DIR: /data
-      HOLZKUBE_MANAGER_LISTEN: 0.0.0.0:8443
-    volumes:
-      - holzkube-manager-data:/data
-    ports:
-      - "8443:8443"
+```sh
+docker compose up -d
 ```
+
+Scratch rather than alpine or distroless: the binary is static, embeds its own
+web assets, and verifies Talos endpoints against the cluster PKI it holds rather
+than against a system trust store. A shell, a package manager and a CA bundle
+would each be a way in that this has no use for.
+
+The image has **not** been built or run as part of this milestone — no Docker
+daemon was available where it was developed. `cmd/holzkube-managerd/container_test.go`
+asserts the properties from the files; everything else about it is untested.
 
 ### Blast radius — stated plainly
 
@@ -289,6 +326,28 @@ as a banner in the UI.
 The chain is tamper-**evidence**, not tamper-proofing: anyone who can write to
 the data directory can rewrite the whole chain. Shipping records off-box is the
 only real answer and is not in this version.
+
+`holzkube-managerd verify-audit` runs the same check on demand and exits
+non-zero on a break, so a cron entry or a monitoring check can use it without
+parsing output.
+
+Input parameters are redacted through an **allowlist**: a field not explicitly
+listed is written as `<redacted>`. The direction is the point — a denylist
+forgets the next secret, and this log is kept forever with no deletion path.
+`cmd/holzkube-managerd/allowlist_test.go` asserts that every audited route has an
+entry, in both directions.
+
+### Supported Talos versions
+
+v1.12 to v1.14. A node outside that range is marked in the node list and every
+version-dependent action against it is refused — the client library would
+happily talk to it, which is the problem: an untested API surface that answers
+is worse than one that refuses, because the divergence surfaces later, on a
+cluster.
+
+Pre-releases are inside the range and are refused anyway unless the instance was
+started with `--allow-prerelease`. Everything this product guarantees about a
+node is a claim about released Talos.
 
 ## Development
 
