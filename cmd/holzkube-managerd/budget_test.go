@@ -661,6 +661,22 @@ var routeBudgets = []routeBudget{
 			"node. Found by the completeness guard along with the row above.",
 	},
 	{
+		route:         "GET /api/v1/clusters/{id}/support-bundle",
+		calls:         nil,
+		routeDeadline: 0,
+		verdict:       withinBudget,
+		clipping:      uncut,
+		why: "A stream, and the second row here that declares no ceiling for a route that does " +
+			"reach nodes -- the etcd snapshot is the other. The reason is the same and it is " +
+			"stronger here: a bundle over a fleet connects to every node in turn, and the whole " +
+			"point of it is being taken while things are broken, which is when every one of " +
+			"those connections is slow. A route ceiling would cut exactly the bundle somebody " +
+			"needs. What bounds it instead is per node: support.PerNodeTimeout, so one node " +
+			"answering slowly cannot eat the budget of the nodes after it, and each read inside " +
+			"carries its own deadline class. The route is marked Streaming, so the server's " +
+			"write timeout does not apply either.",
+	},
+	{
 		route:         "GET /api/v1/schematics",
 		calls:         nil,
 		routeDeadline: 0,

@@ -1,19 +1,19 @@
 ---
 gsd_state_version: 1.0
 milestone: v1.15
-current_phase: 10
-current_phase_name: "Härtung & echter Hardware-Durchlauf"
-status: milestone-built
-stopped_at: Milestone v1.14 built; OPS-05 open (window 87) — no run on real hardware
-last_updated: "2026-09-11T19:15:00.000Z"
-last_activity: 2026-09-11
+current_phase: 1
+current_phase_name: "Support-Bundle-Export (v1.15)"
+status: executing
+stopped_at: v1.15 definiert; Phase 1 beginnt. v1.14 gebaut, OPS-05 offen (Fenster 87)
+last_updated: "2026-09-12T14:50:00.000Z"
+last_activity: 2026-09-12
 last_activity_desc: v1.15 defined autonomously; phase 1 (support bundle) starting
 state_head: a474d2522823cbfb436ee720dee35494890281a3
 progress:
-  total_phases: 10
-  completed_phases: 9
-  total_plans: 40
-  completed_plans: 40
+  total_phases: 3
+  completed_phases: 0
+  total_plans: 0
+  completed_plans: 0
 ---
 
 # Project State
@@ -27,12 +27,18 @@ See: .planning/PROJECT.md (updated 2026-08-27)
 
 ## Current Position
 
-Phase: 10 — Härtung & echter Hardware-Durchlauf (gebaut; Kriterium 1 offen)
-Plan: —
-Status: Milestone v1.14 gebaut, ein Release-Blocker offen
-Last activity: 2026-09-11 — Phase 10 gebaut, Milestone abgeschlossen
+Phase: v1.15 Phase 1 — Support-Bundle-Export
+Plan: siehe `.planning/MILESTONE-v1.15.md`
+Status: beginnt
+Last activity: 2026-09-12 — v1.15 autonom definiert
 
-Progress: [█████████▓] 9 of 10 phases complete, Phase 4 and Phase 10 partially
+Progress: v1.15 [░░░] 0 of 3 phases · v1.14 [█████████▓] gebaut, OPS-05 offen
+
+**v1.15 ist autonom definiert und nicht vom Betreiber bestätigt.**
+`.planning/MILESTONE-v1.15.md` nennt die drei Phasen, die Auswahlregel (alles,
+was echte Hardware braucht, ist draußen) und sechs Rückstau-Punkte mit je einem
+Grund, warum sie es nicht sind. Wenn der Betreiber widerspricht, widerspricht er
+einem Dokument und nicht einem Diff.
 
 **Der Milestone ist gebaut und nicht abnahmefähig, und das ist eine Aussage
 über die Umgebung statt über den Code.** Jede der zehn Phasen ist gegen

@@ -83,6 +83,17 @@ type Options struct {
 	// purpose -- see Streamer.
 	StreamMessages int
 
+	// StreamChunk pads each streamed message to this many bytes.
+	//
+	// A real node's log is volume: kilobytes per second, megabytes over a
+	// boot. The default message here is a single short line, which is right
+	// for a test that counts messages and wrong for one that has to cross a
+	// size threshold -- and a test that reached 256 KiB by asking for nine
+	// thousand short messages would be a test measuring an unbuffered channel
+	// rather than the thing it means to measure. Zero leaves the message as
+	// it is.
+	StreamChunk int
+
 	// Cluster, when set, makes this node a member of a simulated cluster: it
 	// serves that cluster's machine configuration, and its certificate
 	// authority is the cluster's own OS CA rather than a fresh one. A node
@@ -241,7 +252,7 @@ func New(opts Options) (*Server, error) {
 		opts:      opts,
 		pki:       p,
 		node:      newNodeState(opts),
-		streams:   newStreamer(opts.StreamMessages),
+		streams:   newStreamer(opts.StreamMessages, opts.StreamChunk),
 		done:      make(chan struct{}),
 		scenarios: make(map[ScenarioName]Scenario),
 		calls:     make(map[string]int),
