@@ -1,17 +1,17 @@
 ---
 gsd_state_version: 1.0
 milestone: v1.15
-current_phase: 1
-current_phase_name: "Support-Bundle-Export (v1.15)"
+current_phase: 2
+current_phase_name: "COSI-Watches statt Heartbeat (v1.15)"
 status: executing
-stopped_at: v1.15 definiert; Phase 1 beginnt. v1.14 gebaut, OPS-05 offen (Fenster 87)
-last_updated: "2026-09-12T14:50:00.000Z"
+stopped_at: v1.15 Phase 1 fertig (Support-Bundle); Phase 2 (COSI-Watches) beginnt. OPS-05 offen (Fenster 87)
+last_updated: "2026-09-12T16:10:00.000Z"
 last_activity: 2026-09-12
-last_activity_desc: v1.15 defined autonomously; phase 1 (support bundle) starting
+last_activity_desc: v1.15 phase 1 (support bundle) complete; phase 2 (COSI watches) starting
 state_head: a474d2522823cbfb436ee720dee35494890281a3
 progress:
   total_phases: 3
-  completed_phases: 0
+  completed_phases: 1
   total_plans: 0
   completed_plans: 0
 ---
@@ -23,16 +23,27 @@ progress:
 See: .planning/PROJECT.md (updated 2026-08-27)
 
 **Core value:** Eine neue Maschine wird komplett in der UI zum Cluster-Node — ohne `talosctl`, ohne Omni.
-**Current focus:** Milestone v1.15, Phase 1 — Support-Bundle-Export. v1.14 ist gebaut; offen bleibt OPS-05 🚫 (Hardware).
+**Current focus:** Milestone v1.15, Phase 2 — COSI-Watches statt Heartbeat. v1.14 ist gebaut; offen bleibt OPS-05 🚫 (Hardware).
 
 ## Current Position
 
-Phase: v1.15 Phase 1 — Support-Bundle-Export
+Phase: v1.15 Phase 2 — COSI-Watches statt Heartbeat (schließt Fenster 79)
 Plan: siehe `.planning/MILESTONE-v1.15.md`
 Status: beginnt
-Last activity: 2026-09-12 — v1.15 autonom definiert
+Last activity: 2026-09-12 — v1.15 Phase 1 (Support-Bundle) abgeschlossen
 
-Progress: v1.15 [░░░] 0 of 3 phases · v1.14 [█████████▓] gebaut, OPS-05 offen
+Progress: v1.15 [█░░] 1 of 3 phases · v1.14 [█████████▓] gebaut, OPS-05 offen
+
+**v1.15 Phase 1 (Support-Bundle) ist fertig.** `internal/support` sammelt pro
+Node Facts, Services, Versionen, Disks, Links, Extensions, etcd-Status, Logs,
+`dmesg` und die redigierte MachineConfig in ein `tar.gz`, plus Audit-Tail,
+Instanz-Metadaten und ein Manifest, das jede Lücke führt. Es gibt es als Route
+und als Subkommando; das Subkommando sagt in seinem eigenen Manifest, dass es
+keinen Node erreicht hat, weil es den Store-Lock hält. Der Abnahmetest walkt
+Entropie über **jede** Datei im Archiv und sucht den echten CA-Schlüssel des
+simulierten Clusters samt seinem Base64-Körper ohne PEM-Rahmen. Ein Lauf gegen
+einen echten Store hat eine nichtssagende Fehlermeldung in `inventory.Connect`
+gefunden und ersetzt. Siehe `.planning/phases/v1.15-01-support-bundle/01-SUMMARY.md`.
 
 **v1.15 ist autonom definiert und nicht vom Betreiber bestätigt.**
 `.planning/MILESTONE-v1.15.md` nennt die drei Phasen, die Auswahlregel (alles,
@@ -45,7 +56,7 @@ einem Dokument und nicht einem Diff.
 `internal/talossim` ausgeführt; **keine Zeile davon ist je auf einer echten
 Maschine gelaufen**. Der Verifikationsdurchlauf auf amd64-Blech, den Phase 10
 als nicht verhandelbare Eintrittsbedingung führt, hat nicht stattgefunden: dem
-Ausführungshost fehlen Homelab, QEMU, `/dev/kvm` und ein Docker-Daemon.
+Ausführungshost fehlen Homelab, QEMU und `/dev/kvm`.
 
 **OPS-05 🚫 bleibt offen.** Es ist der einzige offene Release-Blocker des
 Milestones. Fenster 87 ist sein Sammelpunkt und schließt gemeinsam mit 82 (die

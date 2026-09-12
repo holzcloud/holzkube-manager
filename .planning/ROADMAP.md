@@ -467,14 +467,27 @@ Phasen laufen in numerischer Reihenfolge: 1 → 2 → 3 → 4 → 5 → 6 → 7 
 |-------|----------------|--------|-----------|
 | 1. Foundation Skeleton | 6/6 | Complete    | 2026-08-28 |
 | 2. Transport Seam, `talossim` & Image Factory | 31/31 | Complete    | 2026-09-05 |
-| 3. Inventar, Cluster-Import & Health | 0/TBD | Not started | - |
-| 4. Walking Skeleton (Wegwerf) | 0/TBD | Not started | - |
-| 5. Streaming | 0/TBD | Not started | - |
-| 6. Jobs-Engine & Node-Aktionen | 0/TBD | Not started | - |
-| 7. Config-Domain | 0/TBD | Not started | - |
-| 8. Provisioning — der Core Value | 0/TBD | Not started | - |
-| 9. Upgrades & etcd-Verwaltung | 0/TBD | Not started | - |
-| 10. Härtung & echter Hardware-Durchlauf | 0/TBD | Not started | - |
+| 3. Inventar, Cluster-Import & Health | 3/3 | Complete    | 2026-09-06 |
+| 4. Walking Skeleton (Wegwerf) | — | **Gebaut, nie gelaufen** | Fenster 80, 81 |
+| 5. Streaming | 2/2 | Complete    | 2026-09-08 |
+| 6. Jobs-Engine & Node-Aktionen | 2/2 | Complete    | 2026-09-09 |
+| 7. Config-Domain | 2/2 | Complete    | 2026-09-10 |
+| 8. Provisioning — der Core Value | 3/3 | Complete (Kriterium 1 offen) | 2026-09-10 |
+| 9. Upgrades & etcd-Verwaltung | 3/3 | Complete (nie auf Hardware) | 2026-09-11 |
+| 10. Härtung & echter Hardware-Durchlauf | 4/5 | **Kriterium 1 offen** (OPS-05, Fenster 87) | 2026-09-11 |
+
+Die Tabelle stand bis 2026-09-12 auf „Not started" für die Phasen 3–10, während
+sie ausgeführt waren. Der Fortschritt wurde in `STATE.md` und den
+Phasen-Summaries geführt und hier nicht nachgezogen — ein Planungsdokument, das
+das Gegenteil des Stands behauptet, ist schlechter als keines.
+
+**Milestone v1.15** (`.planning/MILESTONE-v1.15.md`, autonom definiert):
+
+| Phase | Status | Completed |
+|-------|--------|-----------|
+| 1. Support-Bundle-Export (V2-OPS-01) | Complete    | 2026-09-12 |
+| 2. COSI-Watches statt Heartbeat (INV-13, D-19) | In Arbeit | - |
+| 3. Prometheus-`/metrics` (V2-API-02) | Not started | - |
 
 ## Coverage
 
