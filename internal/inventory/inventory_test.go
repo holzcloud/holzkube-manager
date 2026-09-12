@@ -93,7 +93,7 @@ func newFixtureWith(t *testing.T, opts talossim.Options, heartbeat time.Duration
 	return &fixture{svc: svc, store: st, sim: sim, cluster: cl}
 }
 
-func (f *fixture) importCluster(t *testing.T, ctx context.Context) model.Cluster {
+func (f *fixture) importCluster(ctx context.Context, t *testing.T) model.Cluster {
 	t.Helper()
 
 	fp, err := f.svc.Fingerprint(ctx, f.sim.Host())
@@ -130,7 +130,7 @@ func TestImportAdoptsAControlPlaneNode(t *testing.T) {
 	ctx := testContext(t)
 	f := newFixture(t, talossim.Options{ControlPlane: true})
 
-	c := f.importCluster(t, ctx)
+	c := f.importCluster(ctx, t)
 
 	if c.Origin != model.OriginImported {
 		t.Errorf("Origin = %q, want %q", c.Origin, model.OriginImported)
@@ -241,7 +241,7 @@ func TestNodeLevelFactsSurviveEtcdAndKubernetesBeingDown(t *testing.T) {
 
 	ctx := testContext(t)
 	f := newFixture(t, talossim.Options{ControlPlane: true})
-	c := f.importCluster(t, ctx)
+	c := f.importCluster(ctx, t)
 
 	machines, err := f.svc.Machines(ctx)
 	if err != nil {
@@ -311,7 +311,7 @@ func TestForgettingAMachineNeverTouchesTheNode(t *testing.T) {
 
 	ctx := testContext(t)
 	f := newFixture(t, talossim.Options{ControlPlane: true})
-	f.importCluster(t, ctx)
+	f.importCluster(ctx, t)
 
 	machines, err := f.svc.Machines(ctx)
 	if err != nil {
@@ -341,7 +341,7 @@ func TestAnImportedClusterIsLockedAndCanBeUnlocked(t *testing.T) {
 
 	ctx := testContext(t)
 	f := newFixture(t, talossim.Options{ControlPlane: true})
-	c := f.importCluster(t, ctx)
+	c := f.importCluster(ctx, t)
 
 	if err := f.svc.CheckLock(ctx, c.ID); !errors.Is(err, inventory.ErrClusterLocked) {
 		t.Fatalf("CheckLock on a freshly imported cluster returned %v, want ErrClusterLocked", err)
@@ -369,7 +369,7 @@ func TestCertificateLadderNamesTheState(t *testing.T) {
 
 	ctx := testContext(t)
 	f := newFixture(t, talossim.Options{ControlPlane: true})
-	c := f.importCluster(t, ctx)
+	c := f.importCluster(ctx, t)
 
 	rows := []struct {
 		left    time.Duration
@@ -413,7 +413,7 @@ func TestAddManualRecordsANodeByAddress(t *testing.T) {
 
 	ctx := testContext(t)
 	f := newFixture(t, talossim.Options{ControlPlane: true})
-	c := f.importCluster(t, ctx)
+	c := f.importCluster(ctx, t)
 
 	rec, err := f.svc.AddManual(ctx, c.ID, f.sim.Host())
 	if err != nil {

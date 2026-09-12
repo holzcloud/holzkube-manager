@@ -112,13 +112,13 @@ func (b *Bootstrapper) Bootstrap(
 	// before anything else, because if it is unclear then nothing below it may
 	// run at all.
 	if prev, err := b.readIntent(path); err == nil {
-		switch {
-		case prev.Outcome == "":
+		switch prev.Outcome {
+		case "":
 			return fmt.Errorf("%w: one started at %s against %s and this process cannot say "+
 				"whether it took effect. Look at the cluster -- `talosctl etcd members` against "+
 				"%s answers it -- and then clear the attempt",
 				ErrBootstrapUnclear, prev.StartedAt.Format(time.RFC3339), prev.Machine, prev.Addr)
-		case prev.Outcome == "succeeded", prev.Outcome == "already-exists":
+		case "succeeded", "already-exists":
 			return fmt.Errorf("%w: bootstrapped at %s", ErrAlreadyBootstrapped, prev.StartedAt.Format(time.RFC3339))
 		}
 		// A recorded failure is the one case a second attempt is allowed, and

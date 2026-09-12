@@ -147,7 +147,7 @@ func steps(d Deps, req Request) []jobs.Step {
 			// A machine that took its configuration is no longer in
 			// maintenance mode, and asking is a read. That is what makes the
 			// one irreversible step here resumable rather than parked.
-			Happened: func(ctx context.Context, job *model.Job) (bool, error) {
+			Happened: func(ctx context.Context, _ *model.Job) (bool, error) {
 				return !inMaintenance(ctx, d, req), nil
 			},
 		},

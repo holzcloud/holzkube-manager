@@ -4,10 +4,10 @@ milestone: v1.15
 current_phase: 3
 current_phase_name: "Prometheus-/metrics (v1.15)"
 status: milestone-complete
-stopped_at: v1.15 vollstaendig (Support-Bundle, COSI-Watches, /metrics). OPS-05 bleibt der einzige Release-Blocker (Fenster 87)
-last_updated: "2026-09-12T16:45:00.000Z"
+stopped_at: v1.15 vollstaendig; Lint und Testlauf erstmals gruen (Fenster 77, 89 zu). OPS-05 bleibt der einzige Release-Blocker (Fenster 87)
+last_updated: "2026-09-12T17:15:00.000Z"
 last_activity: 2026-09-12
-last_activity_desc: v1.15 complete: support bundle, COSI watches (window 79 closed), Prometheus /metrics
+last_activity_desc: v1.15 complete; lint run closed windows 77 and 89 and found an unverified certificate pin
 state_head: a474d2522823cbfb436ee720dee35494890281a3
 progress:
   total_phases: 3
@@ -58,6 +58,29 @@ Code. Nebenbei sind zwei alte, stille Supervisions-Fehler gefallen: ein
 Lesevorgang vor `Start()` verhinderte jede Überwachung, und `Supervise()` band
 den Supervisor an den Request-Context des HTTP-Handlers. Siehe
 `.planning/phases/v1.15-02-cosi-watches/02-SUMMARY.md`.
+
+**Der Linter lief zum ersten Mal, und er hat ein Sicherheitsloch gefunden, das
+seit Phase 8 offen war.** `golangci-lint` 2.13.2 gegen go1.26 meldete 45
+Befunde; heute sind es null, und jede Ausnahme in `.golangci.yml` nennt Regel,
+Ort und Grund.
+
+Der wichtigste Befund war **Fenster 90**: der Fingerprint, den ein Betreiber von
+der Konsole einer Maschine im Maintenance-Modus abliest, wurde erhoben,
+angezeigt, bis in `NewMaintenanceClient` weitergereicht — und **nie verglichen**.
+Auf diesem Pfad gibt es keine Cluster-PKI, der Fingerprint ist der einzige
+Vertrauensanker, und der Aufruf, für den der Pfad existiert, ist
+`ApplyConfiguration`. Gefunden hat der Linter nicht das Loch, sondern sein
+Fossil: eine ungenutzte `normalise()`, die einen Fingerprint für einen Vergleich
+trimmte, den nie jemand geschrieben hatte. Repariert, mit vier Tests — und
+`G123` fand direkt danach den Fehler im frischen Pin: `VerifyPeerCertificate`
+wird bei einer **wiederaufgenommenen** TLS-Session gar nicht aufgerufen, was
+einen Pin ergibt, der beim ersten Handshake hält und danach nie wieder.
+
+**Fenster 89 ist zu, und der gesamte Go-Testlauf ist erstmals in dieser Umgebung
+grün.** Beide dauerhaft roten Tests waren Tests, die eine Eigenschaft der
+Maschine prüften statt eine des Codes — ein Hostname, der nicht auflöst, hängt
+von der DNS-Auflösung des Hosts ab; eine Kalibrierung unter Last, gemessen
+danach, hängt von der Last ab.
 
 **v1.15 Phase 3 (Prometheus-`/metrics`) ist fertig, und damit der ganze
 Milestone.** Neun Metrik-Familien, ohne zusätzliche Abhängigkeit, ohne Session
