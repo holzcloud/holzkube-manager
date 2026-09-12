@@ -487,7 +487,7 @@ das Gegenteil des Stands behauptet, ist schlechter als keines.
 |-------|--------|-----------|
 | 1. Support-Bundle-Export (V2-OPS-01) | Complete    | 2026-09-12 |
 | 2. COSI-Watches statt Heartbeat (INV-13, D-19) | Complete    | 2026-09-12 |
-| 3. Prometheus-`/metrics` (V2-API-02) | In Arbeit | - |
+| 3. Prometheus-`/metrics` (V2-API-02) | Complete    | 2026-09-12 |
 
 ## Coverage
 
