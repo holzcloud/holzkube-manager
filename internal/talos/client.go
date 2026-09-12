@@ -238,9 +238,9 @@ func (n *conn) streamPolicy(
 
 	// A method that is a stream in the protocol but a bounded read in meaning
 	// -- COSI List, EtcdRecover -- takes its class deadline as a total one. It
-	// is only the stream class that gets no total deadline, because it is only
-	// the stream class that may legitimately run for hours.
-	if class != ClassStream {
+	// is only the unbounded classes that get no total deadline, because they
+	// are the only ones that may legitimately run for hours.
+	if !class.Unbounded() {
 		if err := requireDeadline(ctx); err != nil {
 			cancel()
 			return nil, fmt.Errorf("talos: %s on %s: %w", shortMethod(method), n.target.Machine, err)
@@ -263,9 +263,9 @@ func (n *conn) streamPolicy(
 		conn:         n,
 		op:           shortMethod(method),
 		cancel:       cancel,
-		unbounded:    class == ClassStream,
+		unbounded:    class.Unbounded(),
 		firstByte:    StreamFirstByteDeadline,
-		idle:         StreamIdleTimeout,
+		idle:         class.StreamIdle(),
 	}, nil
 }
 
@@ -299,6 +299,12 @@ type policyStream struct {
 
 // window is what the next receive is bounded by: the first-byte deadline until
 // something has arrived on this stream, the idle timeout from then on.
+//
+// Zero means no bound, which is the watch class and only the watch class: a
+// watch that has delivered its snapshot and then says nothing for an hour is a
+// node on which nothing happened. See ClassWatch. Until the snapshot arrives
+// the first-byte deadline applies to a watch like it does to anything else --
+// a subscription that never opens is not silence, it is a failure to start.
 func (s *policyStream) window() time.Duration {
 	if s.gotData {
 		return s.idle
@@ -331,8 +337,7 @@ func (s *policyStream) RecvMsg(m any) error {
 	// below claims, so it is now always true.
 	var settled atomic.Bool
 
-	if s.unbounded {
-		window := s.window()
+	if window := s.window(); s.unbounded && window > 0 {
 		timer := time.AfterFunc(window, func() {
 			if !settled.CompareAndSwap(false, true) {
 				return

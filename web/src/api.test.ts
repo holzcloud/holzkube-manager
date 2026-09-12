@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { api, onSudoRequired, type SudoChallenge } from '@/api'
+import { api, machineSchema, onSudoRequired, type SudoChallenge } from '@/api'
 
 /**
  * The request pipeline's own tests, at the one place in the frontend that calls
@@ -191,5 +191,65 @@ describe('every request carries a ceiling', () => {
     expect(signals[0]).toBeInstanceOf(AbortSignal)
     expect(signals[1]).toBeInstanceOf(AbortSignal)
     expect(signals[1]).not.toBe(signals[0])
+  })
+})
+
+/**
+ * A server that has not been upgraded yet is a server whose machines carry no
+ * `watch` object, and the browser is upgraded first about as often as it is
+ * upgraded last. A schema that required the field would turn the whole fleet
+ * list into a parse error rather than into a list with the live-update
+ * indicator missing -- which is the one part of it nobody would miss.
+ */
+describe('the machine schema tolerates a server that does not know about watches', () => {
+  const withoutWatch = {
+    id: 'm1',
+    role: 'controlplane',
+    stage: 'watching',
+    adopted_at: '2026-09-12T00:00:00Z',
+    hostname: { value: 'cp-1', level: 'none', available: true },
+    addr: { value: '10.0.0.1', level: 'none', available: true },
+    talos_version: { value: 'v1.13.0', level: 'node', available: true },
+    kubernetes_version: { value: 'v1.34.0', level: 'k8s', available: true },
+    schematic_id: { value: '', level: 'node', available: true },
+    manufacturer: { value: '', level: 'node', available: true },
+    product_name: { value: '', level: 'node', available: true },
+    serial_number: { value: '', level: 'node', available: true },
+    memory_mib: { value: 0, level: 'node', available: true },
+    cpus: { value: [], level: 'node', available: true },
+    disks: { value: [], level: 'node', available: true },
+    interfaces: { value: [], level: 'node', available: true },
+    services: { value: [], level: 'node', available: true },
+    etcd_member: { value: false, level: 'etcd', available: true },
+    compatibility: {
+      value: { known: true, supported: true, headroom_minors: 1, sentence: '' },
+      level: 'node',
+      available: true,
+    },
+  }
+
+  it('defaults the watch to "not live" rather than refusing the payload', () => {
+    const m = machineSchema.parse(withoutWatch)
+
+    expect(m.watch.live).toBe(false)
+    expect(m.watch.restarts).toBe(0)
+    // And the absence says nothing, which is right: a server that does not
+    // report watches is not a server whose watches are broken.
+    expect(m.watch.reason).toBe('')
+  })
+
+  it('keeps a watch the server did report', () => {
+    const m = machineSchema.parse({
+      ...withoutWatch,
+      watch: {
+        live: false,
+        since: '2026-09-12T10:00:00Z',
+        reason: 'the node could not be reached',
+        restarts: 3,
+      },
+    })
+
+    expect(m.watch.reason).toBe('the node could not be reached')
+    expect(m.watch.restarts).toBe(3)
   })
 })

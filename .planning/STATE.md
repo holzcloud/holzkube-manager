@@ -1,17 +1,17 @@
 ---
 gsd_state_version: 1.0
 milestone: v1.15
-current_phase: 2
-current_phase_name: "COSI-Watches statt Heartbeat (v1.15)"
+current_phase: 3
+current_phase_name: "Prometheus-/metrics (v1.15)"
 status: executing
-stopped_at: v1.15 Phase 1 fertig (Support-Bundle); Phase 2 (COSI-Watches) beginnt. OPS-05 offen (Fenster 87)
-last_updated: "2026-09-12T16:10:00.000Z"
+stopped_at: v1.15 Phasen 1-2 fertig (Support-Bundle, COSI-Watches; Fenster 79 zu); Phase 3 (/metrics) beginnt. OPS-05 offen (Fenster 87)
+last_updated: "2026-09-12T16:30:00.000Z"
 last_activity: 2026-09-12
-last_activity_desc: v1.15 phase 1 (support bundle) complete; phase 2 (COSI watches) starting
+last_activity_desc: v1.15 phase 2 (COSI watches) complete, window 79 closed; phase 3 (/metrics) starting
 state_head: a474d2522823cbfb436ee720dee35494890281a3
 progress:
   total_phases: 3
-  completed_phases: 1
+  completed_phases: 2
   total_plans: 0
   completed_plans: 0
 ---
@@ -23,16 +23,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-08-27)
 
 **Core value:** Eine neue Maschine wird komplett in der UI zum Cluster-Node — ohne `talosctl`, ohne Omni.
-**Current focus:** Milestone v1.15, Phase 2 — COSI-Watches statt Heartbeat. v1.14 ist gebaut; offen bleibt OPS-05 🚫 (Hardware).
+**Current focus:** Milestone v1.15, Phase 3 — Prometheus-`/metrics`. v1.14 ist gebaut; offen bleibt OPS-05 🚫 (Hardware).
 
 ## Current Position
 
-Phase: v1.15 Phase 2 — COSI-Watches statt Heartbeat (schließt Fenster 79)
+Phase: v1.15 Phase 3 — Prometheus-`/metrics` (V2-API-02)
 Plan: siehe `.planning/MILESTONE-v1.15.md`
 Status: beginnt
-Last activity: 2026-09-12 — v1.15 Phase 1 (Support-Bundle) abgeschlossen
+Last activity: 2026-09-12 — v1.15 Phase 2 (COSI-Watches) abgeschlossen, Fenster 79 geschlossen
 
-Progress: v1.15 [█░░] 1 of 3 phases · v1.14 [█████████▓] gebaut, OPS-05 offen
+Progress: v1.15 [██░] 2 of 3 phases · v1.14 [█████████▓] gebaut, OPS-05 offen
 
 **v1.15 Phase 1 (Support-Bundle) ist fertig.** `internal/support` sammelt pro
 Node Facts, Services, Versionen, Disks, Links, Extensions, etcd-Status, Logs,
@@ -44,6 +44,20 @@ Entropie über **jede** Datei im Archiv und sucht den echten CA-Schlüssel des
 simulierten Clusters samt seinem Base64-Körper ohne PEM-Rahmen. Ein Lauf gegen
 einen echten Store hat eine nichtssagende Fehlermeldung in `inventory.Connect`
 gefunden und ersetzt. Siehe `.planning/phases/v1.15-01-support-bundle/01-SUMMARY.md`.
+
+**v1.15 Phase 2 (COSI-Watches) ist fertig und Fenster 79 ist geschlossen.**
+Pro Node laufen zwei Schleifen: der Heartbeat und ein `WatchKind` über fünf
+Ressourcen-Arten. Der Watch trägt keine Daten, nur die Aussage, dass sich etwas
+geändert hat; gelesen wird weiter im bestehenden Durchlauf. **Der Heartbeat ist
+nicht nur geblieben, er ist jetzt der Watchdog**, und das ist gemessen und nicht
+vorsichtshalber: eine Subscription gegen einen gestoppten Node bleibt offen,
+still und fehlerfrei, weil cosi-projects Client sie fünfzehn Minuten lang
+heimlich aus ihrem Bookmark wieder aufbaut. `config.MachineConfig` ist über
+diesen Transport gar nicht beobachtbar und deshalb draußen, mit dem Grund im
+Code. Nebenbei sind zwei alte, stille Supervisions-Fehler gefallen: ein
+Lesevorgang vor `Start()` verhinderte jede Überwachung, und `Supervise()` band
+den Supervisor an den Request-Context des HTTP-Handlers. Siehe
+`.planning/phases/v1.15-02-cosi-watches/02-SUMMARY.md`.
 
 **v1.15 ist autonom definiert und nicht vom Betreiber bestätigt.**
 `.planning/MILESTONE-v1.15.md` nennt die drei Phasen, die Auswahlregel (alles,
