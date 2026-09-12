@@ -319,6 +319,7 @@ Items acknowledged and deferred at milestone close, most recent first:
 | Verification | Installations-Stille messen; `ReappearBudget` in beiden Domänen ersetzen | Open, windows 80, 85 | 2026-09-11 | v1.14 |
 | Verification | Sandbox Tier 1 (Docker) und Tier 2 (QEMU) einmal ausführen | Open, windows 76, 81 | 2026-09-11 | v1.14 |
 | Tooling | `golangci-lint` gegen die Ziel-Go-Version laufen lassen | Open, window 77 | 2026-09-11 | v1.14 |
+| Tooling | Zwei Tests, die diese Umgebung nicht bestehen kann (blackholte Ports, Kernkonkurrenz) | Open, window 89 | 2026-09-12 | v1.14 |
 | Accepted loss | Audit-Parameter aus Phase 6 und 7 bleiben inhaltslos | Open, window 83 | 2026-09-11 | v1.14 |
 | Deviation | Kubernetes-Upgrade orchestriert nicht über die Kubernetes-API | Open, window 86 | 2026-09-11 | v1.14 |
 | Deviation | Supervisors sind Heartbeat-Poller statt COSI-Watches | Open, window 79 | 2026-09-11 | v1.14 |
