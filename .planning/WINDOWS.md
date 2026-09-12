@@ -103,6 +103,7 @@ last_updated: 2026-09-11T16:50:00.000Z
 | 86 | 09 | deviation | internal/upgrade/job.go |  | DAS KUBERNETES-UPGRADE SCHREIBT DIE IMAGES IN DIE MACHINE-CONFIG UND SPRICHT NICHT MIT KUBERNETES. talosctl upgrade-k8s orchestriert ueber die Kubernetes-API: prepull, dann die Static Pods einzeln, dann kube-proxy, dann die Kubelets, jeweils mit Health-Checks dazwischen. Dieser Pfad setzt stattdessen .machine.kubelet.image und die drei .cluster.*.i | open |  | 2026-09-11T18:55:00.000Z |  |
 | 87 | 10 | unrun-verify | .planning/ROADMAP.md |  | OPS-05 IST OFFEN: DER VERIFIKATIONSDURCHLAUF AUF ECHTER AMD64-HARDWARE HAT NICHT STATTGEFUNDEN. Das ist die Eintrittsbedingung von Phase 10, die der Roadmap-Eintrag ausdruecklich als nicht verhandelbar und als 'die einzige Phase, die das Homelab zwingend braucht' fuehrt, und es ist der Release-Blocker, den die Phase besitzt. Der Ausfuehrungshost ha | open |  | 2026-09-11T19:10:00.000Z |  |
 | 88 | 10 | unrun-verify | Dockerfile |  | DAS CONTAINER-IMAGE IST NIE GEBAUT WORDEN. Dockerfile und compose.yaml stehen mit den Eigenschaften, die OPS-04 verlangt -- non-root uid 65532, FROM scratch, CGO_ENABLED=0, deklariertes Volume, cap_drop ALL, no-new-privileges, read_only root, Bindung an 127.0.0.1 --, und cmd/holzkube-managerd/container_test.go prueft genau diese Eigenschaften aus d | open |  | 2026-09-11T19:10:00.000Z |  |
+| 89 | 10 | unrun-verify | internal/talos/errors_test.go |  | ZWEI TESTS SIND IN DIESER UMGEBUNG ROT UND WAREN ES VOR DIESEM MILESTONE AUCH -- das ist hier festgehalten, weil 'die kennt man schon' kein Mechanismus ist und ein Testlauf mit zwei dauerhaft roten Zeilen ein Testlauf ist, den niemand mehr liest. (a) internal/talos TestErrorNamesTheMachineAndNeverTheAddress erwartet Kind=unreachable von einer Verbi | open |  | 2026-09-12T14:20:00.000Z |  |
 
 ````json
 [
@@ -1160,6 +1161,18 @@ last_updated: 2026-09-11T16:50:00.000Z
     "status": "open",
     "reason": "",
     "recorded_at": "2026-09-11T19:10:00.000Z",
+    "resolved_at": null
+  },
+  {
+    "id": 89,
+    "kind": "unrun-verify",
+    "phase": "10",
+    "file": "internal/talos/errors_test.go",
+    "line": null,
+    "description": "ZWEI TESTS SIND IN DIESER UMGEBUNG ROT UND WAREN ES VOR DIESEM MILESTONE AUCH -- das ist hier festgehalten, weil 'die kennt man schon' kein Mechanismus ist und ein Testlauf mit zwei dauerhaft roten Zeilen ein Testlauf ist, den niemand mehr liest. (a) internal/talos TestErrorNamesTheMachineAndNeverTheAddress erwartet Kind=unreachable von einer Verbindung auf einen geschlossenen Port und bekommt Kind=timeout: dieser Container blackholet geschlossene Ports, statt sie mit RST abzulehnen, also laeuft der Dial in den Timeout, statt refused zu werden. Die Unterscheidung, die der Test prueft -- 'nichts geantwortet' gegen 'zu langsam geantwortet' --, ist im Produktcode korrekt; was fehlt, ist eine Umgebung, die RST schickt. Verifiziert gegen Commit bbe1957 (Ende Phase 7), also vor jeder Zeile der Phasen 8 bis 10. (b) internal/auth TestArgonVerifyCostsAtLeastTheTarget misst, dass eine argon2id-Verifikation mindestens ihr Zielbudget kostet, und unterschreitet es, wenn die gesamte Suite parallel laeuft -- der Kalibrierungslauf und der Messlauf konkurrieren dann um dieselben Kerne. Allein ausgefuehrt ist der Test gruen. SCHLIESSBEDINGUNG: (a) ein Lauf auf einem Host, dessen Netz-Stack geschlossene Ports ablehnt statt sie zu verschlucken; (b) entweder ein Lauf auf einem Host mit genug Kernen, oder eine ausdrueckliche Entscheidung, den Test zu serialisieren -- was die Messung schwaecher machen wuerde und deshalb nicht nebenbei passieren sollte.",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-09-12T14:20:00.000Z",
     "resolved_at": null
   }
 ]
