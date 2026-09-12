@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/holzcloud/holzkube-manager/internal/model"
@@ -393,10 +392,4 @@ func prettySize(n uint64) string {
 		exp++
 	}
 	return fmt.Sprintf("%.1f %cB", float64(n)/float64(div), "kMGTPE"[exp])
-}
-
-// normalise trims and lower-cases a fingerprint for comparison, so that a
-// value pasted with stray whitespace or in the wrong case still matches.
-func normalise(fingerprint string) string {
-	return strings.ToLower(strings.TrimSpace(fingerprint))
 }

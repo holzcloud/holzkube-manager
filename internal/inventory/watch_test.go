@@ -29,19 +29,18 @@ func TestAChangeAppearsWithoutWaitingForTheHeartbeat(t *testing.T) {
 	ctx := testContext(t)
 	f := newFixtureWith(t, talossim.Options{Hostname: "before-1", ControlPlane: true}, aLongHeartbeat)
 
-	f.importCluster(t, ctx)
-	id := f.onlyMachine(t, ctx)
+	f.importCluster(ctx, t)
 
 	if err := f.svc.Start(ctx); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
-	f.awaitWatch(t, ctx, id, true)
+	f.awaitWatch(ctx, t, true)
 
 	if err := f.sim.SetHostname(ctx, "after-1"); err != nil {
 		t.Fatalf("SetHostname: %v", err)
 	}
 
-	f.await(t, ctx, 20*time.Second, func(v inventory.MachineView) bool {
+	f.await(ctx, t, 20*time.Second, func(v inventory.MachineView) bool {
 		return v.Hostname.Value == "after-1"
 	}, "the node was renamed and the read model still shows the old name; with the heartbeat at "+
 		aLongHeartbeat.String()+" the watch is the only thing that could have brought it, so it brought nothing")
@@ -67,17 +66,16 @@ func TestTheHeartbeatStillRunsWhileAWatchIsLive(t *testing.T) {
 		TalosVersion: "v1.12.4",
 	}, 900*time.Millisecond)
 
-	f.importCluster(t, ctx)
-	id := f.onlyMachine(t, ctx)
+	f.importCluster(ctx, t)
 
 	if err := f.svc.Start(ctx); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
-	f.awaitWatch(t, ctx, id, true)
+	f.awaitWatch(ctx, t, true)
 
 	f.sim.SetVersion("v1.12.5")
 
-	f.await(t, ctx, 20*time.Second, func(v inventory.MachineView) bool {
+	f.await(ctx, t, 20*time.Second, func(v inventory.MachineView) bool {
 		return v.TalosVersion.Value == "v1.12.5"
 	}, "with a watch live, a change to a fact no topic carries never arrived -- so the heartbeat "+
 		"stopped running once the watch came up, and nothing is left that could notice the watch dying")
@@ -99,19 +97,19 @@ func TestAWatchThatDiesIsVisibleAndRebuilt(t *testing.T) {
 		ControlPlane: true,
 	}, 700*time.Millisecond)
 
-	f.importCluster(t, ctx)
-	id := f.onlyMachine(t, ctx)
+	f.importCluster(ctx, t)
+	id := f.onlyMachine(ctx, t)
 
 	if err := f.svc.Start(ctx); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
-	f.awaitWatch(t, ctx, id, true)
+	f.awaitWatch(ctx, t, true)
 
 	if err := f.sim.Close(); err != nil {
 		t.Fatalf("talossim.Close: %v", err)
 	}
 
-	f.await(t, ctx, 30*time.Second, func(v inventory.MachineView) bool {
+	f.await(ctx, t, 30*time.Second, func(v inventory.MachineView) bool {
 		return !v.Watch.Live && v.Watch.Reason != ""
 	}, "the node was taken away and its watch still reports itself live with no reason given; a "+
 		"subscription that keeps claiming freshness after its node is gone is the silent freeze "+
@@ -150,8 +148,8 @@ func TestAWatchThatHasNotDeliveredASnapshotIsNotLive(t *testing.T) {
 		ControlPlane: true,
 	}, 500*time.Millisecond)
 
-	f.importCluster(t, ctx)
-	id := f.onlyMachine(t, ctx)
+	f.importCluster(ctx, t)
+	id := f.onlyMachine(ctx, t)
 
 	// Point the record at an address nothing answers on, so every attempt --
 	// the poller's and the watch's alike -- fails from here on.
@@ -168,7 +166,7 @@ func TestAWatchThatHasNotDeliveredASnapshotIsNotLive(t *testing.T) {
 		t.Fatalf("Start: %v", err)
 	}
 
-	f.await(t, ctx, 40*time.Second, func(v inventory.MachineView) bool {
+	f.await(ctx, t, 40*time.Second, func(v inventory.MachineView) bool {
 		return v.Stage == health.StageDown
 	}, "an unreachable node never reached the down stage, so this test cannot say anything about "+
 		"what its watch claimed while it was there")
@@ -188,7 +186,7 @@ func TestAWatchThatHasNotDeliveredASnapshotIsNotLive(t *testing.T) {
 	}
 }
 
-func (f *fixture) onlyMachine(t *testing.T, ctx context.Context) model.MachineID {
+func (f *fixture) onlyMachine(ctx context.Context, t *testing.T) model.MachineID {
 	t.Helper()
 
 	machines, err := f.svc.Machines(ctx)
@@ -202,10 +200,10 @@ func (f *fixture) onlyMachine(t *testing.T, ctx context.Context) model.MachineID
 }
 
 // awaitWatch waits for a machine's subscription to reach a state.
-func (f *fixture) awaitWatch(t *testing.T, ctx context.Context, id model.MachineID, live bool) {
+func (f *fixture) awaitWatch(ctx context.Context, t *testing.T, live bool) {
 	t.Helper()
 
-	f.await(t, ctx, 30*time.Second, func(v inventory.MachineView) bool {
+	f.await(ctx, t, 30*time.Second, func(v inventory.MachineView) bool {
 		return v.Watch.Live == live
 	}, "the watch never became live, so every assertion after this point would be about a "+
 		"subscription that was never there")
@@ -217,15 +215,15 @@ func (f *fixture) awaitWatch(t *testing.T, ctx context.Context, id model.Machine
 // looks like: what is being measured is when the fact arrived, and the poll is
 // the ruler rather than the thing that put it there.
 func (f *fixture) await(
-	t *testing.T,
 	ctx context.Context,
+	t *testing.T,
 	within time.Duration,
 	ok func(inventory.MachineView) bool,
 	failure string,
 ) {
 	t.Helper()
 
-	id := f.onlyMachine(t, ctx)
+	id := f.onlyMachine(ctx, t)
 	deadline := time.Now().Add(within)
 
 	for time.Now().Before(deadline) {
@@ -256,7 +254,7 @@ func TestReadingTheFleetDoesNotStopItFromBeingSupervised(t *testing.T) {
 	ctx := testContext(t)
 	f := newFixtureWith(t, talossim.Options{Hostname: "read-first-1", ControlPlane: true}, time.Second)
 
-	f.importCluster(t, ctx)
+	f.importCluster(ctx, t)
 
 	// The read that used to be fatal.
 	if _, err := f.svc.Machines(ctx); err != nil {
@@ -267,10 +265,9 @@ func TestReadingTheFleetDoesNotStopItFromBeingSupervised(t *testing.T) {
 		t.Fatalf("Start: %v", err)
 	}
 
-	id := f.onlyMachine(t, ctx)
-	f.awaitWatch(t, ctx, id, true)
+	f.awaitWatch(ctx, t, true)
 
-	f.await(t, ctx, 20*time.Second, func(v inventory.MachineView) bool {
+	f.await(ctx, t, 20*time.Second, func(v inventory.MachineView) bool {
 		return v.Stage.Live()
 	}, "the fleet was listed before Start and nothing was ever supervised afterwards")
 }
@@ -289,16 +286,16 @@ func TestAMachineSupervisedAfterStartKeepsRunning(t *testing.T) {
 	ctx := testContext(t)
 	f := newFixtureWith(t, talossim.Options{Hostname: "late-1", ControlPlane: true}, time.Second)
 
-	f.importCluster(t, ctx)
+	f.importCluster(ctx, t)
 	if err := f.svc.Start(ctx); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
 
-	id := f.onlyMachine(t, ctx)
+	id := f.onlyMachine(ctx, t)
 
 	// The call the handler makes, with nothing it could bind the supervisor's
 	// lifetime to even if it wanted to.
 	f.svc.Supervise(id)
 
-	f.awaitWatch(t, ctx, id, true)
+	f.awaitWatch(ctx, t, true)
 }

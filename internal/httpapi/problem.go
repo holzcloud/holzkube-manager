@@ -111,6 +111,15 @@ const (
 	// one the operator confirmed. It is a validation failure rather than an
 	// upstream one because what is wrong is the value that was submitted --
 	// or, worse, what is answering at that address.
+	//
+	// Two paths produce it and they are the same fact at different moments.
+	// The adoption path compares before it connects (talos.ErrFingerprintMismatch);
+	// the maintenance path compares during the handshake, where the pin is the
+	// only trust anchor there is (talos.ErrFingerprintPin, PROV-04). What must
+	// never happen is the second arriving as upstream.node-unreachable, which
+	// is what it looked like until the pin recorded what it saw: something
+	// answered, and telling the operator otherwise sends them to check a cable
+	// while somebody else is on the wire.
 	CodeFingerprintMismatch = "validation.fingerprint-mismatch"
 
 	// CodeClusterLocked: the cluster was adopted read-only and this request

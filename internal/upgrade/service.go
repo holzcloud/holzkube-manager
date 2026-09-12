@@ -283,9 +283,13 @@ func (s *Service) PlanKubernetes(ctx context.Context, cluster model.ClusterID, t
 	talosVersion := lowestTalos(machines)
 	chain, cerr := KubernetesChain(from, target, talosVersion)
 	if cerr != nil {
+		// Deliberately not returned as an error. A version pair with no legal
+		// path is not a failure of this call: it is the answer, and the
+		// operator has to read the sentence rather than a 500. Returning it as
+		// an error would lose the rest of the plan along with it.
 		plan.Blocked = true
 		plan.BlockReason = cerr.Error()
-		return plan, nil
+		return plan, nil //nolint:nilerr // a blocked plan is the answer, not a failure
 	}
 	plan.Chain = chain
 

@@ -67,6 +67,85 @@ linters:
           - gosec
         text: "G104"
 
+      # contextcheck cannot see through budgetedContext, which is the one
+      # helper every route in this package derives its deadline with:
+      # context.WithTimeout(r.Context(), budget). It is a derivation and the
+      # linter reads it as a fresh context, so every route that applies its own
+      # budget -- which is every route that talks to a node, by design -- is
+      # reported. The property it is trying to protect is held by
+      # cmd/holzkube-managerd/budget_test.go instead, which checks the actual
+      # arithmetic against the write timeout rather than the shape of the call.
+      - path: internal/httpapi/handlers/
+        linters:
+          - contextcheck
+        text: "Non-inherited new context"
+
+      # Two deliberate detachments, both of them lifetimes rather than calls.
+      # A node's supervisor lives as long as the inventory service, never as
+      # long as the request that adopted the node -- that was a real bug, fixed
+      # in v1.15 phase 2 and held by a regression test. A job runs on the
+      # engine's lifetime for the same reason: a job cancelled because its
+      # submitter's HTTP connection closed is a half-applied configuration.
+      - path: internal/(inventory|jobs)/
+        linters:
+          - contextcheck
+        text: "should pass the context parameter"
+      - path: internal/httpapi/handlers/inventory.go
+        linters:
+          - contextcheck
+        text: "should pass the context parameter"
+
+      # The bootstrap lease is a file whose path is derived from a cluster id
+      # this process holds a record for, opened O_EXCL at 0600. Taking the path
+      # in a variable is the mechanism: the lease is per cluster.
+      - path: internal/provision/bootstrap.go
+        linters:
+          - gosec
+        text: "G304"
+
+      # The subcommands take paths from the operator on the command line --
+      # that is what a backup, a restore and an export are. There is no user
+      # input here and no privilege to escalate to: the process already runs as
+      # whoever typed the command, and it reads and writes what they named.
+      - path: cmd/holzkube-managerd/commands.go
+        linters:
+          - gosec
+        text: "G304|G703"
+
+      # The jitter on the heartbeat spreads a fleet's reads across an interval.
+      # It decides nothing, authenticates nothing and is not a secret; every
+      # value in this product that has to be unguessable comes from crypto/rand
+      # by way of internal/tlsx and internal/auth, where G404 stays on.
+      - path: internal/inventory/observe.go
+        linters:
+          - gosec
+        text: "G404"
+
+      # The talosconfig download: the bytes are assembled by this process from
+      # the cluster's own stored PKI, served as an attachment with nosniff and
+      # a Content-Disposition, and never interpreted as a document. gosec's
+      # taint analysis follows the store read and cannot see that.
+      - path: internal/httpapi/handlers/inventory.go
+        linters:
+          - gosec
+        text: "G705"
+
+      # A test starting a simulated node inside a subtest is starting a
+      # process-lifetime fixture, not making a call: talossim.New listens and
+      # serves until the test cleans it up, and handing it the subtest's
+      # context would tear the node down at the wrong moment.
+      - path: _test\.go$
+        linters:
+          - contextcheck
+
+      # The simulator derives a stable fake identifier by folding a hash into
+      # bytes. The truncation is the algorithm, not an accident, and nothing it
+      # produces leaves internal/talossim.
+      - path: internal/talossim/
+        linters:
+          - gosec
+        text: "G115"
+
 formatters:
   enable:
     - gofmt
