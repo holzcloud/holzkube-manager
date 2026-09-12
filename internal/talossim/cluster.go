@@ -50,6 +50,20 @@ type Cluster struct {
 	WorkerConfig       []byte
 }
 
+// OSKeyPEM is the cluster's own OS certificate-authority private key.
+//
+// It exists so that a test can assert a **specific, real** secret is absent
+// from something -- the support bundle's redaction test is the caller. That is
+// a stronger check than looking for the string "PRIVATE KEY": this is the key
+// that is genuinely in the configuration the simulated node serves, so its
+// absence is evidence rather than the absence of a marker.
+func (c *Cluster) OSKeyPEM() []byte {
+	if c == nil || c.Secrets == nil || c.Secrets.Certs == nil || c.Secrets.Certs.OS == nil {
+		return nil
+	}
+	return c.Secrets.Certs.OS.Key
+}
+
 // NewCluster generates a simulated cluster.
 //
 // endpoint is the Kubernetes API endpoint, in the https://host:port form the

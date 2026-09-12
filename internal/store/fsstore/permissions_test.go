@@ -194,6 +194,11 @@ func TestOpenRefusesAWideOpenDataDirectory(t *testing.T) {
 //     bootstrapping etcd twice destroys a cluster. The exemption is per-file
 //     rather than per-directory so that the rest of internal/provision stays
 //     under the rule.
+//   - cmd/holzkube-managerd/commands.go — the operator-facing subcommands. The
+//     paths it opens are a backup's output, a restore's input and a support
+//     bundle's destination: an export and an import named by the operator, not
+//     state records. Every record it reads goes through fsstore like everything
+//     else, which is the rule this guard is actually about.
 //   - _test.go files — tests legitimately plant fixtures and inspect results.
 func TestNoDirectFileAccessOutsideFsstore(t *testing.T) {
 	root := filepath.Join("..", "..", "..")
@@ -205,11 +210,22 @@ func TestNoDirectFileAccessOutsideFsstore(t *testing.T) {
 		filepath.Join("internal", "audit"),
 	}
 
-	// Named one file at a time, because each is a file whose whole purpose is
-	// a filesystem primitive the store cannot express. Adding to this list is
-	// meant to be an argument, which is why it is not a directory.
+	// Named one file at a time. Adding to this list is meant to be an
+	// argument, which is why it is not a directory.
 	exemptFiles := map[string]bool{
+		// A filesystem primitive the store cannot express -- see the note
+		// above.
 		filepath.Join("internal", "provision", "bootstrap.go"): true,
+
+		// The subcommands, and for a different reason: the paths this file
+		// opens are not state records. They are an operator-facing export and
+		// import -- a backup's output, a restore's input, a support bundle's
+		// destination -- named by the operator on their own command line. The
+		// rule this guard enforces is that *records* are reached through
+		// store.Machines() and never through a path, and that stays true here:
+		// this file reaches every record through fsstore, and the only paths
+		// it opens are ones somebody typed.
+		filepath.Join("cmd", "holzkube-managerd", "commands.go"): true,
 	}
 
 	// os functions that read, write, enumerate or move a file. MkdirAll and

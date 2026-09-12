@@ -12,8 +12,11 @@ import (
 
 	"github.com/holzcloud/holzkube-manager/internal/audit"
 	"github.com/holzcloud/holzkube-manager/internal/config"
+	"github.com/holzcloud/holzkube-manager/internal/model"
 	"github.com/holzcloud/holzkube-manager/internal/store/fsstore"
 	"github.com/holzcloud/holzkube-manager/internal/store/migrate/backup"
+	"github.com/holzcloud/holzkube-manager/internal/support"
+	"github.com/holzcloud/holzkube-manager/internal/talos"
 )
 
 // The subcommands, which are the operational half of this binary (OPS-01,
@@ -39,6 +42,7 @@ var commands = map[string]func(args []string) error{
 	"restore":      cmdRestore,
 	"backups":      cmdBackups,
 	"verify-audit": cmdVerifyAudit,
+	"support":      cmdSupport,
 }
 
 // dispatch routes the first argument to a subcommand, or to the server.
@@ -170,6 +174,152 @@ func cmdRestore(args []string) error {
 	return reportChain(cfg.DataDir)
 }
 
+// cmdSupport writes a support bundle to a file (V2-OPS-01).
+//
+// It exists alongside the HTTP route because the two are reached from
+// different places, and the difference matters exactly when it is needed: this
+// one runs on the host with no session and no listening socket, which is the
+// situation where the interface is part of what is broken.
+//
+// It refuses to write to stdout. A bundle is a gzip stream of tens of
+// megabytes, and a subcommand that dumped it into a terminal by default would
+// be a subcommand whose first use is a mistake.
+func cmdSupport(args []string) error {
+	cfg, err := loadFor(args, "support")
+	if err != nil {
+		return err
+	}
+
+	cluster := ""
+	out := ""
+	for _, a := range args {
+		switch {
+		case strings.HasPrefix(a, "--cluster="):
+			cluster = strings.TrimPrefix(a, "--cluster=")
+		case strings.HasPrefix(a, "--out="):
+			out = strings.TrimPrefix(a, "--out=")
+		}
+	}
+
+	st, err := fsstore.Open(cfg.DataDir)
+	if err != nil {
+		return fmt.Errorf("support: %w. A bundle reads the inventory, so it cannot be taken "+
+			"while holzkube-manager is running -- use GET /api/v1/clusters/{id}/support-bundle "+
+			"instead, which is the same collector from inside the running process", err)
+	}
+	defer st.Close() //nolint:errcheck // the bundle's verdict is the write's
+
+	ctx := context.Background()
+
+	clusters, err := st.Clusters().List(ctx)
+	if err != nil {
+		return err
+	}
+	if cluster == "" {
+		switch len(clusters) {
+		case 0:
+			return errors.New("support: this installation manages no clusters yet")
+		case 1:
+			// The obvious case, answered rather than asked about: an
+			// installation with one cluster does not need to be told which.
+			cluster = string(clusters[0].ID)
+		default:
+			names := make([]string, 0, len(clusters))
+			for _, c := range clusters {
+				names = append(names, fmt.Sprintf("%s (%s)", c.ID, c.Name))
+			}
+			return fmt.Errorf("support: name the cluster with --cluster=ID. This installation "+
+				"manages: %s", strings.Join(names, ", "))
+		}
+	}
+
+	if out == "" {
+		out = filepath.Join(cfg.DataDir, "support-"+
+			time.Now().UTC().Format("20060102T150405Z")+".tar.gz")
+	}
+
+	f, err := os.OpenFile(out, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+	if err != nil {
+		return fmt.Errorf("support: create %s: %w", out, err)
+	}
+	defer f.Close() //nolint:errcheck // the sync below is the verdict
+
+	collector := support.New(support.Deps{
+		Connect:   offlineConnect,
+		Machines:  machinesOf(st),
+		Clusters:  func(ctx context.Context) ([]model.Cluster, error) { return st.Clusters().List(ctx) },
+		AuditTail: support.AuditTailFrom(filepath.Join(cfg.DataDir, audit.DirName)),
+		Instance: func() map[string]any {
+			return map[string]any{
+				"version":      version,
+				"taken_by":     "the support subcommand, with holzkube-manager not running",
+				"talos_range":  talos.MinSupportedVersion + " to " + talos.MaxSupportedVersion,
+				"data_dir_set": cfg.DataDir != "",
+			}
+		},
+	})
+
+	man, err := collector.Write(ctx, model.ClusterID(cluster), f)
+	if err != nil {
+		return err
+	}
+	if err := f.Sync(); err != nil {
+		return err
+	}
+
+	info, err := os.Stat(out)
+	if err != nil {
+		return err
+	}
+
+	fmt.Printf("wrote %s (%s)\n", out, humanBytes(info.Size()))
+	fmt.Printf("%d node(s), %d gap(s)\n", len(man.Nodes), len(man.Incomplete))
+	for _, gap := range man.Incomplete {
+		fmt.Printf("  missing: %s %s — %s\n", gap.Node, gap.What, gap.Reason)
+	}
+	fmt.Println("Machine configurations in it are redacted and the audit records went through " +
+		"the allowlist. Read 00-MANIFEST.json first; it lists everything that is missing and why.")
+	return nil
+}
+
+// offlineConnect is the connector the subcommand uses, and it deliberately
+// reaches no node.
+//
+// The subcommand runs while holzkube-manager is *not* running -- it takes the
+// store's process lock to prove it -- and the credentials to reach a node live
+// in the store it has open. Reaching nodes from here would be a second
+// implementation of inventory.Connect, with its own idea of which credentials
+// belong to which cluster, and the one thing this product has been careful
+// about is not having two of those.
+//
+// So the offline bundle is the *stored* half: every machine record, every
+// snapshot, the cluster and the audit tail. It is what somebody has when the
+// nodes are unreachable anyway, and the manifest says plainly that the node
+// half is missing because of how the bundle was taken. The route is the way to
+// get the live half.
+func offlineConnect(context.Context, model.MachineID) (*talos.ClusterClient, error) {
+	return nil, errors.New("this bundle was taken with the `support` subcommand, which runs " +
+		"while holzkube-manager is not running and deliberately reaches no node. Everything the " +
+		"nodes themselves would report is therefore missing. Take a bundle through " +
+		"GET /api/v1/clusters/{id}/support-bundle on a running instance for the live half")
+}
+
+func machinesOf(st *fsstore.Store) func(context.Context, model.ClusterID) ([]model.Machine, error) {
+	return func(ctx context.Context, id model.ClusterID) ([]model.Machine, error) {
+		all, err := st.Machines().List(ctx)
+		if err != nil {
+			return nil, err
+		}
+		out := make([]model.Machine, 0, len(all))
+		for _, m := range all {
+			if m.Cluster == id {
+				out = append(out, m)
+			}
+		}
+		return out, nil
+	}
+}
+
 // cmdVerifyAudit checks the audit log's hash chain (OPS-02).
 //
 // It exits non-zero on a break, so that a cron entry or a monitoring check can
@@ -237,7 +387,9 @@ func ensureNotInUse(dir string) error {
 func loadFor(args []string, name string) (config.Config, error) {
 	kept := make([]string, 0, len(args))
 	for _, a := range args {
-		if strings.HasPrefix(a, "--label=") {
+		if strings.HasPrefix(a, "--label=") ||
+			strings.HasPrefix(a, "--cluster=") ||
+			strings.HasPrefix(a, "--out=") {
 			continue
 		}
 		kept = append(kept, a)

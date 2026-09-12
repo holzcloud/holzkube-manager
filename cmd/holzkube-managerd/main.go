@@ -32,6 +32,7 @@ import (
 	"github.com/holzcloud/holzkube-manager/internal/provision"
 	"github.com/holzcloud/holzkube-manager/internal/store/fsstore"
 	"github.com/holzcloud/holzkube-manager/internal/streamhub"
+	"github.com/holzcloud/holzkube-manager/internal/support"
 	"github.com/holzcloud/holzkube-manager/internal/talos"
 	"github.com/holzcloud/holzkube-manager/internal/tlsx"
 	"github.com/holzcloud/holzkube-manager/internal/upgrade"
@@ -363,6 +364,28 @@ func run(args []string) error {
 		return factory.Versions(ctx)
 	})
 
+	// The support-bundle collector. It uses the same connector, the same
+	// inventory and the same audit reader everything else does -- a bundle
+	// assembled from its own reads would be a bundle describing a cluster
+	// nobody else sees.
+	supportCollector := support.New(support.Deps{
+		Connect: func(ctx context.Context, id model.MachineID) (*talos.ClusterClient, error) {
+			return inv.Connect(ctx, id)
+		},
+		Machines:  inv.MachinesOf,
+		Clusters:  func(ctx context.Context) ([]model.Cluster, error) { return st.Clusters().List(ctx) },
+		AuditTail: support.AuditTailFrom(filepath.Join(cfg.DataDir, audit.DirName)),
+		Instance: func() map[string]any {
+			return map[string]any{
+				"version":     version,
+				"dry_run":     cfg.DryRun,
+				"talos_range": talos.MinSupportedVersion + " to " + talos.MaxSupportedVersion,
+				"prerelease":  cfg.AllowPreRelease,
+				"taken_by":    "the running instance",
+			}
+		},
+	})
+
 	// The identity provider, if one is configured. New performs no network I/O:
 	// discovery happens on first use, so that a provider which is down -- quite
 	// possibly because it runs on the cluster this tool exists to repair --
@@ -402,6 +425,7 @@ func run(args []string) error {
 		Config:      configSvc,
 		Provision:   provisionSvc,
 		Upgrade:     upgradeSvc,
+		Support:     supportCollector,
 		// The per-cluster read-only lock, read by the route middleware rather
 		// than by each handler (D-22). Inside the literal for the reason the
 		// comment above states: Deps is copied by value into every …Routes
@@ -570,5 +594,6 @@ func routeTable(deps httpapi.Deps) []httpapi.Route {
 		handlers.ConfigRoutes(deps),
 		handlers.ProvisionRoutes(deps),
 		handlers.UpgradeRoutes(deps),
+		handlers.SupportRoutes(deps),
 	)
 }

@@ -236,6 +236,13 @@ var allowlist = map[string][]string{
 
 	// The cluster a node was removed from. The node is in the path.
 	"node.remove-from-cluster": {"cluster"},
+
+	// The support bundle, v1.15. A GET naming its cluster in the path, so
+	// there is no body to permit anything out of -- and it is listed rather
+	// than left to the default because "somebody took a copy of everything
+	// this installation knows about a cluster" is exactly the event an archive
+	// exists to hold, even when the record is only that it happened.
+	"support.bundle": {},
 }
 
 // Listed reports whether an action has an entry in the table.
