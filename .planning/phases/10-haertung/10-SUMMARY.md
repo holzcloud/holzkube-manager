@@ -96,11 +96,40 @@ Web-Assets einbettet und Talos-Endpunkte gegen die Cluster-PKI verifiziert, die
 es hält, statt gegen einen System-Truststore. Eine Shell, ein Paketmanager und
 ein CA-Bundle wären je ein Weg hinein, für den es keine Verwendung gibt.
 
-Das Image ist **nicht gebaut**: auf diesem Host läuft kein Docker-Daemon
-(dasselbe Fenster 76 wie in Phase 3). Was stattdessen existiert, ist ein Test,
-der die beiden Eigenschaften, die eine eilige Änderung entfernt, aus den Dateien
-selbst prüft — in derselben Richtung wie `budget_drift_test.go`, das eine
-`.tsx`-Datei liest.
+Das Image **ist** gebaut und gelaufen — nachträglich, weil sich der
+Docker-Daemon auf diesem Host doch starten ließ (`dockerd` war installiert, nur
+nicht gestartet). Und es hat drei echte Fehler gefunden, von denen kein
+statischer Test einen hätte finden können:
+
+1. **`COPY --from=web /src/dist` existierte nicht.** `vite.config.ts` schreibt
+   nach `../internal/httpapi/dist` — den Pfad, den `go:embed` liest. Der
+   web-Stage muss also die Form des Repositories reproduzieren, statt `web/`
+   auf die Wurzel zu flachen.
+
+2. **Der Prozess konnte als 65532 nicht in das Volume schreiben.** Docker
+   seedet ein Named Volume aus dem Image-Verzeichnis und erzeugt ohne eines ein
+   root-eigenes. Und selbst mit einem übernimmt es nur die Ownership, nicht den
+   Mode: ein Datenverzeichnis, das *das* Volume ist, wäre 0755, und der Store
+   lehnt das zu Recht ab — er repariert bewusst nicht still. Gelöst, indem das
+   Datenverzeichnis ein Unterverzeichnis des Volumes ist, das der Prozess
+   selbst mit 0700 anlegt.
+
+3. **Das Image trug kein CA-Bundle**, weil der Kommentar in diesem Dockerfile
+   argumentierte, es brauche keines: Talos-Endpunkte werden gegen die
+   Cluster-PKI verifiziert. Das ist wahr und nicht die ganze Geschichte — die
+   Image Factory ist öffentliches HTTPS. Ohne das Bundle startet der Container,
+   serviert, verwaltet Nodes und antwortet auf **jede** Factory-Route mit
+   `502 upstream.factory-unavailable`, während er gesund aussieht.
+
+Der dritte ist der, der hier etwas über die Methode sagt: der Kommentar war
+selbstbewusst, plausibel und falsch, und ein Test, der ihn aus der Datei
+gelesen hätte, hätte ihn bestätigt. Nur das Ausführen hat ihn widerlegt.
+
+Verifiziert ist jetzt: `docker build`, `docker compose up` bis `Up (healthy)`,
+Setup/Login/UI und das Backup-Subkommando im Container, Zustand überlebt einen
+Neustart, das Datenverzeichnis im Volume ist `drwx------` uid 65532,
+`docker exec id` scheitert (kein Shell im Image), und die Factory-Routen
+antworten. Fenster 88 ist geschlossen.
 
 ## Settings schließt G-01-1
 
@@ -122,7 +151,7 @@ hat.
 |---|---|
 | 1 | **nicht erfüllt** — kein Homelab, kein QEMU, kein `/dev/kvm`. Fenster 87. Dies ist die Eintrittsbedingung der Phase und der Release-Blocker OPS-05. |
 | 2 | **erfüllt** — `backup`, `backups`, `restore` und `verify-audit` als Subkommandos; der Restore sichert vorher, prüft jeden Eintrag gegen das Ziel und verifiziert die Kette danach |
-| 3 | **teilweise** — Dockerfile und Compose stehen mit non-root, scratch, gedroppten Capabilities und read-only Root; das Image ist nie gebaut worden (Fenster 76 gilt weiter) und „im Dauerbetrieb" ist damit unbelegt |
+| 3 | **erfüllt** — Dockerfile und Compose mit non-root (uid 65532), scratch, gedroppten Capabilities und read-only Root; gebaut, gelaufen, `Up (healthy)`, und der Zustand überlebt einen Neustart. Drei echte Fehler hat erst der Lauf gefunden (Fenster 88, geschlossen) |
 | 4 | **erfüllt** — der Range-Check läuft auf der Liveness-Probe jedes Client-Konstruktors, Pre-Releases sind Opt-in mit eigenem Fehler, und ein Node außerhalb wird in der Liste markiert; als Test ausgeführt, nicht als README-Satz |
 | 5 | **erfüllt** — die Settings-Oberfläche trägt das Passwort-Formular; der Sudo-Dialog rendert darüber statt an seiner Stelle, also bleibt das Formular erhalten, und ein Test hält das fest |
 
