@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	cosiapi "github.com/cosi-project/runtime/api/v1alpha1"
+	"github.com/cosi-project/runtime/pkg/safe"
 	"github.com/cosi-project/runtime/pkg/state"
 	"github.com/cosi-project/runtime/pkg/state/impl/inmem"
 	"github.com/cosi-project/runtime/pkg/state/impl/namespaced"
@@ -53,6 +54,31 @@ func (s *Server) registerCOSI(srv *grpc.Server) {
 	s.cosi = state.WrapCore(namespaced.NewState(inmem.Build))
 
 	cosiapi.RegisterStateServer(srv, cosiserver.NewState(s.cosi))
+}
+
+// SetHostname changes what the node calls itself, the way a configuration
+// apply does on a real machine.
+//
+// Both halves, and the second is the one that matters. A real node's hostname
+// lives in network.HostnameStatus; the hostname in each RPC's response
+// envelope is a copy Talos fills in from there, and every reader in this
+// product that wants a hostname reads the resource (facts.go). A simulator
+// that changed only the envelope would let a test assert a rename that no
+// production reader would ever have seen -- the simulator passing a test the
+// real node could not, which is what TRANS-06 exists against.
+func (s *Server) SetHostname(ctx context.Context, hostname string) error {
+	s.node.setHostname(hostname)
+
+	_, err := safe.StateUpdateWithConflicts(ctx, s.COSI(),
+		network.NewHostnameStatus(network.NamespaceName, network.HostnameID).Metadata(),
+		func(r *network.HostnameStatus) error {
+			r.TypedSpec().Hostname = hostname
+			return nil
+		})
+	if err != nil {
+		return fmt.Errorf("talossim: set hostname to %q: %w", hostname, err)
+	}
+	return nil
 }
 
 // seedCOSI puts the resources a freshly booted node would already have into

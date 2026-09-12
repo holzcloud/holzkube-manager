@@ -764,6 +764,24 @@ export const compatibilitySchema = z.object({
   sentence: z.string(),
 })
 
+/** The state of a node's resource subscription (INV-13, D-19).
+ *
+ * It is deliberately not part of `stage`. A node whose watch is down is still
+ * being read by the heartbeat — it is up to a heartbeat behind, which is what
+ * this product did before watches existed. Colouring it like a failure would
+ * put an alarm on a working machine. */
+export const watchSchema = z.object({
+  /** True only once the subscription has delivered the node's current
+   * contents. A stream that has been opened has not yet said anything. */
+  live: z.boolean().default(false),
+  since: z.string().default(''),
+  reason: z.string().default(''),
+  /** How often this node's watch has had to be rebuilt since the server
+   * started. A watch that is live and has restarted two hundred times looks
+   * healthy at every instant and delivers nothing between them. */
+  restarts: z.number().default(0),
+})
+
 export const machineSchema = z.object({
   id: z.string(),
   cluster: z.string().default(''),
@@ -788,6 +806,7 @@ export const machineSchema = z.object({
   pre_release: z.boolean().default(false),
   version_notice: z.string().default(''),
   adopted_at: z.string(),
+  watch: watchSchema.default({ live: false, since: '', reason: '', restarts: 0 }),
 
   hostname: fieldSchema(z.string()),
   addr: fieldSchema(z.string()),

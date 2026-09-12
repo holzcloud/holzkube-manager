@@ -88,6 +88,27 @@ type Service struct {
 	// confirmed anything since it started.
 	observed map[model.MachineID]*observation
 
+	// supervised is which machines have loops running.
+	//
+	// It is separate from observed, and the separation is a bug this phase
+	// found rather than a distinction somebody designed. observed is filled by
+	// observationFor, which every read of the read model calls -- so with one
+	// map, listing the machines before Start meant Start found an entry for
+	// each of them, concluded they were already supervised, and started
+	// nothing. The fleet then sat at whatever the last read had recorded, for
+	// ever, with no error anywhere. It has not bitten in production because
+	// holzkube-managerd calls Start before it serves; it would have bitten the
+	// first time an adoption ran on an instance that had served a list.
+	supervised map[model.MachineID]struct{}
+
+	// runCtx is the lifetime of the supervisors, set by Start.
+	//
+	// Supervise uses it rather than its caller's context, which is the second
+	// half of the same bug: the HTTP adoption path passed the request's
+	// context, so a node adopted through the API got a supervisor that was
+	// cancelled the moment the response was written.
+	runCtx context.Context //nolint:containedctx // it is the supervisors' lifetime, not a call's
+
 	// stop cancels the running supervisors.
 	stop   context.CancelFunc
 	wg     sync.WaitGroup
@@ -105,7 +126,11 @@ func New(d Deps) *Service {
 	if d.Heartbeat <= 0 {
 		d.Heartbeat = DefaultHeartbeat
 	}
-	return &Service{deps: d, observed: map[model.MachineID]*observation{}}
+	return &Service{
+		deps:       d,
+		observed:   map[model.MachineID]*observation{},
+		supervised: map[model.MachineID]struct{}{},
+	}
 }
 
 // observation is one machine's per-level confirmation state.
@@ -123,6 +148,12 @@ type observation struct {
 	// from degraded to down, so that one missed read does not repaint a
 	// working cluster.
 	failures int
+
+	// watch is the state of this machine's resource subscription. It is kept
+	// beside the levels rather than among them because it is not a level: a
+	// level is something a node said, and this is something about how we are
+	// listening (INV-13).
+	watch watchState
 
 	// expired records that the last failure was an expired client
 	// certificate. It is kept apart from every other failure because it is not

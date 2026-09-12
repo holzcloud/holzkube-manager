@@ -1059,6 +1059,34 @@ The **age is computed by the client** from `stale_since`. The server holds no
 staleness threshold of its own, deliberately: a server-side threshold would be a
 second truth beside the timestamp, and the two would drift.
 
+### `watch`: how quickly a change will be noticed
+
+Every machine carries one more object, and it is **not** a `Field<T>` and **not**
+part of `stage`:
+
+```json
+{
+  "live": true,
+  "since": "2026-09-12T16:04:11Z",
+  "reason": "",
+  "restarts": 0
+}
+```
+
+- `live` is true only once the node's resource subscription has delivered the
+  node's current contents. A stream that has been opened has not yet said
+  anything, and reporting it as live would claim a freshness nobody established.
+- `reason` is why it is not live, and is empty when it is.
+- `restarts` counts rebuilds since the server started. A watch that is `live`
+  with a large `restarts` is the failure this field exists for: it looks healthy
+  at every instant somebody looks and delivers nothing between them.
+
+`live: false` is **not** a node problem and must not be rendered as one. The
+heartbeat reads every node on its own timer whether or not a watch is running,
+so a node without a live watch is at most one heartbeat behind — which is what
+this product did before watches existed. Its `stage` and its fields say what is
+true; `watch` says only how soon the next change will show up.
+
 ### Routes
 
 | Method | Path | Destructive | Action | Notes |

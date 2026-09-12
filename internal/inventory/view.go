@@ -76,6 +76,14 @@ type MachineView struct {
 
 	AdoptedAt time.Time `json:"adopted_at"`
 
+	// Watch is whether this node's resource subscription is delivering
+	// (INV-13, D-19). It is not a Field and not part of Stage: it says how
+	// quickly a change will be noticed, not whether anything below is true.
+	// A node whose watch is down is still confirmed by the heartbeat -- it is
+	// just up to a heartbeat behind, which is what this product did before the
+	// watch existed.
+	Watch WatchStatus `json:"watch"`
+
 	Hostname health.Field[string] `json:"hostname"`
 	Addr     health.Field[string] `json:"addr"`
 
@@ -218,6 +226,7 @@ func (s *Service) viewOf(rec model.Machine) MachineView {
 		PreRelease:         preRelease,
 		VersionNotice:      notice,
 		AdoptedAt:          rec.AdoptedAt,
+		Watch:              s.watchStatus(rec.ID),
 	}
 
 	// Hostname and address are holzkube-manager's own record of what it last saw, so

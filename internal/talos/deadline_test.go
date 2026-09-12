@@ -83,7 +83,6 @@ func TestClassTable(t *testing.T) {
 		talos.ClassStream: {
 			m + "Logs", m + "Dmesg", m + "Events", m + "Read", m + "Copy", m + "List",
 			m + "DiskUsage", m + "ImageList", m + "EtcdSnapshot", m + "PacketCapture",
-			c + "Watch",
 			// Phase 9. The streaming upgrade is deliberately here and not
 			// under Mutation, where its deprecated MachineService twin sits:
 			// the node writes installer output for as long as the install
@@ -92,6 +91,16 @@ func TestClassTable(t *testing.T) {
 			// ask the right question instead -- a node that has said nothing
 			// for a minute has stopped installing.
 			l + "Upgrade",
+		},
+		// v1.15 phase 2. The watch class is a class of one, and it exists for
+		// one difference: it has no idle timeout. On every other stream
+		// silence means the node stopped talking; on a watch it means nothing
+		// changed, which is most of the time on most nodes. Under the stream
+		// class this subscription would be torn down and rebuilt every sixty
+		// seconds -- a poller on a worse interval than the heartbeat it was
+		// added to improve on.
+		talos.ClassWatch: {
+			c + "Watch",
 		},
 	}
 
@@ -136,6 +145,30 @@ func TestClassTable(t *testing.T) {
 	if talos.ClassStream.Deadline() != 0 {
 		t.Errorf("stream class total deadline = %v, want 0: a stream is bounded by its first-byte "+
 			"deadline and its idle timeout, not by a total one", talos.ClassStream.Deadline())
+	}
+
+	// The watch class, asserted as the pair of properties that distinguish it
+	// rather than as a name. Either of these becoming non-zero turns every
+	// node's subscription back into a poller, and it would do it quietly: the
+	// watch would keep working, just by being rebuilt on a timer.
+	if talos.ClassWatch.Deadline() != 0 {
+		t.Errorf("watch class total deadline = %v, want 0", talos.ClassWatch.Deadline())
+	}
+	if talos.ClassWatch.StreamIdle() != 0 {
+		t.Errorf("watch class idle timeout = %v, want 0: a watch that says nothing has nothing to "+
+			"say, and tearing it down for that is a poll wearing a subscription's clothes",
+			talos.ClassWatch.StreamIdle())
+	}
+	if talos.ClassStream.StreamIdle() != talos.StreamIdleTimeout {
+		t.Errorf("stream class idle timeout = %v, want %v", talos.ClassStream.StreamIdle(), talos.StreamIdleTimeout)
+	}
+	if !talos.ClassWatch.Unbounded() || !talos.ClassStream.Unbounded() {
+		t.Error("both streaming classes must be unbounded: a total deadline on either kills a " +
+			"subscription that is working")
+	}
+	if talos.ClassFastRead.Unbounded() || talos.ClassMutation.Unbounded() || talos.ClassProbe.Unbounded() {
+		t.Error("a non-streaming class reported itself unbounded, which would remove the total " +
+			"deadline from an ordinary call")
 	}
 
 	if covered != len(table) {

@@ -125,6 +125,12 @@ export function NodeDetailPage() {
           node itself is very probably fine.
         </p>
       )}
+      {!m.watch.live && m.watch.reason && (
+        <p className="rounded-md border border-slate-500/40 bg-slate-500/10 px-3 py-2 text-sm text-slate-700 dark:text-slate-300">
+          Live updates for this node are off: {m.watch.reason}. Its facts are still being read on
+          the heartbeat, so what you see below is at most one heartbeat old rather than missing.
+        </p>
+      )}
       {m.lost_addr && (
         <p className="rounded-md border border-amber-600/40 bg-amber-600/10 px-3 py-2 text-sm text-amber-700 dark:text-amber-300">
           A different machine answered at this one's last known address. This record was kept
