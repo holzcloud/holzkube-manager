@@ -8,7 +8,7 @@
 
 services:
   holzkube-manager:
-    image: ghcr.io/holzcloud/holzkube-manager:latest
+    image: ghcr.io/holzcloud/holzkube-manager:v1.14.0-beta.1
     # Or, from a checkout:
     # build:
     #   context: .
@@ -28,7 +28,11 @@ services:
       - "127.0.0.1:8443:8443"
 
     volumes:
-      - holzkube-manager-data:/data
+      # The volume is the mount point; the data directory is a subdirectory of
+      # it. Docker creates a mount point at 0755 and the store refuses a data
+      # directory that group or other can read -- so the process creates the
+      # subdirectory itself, at 0700, on first start. See the Dockerfile.
+      - holzkube-manager-data:/var/lib/holzkube-manager
       # The TLS material. A certificate this product generates for itself lives
       # in the data volume; mount a real one here when there is one.
       # - ./tls:/tls:ro
@@ -36,7 +40,7 @@ services:
     environment:
       # The data directory inside the container. The volume above is what makes
       # it survive a restart.
-      HOLZKUBE_MANAGER_DATA_DIR: /data
+      HOLZKUBE_MANAGER_DATA_DIR: /var/lib/holzkube-manager/data
 
       # TLS. holzkube-manager generates a self-signed certificate into the data
       # directory when none is configured, and prints its fingerprint at

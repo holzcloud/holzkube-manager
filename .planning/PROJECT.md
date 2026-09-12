@@ -61,7 +61,7 @@ list, and in `.planning/WINDOWS.md`.
 
 **Betrieb** *(Phase 1, Phase 2, Phase 10)*
 - [x] Single Binary mit embedded Web-UI - keine Runtime-Dependencies
-- [x] Docker-Image / Compose-Setup für Dauerbetrieb - geschrieben, **nie gebaut** (Fenster 88)
+- [x] Docker-Image / Compose-Setup für Dauerbetrieb - gebaut, gelaufen, `Up (healthy)`, Zustand überlebt einen Neustart
 - [x] Lokale Talos-Sandbox für Entwicklung und Tests ohne echte Hardware
 
 ### Was nicht validiert ist
@@ -83,9 +83,10 @@ Konfiguration, wird geupgradet:
 | 85 | Kein Upgrade auf echter Hardware; `ReappearBudget` ist in beiden Domänen eine geratene Zahl |
 | 87 | OPS-05 selbst, plus: der amd64-Installer-Pfad ist auf arm64-QEMU **strukturell** nicht ausübbar |
 
-Drei weitere halten fest, was gebaut und nie ausgeführt wurde: 88 (das
-Container-Image), 80 und 81 (die Messung und Tier 2 aus Phase 4) und 76 (Tier 1,
-Docker, aus Phase 3).
+Zwei weitere halten fest, was gebaut und nie ausgeführt wurde: 80 und 81 (die
+Messung und Tier 2 aus Phase 4) und 76 (Tier 1, Docker, aus Phase 3). Fenster 88
+(das Container-Image) ist geschlossen — es wurde gebaut und gelaufen, und der
+Lauf hat drei Fehler gefunden, die kein statischer Test hätte finden können.
 
 ### Out of Scope
 
