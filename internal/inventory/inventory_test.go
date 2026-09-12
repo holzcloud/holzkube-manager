@@ -30,6 +30,18 @@ type fixture struct {
 func newFixture(t *testing.T, opts talossim.Options) *fixture {
 	t.Helper()
 
+	return newFixtureWith(t, opts, 0)
+}
+
+// newFixtureWith is newFixture with the heartbeat named.
+//
+// The interval is a parameter rather than a field on talossim.Options because
+// it is not a property of the simulated node: how often this product looks is
+// this product's business, and putting it on the simulator would invite a test
+// to configure a node by configuring its observer. Zero takes the default.
+func newFixtureWith(t *testing.T, opts talossim.Options, heartbeat time.Duration) *fixture {
+	t.Helper()
+
 	cl, err := talossim.NewCluster("homelab", "https://192.168.1.41:6443")
 	if err != nil {
 		t.Fatalf("NewCluster: %v", err)
@@ -64,7 +76,8 @@ func newFixture(t *testing.T, opts talossim.Options) *fixture {
 	})
 
 	svc := inventory.New(inventory.Deps{
-		Store: st,
+		Store:     st,
+		Heartbeat: heartbeat,
 		// The direct dialer against the simulator's real loopback listener:
 		// the fingerprint probe opens its own TLS connection, so the
 		// in-process pipe would have nothing to read a certificate from.

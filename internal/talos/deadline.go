@@ -46,6 +46,30 @@ const (
 	// StreamFirstByteDeadline and StreamIdleTimeout, which is the difference
 	// between "this is taking a long time" and "nothing is coming".
 	ClassStream
+
+	// ClassWatch is a resource watch: no total deadline, and -- alone among
+	// the streaming classes -- no idle timeout either.
+	//
+	// The difference is what silence means. On a log stream silence is the
+	// node having stopped talking, so StreamIdleTimeout is what tells "slow"
+	// apart from "gone". On a watch silence is the *expected* state: a node
+	// whose resources have not changed sends nothing, for hours if nothing
+	// happens, and that is a healthy node rather than a dead one. An idle
+	// timeout here would tear down a working watch every minute and rebuild
+	// it -- a poller with extra steps, at a worse interval than the heartbeat
+	// it was meant to improve on.
+	//
+	// What bounds it instead is the heartbeat (INV-13, D-19). The watch is
+	// primary and the poll is the proof that the watch is still alive, which
+	// is why the poller stays rather than being removed: a watch with neither
+	// an idle timeout nor a heartbeat behind it is a subscription that can die
+	// without saying so, and that is the exact failure the heartbeat exists
+	// against.
+	//
+	// StreamFirstByteDeadline still applies. A watch is opened asking for the
+	// current contents, so it owes an answer immediately; one that has not
+	// delivered even its initial snapshot has not started.
+	ClassWatch
 )
 
 // The confirmed deadlines.
@@ -87,11 +111,30 @@ func (c DeadlineClass) Deadline() time.Duration {
 		return FastReadDeadline
 	case ClassMutation:
 		return MutationDeadline
-	case ClassStream:
+	case ClassStream, ClassWatch:
 		return 0
 	default:
 		return 0
 	}
+}
+
+// Unbounded reports whether a class runs without a total deadline, and is
+// therefore bounded by the first-byte deadline and by StreamIdle instead.
+func (c DeadlineClass) Unbounded() bool {
+	return c == ClassStream || c == ClassWatch
+}
+
+// StreamIdle is how long a stream of this class may go without producing
+// anything once it has started, and zero for a class that has no such bound.
+//
+// Zero is a real answer here and not a missing one: see ClassWatch. Every
+// class that is not unbounded reads zero too, and for those the total deadline
+// is the bound -- the call path never asks.
+func (c DeadlineClass) StreamIdle() time.Duration {
+	if c == ClassStream {
+		return StreamIdleTimeout
+	}
+	return 0
 }
 
 func (c DeadlineClass) String() string {
@@ -104,6 +147,8 @@ func (c DeadlineClass) String() string {
 		return "mutation"
 	case ClassStream:
 		return "stream"
+	case ClassWatch:
+		return "watch"
 	default:
 		return fmt.Sprintf("DeadlineClass(%d)", int(c))
 	}
@@ -251,7 +296,11 @@ var deadlineClasses = map[string]DeadlineClass{
 	// a node that has said nothing for that long has stopped installing.
 	MethodLifecycleUpgrade: ClassStream,
 	MethodPacketCapture:    ClassStream,
-	MethodCOSIWatch:        ClassStream,
+
+	// Watch: the one class with no idle timeout. See ClassWatch for why a
+	// resource watch that says nothing for an hour is a healthy watch and a
+	// log stream that does the same is a dead node.
+	MethodCOSIWatch: ClassWatch,
 }
 
 // DeadlineClasses returns a copy of the class table, so a reviewer -- and

@@ -121,37 +121,67 @@ func (s *Service) Start(ctx context.Context) error {
 		return errors.New("inventory: service is closed")
 	}
 	s.stop = cancel
+	s.runCtx = runCtx
 	s.mu.Unlock()
 
 	for _, m := range machines {
-		s.supervise(runCtx, m.ID)
+		s.supervise(m.ID)
 	}
 	return nil
 }
 
 // Supervise starts an observer for one machine if it does not already have
 // one. It is what the adoption path calls for each machine it just recorded.
-func (s *Service) Supervise(ctx context.Context, id model.MachineID) {
-	s.supervise(ctx, id)
+//
+// It takes no context on purpose. A supervisor's lifetime is the service's,
+// fixed by Start; the caller here is an HTTP handler, and a handler that
+// supplied the context would be supplying its own request's -- which cancels
+// when the response is written, leaving the node that was just adopted with a
+// supervisor that ran for a few milliseconds and stopped. That is what this
+// signature used to allow and what the handler actually did.
+func (s *Service) Supervise(id model.MachineID) {
+	s.supervise(id)
 }
 
-func (s *Service) supervise(ctx context.Context, id model.MachineID) {
+func (s *Service) supervise(id model.MachineID) {
 	s.mu.Lock()
 	if s.closed {
 		s.mu.Unlock()
 		return
 	}
-	if _, running := s.observed[id]; running {
+	if _, running := s.supervised[id]; running {
 		s.mu.Unlock()
 		return
 	}
-	s.observed[id] = newObservation()
+	ctx := s.runCtx
+	if ctx == nil {
+		// Nothing has started the service, so there is no lifetime to attach
+		// to. Refusing is the honest answer: a supervisor on a context that
+		// outlives nothing would be a goroutine nobody can stop.
+		s.mu.Unlock()
+		s.deps.Logger.Warn("a machine was supervised before the inventory was started",
+			slog.String("machine", string(id)))
+		return
+	}
+	s.supervised[id] = struct{}{}
+	if _, ok := s.observed[id]; !ok {
+		s.observed[id] = newObservation()
+	}
 	s.mu.Unlock()
 
-	s.wg.Add(1)
+	// Two loops, not one, and the second does not replace the first (INV-13,
+	// D-19). The heartbeat re-confirms on its own timer whatever the watch is
+	// doing, because a subscription that stops delivering without saying so is
+	// the failure the poll exists against; the watch supplies the latency the
+	// poll cannot.
+	s.wg.Add(2)
 	go func() {
 		defer s.wg.Done()
 		s.observeLoop(ctx, id)
+	}()
+	go func() {
+		defer s.wg.Done()
+		s.watchLoop(ctx, id)
 	}()
 }
 

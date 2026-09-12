@@ -320,10 +320,6 @@ func (n *nodeState) setVersion(version string) {
 // nothing.
 func (s *Server) Node() NodeState { return s.node.snapshot() }
 
-// SetHostname changes what the node reports as its hostname, as a
-// configuration apply would on a real machine.
-func (s *Server) SetHostname(hostname string) { s.node.setHostname(hostname) }
-
 // SetVersion changes what the node reports as its Talos version, which is what
 // an upgrade does.
 func (s *Server) SetVersion(version string) { s.node.setVersion(version) }
