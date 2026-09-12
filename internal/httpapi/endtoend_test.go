@@ -27,6 +27,7 @@ import (
 	"github.com/holzcloud/holzkube-manager/internal/inventory"
 	"github.com/holzcloud/holzkube-manager/internal/jobs"
 	"github.com/holzcloud/holzkube-manager/internal/machineconfig"
+	"github.com/holzcloud/holzkube-manager/internal/metrics"
 	"github.com/holzcloud/holzkube-manager/internal/model"
 	"github.com/holzcloud/holzkube-manager/internal/nodestream"
 	"github.com/holzcloud/holzkube-manager/internal/provision"
@@ -74,6 +75,16 @@ type harnessConfig struct {
 	provision            func(*harness) *provision.Service
 	registerProvisionJob func(*jobs.Engine, *harness)
 	upgrade              func(*harness) *upgrade.Service
+	allowedHosts         []string
+}
+
+// withAllowedHosts turns the host allowlist on.
+//
+// It is off by default in the harness because httptest picks the port, and a
+// test cannot know it in advance to put it on a list. A test about the
+// allowlist itself sets a name and sends the Host header by hand.
+func withAllowedHosts(hosts ...string) harnessOpt {
+	return func(c *harnessConfig) { c.allowedHosts = hosts }
 }
 
 // withInventory adds an inventory service built over the harness's store.
@@ -172,12 +183,13 @@ func newHarness(t *testing.T, opts ...harnessOpt) *harness {
 	}
 
 	deps := httpapi.Deps{
-		Store:      st,
-		Audit:      al,
-		Auth:       au,
-		Logger:     slog.New(slog.NewTextHandler(io.Discard, nil)),
-		SudoWindow: 5 * time.Minute,
-		AuditChain: httpapi.ChainStatus{OK: chainOK, BrokenAtLine: brokenLine, File: chainFile},
+		Store:        st,
+		Audit:        al,
+		Auth:         au,
+		Logger:       slog.New(slog.NewTextHandler(io.Discard, nil)),
+		SudoWindow:   5 * time.Minute,
+		AuditChain:   httpapi.ChainStatus{OK: chainOK, BrokenAtLine: brokenLine, File: chainFile},
+		AllowedHosts: cfg.allowedHosts,
 	}
 	h2 := &harness{}
 
@@ -267,8 +279,27 @@ func newHarness(t *testing.T, opts ...harnessOpt) *harness {
 		cfg.registerProvisionJob(h2.jobs, h2)
 	}
 
+	// The Prometheus exporter, wired the way the composition root wires it:
+	// over the same read model the API serves. A second source here would make
+	// a metrics test pass against numbers no screen ever shows.
+	if inv != nil {
+		engine := deps.Jobs
+		deps.Metrics = metrics.New(metrics.Deps{
+			Machines: inv.Machines,
+			Clusters: inv.Clusters,
+			Jobs: func(ctx context.Context) ([]model.Job, error) {
+				if engine == nil {
+					return nil, nil
+				}
+				return engine.List(ctx)
+			},
+			AuditChainIntact: func() bool { return chainOK },
+		})
+	}
+
 	deps.Routes = slices.Concat(
 		handlers.SystemRoutes(deps),
+		handlers.MetricsRoutes(deps),
 		handlers.SetupRoutes(deps),
 		handlers.AuthRoutes(deps),
 		handlers.AccountRoutes(deps),

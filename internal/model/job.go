@@ -39,6 +39,17 @@ const (
 	JobCancelled JobState = "cancelled"
 )
 
+// JobStates returns every state, so a caller can walk the vocabulary rather
+// than keep its own copy of it.
+//
+// The metrics export is what wanted it: a state that currently has no jobs in
+// it still has to be published as a zero, and a list assembled by hand there
+// would have gone out of date the first time a seventh state was added -- with
+// the only symptom a graph that silently stopped mentioning it.
+func JobStates() []JobState {
+	return []JobState{JobPending, JobRunning, JobParked, JobSucceeded, JobFailed, JobCancelled}
+}
+
 // Terminal reports whether a job will never change state again on its own.
 func (s JobState) Terminal() bool {
 	return s == JobSucceeded || s == JobFailed || s == JobCancelled

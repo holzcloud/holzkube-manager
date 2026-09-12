@@ -27,6 +27,7 @@ import (
 	"github.com/holzcloud/holzkube-manager/internal/inventory"
 	"github.com/holzcloud/holzkube-manager/internal/jobs"
 	"github.com/holzcloud/holzkube-manager/internal/machineconfig"
+	"github.com/holzcloud/holzkube-manager/internal/metrics"
 	"github.com/holzcloud/holzkube-manager/internal/model"
 	"github.com/holzcloud/holzkube-manager/internal/nodestream"
 	"github.com/holzcloud/holzkube-manager/internal/provision"
@@ -386,6 +387,21 @@ func run(args []string) error {
 		},
 	})
 
+	// The Prometheus export (V2-API-02). It reads the same read model the API
+	// serves rather than a second one of its own: a metric that disagreed with
+	// the screen would send an operator looking for a fault in the cluster
+	// that was actually a fault here.
+	//
+	// chainOK is captured by value on purpose. It is the startup verification
+	// verdict, and D-15 wants exactly that: a break found at startup has to
+	// stay reported, not stop being reported because nothing re-checked.
+	metricsExporter := metrics.New(metrics.Deps{
+		Machines:         inv.Machines,
+		Clusters:         inv.Clusters,
+		Jobs:             engine.List,
+		AuditChainIntact: func() bool { return chainOK },
+	})
+
 	// The identity provider, if one is configured. New performs no network I/O:
 	// discovery happens on first use, so that a provider which is down -- quite
 	// possibly because it runs on the cluster this tool exists to repair --
@@ -426,6 +442,7 @@ func run(args []string) error {
 		Provision:   provisionSvc,
 		Upgrade:     upgradeSvc,
 		Support:     supportCollector,
+		Metrics:     metricsExporter,
 		// The per-cluster read-only lock, read by the route middleware rather
 		// than by each handler (D-22). Inside the literal for the reason the
 		// comment above states: Deps is copied by value into every …Routes
@@ -595,5 +612,6 @@ func routeTable(deps httpapi.Deps) []httpapi.Route {
 		handlers.ProvisionRoutes(deps),
 		handlers.UpgradeRoutes(deps),
 		handlers.SupportRoutes(deps),
+		handlers.MetricsRoutes(deps),
 	)
 }

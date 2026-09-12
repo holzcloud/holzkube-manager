@@ -1059,6 +1059,43 @@ The **age is computed by the client** from `stale_since`. The server holds no
 staleness threshold of its own, deliberately: a server-side threshold would be a
 second truth beside the timestamp, and the two would drift.
 
+### `/metrics`: the one route outside the versioned API
+
+`GET /metrics` answers the Prometheus text exposition format
+(`text/plain; version=0.0.4`). Three things about it differ from every other
+route, each on purpose:
+
+- **It requires no session.** A scraper sends a bare `GET` on a timer and cannot
+  log in. A metrics endpoint behind the session cookie is one nobody can scrape,
+  and the usual consequence is a second listener with no authentication at all
+  — strictly worse. What guards it is what guards everything: the host allowlist
+  and a loopback bind address.
+- **It is not under `/api/v1`.** `/metrics` is where every scraper looks by
+  default. It also means the export is not versioned with the API, which is
+  right: a metric name is its own contract, and renaming one breaks dashboards
+  whatever the URL says.
+- **It carries no audit action.** It changes nothing and is requested every
+  fifteen seconds for ever; recording it would fill an archive D-16 keeps for
+  ever with the fact that a scraper was scraping.
+
+The export is bounded by two rules. **No machine is ever a label value** — a
+per-node label multiplies every series by the fleet, which is the axis that
+grows — so cardinality is a function of the number of clusters and not of the
+number of nodes. And **a series that drops to zero is still written**, because
+Prometheus cannot tell a series that stopped being reported from a target that
+went away, and a "nodes down" graph that ends at zero shows its last non-zero
+value for as long as anybody looks at it.
+
+`holzkube_cluster_client_certificate_seconds` may be **negative**. An expired
+certificate is a named state, not a missing metric: the failure it describes
+takes every node in the cluster down in the same second, so a series that
+vanished at expiry would go blank exactly when somebody needed it.
+
+An instance started without an inventory answers `503` with a plain-text
+comment rather than a problem document — a scraper does not read RFC 9457, and
+what it does with a non-200 is mark the target down, which is the correct
+reading.
+
 ### `watch`: how quickly a change will be noticed
 
 Every machine carries one more object, and it is **not** a `Field<T>` and **not**
@@ -1091,6 +1128,7 @@ true; `watch` says only how soon the next change will show up.
 
 | Method | Path | Destructive | Action | Notes |
 |---|---|---|---|---|
+| `GET` | `/metrics` | no | — | Prometheus text exposition; **no session**, see below |
 | `GET` | `/api/v1/clusters` | no | — | `{ "clusters": [...] }`, never `null` |
 | `GET` | `/api/v1/clusters/{id}` | no | — | |
 | `POST` | `/api/v1/clusters/fingerprint` | no | `cluster.fingerprint` | step one of adoption |

@@ -19,6 +19,7 @@ import (
 	"github.com/holzcloud/holzkube-manager/internal/inventory"
 	"github.com/holzcloud/holzkube-manager/internal/jobs"
 	"github.com/holzcloud/holzkube-manager/internal/machineconfig"
+	"github.com/holzcloud/holzkube-manager/internal/metrics"
 	"github.com/holzcloud/holzkube-manager/internal/nodestream"
 	"github.com/holzcloud/holzkube-manager/internal/provision"
 	"github.com/holzcloud/holzkube-manager/internal/store"
@@ -184,6 +185,12 @@ type Deps struct {
 	// a deployment that upgrades nothing, and those handlers answer 502 rather
 	// than panicking if it is.
 	Upgrade *upgrade.Service
+
+	// Metrics renders the Prometheus exposition. It is nil in a deployment
+	// with no inventory to report on, and /metrics then answers 503 -- which
+	// is what a scraper reads as "this target is down", the correct verdict
+	// for an instance that cannot say what its fleet looks like.
+	Metrics *metrics.Exporter
 
 	// Support collects support bundles. It is nil in a deployment that offers
 	// none, and that handler answers 502 rather than panicking if it is.

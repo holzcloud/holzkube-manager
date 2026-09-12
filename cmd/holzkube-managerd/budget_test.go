@@ -739,6 +739,12 @@ func TestEveryRouteThatReachesUpstreamHasABudgetRow(t *testing.T) {
 		"GET /api/v1/provision/bootstrap-recovery",
 		"POST /api/v1/provision/bootstrap-recovery/{cluster}",
 		"GET /api/v1/factory/versions", "GET /api/v1/factory/extensions",
+		// The Prometheus export reads the read model the supervisors already
+		// filled and the job records in the store. It reaches no node, which
+		// is the point: a scrape that dialled the fleet would put a request
+		// every fifteen seconds against machines that may be the reason
+		// somebody is looking.
+		"GET /metrics",
 	} {
 		noUpstream[r] = true
 	}

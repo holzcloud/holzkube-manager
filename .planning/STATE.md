@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.15
 current_phase: 3
 current_phase_name: "Prometheus-/metrics (v1.15)"
-status: executing
-stopped_at: v1.15 Phasen 1-2 fertig (Support-Bundle, COSI-Watches; Fenster 79 zu); Phase 3 (/metrics) beginnt. OPS-05 offen (Fenster 87)
-last_updated: "2026-09-12T16:30:00.000Z"
+status: milestone-complete
+stopped_at: v1.15 vollstaendig (Support-Bundle, COSI-Watches, /metrics). OPS-05 bleibt der einzige Release-Blocker (Fenster 87)
+last_updated: "2026-09-12T16:45:00.000Z"
 last_activity: 2026-09-12
-last_activity_desc: v1.15 phase 2 (COSI watches) complete, window 79 closed; phase 3 (/metrics) starting
+last_activity_desc: v1.15 complete: support bundle, COSI watches (window 79 closed), Prometheus /metrics
 state_head: a474d2522823cbfb436ee720dee35494890281a3
 progress:
   total_phases: 3
-  completed_phases: 2
+  completed_phases: 3
   total_plans: 0
   completed_plans: 0
 ---
@@ -23,16 +23,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-08-27)
 
 **Core value:** Eine neue Maschine wird komplett in der UI zum Cluster-Node — ohne `talosctl`, ohne Omni.
-**Current focus:** Milestone v1.15, Phase 3 — Prometheus-`/metrics`. v1.14 ist gebaut; offen bleibt OPS-05 🚫 (Hardware).
+**Current focus:** v1.15 ist fertig. Offen bleibt OPS-05 🚫 (Hardware) — der einzige Release-Blocker.
 
 ## Current Position
 
-Phase: v1.15 Phase 3 — Prometheus-`/metrics` (V2-API-02)
+Phase: v1.15 abgeschlossen — alle drei Phasen
 Plan: siehe `.planning/MILESTONE-v1.15.md`
-Status: beginnt
-Last activity: 2026-09-12 — v1.15 Phase 2 (COSI-Watches) abgeschlossen, Fenster 79 geschlossen
+Status: fertig
+Last activity: 2026-09-12 — v1.15 Phase 3 (Prometheus-`/metrics`) abgeschlossen
 
-Progress: v1.15 [██░] 2 of 3 phases · v1.14 [█████████▓] gebaut, OPS-05 offen
+Progress: v1.15 [███] 3 of 3 phases · v1.14 [█████████▓] gebaut, OPS-05 offen
 
 **v1.15 Phase 1 (Support-Bundle) ist fertig.** `internal/support` sammelt pro
 Node Facts, Services, Versionen, Disks, Links, Extensions, etcd-Status, Logs,
@@ -58,6 +58,17 @@ Code. Nebenbei sind zwei alte, stille Supervisions-Fehler gefallen: ein
 Lesevorgang vor `Start()` verhinderte jede Überwachung, und `Supervise()` band
 den Supervisor an den Request-Context des HTTP-Handlers. Siehe
 `.planning/phases/v1.15-02-cosi-watches/02-SUMMARY.md`.
+
+**v1.15 Phase 3 (Prometheus-`/metrics`) ist fertig, und damit der ganze
+Milestone.** Neun Metrik-Familien, ohne zusätzliche Abhängigkeit, ohne Session
+(ein Scraper kann sich nicht anmelden) und an derselben Hosts-Allowlist wie
+alles andere. Kein Node wird je ein Label-Wert: die Kardinalität ist eine
+Funktion der Cluster-Anzahl und wächst gar nicht mit der Flotte, und ein Test
+misst das an 3 gegen 300 Nodes. Die Rest-Laufzeit des Zertifikats ist
+vorzeichenbehaftet, weil ein abgelaufenes Zertifikat ein benannter Zustand ist
+und keine fehlende Metrik. Gescrapt und **von einem echten Prometheus-Parser**
+gelesen, nicht nur getestet. Siehe
+`.planning/phases/v1.15-03-metrics/03-SUMMARY.md`.
 
 **v1.15 ist autonom definiert und nicht vom Betreiber bestätigt.**
 `.planning/MILESTONE-v1.15.md` nennt die drei Phasen, die Auswahlregel (alles,
