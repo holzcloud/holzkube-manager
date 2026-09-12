@@ -41,6 +41,11 @@ type Streamer struct {
 	messages int
 	produced int
 
+	// chunk pads each message, so a test can reach a size threshold without
+	// asking for thousands of messages through an unbuffered channel. See
+	// Options.StreamChunk.
+	chunk int
+
 	// unbounded is set by the slow_log_consumer scenario. The emitter already
 	// blocks rather than buffers unconditionally; what the scenario adds is a
 	// sequence that never ends, so a consumer that stops reading is stalling a
@@ -56,11 +61,11 @@ type Streamer struct {
 	blockedFor time.Duration
 }
 
-func newStreamer(count int) *Streamer {
+func newStreamer(count, chunk int) *Streamer {
 	if count <= 0 {
 		count = DefaultStreamMessages
 	}
-	return &Streamer{messages: count}
+	return &Streamer{messages: count, chunk: chunk}
 }
 
 // Streams returns the node's stream emitter, so that a test or a scenario can
@@ -193,6 +198,18 @@ func (e *Streamer) Open(ctx context.Context, prefix string) <-chan []byte {
 				total = "unbounded"
 			}
 			msg := []byte(fmt.Sprintf("%s: message %d of %s\n", prefix, i, total))
+
+			// Padded to the configured size, with the filler on its own lines
+			// so the result still looks like a log rather than like one very
+			// long line -- the truncation this feeds has to cut on a line
+			// boundary, and a single unbroken line would not exercise that.
+			if e.chunk > len(msg) {
+				pad := make([]byte, 0, e.chunk)
+				for len(pad)+len(msg) < e.chunk {
+					pad = append(pad, []byte(fmt.Sprintf("%s: filler %d\n", prefix, len(pad)))...)
+				}
+				msg = append(msg, pad...)
+			}
 
 			e.mu.Lock()
 			e.produced++

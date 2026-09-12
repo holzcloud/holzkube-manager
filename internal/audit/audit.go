@@ -75,6 +75,14 @@ type verdict struct {
 // clients asking.
 const verifyCacheTTL = 30 * time.Second
 
+// DirName is the subdirectory of the data directory the log lives in.
+//
+// It is exported because the support bundle names the same directory, and a
+// second string literal "audit" somewhere else would be a second answer to
+// where the log is -- one that stays right only for as long as nobody moves
+// it.
+const DirName = "audit"
+
 // Open prepares <dir>/audit and returns a Logger positioned after the last
 // record already on disk.
 func Open(dir string) (*Logger, error) {
@@ -85,7 +93,7 @@ func open(dir string, now func() time.Time) (*Logger, error) {
 	if dir == "" {
 		return nil, errors.New("audit: empty data directory")
 	}
-	logDir := filepath.Join(dir, "audit")
+	logDir := filepath.Join(dir, DirName)
 	if err := os.MkdirAll(logDir, dirPerm); err != nil {
 		return nil, fmt.Errorf("audit: create log directory: %w", err)
 	}

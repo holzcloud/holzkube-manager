@@ -250,6 +250,22 @@ func (s *Service) Connect(ctx context.Context, id model.MachineID) (*talos.Clust
 
 	creds, err := s.clusterCreds(ctx, rec.Cluster)
 	if err != nil {
+		// Named, because the bare store error is "record not found" and that
+		// sentence tells an operator nothing about which record or why. The
+		// two ways to get here are both worth distinguishing: a machine in no
+		// cluster has no credentials to be found, and a machine in a cluster
+		// whose secrets are gone is a cluster that was forgotten or a data
+		// directory that was restored from an incomplete backup.
+		if errors.Is(err, store.ErrNotFound) {
+			if rec.Cluster == "" {
+				return nil, fmt.Errorf("inventory: %s belongs to no cluster, so there are no "+
+					"credentials to reach it with. Assign it to one, or provision it", id)
+			}
+			return nil, fmt.Errorf("inventory: cluster %s has no stored PKI, so %s cannot be "+
+				"reached. The cluster record exists and its secrets do not, which is what a "+
+				"forgotten cluster or a restore from an incomplete backup looks like",
+				rec.Cluster, id)
+		}
 		return nil, err
 	}
 

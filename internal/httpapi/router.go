@@ -23,6 +23,7 @@ import (
 	"github.com/holzcloud/holzkube-manager/internal/provision"
 	"github.com/holzcloud/holzkube-manager/internal/store"
 	"github.com/holzcloud/holzkube-manager/internal/streamhub"
+	"github.com/holzcloud/holzkube-manager/internal/support"
 	"github.com/holzcloud/holzkube-manager/internal/talos"
 	"github.com/holzcloud/holzkube-manager/internal/upgrade"
 )
@@ -183,6 +184,10 @@ type Deps struct {
 	// a deployment that upgrades nothing, and those handlers answer 502 rather
 	// than panicking if it is.
 	Upgrade *upgrade.Service
+
+	// Support collects support bundles. It is nil in a deployment that offers
+	// none, and that handler answers 502 rather than panicking if it is.
+	Support *support.Collector
 
 	// ClusterLocked reports whether a cluster refuses mutation. It is nil in a
 	// deployment with no inventory, and the lock link is then inert -- which
