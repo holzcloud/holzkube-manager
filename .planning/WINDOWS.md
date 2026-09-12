@@ -101,6 +101,8 @@ last_updated: 2026-09-11T16:50:00.000Z
 | 84 | 08 | unrun-verify | internal/provision/job.go |  | DIE MACHINE-CONFIG DER PROVISIONIERUNG IST NIE GEGEN ECHTES TALOS APPLIZIERT WORDEN. provision.buildConfig baut die Konfiguration aus dem in Phase 3 abgeleiteten Bundle, haengt den Install-Patch (.machine.install.disk und .image aus derselben Schematic-ID) und optional den Hostnamen an, und uebergibt alles an machineconfig.Generate unter dem pro Cl | open |  | 2026-09-11T18:10:00.000Z |  |
 | 85 | 09 | unrun-verify | internal/upgrade/job.go |  | KEIN UPGRADE IST JE AUF ECHTER HARDWARE GELAUFEN, und dieses Fenster fuehrt, was talossim deshalb bestaetigt, weil talossim es eingebaut hat. Dreierlei konkret: (a) ob LifecycleService.Upgrade in Talos v1.13 die Form hat, gegen die hier gebaut wurde -- die Request verlangt ein Image, das bereits per ImagePull auf dem Node liegt, und ob ein echter N | open |  | 2026-09-11T18:55:00.000Z |  |
 | 86 | 09 | deviation | internal/upgrade/job.go |  | DAS KUBERNETES-UPGRADE SCHREIBT DIE IMAGES IN DIE MACHINE-CONFIG UND SPRICHT NICHT MIT KUBERNETES. talosctl upgrade-k8s orchestriert ueber die Kubernetes-API: prepull, dann die Static Pods einzeln, dann kube-proxy, dann die Kubelets, jeweils mit Health-Checks dazwischen. Dieser Pfad setzt stattdessen .machine.kubelet.image und die drei .cluster.*.i | open |  | 2026-09-11T18:55:00.000Z |  |
+| 87 | 10 | unrun-verify | .planning/ROADMAP.md |  | OPS-05 IST OFFEN: DER VERIFIKATIONSDURCHLAUF AUF ECHTER AMD64-HARDWARE HAT NICHT STATTGEFUNDEN. Das ist die Eintrittsbedingung von Phase 10, die der Roadmap-Eintrag ausdruecklich als nicht verhandelbar und als 'die einzige Phase, die das Homelab zwingend braucht' fuehrt, und es ist der Release-Blocker, den die Phase besitzt. Der Ausfuehrungshost ha | open |  | 2026-09-11T19:10:00.000Z |  |
+| 88 | 10 | unrun-verify | Dockerfile |  | DAS CONTAINER-IMAGE IST NIE GEBAUT WORDEN. Dockerfile und compose.yaml stehen mit den Eigenschaften, die OPS-04 verlangt -- non-root uid 65532, FROM scratch, CGO_ENABLED=0, deklariertes Volume, cap_drop ALL, no-new-privileges, read_only root, Bindung an 127.0.0.1 --, und cmd/holzkube-managerd/container_test.go prueft genau diese Eigenschaften aus d | open |  | 2026-09-11T19:10:00.000Z |  |
 
 ````json
 [
@@ -1134,6 +1136,30 @@ last_updated: 2026-09-11T16:50:00.000Z
     "status": "open",
     "reason": "",
     "recorded_at": "2026-09-11T18:55:00.000Z",
+    "resolved_at": null
+  },
+  {
+    "id": 87,
+    "kind": "unrun-verify",
+    "phase": "10",
+    "file": ".planning/ROADMAP.md",
+    "line": null,
+    "description": "OPS-05 IST OFFEN: DER VERIFIKATIONSDURCHLAUF AUF ECHTER AMD64-HARDWARE HAT NICHT STATTGEFUNDEN. Das ist die Eintrittsbedingung von Phase 10, die der Roadmap-Eintrag ausdruecklich als nicht verhandelbar und als 'die einzige Phase, die das Homelab zwingend braucht' fuehrt, und es ist der Release-Blocker, den die Phase besitzt. Der Ausfuehrungshost hat kein Homelab, kein QEMU, kein /dev/kvm und keinen Docker-Daemon. Dieses Fenster ist damit der Sammelpunkt fuer alles, was ohne echte Maschine unbelegt bleibt, und es schliesst gemeinsam mit 82 (Provisioning-Abnahme), 84 (die generierte MachineConfig als Anweisung) und 85 (Upgrade auf echter Hardware) oder gar nicht -- die vier beschreiben zusammen EINEN Durchlauf: eine blanke amd64-Maschine wird ueber den Wizard zu einem Node, bekommt eine Konfiguration, wird geupgradet. ZUSAETZLICH offen und nur hier: ob der amd64-Installer-Pfad ueberhaupt anders laeuft als der arm64 -- der Dev-Host ist darwin/arm64, QEMU faehrt dort arm64-Talos nativ und kann amd64 strukturell nicht ausueben, weshalb selbst ein erfolgreicher QEMU-Lauf dieses Fenster NICHT schliesst. SCHLIESSBEDINGUNG: ein protokollierter Durchlauf auf echtem amd64-Blech, der bei 'blank' anfaengt und bei einem geupgradeten, gesunden Node endet, mit den gemessenen Zeiten als Ersatz fuer provision.ReappearBudget und upgrade.ReappearBudget.",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-09-11T19:10:00.000Z",
+    "resolved_at": null
+  },
+  {
+    "id": 88,
+    "kind": "unrun-verify",
+    "phase": "10",
+    "file": "Dockerfile",
+    "line": null,
+    "description": "DAS CONTAINER-IMAGE IST NIE GEBAUT WORDEN. Dockerfile und compose.yaml stehen mit den Eigenschaften, die OPS-04 verlangt -- non-root uid 65532, FROM scratch, CGO_ENABLED=0, deklariertes Volume, cap_drop ALL, no-new-privileges, read_only root, Bindung an 127.0.0.1 --, und cmd/holzkube-managerd/container_test.go prueft genau diese Eigenschaften aus den Dateien selbst. Was der Test NICHT prueft, weil es ohne Daemon nicht pruefbar ist: dass das Image baut (der Multi-Stage-Build zieht node:22-alpine und golang:1.26-alpine und kopiert web/dist nach internal/httpapi/dist -- ein Pfad, den nur der Build ausuebt), dass der Prozess als 65532 in das Volume schreiben kann, dass read_only:true mit dem, was das Binary an Temporaerdateien braucht, vertraeglich ist, und dass der Healthcheck 'holzkube-managerd verify-audit' gegen ein frisches Datenverzeichnis Exit 0 gibt. 'Im Dauerbetrieb' aus Erfolgskriterium 3 ist damit unbelegt. SCHLIESSBEDINGUNG: docker build und ein docker compose up, der einen Setup, einen Login und einen Neustart mit erhaltenem Zustand ueberlebt.",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-09-11T19:10:00.000Z",
     "resolved_at": null
   }
 ]

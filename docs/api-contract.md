@@ -1785,3 +1785,113 @@ from phase 3 — cluster create and talosconfig — that had never had a row.
 
 Both are the same failure: a guard with its own copy of the thing it guards goes
 quiet exactly when something is added.
+
+## Operations
+
+### The subcommands
+
+| command | what it does |
+|---|---|
+| `holzkube-managerd` | serves (the default; no subcommand needed) |
+| `holzkube-managerd backup [--label X]` | writes a tarball into the data directory |
+| `holzkube-managerd backups` | lists what is there, newest first |
+| `holzkube-managerd restore FILE` | backs up what is there, then unpacks |
+| `holzkube-managerd verify-audit` | checks the audit hash chain; exits non-zero on a break |
+
+They are subcommands of the same binary rather than a separate tool because the
+backup format, the permission rules and the chain's hashing all live in this
+build. A backup written by one version and refused by another is not a backup.
+
+All of them take the same `--data-dir` and `HOLZKUBE_MANAGER_DATA_DIR` the
+server takes, through the same loader.
+
+### A backup is safe while the server runs; a restore is not
+
+**Backup takes no lock.** Every record in the store is written atomically —
+temporary file, fsync, rename — so a tarball taken mid-write captures either the
+old record or the new one and never half of one. The alternative, refusing to
+back up while the server runs, is a backup subcommand nobody runs.
+
+**Restore refuses a directory another process holds.** It takes the store's own
+process lock to find out, because that lock is what makes "one writer" true:
+restoring underneath a running instance would replace the files it has open with
+different ones carrying the same names.
+
+### A restore backs up what it is about to replace
+
+Before a byte is unpacked, the current contents are written to a
+`pre-restore-*.tar.gz`. A restore that went wrong without one would have
+replaced a working installation with a broken one and left nothing to go back
+to. The path is printed whether or not the restore then succeeds.
+
+### Every tar entry is checked against the destination
+
+A path in a tarball is whatever the person who made it wrote. `../../../etc/shadow`
+is a valid tar entry, and so is an absolute path.
+
+The check is on the **resolved** path rather than on the text, because
+`a/../../b` contains no leading `..` and still escapes. An entry that resolves
+outside the data directory is `ErrOutsideDestination` and nothing is written.
+
+Symlinks, hard links and devices are **refused**, not skipped. A symlink in an
+archive is a path the next write follows, and silently dropping one produces a
+restored directory that is missing something nobody is told about.
+
+Restored file modes are narrowed to `0700`, never widened. A restore that
+produced a `0644` would produce a data directory `fsstore` then refuses to open
+— which is a restore that appeared to work.
+
+### Pre-releases are opt-in
+
+A node reporting `v1.14.0-rc.2` is **inside** the supported window and is
+refused anyway, with `talos.ErrPreRelease`, unless the instance was started with
+`--allow-prerelease` / `HOLZKUBE_MANAGER_ALLOW_PRERELEASE=true`.
+
+The two refusals are separate errors because the remedies are opposite kinds of
+thing. "This node is outside the supported range" is a fact about the node and
+the answer is to change the node; "this instance does not accept pre-releases"
+is a setting, and a client showing them as one refusal would send somebody to
+reinstall a node they deliberately put a release candidate on.
+
+`v1.14.0+dirty` is build metadata, not a pre-release: a release built from a
+modified tree, which must not be refused as one.
+
+### A node outside the range is marked, not hidden
+
+`MachineView` carries `unsupported_version`, `pre_release` and
+`version_notice`. All three are derived from the **last version the node
+reported**, not from a failed connection — a node outside the range is refused
+at connect time, so a marking that depended on connecting would be blank for
+exactly the nodes it exists to mark.
+
+A machine whose snapshot carries no version is left unmarked and gets no notice.
+"We have never heard a version from this node" is not "this node is fine", and
+inventing a verdict about it would be the marking saying something nobody knows.
+
+`GET /api/v1/system/status` serves `talos_range` and `allow_prerelease` so the
+screen and the refusal agree; a copy in the browser bundle would drift from the
+constants that enforce it.
+
+### There is no backup button
+
+A backup contains every secret in the data directory verbatim, and the file
+lands on the **server's** disk rather than the operator's. A button would
+produce a file somebody then has to find over SSH anyway — and one that streamed
+the archive to the browser would be an endpoint that hands the cluster over to
+whoever has a session.
+
+### The container
+
+Non-root (uid 65532) from `scratch`, with the data directory as a declared
+volume. Both properties are asserted by `cmd/holzkube-managerd/container_test.go`
+against the files themselves, because no Docker daemon runs in CI here and a
+comment asking people to keep two files in step is not a mechanism.
+
+Scratch rather than alpine or distroless: the binary is static, embeds its own
+web assets, and verifies Talos endpoints against the cluster PKI it holds rather
+than against a system trust store. A shell, a package manager and a CA bundle
+would each be a way in this product has no use for.
+
+The Compose file binds to `127.0.0.1` by default. The dashboard shows every
+node's state and the API can wipe a machine; publishing that on a LAN address is
+a deliberate act.

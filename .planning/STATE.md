@@ -3,17 +3,17 @@ gsd_state_version: 1.0
 milestone: v1.14
 current_phase: 10
 current_phase_name: "Härtung & echter Hardware-Durchlauf"
-status: executing
-stopped_at: Phase 9 complete against talossim; no upgrade on real hardware (window 85)
-last_updated: "2026-09-11T18:55:00.000Z"
+status: milestone-built
+stopped_at: Milestone v1.14 built; OPS-05 open (window 87) — no run on real hardware
+last_updated: "2026-09-11T19:15:00.000Z"
 last_activity: 2026-09-11
-last_activity_desc: Phase 09 complete, transitioned to Phase 10
+last_activity_desc: Phase 10 built; milestone v1.14 closed out with OPS-05 open
 state_head: a474d2522823cbfb436ee720dee35494890281a3
 progress:
   total_phases: 10
-  completed_phases: 8
-  total_plans: 39
-  completed_plans: 39
+  completed_phases: 9
+  total_plans: 40
+  completed_plans: 40
 ---
 
 # Project State
@@ -23,16 +23,43 @@ progress:
 See: .planning/PROJECT.md (updated 2026-08-27)
 
 **Core value:** Eine neue Maschine wird komplett in der UI zum Cluster-Node — ohne `talosctl`, ohne Omni.
-**Current focus:** Phase 10 — Härtung & echter Hardware-Durchlauf
+**Current focus:** Milestone v1.14 gebaut; offen ist OPS-05 🚫 — ein Durchlauf auf echter amd64-Hardware
 
 ## Current Position
 
-Phase: 10 — Härtung & echter Hardware-Durchlauf
-Plan: Not started
-Status: Ready to plan
-Last activity: 2026-09-11 — Phase 09 complete against `talossim`
+Phase: 10 — Härtung & echter Hardware-Durchlauf (gebaut; Kriterium 1 offen)
+Plan: —
+Status: Milestone v1.14 gebaut, ein Release-Blocker offen
+Last activity: 2026-09-11 — Phase 10 gebaut, Milestone abgeschlossen
 
-Progress: [████████▓░] 8 of 10 phases, plus Phase 4 partially
+Progress: [█████████▓] 9 of 10 phases complete, Phase 4 and Phase 10 partially
+
+**Der Milestone ist gebaut und nicht abnahmefähig, und das ist eine Aussage
+über die Umgebung statt über den Code.** Jede der zehn Phasen ist gegen
+`internal/talossim` ausgeführt; **keine Zeile davon ist je auf einer echten
+Maschine gelaufen**. Der Verifikationsdurchlauf auf amd64-Blech, den Phase 10
+als nicht verhandelbare Eintrittsbedingung führt, hat nicht stattgefunden: dem
+Ausführungshost fehlen Homelab, QEMU, `/dev/kvm` und ein Docker-Daemon.
+
+**OPS-05 🚫 bleibt offen.** Es ist der einzige offene Release-Blocker des
+Milestones. Fenster 87 ist sein Sammelpunkt und schließt gemeinsam mit 82 (die
+Provisioning-Abnahme), 84 (die generierte MachineConfig als Anweisung) und 85
+(das Upgrade) — die vier beschreiben einen einzigen Durchlauf: eine blanke
+amd64-Maschine wird über den Wizard zu einem Node, bekommt eine Konfiguration,
+wird geupgradet, und die dabei gemessenen Zeiten ersetzen zwei geratene
+Konstanten.
+
+**Was sonst gebaut und nie ausgeführt wurde:** das Container-Image (88), die
+Installations-Messung und Tier 2 aus Phase 4 (80, 81), Tier 1 aus Phase 3 (76)
+und `golangci-lint` gegen die Ziel-Go-Version (77).
+
+**Ein Befund aus Phase 8 betrifft Phase 6 und 7 rückwirkend und ist nicht
+reparierbar:** acht auditierte Aktionen hatten keinen Allowlist-Eintrag, also
+wurde jeder Parameter jedes Reboots, Resets und Config-Applys als `<redacted>`
+archiviert — unter anderem der Wipe-Umfang eines Resets. Der Mechanismus ist
+repariert und durch einen Test an der Routen-Tabelle gehalten; die bereits
+geschriebenen Zeilen bleiben inhaltslos, weil D-16 keinen Löschpfad definiert
+und eine Migration die Hash-Kette bräche. Fenster 83.
 
 **Phase 9 ist erfüllt und auf keiner echten Maschine gelaufen.** Alle fünf
 Erfolgskriterien sind gegen `talossim` ausgeführt; kein rollendes Upgrade hat je
@@ -82,7 +109,7 @@ Ziel-Go-Version ist und nicht lief.
 
 **Velocity:**
 
-- Total plans completed: 39
+- Total plans completed: 40
 - Average duration: —
 - Total execution time: 0.0 hours
 
@@ -287,10 +314,17 @@ Items acknowledged and deferred at milestone close, most recent first:
 
 | Category | Item | Status | Deferred At | Milestone |
 |----------|------|--------|-------------|-----------|
-| *(none)* | | | | |
+| Release blocker | **OPS-05** 🚫 — Verifikationsdurchlauf auf echter amd64-Hardware | Open, window 87 | 2026-09-11 | v1.14 |
+| Verification | Container-Image bauen und im Dauerbetrieb prüfen | Open, window 88 | 2026-09-11 | v1.14 |
+| Verification | Installations-Stille messen; `ReappearBudget` in beiden Domänen ersetzen | Open, windows 80, 85 | 2026-09-11 | v1.14 |
+| Verification | Sandbox Tier 1 (Docker) und Tier 2 (QEMU) einmal ausführen | Open, windows 76, 81 | 2026-09-11 | v1.14 |
+| Tooling | `golangci-lint` gegen die Ziel-Go-Version laufen lassen | Open, window 77 | 2026-09-11 | v1.14 |
+| Accepted loss | Audit-Parameter aus Phase 6 und 7 bleiben inhaltslos | Open, window 83 | 2026-09-11 | v1.14 |
+| Deviation | Kubernetes-Upgrade orchestriert nicht über die Kubernetes-API | Open, window 86 | 2026-09-11 | v1.14 |
+| Deviation | Supervisors sind Heartbeat-Poller statt COSI-Watches | Open, window 79 | 2026-09-11 | v1.14 |
 
 ## Session Continuity
 
-Last session: 2026-09-11T18:55:00.000Z
-Stopped at: Phase 9 complete against `talossim`
-Resume file: .planning/phases/09-upgrades-etcd/09-SUMMARY.md
+Last session: 2026-09-11T19:15:00.000Z
+Stopped at: Milestone v1.14 built; OPS-05 open
+Resume file: .planning/phases/10-haertung/10-SUMMARY.md
