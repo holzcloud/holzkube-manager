@@ -13,7 +13,6 @@
 package machineconfig
 
 import (
-	"bytes"
 	"fmt"
 	"regexp"
 
@@ -91,6 +90,3 @@ func RedactString(raw string) (string, error) {
 // that a caller which has to hand bytes somewhere irreversible, the audit
 // archive above all, can assert it rather than assume it.
 func ContainsPrivateKey(b []byte) bool { return pemPrivateKey.Match(b) }
-
-// looksRedacted reports whether the marker is present, for the same reason.
-func looksRedacted(b []byte) bool { return bytes.Contains(b, []byte(RedactedMarker)) }

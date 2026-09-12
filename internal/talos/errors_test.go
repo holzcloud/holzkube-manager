@@ -3,8 +3,10 @@ package talos_test
 import (
 	"context"
 	"errors"
+	"net"
 	"os"
 	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -149,26 +151,40 @@ func keysOf(m map[string]talos.ErrorKind) []string {
 // node embeds the address it tried to dial, which is the same class of string
 // audit.ChainStatus.Public() strips before it leaves the process. So the
 // rendered message names the operation and the machine id and stops there.
+//
+// What is dialled is a *closed loopback port* rather than a hostname that
+// cannot resolve, and that change is the whole reason this test used to be red
+// in some environments and green in others. A name that does not resolve is
+// answered by whatever resolver the host has, and a resolver that blackholes an
+// unknown name rather than refusing it makes the dial time out -- so the
+// assertion about KindUnreachable was really an assertion about the machine the
+// suite ran on. A closed port on loopback is refused by the kernel,
+// immediately, everywhere; closedPort, with its own argument about staying
+// below the ephemeral range, was already in this package's helpers while this
+// test was not using it.
+//
+// The needle is then the port rather than an invented hostname. A five-digit
+// number the kernel has just handed out is as unambiguous inside a message as a
+// made-up name, and unlike the name it is the address that was actually
+// dialled -- which is the string the requirement is about.
 func TestErrorNamesTheMachineAndNeverTheAddress(t *testing.T) {
 	t.Parallel()
-
-	// A host that cannot resolve, spelled so that its presence in any message
-	// is unambiguous rather than a coincidence.
-	const sentinel = "sentinel-node-address-must-not-be-logged.invalid"
 
 	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
 	defer cancel()
 
+	port := closedPort(t)
 	target := talos.Target{
 		Machine: model.MachineID("00000000-0000-0000-0000-0000000000aa"),
-		Addr:    sentinel,
+		Addr:    "127.0.0.1",
 	}
 
 	sim := newSim(t, talossim.Options{Hostname: "unused"})
 
-	_, err := talos.NewClusterClient(ctx, talos.NewDirectDialer(1), target, sim.ClientCreds(), talos.Mode{})
+	_, err := talos.NewClusterClient(ctx, talos.NewDirectDialer(port), target,
+		sim.ClientCreds(), talos.Mode{})
 	if err == nil {
-		t.Fatal("NewClusterClient reached a node at an address that does not resolve")
+		t.Fatal("NewClusterClient reached a node on a port nothing is listening on")
 	}
 
 	var te *talos.Error
@@ -177,13 +193,15 @@ func TestErrorNamesTheMachineAndNeverTheAddress(t *testing.T) {
 	}
 
 	if te.Kind != talos.KindUnreachable {
-		t.Errorf("Kind = %v, want %v", te.Kind, talos.KindUnreachable)
+		t.Errorf("Kind = %v, want %v: a refused connection never reached the node, and the "+
+			"breaker and the retry loop both turn on that distinction", te.Kind, talos.KindUnreachable)
 	}
 	if !strings.Contains(te.Error(), string(target.Machine)) {
 		t.Errorf("Error() = %q does not name the machine %q", te.Error(), target.Machine)
 	}
-	if strings.Contains(te.Error(), sentinel) {
-		t.Errorf("Error() = %q leaks the node address", te.Error())
+	dialled := net.JoinHostPort(target.Addr, strconv.Itoa(port))
+	if strings.Contains(te.Error(), dialled) || strings.Contains(te.Error(), strconv.Itoa(port)) {
+		t.Errorf("Error() = %q leaks the node address %q", te.Error(), dialled)
 	}
 	if te.Op == "" {
 		t.Error("Op is empty; a transport failure whose only record says nothing happened is the one " +

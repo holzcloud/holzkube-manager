@@ -10,6 +10,7 @@ import (
 	"github.com/holzcloud/holzkube-manager/internal/jobs"
 	"github.com/holzcloud/holzkube-manager/internal/model"
 	"github.com/holzcloud/holzkube-manager/internal/provision"
+	"github.com/holzcloud/holzkube-manager/internal/talos"
 )
 
 // The provisioning wizard's HTTP surface.
@@ -530,6 +531,19 @@ func writeProvisionError(w http.ResponseWriter, r *http.Request, d httpapi.Deps,
 		httpapi.WriteProblem(w, r, httpapi.Conflict(httpapi.CodeBootstrapInProgress, err.Error()))
 	case errors.Is(err, provision.ErrAlreadyBootstrapped):
 		httpapi.WriteProblem(w, r, httpapi.Conflict(httpapi.CodeAlreadyBootstrapped, err.Error()))
+	case errors.Is(err, talos.ErrFingerprintPin):
+		// The same code the adoption path uses for the same fact, caught at a
+		// different moment: there it is compared before connecting, here
+		// during the handshake, where it is the only trust anchor there is.
+		// What it must not become is an upstream failure -- something
+		// answered.
+		httpapi.WriteProblem(w, r, &httpapi.Problem{
+			Type:   httpapi.TypeValidation,
+			Title:  "That machine is not the one you confirmed",
+			Status: http.StatusBadRequest,
+			Detail: err.Error(),
+			Code:   httpapi.CodeFingerprintMismatch,
+		})
 	default:
 		if code, ok := upstreamNodeCode(err); ok {
 			httpapi.WriteProblem(w, r, httpapi.Upstream(code, err.Error()))

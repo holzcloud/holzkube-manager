@@ -85,6 +85,11 @@ type conn struct {
 	// copied boolean means the next decision that has to reach this far does
 	// not need a second field.
 	mode Mode
+
+	// pin is what the certificate check saw, or nil when this connection has
+	// none. The liveness probe reads it: see pin.go for why the failure cannot
+	// be recovered from the error gRPC produces.
+	pin *pin
 }
 
 // dial is the one place either client type reaches a node.
@@ -137,8 +142,23 @@ func dial(ctx context.Context, d Dialer, t Target, c Creds, m Mode) (*conn, erro
 	// client/connection.go before buildTLSConfig is consulted, which is exactly
 	// what talosctl --insecure does. client/insecure_credentials.go is behind a
 	// sidero.debug build tag and does not compile in a normal build.
+	// The pin, applied here rather than in NewMaintenanceClient, because this
+	// is the one function both client types reach a node through and a
+	// constructor cannot forget what it does not do. Cluster credentials carry
+	// no fingerprint and are unaffected; maintenance credentials carry the one
+	// the operator read off the console, and it is the only trust anchor that
+	// path has (PROV-04, see pin.go).
+	tlsConf := c.TLS
+	var pinRecord *pin
+	if c.Fingerprint != "" {
+		tlsConf, pinRecord, err = pinned(c.TLS, c.Fingerprint, t.Machine)
+		if err != nil {
+			return nil, err
+		}
+	}
+
 	cl, err := client.New(ctx,
-		client.WithTLSConfig(c.TLS),
+		client.WithTLSConfig(tlsConf),
 		client.WithEndpoints(addr),
 		client.WithGRPCDialOptions(opts...),
 	)
@@ -147,6 +167,7 @@ func dial(ctx context.Context, d Dialer, t Target, c Creds, m Mode) (*conn, erro
 	}
 
 	n.c = cl
+	n.pin = pinRecord
 	return n, nil
 }
 
@@ -447,9 +468,12 @@ func NewClusterClient(ctx context.Context, d Dialer, t Target, c Creds, m Mode) 
 // InsecureSkipVerify is permitted here and refused on the cluster path.
 //
 // The TLS configuration is still supplied by the caller, because this package
-// never invents trust. Creds.Fingerprint is the seam on which a later phase
-// pins the maintenance certificate without a signature change (T-02-27); no
-// pinning is performed here yet.
+// never invents trust. What it does do is *perform* the check the caller asked
+// for: when Creds carries a fingerprint, dial installs a peer verifier that
+// refuses any certificate but that one (PROV-04, T-02-27). Without it this is
+// the single connection in the product with no PKI behind it and no check in
+// front of it -- on the path whose reason for existing is handing a machine its
+// cluster's secrets.
 //
 // Mode applies here exactly as it does on the cluster path: maintenance mode is
 // not an exemption from dry-run. ApplyConfiguration is the one thing this
@@ -500,6 +524,15 @@ func (n *conn) proveAnswering(ctx context.Context, version func(context.Context)
 	v, err := version(probeCtx)
 	if err != nil {
 		_ = n.c.Close()
+
+		// Asked before the generic message is built, because it is a better
+		// answer to a different question. A handshake the pin rejected reaches
+		// here as an unclassifiable transport failure, and reporting that as
+		// "the node could not be reached" tells the operator to check a cable
+		// while somebody else is answering on the wire (PROV-04).
+		if perr := n.pin.err(); perr != nil {
+			return perr
+		}
 		return fmt.Errorf("talos: %s did not answer the liveness probe: %w", n.target.Machine, err)
 	}
 

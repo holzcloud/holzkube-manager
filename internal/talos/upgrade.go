@@ -71,7 +71,16 @@ type UpgradeStream struct {
 // the system it is running. Failing there costs nothing. Failing after the
 // upgrade has started costs the node.
 func (c *ClusterClient) ImagePull(ctx context.Context, ref string) error {
-	return c.conn.c.ImagePull(ctx, common.ContainerdNamespace_NS_SYSTEM, ref)
+	// machinery deprecates this in favour of ImageServiceClient, and the swap
+	// is deliberately not made here. ImageService.Pull is a *stream* where this
+	// is a unary call: taking it needs a new deadline-class row, a talossim
+	// handler, a coverage-guard entry and a change to the wire call the upgrade
+	// path makes -- on the one path in this product that has never run against
+	// real hardware (window 85). Changing what an unverified path sends, to
+	// silence a deprecation on a method Talos v1.13 still serves, would be
+	// trading a warning for an unknown. It belongs in the same session that
+	// first runs an upgrade on a real machine.
+	return c.conn.c.ImagePull(ctx, common.ContainerdNamespace_NS_SYSTEM, ref) //nolint:staticcheck // see above
 }
 
 // Upgrade starts an upgrade and returns the node's own output as it arrives.

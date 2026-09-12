@@ -19,7 +19,7 @@ func TestTheUUIDWinsAgainstTheAddress(t *testing.T) {
 
 	ctx := testContext(t)
 	f := newFixture(t, talossim.Options{ControlPlane: true})
-	c := f.importCluster(t, ctx)
+	c := f.importCluster(ctx, t)
 
 	const addr = "192.168.1.50"
 	const first = model.MachineID("11111111-1111-4111-8111-111111111111")
@@ -69,7 +69,7 @@ func TestTheSameMachineAtANewAddressKeepsItsRecord(t *testing.T) {
 
 	ctx := testContext(t)
 	f := newFixture(t, talossim.Options{ControlPlane: true})
-	c := f.importCluster(t, ctx)
+	c := f.importCluster(ctx, t)
 
 	const id = model.MachineID("33333333-3333-4333-8333-333333333333")
 

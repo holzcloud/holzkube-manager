@@ -198,7 +198,7 @@ func issue(parent *x509.Certificate, parentKey crypto.Signer, tmpl *x509.Certifi
 	tmpl.NotBefore = now.Add(-time.Minute)
 	tmpl.NotAfter = now.Add(certValidity)
 
-	var signer crypto.Signer = parentKey
+	signer := crypto.Signer(parentKey)
 	issuer := parent
 	if parentKey == nil {
 		signer = key

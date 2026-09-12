@@ -102,19 +102,19 @@ func ParseTopic(t streamhub.Topic) (Source, error) {
 type State string
 
 const (
-	// StateLive: the upstream stream is open and delivering.
+	// StateLive is the upstream stream open and delivering.
 	StateLive State = "live"
 
-	// StateReconnecting: the upstream stream broke and is being reopened. The
+	// StateReconnecting is the upstream stream broken and being reopened. The
 	// node may be fine; something between here and it was not.
 	StateReconnecting State = "reconnecting"
 
-	// StateRebooting: the node accepted a reboot or is otherwise expected back.
+	// StateRebooting is the node having accepted a reboot, or otherwise expected back.
 	// It is separate from reconnecting because the right response is to wait
 	// rather than to investigate.
 	StateRebooting State = "rebooting"
 
-	// StateDisconnected: the stream is not running and nothing is trying. This
+	// StateDisconnected is the stream not running, with nothing trying. This
 	// is what the last panel closing looks like, and what a node that has been
 	// unreachable past the retry budget looks like.
 	StateDisconnected State = "disconnected"

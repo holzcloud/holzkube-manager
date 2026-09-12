@@ -348,14 +348,6 @@ func (c *ClusterClient) Members(ctx context.Context) ([]Member, error) {
 	return out, nil
 }
 
-// MachineConfigYAML returns the node's active machine configuration as YAML.
-//
-// This is the one read in phase 3 that touches the configuration, and it
-// exists for exactly one purpose: deriving the secrets bundle at adoption
-// (D-01). The bytes contain the cluster CA private key and three joining
-// tokens, so a caller that logs them, returns them or puts them in an error
-// message has leaked the cluster -- which is why nothing above the import
-// service ever sees the return value of this method.
 // KernelCmdline is the command line the node actually booted with.
 //
 // It is read separately from NodeFacts and not folded into it, because only
@@ -372,6 +364,14 @@ func (c *ClusterClient) KernelCmdline(ctx context.Context) (string, error) {
 	return cmdline.TypedSpec().Cmdline, nil
 }
 
+// MachineConfigYAML returns the node's active machine configuration as YAML.
+//
+// This is the one read in phase 3 that touches the configuration, and it
+// exists for exactly one purpose: deriving the secrets bundle at adoption
+// (D-01). The bytes contain the cluster CA private key and three joining
+// tokens, so a caller that logs them, returns them or puts them in an error
+// message has leaked the cluster -- which is why nothing above the import
+// service ever sees the return value of this method.
 func (c *ClusterClient) MachineConfigYAML(ctx context.Context) ([]byte, error) {
 	cfg, err := safe.StateGetByID[*configres.MachineConfig](ctx, c.COSI(), configres.ActiveID)
 	if err != nil {

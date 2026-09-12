@@ -42,8 +42,8 @@ const (
 	// from immediate, which is the whole budget this phase is spending.
 	WatchSettle = 750 * time.Millisecond
 
-	// WatchBackoffMin and WatchBackoffMax bound the rebuild of a watch that
-	// died.
+	// WatchRebuildFloor and WatchRebuildCeiling bound the rebuild of a watch
+	// that died.
 	//
 	// The minimum is not zero and the reason is the failure it is most likely
 	// to meet: a node that is down refuses the subscription immediately, so a
@@ -51,8 +51,11 @@ const (
 	// The maximum is below the heartbeat on purpose -- a watch that is out for
 	// longer than a poll interval has stopped being the primary path, and the
 	// poller is already covering it.
-	WatchBackoffMin = 2 * time.Second
-	WatchBackoffMax = 40 * time.Second
+	WatchRebuildFloor = 2 * time.Second
+
+	// WatchRebuildCeiling is the other end of that bound. See above: it is
+	// below the heartbeat on purpose.
+	WatchRebuildCeiling = 40 * time.Second
 )
 
 // watchState is one machine's subscription as the screen reports it.
@@ -122,11 +125,11 @@ func (s *Service) watchLoop(ctx context.Context, id model.MachineID) {
 // heartbeat uses and for the same reason: a fleet that lost its cluster
 // certificate retries in one synchronised burst otherwise.
 func watchBackoff(attempt int) time.Duration {
-	d := WatchBackoffMin
+	d := WatchRebuildFloor
 	for range attempt {
 		d *= 2
-		if d >= WatchBackoffMax {
-			d = WatchBackoffMax
+		if d >= WatchRebuildCeiling {
+			d = WatchRebuildCeiling
 			break
 		}
 	}
