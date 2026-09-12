@@ -49,9 +49,10 @@ amd64-Maschine wird über den Wizard zu einem Node, bekommt eine Konfiguration,
 wird geupgradet, und die dabei gemessenen Zeiten ersetzen zwei geratene
 Konstanten.
 
-**Was sonst gebaut und nie ausgeführt wurde:** das Container-Image (88), die
-Installations-Messung und Tier 2 aus Phase 4 (80, 81), Tier 1 aus Phase 3 (76)
-und `golangci-lint` gegen die Ziel-Go-Version (77).
+**Was sonst gebaut und nie ausgeführt wurde:** die Installations-Messung und
+Tier 2 aus Phase 4 (80, 81), Tier 1 aus Phase 3 (76) und `golangci-lint` gegen
+die Ziel-Go-Version (77). Das Container-Image (88) ist inzwischen gebaut und
+gelaufen; der Lauf hat drei echte Fehler gefunden.
 
 **Ein Befund aus Phase 8 betrifft Phase 6 und 7 rückwirkend und ist nicht
 reparierbar:** acht auditierte Aktionen hatten keinen Allowlist-Eintrag, also
@@ -315,7 +316,6 @@ Items acknowledged and deferred at milestone close, most recent first:
 | Category | Item | Status | Deferred At | Milestone |
 |----------|------|--------|-------------|-----------|
 | Release blocker | **OPS-05** 🚫 — Verifikationsdurchlauf auf echter amd64-Hardware | Open, window 87 | 2026-09-11 | v1.14 |
-| Verification | Container-Image bauen und im Dauerbetrieb prüfen | Open, window 88 | 2026-09-11 | v1.14 |
 | Verification | Installations-Stille messen; `ReappearBudget` in beiden Domänen ersetzen | Open, windows 80, 85 | 2026-09-11 | v1.14 |
 | Verification | Sandbox Tier 1 (Docker) und Tier 2 (QEMU) einmal ausführen | Open, windows 76, 81 | 2026-09-11 | v1.14 |
 | Tooling | `golangci-lint` gegen die Ziel-Go-Version laufen lassen | Open, window 77 | 2026-09-11 | v1.14 |

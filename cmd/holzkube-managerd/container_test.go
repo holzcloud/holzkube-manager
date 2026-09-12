@@ -62,11 +62,9 @@ func TestTheContainerRunsAsANonRootUser(t *testing.T) {
 
 // TestTheContainerHasNoShell.
 //
-// A scratch image has no shell, no package manager and no system trust store,
-// and it needs none of them: the binary is static, it embeds its own web
-// assets, and the Talos endpoints it reaches are verified against the cluster
-// PKI it holds rather than against a system CA bundle. Every one of those
-// would be a way in this product has no use for.
+// A scratch image has no shell and no package manager, and it needs neither:
+// the binary is static and embeds its own web assets. Both would be a way in
+// this product has no use for.
 func TestTheContainerHasNoShell(t *testing.T) {
 	t.Parallel()
 
@@ -81,6 +79,27 @@ func TestTheContainerHasNoShell(t *testing.T) {
 	if !strings.Contains(dockerfile, "CGO_ENABLED=0") {
 		t.Error("the build does not set CGO_ENABLED=0; a dynamically linked binary cannot run " +
 			"in a scratch image")
+	}
+}
+
+// TestTheContainerCarriesTheCAsTheImageFactoryNeeds.
+//
+// This one exists because the first version of the Dockerfile argued it did
+// *not* need a CA bundle -- Talos endpoints are verified against the cluster
+// PKI holzkube-manager holds, which is true and is not the whole story. The
+// Image Factory is a public HTTPS service. Without the bundle the container
+// starts, serves and manages nodes, and answers every Factory route with
+// `502 upstream.factory-unavailable`; nothing short of running the image
+// showed it.
+func TestTheContainerCarriesTheCAsTheImageFactoryNeeds(t *testing.T) {
+	t.Parallel()
+
+	dockerfile := repoFile(t, "Dockerfile")
+
+	if !strings.Contains(dockerfile, "ca-certificates.crt") {
+		t.Error("the image ships no CA bundle, so every Image Factory route answers " +
+			"502 upstream.factory-unavailable -- the schematics screen, the version list and " +
+			"the ISO links all stop working, and the container looks healthy while they do")
 	}
 }
 

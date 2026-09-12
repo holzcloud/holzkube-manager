@@ -287,14 +287,16 @@ act.
 docker compose up -d
 ```
 
-Scratch rather than alpine or distroless: the binary is static, embeds its own
-web assets, and verifies Talos endpoints against the cluster PKI it holds rather
-than against a system trust store. A shell, a package manager and a CA bundle
-would each be a way in that this has no use for.
+Scratch rather than alpine or distroless: the binary is static and embeds its
+own web assets, so it needs neither a shell nor a package manager, and both
+would be a way in that this has no use for. It does carry the public CA bundle
+— the Image Factory is a public HTTPS service, and without it every schematic
+and version route answers `502` while the container looks perfectly healthy.
 
-The image has **not** been built or run as part of this milestone — no Docker
-daemon was available where it was developed. `cmd/holzkube-managerd/container_test.go`
-asserts the properties from the files; everything else about it is untested.
+The image is built and run: `docker compose up -d` reaches `Up (healthy)`,
+survives a restart with its state, and the data directory inside the volume is
+`0700` owned by uid 65532. What has *not* been exercised is provisioning a real
+machine from it — see the windows in `.planning/WINDOWS.md`.
 
 ### Blast radius — stated plainly
 
