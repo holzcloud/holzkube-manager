@@ -1,13 +1,13 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.14
+milestone: v1.15
 current_phase: 10
 current_phase_name: "Härtung & echter Hardware-Durchlauf"
 status: milestone-built
 stopped_at: Milestone v1.14 built; OPS-05 open (window 87) — no run on real hardware
 last_updated: "2026-09-11T19:15:00.000Z"
 last_activity: 2026-09-11
-last_activity_desc: Phase 10 built; milestone v1.14 closed out with OPS-05 open
+last_activity_desc: v1.15 defined autonomously; phase 1 (support bundle) starting
 state_head: a474d2522823cbfb436ee720dee35494890281a3
 progress:
   total_phases: 10
@@ -23,7 +23,7 @@ progress:
 See: .planning/PROJECT.md (updated 2026-08-27)
 
 **Core value:** Eine neue Maschine wird komplett in der UI zum Cluster-Node — ohne `talosctl`, ohne Omni.
-**Current focus:** Milestone v1.14 gebaut; offen ist OPS-05 🚫 — ein Durchlauf auf echter amd64-Hardware
+**Current focus:** Milestone v1.15, Phase 1 — Support-Bundle-Export. v1.14 ist gebaut; offen bleibt OPS-05 🚫 (Hardware).
 
 ## Current Position
 
