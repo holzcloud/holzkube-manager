@@ -490,7 +490,8 @@ func etcdSnapshot(d httpapi.Deps) http.HandlerFunc {
 	}
 }
 
-// RestoreConfirmation is what the operator has to type.
+// RestoreConfirmationField names the query parameter carrying the typed
+// confirmation.
 //
 // It is the node's own UUID and not a word, and that is the difference from
 // every other typed confirmation in this product. The others ask "did you mean
