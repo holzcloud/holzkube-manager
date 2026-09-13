@@ -1516,6 +1516,29 @@ export const api = {
       }),
 
     /**
+     * Take a node out of its cluster for good (UPG-13).
+     *
+     * Unlike the three above this is not a job: it is synchronous, because
+     * every step of it is a call this process makes and waits for — forfeit
+     * leadership if it holds it, leave etcd, wait out the eviction gap, then
+     * forget the record. What comes back is the notice about cordon and drain,
+     * which the screen has to show afterwards as well as before: an operator
+     * who read it on the way in has already stopped reading by the time it
+     * matters.
+     */
+    removeFromCluster: (
+      id: string,
+      cluster: string,
+      confirmation: string,
+    ): Promise<{ machine: string; notice: string }> =>
+      sendJSON(
+        'POST',
+        `/api/v1/machines/${encodeURIComponent(id)}/remove-from-cluster`,
+        z.object({ machine: z.string(), notice: z.string() }),
+        { cluster, confirmation },
+      ),
+
+    /**
      * Every node action answers 202 with a job id. Nothing has happened yet
      * when this resolves; the job is where it happens.
      */

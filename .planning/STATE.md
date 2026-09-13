@@ -4,10 +4,10 @@ milestone: v1.15
 current_phase: 3
 current_phase_name: "Prometheus-/metrics (v1.15)"
 status: milestone-closed
-stopped_at: v1.15 vollstaendig, CI auf main wieder gruen (Fenster 92, 93 zu). OPS-05 bleibt der einzige Release-Blocker (Fenster 87)
-last_updated: "2026-09-13T09:40:00.000Z"
+stopped_at: v1.15 vollstaendig, CI gruen, Routen-Audit abgearbeitet (Fenster 92-95 zu). OPS-05 bleibt der einzige Release-Blocker (Fenster 87)
+last_updated: "2026-09-13T10:45:00.000Z"
 last_activity: 2026-09-13
-last_activity_desc: CI had been red on main for nine commits; both causes found and fixed
+last_activity_desc: CI red for nine commits (fixed); a route audit found a confirmation the server never enforced
 state_head: a474d2522823cbfb436ee720dee35494890281a3
 progress:
   total_phases: 3
@@ -58,6 +58,28 @@ Code. Nebenbei sind zwei alte, stille Supervisions-Fehler gefallen: ein
 Lesevorgang vor `Start()` verhinderte jede Überwachung, und `Supervise()` band
 den Supervisor an den Request-Context des HTTP-Handlers. Siehe
 `.planning/phases/v1.15-02-cosi-watches/02-SUMMARY.md`.
+
+**Eine systematische Routen-Prüfung nach dem zweiten Fund hat einen dritten
+Fall geliefert — und dahinter ein Loch, das kein Einstiegsproblem war.** Alle
+61 Routen gegen `web/src` geprüft: drei ohne Einstieg, zwei davon zu Recht (der
+OIDC-Callback ist ein Browser-Redirect, `/metrics` ein Scraper-Endpunkt).
+
+Die dritte war `POST /api/v1/machines/{id}/remove-from-cluster` — seit Phase 9
+vorhanden, aus der Oberfläche unerreichbar, also die ganze etcd-Arbeit jener
+Phase nur per curl bedienbar (Fenster 95). Beim Bauen des Dialogs fiel
+**Fenster 94** auf: die Regel im Confirm-Handler lautete
+`if action == node.reset` — geschrieben, als Reset die einzige zerstörende
+bestätigungspflichtige Aktion war. `node.remove-from-cluster` hat „keine
+Eingabe nötig" **geerbt, indem es nicht erwähnt wurde**: der Browser fragte den
+Hostnamen ab, der Server gab jedem ein Token, der ohne einen fragte. Die Regel
+ist jetzt eine Tabelle, ein fehlender Eintrag eine Verweigerung statt eines
+Defaults, und vier Tests halten sie — zwei davon lesen per AST jede
+`Confirmer.Check`-Stelle im Paket.
+
+Dazu: `/metrics` war völlig unauffindbar (kein Login nötig, also auch kein
+Link), und die Einstellungsseite nennt es jetzt samt Scrape-Config, Grenze und
+der Tatsache, dass eine abgelaufene Zertifikatslaufzeit negativ und nicht
+fehlend ist.
 
 **CI war neun Commits lang rot, und niemand hat hingesehen — diese Sitzung
 nicht, die sieben davon selbst gepusht hat (Fenster 92).** Seit Lauf 12
