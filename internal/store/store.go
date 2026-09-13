@@ -70,6 +70,12 @@ type Store interface {
 	// that "what exactly was applied in March" has an answer.
 	Patches() PatchStore
 
+	// MachineClasses holds named label selectors over the inventory. It is an
+	// entity of its own rather than a field on a cluster because a class is a
+	// question about the whole fleet, and the thing that points at one is the
+	// cluster definition rather than the other way round.
+	MachineClasses() MachineClassStore
+
 	Close() error
 }
 
@@ -109,6 +115,14 @@ type PatchStore interface {
 	List(ctx context.Context) ([]model.Patch, error)
 	Put(ctx context.Context, rec model.Patch) (model.Patch, error)
 	Delete(ctx context.Context, id model.PatchID) error
+}
+
+// MachineClassStore holds the named selectors.
+type MachineClassStore interface {
+	Get(ctx context.Context, id model.MachineClassID) (model.MachineClass, error)
+	List(ctx context.Context) ([]model.MachineClass, error)
+	Put(ctx context.Context, rec model.MachineClass) (model.MachineClass, error)
+	Delete(ctx context.Context, id model.MachineClassID) error
 }
 
 // MachineStore holds the node inventory, flat and keyed by UUID (D-10).

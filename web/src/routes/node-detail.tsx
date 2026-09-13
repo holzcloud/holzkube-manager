@@ -4,6 +4,7 @@ import { RefreshCw, Trash2 } from 'lucide-react'
 import { type ReactNode, useState } from 'react'
 import { api, type Field, type Machine } from '@/api'
 import { HealthField, StageBadge } from '@/components/HealthField'
+import { LabelEditor } from '@/components/LabelEditor'
 import { LogPanel } from '@/components/LogPanel'
 import { NodeActions } from '@/components/NodeActions'
 import { Badge } from '@/components/ui/badge'
@@ -159,6 +160,15 @@ export function NodeDetailPage() {
               <Row label="Serial" field={m.serial_number} mono />
               <Row label="etcd member" field={m.etcd_member} render={(v) => (v ? 'yes' : 'no')} />
             </dl>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Labels</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <LabelEditor machine={m} />
           </CardContent>
         </Card>
 

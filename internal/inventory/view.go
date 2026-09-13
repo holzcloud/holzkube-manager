@@ -71,8 +71,14 @@ type MachineView struct {
 	// note about what it should not do rather than something a node said --
 	// and they are true whether or not the node is answering, which is
 	// precisely when the note matters most.
-	Locked     bool   `json:"locked"`
+	Locked bool `json:"locked"`
+
 	LockReason string `json:"lock_reason,omitempty"`
+
+	// Labels are the operator's own words about this machine. They are a plain
+	// map and never a Field: nothing observed them, so there is no level they
+	// could be unavailable at, and no observation ever overwrites one.
+	Labels map[string]string `json:"labels,omitempty"`
 
 	AdoptedAt time.Time `json:"adopted_at"`
 
@@ -222,6 +228,7 @@ func (s *Service) viewOf(rec model.Machine) MachineView {
 		CertificateExpired: s.expiredCertificate(rec.ID),
 		Locked:             rec.Locked,
 		LockReason:         rec.LockReason,
+		Labels:             rec.Labels,
 		UnsupportedVersion: unsupported,
 		PreRelease:         preRelease,
 		VersionNotice:      notice,

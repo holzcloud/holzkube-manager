@@ -963,6 +963,12 @@ export const machineSchema = z.object({
   adopted_at: z.string(),
   watch: watchSchema.default({ live: false, since: '', reason: '', restarts: 0 }),
 
+  /** The operator's own words about this machine. Never a Field: nothing
+   * observed them, so there is no level they could be unavailable at — and no
+   * observation overwrites one, which is what makes a selector over them
+   * stable across a reboot. */
+  labels: z.record(z.string(), z.string()).default({}),
+
   hostname: fieldSchema(z.string()),
   addr: fieldSchema(z.string()),
   talos_version: fieldSchema(z.string()),
@@ -1007,6 +1013,36 @@ export type Cluster = z.infer<typeof clusterSchema>
 
 export const clustersSchema = z.object({ clusters: z.array(clusterSchema) })
 export const machinesSchema = z.object({ machines: z.array(machineSchema) })
+
+/* ---------------------------------------------------------------------- */
+/* Machine classes (V2 phase 5)                                            */
+/* ---------------------------------------------------------------------- */
+
+export const labelSelectorSchema = z.object({
+  equals: z.record(z.string(), z.string()).default({}),
+  present: z.array(z.string()).default([]),
+  absent: z.array(z.string()).default([]),
+})
+
+export const machineClassSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  description: z.string().default(''),
+  selector: labelSelectorSchema,
+  /** The selector in words. The data is there too; this is what is read. */
+  sentence: z.string().default(''),
+  /** Which machines this class names right now. A class is a question
+   * re-answered on every read, not a group somebody is added to. */
+  machines: z.array(z.string()).default([]),
+  count: z.number().default(0),
+})
+
+export const machineClassesSchema = z.object({
+  classes: z.array(machineClassSchema).default([]),
+})
+
+export type LabelSelector = z.infer<typeof labelSelectorSchema>
+export type MachineClass = z.infer<typeof machineClassSchema>
 
 export const fingerprintSchema = z.object({
   endpoint: z.string(),
@@ -1987,6 +2023,38 @@ export const api = {
         `/api/v1/service-accounts/${encodeURIComponent(id)}/token`,
         serviceAccountTokenSchema,
       ),
+  },
+
+  labels: {
+    /**
+     * Replaces a machine's labels. Replaces, and not merges: a merge cannot
+     * remove anything, so an operator who deleted a row from a form would find
+     * it still there afterwards.
+     */
+    set: (id: string, labels: Record<string, string>): Promise<Machine> =>
+      sendJSON('PUT', `/api/v1/machines/${encodeURIComponent(id)}/labels`, machineSchema, {
+        labels,
+      }),
+  },
+
+  machineClasses: {
+    list: async (): Promise<MachineClass[]> =>
+      (await sendJSON('GET', '/api/v1/machine-classes', machineClassesSchema)).classes,
+
+    put: (
+      id: string,
+      body: { name: string; description: string; selector: LabelSelector },
+    ): Promise<MachineClass> =>
+      sendJSON(
+        'PUT',
+        `/api/v1/machine-classes/${encodeURIComponent(id)}`,
+        machineClassSchema,
+        body,
+      ),
+
+    remove: async (id: string): Promise<void> => {
+      await sendJSON('DELETE', `/api/v1/machine-classes/${encodeURIComponent(id)}`, z.unknown())
+    },
   },
 
   jobs: {

@@ -731,6 +731,42 @@ var routeBudgets = []routeBudget{
 		why:           "store-only.",
 	},
 	{
+		route:         "PUT /api/v1/machines/{id}/labels",
+		calls:         nil,
+		routeDeadline: 0,
+		verdict:       withinBudget,
+		clipping:      uncut,
+		why: "store-only, and deliberately so: a label is the operator's word about a machine " +
+			"and nothing about it is on the machine. That is the same property that makes a " +
+			"label safe to select on -- no observation ever overwrites one.",
+	},
+	{
+		route:         "GET /api/v1/machine-classes",
+		calls:         nil,
+		routeDeadline: 0,
+		verdict:       withinBudget,
+		clipping:      uncut,
+		why: "store-only. It answers each class's selector against the stored inventory rather " +
+			"than asking any node, which is what makes the membership a question re-answered on " +
+			"every read instead of a second thing to keep in step with the labels.",
+	},
+	{
+		route:         "PUT /api/v1/machine-classes/{id}",
+		calls:         nil,
+		routeDeadline: 0,
+		verdict:       withinBudget,
+		clipping:      uncut,
+		why:           "store-only.",
+	},
+	{
+		route:         "DELETE /api/v1/machine-classes/{id}",
+		calls:         nil,
+		routeDeadline: 0,
+		verdict:       withinBudget,
+		clipping:      uncut,
+		why:           "store-only.",
+	},
+	{
 		route:         "GET /api/v1/clusters/{id}/talosconfig",
 		calls:         nil,
 		routeDeadline: 0,
