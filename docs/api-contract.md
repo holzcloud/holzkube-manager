@@ -1279,6 +1279,42 @@ Turning the list into a class is the operator's edit, and it is one line. The
 machines are sorted, so two exports of one cluster are the same file and a diff
 between them means something.
 
+## Cluster size
+
+`GET /api/v1/clusters/{id}/scale` answers the question that comes before either
+half of scaling: which of this cluster's nodes may be removed, what adding one
+would mean, and which machines could join.
+
+**It changes nothing.** Removing a node is that node's own route and adding one
+is provisioning; both already existed. What did not exist was the answer, and it
+was scattered across etcd's membership, the inventory, and arithmetic somebody
+had to do in their head — the part that goes wrong, and in a direction that
+feels like caution. Four voting members feel safer than three and tolerate
+exactly the same single loss.
+
+Every refusal on this route comes from `upgrade.RefuseIfCannotSpareAVoter`, the
+same function `remove-from-cluster` calls, and is carried into the response
+**unchanged**. A screen that reached its own verdict would disagree with the
+route eventually and would do it quietly: it would look right until somebody
+clicked. `reason` is therefore never this route's paraphrase of another route's
+refusal.
+
+`members_known` is separate from `voting` because a count of zero that means
+"etcd has no voting members" and one that means "etcd was not asked" are
+different answers that send an operator to different places. A membership that
+cannot be read **does not fail the request**: it is carried into the plan as
+`members_problem`, every control-plane node is refused with it as the reason,
+and the inventory half of the answer — which machines are in the cluster, which
+workers can still go — still comes back. A cluster whose etcd is unreachable is
+exactly the cluster somebody is asking this about.
+
+A worker's removal is never gated on the membership. It is not a member.
+
+Machines that cannot join are **listed with a reason** rather than omitted:
+"there is nothing to add" and "there are two machines and both are unreachable"
+are different situations. Machines belonging to a *different* cluster are left
+out entirely — they are not this cluster's business.
+
 ## Labels and machine classes
 
 `PUT /api/v1/machines/{id}/labels` **replaces** a machine's labels. Replaces and
@@ -2072,7 +2108,7 @@ conflict.last-voting-member`. A removal is not an upgrade — there is no node
 coming back afterwards — so it is the last point at which anything can say no.
 
 The same decision governs `remove-from-cluster` further down, and it is reached
-through one function (`upgrade.refuseIfTheClusterCannotSpareAVoter`) rather than
+through one function (`upgrade.RefuseIfCannotSpareAVoter`) rather than
 two copies. Two doors into the same rule answering differently is the failure
 this is written to avoid, and it had already happened: the member route refused
 and the node route read no membership at all.

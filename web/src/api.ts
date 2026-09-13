@@ -1105,6 +1105,53 @@ export const templatePlanResponseSchema = z.object({
 
 export type TemplatePlan = z.infer<typeof templatePlanSchema>
 
+/* ---------------------------------------------------------------------- */
+/* Cluster scale (V2 phase 8)                                              */
+/* ---------------------------------------------------------------------- */
+
+export const scaleRemovalSchema = z.object({
+  machine: z.string(),
+  name: z.string().default(''),
+  role: z.string().default(''),
+  allowed: z.boolean().default(false),
+  /** Why not, in the words of whatever refused. Never this screen's own
+   * paraphrase: two accounts of one condition is how an operator comes to
+   * believe the screen and the server disagree. */
+  reason: z.string().default(''),
+})
+
+export const scaleCandidateSchema = z.object({
+  machine: z.string(),
+  name: z.string().default(''),
+  ready: z.boolean().default(false),
+  reason: z.string().default(''),
+})
+
+export const scalePlanSchema = z.object({
+  cluster: z.string(),
+  name: z.string().default(''),
+  control_plane: z.number().default(0),
+  workers: z.number().default(0),
+  /** Whether etcd was read at all. A voting count of 0 that means "none" and
+   * one that means "not asked" are different answers. */
+  members_known: z.boolean().default(false),
+  voting: z.number().default(0),
+  tolerates: z.number().default(0),
+  members_problem: z.string().default(''),
+  removals: z.array(scaleRemovalSchema).default([]),
+  additions: z.array(scaleCandidateSchema).default([]),
+  /** The arithmetic in words. It is why the screen exists. */
+  advice: z.array(z.string()).default([]),
+  sentence: z.string().default(''),
+})
+
+export const scalePlanResponseSchema = z.object({
+  plan: scalePlanSchema,
+  notice: z.string().default(''),
+})
+
+export type ScalePlan = z.infer<typeof scalePlanSchema>
+
 export const fingerprintSchema = z.object({
   endpoint: z.string(),
   fingerprint: z.string(),
@@ -2083,6 +2130,22 @@ export const api = {
         'POST',
         `/api/v1/service-accounts/${encodeURIComponent(id)}/token`,
         serviceAccountTokenSchema,
+      ),
+  },
+
+  scale: {
+    /**
+     * What changing this cluster's size would mean.
+     *
+     * A read, and there is deliberately no companion that scales anything:
+     * removing a node is that node's own action and adding one is
+     * provisioning. What was missing was never a button.
+     */
+    plan: (cluster: string): Promise<z.infer<typeof scalePlanResponseSchema>> =>
+      sendJSON(
+        'GET',
+        `/api/v1/clusters/${encodeURIComponent(cluster)}/scale`,
+        scalePlanResponseSchema,
       ),
   },
 

@@ -627,6 +627,7 @@ var routeBudgets = []routeBudget{
 		route: "POST /api/v1/machines/{id}/remove-from-cluster",
 		calls: []upstreamCall{
 			{name: "NewClusterClient: Version", class: nodeProbeCall},
+			{name: "EtcdMemberList (control-plane nodes only -- does the cluster survive this)", class: nodeFastReadCall},
 			{name: "EtcdLeaveCluster (control-plane nodes only)", class: nodeMutationCall},
 			{name: "Reset", class: nodeMutationCall},
 		},
@@ -642,7 +643,25 @@ var routeBudgets = []routeBudget{
 			"told to leave etcd, and stopping there is better than wiping it anyway.",
 		why: "The node leaves etcd and is then wiped, in that order and on one connection. " +
 			"Doing the removal from another node while this one still runs leaves a member " +
-			"that believes it is in a cluster that has forgotten it.",
+			"that believes it is in a cluster that has forgotten it. The membership read in " +
+			"front of both is what decides whether the cluster survives losing this node, and " +
+			"it is first because a refusal after the etcd leave would be a refusal in name.",
+	},
+	{
+		route: "GET /api/v1/clusters/{id}/scale",
+		calls: []upstreamCall{
+			{name: "NewClusterClient: Version", class: nodeProbeCall},
+			{name: "EtcdMemberList", class: nodeFastReadCall},
+		},
+		routeDeadline: handlers.EtcdRouteBudget,
+		verdict:       withinBudget,
+		clipping:      uncut,
+		why: "The same pair as the member list, because the membership is the only thing on " +
+			"this route that leaves the process -- everything else is records already held. " +
+			"A membership that cannot be read does not fail the request: it is carried into " +
+			"the plan as the reason no control-plane node is offered for removal, because a " +
+			"cluster whose etcd is unreachable is exactly the cluster somebody is on this " +
+			"screen about.",
 	},
 	{
 		route:         "GET /api/v1/upgrade/releases",

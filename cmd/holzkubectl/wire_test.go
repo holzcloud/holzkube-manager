@@ -8,6 +8,7 @@ import (
 	"github.com/holzcloud/holzkube-manager/internal/clustertemplate"
 	"github.com/holzcloud/holzkube-manager/internal/inventory"
 	"github.com/holzcloud/holzkube-manager/internal/model"
+	"github.com/holzcloud/holzkube-manager/internal/scale"
 )
 
 // This file is the guard for the one way a client of a JSON API is wrong
@@ -53,6 +54,9 @@ func TestEveryNameThisToolDecodesIsOneTheServerSends(t *testing.T) {
 			// class -- which machines, right now -- and neither is stored.
 			addedByTheHandler: []string{"sentence", "count"},
 		},
+		{what: "a scale plan", client: scaleRow{}, server: scale.Plan{}},
+		{what: "a removal decision", client: scaleRemovalRow{}, server: scale.Removal{}},
+		{what: "a join candidate", client: scaleCandidateRow{}, server: scale.Candidate{}},
 		{what: "a template plan", client: planRow{}, server: clustertemplate.Plan{}},
 		{what: "one side of a plan", client: nodeSetRow{}, server: clustertemplate.NodeSetPlan{}},
 	} {

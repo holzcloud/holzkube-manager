@@ -500,6 +500,41 @@ Every condition has to hold. A class with no conditions is refused rather than
 stored — it would match nothing, and the reading that makes it match everything
 is the one that costs a cluster.
 
+### Growing and shrinking a cluster
+
+Each cluster card answers **what can this cluster spare?** — which of its nodes
+may be removed, and what adding one would actually buy. Nothing on it changes
+anything: removing a node is that node's own action and adding one is
+provisioning. What was missing was never a button.
+
+The arithmetic is the reason it exists, and it goes wrong in a direction that
+feels like caution. A majority of *n* is *n/2+1*, so **an even number of voting
+members tolerates exactly what the odd number below it does**: four control-plane
+nodes survive losing one, the same as three, and the fourth is paying for itself
+and buying nothing. Two survive losing none — the same as one. The panel says
+this in words, with the numbers, because an operator told "add two" and not why
+will add one.
+
+A control-plane node that cannot be removed says so with the reason the removal
+route itself would give, including what to do instead. It is the same sentence
+because it is produced by the same code: a screen with its own account of the
+rule looks right until somebody clicks.
+
+Two things this refuses that are worth naming:
+
+- **the only etcd member.** Removing it does not make the cluster smaller, it
+  ends it — no quorum left to rejoin, no member to add one through, and a
+  restore from a snapshot as the only way back. To take that node out of
+  service, reset it.
+- **one of two.** The cluster stops accepting writes and the Kubernetes API
+  stops with it. That one is recoverable by adding a control-plane node back.
+
+A locked node is not removable either (a lock is somebody saying "not this one",
+and a removal cannot walk past anything the way a rolling upgrade can), and the
+reason they wrote is on the refusal.
+
+`holzkubectl scale <cluster>` prints the same thing.
+
 ### Cluster templates
 
 A cluster described in one file, with its nodes chosen by machine class rather
@@ -550,6 +585,7 @@ holzkubectl nodes                 every machine, across every cluster
 holzkubectl clusters              the clusters this instance manages
 holzkubectl jobs                  long-running operations and where they are
 holzkubectl classes               the machine classes and what they name now
+holzkubectl scale <cluster>       which of a cluster's nodes may be removed
 holzkubectl label <id> k=v ...    replace a machine's labels (none clears them)
 holzkubectl template plan <file>  what a cluster template would mean
 holzkubectl template export <id>  write a cluster down as a template
