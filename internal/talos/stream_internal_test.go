@@ -36,6 +36,11 @@ type scriptedStream struct {
 	steps []func() error
 	n     int
 
+	// trailers is what Trailer answers. A server that answered sends them and
+	// one that was never reached does not, which is the whole of the
+	// unreachable/rejected distinction.
+	trailers metadata.MD
+
 	// trailerDelay is how long Trailer blocks. RecvMsg reads the trailer after
 	// the receive has settled and before the deferred timer.Stop, which makes
 	// it the one place a test can hold the code inside that window long enough
@@ -56,7 +61,7 @@ func (s *scriptedStream) Context() context.Context { return s.ctx }
 
 func (s *scriptedStream) Trailer() metadata.MD {
 	time.Sleep(s.trailerDelay)
-	return nil
+	return s.trailers
 }
 
 // unavailable is an ordinary transport failure: something this stream can fail
@@ -76,6 +81,7 @@ func newTestStream(t *testing.T, window time.Duration, steps int) *policyStream 
 		ClientStream: &scriptedStream{ctx: ctx, steps: make([]func() error, steps)},
 		conn:         &conn{target: Target{Machine: model.MachineID("stream-under-test")}},
 		op:           "Logs",
+		caller:       t.Context(),
 		cancel:       cancel,
 		unbounded:    true,
 		firstByte:    window,
@@ -241,5 +247,85 @@ func TestStreamWindowsComeFromTheDeadlinePolicy(t *testing.T) {
 	ps.gotData = true
 	if got := ps.window(); got != StreamIdleTimeout {
 		t.Errorf("the window after data is %v, want the idle timeout %v", got, StreamIdleTimeout)
+	}
+}
+
+// TestAStreamFailureIsClassified is CR-04.
+//
+// RecvMsg cancelled the stream and then asked classify about the context it had
+// just cancelled. classify returns a cancelled call's error untouched -- on the
+// sound argument that cancellation says the caller changed their mind and says
+// nothing about the node -- so every stream failure came back as the raw status
+// error. KindUnreachable and KindRejected were unreachable on every stream this
+// product opens, which means the breaker never heard about a node that stopped
+// answering in the middle of one, and neither did any caller branching on the
+// kind.
+//
+// The two cases below are the two sides of that classification, and they are
+// told apart by exactly one thing: whether the server sent trailers.
+func TestAStreamFailureIsClassified(t *testing.T) {
+	t.Parallel()
+
+	t.Run("a node that stopped answering is unreachable", func(t *testing.T) {
+		t.Parallel()
+
+		ps := newTestStream(t, time.Hour, 1)
+		script(t, ps).steps[0] = unavailable
+
+		err := ps.RecvMsg(nil)
+		kind, ok := ErrorKindOf(err)
+		if !ok {
+			t.Fatalf("the failure was not classified at all: %v", err)
+		}
+		if kind != KindUnreachable {
+			t.Errorf("Kind = %v, want %v; no trailers means the server never answered", kind, KindUnreachable)
+		}
+	})
+
+	t.Run("a node that refused is rejected", func(t *testing.T) {
+		t.Parallel()
+
+		ps := newTestStream(t, time.Hour, 1)
+		s := script(t, ps)
+		s.trailers = metadata.Pairs("content-type", "application/grpc")
+		s.steps[0] = func() error { return status.Error(codes.PermissionDenied, "no") }
+
+		err := ps.RecvMsg(nil)
+		kind, ok := ErrorKindOf(err)
+		if !ok {
+			t.Fatalf("the failure was not classified at all: %v", err)
+		}
+		if kind != KindRejected {
+			t.Errorf("Kind = %v, want %v; trailers mean a server answered and said no", kind, KindRejected)
+		}
+	})
+}
+
+// TestACallerCancellationIsStillNotAFaultOfTheNode is the property the broken
+// ordering happened to preserve, and the one a fix must not trade away.
+//
+// A cancelled fan-out must not open the breaker of every healthy node it was
+// walking. What makes that true is the caller's context, which is why the
+// stream now keeps it: asking the stream's own context conflated the caller
+// changing their mind with this package cleaning up after a failure.
+func TestACallerCancellationIsStillNotAFaultOfTheNode(t *testing.T) {
+	t.Parallel()
+
+	caller, cancelCaller := context.WithCancel(t.Context())
+
+	ps := newTestStream(t, time.Hour, 1)
+	ps.caller = caller
+	script(t, ps).steps[0] = func() error {
+		cancelCaller()
+		return status.Error(codes.Canceled, "context canceled")
+	}
+
+	err := ps.RecvMsg(nil)
+	if err == nil {
+		t.Fatal("the receive succeeded where the script fails it")
+	}
+	if kind, ok := ErrorKindOf(err); ok {
+		t.Errorf("a caller's own cancellation was classified as %v, which would open the breaker "+
+			"of every node a cancelled fan-out had reached", kind)
 	}
 }
