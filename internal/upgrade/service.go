@@ -453,14 +453,17 @@ func (s *Service) Restore(ctx context.Context, id model.MachineID, snapshot io.R
 }
 
 // RemoveNodeFromCluster is UPG-13.
-func (s *Service) RemoveNodeFromCluster(ctx context.Context, id model.MachineID, controlPlane bool) error {
-	cc, err := s.deps.Connect(ctx, id)
+func (s *Service) RemoveNodeFromCluster(ctx context.Context, m model.Machine) error {
+	cc, err := s.deps.Connect(ctx, m.ID)
 	if err != nil {
 		return err
 	}
 	defer cc.Close() //nolint:errcheck // the removal's verdict is its own
 
-	return RemoveNode(ctx, cc, controlPlane)
+	// The machine rather than an id and a bool. The caller used to derive
+	// `controlPlane` itself, which put the decision about which rules apply on
+	// the far side of the seam from the rules.
+	return RemoveNode(ctx, cc, m)
 }
 
 // anyControlPlane opens a client to the first control-plane node that answers.

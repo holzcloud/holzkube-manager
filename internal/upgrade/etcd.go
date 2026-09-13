@@ -127,6 +127,47 @@ func Members(ctx context.Context, cc *talos.ClusterClient, machines []model.Mach
 	return out, nil
 }
 
+// refuseIfTheClusterCannotSpareAVoter is the one place that decides whether a
+// cluster survives losing a voting etcd member.
+//
+// One place, because there are two doors into it and they must not answer
+// differently: RemoveMember, which takes a member out by id, and RemoveNode,
+// which is the button on a node's page. The second went two phases consulting
+// no membership at all, so the refusal existed beside it and never ran.
+//
+// Two cases, separated because the consequences are not the same size:
+//
+//   - **the only member.** Removing it does not make the cluster smaller, it
+//     ends it. There is no quorum left to rejoin and no member to add one
+//     through, and the way back is a restore from a snapshot.
+//   - **one of two.** The cluster stops accepting writes, and the Kubernetes
+//     API stops with it. That is recoverable by adding a member back; the
+//     first is not.
+//
+// The first case shipped excluded by a `VotingCount > 1` on the second one's
+// condition, which let the worse of the two through.
+//
+// The upgrade gate's single-node exemption is deliberately not here. A cluster
+// of one is exempt from the *upgrade* gate because it has no quorum to lose
+// and refusing would make the smallest homelab unupgradeable -- and the node
+// comes back. Nothing comes back from a removal.
+func refuseIfTheClusterCannotSpareAVoter(list MemberList, name string) error {
+	switch {
+	case list.VotingCount <= 1:
+		return fmt.Errorf("%w: %s is the only etcd member. Removing it does not make the "+
+			"cluster smaller, it ends it -- there would be no quorum left to rejoin and no "+
+			"member to add one through, and the only way back is a restore from a snapshot. "+
+			"To take this node out of service, reset it",
+			ErrLastVotingMember, name)
+
+	case list.Tolerates == 0:
+		return fmt.Errorf("%w: %s is one of %d voting members, and %d cannot lose one. Add a "+
+			"control-plane node first, or accept that the cluster stops accepting writes",
+			ErrLastVotingMember, name, list.VotingCount, list.VotingCount)
+	}
+	return nil
+}
+
 // RemoveMember removes one member from etcd (UPG-11).
 //
 // through is the node the call is made against, and it must not be the member
@@ -144,13 +185,10 @@ func RemoveMember(
 		return fmt.Errorf("upgrade: etcd has no member %s", id)
 	}
 
-	// Removing a voter from a cluster that cannot spare one is refused. A
-	// removal is not an upgrade -- there is no node coming back afterwards --
-	// so this is the last point at which anything can say no.
-	if member.Voting && list.Tolerates == 0 && list.VotingCount > 1 {
-		return fmt.Errorf("%w: %s is one of %d voting members, and %d cannot lose one. Add a "+
-			"control-plane node first, or accept that the cluster stops accepting writes",
-			ErrLastVotingMember, member.Name, list.VotingCount, list.VotingCount)
+	if member.Voting {
+		if err := refuseIfTheClusterCannotSpareAVoter(list, member.Name); err != nil {
+			return err
+		}
 	}
 
 	n, err := parseMemberID(id)
@@ -221,9 +259,28 @@ func Snapshot(ctx context.Context, cc *talos.ClusterClient, w io.Writer) (int64,
 func RemoveNode(
 	ctx context.Context,
 	cc *talos.ClusterClient,
-	controlPlane bool,
+	m model.Machine,
 ) error {
-	if controlPlane {
+	if m.Role == model.RoleControlPlane {
+		// Before anything, and this is the whole of the fix: read the
+		// membership and refuse if the cluster does not survive losing a
+		// voter. It is read through the node being removed, which is fine --
+		// it is still a member and still answering, or Connect would not have
+		// returned a client.
+		//
+		// A worker never reaches this. It is not a member, and a cluster whose
+		// etcd cannot be reached must not be a cluster whose workers cannot be
+		// removed.
+		list, err := Members(ctx, cc, nil)
+		if err != nil {
+			return fmt.Errorf("upgrade: %s is a control-plane node and its cluster's etcd "+
+				"membership could not be read, so there is no way to tell whether the cluster "+
+				"survives losing it. Nothing has been changed: %w", nameOf(m), err)
+		}
+		if err := refuseIfTheClusterCannotSpareAVoter(list, nameOf(m)); err != nil {
+			return err
+		}
+
 		leaveCtx, cancel, err := talos.WithClassDeadline(ctx, talos.MethodEtcdLeaveCluster)
 		if err != nil {
 			return err
@@ -232,7 +289,7 @@ func RemoveNode(
 		cancel()
 		if err != nil {
 			return fmt.Errorf("upgrade: %s could not leave etcd: %w. Nothing has been wiped",
-				"this node", err)
+				nameOf(m), err)
 		}
 	}
 
