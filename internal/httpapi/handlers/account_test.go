@@ -438,28 +438,64 @@ func TestSudoWindowExpires(t *testing.T) {
 // after the original window would have closed and is carried by the refresh the
 // first one earned.
 func TestDestructiveActionRestartsTheWindow(t *testing.T) {
-	const window = 400 * time.Millisecond
+	// Three seconds, where this used to say four hundred milliseconds, and the
+	// length is the whole repair. This test measures a property by waiting, and
+	// what makes waiting sound is that the wait dominates everything else
+	// going on. Everything else here is argon2id: opening the window verifies a
+	// password, and each change verifies one and hashes another. CI calibrates
+	// a single hash to about 250ms on its runners, so the old window had
+	// roughly one hash of margin either side -- and CI run 33 spent it and
+	// reported "the window was not restarted" about a window that had simply
+	// closed while a password was being hashed.
+	const window = 3 * time.Second
 
 	s := newServer(t, window)
 	c := s.newClient(t)
 	c.setup()
 
+	// The stamp is taken inside the sudo handler, so it lies somewhere between
+	// these two instants. Both are kept. The earlier one bounds how long the
+	// window is certainly still open, the later one bounds when it has
+	// certainly closed, and a test that used one number for both would be
+	// counting its own request latency as part of the window.
+	before := time.Now()
 	if resp, raw := c.sudo(testPass); resp.StatusCode != http.StatusNoContent {
 		t.Fatalf("sudo: got %d, want 204 (body: %s)", resp.StatusCode, raw)
 	}
+	closedBy := time.Now().Add(window)
 
-	// Late in the first window, still inside it.
-	time.Sleep(window * 5 / 8)
+	// Late in the first window and certainly inside it.
+	sleepUntil(before.Add(window / 2))
+	touchedNoEarlierThan := time.Now()
 	if resp, raw := c.changePassword(testPass, newPass); resp.StatusCode != http.StatusNoContent {
-		t.Fatalf("first change: got %d, want 204 (body: %s)", resp.StatusCode, raw)
+		t.Fatalf("first change: got %d, want 204 -- %s into a %s window (body: %s)",
+			resp.StatusCode, time.Since(before).Round(time.Millisecond), window, raw)
 	}
 
-	// Past where the original window ended, inside the one the first change
+	// Past where the original window ended, and inside the one the first change
 	// restarted.
-	time.Sleep(window * 5 / 8)
+	sleepUntil(closedBy.Add(50 * time.Millisecond))
+	if late := time.Since(touchedNoEarlierThan); late > window {
+		t.Fatalf("the requests took %s, so the restarted window had also closed before the second "+
+			"change could be made. That is this machine being slower than a %s window, not the "+
+			"window failing to restart", late.Round(time.Millisecond), window)
+	}
+
 	const thirdPass = "yet-another-long-passphrase"
 	if resp, raw := c.changePassword(newPass, thirdPass); resp.StatusCode != http.StatusNoContent {
 		t.Fatalf("second change: got %d, want 204 -- the window was not restarted (body: %s)", resp.StatusCode, raw)
+	}
+}
+
+// sleepUntil waits for an instant rather than for a duration.
+//
+// The difference is what a slow request before the wait does to it: sleeping
+// for a duration pushes the instant the test was aiming at by however long the
+// request took, which is exactly how a margin gets spent without anybody
+// choosing to spend it.
+func sleepUntil(deadline time.Time) {
+	if d := time.Until(deadline); d > 0 {
+		time.Sleep(d)
 	}
 }
 
