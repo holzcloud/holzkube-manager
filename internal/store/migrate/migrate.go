@@ -23,7 +23,7 @@ import (
 )
 
 // CurrentVersion is the schema version this binary understands.
-const CurrentVersion = 5
+const CurrentVersion = 6
 
 const (
 	// VersionFileName holds the schema version of a data directory.
@@ -132,6 +132,21 @@ var migrations = []Migration{
 		To:   5,
 		Apply: func(dir string) error {
 			path := filepath.Join(dir, "patches")
+			if err := os.MkdirAll(path, dirPerm); err != nil {
+				return fmt.Errorf("create %s: %w", path, err)
+			}
+			return nil
+		},
+	},
+	{
+		// Machine classes: named label selectors over the inventory. Nothing
+		// is migrated into it, because labels are the operator's own words and
+		// nobody has written any yet -- which is also why there is no
+		// backfill here that would invent some.
+		From: 5,
+		To:   6,
+		Apply: func(dir string) error {
+			path := filepath.Join(dir, "machine-classes")
 			if err := os.MkdirAll(path, dirPerm); err != nil {
 				return fmt.Errorf("create %s: %w", path, err)
 			}

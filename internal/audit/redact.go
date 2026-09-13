@@ -144,6 +144,24 @@ var allowlist = map[string][]string{
 	// what somebody investigating a machine that suddenly got 401s needs.
 	"service-account.rotate": {},
 
+	// Labels and machine classes, v1.16 phase 5.
+	//
+	// The labels themselves are permitted in clear, and that is a decision
+	// rather than a default. They are the operator's own words about their own
+	// machines -- "rack=b3", "storage=nvme" -- and a record saying "somebody
+	// relabelled a node" without saying to what answers nothing. What makes
+	// that safe here and not elsewhere is that nothing observed writes a
+	// label, so a label can never be a value a node reported.
+	"machine.labels": {"labels"},
+
+	// The class as a whole: its name, what it is for, and the conditions it
+	// selects on. Six months later the archive is the only place that says
+	// what a class meant at the moment it was used.
+	"machine-class.put": {"name", "description", "selector"},
+
+	// The class is in the path and there is no body.
+	"machine-class.delete": {},
+
 	// The kubeconfig fetch, v1.16 phase 2. The cluster is in the path and
 	// there is no body, so the list is empty -- and the entry exists because
 	// the event does, which is the whole reason this route is audited when the

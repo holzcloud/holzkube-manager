@@ -476,6 +476,23 @@ body without the PEM armour.
 Logs are capped per stream. The **newest** bytes are kept, cut on a line
 boundary, with a first line saying how much was dropped.
 
+## Labels and machine classes
+
+Labels are your words about a machine — `rack=b3`, `storage=nvme`, `owner=ops` —
+set on the node's page. Nothing the node reports ever changes them, and that is
+the whole point: a set of machines chosen by label stays the same set across a
+reboot, and one chosen by observed facts does not.
+
+A **machine class** is a named set, chosen by those labels, listed under the
+nodes table. It is a question rather than a group: a machine joins by being
+labelled and leaves by being unlabelled, and the membership is worked out
+whenever the class is read. There is one place to look when it is not what you
+expected.
+
+Every condition has to hold. A class with no conditions is refused rather than
+stored — it would match nothing, and the reading that makes it match everything
+is the one that costs a cluster.
+
 ## Reaching the cluster from the command line
 
 Two files, from the cluster card:

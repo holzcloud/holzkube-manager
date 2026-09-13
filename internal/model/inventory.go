@@ -164,6 +164,17 @@ type Machine struct {
 	// is a lock that gets cleared by the next person who finds it in the way.
 	LockReason string `json:"lock_reason,omitempty"`
 
+	// Labels are the operator's own words about this machine.
+	//
+	// They are deliberately not facts. Everything else on this record is
+	// something a node said about itself and is overwritten by the next
+	// observation; a label is something a person decided -- "rack=b3",
+	// "storage=nvme", "role=build" -- and no observation touches it. That
+	// separation is what makes a label safe to select on: a selector over
+	// observed facts would silently re-form a set when a node rebooted with a
+	// different disk.
+	Labels map[string]string `json:"labels,omitempty"`
+
 	// LostAddrAt marks that a *different* machine answered at Addr. The record
 	// is never overwritten in that case and a new one is created for the
 	// stranger (D-10); this field is what lets the screen say why this machine

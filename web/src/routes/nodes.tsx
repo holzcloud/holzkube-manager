@@ -4,6 +4,7 @@ import { RefreshCw } from 'lucide-react'
 import { useState } from 'react'
 import { api, type Machine } from '@/api'
 import { HealthField, StageBadge } from '@/components/HealthField'
+import { MachineClasses } from '@/components/MachineClasses'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
@@ -91,6 +92,8 @@ export function NodesPage() {
           ))}
         </TableBody>
       </Table>
+
+      <MachineClasses />
     </section>
   )
 }

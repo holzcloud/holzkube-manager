@@ -38,6 +38,7 @@ const machine: Machine = {
   lost_addr: false,
   certificate_expired: false,
   locked: false,
+  labels: {},
   lock_reason: '',
   unsupported_version: false,
   pre_release: false,
