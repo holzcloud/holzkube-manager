@@ -124,7 +124,7 @@ bestehenden Cluster exportierbar. Baut auf Phase 5 auf.
 so beschriebener Cluster entsteht, hängt an Phase 8 von v1.14 und damit an
 Hardware.
 
-### Phase 7: `holzkubectl` (Omni: „omnictl CLI", „Manage Omni Resources with omnictl")
+### Phase 7: `holzkubectl` (Omni: „omnictl CLI", „Manage Omni Resources with omnictl") — GEBAUT
 
 V2-API-01. Die Ausschlussbegründung von v1.15 war „ein vollständiges CLI ist
 eine zweite Oberfläche, und die Entscheidung ‚ein Interface pflegen' steht
@@ -134,6 +134,24 @@ ist und keine zweite Implementierung von irgendetwas. Das ist der einzige
 Zuschnitt, in dem „ein Interface pflegen" und „ein CLI haben" beide wahr sind.
 
 **Belegbar hier:** vollständig.
+
+Gebaut als `cmd/holzkubectl`: eigenes Binary, kein eingebettetes Frontend,
+Authentifizierung ausschließlich über einen Service-Account-Token. Kein Flag,
+das die Zertifikatsprüfung abschaltet — `HOLZKUBE_FINGERPRINT` pinnt wie D-03
+es für Knoten tut, und zwar über `VerifyConnection`, weil Go
+`VerifyPeerCertificate` bei einer wiederaufgenommenen TLS-Sitzung überspringt
+(dieselbe Falle, die `internal/talos/pin.go` beschreibt; ein Test stellt zwei
+Anfragen hintereinander, weil die erste allein nichts belegt).
+
+Was dabei gelernt wurde und den Rest des Milestones betrifft: **ein Client, der
+einen Schlüssel dekodiert, den die API nicht sendet, fällt nicht auf.**
+`encoding/json` lässt das Feld auf dem Nullwert stehen und meldet nichts, also
+stand in der Spalte NODES eine 0 und unter STEPS `0/3` — beides sah aus wie eine
+Antwort. Zwei von fünf Dekodier-Strukturen waren so falsch. Dagegen steht jetzt
+`cmd/holzkubectl/wire_test.go`, das jeden JSON-Namen des CLI gegen den
+Servertyp hält, der ihn erzeugt. Derselbe Fehler: das Plan-Route nimmt YAML,
+das CLI schickte `application/json`, und es funktionierte nur, weil nichts
+davor hinsieht.
 
 ### Phase 8: Cluster skalieren (Omni: „Scale a Cluster Up or Down")
 
