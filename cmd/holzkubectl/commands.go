@@ -23,6 +23,9 @@ const usage = `holzkubectl — a command-line client for a holzkube-manager inst
   holzkubectl jobs                  long-running operations and where they are
   holzkubectl classes               the machine classes and what they name now
   holzkubectl scale <cluster>       which of a cluster's nodes may be removed
+  holzkubectl renew-certificate <cluster>
+                                    issue this installation a fresh admin
+                                    certificate for the cluster
   holzkubectl label <id> k=v ...    replace a machine's labels (none clears them)
   holzkubectl template plan <file>  what a cluster template would mean
   holzkubectl template export <id>  write a cluster down as a template
@@ -88,6 +91,8 @@ func run(ctx context.Context, args []string) error {
 		return listClasses(ctx, client, asJSON)
 	case "scale":
 		return clusterScale(ctx, client, args[1:], asJSON)
+	case "renew-certificate":
+		return renewCertificate(ctx, client, args[1:], asJSON)
 	case "label":
 		return setLabels(ctx, client, args[1:], asJSON)
 	case "template":
@@ -158,6 +163,12 @@ type clusterRow struct {
 	Endpoint string `json:"endpoint"`
 	Locked   bool   `json:"locked"`
 	Nodes    int    `json:"nodes"`
+
+	// CertNotAfter is when the certificate this installation dials the cluster
+	// with expires. It is a string because this tool prints it and never does
+	// arithmetic on it -- the days-left figure is the server's, computed
+	// against the server's clock, which is the clock the warning uses.
+	CertNotAfter string `json:"client_cert_not_after"`
 }
 
 type jobRow struct {
@@ -435,6 +446,47 @@ func clusterScale(ctx context.Context, c *Client, args []string, asJSON bool) er
 	if body.Notice != "" {
 		fmt.Printf("\n%s\n", body.Notice)
 	}
+	return nil
+}
+
+// renewCertificate issues this installation a fresh admin certificate for one
+// cluster.
+//
+// It is here because this is the operation somebody wants on a timer: the
+// certificate expires once a year, and a cron entry that renews it in the
+// quarter before is a better answer than a banner somebody has to be logged in
+// to see. The server proves the new certificate against a node before keeping
+// it, so a failed run means the old one is still in place -- which is what
+// makes putting this in a cron entry defensible at all.
+func renewCertificate(ctx context.Context, c *Client, args []string, asJSON bool) error {
+	if len(args) != 1 {
+		return errUsage
+	}
+
+	var raw []byte
+	if err := c.Do(ctx, request{
+		Method: http.MethodPost,
+		Path:   "/api/v1/clusters/" + args[0] + "/client-certificate",
+
+		// A POST with no body. The cluster is in the path and there is nothing
+		// to choose: a renewal takes no options, because every option it could
+		// take would be a way to mint a certificate that is not the one this
+		// installation needs.
+		ContentType: "application/json",
+		Body:        []byte("{}"),
+	}, &raw); err != nil {
+		return err
+	}
+	if asJSON {
+		return printJSON(raw)
+	}
+
+	var cluster clusterRow
+	if err := json.Unmarshal(raw, &cluster); err != nil {
+		return err
+	}
+	fmt.Printf("%s: renewed, expiring %s. No node was touched.\n",
+		cluster.Name, cluster.CertNotAfter)
 	return nil
 }
 

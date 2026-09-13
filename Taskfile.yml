@@ -97,9 +97,21 @@ tasks:
       # findings to nobody. A version on screen makes the two comparable.
       #
       # If the local binary refuses to run, install the pinned one rather than
-      # working around it. `task lint:go:install` does exactly what CI does.
-      - golangci-lint --version
-      - golangci-lint run
+      # working around it. `task lint:go:install` does exactly what CI does,
+      # and this target prefers what it leaves in ./bin over whatever is on
+      # PATH -- because the PATH copy is the one nobody chose. A host with an
+      # older golangci-lint installed for some other repository refuses to
+      # load this config at all ("the Go language version used to build
+      # golangci-lint is lower than the targeted Go version"), and a host with
+      # a *newer* one is worse: it runs, it disagrees with CI, and nothing
+      # says which of the two answers is the one that will block a push.
+      - |
+        lint=golangci-lint
+        if [ -x ./bin/golangci-lint ]; then
+          lint=./bin/golangci-lint
+        fi
+        "$lint" --version
+        "$lint" run
 
   lint:go:install:
     desc: Install the exact golangci-lint CI pins, into ./bin.

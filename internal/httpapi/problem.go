@@ -214,6 +214,20 @@ const (
 	// removal has no node coming back afterwards.
 	CodeLastVotingMember = "conflict.last-voting-member"
 
+	// CodeNoCertificateAuthority: this cluster's stored bundle carries an
+	// admin certificate and no authority key, so nothing new can be issued
+	// from it (V2-OPS-02). It is a condition with a specific repair rather
+	// than a fault: the cluster was adopted from a talosconfig that did not
+	// carry the authority.
+	CodeNoCertificateAuthority = "conflict.no-certificate-authority"
+
+	// CodeCertificateRejected: a freshly minted client certificate reached no
+	// node, so the old one was kept. Its own code because it is the *safe*
+	// outcome of a renewal and not a failure of one -- nothing changed, and a
+	// client that treated it as an error would tell an operator their cluster
+	// is broken when what happened is that this refused to break it.
+	CodeCertificateRejected = "conflict.certificate-rejected"
+
 	// CodeUnknownSchematic: this node's Image Factory schematic could not be
 	// read, so an upgrade would install a stock system and silently remove
 	// every extension it has (UPG-03).

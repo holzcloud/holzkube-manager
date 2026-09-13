@@ -1279,6 +1279,53 @@ Turning the list into a class is the operator's edit, and it is one line. The
 machines are sorted, so two exports of one cluster are the same file and a diff
 between them means something.
 
+## Renewing this installation's client certificate
+
+`POST /api/v1/clusters/{id}/client-certificate` issues holzkube-manager a fresh
+admin certificate for one cluster (V2-OPS-02).
+
+The cluster card has warned about this certificate since D-23 shipped, on a
+ladder ending in *"every node in this cluster becomes unreachable at once"*, and
+there was nothing to click. A countdown to a door that does not exist is worse
+than no countdown: it teaches an operator that the warnings on that screen are
+not actionable.
+
+**It touches no node.** The certificate is minted from the cluster's own Talos
+certificate authority, which this installation holds, and a node trusts that
+authority rather than any particular certificate issued from it — so a fresh one
+is accepted the moment it is presented, with nothing rolled and nothing
+restarted. This is a different operation from rotating the authority itself,
+which changes what every node trusts and is **not built**.
+
+**The new certificate is proven before it is kept, and that ordering is the
+operation.** Minting is two lines; the way this goes wrong is replacing a
+working credential with one that is not, and finding out when the old one
+expires — precisely when nobody can get in to fix it. So a connection is opened
+with the new certificate and a node has to answer through it before anything is
+written. The check is a real connection and not a local signature verification:
+verifying against the stored authority would only prove this installation is
+consistent with itself, and what has to be true is that the *nodes* still trust
+that authority.
+
+Every machine in the cluster is tried, because "this certificate does not work"
+and "the node I picked is switched off" are different findings and only the
+first is a reason to throw a certificate away.
+
+It is **Destructive** (D-06, so it needs the re-authentication window) for the
+reason the password change is: it replaces the credential guarding access to a
+cluster's PKI.
+
+It is deliberately **not** under the cluster lock. INV-12 means "nothing may
+change this cluster", and this changes nothing on the cluster. Putting it behind
+the lock would mean an imported cluster kept read-only on purpose becomes
+permanently unreachable the day its certificate expires — the lock turning into
+the thing it exists to protect against.
+
+| code | HTTP | when |
+|---|---|---|
+| `conflict.no-certificate-authority` | 409 | the stored bundle carries an admin certificate and no authority key, so nothing new can be issued from it. The cluster was adopted from a talosconfig that did not carry the authority; the detail says how to get one. |
+| `conflict.certificate-rejected` | 409 | the new certificate reached no node, **so the old one was kept and nothing changed**. Its own code because this is the safe outcome of a renewal rather than a failure of one: either every node is unreachable, or the authority in this store is no longer the one the cluster trusts. |
+
 ## Cluster size
 
 `GET /api/v1/clusters/{id}/scale` answers the question that comes before either
