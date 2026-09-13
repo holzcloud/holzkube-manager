@@ -286,7 +286,7 @@ func (n *conn) streamPolicy(
 		caller:       ctx,
 		cancel:       cancel,
 		unbounded:    class.Unbounded(),
-		firstByte:    StreamFirstByteDeadline,
+		firstByte:    class.FirstByte(),
 		idle:         class.StreamIdle(),
 	}, nil
 }
@@ -682,6 +682,30 @@ func (c *ClusterClient) ApplyConfiguration(ctx context.Context, cfg []byte) (App
 // compile.
 func (c *ClusterClient) Bootstrap(ctx context.Context) error {
 	return c.conn.c.Bootstrap(ctx, &machine.BootstrapRequest{})
+}
+
+// BootstrapFromSnapshot bootstraps a node onto an etcd snapshot that
+// EtcdRecover has already uploaded to it.
+//
+// It is a separate method and not a flag on Bootstrap, because the two are
+// different operations that happen to share an RPC. Bootstrap starts a new,
+// empty cluster and refuses on a node that is already in one. This one
+// restarts an existing cluster's etcd from a database somebody took earlier,
+// which means the caller has already decided that the running state is worse
+// than the snapshot. A boolean parameter would let a caller reach the second
+// by mistyping the first.
+//
+// skipHashCheck turns off the snapshot's own integrity check. Talos wants it
+// for a snapshot taken by copying etcd's data directory off a node rather than
+// through the etcd API, because such a copy has no hash to check -- which is
+// precisely the snapshot you are left with on a cluster that had lost quorum
+// (see SnapshotNotice). Passing it for an API-taken snapshot skips the one
+// check that would have caught a truncated upload.
+func (c *ClusterClient) BootstrapFromSnapshot(ctx context.Context, skipHashCheck bool) error {
+	return c.conn.c.Bootstrap(ctx, &machine.BootstrapRequest{
+		RecoverEtcd:          true,
+		RecoverSkipHashCheck: skipHashCheck,
+	})
 }
 
 // Reboot restarts the node. Cluster-only, for the same reason as Bootstrap.

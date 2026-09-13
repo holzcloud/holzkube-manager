@@ -250,3 +250,32 @@ func DescribeMember(m EtcdMemberDetail) string {
 	}
 	return fmt.Sprintf("%s (id %x)", name, m.ID)
 }
+
+// EtcdRecover uploads a snapshot to a node so that a subsequent
+// BootstrapFromSnapshot can start etcd from it (UPG-12's other half).
+//
+// It is a client stream -- the only one this product makes -- and that is why
+// it takes a reader rather than bytes: an etcd database is as large as it is,
+// and reading a multi-gigabyte snapshot into memory to hand it over would put
+// the size of somebody's cluster into this process's resident set.
+//
+// Uploading is not restoring. This call leaves the snapshot on the node and
+// changes nothing: the node still runs whatever etcd it was running. What acts
+// on it is BootstrapFromSnapshot, and keeping them apart is what lets a restore
+// fail at the upload without having touched the cluster.
+func (c *ClusterClient) EtcdRecover(ctx context.Context, snapshot io.Reader) error {
+	_, err := c.conn.c.EtcdRecover(ctx, snapshot)
+	return err
+}
+
+// RestoreNotice is what a screen says before a restore (UPG-12).
+//
+// It is a constant for the same reason SnapshotNotice is: it states what the
+// operation does to a cluster, and every softer wording of it is a wording that
+// gets somebody to click.
+const RestoreNotice = "Restoring replaces the cluster's etcd with the contents of the snapshot. " +
+	"Everything written since the snapshot was taken is gone -- every object created, every " +
+	"change applied, every secret rotated. The cluster is unavailable while it happens, and the " +
+	"other control-plane nodes have to be reset and rejoined afterwards, because their etcd is " +
+	"the one being replaced and they will not agree with the recovered member. This is what you " +
+	"do when the alternative is rebuilding the cluster."
