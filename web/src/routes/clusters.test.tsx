@@ -3,6 +3,7 @@ import { render, screen } from '@testing-library/react'
 import type { ReactNode } from 'react'
 import { describe, expect, it } from 'vitest'
 import type { Cluster } from '@/api'
+import { ClusterTemplatePanel } from '@/components/ClusterTemplate'
 import { ClusterCard } from '@/routes/clusters'
 
 /**
@@ -99,5 +100,52 @@ describe('a cluster card', () => {
       'href',
       '/api/v1/clusters/a%2Fb%20c/support-bundle',
     )
+  })
+})
+
+/**
+ * The template panel, and the one thing it must not let anybody believe.
+ *
+ * Everything on this screen builds or changes something. This panel does not,
+ * and the notice that says so comes from the server rather than being written
+ * here — it is a statement about the server's limits, and a client that
+ * invented its own wording would be making a promise on the server's behalf.
+ */
+describe('the cluster template panel', () => {
+  it('offers the export with the limitation on it', () => {
+    render(
+      <QueryClientProvider
+        client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
+      >
+        <ClusterTemplatePanel clusterID="c-1" />
+      </QueryClientProvider>,
+    )
+
+    const link = screen.getByRole('link', { name: /Export this cluster/i })
+    expect(link).toHaveAttribute('href', '/api/v1/clusters/c-1/template')
+
+    // Why the export lists UUIDs rather than a machine class. Nothing here can
+    // know which label an operator meant as the reason a machine is in this
+    // cluster, and guessing would produce a file that selects a different set
+    // later.
+    expect(link.getAttribute('title')).toMatch(/guessing/i)
+    // And the panel says, before anything is planned, that nothing here
+    // applies a template.
+    expect(screen.getByText(/Nothing here applies/i)).toBeInTheDocument()
+  })
+
+  it('will not offer to plan an empty document', () => {
+    render(
+      <QueryClientProvider
+        client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
+      >
+        <ClusterTemplatePanel />
+      </QueryClientProvider>,
+    )
+
+    expect(screen.getByRole('button', { name: /What would this mean/i })).toBeDisabled()
+    // No cluster, no export link: the panel is still usable for a document
+    // that describes a cluster this installation does not have yet.
+    expect(screen.queryByRole('link', { name: /Export this cluster/i })).toBeNull()
   })
 })

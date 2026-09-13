@@ -761,6 +761,34 @@ async function sendBody<T>(
   return schema.parse(await response.json())
 }
 
+/**
+ * Sends a YAML document as the request body.
+ *
+ * A third body encoding, and the same justification as the second: this one is
+ * a document a person wrote, and the alternative is escaping it into a JSON
+ * string where nothing can read it back. It goes through sendPrebuilt so the
+ * sudo prompt and the session-expiry transition behave exactly as everywhere
+ * else.
+ */
+async function sendYAML<T>(
+  method: string,
+  path: string,
+  schema: z.ZodType<T>,
+  body: string,
+): Promise<T> {
+  const response = await sendPrebuilt(path, {
+    method,
+    headers: {
+      Accept: 'application/json',
+      'Content-Type': 'application/yaml',
+      [CSRF_HEADER]: CSRF_HEADER_VALUE,
+    },
+    credentials: 'same-origin',
+    body,
+  })
+  return schema.parse(await response.json())
+}
+
 async function sendJSON<T>(
   method: string,
   path: string,
@@ -1043,6 +1071,39 @@ export const machineClassesSchema = z.object({
 
 export type LabelSelector = z.infer<typeof labelSelectorSchema>
 export type MachineClass = z.infer<typeof machineClassSchema>
+
+/* ---------------------------------------------------------------------- */
+/* Cluster templates (V2 phase 6)                                          */
+/* ---------------------------------------------------------------------- */
+
+export const nodeSetPlanSchema = z.object({
+  /** A machine class id, or "named" when the template listed machines. */
+  source: z.string().default(''),
+  machines: z.array(z.string()).default([]),
+  /** What the template asked for; 0 means all of them. */
+  wanted: z.number().default(0),
+})
+
+export const templatePlanSchema = z.object({
+  cluster: z.string(),
+  exists: z.boolean().default(false),
+  control_plane: nodeSetPlanSchema,
+  workers: nodeSetPlanSchema,
+  /** Why it cannot be applied as written. Empty means it can. */
+  problems: z.array(z.string()).default([]),
+  /** Worth knowing and not a problem. */
+  notes: z.array(z.string()).default([]),
+  sentence: z.string().default(''),
+})
+
+export const templatePlanResponseSchema = z.object({
+  plan: templatePlanSchema,
+  /** What these routes deliberately do not do. It comes from the server
+   * because it is a statement about the server's limits. */
+  notice: z.string().default(''),
+})
+
+export type TemplatePlan = z.infer<typeof templatePlanSchema>
 
 export const fingerprintSchema = z.object({
   endpoint: z.string(),
@@ -2023,6 +2084,25 @@ export const api = {
         `/api/v1/service-accounts/${encodeURIComponent(id)}/token`,
         serviceAccountTokenSchema,
       ),
+  },
+
+  clusterTemplates: {
+    /**
+     * What a template would mean for the fleet as it is now.
+     *
+     * The body is the YAML itself rather than a JSON envelope: the document is
+     * one an operator wrote in an editor and keeps in a repository, and
+     * escaping every newline to post it produces a file nobody can read in a
+     * request log.
+     *
+     * There is deliberately no `apply` here, because there is no route that
+     * applies one.
+     */
+    plan: (yaml: string): Promise<z.infer<typeof templatePlanResponseSchema>> =>
+      sendYAML('POST', '/api/v1/cluster-templates/plan', templatePlanResponseSchema, yaml),
+
+    /** Where the browser downloads a cluster written down as a template. */
+    exportPath: (id: string): string => `/api/v1/clusters/${encodeURIComponent(id)}/template`,
   },
 
   labels: {

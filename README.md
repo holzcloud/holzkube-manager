@@ -493,6 +493,24 @@ Every condition has to hold. A class with no conditions is refused rather than
 stored — it would match nothing, and the reading that makes it match everything
 is the one that costs a cluster.
 
+### Cluster templates
+
+A cluster described in one file, with its nodes chosen by machine class rather
+than listed by UUID, so the description survives a machine being replaced.
+
+**Nothing applies a template.** The clusters screen says what a document would
+mean for the machines this installation knows about — which machines each class
+resolves to, and what does not add up — and building or changing a cluster is
+still the provisioning and upgrade screens, one decision at a time. That is
+deliberate: applying is provisioning, and provisioning has not yet run against
+real hardware here.
+
+An existing cluster can be exported as a template. The export lists its machines
+by UUID rather than by class, because nothing here can know which of your labels
+you meant as the *reason* a machine is in that cluster — guessing would give you
+a file that quietly selects a different set later. Turning the list into a class
+is one line, and it is yours to write.
+
 ## Reaching the cluster from the command line
 
 Two files, from the cluster card:

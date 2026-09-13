@@ -130,6 +130,16 @@ linters:
           - gosec
         text: "G705"
 
+      # The cluster-template export, and the same argument as the two
+      # configuration downloads above it: the bytes are YAML this process
+      # generated from its own stored records, served as an attachment with
+      # nosniff and a Content-Disposition. The taint analysis follows the store
+      # read into the response and cannot see the encoder in between.
+      - path: internal/httpapi/handlers/templates.go
+        linters:
+          - gosec
+        text: "G705"
+
       # A test starting a simulated node inside a subtest is starting a
       # process-lifetime fixture, not making a call: talossim.New listens and
       # serves until the test cleans it up, and handing it the subtest's

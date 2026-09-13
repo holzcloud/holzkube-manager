@@ -767,6 +767,25 @@ var routeBudgets = []routeBudget{
 		why:           "store-only.",
 	},
 	{
+		route:         "POST /api/v1/cluster-templates/plan",
+		calls:         nil,
+		routeDeadline: 0,
+		verdict:       withinBudget,
+		clipping:      uncut,
+		why: "store-only, and that is the scope of the feature rather than an accident of this " +
+			"route: a plan says what a template would mean for the machines this installation " +
+			"already knows about. Applying one is provisioning, and there is no route here that " +
+			"does it.",
+	},
+	{
+		route:         "GET /api/v1/clusters/{id}/template",
+		calls:         nil,
+		routeDeadline: 0,
+		verdict:       withinBudget,
+		clipping:      uncut,
+		why:           "store-only: the export is written from the stored records.",
+	},
+	{
 		route:         "GET /api/v1/clusters/{id}/talosconfig",
 		calls:         nil,
 		routeDeadline: 0,
