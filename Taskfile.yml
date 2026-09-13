@@ -7,6 +7,10 @@ vars:
   # the real tag through the same variable. The substitution is plain shell so
   # that nothing here depends on a go-task version-specific var syntax.
   LDFLAGS: -s -w -X main.version=$(git describe --tags --always --dirty 2>/dev/null || echo dev)
+  # The linter version CI pins. It is here so that `task lint:go` can name it
+  # next to the one actually installed; changing it means changing
+  # .github/workflows/ci.yml in the same commit.
+  GOLANGCI_VERSION: v2.13.1
 
 tasks:
   default:
@@ -75,6 +79,13 @@ tasks:
   lint:go:
     desc: Lint the Go sources.
     cmds:
+      # The version is printed rather than merely used. CI pins
+      # {{.GOLANGCI_VERSION}} in .github/workflows/ci.yml, and a local binary
+      # built against an older Go than go.mod targets refuses to run at all --
+      # which is how this project once carried an "the linter cannot run here"
+      # note for a month while CI ran it on every push and reported the
+      # findings to nobody. A version on screen makes the two comparable.
+      - golangci-lint --version
       - golangci-lint run
 
   lint:web:
@@ -87,6 +98,23 @@ tasks:
     cmds:
       - task: lint:go
       - task: lint:web
+
+  ci:
+    desc: Run the gates CI runs, in CI's order, so that "it is green here" means the same thing.
+    #
+    # It exists because it did not, and the gap had a cost: local runs used
+    # `task test` and `task lint:web`, CI additionally ran the pinned Go linter
+    # and the frontend suite, and main sat red for nine commits while every
+    # local run was green. The order is CI's rather than a convenient one --
+    # the web gates come first because they are the quickest to fail, and the
+    # build precedes the Go steps because go:embed reads the bundle.
+    cmds:
+      - npm --prefix web ci
+      - task: lint:web
+      - task: test:web
+      - task: build
+      - task: lint:go
+      - task: test
 
   fmt:
     desc: Format Go and frontend sources in place.

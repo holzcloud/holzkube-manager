@@ -226,6 +226,17 @@ func (s *Server) startVersionOutOfSupportedRange(sc Scenario) (func(), error) {
 // The old address refuses rather than times out, which is the client-observable
 // difference between a released port and a black hole -- and only the refusing
 // one models a machine that gave its address back.
+//
+// "Severed" has to mean severed at an instant rather than over an interval, and
+// that took a second fix. Closing a listening socket stops the kernel
+// completing new handshakes and says nothing about one it completed a
+// microsecond earlier: that connection sits in the accept queue, the serve loop
+// takes it, and the node answers at an address it has given up. A gRPC client
+// whose connection has just died redials immediately, which puts it exactly
+// there. The symptom was this scenario's own contract assertion failing --
+// "the client at the abandoned address answered" -- about one full-suite run in
+// three under -race, never reproducibly on its own. trackingListener carries a
+// severed flag for it; see closeConns.
 func (s *Server) rebind() error {
 	s.lmu.Lock()
 	old := s.tcp
@@ -335,6 +346,11 @@ type trackingListener struct {
 
 	mu    sync.Mutex
 	conns map[net.Conn]struct{}
+
+	// severed marks a listener whose address the node has given up. Accept
+	// refuses from here on, which is what makes the sever a point in time
+	// rather than an interval.
+	severed bool
 }
 
 func newTrackingListener(l net.Listener) *trackingListener {
@@ -350,15 +366,39 @@ func (t *trackingListener) Accept() (net.Conn, error) {
 	tc := &trackedConn{Conn: c, owner: t}
 
 	t.mu.Lock()
+	if t.severed {
+		// The window this closes is not theoretical: with 50 ms dropped
+		// between the sever and the Close below, ip_changes_on_reboot failed
+		// five runs in five, and without it the whole suite under -race failed
+		// about one run in three -- on CI as well as locally.
+		//
+		// A connection the kernel completed while this listener was being
+		// severed is a connection to an address the node has given up. Serving
+		// it makes the simulator do something a machine cannot: answer at an
+		// address it no longer holds. That is the exact failure
+		// ip_changes_on_reboot exists to rule out, produced by the simulator
+		// rather than caught by it.
+		t.mu.Unlock()
+		_ = c.Close()
+		return nil, net.ErrClosed
+	}
 	t.conns[c] = struct{}{}
 	t.mu.Unlock()
 
 	return tc, nil
 }
 
-// closeConns severs every connection accepted on this listener.
+// closeConns severs every connection accepted on this listener, and stops it
+// accepting any more.
+//
+// The two halves are one operation on purpose. Closing the listener stops the
+// kernel completing new handshakes but does nothing about one it completed a
+// microsecond earlier, and that connection is then accepted by the serve loop
+// and served -- on an address the node has abandoned. The flag is what makes
+// the sever atomic from the client's point of view.
 func (t *trackingListener) closeConns() {
 	t.mu.Lock()
+	t.severed = true
 	conns := make([]net.Conn, 0, len(t.conns))
 	for c := range t.conns {
 		conns = append(conns, c)

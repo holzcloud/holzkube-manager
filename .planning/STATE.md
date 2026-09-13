@@ -4,10 +4,10 @@ milestone: v1.15
 current_phase: 3
 current_phase_name: "Prometheus-/metrics (v1.15)"
 status: milestone-closed
-stopped_at: v1.15 vollstaendig; Lint und Testlauf erstmals gruen (Fenster 77, 89 zu). OPS-05 bleibt der einzige Release-Blocker (Fenster 87)
-last_updated: "2026-09-12T17:30:00.000Z"
-last_activity: 2026-09-12
-last_activity_desc: v1.15 closed out; v1.15.0-beta.1 amd64 built, container verified, artifact delivered
+stopped_at: v1.15 vollstaendig, CI auf main wieder gruen (Fenster 92, 93 zu). OPS-05 bleibt der einzige Release-Blocker (Fenster 87)
+last_updated: "2026-09-13T09:40:00.000Z"
+last_activity: 2026-09-13
+last_activity_desc: CI had been red on main for nine commits; both causes found and fixed
 state_head: a474d2522823cbfb436ee720dee35494890281a3
 progress:
   total_phases: 3
@@ -58,6 +58,25 @@ Code. Nebenbei sind zwei alte, stille Supervisions-Fehler gefallen: ein
 Lesevorgang vor `Start()` verhinderte jede Überwachung, und `Supervise()` band
 den Supervisor an den Request-Context des HTTP-Handlers. Siehe
 `.planning/phases/v1.15-02-cosi-watches/02-SUMMARY.md`.
+
+**CI war neun Commits lang rot, und niemand hat hingesehen — diese Sitzung
+nicht, die sieben davon selbst gepusht hat (Fenster 92).** Seit Lauf 12
+schlug `Build, lint and test` fehl: Läufe 12–19 an genau den golangci-lint-
+Befunden, die Fenster 77 als „nicht ausführbar" führte, Lauf 20 an einem Flake.
+Die Zeile *„Required status check 'Build, lint and test' is expected"* stand bei
+jedem Push im Ausgang und wurde jedes Mal als Branch-Protection-Rauschen
+gelesen. **Ein lokal grüner Lauf ist kein CI-Lauf:** CI fährt `-race` und einen
+gepinnten Linter, und beides hat hier Dinge gefunden, die lokal grün waren.
+
+**Der Flake war ein echter Fehler im Simulator (Fenster 93), und zwar genau
+der, gegen den `ip_changes_on_reboot` existiert.** `severListener` schloss erst
+die Verbindungen und dann den Listener — dazwischen nimmt die Serve-Schleife
+eine Verbindung an, die der Kernel eine Mikrosekunde vorher fertig gehandshaked
+hat, und bedient sie **auf einer Adresse, die der Node aufgegeben hat**. Genau
+dort landet der gRPC-Client, der nach dem Abriss sofort neu wählt. Nachgewiesen
+statt vermutet: 50 ms in das Fenster gelegt → fünf von fünf Läufen rot.
+Behoben mit einem `severed`-Flag, das aus dem Sever einen Zeitpunkt statt eines
+Intervalls macht, plus zwei internen Tests, die ohne den Fix rot sind.
 
 **Der Linter lief zum ersten Mal, und er hat ein Sicherheitsloch gefunden, das
 seit Phase 8 offen war.** `golangci-lint` 2.13.2 gegen go1.26 meldete 45
