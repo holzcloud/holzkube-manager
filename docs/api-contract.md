@@ -1204,6 +1204,55 @@ is not a missing code: it is every one of these failures arriving as
 `internal.unexpected` — which by contract carries no detail — and staying that
 way forever in an archive with no deletion path.
 
+## Cluster templates
+
+Two routes, and **neither of them applies anything**. That is the scope and it
+is stated rather than implied: applying a template is provisioning, and
+provisioning is the one part of this product that has never run against real
+hardware. A route that drove it from a YAML file would move that gap somewhere
+harder to see.
+
+`POST /api/v1/cluster-templates/plan` takes a template **as the request body, in
+YAML** — not wrapped in a JSON envelope. The document is one an operator wrote
+in an editor and keeps in a repository, and escaping every newline to post it
+produces a file nobody can read in a request log.
+
+It answers with what the document would mean for the machines this installation
+knows about right now: which machines each side resolves to, what does not add
+up, and a sentence saying so. A class is resolved at the moment the template is
+read, which is the whole reason a template is worth more than a list of UUIDs.
+
+The document is parsed **strictly**: an unknown field is a refusal. That is the
+opposite of what this API's own Image Factory client does with upstream
+responses, and the difference is who wrote the document — an unknown field from
+a third party is their addition, and an unknown field here is this operator's
+typo.
+
+Two refusals are worth naming because they are what the format makes easy:
+
+- a node set that gives both a `machineClass` and a list of `machines`, because
+  one of them would be ignored and nothing says which;
+- a `count` with no class, because a count picks from a class and a list of
+  machines is already the count.
+
+And one problem is found at plan time rather than parse time, because it needs
+the fleet: a machine named in both `controlPlane` and `workers`. Two lists of
+UUIDs is exactly where that mistake lives.
+
+An **even control plane is a note and not a refusal**. Four voting members
+tolerate no more failures than three do, which is worth saying — but somebody
+may be mid-change, and refusing there is a product telling an operator they
+cannot do what they are doing.
+
+`GET /api/v1/clusters/{id}/template` writes an existing cluster down as one.
+**The export lists machines by UUID and never by class**, and that is a
+limitation stated rather than hidden: nothing here can know which of an
+operator's labels they meant as the *reason* a machine is in this cluster, and
+guessing would produce a document that quietly selects a different set later.
+Turning the list into a class is the operator's edit, and it is one line. The
+machines are sorted, so two exports of one cluster are the same file and a diff
+between them means something.
+
 ## Labels and machine classes
 
 `PUT /api/v1/machines/{id}/labels` **replaces** a machine's labels. Replaces and
