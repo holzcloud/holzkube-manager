@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/holzcloud/holzkube-manager/internal/httpapi"
+	"github.com/holzcloud/holzkube-manager/internal/model"
 	"github.com/holzcloud/holzkube-manager/internal/nodestream"
 	"github.com/holzcloud/holzkube-manager/internal/streamhub"
 )
@@ -53,6 +54,7 @@ func StreamRoutes(d httpapi.Deps) []httpapi.Route {
 			Method:          http.MethodGet,
 			Pattern:         "/api/v1/stream",
 			RequiresSession: true,
+			MinRole:         model.RoleReader,
 			Streaming:       true,
 			Handler:         handler(streamEvents(d)),
 		},

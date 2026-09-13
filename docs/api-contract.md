@@ -1204,6 +1204,73 @@ is not a missing code: it is every one of these failures arriving as
 `internal.unexpected` — which by contract carries no detail — and staying that
 way forever in an archive with no deletion path.
 
+## Accounts and roles
+
+Every route that needs a session also names the least privileged role that may
+use it, and a session route that names none **cannot be registered**: the
+process refuses to start. That is the same fail-closed shape as the retry
+allowlist and the audit redaction allowlist, and it is there for the same
+reason — a permission nobody chose is not a permission anybody reviewed.
+
+There are three roles and no more:
+
+| Role | May |
+|---|---|
+| `reader` | look. Read the fleet, the jobs, the plans and the streams; sign out; change their own password. |
+| `operator` | run the fleet: configure, upgrade, provision, reboot, reset, remove a node. |
+| `admin` | everything, plus the two things whose blast radius is the instance: manage accounts, and hand out the credentials that make this instance unnecessary. |
+
+The admin-only reads are the ones that hand over a credential or the contents of
+a cluster: `talosconfig`, `kubeconfig`, the etcd snapshot and its restore, the
+support bundle, the audit archive, and the cluster lock — because unlocking is
+what makes every other destructive route reachable.
+
+A request from an account without the role answers **403 `forbidden.role`**, and
+the detail names the role it needed. It is a 403 and not a 404: everybody who
+can receive it has already authenticated against this installation, and hiding
+the route would turn "ask an admin" into "file a bug".
+
+**An account with no stored role is an admin.** Every account created before
+roles existed has an empty one, and that account was the only account — reading
+it as the least privilege would demote an operator out of their own instance on
+the upgrade that introduced this. The empty role is not writable: creating an
+account with it is a 400.
+
+### Managing accounts
+
+`GET /api/v1/users` lists them. No password hash is ever reported, and there is
+no route that returns one — `auth.Users` strips it before the handler sees it,
+so the HTTP layer has nothing to leak. `linked_identity` says whether the
+account signs in through the identity provider; the issuer and subject are not
+reported, because they are somebody's identity at a third party.
+
+`POST /api/v1/users`, `POST /api/v1/users/{id}/role`,
+`POST /api/v1/users/{id}/password` and `DELETE /api/v1/users/{id}` are all
+**Destructive** and behind the sudo window. Each changes who can reach cluster
+PKI, which is the argument that made the operator's own password change
+destructive.
+
+Two refusals are the same rule seen from different sides, and they are separate
+codes because the remedy differs:
+
+| Code | Status | Means |
+|---|---|---|
+| `conflict.self-demotion` | 409 | an account tried to take away its own admin role. Another admin can do it. |
+| `conflict.last-admin` | 409 | the change would leave this instance with no admin. Promote another account first. |
+
+An account **may** delete itself, as long as it is not the last admin. Somebody
+leaving should not have to ask a colleague to remove them; a rule that refused
+it is a rule people work around by sharing an account.
+
+The password reset does not ask for the old password, and the account's own
+change does. That is not an oversight in either direction: the account's own
+change defends against a stolen session, and the reset exists precisely because
+nobody has the old password any more.
+
+**Single sign-on binds on first use and only when there is exactly one
+account.** With two, there is no answer to "which account is this identity", and
+guessing one is how a new provider subject takes over somebody else's account.
+
 ### Audit
 
 `cluster.import` permits `name`, `endpoint` and `fingerprint` in clear.

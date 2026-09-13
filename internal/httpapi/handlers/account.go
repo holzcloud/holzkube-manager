@@ -6,6 +6,7 @@ import (
 
 	"github.com/holzcloud/holzkube-manager/internal/auth"
 	"github.com/holzcloud/holzkube-manager/internal/httpapi"
+	"github.com/holzcloud/holzkube-manager/internal/model"
 )
 
 type changePasswordRequest struct {
@@ -36,6 +37,7 @@ func AccountRoutes(d httpapi.Deps) []httpapi.Route {
 			Destructive: true,
 
 			RequiresSession: true,
+			MinRole:         model.RoleReader,
 			Action:          "account.password",
 
 			Handler: handler(func(w http.ResponseWriter, r *http.Request) { changePassword(d, w, r) }),
