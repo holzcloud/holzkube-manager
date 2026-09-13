@@ -67,6 +67,28 @@ describe('a cluster card', () => {
     )
   })
 
+  it('offers the kubeconfig, which is the answer to "how do I run kubectl"', () => {
+    wrap(<ClusterCard cluster={cluster} />)
+
+    expect(screen.getByRole('link', { name: /kubeconfig/i })).toHaveAttribute(
+      'href',
+      '/api/v1/clusters/c-1/kubeconfig',
+    )
+  })
+
+  it('says what the kubeconfig is before somebody downloads it', () => {
+    wrap(<ClusterCard cluster={cluster} />)
+
+    // Two facts an operator needs before this file leaves the browser: it is
+    // full admin on the cluster, and nothing here can take it back. The
+    // talosconfig beside it is revocable in the sense that matters -- it is
+    // minted on demand and is not the credential this installation dials with
+    // -- and a kubeconfig is not.
+    const link = screen.getByRole('link', { name: /kubeconfig/i })
+    expect(link.getAttribute('title')).toMatch(/system:masters/i)
+    expect(link.getAttribute('title')).toMatch(/not revocable/i)
+  })
+
   it('escapes a cluster id in the paths it builds', () => {
     // Ids are this product's own and contain nothing exotic today. The
     // encoding is here so that the day one does, the link breaks visibly in

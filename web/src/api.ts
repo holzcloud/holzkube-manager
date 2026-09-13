@@ -1536,6 +1536,19 @@ export const api = {
       `/api/v1/clusters/${encodeURIComponent(id)}/support-bundle`,
 
     /**
+     * The cluster's admin kubeconfig, as a path rather than a fetch, for the
+     * same reason as the two above.
+     *
+     * Unlike them it reaches a node: the kubeconfig is rendered by a
+     * control-plane node from the machine configuration it is running, not by
+     * holzkube-manager from anything it stores. So this one can fail because
+     * the cluster is unreachable, and the browser shows the problem document
+     * rather than downloading it — which is the ordinary behaviour of a link
+     * to something that is not there, and better than a spinner.
+     */
+    kubeconfigPath: (id: string): string => `/api/v1/clusters/${encodeURIComponent(id)}/kubeconfig`,
+
+    /**
      * Unlocking is destructive: it is what makes every other destructive route
      * reachable on this cluster. The 428 interceptor opens the password prompt
      * and replays this request, so this screen needs no confirmation of its

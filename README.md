@@ -405,6 +405,22 @@ body without the PEM armour.
 Logs are capped per stream. The **newest** bytes are kept, cut on a line
 boundary, with a first line saying how much was dropped.
 
+## Reaching the cluster from the command line
+
+Two files, from the cluster card:
+
+- **talosconfig** — an admin client configuration for `talosctl`. It is rendered
+  here from the stored secrets bundle and reaches no node, and the certificate in
+  it is minted on demand rather than being the one holzkube-manager dials with:
+  losing your copy does not affect this instance's access.
+- **kubeconfig** — admin credentials for the cluster's Kubernetes, so `kubectl`
+  works. Unlike the talosconfig it is rendered by a control-plane node and this
+  is a passthrough, so it can fail when the cluster cannot be reached.
+
+The kubeconfig download is **recorded in the audit log** and the talosconfig is
+not. What it hands over is `system:masters`, and nothing here can take it back —
+rotating the cluster's Kubernetes CA is what withdraws it.
+
 ## What this product does not do
 
 One operation it performs half of, said here because a product that does the
