@@ -2,9 +2,9 @@
 schema_version: 1
 open_count: 60
 waived_count: 0
-fixed_count: 43
-total_count: 103
-last_updated: 2026-09-13T12:00:00.000Z
+fixed_count: 45
+total_count: 105
+last_updated: 2026-09-13T12:30:00.000Z
 ---
 
 # Broken Windows Ledger
@@ -119,6 +119,9 @@ last_updated: 2026-09-13T12:00:00.000Z
 | 101 | 16 | deviation | cmd/holzkubectl/commands.go |  | DREI STILLE DRIFTS IM NEUEN CLI, ALLE VON DERSELBEN ART: ein Client, der einen Schluessel dekodiert, den die API nicht sendet, faellt nicht auf. encoding/json laesst das Feld auf dem Nullwert stehen und meldet nichts. Die Spalte NODES las 'machine_count' (die API sendet 'nodes') und zeigte 0; die Schritt-Zaehlung verglich gegen 'succeeded' (das Modell kennt nur 'done') und zeigte 0/3; das YAML-Dokument der Template-Route ging als application/json raus und funktionierte nur, weil nichts davor hinsieht. | fixed | GESCHLOSSEN 2026-09-13. cmd/holzkubectl/wire_test.go haelt jeden JSON-Namen gegen den Servertyp; Content-Type ist jetzt ein Feld pro Aufruf statt eines Defaults. | 2026-09-13T12:00:00.000Z | 2026-09-13T12:00:00.000Z |
 | 102 | 16 | deviation | Taskfile.yml |  | DAS LOKALE GATE WAR NICHT DAS GATE VON CI, ZWEIMAL. Erstens lief lokal biome und vitest, aber nicht 'tsc --noEmit' -- das macht 'npm run build', und CI-Lauf 52 stand deshalb rot auf einem Typfehler in einem Test, den derselbe lokale Lauf gerade gruen gemeldet hatte. 'task ci' gibt es genau dafuer; go-task war in dieser Umgebung nicht installiert, also wurde es nicht benutzt. Zweitens nahm 'task lint:go' das golangci-lint vom PATH statt das gepinnte aus ./bin -- hier eine aeltere Version, die die Config gar nicht laedt (laut), eine neuere waere schlimmer: sie laeuft, widerspricht CI, und nichts sagt, welche der beiden Antworten einen Push blockiert. | fixed | GESCHLOSSEN 2026-09-13. go-task installiert, 'task ci' ist das Gate; lint:go bevorzugt ./bin/golangci-lint. | 2026-09-13T12:00:00.000Z | 2026-09-13T12:00:00.000Z |
 | 103 | 16 | stub | README.md |  | DIE ROTATION DER CA SELBST IST NICHT GEBAUT (V2-OPS-02, zweite Haelfte). Das Erneuern des eigenen Client-Zertifikats ist gebaut und faesst keinen Knoten an. Die Autoritaet zu rotieren ist eine andere Operation: sie aendert, wem jeder Knoten vertraut, und sind vier Konfigurationsdurchlaeufe ueber jede Maschine -- Abbruch in der Mitte hinterlaesst einen Cluster, der zwei Autoritaeten vertraut, falsche Reihenfolge einen, der keiner vertraut. Gegen talossim waere sie zu bauen und waere dann auch gruen; gruen gegen einen Simulator und nie gegen Blech ist bei genau dieser Operation keine Aussage, auf die jemand handeln sollte. Die README sagt das ausdruecklich, und die Ablehnung beim Erneuern benennt den Fall einer extern rotierten Autoritaet. SCHLIESSBEDINGUNG: eine Hardware-Sitzung, in der die Rotation an einem echten Cluster durchlaeuft -- oder eine ausdrueckliche Entscheidung, dass dieses Produkt sie dauerhaft nicht anbietet. | open |  | 2026-09-13T12:00:00.000Z |  |
+
+| 104 | 16 | deviation | internal/httpapi/handlers/auth.go |  | BEIDE ROUTEN, DIE EIN PASSWORT NEHMEN, ANTWORTETEN EINEM SERVICE-ACCOUNT MIT 500. auth.ErrNotAPerson existierte seit der Service-Account-Phase mit Doc-Kommentar und wurde von nichts zurueckgegeben und von nichts geprueft -- dieselbe Form wie die etcd-Entfernung: eine Weigerung, die neben dem Pfad liegt, der sie braucht. Erreichbar sind beide Routen: sie brauchen nur RoleReader, und ein Bearer-Token erfuellt CSRF-Pruefung und Sudo-Fenster. Beim Handler ankam Verify(current, "") gegen einen leeren Hash -- kein falsches Passwort, sondern ein undekodierbares -- also ein Fehler statt false, und daraus 500 internal.unexpected mit einer Logzeile ueber einen unerwarteten internen Zustand. Unerwartet war daran nichts. Jetzt 409 conflict.not-a-person, bei /auth/sudo vor dem Throttle, weil dieser Aufrufer nicht raet. | fixed | GESCHLOSSEN 2026-09-13. Beide behoben und, weil zwei getrennte identische Fehler bedeuten, dass die dritte Passwort-Route auch nicht hinsehen wuerde, mit einem Quell-Waechter gehalten: jede Funktion im Paket, die auth.Verify ruft, muss auch fragen, ob das Konto ein Passwort hat. | 2026-09-13T12:30:00.000Z | 2026-09-13T12:30:00.000Z |
+| 105 | 16 | deviation | cmd/holzkubectl/wire_test.go |  | METHODISCHE NOTIZ AUS ZWEI FEHLGESCHLAGENEN FEHLEREINBAUTEN: ein Test, der nur das Sentinel prueft (errors.Is) oder nur 'hat sich geaendert', kann gegen seinen eigenen eingebauten Fehler gruen bleiben. Zweimal passiert. Bei den etcd-Weigerungen blieben beide Faelle gruen, weil sich die Bedingungen ueberlappen und der falsche -- aktiv nutzlose -- Rat trotzdem ein ErrLastVotingMember ist. Bei der Zertifikatserneuerung blieb der Fehler 'der Countdown wird nicht aktualisiert' gruen, weil altes und neues Zertifikat in derselben Sekunde ablaufen, wenn man Sekunden nach der Adoption erneuert. Beide Tests pruefen jetzt den Satz bzw. starten aus dem Zustand, fuer den es das Feature gibt. KEIN OFFENER DEFEKT -- der Eintrag steht als Merksatz: einen eingebauten Fehler rot zu sehen ist die Pruefung, und wenn er gruen bleibt, ist der Test schwach, nicht der Fehler harmlos. | fixed | GESCHLOSSEN 2026-09-13 mit der Runde, die es gefunden hat. | 2026-09-13T12:30:00.000Z | 2026-09-13T12:30:00.000Z |
 
 ````json
 [
@@ -1357,6 +1360,30 @@ last_updated: 2026-09-13T12:00:00.000Z
     "reason": "",
     "recorded_at": "2026-09-13T12:00:00.000Z",
     "resolved_at": null
+  },
+  {
+    "id": 104,
+    "kind": "deviation",
+    "phase": "16",
+    "file": "internal/httpapi/handlers/auth.go",
+    "line": null,
+    "description": "BEIDE ROUTEN, DIE EIN PASSWORT NEHMEN, ANTWORTETEN EINEM SERVICE-ACCOUNT MIT 500. auth.ErrNotAPerson existierte seit der Service-Account-Phase mit Doc-Kommentar und wurde von nichts zurueckgegeben und von nichts geprueft -- dieselbe Form wie die etcd-Entfernung: eine Weigerung, die neben dem Pfad liegt, der sie braucht. Erreichbar sind beide Routen: sie brauchen nur RoleReader, und ein Bearer-Token erfuellt CSRF-Pruefung und Sudo-Fenster. Beim Handler ankam Verify(current, \"\") gegen einen leeren Hash -- kein falsches Passwort, sondern ein undekodierbares -- also ein Fehler statt false, und daraus 500 internal.unexpected mit einer Logzeile ueber einen unerwarteten internen Zustand. Unerwartet war daran nichts. Jetzt 409 conflict.not-a-person, bei /auth/sudo vor dem Throttle, weil dieser Aufrufer nicht raet.",
+    "status": "fixed",
+    "reason": "GESCHLOSSEN 2026-09-13. Beide behoben und, weil zwei getrennte identische Fehler bedeuten, dass die dritte Passwort-Route auch nicht hinsehen wuerde, mit einem Quell-Waechter gehalten: jede Funktion im Paket, die auth.Verify ruft, muss auch fragen, ob das Konto ein Passwort hat.",
+    "recorded_at": "2026-09-13T12:30:00.000Z",
+    "resolved_at": "2026-09-13T12:30:00.000Z"
+  },
+  {
+    "id": 105,
+    "kind": "deviation",
+    "phase": "16",
+    "file": "cmd/holzkubectl/wire_test.go",
+    "line": null,
+    "description": "METHODISCHE NOTIZ AUS ZWEI FEHLGESCHLAGENEN FEHLEREINBAUTEN: ein Test, der nur das Sentinel prueft (errors.Is) oder nur 'hat sich geaendert', kann gegen seinen eigenen eingebauten Fehler gruen bleiben. Zweimal passiert. Bei den etcd-Weigerungen blieben beide Faelle gruen, weil sich die Bedingungen ueberlappen und der falsche -- aktiv nutzlose -- Rat trotzdem ein ErrLastVotingMember ist. Bei der Zertifikatserneuerung blieb der Fehler 'der Countdown wird nicht aktualisiert' gruen, weil altes und neues Zertifikat in derselben Sekunde ablaufen, wenn man Sekunden nach der Adoption erneuert. Beide Tests pruefen jetzt den Satz bzw. starten aus dem Zustand, fuer den es das Feature gibt. KEIN OFFENER DEFEKT -- der Eintrag steht als Merksatz: einen eingebauten Fehler rot zu sehen ist die Pruefung, und wenn er gruen bleibt, ist der Test schwach, nicht der Fehler harmlos.",
+    "status": "fixed",
+    "reason": "GESCHLOSSEN 2026-09-13 mit der Runde, die es gefunden hat.",
+    "recorded_at": "2026-09-13T12:30:00.000Z",
+    "resolved_at": "2026-09-13T12:30:00.000Z"
   }
 ]
 ````
