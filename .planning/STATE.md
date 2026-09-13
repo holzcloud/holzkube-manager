@@ -5,7 +5,7 @@ current_phase: 3
 current_phase_name: "Prometheus-/metrics (v1.15)"
 status: milestone-closed
 stopped_at: v1.15 vollstaendig, CI gruen, Routen-Audit abgearbeitet (Fenster 92-95 zu). OPS-05 bleibt der einzige Release-Blocker (Fenster 87)
-last_updated: "2026-09-13T12:10:00.000Z"
+last_updated: "2026-09-13T12:30:00.000Z"
 last_activity: 2026-09-13
 last_activity_desc: CI race detector found a production data race in every destructive action
 state_head: a474d2522823cbfb436ee720dee35494890281a3
@@ -28,11 +28,34 @@ See: .planning/PROJECT.md (updated 2026-08-27)
 ## Current Position
 
 Phase: v1.15 abgeschlossen — alle drei Phasen
-Plan: `.planning/MILESTONE-v1.15.md`, Abschluss in `.planning/MILESTONE-v1.15-CLOSEOUT.md`
-Status: abgeschlossen; `v1.15.0-beta.1` (linux/amd64) gebaut und übergeben
-Last activity: 2026-09-12 — v1.15 Phase 3 (Prometheus-`/metrics`) abgeschlossen
+Plan: `.planning/MILESTONE-v1.15.md`, Abschluss und **Nachtrag** in
+`.planning/MILESTONE-v1.15-CLOSEOUT.md`
+Status: abgeschlossen; ausgeliefert ist `v1.15.0-beta.2` (linux/amd64)
+Last activity: 2026-09-13 — Data Race im Produktionspfad behoben (Fenster 97)
 
 Progress: v1.15 [███] 3 of 3 phases · v1.14 [█████████▓] gebaut, OPS-05 offen
+
+**Lies den Nachtrag im Close-out, bevor du diesen Abschnitt für den Stand
+hältst.** Nach dem Abschluss des Milestones kamen acht Commits, und sie haben
+mehr echte Fehler gefunden als die drei Phasen davor: CI war neun Commits lang
+rot (92), der Simulator erzeugte selbst den Fehler, gegen den eine seiner
+Szenarien existiert (93), eine getippte Bestätigung wurde serverseitig nie
+erzwungen (94), drei Routen hatten keinen Einstieg (95), zwei Problem-Codes
+standen nicht im Vertrag (96), und im Antwortpfad **jeder** zerstörenden Aktion
+lief seit Phase 6 ein Data Race (97).
+
+**Die Lehre, die sich zweimal wiederholt hat und oben in den Absätzen steht:
+ein Wächter ist nichts wert, bis er am absichtlich wieder eingebauten Fehler rot
+geworden ist.** Zwei Tests dieser Sitzung bestanden, während sie nichts prüften
+— einer, weil jede Konstante einen Doku-Kommentar mit ihrem eigenen Namen trägt,
+einer, weil ein Kanalempfang eine Happens-before-Kante ist. Beide fielen nur
+auf, weil der Fehler zurückgebaut und der Test beobachtet wurde.
+
+**Und: ein lokal grüner Lauf ist kein CI-Lauf.** Der Data Race aus Fenster 97
+ist in keinem lokalen Durchlauf je aufgetreten, und Lauf 29 auf CI war grün,
+obwohl der Fehler noch drin war. Was ihn belegt, ist die lokale Reproduktion:
+ohne den Fix `WARNING: DATA RACE`, mit ihm dreimal sauber. `task ci` fährt die
+Tore, die CI fährt.
 
 **v1.15 Phase 1 (Support-Bundle) ist fertig.** `internal/support` sammelt pro
 Node Facts, Services, Versionen, Disks, Links, Extensions, etcd-Status, Logs,
