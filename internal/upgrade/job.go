@@ -54,6 +54,15 @@ type Deps struct {
 	// skew Kubernetes forbids in the other direction.
 	Machines func(ctx context.Context, id model.ClusterID) ([]model.Machine, error)
 
+	// RoleOf reports one machine's role.
+	//
+	// It is here rather than derived from Machines because a restore names a
+	// node and not a cluster: the operator is choosing which member's data
+	// becomes the cluster's, and asking for the cluster first to find the role
+	// would be asking a question whose answer this code would then have to
+	// pick from.
+	RoleOf func(ctx context.Context, id model.MachineID) (model.MachineRole, error)
+
 	// Gate is the etcd health gate, re-evaluated before every node.
 	Gate *Gate
 

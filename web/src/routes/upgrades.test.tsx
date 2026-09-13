@@ -1,5 +1,6 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { render, screen } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import type { EtcdMemberList, GateVerdict } from '@/api'
 import { EtcdPanel, GatePanel, MemberTable } from '@/routes/upgrades'
@@ -135,17 +136,63 @@ describe('the etcd member list', () => {
   })
 })
 
+/** A Field<T> as the API serialises one: a value with its own availability. */
+function field(value: unknown, level = 'node') {
+  return { value, level, available: true, unavailable_reason: '' }
+}
+
+/** One control-plane machine, in the shape machineSchema requires. */
+function controlPlaneFixture() {
+  return {
+    id: 'cp-1-uuid',
+    cluster: 'c-1',
+    role: 'controlplane',
+    stage: 'watching',
+    adopted_at: '2026-09-12T00:00:00Z',
+    hostname: field('cp-1', 'none'),
+    addr: field('10.0.0.1', 'none'),
+    talos_version: field('v1.13.9'),
+    kubernetes_version: field('v1.34.0', 'k8s'),
+    schematic_id: field(''),
+    manufacturer: field(''),
+    product_name: field(''),
+    serial_number: field(''),
+    memory_mib: field(0),
+    cpus: field([]),
+    disks: field([]),
+    interfaces: field([]),
+    services: field([]),
+    etcd_member: field(false, 'etcd'),
+    compatibility: field({ known: true, supported: true, headroom_minors: 1, sentence: '' }),
+  }
+}
+
 /**
- * What the snapshot card says the product will not do.
+ * What the snapshot card says, and what it asks for before it restores.
  *
  * A backup button with no restore behind it is a promise the operator
- * discovers is empty during the disaster. Saying so here — where somebody
- * forms the belief, next to the download — is the same thing the settings
- * screen does about its own backup tarballs, and the same thing the removal
- * dialog does about cordon and drain.
+ * discovers is empty during the disaster. There is a restore now; what is said
+ * here — where somebody forms the belief, next to the download — is what it
+ * costs and what it leaves for them to finish.
  */
 describe('the etcd snapshot card', () => {
   function wrapEtcd() {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((input: RequestInfo | URL) => {
+        const path = String(input)
+        const body = path.includes('/machines')
+          ? { machines: [controlPlaneFixture()] }
+          : { members: [], voting_count: 0, tolerates: 0, sentence: '' }
+        return Promise.resolve(
+          new Response(JSON.stringify(body), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          }),
+        )
+      }),
+    )
+
     const client = new QueryClient({
       defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
     })
@@ -164,24 +211,48 @@ describe('the etcd snapshot card', () => {
     )
   })
 
-  it('says plainly that it does not restore one', () => {
+  /**
+   * This screen used to say the product does not restore a snapshot, with an
+   * argument for why a browser is the wrong place for one: a restore runs on
+   * exactly one control-plane node, and doing it on two produces two clusters
+   * that each believe they are the original.
+   *
+   * The argument was not wrong and it is not dropped. It is answered in the
+   * shape of the operation -- one named node, confirmed by that node's own id
+   * -- and the part of it that is still true is what these tests pin: what the
+   * restore costs, and what it does not do for the operator afterwards.
+   */
+  it('says what a restore costs before offering one', () => {
     wrapEtcd()
-    expect(screen.getByText(/does not restore a snapshot/i)).toBeInTheDocument()
+    expect(screen.getByText(/Everything written since it was taken is gone/i)).toBeInTheDocument()
+    expect(screen.getByText(/reset and rejoined/i)).toBeInTheDocument()
+    expect(screen.getByText(/Nothing here does that for you/i)).toBeInTheDocument()
   })
 
-  it('names the two steps that do, rather than leaving the operator to find out', () => {
+  it("will not restore until a node, a file and that node's own id are all given", async () => {
+    const user = userEvent.setup()
     wrapEtcd()
-    expect(screen.getByText(/talosctl etcd recover/)).toBeInTheDocument()
-    expect(screen.getByText(/bootstrap that same node in recovery mode/i)).toBeInTheDocument()
+
+    const button = screen.getByRole('button', { name: /Restore etcd from this snapshot/i })
+    expect(button).toBeDisabled()
+
+    // A node chosen and a file chosen is still not enough: the confirmation is
+    // the node's id, because the question is not "did you mean to do this" but
+    // "did you mean to do it here".
+    await user.click(screen.getByRole('combobox', { name: /Restore onto/i }))
+    await user.click(await screen.findByRole('option', { name: /cp-1/ }))
+
+    const input = screen.getByLabelText(/^Snapshot$/i)
+    await user.upload(input, new File(['a snapshot'], 'etcd.snapshot'))
+    expect(button).toBeDisabled()
+
+    await user.type(screen.getByLabelText(/Type the node's id to confirm/i), 'wrong-id')
+    expect(button).toBeDisabled()
   })
 
-  it('says why it is not a button, and it is not "not yet"', () => {
+  it('warns that skipping the integrity check is for a data-directory copy only', () => {
     wrapEtcd()
-
-    // The two facts that make this a decision rather than a gap: a restore
-    // discards everything after the snapshot, and running it on two nodes
-    // produces two clusters that each believe they are the original.
-    expect(screen.getByText(/discards everything after/i)).toBeInTheDocument()
-    expect(screen.getByText(/two clusters that each believe/i)).toBeInTheDocument()
+    expect(screen.getByLabelText(/Skip the snapshot's integrity check/i)).not.toBeChecked()
+    expect(screen.getByText(/had already lost quorum/i)).toBeInTheDocument()
   })
 })

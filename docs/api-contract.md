@@ -1817,6 +1817,60 @@ refusal arrives on the first read rather than when the stream is opened.
 A snapshot that wrote **zero bytes** is refused rather than reported as success.
 A zero-length file looks like a backup in a directory listing.
 
+### Restoring etcd from a snapshot
+
+`POST /api/v1/machines/{id}/etcd/restore` replaces one control-plane node's etcd
+with an uploaded snapshot. It is the most consequential route in this API and
+its shape says so.
+
+**The body is the snapshot**, `application/octet-stream`, and not a field in a
+JSON envelope: base64 inside JSON costs a third of a database's size on the wire
+and all of it in memory. The two small values that go with it ride in the query
+string.
+
+**`?machine=` is a typed confirmation and must equal the `{id}` in the path.**
+Every other confirmation in this API asks whether the operator meant to do
+something; this one asks whether they meant to do it *here*. A restore aimed at
+the wrong control-plane node makes that node's data the cluster's and discards
+the rest, and the two nodes are one dropdown apart. A mismatch is **400
+`validation.failed`** with `machine` named in `errors`.
+
+**`?skip_hash_check=true`** turns off the snapshot's integrity check on the node.
+It exists for one case: a copy of a node's etcd data directory has no hash to
+check, and that is what is left on a cluster that had already lost quorum (see
+the snapshot fallback above). For a snapshot this API produced, it skips the one
+check that would have caught a truncated upload.
+
+The route is **destructive** and therefore behind the sudo window. It is **not**
+`Streaming`: that flag is about the response, and the response is a small JSON
+object. What it needs instead is the server's *read* deadline cleared for the
+request, which the handler does explicitly — an etcd database is as large as it
+is, and a read deadline on this route is a bound on how large a cluster may be
+before it stops being restorable.
+
+Two refusals happen before anything is sent, because a refusal that had already
+uploaded something would be a refusal that changed the cluster: a node that is
+not a control-plane node, and a snapshot with no bytes in it.
+
+```json
+{ "uploaded_bytes": 4194304, "notice": "Restoring replaces the cluster's etcd …" }
+```
+
+`uploaded_bytes` is the whole of the verdict a client can check for itself,
+which is the same reason the snapshot download reports a length.
+
+**A failure between the upload and the bootstrap is named rather than
+generalised.** The upload leaves the snapshot on the node and changes nothing;
+only the bootstrap that follows replaces etcd. When the bootstrap fails, the
+detail says the snapshot was uploaded and etcd was not restarted from it, so the
+cluster is still running the data it had — which is the better of the two places
+to be standing, and an operator told only "restore failed" cannot tell it from
+the other one.
+
+**What it does not do:** the other control-plane nodes still hold the etcd that
+was just replaced and will not agree with the recovered member. They have to be
+reset and rejoined. Nothing in this API does that.
+
 ### Removing a node from a cluster
 
 `POST /api/v1/machines/{id}/remove-from-cluster` does three things in an order

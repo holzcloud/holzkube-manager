@@ -456,6 +456,21 @@ interface RequestOptions {
   interceptUnauthenticated?: boolean
   /** Whether a 428 should open the sudo prompt and replay. */
   interceptSudo?: boolean
+
+  /**
+   * Whether this request is exempt from REQUEST_CEILING_MS.
+   *
+   * One route is: the etcd restore, whose body is a database. The ceiling
+   * exists so a browser tab does not sit forever on a server that has stopped
+   * answering, and it is sized against a response arriving. An upload is a
+   * different shape — it is making progress the whole time, and a ceiling on
+   * it is a limit on how large somebody's etcd is allowed to be. The server
+   * clears its own read deadline for the same route and for the same reason.
+   *
+   * It is a named option and not a number, so that adding a second exempt
+   * route is a decision somebody makes here rather than a constant they raise.
+   */
+  unbounded?: boolean
 }
 
 /**
@@ -512,7 +527,10 @@ function buildInit(method: string, body: unknown): RequestInit {
  * Do not "simplify" this back into buildInit. The property it protects is
  * invisible from there.
  */
-function fetchWithCeiling(path: string, init: RequestInit): Promise<Response> {
+function fetchWithCeiling(path: string, init: RequestInit, unbounded = false): Promise<Response> {
+  if (unbounded) {
+    return fetch(path, init)
+  }
   return fetch(path, { ...init, signal: AbortSignal.timeout(REQUEST_CEILING_MS) })
 }
 
@@ -555,16 +573,31 @@ async function send(
   body?: unknown,
   options: RequestOptions = {},
 ): Promise<Response> {
-  const { interceptUnauthenticated = true, interceptSudo = true } = options
-
   // Built once and reused for the replay, so the retried request is byte for
   // byte the request that was refused -- same body, same headers, same
   // credentials mode. Rebuilding it would be the bug this design avoids.
-  const init = buildInit(method, body)
+  return sendPrebuilt(path, buildInit(method, body), options)
+}
+
+/**
+ * The half of `send` that does not build the request.
+ *
+ * It is split out so that a caller with a body this module cannot build — the
+ * etcd restore, whose body is a file the operator chose — gets the same
+ * refusal handling as everything else: the sudo prompt and its byte-for-byte
+ * replay, and the session-expiry transition. A second copy of that logic next
+ * to the one route that needed it is how those two behaviours drift apart.
+ */
+async function sendPrebuilt(
+  path: string,
+  init: RequestInit,
+  options: RequestOptions = {},
+): Promise<Response> {
+  const { interceptUnauthenticated = true, interceptSudo = true, unbounded = false } = options
 
   let response: Response
   try {
-    response = await fetchWithCeiling(path, init)
+    response = await fetchWithCeiling(path, init, unbounded)
   } catch (cause) {
     if (isCeilingAbort(cause)) {
       throw ceilingError()
@@ -586,7 +619,7 @@ async function send(
     // just spent time at the password prompt, and charging that time to the
     // replay's budget would abort a request that had not started.
     try {
-      response = await fetchWithCeiling(path, init)
+      response = await fetchWithCeiling(path, init, unbounded)
     } catch (cause) {
       if (isCeilingAbort(cause)) {
         throw ceilingError()
@@ -604,6 +637,40 @@ async function send(
   }
 
   throw error
+}
+
+/**
+ * Sends a request whose body is bytes rather than JSON.
+ *
+ * It exists for one route and says so, because the shape is easy to reach for
+ * and wrong nearly everywhere: this API is JSON, and a second body encoding is
+ * a second thing every future reader has to check. What makes it right here is
+ * that the body is an etcd database — base64 inside a JSON envelope would cost
+ * a third of its size on the wire and all of it in memory.
+ *
+ * A Blob and not a stream, deliberately. `send` builds the request once and
+ * replays it byte for byte after the sudo prompt, and a stream cannot be read
+ * twice: a restore that asked for a password would replay with an empty body.
+ */
+async function sendBody<T>(
+  method: string,
+  path: string,
+  schema: z.ZodType<T>,
+  body: Blob,
+): Promise<T> {
+  const init: RequestInit = {
+    method,
+    headers: {
+      Accept: 'application/json',
+      'Content-Type': 'application/octet-stream',
+      [CSRF_HEADER]: CSRF_HEADER_VALUE,
+    },
+    credentials: 'same-origin',
+    body,
+  }
+
+  const response = await sendPrebuilt(path, init, { unbounded: true })
+  return schema.parse(await response.json())
 }
 
 async function sendJSON<T>(
@@ -1090,6 +1157,20 @@ export const etcdMemberListSchema = z.object({
 
 export type EtcdMemberList = z.infer<typeof etcdMemberListSchema>
 export type EtcdMember = z.infer<typeof etcdMemberSchema>
+
+/**
+ * What a restore answers.
+ *
+ * `uploaded_bytes` is the whole of the verdict a client can check for itself: a
+ * transfer that moved nothing and reported success is the failure worth
+ * catching, and it is the same reason the snapshot download reports a length.
+ */
+export const etcdRestoredSchema = z.object({
+  uploaded_bytes: z.number().default(0),
+  notice: z.string().default(''),
+})
+
+export type EtcdRestored = z.infer<typeof etcdRestoredSchema>
 
 export const releasesSchema = z.object({
   releases: z.array(z.string()).default([]),
@@ -1734,6 +1815,33 @@ export const api = {
      * browser streams it to disk instead of holding a database in memory. */
     snapshotURL: (cluster: string) =>
       `/api/v1/clusters/${encodeURIComponent(cluster)}/etcd/snapshot`,
+
+    /**
+     * Restore one control-plane node's etcd from a snapshot.
+     *
+     * The file is the request body rather than a field in a JSON envelope, for
+     * the reason the route's own comment gives: base64 inside JSON costs a
+     * third of a database's size on the wire and all of it in memory. The two
+     * small values that go with it ride in the query string instead.
+     *
+     * `machine` is repeated in the query deliberately. It is the typed
+     * confirmation, and unlike every other one in this product it is not a
+     * word but the node's own id: the question is not "did you mean to do
+     * this" but "did you mean to do it here", because a restore aimed at the
+     * wrong control-plane node makes that node's data the cluster's.
+     */
+    restore: (machine: string, snapshot: Blob, skipHashCheck: boolean): Promise<EtcdRestored> => {
+      const query = new URLSearchParams({ machine })
+      if (skipHashCheck) {
+        query.set('skip_hash_check', 'true')
+      }
+      return sendBody(
+        'POST',
+        `/api/v1/machines/${encodeURIComponent(machine)}/etcd/restore?${query}`,
+        etcdRestoredSchema,
+        snapshot,
+      )
+    },
   },
 
   jobs: {
