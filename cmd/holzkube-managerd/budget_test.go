@@ -677,6 +677,24 @@ var routeBudgets = []routeBudget{
 			"node. Found by the completeness guard along with the row above.",
 	},
 	{
+		route: "GET /api/v1/clusters/{id}/kubeconfig",
+		// Five nodes' worth, because this route is a loop and the table has to
+		// say how long a loop it is willing to describe. Five is the largest
+		// control plane anybody runs; a cluster with more is not a case this
+		// ceiling was sized for and the ceiling is what stops it.
+		calls:         kubeconfigAttempts(5),
+		routeDeadline: handlers.KubeconfigRouteBudget,
+		verdict:       withinBudget,
+		clipping:      clipped,
+		clippingRationale: "The route tries control-plane nodes in turn and stops at the first " +
+			"that answers, so the calls above are one node's pair repeated. Sixty seconds is " +
+			"four of those pairs at their ceilings, which covers what the fallback exists for: " +
+			"a cluster whose first node or two are down. It deliberately does not cover five " +
+			"nodes all timing out, because at that point the operator has a cluster-wide " +
+			"problem that every other screen is already telling them about, and a longer wait " +
+			"adds nothing but the wait. A ceiling that cannot be reached is not a ceiling.",
+	},
+	{
 		route:         "GET /api/v1/clusters/{id}/support-bundle",
 		calls:         nil,
 		routeDeadline: 0,
@@ -806,6 +824,25 @@ func (row routeBudget) decompose(t *testing.T) (sum, maxCall time.Duration, deta
 		return 0, 0, "no upstream calls"
 	}
 	return sum, maxCall, strings.Join(parts, " + ")
+}
+
+// kubeconfigAttempts is n rounds of the pair the kubeconfig route makes per
+// control-plane node it tries.
+func kubeconfigAttempts(n int) []upstreamCall {
+	calls := make([]upstreamCall, 0, n*2)
+	for i := range n {
+		calls = append(calls,
+			upstreamCall{
+				name:  fmt.Sprintf("control-plane node %d: Connect (Version)", i+1),
+				class: nodeProbeCall,
+			},
+			upstreamCall{
+				name:  fmt.Sprintf("control-plane node %d: Kubeconfig", i+1),
+				class: nodeFastReadCall,
+			},
+		)
+	}
+	return calls
 }
 
 // TestRouteBudgetsComposeAgainstWriteTimeout is the assertion itself: for each

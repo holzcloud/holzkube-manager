@@ -129,10 +129,11 @@ func newNodeState(opts Options) *nodeState {
 		now = time.Now
 	}
 	return &nodeState{
-		now:      now,
-		hostname: opts.Hostname,
-		version:  opts.TalosVersion,
-		lastBoot: now(),
+		now:          now,
+		hostname:     opts.Hostname,
+		version:      opts.TalosVersion,
+		lastBoot:     now(),
+		bootstrapped: opts.Bootstrapped,
 	}
 }
 

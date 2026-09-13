@@ -123,3 +123,51 @@ func (s *Service) Talosconfig(ctx context.Context, id model.ClusterID) ([]byte, 
 	}
 	return talos.RenderTalosconfig(cluster.Name, cluster.Endpoint, sec.OSCACrt, sec.OSCAKey, ClientCertTTL)
 }
+
+// Kubeconfig fetches the cluster's admin kubeconfig from a control-plane node.
+//
+// It is the one credential in this product that holzkube-manager does not
+// mint. A talosconfig is rendered here from the stored bundle, because the
+// Talos CA is in it; a kubeconfig is rendered by the node, from the machine
+// configuration it is running, and this is a passthrough. The difference
+// matters for what it means when this fails: a talosconfig cannot fail to
+// render for a cluster whose secrets are on disk, and a kubeconfig can fail
+// because the cluster is not reachable or has no Kubernetes yet.
+//
+// The node is whichever control-plane node answers first, for the same reason
+// the snapshot picks one: this is a question about the cluster and any member
+// can answer it. A restore is the operation where that is not true.
+func (s *Service) Kubeconfig(ctx context.Context, id model.ClusterID) ([]byte, error) {
+	machines, err := s.ControlPlanesOf(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if len(machines) == 0 {
+		return nil, fmt.Errorf("%w: this cluster has no control-plane node on record, and a "+
+			"kubeconfig is rendered by one", ErrNotFound)
+	}
+
+	var last error
+	for _, m := range machines {
+		cc, err := s.Connect(ctx, m.ID)
+		if err != nil {
+			last = err
+			continue
+		}
+
+		fetchCtx, cancel, err := talos.WithClassDeadline(ctx, talos.MethodKubeconfig)
+		if err != nil {
+			_ = cc.Close()
+			return nil, err
+		}
+		raw, err := cc.Kubeconfig(fetchCtx)
+		cancel()
+		_ = cc.Close()
+
+		if err == nil {
+			return raw, nil
+		}
+		last = err
+	}
+	return nil, last
+}

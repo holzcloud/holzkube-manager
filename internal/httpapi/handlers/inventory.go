@@ -121,6 +121,16 @@ func InventoryRoutes(d httpapi.Deps) []httpapi.Route {
 			Handler:         handler(clusterTalosconfig(d)),
 		},
 		{
+			// The kubeconfig reaches a node, unlike the talosconfig next to
+			// it, so it carries a route budget and can fail for reasons that
+			// have nothing to do with this installation's own records.
+			Method:          http.MethodGet,
+			Pattern:         "/api/v1/clusters/{id}/kubeconfig",
+			RequiresSession: true,
+			Action:          "cluster.kubeconfig",
+			Handler:         handler(clusterKubeconfig(d)),
+		},
+		{
 			Method:          http.MethodPost,
 			Pattern:         "/api/v1/clusters/{id}/lock",
 			RequiresSession: true,
@@ -480,6 +490,46 @@ func clusterTalosconfig(d httpapi.Deps) http.HandlerFunc {
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("Cache-Control", "no-store")
 		w.Header().Set("Content-Disposition", `attachment; filename="talosconfig"`)
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(raw)
+	}
+}
+
+// KubeconfigRouteBudget bounds the kubeconfig fetch.
+//
+// It is one connection and one fast read per control-plane node tried, and the
+// loop stops at the first that answers. The ceiling is sized for a small
+// cluster whose first node or two are down, which is the case the fallback
+// exists for; beyond that the operator has a cluster-wide problem and a longer
+// wait tells them nothing new.
+const KubeconfigRouteBudget = 60 * time.Second
+
+// clusterKubeconfig hands over admin credentials for the cluster's Kubernetes.
+//
+// It is audited -- `cluster.kubeconfig` -- and that is the whole reason it is
+// not simply a link the way the talosconfig is. What comes back is
+// system:masters on somebody's cluster, and "who asked for this and when" is
+// exactly what an archive exists to answer.
+func clusterKubeconfig(d httpapi.Deps) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if p := inventoryConfigured(d); p != nil {
+			httpapi.WriteProblem(w, r, p)
+			return
+		}
+
+		ctx, cancel := budgetedContext(r, KubeconfigRouteBudget)
+		defer cancel()
+
+		raw, err := d.Inventory.Kubeconfig(ctx, model.ClusterID(r.PathValue("id")))
+		if err != nil {
+			writeInventoryError(w, r, d, err)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/yaml")
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Header().Set("Cache-Control", "no-store")
+		w.Header().Set("Content-Disposition", `attachment; filename="kubeconfig"`)
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write(raw)
 	}

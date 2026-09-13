@@ -107,6 +107,20 @@ type Options struct {
 	// worker must be refused by name rather than half-completed.
 	ControlPlane bool
 
+	// Bootstrapped starts the node with etcd already running.
+	//
+	// It exists because the default is the truthful simulation of a *fresh*
+	// node -- one the provisioning path has just installed and not yet
+	// bootstrapped -- and that is not the node the adoption path meets. An
+	// imported cluster is by definition already running, so a test that
+	// imports one and then asks it anything about Kubernetes or etcd is
+	// testing against a node in a state no adopted node is ever in.
+	//
+	// It sets only the flag, not a bootstrap call: BootstrapCalls stays at
+	// zero, so a test can still tell a node that came up this way from one
+	// this product bootstrapped.
+	Bootstrapped bool
+
 	// Members is the cluster membership this node's discovery reports. Leaving
 	// it empty is the truthful simulation of a cluster whose discovery service
 	// is switched off -- which is a supported configuration and must not look
