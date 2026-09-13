@@ -59,7 +59,7 @@ export function ClustersPage() {
   )
 }
 
-function ClusterCard({ cluster }: { cluster: Cluster }) {
+export function ClusterCard({ cluster }: { cluster: Cluster }) {
   const queryClient = useQueryClient()
 
   const setLock = useMutation({
@@ -133,13 +133,35 @@ function ClusterCard({ cluster }: { cluster: Cluster }) {
           </dd>
         </dl>
 
-        <a
-          href={api.clusters.talosconfigPath(cluster.id)}
-          className="inline-block text-sm underline"
-          title="An admin client configuration for talosctl. The certificate in it is minted on demand and is not the one holzkube-manager dials with, so losing your copy does not affect this instance's access."
-        >
-          Download a talosconfig
-        </a>
+        <div className="flex flex-col gap-1">
+          <a
+            href={api.clusters.talosconfigPath(cluster.id)}
+            className="inline-block text-sm underline"
+            title="An admin client configuration for talosctl. The certificate in it is minted on demand and is not the one holzkube-manager dials with, so losing your copy does not affect this instance's access."
+          >
+            Download a talosconfig
+          </a>
+
+          {/*
+            The support bundle's way in. The route was built on the argument
+            that during an incident the operator is in a browser and not on a
+            console — and then shipped without anything to click, which made
+            the argument false. This is that gap closed, in the same shape as
+            the link above: a plain anchor, because the response is a file to
+            keep and the browser downloads it better than we can.
+
+            No confirmation and no destructive marking: it reads the cluster
+            and changes nothing. What it is worth saying is what is *in* it,
+            because the operator is about to send it to somebody.
+          */}
+          <a
+            href={api.clusters.supportBundlePath(cluster.id)}
+            className="inline-block text-sm underline"
+            title="One archive with what somebody debugging this cluster would otherwise collect by hand: per node the facts, services, versions, disks, links, extensions, etcd status, recent logs and the machine configuration with every secret removed — plus the audit tail. Nodes that do not answer are listed with the reason rather than left out."
+          >
+            Download a support bundle
+          </a>
+        </div>
 
         <Button
           size="sm"

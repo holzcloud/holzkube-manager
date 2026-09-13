@@ -1441,6 +1441,20 @@ export const api = {
       `/api/v1/clusters/${encodeURIComponent(id)}/talosconfig`,
 
     /**
+     * The support bundle, as a path rather than a fetch.
+     *
+     * It is a plain link for the same reason the talosconfig is: the response
+     * is a file the operator is going to keep, and pulling tens of megabytes
+     * of gzip through `fetch` only to hand it back to the browser as a blob
+     * buffers the whole archive in the tab — during the incident the archive
+     * is being collected for. A GET carries the session cookie and needs no
+     * CSRF header, so the browser's own download is both simpler and better
+     * behaved than anything this file could do.
+     */
+    supportBundlePath: (id: string): string =>
+      `/api/v1/clusters/${encodeURIComponent(id)}/support-bundle`,
+
+    /**
      * Unlocking is destructive: it is what makes every other destructive route
      * reachable on this cluster. The 428 interceptor opens the password prompt
      * and replays this request, so this screen needs no confirmation of its
