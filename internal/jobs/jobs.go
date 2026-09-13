@@ -237,7 +237,16 @@ func (e *Engine) Submit(ctx context.Context, j model.Job) (model.Job, error) {
 }
 
 // start runs a job in the background.
+//
+// The goroutine gets its own copy, and that is not defensive tidiness: a
+// model.Job passed by value still shares its Steps array and its Params map
+// with the caller. Submit's caller is an HTTP handler that JSON-encodes the
+// returned job into its 202 while run() below is already writing
+// Steps[i].State into the same backing array. The race detector caught it on
+// CI, on the path every reboot, shutdown, reset, provision and upgrade takes.
 func (e *Engine) start(j model.Job, steps []Step) {
+	j = j.Clone()
+
 	e.mu.Lock()
 	if e.closed {
 		e.mu.Unlock()

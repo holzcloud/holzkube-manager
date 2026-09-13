@@ -1,6 +1,10 @@
 package model
 
-import "time"
+import (
+	"maps"
+	"slices"
+	"time"
+)
 
 // JobID identifies one long-running operation.
 type JobID string
@@ -38,6 +42,25 @@ const (
 	// steps that had already run still ran.
 	JobCancelled JobState = "cancelled"
 )
+
+// Clone returns a Job that shares nothing mutable with the original.
+//
+// It exists because a Job is passed by value and is not therefore a copy: it
+// carries a Steps slice and a Params map, and both are headers onto storage the
+// original keeps pointing at. jobs.Engine.start handed a Job to the goroutine
+// that runs it while the HTTP handler still held the same value and was
+// JSON-encoding it into a 202 -- two goroutines, one backing array, one of them
+// writing Steps[i].State. The race detector found it on CI, on the path every
+// reboot, shutdown, reset, provision and upgrade submission takes.
+//
+// It lives on the type rather than in the engine so that a field added to Job
+// is a field somebody has to decide about here. A new reference-typed field
+// that nobody adds to this method is the same bug again.
+func (j Job) Clone() Job {
+	j.Steps = slices.Clone(j.Steps)
+	j.Params = maps.Clone(j.Params)
+	return j
+}
 
 // JobStates returns every state, so a caller can walk the vocabulary rather
 // than keep its own copy of it.
