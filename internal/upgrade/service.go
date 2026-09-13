@@ -425,6 +425,33 @@ func (s *Service) Snapshot(ctx context.Context, cluster model.ClusterID, w io.Wr
 	return Snapshot(ctx, cc, w)
 }
 
+// Restore replaces a cluster's etcd with an uploaded snapshot.
+//
+// It goes to a *named* node rather than to whichever control-plane node
+// answers first, and that is the difference from Snapshot above. Taking a
+// snapshot is a question about the cluster and any member can answer it;
+// restoring is a decision to make one member the new source of truth, and
+// which member that is has consequences the operator has to own. Picking it
+// here would be this code choosing whose data survives.
+func (s *Service) Restore(ctx context.Context, id model.MachineID, snapshot io.Reader, skipHashCheck bool) (int64, error) {
+	role, err := s.deps.RoleOf(ctx, id)
+	if err != nil {
+		return 0, err
+	}
+
+	cc, err := s.deps.Connect(ctx, id)
+	if err != nil {
+		return 0, err
+	}
+	defer cc.Close() //nolint:errcheck // the byte count is the verdict
+
+	return Restore(ctx, cc, RestoreRequest{
+		Snapshot:      snapshot,
+		Role:          role,
+		SkipHashCheck: skipHashCheck,
+	})
+}
+
 // RemoveNodeFromCluster is UPG-13.
 func (s *Service) RemoveNodeFromCluster(ctx context.Context, id model.MachineID, controlPlane bool) error {
 	cc, err := s.deps.Connect(ctx, id)

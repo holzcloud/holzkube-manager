@@ -407,29 +407,39 @@ boundary, with a first line saying how much was dropped.
 
 ## What this product does not do
 
-Two operations it performs half of, said here because a product that does the
+One operation it performs half of, said here because a product that does the
 first half silently is a product whose operator finds out during the incident.
 
-### It takes etcd snapshots and does not restore them
+### It restores etcd onto one node and does not rebuild the rest
 
 The upgrades screen takes a snapshot through the etcd API — a consistent
 point-in-time copy, which needs a quorum, so a cluster that has lost one cannot
-produce it.
+produce it. What is left on such a cluster is a copy of a member's own etcd data
+directory, taken off the node; that is a different thing and the screen says so.
 
-**holzkube-manager does not restore one.** Recovery is two steps with
-`talosctl`: upload the snapshot to **one** control-plane node with `talosctl
-etcd recover`, then bootstrap that same node in recovery mode. Talos'
-documentation is the reference for the exact invocation.
+It restores one too. The restore is deliberately narrow, and the shape is the
+argument for why it is a button at all:
 
-That is a decision rather than a gap. A restore rewinds the cluster to the
-snapshot's moment and discards everything after it, and running it on more than
-one node produces two clusters that each believe they are the original — which
-is a thing to do at a console with the cluster in front of you, not a button in
-a browser during an incident. The screen says so next to the download, because
-that is where somebody forms the belief that there is a restore button
-somewhere.
+- **It runs on one control-plane node**, named in the request, and the typed
+  confirmation is that node's own id rather than a word. Every other
+  confirmation in this product asks "did you mean to do this"; this one asks
+  "did you mean to do it *here*", because a restore aimed at the wrong
+  control-plane node makes that node's data the cluster's and discards the rest.
+- **It leaves the other control-plane nodes to you.** They still hold the etcd
+  that was just replaced and will not agree with the recovered member, so they
+  have to be reset and rejoined. Nothing here does that.
+- **Uploading and recovering are two calls.** The snapshot is uploaded first and
+  changes nothing; the cluster is only touched by the bootstrap that follows. A
+  failure at the upload has not touched anything, and the failure message says
+  which of the two places you are standing in — "restore failed" does not.
+- **The integrity check is on unless you turn it off.** A snapshot taken through
+  the etcd API carries a hash. A copy of a data directory does not, which is
+  exactly what you have on a cluster that had already lost quorum, so the flag
+  exists — and turning it on for an API snapshot skips the one check that would
+  have caught a truncated upload.
 
-Keep the file somewhere that survives the cluster.
+Everything written since the snapshot was taken is gone. Keep the file
+somewhere that survives the cluster.
 
 ### It verifies upgrades and does not undo them
 

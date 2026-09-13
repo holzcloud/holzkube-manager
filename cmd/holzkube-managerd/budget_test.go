@@ -598,6 +598,22 @@ var routeBudgets = []routeBudget{
 			"marked Streaming, so the write timeout does not apply to it either.",
 	},
 	{
+		route:         "POST /api/v1/machines/{id}/etcd/restore",
+		calls:         nil,
+		routeDeadline: 0,
+		verdict:       withinBudget,
+		clipping:      uncut,
+		why: "The third row that reaches a node and declares no ceiling, and the first that is a " +
+			"route receiving rather than sending. The upload is EtcdRecover, which is in the " +
+			"upload deadline class: no total deadline, because a total deadline on it is a bound " +
+			"on how large somebody's etcd is allowed to be. The route is not marked Streaming -- " +
+			"that flag is about the response, and this response is a small JSON body -- so what " +
+			"the handler clears instead is the server's READ deadline, with " +
+			"http.ResponseController, for the same reason and on the other side. The bootstrap " +
+			"that follows the upload does carry its class deadline; it is one call and it is " +
+			"bounded.",
+	},
+	{
 		route:         "POST /api/v1/machines/{id}/lock",
 		calls:         nil,
 		routeDeadline: 0,
