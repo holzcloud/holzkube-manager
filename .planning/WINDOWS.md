@@ -110,6 +110,7 @@ last_updated: 2026-09-11T16:50:00.000Z
 | 93 | 02 | deviation | internal/talossim/scenario_conn.go |  | DER SIMULATOR HAT SELBST ERZEUGT, WOGEGEN ip_changes_on_reboot EXISTIERT: eine Antwort von einer Adresse, die der Node aufgegeben hat. severListener rief closeConns() und danach l.Close(). Das Schliessen des Listen-Sockets verhindert nur, dass der Kernel NEUE  | resolved | GESCHLOSSEN 2026-09-13: Ursache nachgewiesen statt vermutet (50-ms-Fenster, 5/5 rot), behoben, und mit zwei Tests gehalten, die ohne den Fix fehlschlagen. | 2026-09-13T09:20:00.000Z | 2026-09-13T09:40:00.000Z |
 | 94 | 09 | deviation | internal/httpapi/handlers/jobs.go |  | DIE GETIPPTE BESTAETIGUNG FUER node.remove-from-cluster WURDE VOM SERVER NICHT ERZWUNGEN. Die Regel im Confirm-Handler war 'if action == node.reset' -- geschrieben, als Reset die einzige bestaetigungspflichtige Aktion war, die etwas zerstoert. Phase 9 hat node | resolved | GESCHLOSSEN 2026-09-13 in derselben Runde, in der es gefunden wurde. Der Eintrag bleibt: von Phase 9 bis hierher war die Bestaetigung fuer diese Aktion allein Browser-Sache. | 2026-09-13T10:30:00.000Z | 2026-09-13T10:30:00.000Z |
 | 95 | 09 | deviation | web/src/components/NodeActions.tsx |  | DRITTE ROUTE OHNE EINSTIEG, GEFUNDEN DURCH EINE SYSTEMATISCHE PRUEFUNG STATT DURCH ZUFALL. POST /api/v1/machines/{id}/remove-from-cluster stand seit Phase 9 und war aus der Oberflaeche nicht erreichbar -- die gesamte etcd-Arbeit dieser Phase war damit nur per  | resolved | GESCHLOSSEN 2026-09-13. Die Pruefung selbst ist das Ergebnis: 61 Routen gegen die Oberflaeche, drei ohne Einstieg, zwei davon zu Recht. | 2026-09-13T10:30:00.000Z | 2026-09-13T10:30:00.000Z |
+| 96 | v1.15 | deviation | docs/api-contract.md |  | ZWEI PROBLEM-CODES WAREN IM VERTRAG NICHT DOKUMENTIERT, obwohl der Vertrag selbst die Regel aufstellt, dass Codes bewusst und im selben Commit wie die Route gepraegt werden, die sie ausgibt: forbidden.dry-run und validation.patch-invalid. Ein Client konnte bei | resolved | GESCHLOSSEN 2026-09-13. Beide Codes dokumentiert; drei Waechter, jeder in beide Richtungen gegen eine eingebaute Fehlerform geprueft. | 2026-09-13T11:30:00.000Z | 2026-09-13T11:30:00.000Z |
 
 ````json
 [
@@ -1252,6 +1253,18 @@ last_updated: 2026-09-11T16:50:00.000Z
     "reason": "GESCHLOSSEN 2026-09-13. Die Pruefung selbst ist das Ergebnis: 61 Routen gegen die Oberflaeche, drei ohne Einstieg, zwei davon zu Recht.",
     "recorded_at": "2026-09-13T10:30:00.000Z",
     "resolved_at": "2026-09-13T10:30:00.000Z"
+  },
+  {
+    "id": 96,
+    "kind": "deviation",
+    "phase": "v1.15",
+    "file": "docs/api-contract.md",
+    "line": null,
+    "description": "ZWEI PROBLEM-CODES WAREN IM VERTRAG NICHT DOKUMENTIERT, obwohl der Vertrag selbst die Regel aufstellt, dass Codes bewusst und im selben Commit wie die Route gepraegt werden, die sie ausgibt: forbidden.dry-run und validation.patch-invalid. Ein Client konnte beide erhalten und nirgends nachschlagen. Gefunden durch dieselbe Art Pruefung wie die Routen (Fenster 95), nur auf die Fehler-Taxonomie angewandt. GESCHLOSSEN: beide dokumentiert, plus drei Waechter -- jeder Code muss im Vertrag vorkommen, jeder Code muss tatsaechlich ausgegeben werden, und die Ausnahmeliste dafuer muss aktuell sein. Der zweite Waechter war in zwei Anlaeufen falsch: problem.go zu ueberspringen meldete CodeClusterLocked als tot (es wird von einem Konstruktor in derselben Datei ausgegeben), und Textvorkommen zu zaehlen machte den Test WIRKUNGSLOS, weil jeder Code einen Doku-Kommentar traegt, der mit seinem eigenen Namen beginnt -- mit einer absichtlich toten Konstante geprueft und fuer gruen befunden. Erst das Tokenisieren beantwortet beides.",
+    "status": "resolved",
+    "reason": "GESCHLOSSEN 2026-09-13. Beide Codes dokumentiert; drei Waechter, jeder in beide Richtungen gegen eine eingebaute Fehlerform geprueft.",
+    "recorded_at": "2026-09-13T11:30:00.000Z",
+    "resolved_at": "2026-09-13T11:30:00.000Z"
   }
 ]
 ````
