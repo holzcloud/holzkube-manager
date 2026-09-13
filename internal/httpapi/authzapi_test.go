@@ -14,6 +14,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/cookiejar"
+	"strings"
 	"testing"
 
 	"github.com/holzcloud/holzkube-manager/internal/httpapi"
@@ -329,5 +330,30 @@ func TestAServiceAccountTokenWorksOverHTTP(t *testing.T) {
 	bad := &asClient{srv: h.srv.URL, client: h.srv.Client(), bearer: "hkm_not-a-real-token"}
 	if got, body := bad.status(t, http.MethodGet, "/api/v1/machines", nil); got != http.StatusUnauthorized {
 		t.Errorf("an invalid token answered %d, want 401 (%s)", got, body)
+	}
+
+	// A service account changing "its" password. It has none -- that is the
+	// definition -- and the route is open to it: the password change requires
+	// only RoleReader, and a bearer token satisfies both the CSRF check and
+	// the sudo window, so every gate in front of this hands the request
+	// through.
+	//
+	// What arrives at the handler is Verify(current, "") against an empty
+	// hash, which is not a wrong password but an undecodable one, so it
+	// returns an error rather than false -- and an error there is a 500 with a
+	// line in the log about an unexpected internal condition. There is nothing
+	// unexpected about it. auth.ErrNotAPerson was written for exactly this and
+	// was never returned by anything.
+	got, body = c.status(t, http.MethodPost, "/api/v1/account/password",
+		map[string]string{"current_password": "anything", "new_password": "long-enough-to-pass"})
+	if got >= 500 {
+		t.Errorf("a service account asking to change a password it does not have got %d, "+
+			"which is this product calling a state it can name an internal error: %s", got, body)
+	}
+	if got != http.StatusConflict {
+		t.Errorf("a service account changing a password answered %d, want 409 (%s)", got, body)
+	}
+	if !strings.Contains(string(body), "service account") {
+		t.Errorf("the refusal does not say what is actually wrong: %s", body)
 	}
 }

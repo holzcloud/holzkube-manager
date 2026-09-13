@@ -62,6 +62,21 @@ func changePassword(d httpapi.Deps, w http.ResponseWriter, r *http.Request) {
 
 	err := d.Auth.ChangePassword(r.Context(), req.CurrentPassword, req.NewPassword)
 	switch {
+	case errors.Is(err, auth.ErrNotAPerson):
+		// Named rather than folded into the 401 above. This caller has already
+		// proven which account it is, so there is nothing to withhold, and the
+		// alternative -- "invalid credentials" for an account that has none --
+		// sends whoever automated this looking for a password that was never
+		// issued.
+		httpapi.WriteProblem(w, r, &httpapi.Problem{
+			Type:   httpapi.TypeConflict,
+			Title:  "That account has no password",
+			Status: http.StatusConflict,
+			Detail: "A service account authenticates with a token and has no password to change. " +
+				"Rotate its token instead.",
+			Code: httpapi.CodeNotAPerson,
+		})
+		return
 	case errors.Is(err, auth.ErrInvalidCredentials):
 		// The same answer as a failed login. A caller who can tell "wrong
 		// current password" from "not allowed" learns something about a

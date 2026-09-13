@@ -212,6 +212,23 @@ func (s *Service) ChangePassword(ctx context.Context, current, next string) erro
 		return ErrInvalidCredentials
 	}
 
+	// A service account has no password to change, and this is reachable: the
+	// route needs only RoleReader, and a bearer token satisfies both the CSRF
+	// check and the sudo window, so every gate in front of it hands the
+	// request through. Without this, Verify is handed an empty hash -- not a
+	// wrong password but an undecodable one -- and returns an error rather
+	// than false, which becomes a 500 and a log line about an unexpected
+	// internal condition. There is nothing unexpected about it.
+	//
+	// Unlike the refusal in Authenticate above, this one names the reason. The
+	// two are different questions: there, an anonymous caller is guessing at
+	// usernames and must learn nothing from the answer; here, the caller has
+	// already proven which account it is and is being told a fact about its
+	// own account.
+	if u.IsService() {
+		return ErrNotAPerson
+	}
+
 	valid, err := Verify(current, u.PasswordHash)
 	if err != nil {
 		return fmt.Errorf("auth: verify current password: %w", err)

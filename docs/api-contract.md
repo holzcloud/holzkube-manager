@@ -1487,6 +1487,19 @@ so the two are not distinguishable by timing. **A token never signs in a
 person** — a person has no token hash, and there is no route that would mint one
 for them (409 `conflict.not-a-service-account`).
 
+The mirror of that is `POST /api/v1/account/password`, which answers 409
+`conflict.not-a-person` to a service account: it authenticates with a token and
+has no password to change, so the answer is to rotate the token. The route is
+genuinely reachable by one — it needs only `RoleReader`, and a bearer token
+satisfies both the CSRF check and the sudo window — and it answered `500
+internal.unexpected` until v1.16, because `Verify` against an empty hash returns
+an error rather than false. There was nothing unexpected about it.
+
+Unlike the sign-in refusal above, this one **names the reason**. The two are
+different questions: there, an anonymous caller is guessing at usernames and
+must learn nothing from the answer; here the caller has already proven which
+account it is and is being told a fact about its own account.
+
 `POST /api/v1/service-accounts` mints the account and its token together and
 returns the token **once**. There is no route that returns it again, because
 only its SHA-256 is stored. SHA-256 and not argon2id: stretching improves
