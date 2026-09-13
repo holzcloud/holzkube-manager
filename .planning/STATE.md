@@ -5,7 +5,7 @@ current_phase: 3
 current_phase_name: "Prometheus-/metrics (v1.15)"
 status: milestone-closed
 stopped_at: v1.15 vollstaendig, CI gruen, Routen-Audit abgearbeitet (Fenster 92-95 zu). OPS-05 bleibt der einzige Release-Blocker (Fenster 87)
-last_updated: "2026-09-13T11:00:00.000Z"
+last_updated: "2026-09-13T11:30:00.000Z"
 last_activity: 2026-09-13
 last_activity_desc: CI red for nine commits (fixed); a route audit found a confirmation the server never enforced
 state_head: a474d2522823cbfb436ee720dee35494890281a3
@@ -58,6 +58,18 @@ Code. Nebenbei sind zwei alte, stille Supervisions-Fehler gefallen: ein
 Lesevorgang vor `Start()` verhinderte jede Überwachung, und `Supervise()` band
 den Supervisor an den Request-Context des HTTP-Handlers. Siehe
 `.planning/phases/v1.15-02-cosi-watches/02-SUMMARY.md`.
+
+**Dieselbe Prüfung auf die Fehler-Taxonomie angewandt (Fenster 96): zwei Codes
+standen nicht im Vertrag** — `forbidden.dry-run` und `validation.patch-invalid`.
+Ein Client konnte beide bekommen und nirgends nachschlagen, obwohl der Vertrag
+selbst die Regel aufstellt, dass Codes bewusst gemünzt werden. Jetzt
+dokumentiert, plus drei Wächter in beide Richtungen. Der Wächter „jeder Code
+wird auch ausgegeben" war dabei **zweimal falsch**: `problem.go` zu überspringen
+meldete `CodeClusterLocked` als tot (ein Konstruktor in derselben Datei gibt ihn
+aus), und Textvorkommen zu zählen machte ihn **wirkungslos**, weil jeder Code
+einen Doku-Kommentar trägt, der mit seinem Namen beginnt — mit einer absichtlich
+toten Konstante geprüft und für grün befunden. Erst Tokenisieren beantwortet
+beides.
 
 **Die Routen-Prüfung ist jetzt ein Test und keine Beobachtung mehr.**
 `TestEveryRouteIsReachableFromTheInterface` läuft die Routen-Tabelle gegen
