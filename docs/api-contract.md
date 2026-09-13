@@ -2071,6 +2071,12 @@ Removing a voter from a cluster that cannot spare one is `409
 conflict.last-voting-member`. A removal is not an upgrade — there is no node
 coming back afterwards — so it is the last point at which anything can say no.
 
+The same decision governs `remove-from-cluster` further down, and it is reached
+through one function (`upgrade.refuseIfTheClusterCannotSpareAVoter`) rather than
+two copies. Two doors into the same rule answering differently is the failure
+this is written to avoid, and it had already happened: the member route refused
+and the node route read no membership at all.
+
 ### The snapshot fallback is stated, not hidden
 
 `GET /api/v1/clusters/{id}/etcd/snapshot` streams bytes. It needs a **quorum**:
@@ -2151,6 +2157,34 @@ system disk, and it is forgotten from the inventory.
 **Cordon and drain are not performed**, and the response says so. holzkube-manager
 speaks the Talos machine API and not the Kubernetes API. Anything still scheduled
 on the node stops when it does.
+
+**A control-plane node's removal is gated on etcd's membership**, read before
+anything is changed, and refused with `409 conflict.last-voting-member` when the
+cluster does not survive losing a voter. Two cases, and the refusal says which:
+
+- **the only member** — removing it does not make the cluster smaller, it ends
+  it. There is no quorum left to rejoin and no member to add one through, and
+  the way back is a restore from a snapshot. To take that node out of service,
+  reset it.
+- **one of two** — the cluster stops accepting writes and the Kubernetes API
+  stops with it. Recoverable by adding a control-plane node back, which the
+  first case is not.
+
+The gate and the confirmation are not the same thing and neither substitutes for
+the other. This route shipped with the hostname confirmation and no membership
+read at all, so a one-node cluster was one correctly-typed hostname from a wipe:
+a confirmation dialog asks whether somebody meant what they already clicked, and
+a gate is the part that knows what it costs. Both are cheap and only one of them
+can answer a question about etcd.
+
+A **worker's removal reads no membership**, deliberately: it is not a member,
+and a cluster whose etcd cannot be reached must not be a cluster whose workers
+cannot be removed.
+
+The upgrade gate's single-node exemption does not reach this route. A cluster of
+one is exempt there because it has no quorum to lose and refusing would make the
+smallest homelab unupgradeable — and the node comes back. Nothing comes back
+from a removal.
 
 ### The per-node lock
 

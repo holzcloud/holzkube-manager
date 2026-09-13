@@ -193,6 +193,23 @@ func (s *Service) Machines(ctx context.Context) ([]MachineView, error) {
 	return out, nil
 }
 
+// MachineRecord reads the stored record rather than the view.
+//
+// It exists for the callers that make a decision about a machine rather than
+// draw one: a view is assembled for a screen, and a rule reading a machine's
+// role out of a `Field[T]`-carrying view is a rule reading a shape built for
+// display. The removal path takes this.
+func (s *Service) MachineRecord(ctx context.Context, id model.MachineID) (model.Machine, error) {
+	rec, err := s.deps.Store.Machines().Get(ctx, id)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return model.Machine{}, ErrNotFound
+		}
+		return model.Machine{}, err
+	}
+	return rec, nil
+}
+
 // Machine returns one machine.
 func (s *Service) Machine(ctx context.Context, id model.MachineID) (MachineView, error) {
 	rec, err := s.deps.Store.Machines().Get(ctx, id)

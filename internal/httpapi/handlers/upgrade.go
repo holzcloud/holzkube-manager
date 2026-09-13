@@ -620,7 +620,11 @@ func removeNodeFromCluster(d httpapi.Deps) http.HandlerFunc {
 		}
 
 		id := model.MachineID(r.PathValue("id"))
-		m, err := d.Inventory.Machine(r.Context(), id)
+
+		// The record and not the view: what follows decides whether this node
+		// may be removed, and a decision reading a shape assembled for a
+		// screen is a decision one layout change away from being wrong.
+		m, err := d.Inventory.MachineRecord(r.Context(), id)
 		if err != nil {
 			writeInventoryError(w, r, d, err)
 			return
@@ -638,7 +642,7 @@ func removeNodeFromCluster(d httpapi.Deps) http.HandlerFunc {
 		ctx, cancel := budgetedContext(r, EtcdRouteBudget)
 		defer cancel()
 
-		if err := d.Upgrade.RemoveNodeFromCluster(ctx, id, m.Role == model.RoleControlPlane); err != nil {
+		if err := d.Upgrade.RemoveNodeFromCluster(ctx, m); err != nil {
 			writeUpgradeError(w, r, d, err)
 			return
 		}

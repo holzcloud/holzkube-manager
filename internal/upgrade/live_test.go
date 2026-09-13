@@ -290,6 +290,134 @@ func TestRemovingTheLastVotingMemberIsRefused(t *testing.T) {
 	if !strings.Contains(err.Error(), "cp-2") {
 		t.Errorf("the refusal %q does not name the member", err)
 	}
+
+	// The other half of the pair above: this cluster survives as a cluster,
+	// so the advice is the one that applies to a cluster.
+	if !strings.Contains(err.Error(), "Add a control-plane node first") {
+		t.Errorf("the refusal does not say what to do about it: %q", err)
+	}
+	if strings.Contains(err.Error(), "only etcd member") {
+		t.Errorf("a two-member cluster was described as having one member: %q", err)
+	}
+}
+
+// TestRemovingTheOnlyMemberIsRefused is the case the two-member test above
+// does not reach, and the worse one.
+//
+// A cluster with two voting members tolerates no loss, so removing one stops
+// it accepting writes -- bad, and recoverable by adding a member back. A
+// cluster with one voting member has nothing after the removal at all: no
+// quorum to rejoin, no member to add a member through, and a data directory
+// that is now the only copy. There is no repair from here that is not a
+// restore.
+//
+// Somebody in a one-node homelab clicking "remove from cluster" on their one
+// control-plane node is the most ordinary way to arrive at it.
+func TestRemovingTheOnlyMemberIsRefused(t *testing.T) {
+	t.Parallel()
+
+	_, cc := liveNode(t)
+
+	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+	defer cancel()
+
+	list := upgrade.MemberList{
+		Members:     []upgrade.Member{{ID: "1", Name: "cp-1", Voting: true}},
+		VotingCount: 1,
+		Tolerates:   0,
+	}
+
+	err := upgrade.RemoveMember(ctx, cc, list, "1")
+	if !errors.Is(err, upgrade.ErrLastVotingMember) {
+		t.Fatalf("removing the only etcd member returned %v, want ErrLastVotingMember", err)
+	}
+	if !strings.Contains(err.Error(), "cp-1") {
+		t.Errorf("the refusal %q does not name the member", err)
+	}
+
+	// And it gives this cluster's advice rather than the other one's. The two
+	// refusals share a sentinel and overlap in their conditions -- a cluster
+	// of one also tolerates nothing -- so a test that checked only the
+	// sentinel would pass while the operator was told to "add a control-plane
+	// node first", which is advice about a cluster that still exists. There is
+	// nothing to add a node to here.
+	if !strings.Contains(err.Error(), "only etcd member") ||
+		!strings.Contains(err.Error(), "restore from a snapshot") {
+		t.Errorf("the refusal gives the wrong cluster's advice: %q", err)
+	}
+	if strings.Contains(err.Error(), "Add a control-plane node first") {
+		t.Errorf("the refusal tells the operator to add a node to a cluster that would not exist: %q", err)
+	}
+}
+
+// TestRemovingTheOnlyControlPlaneNodeIsRefused is the same rule as the two
+// tests above, asked through the door an operator actually uses.
+//
+// RemoveMember is "take this etcd member out by id", which is the repair for a
+// member that should not be there. node.remove-from-cluster is the button on a
+// node's page, and it does something larger: leave etcd, then wipe the system
+// disk. It went two phases reading no membership at all -- the refusal existed
+// beside it and never ran, so the confirmation dialog was the only thing
+// between a one-node cluster and a wipe, and a confirmation dialog is not a
+// gate. It is a way of asking somebody whether they meant the thing they
+// already clicked.
+//
+// The upgrade gate exempts a single-node cluster on purpose: it has no quorum
+// to lose, and refusing there would make the smallest homelab unupgradeable.
+// That exemption must not reach this operation, and this test is the
+// difference between the two: an upgraded node comes back, and a removed one
+// does not.
+func TestRemovingTheOnlyControlPlaneNodeIsRefused(t *testing.T) {
+	t.Parallel()
+
+	sim, cc := liveNode(t)
+
+	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+	defer cancel()
+
+	err := upgrade.RemoveNode(ctx, cc, model.Machine{
+		ID:       "00000000-0000-4000-8000-000000000001",
+		Role:     model.RoleControlPlane,
+		Hostname: "cp-1",
+	})
+	if !errors.Is(err, upgrade.ErrLastVotingMember) {
+		t.Fatalf("removing the only control-plane node returned %v, want ErrLastVotingMember", err)
+	}
+	if !strings.Contains(err.Error(), "only etcd member") {
+		t.Errorf("the refusal gives the wrong cluster's advice: %q", err)
+	}
+
+	// And nothing happened to the node. A refusal that arrived after the
+	// etcd leave, or after the reset, would be a refusal in name only.
+	if !sim.Node().Bootstrapped {
+		t.Error("the node left etcd before the refusal")
+	}
+	if sim.Node().Resets != 0 {
+		t.Error("the node was reset despite the refusal")
+	}
+}
+
+// TestRemovingAWorkerAsksEtcdNothing. A worker is not a member, so the
+// membership is not its business -- and a cluster whose etcd cannot be reached
+// must not be a cluster whose workers cannot be removed.
+func TestRemovingAWorkerAsksEtcdNothing(t *testing.T) {
+	t.Parallel()
+
+	sim, cc := liveNode(t)
+
+	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+	defer cancel()
+
+	if err := upgrade.RemoveNode(ctx, cc, model.Machine{
+		ID:       "00000000-0000-4000-8000-000000000002",
+		Role:     model.RoleWorker,
+		Hostname: "w-1",
+	}); err != nil {
+		t.Fatalf("removing a worker: %v", err)
+	}
+	if sim.Node().Resets != 1 {
+		t.Errorf("the worker was reset %d times, want once", sim.Node().Resets)
+	}
 }
 
 // TestASnapshotIsBytesAndAZeroLengthOneIsNotABackup is UPG-12.
