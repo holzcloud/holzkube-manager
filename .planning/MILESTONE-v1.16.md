@@ -5,7 +5,10 @@
 weiter mit allen offenen Milestones. Bis die Software alle Funktionen welche
 talos omni hat auch hat."
 **Status:** definiert, nicht vom Betreiber bestätigt
-**Fortschritt:** Phasen 1 bis 4 gebaut (etcd-Restore, kubeconfig, Rollen, Service-Accounts)
+**Fortschritt:** Abschnitt B ist abgearbeitet. Phasen 1 bis 8 gebaut, Phase 9
+zur Hälfte und mit dem ausdrücklichen Vermerk, welche Hälfte fehlt und warum.
+Offen bleiben nur die Abschnitte C (braucht Hardware, die es hier nicht gibt)
+und D (braucht eine Entscheidung des Betreibers, keine Arbeit).
 
 ## Was diese Anweisung ändert
 
@@ -107,7 +110,7 @@ im Audit-Pfad und eigener Rolle. Folgt aus Phase 3 und ist ohne sie sinnlos.
 
 **Belegbar hier:** vollständig.
 
-### Phase 5: Maschinen-Labels und Maschinen-Klassen (Omni: „Set Initial Machine Labels", „Create a Machine Class")
+### Phase 5: Maschinen-Labels und Maschinen-Klassen (Omni: „Set Initial Machine Labels", „Create a Machine Class") — GEBAUT
 
 `model.Machine` hat heute kein Label-Feld. Labels sind die Grundlage, auf der
 Omni Cluster zusammenstellt: eine Maschinen-Klasse ist ein Label-Selektor, und
@@ -115,7 +118,7 @@ eine Cluster-Definition nennt Klassen statt einzelner Maschinen.
 
 **Belegbar hier:** vollständig.
 
-### Phase 6: Cluster-Templates (Omni: „Introduction to Cluster Templates", „Export a Cluster template", Referenz)
+### Phase 6: Cluster-Templates (Omni: „Introduction to Cluster Templates", „Export a Cluster template", Referenz) — GEBAUT
 
 Eine deklarative YAML-Beschreibung eines Clusters, anwendbar und aus einem
 bestehenden Cluster exportierbar. Baut auf Phase 5 auf.
