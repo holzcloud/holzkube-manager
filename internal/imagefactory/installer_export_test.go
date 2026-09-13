@@ -81,3 +81,13 @@ func (c *Client) DoUnbudgetedForTest(ctx context.Context, u string) error {
 	var dst any
 	return c.do(req, &dst)
 }
+
+// RegistryReason exposes the mapping from a transport failure to the sentence
+// an operator reads.
+//
+// It is exported to the tests rather than tested through InstallerImage because
+// going through the client for each case would need a fake registry that can
+// fail in five different transport-level ways -- a test about the fake. The
+// full path is still covered: TestInstallerImageFallsBackToTheLegacyRepository
+// reads the sentence out of a real warning.
+func RegistryReason(err error) string { return registryReason(err) }

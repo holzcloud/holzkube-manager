@@ -8,6 +8,9 @@ import {
   ProblemError,
   type Schematic,
   type SchematicInput,
+  type SchematicWarning,
+  WARNING_INSTALLER_REPO_FALLBACK_UNVERIFIED,
+  WARNING_INSTALLER_SECUREBOOT_REPO_FALLBACK_UNVERIFIED,
 } from '@/api'
 import {
   LiveSchematicWarnings,
@@ -1465,7 +1468,11 @@ function AssetPanel({ record, archSeed }: { record: Schematic; archSeed: Archite
                 secureBoot={secureBoot}
               />
             ) : (
-              <AssetRow label="Installer" value={assets.data.installer} />
+              <AssetRow
+                label="Installer"
+                value={assets.data.installer}
+                provisional={isProvisional(assets.data.warnings)}
+              />
             )}
             <AssetRow label="PXE" value={assets.data.pxe} />
             <AssetRow label="Disk image" value={assets.data.disk_image} />
@@ -1498,16 +1505,53 @@ function AssetPanel({ record, archSeed }: { record: Schematic; archSeed: Archite
  * A dd is name-prohibited, so labelling one would be markup that validates and
  * does not work.
  */
-function AssetRow({ label, value }: { label: string; value: string }) {
+function AssetRow({
+  label,
+  value,
+  provisional = false,
+}: {
+  label: string
+  value: string
+  provisional?: boolean
+}) {
   return (
     <fieldset
       aria-label={`${label} reference`}
       className="grid grid-cols-[minmax(0,8rem)_1fr_auto] items-start gap-2"
     >
-      <span className="text-sm text-muted-foreground">{label}</span>
+      <span className="text-sm text-muted-foreground">
+        {label}
+        {provisional && (
+          <span className="ml-1 rounded bg-amber-500/20 px-1 text-[10px] font-medium uppercase tracking-wide text-amber-700 dark:text-amber-400">
+            provisional
+          </span>
+        )}
+      </span>
       <ReferenceValue value={value} />
       <CopyButton label={label} value={value} />
     </fieldset>
+  )
+}
+
+/**
+ * Whether the installer reference on this response was reached past a candidate
+ * repository that never answered.
+ *
+ * The two codes it asks about are the two whose detail ends "asking again may
+ * produce a different reference", and the mark exists because that sentence is
+ * three lines up in a warning box an operator reading off a URL has already
+ * scrolled past. The label sits on the value it is about.
+ *
+ * It is a mark and never a filter: SchematicWarnings still renders every code
+ * generically, including one this build has never heard of, so a warning does
+ * not need a branch here to reach the operator. This adds emphasis to two it
+ * does know.
+ */
+function isProvisional(warnings: SchematicWarning[]): boolean {
+  return warnings.some(
+    (warning) =>
+      warning.code === WARNING_INSTALLER_REPO_FALLBACK_UNVERIFIED ||
+      warning.code === WARNING_INSTALLER_SECUREBOOT_REPO_FALLBACK_UNVERIFIED,
   )
 }
 

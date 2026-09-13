@@ -1639,6 +1639,45 @@ describe('ImagesView — the saved schematics', () => {
     }
   })
 
+  /**
+   * The warning box says "asking again may produce a different reference", and
+   * it says it three lines above a URL the operator has already copied. The
+   * mark sits on the value it is about.
+   */
+  it('marks a provisional installer reference on the row itself', async () => {
+    stubFactory({
+      saved: [USABLE],
+      assetWarnings: [
+        {
+          code: WARNING_INSTALLER_REPO_FALLBACK_UNVERIFIED,
+          detail: 'The preferred repository did not answer at all.',
+        },
+      ],
+    })
+    const user = userEvent.setup()
+
+    renderImages()
+    const detail = await openDetail(user, USABLE)
+
+    const row = await detail.findByLabelText('Installer reference')
+    expect(within(row).getByText(/provisional/i)).toBeInTheDocument()
+
+    // And not on a reference nobody said anything provisional about.
+    const iso = detail.getByLabelText('ISO reference')
+    expect(within(iso).queryByText(/provisional/i)).toBeNull()
+  })
+
+  it('does not mark the installer reference when nothing is provisional', async () => {
+    stubFactory({ saved: [USABLE] })
+    const user = userEvent.setup()
+
+    renderImages()
+    const detail = await openDetail(user, USABLE)
+
+    const row = await detail.findByLabelText('Installer reference')
+    expect(within(row).queryByText(/provisional/i)).toBeNull()
+  })
+
   it('deletes through the existing sudo dialog and adds no confirmation of its own', async () => {
     const fetchMock = stubFactory({ saved: [USABLE], sudoRequired: true })
     const challenges: SudoChallenge[] = []

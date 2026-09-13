@@ -211,12 +211,15 @@ type Server struct {
 	closed bool
 }
 
+// New builds and starts a simulated node. It returns a running server or an
+// error, never a half-built value: a simulator that is listening on one of its
+// two listeners is worse than one that failed.
 // newServer builds the server value and opens nothing.
 //
-// It is separate from New so that a test can build the value New builds and
-// then hand serveOn a pair of listeners it can inspect. Rebuilding this struct
-// inside a test would be the usual kind of duplication: the test would go on
-// passing while the thing it claims to be about had changed underneath it.
+// It is separate from New so that a test can build the same value New builds
+// and then hand serveOn listeners it can inspect. Rebuilding this struct in a
+// test would be the usual kind of duplication: the test would keep passing
+// while the thing it claims to be about had changed.
 func newServer(opts Options) (*Server, error) {
 	if opts.TalosVersion == "" {
 		opts.TalosVersion = DefaultTalosVersion
@@ -282,9 +285,12 @@ func New(opts Options) (*Server, error) {
 // serveOn finishes construction on the two listeners it is handed, and closes
 // both if it cannot finish.
 //
-// The listeners are arguments rather than something this opens for itself
-// because New's promise is about them, and a promise about listeners is only
-// checkable by a test that can see them.
+// It is split out of New for one reason: the promise in New's doc -- "a running
+// server or an error, never a half-built value" -- was not kept on the seeding
+// path, and a promise about listeners is only checkable by a test that can see
+// the listeners. New opens them itself, so nothing outside could. This takes
+// them as arguments, so an internal test can hand it a pair that records
+// whether they were closed and then hand it a fixture that cannot seed.
 func (s *Server) serveOn(raw net.Listener, pipe *bufconn.Listener) (*Server, error) {
 	// Wrapped from the start rather than only while a scenario is active: the
 	// connections flap_connection has to sever are the ones accepted before it
@@ -319,12 +325,13 @@ func (s *Server) serveOn(raw net.Listener, pipe *bufconn.Listener) (*Server, err
 	// observe the node in the half-populated state between construction and
 	// the first resource being written.
 	//
-	// Both listeners are already open here, and a failure used to return
-	// without closing either. New's doc promises "never a half-built value",
-	// and a leaked listener holding a loopback port for the life of the
-	// process is exactly the half-built value it promises not to leave behind
-	// -- worse in a test binary than in production, because a test binary
-	// builds hundreds of these.
+	// Both listeners are already open at this point, and a failure here used
+	// to return without closing either of them. New's doc promises "a running
+	// server or an error, never a half-built value" -- a leaked listener
+	// holding a loopback port for the life of the process is exactly the
+	// half-built value it promises not to leave behind, and it costs more in a
+	// test binary than in production because a test binary builds hundreds of
+	// these.
 	if err := s.seedCOSI(context.Background()); err != nil {
 		s.srv.Stop()
 		_ = tcp.Close()

@@ -4,8 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
+	"net"
+	"net/url"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -424,10 +429,80 @@ func TestInstallerImageWarnsWhenThePreferredNameWasNeverRuledOut(t *testing.T) {
 	if !strings.Contains(w.Detail, installerModernVersion) {
 		t.Errorf("the warning does not name the version: %q", w.Detail)
 	}
-	// The transport error as the client reported it. Without it an operator
-	// reading the warning cannot tell a throttled registry from a broken one.
-	if !strings.Contains(w.Detail, "EOF") && !strings.Contains(w.Detail, "connection") {
-		t.Errorf("the warning does not carry the transport error: %q", w.Detail)
+	// Why the registry did not answer, in words. Without it an operator reading
+	// the warning cannot tell a throttled registry from a broken one.
+	if !strings.Contains(w.Detail, "registry") {
+		t.Errorf("the warning does not say why the preferred repository did not answer: %q", w.Detail)
+	}
+
+	// And not in Go's words. This detail is long-lived in a way an error
+	// returned from a call is not: it rides every cached answer for this key
+	// until the entry is re-questioned, so it is read long after the moment it
+	// describes -- with a resolved IP address in it that stopped being true
+	// somewhere in between.
+	for _, leak := range []string{"dial tcp", "Get \"", "x509:", "*net."} {
+		if strings.Contains(w.Detail, leak) {
+			t.Errorf("the warning carries %q, which is net/http's account and not the operator's: %q",
+				leak, w.Detail)
+		}
+	}
+}
+
+// TestRegistryReasonSaysWhyRatherThanHow covers the mapping itself.
+//
+// Going through InstallerImage for each of these would mean a fake registry
+// that can fail in five different transport-level ways, which is a test about
+// the fake. The function takes an error and returns a sentence, so it is asked
+// directly.
+func TestRegistryReasonSaysWhyRatherThanHow(t *testing.T) {
+	t.Parallel()
+
+	for name, tc := range map[string]struct {
+		err  error
+		want string
+	}{
+		"refused": {
+			err:  &url.Error{Op: "Get", URL: "https://ghcr.io/v2/x", Err: &net.OpError{Op: "dial", Err: syscall.ECONNREFUSED}},
+			want: "refused the connection",
+		},
+		"reset": {
+			err:  &url.Error{Op: "Get", URL: "https://ghcr.io/v2/x", Err: &net.OpError{Op: "read", Err: syscall.ECONNRESET}},
+			want: "closed the connection without replying",
+		},
+		"eof": {
+			err:  &url.Error{Op: "Get", URL: "https://ghcr.io/v2/x", Err: io.EOF},
+			want: "throttling",
+		},
+		"dns": {
+			err:  &url.Error{Op: "Get", URL: "https://nope.example/v2/x", Err: &net.DNSError{Err: "no such host", Name: "nope.example"}},
+			want: "host name could not be resolved",
+		},
+		"deadline": {
+			err:  fmt.Errorf("Get %q: %w", "https://ghcr.io/v2/x", context.DeadlineExceeded),
+			want: "ran out of time",
+		},
+		"tls": {
+			err:  &url.Error{Op: "Get", URL: "https://ghcr.io/v2/x", Err: errors.New("tls: failed to verify certificate: x509: certificate signed by unknown authority")},
+			want: "TLS certificate was not accepted",
+		},
+		"nothing recognisable": {
+			err:  errors.New("something nobody has classified"),
+			want: "connection to the registry failed",
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			got := imagefactory.RegistryReason(tc.err)
+			if !strings.Contains(got, tc.want) {
+				t.Errorf("RegistryReason = %q, want it to contain %q", got, tc.want)
+			}
+			for _, leak := range []string{"dial tcp", "x509:", "Get \"", "syscall"} {
+				if strings.Contains(got, leak) {
+					t.Errorf("RegistryReason leaked %q into an operator-facing sentence: %q", leak, got)
+				}
+			}
+		})
 	}
 }
 
