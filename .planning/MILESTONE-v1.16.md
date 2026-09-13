@@ -5,6 +5,7 @@
 weiter mit allen offenen Milestones. Bis die Software alle Funktionen welche
 talos omni hat auch hat."
 **Status:** definiert, nicht vom Betreiber bestätigt
+**Fortschritt:** Phasen 1 bis 4 gebaut (etcd-Restore, kubeconfig, Rollen, Service-Accounts)
 
 ## Was diese Anweisung ändert
 
@@ -63,7 +64,7 @@ Abschnitt darin. Sie stehen nicht in den Tabellen.
 Das ist der Arbeitsvorrat dieses Milestones. Reihenfolge nach dem, was ein
 Betreiber am nächsten Vorfall merkt.
 
-### Phase 1: etcd-Restore (Omni: „Restore Etcd of a Cluster")
+### Phase 1: etcd-Restore (Omni: „Restore Etcd of a Cluster") — GEBAUT
 
 Die README sagt heute ausdrücklich „It takes etcd snapshots and does not restore
 them", und das ist die größte einzelne Lücke im Produkt: ein Backup, das nicht
@@ -77,7 +78,7 @@ belegt der Test nur, dass ein RPC abgesetzt wurde (siehe Fenster 3 und 4).
 **Belegbar hier:** die Mechanik gegen talossim, die Refusals, der Job-Verlauf.
 **Nicht belegbar hier:** dass ein echter Cluster danach wieder läuft.
 
-### Phase 2: kubeconfig (Omni: „Use Kubectl With Omni", „Create a Kubeconfig for a Kubernetes Service Account")
+### Phase 2: kubeconfig (Omni: „Use Kubectl With Omni", „Create a Kubeconfig for a Kubernetes Service Account") — GEBAUT
 
 `MachineService/Kubeconfig` ist ein Server-Stream, der ein tar-Archiv liefert.
 Ein Betreiber, der einen Cluster über diese Oberfläche adoptiert hat, hat heute
@@ -86,7 +87,7 @@ Werkzeug, das dieses Produkt ersetzen soll.
 
 **Belegbar hier:** vollständig, gegen talossim.
 
-### Phase 3: Mehrere Benutzer und Rollen (Omni: „Manage Users in Omni", „Access Policies (ACLs)")
+### Phase 3: Mehrere Benutzer und Rollen (Omni: „Manage Users in Omni", „Access Policies (ACLs)") — GEBAUT
 
 `PROJECT.md` hält die Gegenentscheidung fest: „Ein zweiter echter Benutzer wäre
 der Auslöser, nicht Vollständigkeit." Die neue Anweisung ist dieser Auslöser,
@@ -99,7 +100,7 @@ schon heute den Handelnden mit, also gibt es die Hälfte davon bereits.
 
 **Belegbar hier:** vollständig.
 
-### Phase 4: Service-Accounts (Omni: „Create an Omni Service Account")
+### Phase 4: Service-Accounts (Omni: „Create an Omni Service Account") — GEBAUT
 
 Ein nicht-interaktives Zugangsmittel für Automatisierung, mit eigener Identität
 im Audit-Pfad und eigener Rolle. Folgt aus Phase 3 und ist ohne sie sinnlos.
@@ -209,6 +210,32 @@ Phase 7 (holzkubectl)      braucht 3 und 4 (ein CLI ohne Token ist ein Cookie-Ja
 Phase 8 (Skalieren)        braucht 5
 Phase 9 (CA-Rotation)      unabhängig
 ```
+
+## Was beim Bauen anders kam als geplant
+
+**Phase 1** hat eine Abweichung von der bestaetigten Deadline-Policy noetig
+gemacht (Fenster 98): EtcdRecover ist dort als Mutation gefuehrt und ist jetzt
+ClassUpload, weil die Policy nie einen hochladenden Aufruf zu bedenken hatte.
+Die Mutations-Klasse begrenzt laut eigenem Doc „the call that *initiates* a
+mutation" -- dieser initiiert nichts und passt in kein Paket.
+
+**Phase 2** hat talossim.Options um `Bootstrapped` erweitert. Der Default
+modelliert einen frischen Knoten, den der Provisioning-Pfad gerade installiert
+hat; das ist nicht der Knoten, den der Adoptions-Pfad trifft. Ein importierter
+Cluster laeuft per Definition schon.
+
+**Phase 3** war groesser als geplant, und zwar an der richtigen Stelle: nicht
+die drei Rollen, sondern dass jede der 65 Session-Routen ihre Mindestrolle
+einzeln nennt und eine Route ohne Rolle den Prozess am Start abbricht. Die
+Alternative -- ein Default -- waere genau die Sorte Entscheidung gewesen, die
+dieses Repository sonst nirgends trifft.
+
+**Phase 4** hat zwei Tore geoeffnet, die beide begruendet sind und keines davon
+bequem: CSRF und das Sudo-Fenster lassen einen Bearer-Token durch. Die erste
+Fassung der Sudo-Behauptung im Test hat nichts geprueft (sie benutzte den
+per-Node-Lock, der absichtlich NICHT Destructive ist); die CSRF-Ausnahme war
+ueberhaupt nicht wirksam, bis sie als Praedikat an die Kompositionswurzel kam.
+Beides gefunden, indem der Fehler absichtlich wieder eingebaut wurde.
 
 ## Die Regel, unter der das gebaut wird
 
