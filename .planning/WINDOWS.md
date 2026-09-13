@@ -111,6 +111,7 @@ last_updated: 2026-09-11T16:50:00.000Z
 | 94 | 09 | deviation | internal/httpapi/handlers/jobs.go |  | DIE GETIPPTE BESTAETIGUNG FUER node.remove-from-cluster WURDE VOM SERVER NICHT ERZWUNGEN. Die Regel im Confirm-Handler war 'if action == node.reset' -- geschrieben, als Reset die einzige bestaetigungspflichtige Aktion war, die etwas zerstoert. Phase 9 hat node | resolved | GESCHLOSSEN 2026-09-13 in derselben Runde, in der es gefunden wurde. Der Eintrag bleibt: von Phase 9 bis hierher war die Bestaetigung fuer diese Aktion allein Browser-Sache. | 2026-09-13T10:30:00.000Z | 2026-09-13T10:30:00.000Z |
 | 95 | 09 | deviation | web/src/components/NodeActions.tsx |  | DRITTE ROUTE OHNE EINSTIEG, GEFUNDEN DURCH EINE SYSTEMATISCHE PRUEFUNG STATT DURCH ZUFALL. POST /api/v1/machines/{id}/remove-from-cluster stand seit Phase 9 und war aus der Oberflaeche nicht erreichbar -- die gesamte etcd-Arbeit dieser Phase war damit nur per  | resolved | GESCHLOSSEN 2026-09-13. Die Pruefung selbst ist das Ergebnis: 61 Routen gegen die Oberflaeche, drei ohne Einstieg, zwei davon zu Recht. | 2026-09-13T10:30:00.000Z | 2026-09-13T10:30:00.000Z |
 | 96 | v1.15 | deviation | docs/api-contract.md |  | ZWEI PROBLEM-CODES WAREN IM VERTRAG NICHT DOKUMENTIERT, obwohl der Vertrag selbst die Regel aufstellt, dass Codes bewusst und im selben Commit wie die Route gepraegt werden, die sie ausgibt: forbidden.dry-run und validation.patch-invalid. Ein Client konnte bei | resolved | GESCHLOSSEN 2026-09-13. Beide Codes dokumentiert; drei Waechter, jeder in beide Richtungen gegen eine eingebaute Fehlerform geprueft. | 2026-09-13T11:30:00.000Z | 2026-09-13T11:30:00.000Z |
+| 97 | 06 | deviation | internal/jobs/jobs.go |  | EIN ECHTER DATA RACE IM PRODUKTIONSPFAD JEDER ZERSTOERENDEN AKTION, gefunden vom Race-Detector in CI und von keinem lokalen Lauf. Ein model.Job wird als Wert uebergeben und ist deshalb KEINE Kopie: Steps ist ein Slice-Header und Params eine Map, beide zeigen a | resolved | GESCHLOSSEN 2026-09-13. Ursache gelesen statt geraten (Put gibt denselben Slice-Header zurueck, den es bekommen hat), behoben, und mit einem Test gehalten, der ohne den Fix WARNING: DATA RACE meldet und mit ihm dreimal sauber laeuft. | 2026-09-13T12:10:00.000Z | 2026-09-13T12:10:00.000Z |
 
 ````json
 [
@@ -1265,6 +1266,18 @@ last_updated: 2026-09-11T16:50:00.000Z
     "reason": "GESCHLOSSEN 2026-09-13. Beide Codes dokumentiert; drei Waechter, jeder in beide Richtungen gegen eine eingebaute Fehlerform geprueft.",
     "recorded_at": "2026-09-13T11:30:00.000Z",
     "resolved_at": "2026-09-13T11:30:00.000Z"
+  },
+  {
+    "id": 97,
+    "kind": "deviation",
+    "phase": "06",
+    "file": "internal/jobs/jobs.go",
+    "line": null,
+    "description": "EIN ECHTER DATA RACE IM PRODUKTIONSPFAD JEDER ZERSTOERENDEN AKTION, gefunden vom Race-Detector in CI und von keinem lokalen Lauf. Ein model.Job wird als Wert uebergeben und ist deshalb KEINE Kopie: Steps ist ein Slice-Header und Params eine Map, beide zeigen auf Speicher, den das Original behaelt. Engine.start reichte den Job direkt an die Goroutine weiter, die ihn ausfuehrt, waehrend der HTTP-Handler denselben Wert noch hielt und ihn in seine 202-Antwort JSON-kodierte; run() schreibt Steps[i].State vor und nach jedem Schritt. Zwei Goroutinen, ein Backing-Array, eine davon schreibend -- auf dem Pfad, den JEDE Reboot-, Shutdown-, Reset-, Provision- und Upgrade-Einreichung nimmt. Bestand seit Phase 6. BEHOBEN mit model.Job.Clone(), aufgerufen in start(); die Methode liegt am Typ, damit ein neues Referenzfeld an Job eine Entscheidung an dieser Stelle erzwingt. ZWEI TESTS, und der erste war falsch: er wartete auf den 'ich habe angefangen'-Kanal des Schritts und marshallte danach -- und bestand AUCH OHNE DEN FIX, weil ein Kanalempfang eine Happens-before-Kante ist und das Warten genau die Ordnung herstellt, deren Abwesenheit der Test zeigen sollte. Die Fassung ohne jede Synchronisation meldet den Race zuverlaessig.",
+    "status": "resolved",
+    "reason": "GESCHLOSSEN 2026-09-13. Ursache gelesen statt geraten (Put gibt denselben Slice-Header zurueck, den es bekommen hat), behoben, und mit einem Test gehalten, der ohne den Fix WARNING: DATA RACE meldet und mit ihm dreimal sauber laeuft.",
+    "recorded_at": "2026-09-13T12:10:00.000Z",
+    "resolved_at": "2026-09-13T12:10:00.000Z"
   }
 ]
 ````

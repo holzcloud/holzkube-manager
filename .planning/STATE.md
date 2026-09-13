@@ -5,9 +5,9 @@ current_phase: 3
 current_phase_name: "Prometheus-/metrics (v1.15)"
 status: milestone-closed
 stopped_at: v1.15 vollstaendig, CI gruen, Routen-Audit abgearbeitet (Fenster 92-95 zu). OPS-05 bleibt der einzige Release-Blocker (Fenster 87)
-last_updated: "2026-09-13T11:30:00.000Z"
+last_updated: "2026-09-13T12:10:00.000Z"
 last_activity: 2026-09-13
-last_activity_desc: CI red for nine commits (fixed); a route audit found a confirmation the server never enforced
+last_activity_desc: CI race detector found a production data race in every destructive action
 state_head: a474d2522823cbfb436ee720dee35494890281a3
 progress:
   total_phases: 3
@@ -58,6 +58,21 @@ Code. Nebenbei sind zwei alte, stille Supervisions-Fehler gefallen: ein
 Lesevorgang vor `Start()` verhinderte jede Überwachung, und `Supervise()` band
 den Supervisor an den Request-Context des HTTP-Handlers. Siehe
 `.planning/phases/v1.15-02-cosi-watches/02-SUMMARY.md`.
+
+**CI hat einen echten Data Race im Produktionspfad gefunden (Fenster 97), den
+kein lokaler Lauf je gemeldet hat.** Ein `model.Job` wird als Wert übergeben und
+ist deshalb **keine** Kopie: `Steps` ist ein Slice-Header, `Params` eine Map.
+`Engine.start` reichte den Job direkt an die ausführende Goroutine weiter,
+während der HTTP-Handler denselben Wert noch in seine 202-Antwort JSON-kodierte
+— auf dem Pfad, den **jede** Reboot-, Shutdown-, Reset-, Provision- und
+Upgrade-Einreichung nimmt, seit Phase 6. Behoben mit `model.Job.Clone()`.
+
+Der erste Test dazu war falsch und **bestand ohne den Fix**: er wartete auf den
+Kanal des Schritts und marshallte danach — ein Kanalempfang ist eine
+Happens-before-Kante, das Warten stellt also genau die Ordnung her, deren
+Abwesenheit gezeigt werden sollte. Das ist jetzt zweimal in Folge dieselbe Lehre
+(vgl. Fenster 96): **ein Wächter ist nichts wert, bis er am eingebauten Fehler
+rot geworden ist.**
 
 **Dieselbe Prüfung auf die Fehler-Taxonomie angewandt (Fenster 96): zwei Codes
 standen nicht im Vertrag** — `forbidden.dry-run` und `validation.patch-invalid`.
