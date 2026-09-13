@@ -91,6 +91,9 @@ flag > environment > default.
 | `--tls-cert` | `HOLZKUBE_MANAGER_TLS_CERT` | generated on first run |
 | `--tls-key` | `HOLZKUBE_MANAGER_TLS_KEY` | generated on first run |
 | `--insecure-http` | `HOLZKUBE_MANAGER_INSECURE_HTTP` | `false` |
+| `--dry-run` | `HOLZKUBE_MANAGER_DRY_RUN` | `false` |
+| `--allow-prerelease` | `HOLZKUBE_MANAGER_ALLOW_PRERELEASE` | `false` |
+| `--image-factory` | `HOLZKUBE_MANAGER_IMAGE_FACTORY_URL` | `https://factory.talos.dev` |
 | `--sudo-window` | `HOLZKUBE_MANAGER_SUDO_WINDOW` | `5m` |
 | `--session-lifetime` | `HOLZKUBE_MANAGER_SESSION_LIFETIME` | `24h` |
 | `--oidc-issuer` | `HOLZKUBE_MANAGER_OIDC_ISSUER` | (none) |
@@ -100,7 +103,15 @@ flag > environment > default.
 | `--log-level` | `HOLZKUBE_MANAGER_LOG_LEVEL` | `info` |
 
 `--version` and `--help` print and exit; the help output is generated from the
-same table as the flags, so it cannot drift from them.
+same table as the flags, so it cannot drift from them. The table above is
+checked against that same option table by a test, because three options had
+already been added without a row here.
+
+`--image-factory` points at a different Image Factory — a private one at an
+air-gapped site, for instance. A response from it carrying a field this build
+does not know is decoded past and logged as a warning naming the field, rather
+than refused: the Factory adds fields without announcing them, and the
+extension catalog is read on every visit to the Images screen.
 
 Every option is logged at startup with its effective value **and where that
 value came from**:

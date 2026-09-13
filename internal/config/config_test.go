@@ -11,6 +11,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/holzcloud/holzkube-manager/internal/imagefactory"
 )
 
 const testHome = "/home/op"
@@ -171,6 +173,7 @@ func TestEveryOptionIsSettableByFlagAndByEnvironment(t *testing.T) {
 		"insecure-http":           "true",
 		"dry-run":                 "true",
 		"allow-prerelease":        "true",
+		"image-factory":           "https://factory.internal.example.com",
 		"sudo-window":             "7m0s",
 		"session-lifetime":        "48h0m0s",
 		"oidc-issuer":             "https://idp.example.com/application/o/holzkube-manager/",
@@ -695,5 +698,21 @@ func TestIssuerMustBeHTTPS(t *testing.T) {
 	}
 	if _, err := LoadWith(append(base, "--oidc-issuer=http://127.0.0.1:9000/"), envFrom(nil), testHome); err != nil {
 		t.Errorf("a loopback issuer was refused: %v", err)
+	}
+}
+
+// TestTheImageFactoryDefaultIsTheOneImagefactoryPublishes keeps the two
+// spellings of one string from drifting.
+//
+// The option table cannot import internal/imagefactory -- that would put the
+// Factory client in the dependency graph of every binary that reads a
+// configuration -- so the default is spelled here as a literal. A test is what
+// makes the duplication safe, and it imports the package precisely because a
+// test is allowed to.
+func TestTheImageFactoryDefaultIsTheOneImagefactoryPublishes(t *testing.T) {
+	cfg := load(t, nil, nil)
+	if cfg.ImageFactoryURL != imagefactory.DefaultBaseURL {
+		t.Errorf("the default Image Factory is %q, but imagefactory.DefaultBaseURL is %q",
+			cfg.ImageFactoryURL, imagefactory.DefaultBaseURL)
 	}
 }

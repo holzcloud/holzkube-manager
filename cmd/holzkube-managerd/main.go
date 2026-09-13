@@ -181,7 +181,19 @@ func run(args []string) error {
 	// connection until a route asks it to, so constructing it here costs
 	// nothing and a bad base URL is a start failure rather than a 502 the first
 	// time an operator opens the images screen.
-	factory, err := imagefactory.New(imagefactory.DefaultBaseURL)
+	//
+	// The drift observer is where the Factory's schema additions become
+	// visible. imagefactory decodes past a field it does not know rather than
+	// refusing the response -- one additive upstream field used to take the
+	// whole Images screen down -- so this line is the only thing that makes
+	// such an addition something anybody finds out about.
+	factory, err := imagefactory.New(cfg.ImageFactoryURL,
+		imagefactory.WithDriftObserver(func(path, field string) {
+			logger.Warn("the Image Factory answered with a field this build does not know",
+				slog.String("path", path),
+				slog.String("field", field),
+				slog.String("effect", "the field was ignored and the rest of the response was used"))
+		}))
 	if err != nil {
 		return err
 	}

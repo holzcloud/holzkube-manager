@@ -184,7 +184,7 @@ func upgradePlan(d httpapi.Deps, kubernetes bool) http.HandlerFunc {
 			To string `json:"to"`
 		}
 		if err := decodeJSON(w, r, &body); err != nil {
-			httpapi.WriteProblem(w, r, httpapi.Validation(err.Error()))
+			httpapi.WriteProblem(w, r, decodeProblem(err))
 			return
 		}
 		if strings.TrimSpace(body.To) == "" {
@@ -241,7 +241,7 @@ func confirmUpgrade(d httpapi.Deps) http.HandlerFunc {
 			Typed string `json:"typed"`
 		}
 		if err := decodeJSON(w, r, &body); err != nil {
-			httpapi.WriteProblem(w, r, httpapi.Validation(err.Error()))
+			httpapi.WriteProblem(w, r, decodeProblem(err))
 			return
 		}
 
@@ -307,7 +307,7 @@ func submitUpgrade(d httpapi.Deps, kind model.JobKind) http.HandlerFunc {
 			Confirmation string `json:"confirmation"`
 		}
 		if err := decodeJSON(w, r, &body); err != nil {
-			httpapi.WriteProblem(w, r, httpapi.Validation(err.Error()))
+			httpapi.WriteProblem(w, r, decodeProblem(err))
 			return
 		}
 
@@ -485,7 +485,7 @@ func lockMachine(d httpapi.Deps) http.HandlerFunc {
 			Reason string `json:"reason"`
 		}
 		if err := decodeJSON(w, r, &body); err != nil {
-			httpapi.WriteProblem(w, r, httpapi.Validation(err.Error()))
+			httpapi.WriteProblem(w, r, decodeProblem(err))
 			return
 		}
 		if body.Locked == nil {
@@ -527,7 +527,7 @@ func removeNodeFromCluster(d httpapi.Deps) http.HandlerFunc {
 			Confirmation string `json:"confirmation"`
 		}
 		if err := decodeJSON(w, r, &body); err != nil {
-			httpapi.WriteProblem(w, r, httpapi.Validation(err.Error()))
+			httpapi.WriteProblem(w, r, decodeProblem(err))
 			return
 		}
 

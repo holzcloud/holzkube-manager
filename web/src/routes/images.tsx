@@ -72,7 +72,47 @@ import { authenticatedRoute } from '@/routes/__root'
  * the installer/initramfs warning *live*, before the schematic is created.
  */
 
-export type MetaRow = { key: number; value: string }
+/**
+ * One META row as the form holds it.
+ *
+ * `key` is a string and not a number, which looks like a step backwards and is
+ * not. An `<input type="number">` holds text; `Number('')` is `0`; and META
+ * slot 0 is the machine UUID override. So clearing the key field used to turn
+ * the row into a silent claim on the one slot an operator would never pick by
+ * accident, with nothing on screen saying so. A typed-out-of-range key had the
+ * mirror problem in the other direction: 300 went to the server and came back
+ * as a decoder complaint about a Go integer type.
+ *
+ * Holding the text the operator actually typed is what makes both of those
+ * statable. The conversion to a number happens once, at submit, on a value that
+ * has been checked.
+ */
+export type MetaRow = { key: string; value: string }
+
+/** What a META row's key must be, said once so the form and the message agree. */
+export const META_KEY_MESSAGE = 'A META key is a number from 0 to 255.'
+
+/**
+ * metaKeyError judges one key field.
+ *
+ * The empty string is refused rather than defaulted. There is no sensible
+ * default for "which of 256 slots did you mean", and the one a Number()
+ * conversion would pick is the most consequential of them.
+ */
+export function metaKeyError(raw: string): string | null {
+  const text = raw.trim()
+  if (text === '') {
+    return META_KEY_MESSAGE
+  }
+  if (!/^\d+$/.test(text)) {
+    return META_KEY_MESSAGE
+  }
+  const value = Number(text)
+  if (!Number.isInteger(value) || value < 0 || value > 255) {
+    return META_KEY_MESSAGE
+  }
+  return null
+}
 
 /**
  * The refusal set, declared as data.
@@ -368,13 +408,14 @@ function ImagesView() {
   const kernelArgErrors = kernelArgs.map((value) =>
     hasControlCharacter(value) ? CONTROL_CHARACTER_MESSAGE : null,
   )
-  const metaErrors = meta.map((row) =>
-    hasControlCharacter(row.value) ? CONTROL_CHARACTER_MESSAGE : null,
-  )
+  const metaErrors = meta.map((row) => ({
+    key: metaKeyError(row.key),
+    value: hasControlCharacter(row.value) ? CONTROL_CHARACTER_MESSAGE : null,
+  }))
   const hasUnusableValue =
     nameError !== null ||
     kernelArgErrors.some((each) => each !== null) ||
-    metaErrors.some((each) => each !== null)
+    metaErrors.some((each) => each.key !== null || each.value !== null)
 
   const submit = useCallback(() => {
     create.mutate({
@@ -385,9 +426,12 @@ function ImagesView() {
       // control offers nothing else, and the server rejects anything else.
       extensions,
       kernel_args: kernelArgs.map((arg) => arg.trim()).filter((arg) => arg !== ''),
+      // Number() is safe here and only here: submit is unreachable while any
+      // key fails metaKeyError, so every key that gets this far is a decimal
+      // integer in 0..255.
       meta: meta
         .filter((row) => row.value.trim() !== '')
-        .map((row): MetaValue => ({ key: row.key, value: row.value })),
+        .map((row): MetaValue => ({ key: Number(row.key), value: row.value })),
       secureboot: secureBoot,
     })
   }, [create, name, version, arch, extensions, kernelArgs, meta, secureBoot])
@@ -716,7 +760,7 @@ function MetaRows({
 }: {
   meta: MetaRow[]
   onChange: (next: MetaRow[]) => void
-  errors?: (string | null)[]
+  errors?: { key: string | null; value: string | null }[]
 }) {
   return (
     <section className="space-y-2">
@@ -732,9 +776,10 @@ function MetaRows({
               max={255}
               value={row.key}
               className="w-24"
+              aria-invalid={errors?.[index]?.key != null}
               onChange={(event) => {
                 const next = [...meta]
-                next[index] = { ...row, key: Number(event.target.value) }
+                next[index] = { ...row, key: event.target.value }
                 onChange(next)
               }}
             />
@@ -756,13 +801,14 @@ function MetaRows({
               Remove
             </Button>
           </div>
-          <RowProblem label={`META value ${index + 1}`} message={errors?.[index] ?? null} />
+          <RowProblem label={`META key ${index + 1}`} message={errors?.[index]?.key ?? null} />
+          <RowProblem label={`META value ${index + 1}`} message={errors?.[index]?.value ?? null} />
         </div>
       ))}
       <Button
         type="button"
         variant="secondary"
-        onClick={() => onChange([...meta, { key: 0, value: '' }])}
+        onClick={() => onChange([...meta, { key: '0', value: '' }])}
       >
         Add META value
       </Button>
@@ -1598,22 +1644,74 @@ export function ReferenceValue({ value }: { value: string }) {
 }
 
 /** Copies one reference. Nothing here is secret; it is a URL an operator needs. */
+/** How long the button stays on the label that says what just happened. */
+export const COPY_FEEDBACK_MS = 2000
+
+/**
+ * Copy one value to the clipboard and say whether it worked.
+ *
+ * Two things were wrong and they share a cause: the button had one boolean for
+ * three situations. It went to "Copied" and stayed there for the life of the
+ * panel, so a second copy -- of a different reference, from a different row --
+ * produced no visible change at all and the operator had no way to tell whether
+ * the click had registered. And a clipboard the browser refuses, which is the
+ * ordinary case outside a secure context and the case this product meets when
+ * it is reached by IP address, left the label reading "Copy" while nothing had
+ * been copied. Silence is the worst of the three outcomes to render as the
+ * resting state.
+ *
+ * So there are three states, and the two that are not resting return to it.
+ */
 function CopyButton({ label, value }: { label: string; value: string }) {
-  const [copied, setCopied] = useState(false)
+  const [outcome, setOutcome] = useState<'resting' | 'copied' | 'failed'>('resting')
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const settle = useCallback((next: 'copied' | 'failed') => {
+    setOutcome(next)
+    if (timer.current !== null) {
+      clearTimeout(timer.current)
+    }
+    timer.current = setTimeout(() => setOutcome('resting'), COPY_FEEDBACK_MS)
+  }, [])
+
+  // A timer that fires into an unmounted component is a React warning and, in a
+  // test, a leak across cases.
+  useEffect(
+    () => () => {
+      if (timer.current !== null) {
+        clearTimeout(timer.current)
+      }
+    },
+    [],
+  )
 
   return (
     <Button
       type="button"
       variant="ghost"
       aria-label={`Copy ${label}`}
+      title={
+        outcome === 'failed'
+          ? 'The browser refused the clipboard. That usually means this page was not loaded over a trusted origin.'
+          : undefined
+      }
       onClick={() => {
-        void navigator.clipboard?.writeText(value).then(
-          () => setCopied(true),
-          () => setCopied(false),
+        const written = navigator.clipboard?.writeText(value)
+        if (written === undefined) {
+          // No clipboard at all. Reporting it is the whole point: the old code
+          // discarded this case and rendered it as "nothing happened".
+          settle('failed')
+          return
+        }
+        void written.then(
+          () => settle('copied'),
+          () => settle('failed'),
         )
       }}
     >
-      {copied ? 'Copied' : 'Copy'}
+      <span aria-live="polite">
+        {outcome === 'copied' ? 'Copied' : outcome === 'failed' ? 'Copy failed' : 'Copy'}
+      </span>
     </Button>
   )
 }
