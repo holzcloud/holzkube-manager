@@ -394,7 +394,12 @@ body without the PEM armour.
 Logs are capped per stream. The **newest** bytes are kept, cut on a line
 boundary, with a first line saying how much was dropped.
 
-### etcd snapshots, and what this product will not do with them
+## What this product does not do
+
+Two operations it performs half of, said here because a product that does the
+first half silently is a product whose operator finds out during the incident.
+
+### It takes etcd snapshots and does not restore them
 
 The upgrades screen takes a snapshot through the etcd API — a consistent
 point-in-time copy, which needs a quorum, so a cluster that has lost one cannot
@@ -414,6 +419,26 @@ that is where somebody forms the belief that there is a restore button
 somewhere.
 
 Keep the file somewhere that survives the cluster.
+
+### It verifies upgrades and does not undo them
+
+UPG-07 verifies every upgrade by asking the node afterwards: the version that
+was installed, the schematic that was installed, and whether the node's own
+services are running. "The API said OK" is not accepted as proof, and a node
+that comes back on the right version with its extensions gone is caught by that
+check rather than by somebody noticing weeks later.
+
+What the check hands you is a broken node and a precise sentence about why.
+**holzkube-manager does not undo an upgrade.** Talos installs to one of two
+boot partitions and keeps the previous installation on the other, and `talosctl
+rollback` against that node boots it — per node, and only until that node is
+upgraded again. It undoes the Talos version and nothing else: a Kubernetes
+upgrade, and anything etcd did while the node was on the new version, are not
+affected.
+
+Every failed verification says so in its own message, because the job screen
+renders a step's detail verbatim and that message is the screen at the moment
+it matters.
 
 ## Metrics
 
