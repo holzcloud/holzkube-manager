@@ -438,6 +438,12 @@ while dry-run is on still writes a record to the store and to the audit archive,
 and still contacts the Image Factory. `--dry-run` is about what reaches a
 **node**.
 
+A mutation refused by dry-run answers **403 `forbidden.dry-run`**. It is its own
+code rather than a generic refusal because the remedy is not on the operator's
+side at all: nothing they can type will make it go through, and the instance has
+to be restarted without the flag. A client that showed it as an ordinary
+permission error would send somebody looking for a role to grant.
+
 The field is on this endpoint and **not** on `GET /api/v1/system/status`, which
 answers before authentication. Whether an instance can currently change anything
 is not something an anonymous caller is owed, and the operator this field exists
@@ -1479,6 +1485,11 @@ happened to be when the patch was written; applied to a node whose list is one
 longer it edits the wrong entry and reports success. It is refused with its own
 code, `validation.patch-not-strategic`, so a client can tell "fix this patch"
 from "use the other form".
+
+A patch that is not usable for any other reason — not YAML, or YAML that is not
+a mapping — is `validation.patch-invalid`. The two are separate because the
+remedies are: one says rewrite the patch in the other form, the other says fix
+what you wrote.
 
 Editing a patch writes a **new version** and marks the old one `superseded`. The
 old body stays readable, because "what exactly was applied to this node in March"
