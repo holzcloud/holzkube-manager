@@ -351,9 +351,90 @@ Pre-releases are inside the range and are refused anyway unless the instance was
 started with `--allow-prerelease`. Everything this product guarantees about a
 node is a claim about released Talos.
 
+## Support bundle
+
+When something is broken, one archive with what somebody debugging this cluster
+would otherwise collect by hand: per node the facts, the service list, the Talos
+and Kubernetes versions, disks, links, extensions, etcd status, recent logs and
+`dmesg`, plus the machine configuration **with every secret removed** — and the
+audit tail and this instance's own metadata.
+
+Two ways in, because they are reached from different places:
+
+```sh
+holzkube-managerd support                      # on the host, when the interface is part of what is broken
+holzkube-managerd support --cluster=ID --out=FILE
+```
+
+An installation with one cluster is not asked which; one with several is told
+its names rather than made to guess. The subcommand opens the store directly,
+so it cannot run while holzkube-manager is running — and it says so, naming the
+route to use instead.
+
+The other way in is a link on the cluster card, because during an incident an
+operator is usually in a browser, and telling them to find an SSH session first
+is telling them to do the collection by hand after all.
+
+**A node that does not answer is the point, not an error.** It contributes its
+stored record plus a file saying which node and why; the run continues, and the
+manifest lists every gap. A collection that stopped at the first dead node would
+produce nothing exactly when it matters.
+
+The subcommand says in its own manifest that it reached no node: it takes the
+store's lock, so holzkube-manager is not running, so the bundle is the stored
+half. Claiming otherwise would be a bundle whose gaps are invisible.
+
+Configurations go through the same two redaction passes the config screen uses,
+and a file that still contains a PEM private key afterwards is **left out** with
+the gap recorded — a bundle that leaks a certificate authority is worse than one
+missing a configuration. The acceptance test walks entropy over every file in
+the archive, looking for the simulated cluster's real CA key and for its base64
+body without the PEM armour.
+
+Logs are capped per stream. The **newest** bytes are kept, cut on a line
+boundary, with a first line saying how much was dropped.
+
+## Metrics
+
+```
+GET /metrics
+```
+
+Prometheus text exposition. **No session** — a scraper has none, and an endpoint
+behind the session cookie is one nobody can scrape, whose usual consequence is a
+second listener with no authentication at all. What guards it is the host
+allowlist that guards everything else here, and a listener that stays on
+loopback unless you moved it.
+
+```yaml
+scrape_configs:
+  - job_name: holzkube-manager
+    scheme: https
+    static_configs:
+      - targets: ['127.0.0.1:8443']
+```
+
+What it exports is what this instance knows and nothing else has: nodes per
+stage, seconds left on each cluster's client certificate, job records by kind
+and state, confirmed etcd members, and whether the audit chain verified at
+startup.
+
+**Export, never ingest.** This does not become a monitoring pipeline: it keeps
+no history and it does not alert.
+
+Two properties are deliberate and worth knowing before writing a rule against
+it. **No node is ever a label value**, so the number of series follows the
+number of clusters rather than the size of the fleet — what an operator graphs
+is "how many nodes are down", and the dashboard answers "which one". And
+`holzkube_cluster_client_certificate_seconds` **goes negative**: an expired
+certificate is a named state rather than a missing metric, because the failure
+it describes takes every node in the cluster down in the same second and a
+series that vanished at expiry would go blank exactly when somebody needed it.
+
 ## Development
 
 ```sh
+task ci                # the gates CI runs, in CI's order
 task test              # go test ./... -race
 task test:web          # vitest, both projects
 task test:web:browser  # only the tests that measure layout in a real browser
@@ -396,6 +477,17 @@ operating system, so they get their own module under
 [`sandbox/`](sandbox/README.md) — outside the product build and outside
 `go list ./...`. `internal/depguard_test.go` fails the build if a root-module
 package ever reaches `cmd/holzkube-managerd`.
+
+### Running the same gates CI runs
+
+`task ci` exists because it did not, and the gap had a cost: local runs used
+`task test` and `task lint:web`, CI additionally ran a pinned Go linter and the
+frontend suite, and `main` sat red for nine commits while every local run was
+green. A local binary built against an older Go than `go.mod` targets refuses to
+run at all, which is why `task lint:go` prints the version it is using next to
+the one CI pins.
+
+**A green local run is not a green CI run** unless it ran the same things.
 
 ## Documentation
 
