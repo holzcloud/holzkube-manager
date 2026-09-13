@@ -193,6 +193,33 @@ With two, there is no answer to "which account is this identity", and every
 plausible guess is a way for a new subject at the provider to take over somebody
 else's account.
 
+### Service accounts
+
+An identity for a machine. It has a role like any other account, it appears in
+the audit log under its own name, and it signs in by putting a token on every
+request:
+
+```
+curl -H "Authorization: Bearer hkm_…" https://holzkube.example/api/v1/machines
+```
+
+The token is shown **once**, when the account is created or its token is
+rotated. Only a hash is stored, so a lost token is replaced rather than
+recovered — and rotating is the only revocation there is: the old token stops
+working the instant the new one exists.
+
+A service account is never asked to re-authenticate for a destructive action,
+and that is a decision rather than a gap. The re-authentication prompt exists
+against a stolen session cookie — somebody who has the session and not the
+password — and a token has no such gap: it is not something another site can
+make a browser send, and there is no second secret to ask for. Requiring one
+would mean giving every service account a password, which is a second and weaker
+way in, or putting every destructive route out of reach of automation.
+
+A password never signs in a service account and a token never signs in a person.
+Both directions are enforced, because an identity that can be reached two ways
+is an identity whose weakest way in is the one that matters.
+
 ### Why the local account stays
 
 A cluster manager whose only route to authentication runs on the cluster it

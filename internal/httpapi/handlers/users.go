@@ -11,6 +11,7 @@ import (
 	"errors"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/holzcloud/holzkube-manager/internal/auth"
 	"github.com/holzcloud/holzkube-manager/internal/httpapi"
@@ -43,6 +44,27 @@ func UserRoutes(d httpapi.Deps) []httpapi.Route {
 			Destructive:     true,
 			Action:          "user.create",
 			Handler:         handler(createUser(d)),
+		},
+		{
+			// A service account and its token, in one request and one answer.
+			// The token is in that answer and nowhere else, ever: only its
+			// hash is stored, so a lost token is rotated rather than recovered.
+			Method:          http.MethodPost,
+			Pattern:         "/api/v1/service-accounts",
+			RequiresSession: true,
+			MinRole:         model.RoleAdmin,
+			Destructive:     true,
+			Action:          "service-account.create",
+			Handler:         handler(createServiceAccount(d)),
+		},
+		{
+			Method:          http.MethodPost,
+			Pattern:         "/api/v1/service-accounts/{id}/token",
+			RequiresSession: true,
+			MinRole:         model.RoleAdmin,
+			Destructive:     true,
+			Action:          "service-account.rotate",
+			Handler:         handler(rotateServiceAccountToken(d)),
 		},
 		{
 			Method:          http.MethodPost,
@@ -85,6 +107,17 @@ type userView struct {
 	Role      string `json:"role"`
 	CreatedAt string `json:"created_at"`
 
+	// Kind is "person" or "service". A list that did not distinguish them
+	// would offer a password reset for something that has no password.
+	Kind string `json:"kind"`
+
+	// TokenIssuedAt and LastUsedAt are reported for a service account and are
+	// absent for a person. Together they answer the question an operator
+	// actually has about a machine credential: how old is it, and is anything
+	// still using it.
+	TokenIssuedAt string `json:"token_issued_at,omitempty"`
+	LastUsedAt    string `json:"last_used_at,omitempty"`
+
 	// LinkedIdentity says whether this account signs in through the identity
 	// provider. The issuer and subject themselves are not reported: they are
 	// somebody's identity at a third party, and "is it linked" is the whole of
@@ -98,13 +131,106 @@ type userView struct {
 }
 
 func viewOfUser(u model.User, self model.UserID) userView {
-	return userView{
+	v := userView{
 		ID:             string(u.ID),
 		Username:       u.Username,
 		Role:           string(u.Role.OrAdmin()),
-		CreatedAt:      u.CreatedAt.UTC().Format("2006-01-02T15:04:05Z07:00"),
+		Kind:           string(u.Kind.OrPerson()),
+		CreatedAt:      stamp(u.CreatedAt),
 		LinkedIdentity: u.HasIdentityBinding(),
 		Self:           u.ID == self,
+	}
+	if u.IsService() {
+		v.TokenIssuedAt = stamp(u.TokenIssuedAt)
+		// Empty rather than the zero time, and the difference is what the
+		// screen renders: "never used" is a fact about this credential, and
+		// "1 January year 1" is a fact about Go.
+		v.LastUsedAt = stamp(u.LastUsedAt)
+	}
+	return v
+}
+
+// stamp formats a time, and the empty string for one that was never set.
+func stamp(t time.Time) string {
+	if t.IsZero() {
+		return ""
+	}
+	return t.UTC().Format(time.RFC3339)
+}
+
+// createServiceAccount mints a machine identity and hands back its token once.
+func createServiceAccount(d httpapi.Deps) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Username string `json:"username"`
+			Role     string `json:"role"`
+		}
+		if err := decodeJSON(w, r, &body); err != nil {
+			httpapi.WriteProblem(w, r, decodeProblem(err))
+			return
+		}
+
+		username := strings.TrimSpace(body.Username)
+		var fieldErrs []httpapi.FieldError
+		if len(username) < minUsernameLen || len(username) > maxUsernameLen {
+			fieldErrs = append(fieldErrs, httpapi.FieldError{
+				Field: "username", Reason: "must be between 3 and 64 characters",
+			})
+		}
+		if isReservedActor(username) {
+			fieldErrs = append(fieldErrs, httpapi.FieldError{
+				Field:  "username",
+				Reason: "is reserved: the audit log uses it to mean a mutation the process itself initiated",
+			})
+		}
+		if !model.UserRole(body.Role).Valid() {
+			fieldErrs = append(fieldErrs, httpapi.FieldError{
+				Field: "role", Reason: "must be one of admin, operator or reader",
+			})
+		}
+		if len(fieldErrs) > 0 {
+			httpapi.WriteProblem(w, r, httpapi.Validation("The service account details are not valid.", fieldErrs...))
+			return
+		}
+
+		id, err := newID()
+		if err != nil {
+			httpapi.WriteInternal(w, r, d.Logger, err)
+			return
+		}
+
+		created, token, err := d.Auth.CreateServiceAccount(r.Context(), id, username, model.UserRole(body.Role))
+		if err != nil {
+			writeUserError(w, r, d, err)
+			return
+		}
+
+		me, _ := d.Auth.CurrentUser(r.Context())
+		writeJSON(w, http.StatusCreated, map[string]any{
+			"account": viewOfUser(created, me.ID),
+			"token":   token,
+			"notice":  TokenNotice,
+		})
+	}
+}
+
+// TokenNotice is what the screen says beside a freshly minted token.
+//
+// It is a constant because it is a statement about what this product can and
+// cannot do afterwards, not UI copy: there is no route that returns a token a
+// second time, because only its hash was kept.
+const TokenNotice = "This is the only time this token is shown. Only its hash is stored, so it " +
+	"cannot be recovered — a lost token is replaced by rotating it, which is the same act as " +
+	"revoking the old one. Send it as an Authorization header: Bearer " + auth.TokenPrefix + "…"
+
+func rotateServiceAccountToken(d httpapi.Deps) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		token, err := d.Auth.RotateToken(r.Context(), model.UserID(r.PathValue("id")))
+		if err != nil {
+			writeUserError(w, r, d, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"token": token, "notice": TokenNotice})
 	}
 }
 
@@ -248,6 +374,10 @@ func writeUserError(w http.ResponseWriter, r *http.Request, d httpapi.Deps, err 
 	case errors.Is(err, auth.ErrUsernameTaken):
 		httpapi.WriteProblem(w, r, httpapi.Conflict("conflict.username-taken",
 			"Another account already has that username."))
+	case errors.Is(err, auth.ErrNotAServiceAccount):
+		httpapi.WriteProblem(w, r, httpapi.Conflict("conflict.not-a-service-account",
+			"That account is a person and has a password rather than a token. An admin can reset "+
+				"their password; nobody can mint a token for them."))
 	case errors.Is(err, auth.ErrInvalidRole):
 		httpapi.WriteProblem(w, r, httpapi.Validation("That is not a role.",
 			httpapi.FieldError{Field: "role", Reason: "must be one of admin, operator or reader"}))

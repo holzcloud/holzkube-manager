@@ -177,6 +177,10 @@ func (h *harness) setupAndLogin(t *testing.T) {
 type asClient struct {
 	srv    string
 	client *http.Client
+
+	// bearer, when set, is sent instead of relying on a cookie jar. A client
+	// with both would be testing neither.
+	bearer string
 }
 
 func (h *harness) asUser(t *testing.T, username, password string) *asClient {
@@ -223,7 +227,15 @@ func (c *asClient) status(t *testing.T, method, path string, body any) (int, []b
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
-	req.Header.Set("X-Holzkube-Manager-CSRF", "1")
+	if c.bearer == "" {
+		req.Header.Set("X-Holzkube-Manager-CSRF", "1")
+	} else {
+		// Deliberately no CSRF header. A bearer token is not ambient -- a page
+		// on another origin cannot read it or cause it to be sent -- so
+		// demanding the header from a machine would be a ritual that protects
+		// nothing. If that stops being true, this call starts failing.
+		req.Header.Set("Authorization", "Bearer "+c.bearer)
+	}
 
 	resp, err := c.client.Do(req)
 	if err != nil {
@@ -236,4 +248,86 @@ func (c *asClient) status(t *testing.T, method, path string, body any) (int, []b
 		t.Fatalf("read body: %v", err)
 	}
 	return resp.StatusCode, raw
+}
+
+// TestAServiceAccountTokenWorksOverHTTP is the wiring the unit tests cannot
+// reach: that a bearer token establishes an identity at all, that the role gate
+// reads it, and that it satisfies the sudo gate without a password.
+func TestAServiceAccountTokenWorksOverHTTP(t *testing.T) {
+	t.Parallel()
+
+	h := newHarness(t)
+	h.setupAndLogin(t)
+
+	if resp, raw := h.do(t, http.MethodPost, "/api/v1/auth/sudo",
+		map[string]string{"password": testPass}); resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("sudo: %d (%s)", resp.StatusCode, raw)
+	}
+
+	resp, raw := h.do(t, http.MethodPost, "/api/v1/service-accounts", map[string]string{
+		"username": "ci-bot", "role": "operator",
+	})
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("creating the service account: %d (%s)", resp.StatusCode, raw)
+	}
+
+	var created struct {
+		Token   string `json:"token"`
+		Notice  string `json:"notice"`
+		Account struct {
+			Kind string `json:"kind"`
+			Role string `json:"role"`
+		} `json:"account"`
+	}
+	if err := json.Unmarshal(raw, &created); err != nil {
+		t.Fatalf("the response is not the shape the contract describes: %v (%s)", err, raw)
+	}
+	if created.Token == "" {
+		t.Fatal("no token was returned, and there is no second chance to ask for one")
+	}
+	if created.Account.Kind != "service" || created.Account.Role != "operator" {
+		t.Errorf("the account came back as %+v, want a service account at operator", created.Account)
+	}
+	if created.Notice == "" {
+		t.Error("nothing told the operator this is the only time the token is shown")
+	}
+
+	c := &asClient{srv: h.srv.URL, client: h.srv.Client(), bearer: created.Token}
+
+	// A read the role allows. 502 is the harness having no inventory service,
+	// which is this route saying it got past both gates.
+	if got, body := c.status(t, http.MethodGet, "/api/v1/machines", nil); got == http.StatusUnauthorized ||
+		got == http.StatusForbidden {
+		t.Errorf("the token did not authenticate a read its role allows: %d (%s)", got, body)
+	}
+
+	// A route the role does not allow. The gate reads the token's identity.
+	if got, body := c.status(t, http.MethodGet, "/api/v1/users", nil); got != http.StatusForbidden {
+		t.Errorf("an operator token could read the accounts: %d (%s)", got, body)
+	}
+
+	// And a genuinely Destructive route, with no sudo window anywhere. This is
+	// the decision the phase makes: a bearer token is not ambient, so there is
+	// no second secret to ask for.
+	//
+	// The reboot and not the lock. The lock is deliberately NOT Destructive --
+	// it is this installation's own note about what it should not do -- so a
+	// test that used it would pass whether or not the sudo gate had been
+	// taught about tokens, which is how the first version of this assertion
+	// checked nothing.
+	got, body := c.status(t, http.MethodPost, "/api/v1/machines/x/reboot", nil)
+	if got == http.StatusPreconditionRequired {
+		t.Errorf("a token was asked to re-authenticate. There is no password to ask for, so this "+
+			"makes every destructive route unreachable by automation: %s", body)
+	}
+	if got == http.StatusUnauthorized || got == http.StatusForbidden {
+		t.Errorf("the token was refused a destructive route its role allows: %d (%s)", got, body)
+	}
+
+	// A token that authenticates nothing leaves the request anonymous rather
+	// than producing a second vocabulary for "not signed in".
+	bad := &asClient{srv: h.srv.URL, client: h.srv.Client(), bearer: "hkm_not-a-real-token"}
+	if got, body := bad.status(t, http.MethodGet, "/api/v1/machines", nil); got != http.StatusUnauthorized {
+		t.Errorf("an invalid token answered %d, want 401 (%s)", got, body)
+	}
 }

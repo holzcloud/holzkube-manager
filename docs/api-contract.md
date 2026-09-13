@@ -1271,6 +1271,63 @@ nobody has the old password any more.
 account.** With two, there is no answer to "which account is this identity", and
 guessing one is how a new provider subject takes over somebody else's account.
 
+### Service accounts
+
+A service account is an identity that is not a person. It has a role like any
+other account and appears in the audit archive under its own name, and it
+authenticates by presenting a token on every request rather than by holding a
+session.
+
+```
+Authorization: Bearer hkm_<43 characters>
+```
+
+The asymmetry is enforced in both directions, because an identity reachable two
+ways is an identity whose weakest way in is the one that matters. **A password
+never signs in a service account** — the refusal is in the password check
+itself, not at the sign-in form, and it spends the same work as a wrong password
+so the two are not distinguishable by timing. **A token never signs in a
+person** — a person has no token hash, and there is no route that would mint one
+for them (409 `conflict.not-a-service-account`).
+
+`POST /api/v1/service-accounts` mints the account and its token together and
+returns the token **once**. There is no route that returns it again, because
+only its SHA-256 is stored. SHA-256 and not argon2id: stretching improves
+nothing on 256 bits from `crypto/rand`, and the stretch would be paid on every
+call a machine makes.
+
+`POST /api/v1/service-accounts/{id}/token` rotates. That is the only revocation
+there is — the old token stops working at the instant the new one is minted —
+and it is why there is one token per account rather than a set: a set needs
+names, expiries and a list, and every one of those is somewhere a forgotten
+credential keeps working.
+
+**A bearer token satisfies both the CSRF check and the sudo window**, and each
+is a statement about the attack rather than a convenience.
+
+CSRF is an attack on *ambient* credentials: a cookie the browser attaches to a
+request the operator never made. A page on another origin can neither read a
+bearer token nor cause one to be sent, so the header would protect nothing.
+
+The sudo window exists against a *stolen cookie* — somebody who has the session
+and not the password — and re-asking for the password is what separates them. A
+token has no such gap: it is put on each request deliberately by whatever holds
+it, and there is no second secret to ask for. Demanding one would mean either
+giving every service account a password, which is a second and weaker way in, or
+making every destructive route unreachable by automation, which is most of what
+automation is for. What replaces the window is the token itself: per account,
+rotatable, and every use of it recorded under that account's name.
+
+An invalid token leaves the request **anonymous** rather than producing its own
+refusal, so there is one sentence for "you are not signed in" rather than two
+that differ by which credential was tried.
+
+`GET /api/v1/users` lists service accounts alongside people, marked by `kind`,
+with `token_issued_at` and `last_used_at`. `last_used_at` is written
+best-effort and at most once a minute: writing it per request would put a store
+write in front of every call a machine makes and lose a revision race with
+whatever that call was about to do. An empty `last_used_at` means never used.
+
 ### Audit
 
 `cluster.import` permits `name`, `endpoint` and `fingerprint` in clear.

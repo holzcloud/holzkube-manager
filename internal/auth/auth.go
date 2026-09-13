@@ -103,6 +103,19 @@ func (s *Service) verifyPassword(ctx context.Context, username, password string)
 		return model.User{}, err
 	}
 
+	// A service account has no password, and the refusal is here rather than
+	// at the sign-in form so that every path to a password check meets it. It
+	// is placed after FindByUsername and before Verify so that the work spent
+	// is the same as for a person whose password is wrong: a service account's
+	// username must not be distinguishable from a person's by how long the
+	// answer takes.
+	if u.IsService() {
+		if h := decoyHash(); h != "" {
+			_, _ = Verify(password, h)
+		}
+		return model.User{}, ErrInvalidCredentials
+	}
+
 	ok, err := Verify(password, u.PasswordHash)
 	if err != nil {
 		return model.User{}, fmt.Errorf("auth: verify password: %w", err)
@@ -232,7 +245,17 @@ func (s *Service) ChangePassword(ctx context.Context, current, next string) erro
 }
 
 // CurrentUser returns the authenticated account, if any.
+//
+// Two ways in and one answer. A service-account token is resolved per request
+// and left on the context by the middleware that validated it; a person's
+// identity lives in the session. The context is asked first, because a request
+// carrying a token is a request that named its identity explicitly, and because
+// a machine never has a session for the two to disagree about.
 func (s *Service) CurrentUser(ctx context.Context) (model.User, bool) {
+	if u, ok := TokenActor(ctx); ok {
+		return u, true
+	}
+
 	id := s.sm.GetString(ctx, sessionKeyUser)
 	if id == "" {
 		return model.User{}, false
