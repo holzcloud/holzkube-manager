@@ -356,4 +356,17 @@ func TestAServiceAccountTokenWorksOverHTTP(t *testing.T) {
 	if !strings.Contains(string(body), "service account") {
 		t.Errorf("the refusal does not say what is actually wrong: %s", body)
 	}
+
+	// And the second route that takes a password, for the same reason. A
+	// service account re-authenticating is asking for a window its token
+	// already satisfies, with a credential it does not have -- and the same
+	// Verify against the same empty hash produced the same 500.
+	got, body = c.status(t, http.MethodPost, "/api/v1/auth/sudo",
+		map[string]string{"password": "anything"})
+	if got >= 500 {
+		t.Errorf("a service account re-authenticating got %d: %s", got, body)
+	}
+	if got != http.StatusConflict {
+		t.Errorf("a service account opening a sudo window answered %d, want 409 (%s)", got, body)
+	}
 }

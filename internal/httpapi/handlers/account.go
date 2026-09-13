@@ -9,6 +9,24 @@ import (
 	"github.com/holzcloud/holzkube-manager/internal/model"
 )
 
+// notAPerson is the refusal both password-taking routes give a service
+// account.
+//
+// One constructor, because there are two of them and they are the same
+// statement: this account has no password. They were separately, identically
+// wrong before -- each handed Verify an empty hash and turned the resulting
+// error into a 500 -- and two copies of the fix would be two places for the
+// next password-taking route to not look.
+func notAPerson(detail string) *httpapi.Problem {
+	return &httpapi.Problem{
+		Type:   httpapi.TypeConflict,
+		Title:  "That account has no password",
+		Status: http.StatusConflict,
+		Detail: detail,
+		Code:   httpapi.CodeNotAPerson,
+	}
+}
+
 type changePasswordRequest struct {
 	CurrentPassword string `json:"current_password"`
 	NewPassword     string `json:"new_password"`
@@ -68,14 +86,9 @@ func changePassword(d httpapi.Deps, w http.ResponseWriter, r *http.Request) {
 		// alternative -- "invalid credentials" for an account that has none --
 		// sends whoever automated this looking for a password that was never
 		// issued.
-		httpapi.WriteProblem(w, r, &httpapi.Problem{
-			Type:   httpapi.TypeConflict,
-			Title:  "That account has no password",
-			Status: http.StatusConflict,
-			Detail: "A service account authenticates with a token and has no password to change. " +
-				"Rotate its token instead.",
-			Code: httpapi.CodeNotAPerson,
-		})
+		httpapi.WriteProblem(w, r, notAPerson(
+			"A service account authenticates with a token and has no password to change. "+
+				"Rotate its token instead."))
 		return
 	case errors.Is(err, auth.ErrInvalidCredentials):
 		// The same answer as a failed login. A caller who can tell "wrong

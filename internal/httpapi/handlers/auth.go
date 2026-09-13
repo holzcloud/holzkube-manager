@@ -214,6 +214,23 @@ func openSudo(d httpapi.Deps, limiter *auth.Limiter, w http.ResponseWriter, r *h
 		return
 	}
 
+	// A service account has no password, and its token already satisfies the
+	// window this route exists to open -- so there is nothing here for it to
+	// ask for. Without this it reached Verify with an empty hash, which errors
+	// rather than returning false, and the answer was a 500.
+	//
+	// Before the throttle rather than after. The throttle exists to slow a
+	// password guesser, and this caller is not guessing: it has proven its
+	// identity with a token and is being told a fact about its own account.
+	// Spending an IP's budget on that would let one automation's misconfigured
+	// call delay a person's sign-in from the same address.
+	if u.IsService() {
+		httpapi.WriteProblem(w, r, notAPerson(
+			"A service account has no password to re-authenticate with, and does not need to: "+
+				"its token already satisfies the re-authentication window."))
+		return
+	}
+
 	if throttle(limiter, w, r) {
 		return
 	}
