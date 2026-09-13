@@ -172,6 +172,13 @@ export const userSchema = z.object({
   username: z.string(),
   role: z.string(),
   created_at: z.string(),
+  /** "person" or "service". Defaulted, so a page served by an older binary
+   * keeps rendering the accounts it already knows about. */
+  kind: z.string().default('person'),
+  /** Both are present only for a service account, and empty means never: a
+   * token that has never been used is a fact worth showing. */
+  token_issued_at: z.string().default(''),
+  last_used_at: z.string().default(''),
   /** Whether this account signs in through the identity provider. */
   linked_identity: z.boolean().default(false),
   /** Whether this is the account making the request. */
@@ -181,6 +188,27 @@ export const userSchema = z.object({
 export const usersSchema = z.object({ users: z.array(userSchema).default([]) })
 
 export type User = z.infer<typeof userSchema>
+
+/**
+ * A token, and the sentence that has to travel with it.
+ *
+ * The notice comes from the server rather than being written here, because it
+ * is a statement about what the server kept — only a hash — and a client that
+ * invented its own wording would be making a promise on the server's behalf.
+ */
+export const serviceAccountTokenSchema = z.object({
+  token: z.string(),
+  notice: z.string().default(''),
+})
+
+export const serviceAccountCreatedSchema = z.object({
+  account: userSchema,
+  token: z.string(),
+  notice: z.string().default(''),
+})
+
+export type ServiceAccountToken = z.infer<typeof serviceAccountTokenSchema>
+export type ServiceAccountCreated = z.infer<typeof serviceAccountCreatedSchema>
 
 /**
  * Whether a role carries the privileges of another.
@@ -1935,6 +1963,30 @@ export const api = {
     remove: async (id: string): Promise<void> => {
       await sendJSON('DELETE', `/api/v1/users/${encodeURIComponent(id)}`, z.unknown())
     },
+  },
+
+  serviceAccounts: {
+    /**
+     * Mints a machine identity and its one token.
+     *
+     * The token is in this response and in nothing else, ever: only its hash
+     * is stored. There is deliberately no `get` here, because there is no
+     * route that could answer one.
+     */
+    create: (username: string, role: UserRoleName): Promise<ServiceAccountCreated> =>
+      sendJSON('POST', '/api/v1/service-accounts', serviceAccountCreatedSchema, {
+        username,
+        role,
+      }),
+
+    /** Rotating is the only revocation this product has: the old token stops
+     * working at the moment the new one is minted. */
+    rotate: (id: string): Promise<ServiceAccountToken> =>
+      sendJSON(
+        'POST',
+        `/api/v1/service-accounts/${encodeURIComponent(id)}/token`,
+        serviceAccountTokenSchema,
+      ),
   },
 
   jobs: {

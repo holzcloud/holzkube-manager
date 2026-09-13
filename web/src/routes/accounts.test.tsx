@@ -22,6 +22,9 @@ function account(over: Partial<User> = {}): User {
     username: 'somebody',
     role: 'operator',
     created_at: '2026-09-12T00:00:00Z',
+    kind: 'person',
+    token_issued_at: '',
+    last_used_at: '',
     linked_identity: false,
     self: false,
     ...over,
@@ -111,6 +114,27 @@ describe('the accounts table', () => {
     expect(set).toBeDisabled()
     await user.type(field, 'a-long-enough-passphrase')
     await waitFor(() => expect(set).toBeEnabled())
+  })
+
+  /**
+   * A service account has no password, so offering a reset for one is offering
+   * to change something that does not exist. What it has instead is a token,
+   * and the only thing anybody can do to a token is replace it.
+   */
+  it('offers a service account a rotation rather than a password reset', () => {
+    wrap([account({ username: 'ci-bot', kind: 'service', token_issued_at: '2026-09-12T00:00:00Z' })])
+
+    const row = screen.getByText('ci-bot').closest('tr')
+    if (row === null) {
+      throw new Error('the service account has no row')
+    }
+
+    expect(within(row).getByRole('button', { name: /Rotate token/i })).toBeInTheDocument()
+    expect(within(row).queryByRole('button', { name: /Reset password/i })).toBeNull()
+
+    // And a token nothing has used yet says so, rather than showing the zero
+    // time as a date in the year 1.
+    expect(within(row).getByText(/never used/i)).toBeInTheDocument()
   })
 
   it('says which accounts sign in through the identity provider', () => {

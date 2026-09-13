@@ -712,6 +712,25 @@ var routeBudgets = []routeBudget{
 		why:           "store-only.",
 	},
 	{
+		route:         "POST /api/v1/service-accounts",
+		calls:         nil,
+		routeDeadline: 0,
+		verdict:       withinBudget,
+		clipping:      uncut,
+		why: "store-only. Note what it deliberately does NOT do: minting a token is one read " +
+			"from crypto/rand and one SHA-256, not an argon2id hash. A token is 256 bits and " +
+			"stretching it improves nothing, while the stretch would be paid on every API call " +
+			"a machine makes.",
+	},
+	{
+		route:         "POST /api/v1/service-accounts/{id}/token",
+		calls:         nil,
+		routeDeadline: 0,
+		verdict:       withinBudget,
+		clipping:      uncut,
+		why:           "store-only.",
+	},
+	{
 		route:         "GET /api/v1/clusters/{id}/talosconfig",
 		calls:         nil,
 		routeDeadline: 0,
