@@ -38,6 +38,32 @@ builds:
       - goos: darwin
         goarch: amd64
 
+  # The command-line client is its own build and its own archive, because it is
+  # a different thing in a different place: the daemon runs beside the cluster
+  # and carries the whole web UI inside it, and this runs on the laptop of
+  # whoever is asking it questions.
+  - id: holzkubectl
+    main: ./cmd/holzkubectl
+    binary: holzkubectl
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w -X main.version={{ .Version }}
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    # No ignore list, and the reasoning is the daemon's inverted. Intel macOS
+    # is excluded above because nothing runs a cluster on one; people very much
+    # still type commands on one. Windows is here for the same reason and only
+    # for this binary: a terminal is a terminal, and nothing in this tool
+    # touches a path, a signal or a socket that would behave differently there.
+
 archives:
   - id: default
     ids:
@@ -49,6 +75,22 @@ archives:
       - LICENSE
       - README.md
       - docs/*
+
+  # Separate, so that somebody who wants the client does not download a server
+  # with a web UI compiled into it to get a file they could have fetched on its
+  # own.
+  - id: cli
+    ids:
+      - holzkubectl
+    formats:
+      - tar.gz
+    format_overrides:
+      - goos: windows
+        formats:
+          - zip
+    name_template: "holzkubectl_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - LICENSE
 
 checksum:
   name_template: checksums.txt

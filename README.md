@@ -10,10 +10,10 @@ and serves an embedded web UI.
 
 ## Build
 
-One command produces the binary:
+One command produces both binaries:
 
 ```sh
-task build          # builds web, then go, into bin/holzkube-managerd
+task build          # builds web, then go, into bin/holzkube-managerd and bin/holzkubectl
 ```
 
 The frontend is built **before** the Go compiler runs, and that ordering is a
@@ -28,6 +28,13 @@ Without `task`:
 npm --prefix web ci      # ci, not install: builds what the lockfile pins
 npm --prefix web run build
 go build -o bin/holzkube-managerd ./cmd/holzkube-managerd
+```
+
+The command-line client is its own binary and embeds nothing, so it needs none
+of the above:
+
+```sh
+go build -o bin/holzkubectl ./cmd/holzkubectl   # or: task build:cli
 ```
 
 Toolchain: Go 1.26.7 (pinned in `go.mod`), Node with npm, and — for the full
@@ -526,6 +533,78 @@ Two files, from the cluster card:
 The kubeconfig download is **recorded in the audit log** and the talosconfig is
 not. What it hands over is `system:masters`, and nothing here can take it back —
 rotating the cluster's Kubernetes CA is what withdraws it.
+
+## holzkubectl — the command-line client
+
+A second way to ask the same questions, for the times a terminal is what you
+have: over SSH, in a pipeline, or on a machine with no browser.
+
+It is a **client**, and that is the whole design. Every verdict it prints was
+reached by the server and every sentence it shows about a refusal is the
+server's own. There is no domain logic in it and there never will be: a second
+implementation of a rule is a second thing to keep in step, and two that
+disagree are worse than one of them not existing.
+
+```
+holzkubectl nodes                 every machine, across every cluster
+holzkubectl clusters              the clusters this instance manages
+holzkubectl jobs                  long-running operations and where they are
+holzkubectl classes               the machine classes and what they name now
+holzkubectl label <id> k=v ...    replace a machine's labels (none clears them)
+holzkubectl template plan <file>  what a cluster template would mean
+holzkubectl template export <id>  write a cluster down as a template
+holzkubectl kubeconfig <cluster>  admin credentials for the cluster's Kubernetes
+holzkubectl talosconfig <cluster> an admin talosconfig
+holzkubectl version               this tool's version
+```
+
+Configuration is environment variables only — nothing to parse means nothing to
+migrate, and a token in a config file is a token in a backup:
+
+| Variable | |
+| --- | --- |
+| `HOLZKUBE_URL` | `https://holzkube.example:8443` |
+| `HOLZKUBE_TOKEN` | a service-account token, from **Settings → Accounts**. Shown once. |
+| `HOLZKUBE_FINGERPRINT` | the server's TLS certificate as SHA-256 hex. Optional, and how you reach an instance using its own generated certificate. |
+| `HOLZKUBE_TIMEOUT` | how long one request may take. Default `30s`. |
+
+```console
+$ export HOLZKUBE_URL=https://holzkube.example:8443
+$ export HOLZKUBE_TOKEN=hkm_...
+$ holzkubectl nodes
+HOST   STATE             ROLE          ADDRESS      TALOS    CLUSTER  LABELS
+cp-1   running           controlplane  10.0.0.11    v1.13.9  prod     rack=b
+w-3    running (locked)  worker        10.0.0.31    v1.13.9  prod     rack=c
+w-4    unknown           worker        (the node has not answered since 09:14)
+```
+
+A reading that is not available prints its reason in brackets rather than a
+blank. That is the API's `Field[T]` read model reaching the terminal intact: a
+node that has not answered has an address that is *unknown*, which is not the
+same statement as a node with no address.
+
+**A token, and never a password.** A CLI that took a password would be a second
+sign-in path holding a session, and sessions are for browsers: they are ambient,
+they are what the CSRF checks and the re-authentication window exist against,
+and none of that machinery means anything on a terminal. A token is put on each
+request deliberately, is per account, is rotatable, and every use of it is in
+the audit archive under that account's name. A token account carries a role like
+any other, so a reader's token can read and cannot reboot.
+
+**There is deliberately no flag that skips certificate verification.** This
+product pins *node* certificates by fingerprint rather than skipping the check
+(D-03), and a tool that took the shortcut it denies its own transport would be
+telling you two different things about one risk. `HOLZKUBE_FINGERPRINT` is the
+supported way to reach a self-signed instance: the chain cannot be checked
+because there is no authority to check it against, but the identity still is,
+and by a stronger check than a chain gives.
+
+Add `--json` to any read and the server's bytes come through unchanged, so a
+script never depends on this tool's formatting.
+
+`holzkubectl template plan` exits non-zero when the plan has problems, and still
+prints them — an exit code that swallowed the reasons would make it worse than
+silence.
 
 ## What this product does not do
 

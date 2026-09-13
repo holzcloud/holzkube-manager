@@ -199,6 +199,10 @@ func TestOpenRefusesAWideOpenDataDirectory(t *testing.T) {
 //     bundle's destination: an export and an import named by the operator, not
 //     state records. Every record it reads goes through fsstore like everything
 //     else, which is the rule this guard is actually about.
+//   - cmd/holzkubectl/commands.go — the command-line client, which holds no
+//     store at all. It is a separate binary that reaches every record over
+//     HTTP, and the one path it opens is the cluster template a person named
+//     as an argument. There is no record here to reach the wrong way.
 //   - _test.go files — tests legitimately plant fixtures and inspect results.
 func TestNoDirectFileAccessOutsideFsstore(t *testing.T) {
 	root := filepath.Join("..", "..", "..")
@@ -226,6 +230,13 @@ func TestNoDirectFileAccessOutsideFsstore(t *testing.T) {
 		// this file reaches every record through fsstore, and the only paths
 		// it opens are ones somebody typed.
 		filepath.Join("cmd", "holzkube-managerd", "commands.go"): true,
+
+		// The command-line client, and the clearest case on this list: it is a
+		// different binary, it links no store, and every record it shows was
+		// fetched over HTTP from a server that did go through fsstore. The one
+		// path it opens is `holzkubectl template plan <file>` -- a document
+		// somebody wrote in an editor and named on their own command line.
+		filepath.Join("cmd", "holzkubectl", "commands.go"): true,
 	}
 
 	// os functions that read, write, enumerate or move a file. MkdirAll and
