@@ -1334,10 +1334,21 @@ does not survive a restart. That is correct: it is a statement about a decision
 somebody is making now, and one that outlived its process would be a decision
 about a fleet that may have changed.
 
-`typed` is required for a reset and checked against the machine's hostname. It
-is deliberately not required for a reboot: asking somebody to type a hostname
-before every reboot is how they learn to paste it without reading, and then the
-typing means nothing on the one screen where it matters.
+**The route issues tokens for a fixed set of actions, and `typed` is decided
+per action rather than defaulted.**
+
+| action | `typed` required | why |
+|---|---|---|
+| `node.reboot` | no | asking for a hostname before every reboot is how somebody learns to paste it without reading, and then the typing means nothing on the screen where it matters |
+| `node.shutdown` | no | same |
+| `node.reset` | **yes**, the hostname | it wipes disks on a real machine |
+| `node.remove-from-cluster` | **yes**, the hostname | the node leaves etcd and its record here is forgotten; on a three-member control plane that is a third of the quorum |
+
+Anything else is refused with `validation.*` rather than confirmed. That
+refusal is the point: the rule used to be "required for reset, not otherwise",
+so `node.remove-from-cluster` inherited "not otherwise" by not being mentioned —
+the browser asked for the hostname and the server issued a token to anybody who
+asked without one. A default is how a confirmation becomes decoration.
 
 | code | HTTP | when |
 |---|---|---|

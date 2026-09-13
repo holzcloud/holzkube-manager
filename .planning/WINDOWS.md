@@ -108,6 +108,8 @@ last_updated: 2026-09-11T16:50:00.000Z
 | 91 | 09 | deviation | internal/talos/upgrade.go |  | ImagePull ist in machinery v1.13.9 deprecated zugunsten von ImageServiceClient, und der Tausch ist bewusst NICHT gemacht. ImageService.Pull ist ein Stream, wo das hier ein unaerer Aufruf ist: der Wechsel braucht eine neue Zeile in der Deadline-Klassentabelle,  | open |  | 2026-09-12T17:10:00.000Z |  |
 | 92 | v1.15 | deviation | .github/workflows/ci.yml |  | CI WAR NEUN COMMITS LANG ROT UND NIEMAND HAT HINGESEHEN -- auch diese Sitzung nicht, die sieben davon selbst gepusht hat. Von Lauf 12 (b798c29) bis Lauf 20 schlug 'Build, lint and test' fehl; Laeufe 12-19 an golangci-lint (genau den Befunden, die Fenster 77 al | resolved | GESCHLOSSEN 2026-09-13: beide Ursachen behoben (Fenster 77 und 93), main ist gruen. Der Eintrag bleibt, weil der Zeitraum zaehlt und weil die Gegenmassnahme eine Gewohnheit ist und kein Code: nach dem Push den Lauf ansehen. | 2026-09-13T09:00:00.000Z | 2026-09-13T09:40:00.000Z |
 | 93 | 02 | deviation | internal/talossim/scenario_conn.go |  | DER SIMULATOR HAT SELBST ERZEUGT, WOGEGEN ip_changes_on_reboot EXISTIERT: eine Antwort von einer Adresse, die der Node aufgegeben hat. severListener rief closeConns() und danach l.Close(). Das Schliessen des Listen-Sockets verhindert nur, dass der Kernel NEUE  | resolved | GESCHLOSSEN 2026-09-13: Ursache nachgewiesen statt vermutet (50-ms-Fenster, 5/5 rot), behoben, und mit zwei Tests gehalten, die ohne den Fix fehlschlagen. | 2026-09-13T09:20:00.000Z | 2026-09-13T09:40:00.000Z |
+| 94 | 09 | deviation | internal/httpapi/handlers/jobs.go |  | DIE GETIPPTE BESTAETIGUNG FUER node.remove-from-cluster WURDE VOM SERVER NICHT ERZWUNGEN. Die Regel im Confirm-Handler war 'if action == node.reset' -- geschrieben, als Reset die einzige bestaetigungspflichtige Aktion war, die etwas zerstoert. Phase 9 hat node | resolved | GESCHLOSSEN 2026-09-13 in derselben Runde, in der es gefunden wurde. Der Eintrag bleibt: von Phase 9 bis hierher war die Bestaetigung fuer diese Aktion allein Browser-Sache. | 2026-09-13T10:30:00.000Z | 2026-09-13T10:30:00.000Z |
+| 95 | 09 | deviation | web/src/components/NodeActions.tsx |  | DRITTE ROUTE OHNE EINSTIEG, GEFUNDEN DURCH EINE SYSTEMATISCHE PRUEFUNG STATT DURCH ZUFALL. POST /api/v1/machines/{id}/remove-from-cluster stand seit Phase 9 und war aus der Oberflaeche nicht erreichbar -- die gesamte etcd-Arbeit dieser Phase war damit nur per  | resolved | GESCHLOSSEN 2026-09-13. Die Pruefung selbst ist das Ergebnis: 61 Routen gegen die Oberflaeche, drei ohne Einstieg, zwei davon zu Recht. | 2026-09-13T10:30:00.000Z | 2026-09-13T10:30:00.000Z |
 
 ````json
 [
@@ -1226,6 +1228,30 @@ last_updated: 2026-09-11T16:50:00.000Z
     "reason": "GESCHLOSSEN 2026-09-13: Ursache nachgewiesen statt vermutet (50-ms-Fenster, 5/5 rot), behoben, und mit zwei Tests gehalten, die ohne den Fix fehlschlagen.",
     "recorded_at": "2026-09-13T09:20:00.000Z",
     "resolved_at": "2026-09-13T09:40:00.000Z"
+  },
+  {
+    "id": 94,
+    "kind": "deviation",
+    "phase": "09",
+    "file": "internal/httpapi/handlers/jobs.go",
+    "line": null,
+    "description": "DIE GETIPPTE BESTAETIGUNG FUER node.remove-from-cluster WURDE VOM SERVER NICHT ERZWUNGEN. Die Regel im Confirm-Handler war 'if action == node.reset' -- geschrieben, als Reset die einzige bestaetigungspflichtige Aktion war, die etwas zerstoert. Phase 9 hat node.remove-from-cluster hinzugefuegt: der Node verlaesst etcd, gibt vorher die Leadership ab, und sein Record hier wird vergessen. Auf einer Drei-Knoten-Control-Plane ist das ein Drittel des Quorums. Die Aktion hat 'keine Eingabe noetig' geerbt, indem sie nicht erwaehnt wurde: ein Client, der die Box uebersprang, bekam trotzdem ein Token. BEHOBEN: die Regel ist eine Tabelle, ein fehlender Eintrag ist eine Verweigerung statt eines Defaults, und zwei Tests halten sie -- einer prueft die Tabelle gegen die erwarteten Antworten, einer liest per AST jede Confirmer.Check-Stelle im Paket und verlangt fuer jede einen Eintrag. Beide sind ohne den Fix rot.",
+    "status": "resolved",
+    "reason": "GESCHLOSSEN 2026-09-13 in derselben Runde, in der es gefunden wurde. Der Eintrag bleibt: von Phase 9 bis hierher war die Bestaetigung fuer diese Aktion allein Browser-Sache.",
+    "recorded_at": "2026-09-13T10:30:00.000Z",
+    "resolved_at": "2026-09-13T10:30:00.000Z"
+  },
+  {
+    "id": 95,
+    "kind": "deviation",
+    "phase": "09",
+    "file": "web/src/components/NodeActions.tsx",
+    "line": null,
+    "description": "DRITTE ROUTE OHNE EINSTIEG, GEFUNDEN DURCH EINE SYSTEMATISCHE PRUEFUNG STATT DURCH ZUFALL. POST /api/v1/machines/{id}/remove-from-cluster stand seit Phase 9 und war aus der Oberflaeche nicht erreichbar -- die gesamte etcd-Arbeit dieser Phase war damit nur per curl bedienbar. Dasselbe Muster wie G-01-1 (das Passwort-Formular) und wie das Support-Bundle. Nach dem zweiten Fall wurden alle 61 Routen gegen web/src geprueft: uebrig blieben der OIDC-Callback (ein Browser-Redirect, richtig ohne SPA-Aufruf), /metrics (ein Scraper-Endpunkt, richtig) und diese. GESCHLOSSEN mit einem Dialog in der Form des Reset-Dialogs, sieben Tests, und zwei Saetzen, die sonst nirgends stehen: dass dieses Produkt nicht cordonen oder drainen kann (UPG-13), und dass ein Removal KEIN Wipe ist -- wer einen Reset erwartet, laesst eine Maschine im Netz stehen, die noch die Geheimnisse des Clusters haelt.",
+    "status": "resolved",
+    "reason": "GESCHLOSSEN 2026-09-13. Die Pruefung selbst ist das Ergebnis: 61 Routen gegen die Oberflaeche, drei ohne Einstieg, zwei davon zu Recht.",
+    "recorded_at": "2026-09-13T10:30:00.000Z",
+    "resolved_at": "2026-09-13T10:30:00.000Z"
   }
 ]
 ````

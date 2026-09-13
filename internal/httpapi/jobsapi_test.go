@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/holzcloud/holzkube-manager/internal/httpapi"
+	"github.com/holzcloud/holzkube-manager/internal/httpapi/handlers"
 	"github.com/holzcloud/holzkube-manager/internal/inventory"
 	"github.com/holzcloud/holzkube-manager/internal/model"
 	"github.com/holzcloud/holzkube-manager/internal/store/fsstore"
@@ -364,3 +365,93 @@ func (h *inventoryHarness) hostnameOf(t *testing.T, id model.MachineID) string {
 }
 
 var _ = time.Second
+
+// TestRemovingANodeFromItsClusterRequiresTypingTheHostname is the gap the
+// confirmation table closed.
+//
+// The rule used to be `if action == node.reset`, written when reset was the
+// only confirmable action that destroyed anything. Phase 9 added
+// node.remove-from-cluster -- the node leaves etcd, forfeits leadership first
+// if it holds it, and its record here is forgotten -- and it inherited "no
+// typing needed" by not being mentioned. The browser asked for the hostname.
+// The server handed a token to anybody who asked without one, which made the
+// dialog decoration.
+func TestRemovingANodeFromItsClusterRequiresTypingTheHostname(t *testing.T) {
+	h := newJobHarness(t)
+	id := h.adoptedMachine(t)
+
+	params := map[string]string{"cluster": h.adoptedCluster(t)}
+
+	// Nothing typed at all: the shape a client that skipped the box produces.
+	resp, raw := h.do(t, http.MethodPost, "/api/v1/machines/"+string(id)+"/confirm", map[string]any{
+		"action": handlers.ActionRemoveFromCluster,
+		"params": params,
+		"typed":  "",
+	})
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("confirming a removal with nothing typed: %d (%s), want 400. A confirmation only "+
+			"the browser enforces is not a confirmation", resp.StatusCode, raw)
+	}
+
+	// And a near miss, because that is what a paste of the wrong hostname
+	// looks like.
+	resp, raw = h.do(t, http.MethodPost, "/api/v1/machines/"+string(id)+"/confirm", map[string]any{
+		"action": handlers.ActionRemoveFromCluster,
+		"params": params,
+		"typed":  "cp-2",
+	})
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("confirming a removal with the wrong hostname: %d (%s), want 400",
+			resp.StatusCode, raw)
+	}
+
+	// The right one is accepted, so the test above is not passing because the
+	// route refuses everything.
+	if token := h.confirm(t, id, handlers.ActionRemoveFromCluster, params, "cp-1"); token == "" {
+		t.Fatal("a correctly typed removal produced no token")
+	}
+}
+
+// TestAnActionNobodyHasDecidedAboutGetsNoToken is the default this route used
+// to have.
+//
+// Every action fell through to "no typing needed" unless it was reset, so a
+// destructive action added later was confirmed by whatever its client chose to
+// ask for. A refusal is the safe direction and, unlike a silent default, it is
+// visible on the day somebody adds the fifth action.
+func TestAnActionNobodyHasDecidedAboutGetsNoToken(t *testing.T) {
+	h := newJobHarness(t)
+	id := h.adoptedMachine(t)
+
+	resp, raw := h.do(t, http.MethodPost, "/api/v1/machines/"+string(id)+"/confirm", map[string]any{
+		"action": "node.something-nobody-wrote-down",
+		"params": map[string]string{},
+		"typed":  "",
+	})
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("confirming an unknown action: %d (%s), want 400", resp.StatusCode, raw)
+	}
+}
+
+// adoptedCluster is the cluster the job harness adopted, read back the way a
+// client reads it.
+func (h *inventoryHarness) adoptedCluster(t *testing.T) string {
+	t.Helper()
+
+	resp, raw := h.do(t, http.MethodGet, "/api/v1/clusters", nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("clusters: %d (%s)", resp.StatusCode, raw)
+	}
+	var list struct {
+		Clusters []struct {
+			ID string `json:"id"`
+		} `json:"clusters"`
+	}
+	if err := json.Unmarshal(raw, &list); err != nil {
+		t.Fatalf("decode clusters: %v", err)
+	}
+	if len(list.Clusters) == 0 {
+		t.Fatal("the harness adopted no cluster")
+	}
+	return list.Clusters[0].ID
+}

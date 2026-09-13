@@ -2,7 +2,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { fireEvent, render, screen } from '@testing-library/react'
 import type { ReactNode } from 'react'
 import { describe, expect, it } from 'vitest'
-import { PasswordCard } from '@/routes/settings'
+import { MetricsCard, PasswordCard } from '@/routes/settings'
 
 /**
  * The password form, which is why this screen exists (UAT gap G-01-1).
@@ -61,5 +61,46 @@ describe('the password form', () => {
     )
 
     expect(screen.getByLabelText('New password')).toHaveValue('kept')
+  })
+})
+
+/**
+ * The metrics card (V2-API-02).
+ *
+ * `/metrics` needs no session, because a scraper cannot log in — which makes
+ * it reachable and completely undiscoverable. An operator who does not already
+ * know the convention has no way to learn this instance exports anything. This
+ * card is the only place that says so, which is why what it says is asserted
+ * rather than assumed.
+ */
+describe('the metrics card', () => {
+  it('names the path a scraper has to be pointed at', () => {
+    wrap(<MetricsCard />)
+    expect(screen.getByText('/metrics')).toBeInTheDocument()
+  })
+
+  it('says the endpoint needs no session, and what guards it instead', () => {
+    wrap(<MetricsCard />)
+
+    // Left unsaid, "no session" reads as "unprotected", and an operator who
+    // believes that either panics or moves the listener somewhere worse.
+    expect(screen.getByText(/needs no session/i)).toBeInTheDocument()
+    expect(screen.getByText(/host allowlist/i)).toBeInTheDocument()
+  })
+
+  it('states the export-never-ingest boundary', () => {
+    wrap(<MetricsCard />)
+
+    // The backlog drew this line and the product keeps it. Saying so here is
+    // what stops somebody asking this product for an alert rule.
+    expect(screen.getByText(/does not alert/i)).toBeInTheDocument()
+  })
+
+  it('says an expired certificate is a negative number rather than a missing one', () => {
+    wrap(<MetricsCard />)
+
+    // The one metric whose sign carries meaning. An alert rule written against
+    // it has to know that "no data" is not how expiry shows up.
+    expect(screen.getByText(/negative once it has expired/i)).toBeInTheDocument()
   })
 })

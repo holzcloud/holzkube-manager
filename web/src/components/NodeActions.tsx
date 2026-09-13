@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { AlertTriangle, Power, RotateCcw, Trash2 } from 'lucide-react'
+import { AlertTriangle, Power, RotateCcw, Trash2, Unplug } from 'lucide-react'
 import type { ReactNode } from 'react'
 import { useState } from 'react'
 import { api, type Machine } from '@/api'
@@ -15,7 +15,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 
 /**
- * Reboot, shut down, reset.
+ * Reboot, shut down, reset, and remove from the cluster.
  *
  * Every one of them goes through the server twice: once to get a confirmation
  * token for exactly this action with exactly these parameters, and once to
@@ -30,8 +30,23 @@ import { Label } from '@/components/ui/label'
  * otherwise. So nothing is pre-selected to match it, and the difference is
  * stated on the screen.
  */
-export function NodeActions({ machine }: { machine: Machine }) {
+export function NodeActions({
+  machine,
+  onRemoved,
+}: {
+  machine: Machine
+  /**
+   * Called once the operator closes the removal dialog after a successful
+   * removal. The record is gone by then, so the screen this component is on is
+   * about a machine that no longer exists — but the dialog is also the only
+   * place the cordon-and-drain notice appears, so navigating away the instant
+   * the call returns would take it off the screen before it was read. The
+   * caller decides where to go, after the reading.
+   */
+  onRemoved?: () => void
+}) {
   const [resetOpen, setResetOpen] = useState(false)
+  const [removeOpen, setRemoveOpen] = useState(false)
 
   return (
     <div className="flex flex-wrap gap-2">
@@ -58,8 +73,179 @@ export function NodeActions({ machine }: { machine: Machine }) {
         <Trash2 aria-hidden="true" className="size-4" /> Reset
       </Button>
 
+      {/*
+        Only for a node that is in a cluster. A machine in maintenance mode has
+        nothing to be removed from, and a button that answers "this machine
+        belongs to no cluster" is a button that teaches the operator to ignore
+        what it says.
+      */}
+      {machine.cluster !== '' && (
+        <Button
+          variant="outline"
+          size="sm"
+          className="text-destructive"
+          onClick={() => setRemoveOpen(true)}
+        >
+          <Unplug aria-hidden="true" className="size-4" /> Remove from cluster
+        </Button>
+      )}
+
       <ResetDialog machine={machine} open={resetOpen} onOpenChange={setResetOpen} />
+      <RemoveFromClusterDialog
+        machine={machine}
+        open={removeOpen}
+        onOpenChange={setRemoveOpen}
+        onRemoved={onRemoved}
+      />
     </div>
+  )
+}
+
+/**
+ * Taking a node out of its cluster for good (UPG-13).
+ *
+ * The route has existed since phase 9 with nothing to click, which made the
+ * whole of that phase's etcd work reachable only with curl. This is the same
+ * shape as Reset: the server issues a token bound to this action, this machine
+ * and this cluster, and the dialog's job is to make sure the operator is
+ * looking at the action the token will authorise.
+ *
+ * Two things are said here and nowhere else. The first is that holzkube-manager
+ * cannot cordon or drain -- it speaks the Talos machine API and not the
+ * Kubernetes one -- so anything still scheduled on the node stops when it does.
+ * The server sends that sentence back with the result as well, and it is shown
+ * again afterwards on purpose: an operator who read it on the way in has
+ * stopped reading by the time it is true.
+ *
+ * The second is that this is not a reset. The machine keeps its disks and its
+ * configuration; what it loses is its membership and its record here. Somebody
+ * expecting a wipe would otherwise leave a machine on the network still holding
+ * the cluster's secrets.
+ */
+function RemoveFromClusterDialog({
+  machine,
+  open,
+  onOpenChange,
+  onRemoved,
+}: {
+  machine: Machine
+  open: boolean
+  onOpenChange: (v: boolean) => void
+  onRemoved?: () => void
+}) {
+  const queryClient = useQueryClient()
+  const [typed, setTyped] = useState('')
+  const [failure, setFailure] = useState('')
+  const [notice, setNotice] = useState('')
+
+  // The hostname, for the reason the reset dialog gives: it is the thing the
+  // operator can check against the machine in front of them. A node that has
+  // not reported one falls back to its id, which is still specific to this
+  // machine -- unlike a generic word, which confirms only that somebody can
+  // type.
+  const phrase = machine.hostname.value || machine.id
+
+  const run = useMutation({
+    mutationFn: async () => {
+      const params = { cluster: machine.cluster }
+      const { token } = await api.machines.confirm(
+        machine.id,
+        'node.remove-from-cluster',
+        params,
+        typed,
+      )
+      return api.machines.removeFromCluster(machine.id, machine.cluster, token)
+    },
+    onSuccess: (result) => {
+      setFailure('')
+      setNotice(result.notice)
+      void queryClient.invalidateQueries({ queryKey: ['machines'] })
+      void queryClient.invalidateQueries({ queryKey: ['clusters'] })
+    },
+    onError: (e: Error) => setFailure(e.message),
+  })
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2 text-destructive">
+            <AlertTriangle aria-hidden="true" className="size-5" />
+            Remove {phrase} from its cluster
+          </DialogTitle>
+          <DialogDescription>
+            The node leaves etcd, forfeiting leadership first if it holds it, and its record here is
+            forgotten. Its disks and its configuration are untouched — this is not a reset, and the
+            machine keeps the cluster's secrets until somebody wipes it.
+          </DialogDescription>
+        </DialogHeader>
+
+        {notice !== '' ? (
+          <div className="space-y-4 text-sm">
+            <p className="rounded-md border border-emerald-600/40 bg-emerald-600/10 px-3 py-2 text-emerald-700 dark:text-emerald-300">
+              {phrase} has been removed.
+            </p>
+            <p className="rounded-md border border-amber-600/40 bg-amber-600/10 px-3 py-2 text-amber-700 dark:text-amber-300">
+              {notice}
+            </p>
+            <div className="flex justify-end">
+              <Button
+                onClick={() => {
+                  onOpenChange(false)
+                  onRemoved?.()
+                }}
+              >
+                Close
+              </Button>
+            </div>
+          </div>
+        ) : (
+          <div className="space-y-4 text-sm">
+            <p className="rounded-md border border-amber-600/40 bg-amber-600/10 px-3 py-2 text-amber-700 dark:text-amber-300">
+              holzkube-manager speaks the Talos machine API and not the Kubernetes API, so it cannot
+              cordon or drain this node. Anything still scheduled on it stops when it does. Run{' '}
+              <code>kubectl drain &lt;node&gt;</code> first if those workloads need to move rather
+              than restart.
+            </p>
+
+            {machine.etcd_member.value && (
+              <p className="rounded-md border border-red-600/40 bg-red-600/10 px-3 py-2 text-red-700 dark:text-red-300">
+                This node is an etcd member. Removing it lowers the cluster's voting count, and a
+                cluster that drops below a quorum stops accepting writes until enough members are
+                back.
+              </p>
+            )}
+
+            <div className="space-y-1">
+              <Label htmlFor="remove-confirm">
+                Type <span className="font-mono">{phrase}</span> to confirm
+              </Label>
+              <Input
+                id="remove-confirm"
+                value={typed}
+                autoComplete="off"
+                onChange={(e) => setTyped(e.target.value)}
+              />
+            </div>
+
+            {failure !== '' && <p className="text-destructive">{failure}</p>}
+
+            <div className="flex justify-end gap-2">
+              <Button variant="ghost" onClick={() => onOpenChange(false)}>
+                Cancel
+              </Button>
+              <Button
+                variant="destructive"
+                disabled={typed !== phrase || run.isPending}
+                onClick={() => run.mutate()}
+              >
+                Remove from cluster
+              </Button>
+            </div>
+          </div>
+        )}
+      </DialogContent>
+    </Dialog>
   )
 }
 

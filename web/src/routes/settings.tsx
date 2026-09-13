@@ -1,6 +1,6 @@
 import { useMutation, useQuery } from '@tanstack/react-query'
 import { createRoute } from '@tanstack/react-router'
-import { AlertTriangle, Download, Info, ShieldCheck } from 'lucide-react'
+import { Activity, AlertTriangle, Download, Info, ShieldCheck } from 'lucide-react'
 import { type FormEvent, useState } from 'react'
 import { api } from '@/api'
 import { Button } from '@/components/ui/button'
@@ -37,6 +37,7 @@ export function SettingsPage() {
 
       <PasswordCard />
       <SupportCard />
+      <MetricsCard />
       <BackupCard />
     </section>
   )
@@ -216,6 +217,62 @@ export function SupportCard() {
  * SSH anyway — and a button that streamed it to the browser would be an
  * endpoint that hands the cluster over to whoever has a session.
  */
+/**
+ * Where the Prometheus endpoint is, because nothing else says.
+ *
+ * `/metrics` needs no session — a scraper cannot log in — so it is reachable
+ * and completely undiscoverable: there is no link to it, and an operator who
+ * does not already know the convention has no way to learn this instance
+ * exports anything at all. That is the shape of a feature that ships and is
+ * never used.
+ *
+ * It is a card of prose rather than a link, deliberately. Following it in a
+ * browser produces a page of text nobody wants to read; what an operator needs
+ * is the address to paste into a scrape config, and the boundary this product
+ * keeps.
+ */
+export function MetricsCard() {
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-base">Metrics</CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-3 text-sm">
+        <p className="flex items-center gap-2">
+          <Activity aria-hidden="true" className="size-4" />
+          <span>
+            Prometheus can scrape <span className="font-mono">/metrics</span> on this instance.
+          </span>
+        </p>
+
+        <pre className="overflow-x-auto rounded-md border border-border p-3 font-mono text-xs">
+          {`scrape_configs:
+  - job_name: holzkube-manager
+    scheme: https
+    static_configs:
+      - targets: ['${typeof window === 'undefined' ? 'localhost:8443' : window.location.host}']`}
+        </pre>
+
+        <p className="max-w-prose text-muted-foreground">
+          It needs no session, because a scraper has none. What guards it is the same host allowlist
+          that guards every other route here, and a listener that stays on loopback unless you moved
+          it.
+        </p>
+
+        <p className="max-w-prose text-muted-foreground">
+          What it exports is what this instance knows and nothing else has: nodes per stage, seconds
+          left on each cluster's client certificate — negative once it has expired, because an
+          expired certificate is a state and not a missing number — job records by kind, confirmed
+          etcd members, and whether the audit chain verified at startup. No node ever appears as a
+          label, so the number of series follows the number of clusters rather than the size of the
+          fleet. This exports; it does not alert, and it keeps no history — that is the scraper's
+          job.
+        </p>
+      </CardContent>
+    </Card>
+  )
+}
+
 export function BackupCard() {
   return (
     <Card>

@@ -250,6 +250,46 @@ func resetPreview(d httpapi.Deps) http.HandlerFunc {
 	}
 }
 
+// ActionRemoveFromCluster is the confirmable action phase 9 added.
+//
+// It is a constant here rather than a literal at its two use sites because
+// those sites are in different files -- the token is issued in this one and
+// checked in upgrade.go -- and a typo in either would produce a token that
+// never validates, which reads to an operator as a confirmation dialog that
+// simply does not work.
+const ActionRemoveFromCluster = "node.remove-from-cluster"
+
+// typedPhrase says, for every action this route will issue a token for,
+// whether the operator has to type the machine's hostname first.
+//
+// It is a table and not a condition, and the reason is what it replaced. The
+// rule used to be `if action == node.reset`, written when reset was the only
+// confirmable action that destroyed anything. Phase 9 then added
+// node.remove-from-cluster -- a node taken out of etcd and out of the
+// inventory, which on a three-member control plane is a third of the quorum --
+// and it inherited "no typing needed" by not being mentioned. The browser
+// asked for the hostname; the server issued a token to anybody who asked
+// without one.
+//
+// A missing entry is now a refusal rather than a silence, and
+// TestEveryConfirmableActionDecidesOnTypedPhrase walks the map so that the
+// next action cannot be added without somebody answering this question.
+var typedPhrase = map[string]bool{
+	// Reboot and shutdown: no. Asking somebody to type a hostname before every
+	// reboot is how they learn to paste it without reading, and then the
+	// typing means nothing on the screen where it matters.
+	string(model.JobReboot):   false,
+	string(model.JobShutdown): false,
+
+	// Reset wipes disks on a real machine (JOB-07).
+	string(model.JobReset): true,
+
+	// Removing from the cluster is irreversible in the way that matters: the
+	// node leaves etcd and its record here is forgotten, so what is lost is
+	// the cluster's memory of it rather than its disks.
+	ActionRemoveFromCluster: true,
+}
+
 // issueConfirmation hands out a token for exactly the action described.
 func issueConfirmation(d httpapi.Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -282,14 +322,23 @@ func issueConfirmation(d httpapi.Deps) http.HandlerFunc {
 			return
 		}
 
-		// The typed phrase is required for the destructive-by-nature action
-		// and not for the others. Asking somebody to type a hostname before
-		// every reboot is how they learn to paste it without reading.
-		if body.Action == string(model.JobReset) {
+		// An action nobody has decided about gets no token. A default of "no
+		// typing needed" is how node.remove-from-cluster went two phases with
+		// a confirmation box the server did not enforce.
+		needsPhrase, known := typedPhrase[body.Action]
+		if !known {
+			httpapi.WriteProblem(w, r, httpapi.Validation(
+				"This instance issues confirmations for a fixed set of actions and that is not one "+
+					"of them.",
+				httpapi.FieldError{Field: "action", Reason: "not a confirmable action"}))
+			return
+		}
+
+		if needsPhrase {
 			if m.Hostname.Value == "" {
 				httpapi.WriteProblem(w, r, httpapi.Validation(
-					"This machine has no known hostname, so there is nothing to type to confirm a reset. "+
-						"Refresh it first."))
+					"This machine has no known hostname, so there is nothing to type to confirm "+
+						"this. Refresh it first."))
 				return
 			}
 			if strings.TrimSpace(body.Typed) != m.Hostname.Value {
