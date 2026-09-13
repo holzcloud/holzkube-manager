@@ -4,9 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
+	"net"
 	"net/http"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 )
 
@@ -500,6 +503,62 @@ func (c *Client) requestionInstallerRepo(ctx context.Context, r AssetRequest, ke
 	return c.storeInstallerRepo(key, next)
 }
 
+// registryReason says why a registry did not answer, in words rather than in
+// Go's.
+//
+// What used to be interpolated here was the transport error exactly as
+// net/http produced it:
+//
+//	Get "https://ghcr.io/v2/siderolabs/installer/manifests/v1.13.9": dial tcp 140.82.121.33:443: connect: connection refused
+//
+// Three things are wrong with that in this particular place. It is Go's
+// vocabulary and a resolved IP address rather than a sentence an operator can
+// act on; it is pinned to whatever address DNS returned at that moment, which
+// is misleading by the time anybody reads it; and unlike an error returned from
+// a call, this one is long-lived -- the warning rides every cached answer for
+// that key until the entry is re-questioned, so it is read long after the
+// moment it describes.
+//
+// What an operator can act on is the kind of failure, and that is what this
+// keeps. An unrecognised failure says so plainly rather than inventing a cause.
+func registryReason(err error) string {
+	if err == nil {
+		return "no reason was recorded"
+	}
+
+	// An HTTP status is already a sentence anybody can look up, and the
+	// resolver spells it out when it files one, so it is passed through.
+	if strings.Contains(err.Error(), "answered HTTP ") {
+		if i := strings.LastIndex(err.Error(), "answered HTTP "); i >= 0 {
+			return "the registry " + err.Error()[i:]
+		}
+	}
+
+	var dnsErr *net.DNSError
+	var netErr net.Error
+
+	switch {
+	case errors.Is(err, context.DeadlineExceeded):
+		return "the request ran out of time before the registry replied"
+	case errors.As(err, &dnsErr):
+		return "the registry's host name could not be resolved"
+	case errors.Is(err, syscall.ECONNREFUSED):
+		return "the registry refused the connection"
+	case errors.Is(err, syscall.ECONNRESET), errors.Is(err, io.EOF), errors.Is(err, io.ErrUnexpectedEOF):
+		// The measured behaviour of factory.talos.dev under throttling, per
+		// 02-04-SUMMARY.md:385: the connection goes away with no HTTP response
+		// at all. Saying so is the difference between an operator waiting and
+		// an operator investigating a network they have not broken.
+		return "the registry closed the connection without replying, which is what it does when it is throttling"
+	case errors.As(err, &netErr) && netErr.Timeout():
+		return "the connection to the registry timed out"
+	case strings.Contains(err.Error(), "x509") || strings.Contains(err.Error(), "tls:"):
+		return "the registry's TLS certificate was not accepted"
+	default:
+		return "the connection to the registry failed"
+	}
+}
+
 // installerFallbackWarning is the operator-facing sentence for a reference
 // reached past a candidate that never answered.
 //
@@ -519,11 +578,11 @@ func (c *Client) requestionInstallerRepo(ctx context.Context, r AssetRequest, ke
 func installerFallbackWarning(r AssetRequest, res installerResolution) Warning {
 	detail := fmt.Sprintf(
 		"This installer reference names the repository %q, which answered for %s. "+
-			"The preferred repository %s did not answer at all, so it was never ruled out: %v. "+
+			"The preferred repository %s did not answer at all, so it was never ruled out: %s. "+
 			"The reference is usable, but it is provisional rather than proven: "+
 			"once the registry is reachable again the preferred name may answer, "+
 			"and the reference shown here would then change.",
-		res.repo, r.Version, strings.Join(res.unresolved, " or "), res.unanswered)
+		res.repo, r.Version, strings.Join(res.unresolved, " or "), registryReason(res.unanswered))
 
 	if !r.SecureBoot {
 		return Warning{Code: WarningInstallerRepoFallbackUnverified, Detail: detail}
