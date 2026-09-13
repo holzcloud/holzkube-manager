@@ -27,14 +27,21 @@ import (
 func TestRetryAllowlistIsExactlyTheFastReadClass(t *testing.T) {
 	t.Parallel()
 
-	// The three deliberate exclusions. They are reads, and they are in the
-	// fast read class, but each is expensive enough that a retry storm is its
-	// own outage -- so they are named here and commented on their allowlist
-	// entry rather than being quietly absent.
+	// The four deliberate exclusions. They are reads, and they are in the fast
+	// read class, but each has a reason a retry is worse than a failure -- so
+	// they are named here and argued on their allowlist entry rather than
+	// being quietly absent.
+	//
+	// Three are about cost: a retry storm of snapshots, packet captures or
+	// filesystem walks against a struggling node is its own outage. Kubeconfig
+	// is the fourth and it is a different argument: Talos mints a fresh admin
+	// certificate on each call, so a retry does not repeat a read, it leaves
+	// extra valid credentials on the cluster.
 	excluded := map[string]bool{
 		MethodEtcdSnapshot:  true,
 		MethodPacketCapture: true,
 		MethodDiskUsage:     true,
+		MethodKubeconfig:    true,
 	}
 
 	for method, class := range deadlineClasses {

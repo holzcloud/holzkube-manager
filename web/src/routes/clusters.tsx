@@ -143,6 +143,24 @@ export function ClusterCard({ cluster }: { cluster: Cluster }) {
           </a>
 
           {/*
+            The answer to "how do I run kubectl against this", which this
+            product could not give until now: the only way was talosctl, which
+            is the tool it exists to replace.
+
+            It is rendered by a control-plane node rather than by this
+            installation, so unlike the talosconfig above it can fail — and it
+            is the one download here that is audited, because what comes back
+            is system:masters on the cluster.
+          */}
+          <a
+            href={api.clusters.kubeconfigPath(cluster.id)}
+            className="inline-block text-sm underline"
+            title="Admin credentials for this cluster's Kubernetes, rendered by a control-plane node. It is system:masters and it is not revocable from here — a Kubernetes CA rotation is what withdraws it. The request is recorded in the audit log."
+          >
+            Download a kubeconfig
+          </a>
+
+          {/*
             The support bundle's way in. The route was built on the argument
             that during an incident the operator is in a browser and not on a
             console — and then shipped without anything to click, which made

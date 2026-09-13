@@ -106,6 +106,14 @@ var allowlist = map[string][]string{
 	// would be a record that says something happened and not what.
 	"cluster.lock": {"locked"},
 
+	// The kubeconfig fetch, v1.16 phase 2. The cluster is in the path and
+	// there is no body, so the list is empty -- and the entry exists because
+	// the event does, which is the whole reason this route is audited when the
+	// talosconfig download beside it is a plain link. What it hands over is
+	// system:masters on somebody's cluster, and "who asked for this and when"
+	// is precisely what an archive is for.
+	"cluster.kubeconfig": {},
+
 	// The cluster this machine was added to and the address it was found at.
 	// Neither is a credential; the credentials are the cluster's, and they are
 	// not in this body at all.

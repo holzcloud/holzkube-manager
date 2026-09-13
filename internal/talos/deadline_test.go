@@ -71,6 +71,13 @@ func TestClassTable(t *testing.T) {
 			m + "Containers", m + "EtcdMemberList", m + "EtcdStatus", m + "EtcdAlarmList",
 			c + "Get", c + "List",
 			s + "Disks",
+			// v1.16 phase 2. A server stream in the protocol and a bounded
+			// read in meaning, exactly like COSI List: the node renders it
+			// from the machine configuration it already holds, and one small
+			// file that has not arrived in ten seconds is not a stream still
+			// working. This one is NOT a deviation -- the confirmed policy
+			// derives the fast-read class from that shape, and this has it.
+			m + "Kubeconfig",
 		},
 		talos.ClassMutation: {
 			m + "ApplyConfiguration", m + "Bootstrap", m + "Reset", m + "Reboot", m + "Shutdown",

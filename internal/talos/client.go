@@ -1079,3 +1079,19 @@ func (n *conn) close() error {
 	}
 	return nil
 }
+
+// Kubeconfig returns the cluster's admin kubeconfig, rendered by the node.
+//
+// It is the answer to the one question this product could not answer for an
+// operator who had adopted a cluster through it: how do I run kubectl. The
+// alternative was talosctl, which is the tool this is meant to replace.
+//
+// The node renders it from the machine configuration it already holds, and
+// machinery unpacks the gzipped tar the RPC streams. What comes back is the
+// kubeconfig bytes and nothing else.
+//
+// It is admin credentials for the cluster, valid for as long as the cluster's
+// Kubernetes CA says. Everything that handles the return value handles that.
+func (c *ClusterClient) Kubeconfig(ctx context.Context) ([]byte, error) {
+	return c.conn.c.Kubeconfig(ctx)
+}

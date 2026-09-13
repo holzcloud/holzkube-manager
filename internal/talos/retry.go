@@ -66,7 +66,7 @@ var retryable = map[string]bool{
 	MethodCOSIList:                        true,
 	MethodDisks:                           true,
 
-	// The three deliberate exclusions. Each is a read, so the class is right;
+	// The four deliberate exclusions. Each is a read, so the class is right;
 	// each is listed here as false rather than left out, so the table shows the
 	// decision instead of leaving it to be inferred from an absence.
 	//
@@ -83,6 +83,14 @@ var retryable = map[string]bool{
 	// DiskUsage walks a filesystem tree. It is a read, and it is the most
 	// expensive read on the surface.
 	MethodDiskUsage: false,
+
+	// Kubeconfig is a read in every sense except the one that decides this.
+	// Talos mints a fresh admin client certificate on each call, so a call
+	// that timed out on the way back has still left a valid credential on the
+	// cluster -- and retrying it three times leaves three. Credentials nobody
+	// counted is a worse outcome than an operator pressing the link again,
+	// which is what a failure here costs instead.
+	MethodKubeconfig: false,
 }
 
 // Retryable reports whether an RPC may be retried at all.

@@ -1211,6 +1211,37 @@ way forever in an archive with no deletion path.
 private key, and the fail-closed default writes `<redacted>` for it. That is the
 whole reason `internal/audit/redact.go` is an allowlist and not a denylist.
 
+### The two configurations a cluster hands out
+
+`GET /api/v1/clusters/{id}/talosconfig` and `GET /api/v1/clusters/{id}/kubeconfig`
+look alike and are not, and the difference decides what a failure means.
+
+The **talosconfig** is rendered here, from the stored secrets bundle, and
+reaches no node. It cannot fail for a cluster whose secrets are on disk. The
+certificate in it is minted on demand and is deliberately *not* the one
+holzkube-manager dials with: two consumers sharing one credential means revoking
+either revokes both, and this instance's own access is the one that has to keep
+working when everything else has stopped.
+
+The **kubeconfig** is rendered by a control-plane node, from the machine
+configuration it is running, and this route is a passthrough. So it can fail for
+reasons the talosconfig cannot — the cluster is unreachable, or has no
+Kubernetes yet. The route tries control-plane nodes in turn and stops at the
+first that answers, because this is a question about the cluster and any member
+can answer it. A cluster with no control-plane node on record is refused with a
+sentence saying so rather than with a connection error: the two send an operator
+to different places.
+
+Both respond `application/yaml` with a `Content-Disposition` filename and
+`Cache-Control: no-store`.
+
+**The kubeconfig is audited and the talosconfig is not**, under
+`cluster.kubeconfig` with an empty parameter allowlist — the cluster is in the
+path and there is no body. The asymmetry is deliberate: what the kubeconfig
+hands over is `system:masters` on somebody's cluster, it is not revocable from
+here (a Kubernetes CA rotation is what withdraws it), and "who asked for this and
+when" is exactly what an archive exists to answer.
+
 ## Streaming
 
 ### One connection per tab, not per panel

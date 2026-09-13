@@ -240,6 +240,7 @@ const (
 	MethodLogs               = machineService + "Logs"
 	MethodEtcdSnapshot       = machineService + "EtcdSnapshot"
 	MethodEtcdRecover        = machineService + "EtcdRecover"
+	MethodKubeconfig         = machineService + "Kubeconfig"
 	MethodPacketCapture      = machineService + "PacketCapture"
 	MethodDiskUsage          = machineService + "DiskUsage"
 	MethodDisks              = storageService + "Disks"
@@ -281,6 +282,13 @@ var deadlineClasses = map[string]DeadlineClass{
 	// resource listing that has not finished in ten seconds is not a stream
 	// that is still working.
 	MethodCOSIList: ClassFastRead,
+
+	// Kubeconfig is the same shape for the same reason: a stream in the
+	// protocol carrying one gzipped tar with one small file in it. The node
+	// renders it from the machine configuration it already holds, so ten
+	// seconds is generous rather than tight, and a total deadline is the right
+	// bound -- there is no case where this is "still arriving" after that.
+	MethodKubeconfig: ClassFastRead,
 
 	// StorageService.Disks is the one entry the confirmed policy does not name.
 	// The policy was derived from the MachineService surface, and Disks lives
