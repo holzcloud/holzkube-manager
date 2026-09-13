@@ -226,6 +226,10 @@ const ssoErrorText: Record<string, string> = {
   'setup-required':
     'This instance has no operator account yet. It has to be created from the local network.',
   'other-identity': 'This instance is linked to a different account at the identity provider.',
+  'bind-ambiguous':
+    'This instance has more than one account, so there is no way to tell which one this identity ' +
+    'belongs to. An admin has to link it to a specific account first — linking on first sign-in ' +
+    'only works while there is exactly one.',
   denied:
     'The identity provider refused the sign-in. Check that your account is assigned to this application.',
   'provider-unreachable':

@@ -31,6 +31,11 @@ type meResponse struct {
 	ID       model.UserID `json:"id"`
 	Username string       `json:"username"`
 
+	// Role is what this session may do. It decides what the interface offers
+	// and it is not the enforcement -- every route decides for itself on the
+	// way in.
+	Role model.UserRole `json:"role"`
+
 	// DryRun is the process's transport mode, not a UI preference. It is on
 	// this endpoint rather than on GET /api/v1/system/status because that one
 	// answers before authentication and Phase 1 declined to extend it for that
@@ -67,6 +72,7 @@ func AuthRoutes(d httpapi.Deps) []httpapi.Route {
 			Method:          http.MethodPost,
 			Pattern:         "/api/v1/auth/logout",
 			RequiresSession: true,
+			MinRole:         model.RoleReader,
 			Action:          "auth.logout",
 			Handler:         handler(func(w http.ResponseWriter, r *http.Request) { logout(d, w, r) }),
 		},
@@ -74,6 +80,7 @@ func AuthRoutes(d httpapi.Deps) []httpapi.Route {
 			Method:          http.MethodGet,
 			Pattern:         "/api/v1/auth/me",
 			RequiresSession: true,
+			MinRole:         model.RoleReader,
 			Action:          "auth.me",
 			Handler:         handler(func(w http.ResponseWriter, r *http.Request) { me(d, w, r) }),
 		},
@@ -86,6 +93,7 @@ func AuthRoutes(d httpapi.Deps) []httpapi.Route {
 			Destructive: false,
 
 			RequiresSession: true,
+			MinRole:         model.RoleReader,
 			Action:          "auth.sudo",
 			Handler:         handler(func(w http.ResponseWriter, r *http.Request) { openSudo(d, limiter, w, r) }),
 		},
@@ -236,7 +244,16 @@ func me(d httpapi.Deps, w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, meResponse{
 		ID:       u.ID,
 		Username: u.Username,
-		DryRun:   d.TalosMode.DryRun,
-		SSO:      d.Auth.Sessions().GetBool(r.Context(), sessionKeyIsSSOAuth),
+		// The role rides here for the same reason dry_run does: it decides
+		// what the interface offers, and an interface that has to ask a second
+		// route what this session may do is an interface that renders a
+		// screenful of buttons and then takes half of them away.
+		//
+		// It is not the enforcement. Every route decides for itself on the way
+		// in, and a client that ignored this field would meet 403 rather than
+		// get anywhere.
+		Role:   u.Role.OrAdmin(),
+		DryRun: d.TalosMode.DryRun,
+		SSO:    d.Auth.Sessions().GetBool(r.Context(), sessionKeyIsSSOAuth),
 	})
 }

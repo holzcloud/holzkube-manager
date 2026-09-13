@@ -123,6 +123,21 @@ export const meSchema = z.object({
   dry_run: z.boolean(),
 
   /**
+   * What this session may do.
+   *
+   * It decides what the interface offers and it is not what enforces anything:
+   * every route decides for itself on the way in, so a client that got this
+   * wrong would meet 403 rather than get anywhere.
+   *
+   * Defaulted to admin, and that default is the same decision the server makes
+   * about an account with no stored role: a page served by an older binary
+   * gets no field at all, and hiding half the interface from the one operator
+   * of a single-account installation would be a regression dressed as a
+   * permission.
+   */
+  role: z.string().default('admin'),
+
+  /**
    * Whether this session was established through the identity provider.
    *
    * Signing out then has to go through the provider's RP-initiated logout, or
@@ -135,6 +150,51 @@ export const meSchema = z.object({
 })
 
 export type Me = z.infer<typeof meSchema>
+
+/* ---------------------------------------------------------------------- */
+/* Accounts (V2-AUTH-02)                                                   */
+/* ---------------------------------------------------------------------- */
+
+export const USER_ROLES = ['admin', 'operator', 'reader'] as const
+export type UserRoleName = (typeof USER_ROLES)[number]
+
+/** What each role may do, in the words the settings screen uses. */
+export const USER_ROLE_SENTENCE: Record<UserRoleName, string> = {
+  admin:
+    'Everything, including managing accounts and downloading the credentials that make this instance unnecessary.',
+  operator:
+    'Run the fleet: configure, upgrade, provision, reboot, reset, remove a node. Not accounts, and not cluster credentials.',
+  reader: 'Look. Nothing they do changes anything.',
+}
+
+export const userSchema = z.object({
+  id: z.string(),
+  username: z.string(),
+  role: z.string(),
+  created_at: z.string(),
+  /** Whether this account signs in through the identity provider. */
+  linked_identity: z.boolean().default(false),
+  /** Whether this is the account making the request. */
+  self: z.boolean().default(false),
+})
+
+export const usersSchema = z.object({ users: z.array(userSchema).default([]) })
+
+export type User = z.infer<typeof userSchema>
+
+/**
+ * Whether a role carries the privileges of another.
+ *
+ * The order is the server's, and it is duplicated here rather than fetched
+ * because it decides what is rendered before any request is made. The
+ * duplication is safe in the direction that matters: this side only ever hides
+ * things, and the server refuses them.
+ */
+export function roleAtLeast(have: string, want: UserRoleName): boolean {
+  const h = USER_ROLES.indexOf(have as UserRoleName)
+  const w = USER_ROLES.indexOf(want)
+  return h >= 0 && w >= 0 && h <= w
+}
 
 /** Where the browser is sent to start a flow against the identity provider. */
 export const oidcPath = {
@@ -1854,6 +1914,26 @@ export const api = {
         etcdRestoredSchema,
         snapshot,
       )
+    },
+  },
+
+  users: {
+    list: async (): Promise<User[]> => (await sendJSON('GET', '/api/v1/users', usersSchema)).users,
+
+    create: (username: string, password: string, role: UserRoleName): Promise<User> =>
+      sendJSON('POST', '/api/v1/users', userSchema, { username, password, role }),
+
+    setRole: (id: string, role: UserRoleName): Promise<User> =>
+      sendJSON('POST', `/api/v1/users/${encodeURIComponent(id)}/role`, userSchema, { role }),
+
+    resetPassword: async (id: string, password: string): Promise<void> => {
+      await sendJSON('POST', `/api/v1/users/${encodeURIComponent(id)}/password`, z.unknown(), {
+        password,
+      })
+    },
+
+    remove: async (id: string): Promise<void> => {
+      await sendJSON('DELETE', `/api/v1/users/${encodeURIComponent(id)}`, z.unknown())
     },
   },
 

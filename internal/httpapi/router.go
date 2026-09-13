@@ -20,6 +20,7 @@ import (
 	"github.com/holzcloud/holzkube-manager/internal/jobs"
 	"github.com/holzcloud/holzkube-manager/internal/machineconfig"
 	"github.com/holzcloud/holzkube-manager/internal/metrics"
+	"github.com/holzcloud/holzkube-manager/internal/model"
 	"github.com/holzcloud/holzkube-manager/internal/nodestream"
 	"github.com/holzcloud/holzkube-manager/internal/provision"
 	"github.com/holzcloud/holzkube-manager/internal/store"
@@ -48,6 +49,22 @@ type Route struct {
 
 	// RequiresSession bool declares that the route needs a live session.
 	RequiresSession bool
+
+	// MinRole is the least privileged account that may use this route.
+	//
+	// The zero value is the empty string, which model.UserRole.AtLeast refuses
+	// for everybody -- so a session route that names no role is unreachable
+	// rather than open. That is the same fail-closed shape as
+	// internal/talos's retry allowlist and internal/audit's redaction
+	// allowlist, and for the same reason: a route nobody classified is a route
+	// nobody decided about, and the safe reading of an undecided permission is
+	// "no".
+	//
+	// New refuses to register a session route with no MinRole, so the failure
+	// is a panic at composition rather than a 403 an operator meets later. It
+	// is ignored on a route that needs no session: there is no account to have
+	// a role.
+	MinRole model.UserRole
 
 	// Action is the stable audit token for this route, e.g. "auth.login".
 	// A mutating route without one would execute unlogged.
@@ -240,6 +257,22 @@ func New(d Deps) http.Handler {
 				"window has been refreshed, so a held response cannot be a stream.")
 		}
 
+		// The same composition-time refusal, for the same reason. A route that
+		// needs a session and names no role is unreachable by every account,
+		// which in production is a route that looks broken; finding it here is
+		// finding it before the listener opens.
+		if rt.RequiresSession && !rt.MinRole.Valid() {
+			panic("httpapi: route " + rt.Method + " " + rt.Pattern +
+				" requires a session and names no MinRole. Every session route says which " +
+				"accounts may use it; the zero value is refused rather than defaulted, because " +
+				"a permission nobody chose is not a permission anybody reviewed.")
+		}
+		if !rt.RequiresSession && rt.MinRole != "" {
+			panic("httpapi: route " + rt.Method + " " + rt.Pattern +
+				" names a MinRole and needs no session. There is no account to have a role, so " +
+				"the marking would read as a restriction that is not enforced.")
+		}
+
 		handler := d.wrapRoute(rt)
 		mux.Handle(rt.Method+" "+rt.Pattern, handler)
 
@@ -302,6 +335,22 @@ func (d Deps) wrapRoute(rt Route) http.Handler {
 		middleware.Audit(auditAdapter{deps: d}, rt.Action, middleware.IsMutating(rt.Method),
 			func(w http.ResponseWriter, r *http.Request, err error) {
 				WriteInternal(w, r, d.Logger, err)
+			}),
+		// Inside audit rather than outside it, and that is the opposite
+		// placement from authn. The archive exists for exactly this event --
+		// somebody holding a valid session reached for something their account
+		// may not do -- and it is the same argument that keeps the sudo
+		// refusal inside. What kept the 401 out was that anyone can provoke
+		// one; a 403 here needs a session first.
+		middleware.Authz(rt.RequiresSession,
+			func(r *http.Request) bool {
+				u, ok := d.Auth.CurrentUser(r.Context())
+				return ok && u.Role.AtLeast(rt.MinRole)
+			},
+			func(w http.ResponseWriter, r *http.Request) {
+				WriteProblem(w, r, Forbidden(CodeForbiddenRole,
+					"This account does not have the role this action needs. It needs at least "+
+						string(rt.MinRole)+"."))
 			}),
 		// The lock sits between the archive and the password prompt. Inside
 		// audit, because an attempt to change a cluster somebody adopted
