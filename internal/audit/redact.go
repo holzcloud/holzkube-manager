@@ -106,6 +106,29 @@ var allowlist = map[string][]string{
 	// would be a record that says something happened and not what.
 	"cluster.lock": {"locked"},
 
+	// Account management, v1.16 phase 3. Four entries, and what they permit is
+	// decided by one question: six months from now, what does somebody
+	// investigating need this record to say?
+	//
+	// The username and the role, because "an account was created" without them
+	// is a record that cannot answer "who can reach this cluster and since
+	// when". The password never, on any of them -- the fail-closed default
+	// writes <redacted> and this is the case it was built for.
+	"user.create": {"username", "role"},
+
+	// The role a change moved somebody to. The account is in the path. A role
+	// change with a redacted direction is a record of nothing, which is the
+	// same argument cluster.lock makes.
+	"user.role": {"role"},
+
+	// A reset has nothing permissible in its body at all, and the entry exists
+	// so the table says so rather than leaving it to be inferred. The account
+	// whose password was reset is in the path, and that is the fact.
+	"user.password-reset": {},
+
+	// Likewise: the account is in the path and there is no body.
+	"user.delete": {},
+
 	// The kubeconfig fetch, v1.16 phase 2. The cluster is in the path and
 	// there is no body, so the list is empty -- and the entry exists because
 	// the event does, which is the whole reason this route is audited when the

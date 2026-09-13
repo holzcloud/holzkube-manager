@@ -149,6 +149,50 @@ a confidential client with a secret: the redirect carrying the code lands in a
 browser on an operator's machine, and a code intercepted there is worth a
 session against cluster PKI.
 
+### Accounts and roles
+
+The setup wizard creates one account and it is an admin, because it is the only
+account and any other role would leave an instance nobody can manage. Further
+accounts are created from **Settings → Accounts**, which only an admin sees.
+
+| Role | May |
+|---|---|
+| `reader` | look. The fleet, the jobs, the plans, the log streams; sign out; change their own password. |
+| `operator` | run the fleet: configure, upgrade, provision, reboot, reset, remove a node. |
+| `admin` | everything, plus the two things whose blast radius is this instance rather than a node — managing accounts, and downloading the credentials that make this instance unnecessary. |
+
+Admin-only reads are the ones that hand over a credential or the contents of a
+cluster: the talosconfig, the kubeconfig, the etcd snapshot and its restore, the
+support bundle, the audit archive, and the cluster lock — unlocking is what
+makes every other destructive route reachable.
+
+Every route names the least privileged role that may use it, and **a route that
+names none cannot be registered**: the process refuses to start. A permission
+nobody chose is not a permission anybody reviewed.
+
+**Two changes are refused, and for different reasons.** An account cannot take
+away its own admin role — another admin can, which is what stops this being one
+click from nobody being able to undo it. And nothing can leave the instance with
+no admin at all; the repair for that is a shell on the host. An account *may*
+delete itself as long as it is not the last admin: somebody leaving should not
+have to ask a colleague, and a rule that made them is a rule people work around
+by sharing an account.
+
+An admin can reset another account's password without knowing the old one. Their
+own change still asks for it, and that asymmetry is deliberate: the account's own
+change defends against a stolen session, and a reset exists precisely because
+nobody has the old password any more.
+
+**Upgrading from a single-account installation changes nothing.** An account
+stored before roles existed has none, and that is read as admin — it was the only
+account, so it could do everything, and demoting it on upgrade would be a lockout
+dressed as a security improvement.
+
+**Single sign-on links on first use only while there is exactly one account.**
+With two, there is no answer to "which account is this identity", and every
+plausible guess is a way for a new subject at the provider to take over somebody
+else's account.
+
 ### Why the local account stays
 
 A cluster manager whose only route to authentication runs on the cluster it

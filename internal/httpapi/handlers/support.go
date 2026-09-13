@@ -30,6 +30,7 @@ func SupportRoutes(d httpapi.Deps) []httpapi.Route {
 			Method:          http.MethodGet,
 			Pattern:         "/api/v1/clusters/{id}/support-bundle",
 			RequiresSession: true,
+			MinRole:         model.RoleAdmin,
 			Streaming:       true,
 			Action:          "support.bundle",
 			Handler:         handler(supportBundle(d)),

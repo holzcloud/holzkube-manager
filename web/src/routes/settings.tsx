@@ -1,13 +1,14 @@
 import { useMutation, useQuery } from '@tanstack/react-query'
 import { createRoute } from '@tanstack/react-router'
 import { Activity, AlertTriangle, Download, Info, ShieldCheck } from 'lucide-react'
-import { type FormEvent, useState } from 'react'
-import { api } from '@/api'
+import { type FormEvent, type ReactNode, useState } from 'react'
+import { api, roleAtLeast } from '@/api'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { authenticatedRoute } from '@/routes/__root'
+import { AccountsCard } from '@/routes/accounts'
 
 /**
  * Settings: the operator's own account, and what this installation is.
@@ -25,6 +26,26 @@ import { authenticatedRoute } from '@/routes/__root'
  * the caller is still awaiting: nothing unmounts, and this component keeps its
  * own state throughout.
  */
+/**
+ * Renders its children only for an admin session.
+ *
+ * It is presentation and never enforcement: every route behind it refuses on
+ * its own, and a client that ignored this would meet 403 rather than get
+ * anywhere. What it buys is that an operator does not see a panel whose every
+ * button answers "you may not".
+ *
+ * While the identity is still loading it renders nothing rather than
+ * optimistically showing the panel, because a panel that appears and then
+ * vanishes reads as a bug.
+ */
+function AdminOnly({ children }: { children: ReactNode }) {
+  const me = useQuery({ queryKey: ['me'], queryFn: () => api.me() })
+  if (!me.data || !roleAtLeast(me.data.role, 'admin')) {
+    return null
+  }
+  return <>{children}</>
+}
+
 export function SettingsPage() {
   return (
     <section className="space-y-5">
@@ -36,6 +57,9 @@ export function SettingsPage() {
       </div>
 
       <PasswordCard />
+      <AdminOnly>
+        <AccountsCard />
+      </AdminOnly>
       <SupportCard />
       <MetricsCard />
       <BackupCard />

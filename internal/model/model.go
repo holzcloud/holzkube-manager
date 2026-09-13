@@ -35,6 +35,15 @@ type User struct {
 	PasswordHash string    `json:"password_hash"`
 	CreatedAt    time.Time `json:"created_at"`
 
+	// Role is what this account is allowed to do.
+	//
+	// It is stored rather than derived, and it is empty on every account
+	// created before roles existed. UserRole.OrAdmin is what reads it, and it
+	// reads an empty value as admin: an installation that had one account had
+	// an account that could do everything, and quietly demoting it on upgrade
+	// would lock the operator out of their own instance.
+	Role UserRole `json:"role,omitempty"`
+
 	// Issuer and Subject bind this account to an external identity. Both are
 	// empty until the operator has signed in through the provider once.
 	//
@@ -49,6 +58,81 @@ type User struct {
 
 	// Rev is the compare-and-swap revision. Every stored record carries one.
 	Rev uint64 `json:"rev"`
+}
+
+// UserRole is what an account may do (V2-AUTH-02).
+//
+// Three and not more. Every role beyond these is a policy this product would
+// have to keep in step with a surface that grows every phase, and the
+// distinctions that actually matter in a homelab are: can this person change
+// the fleet, and can they destroy part of it.
+type UserRole string
+
+const (
+	// RoleReader may look and may not change anything. It is the role for the
+	// person who is on call and not on the hook -- and for the dashboard left
+	// open on a screen in the hallway.
+	RoleReader UserRole = "reader"
+
+	// RoleOperator may run the fleet: upgrade, configure, provision, reboot.
+	// It may not do the two things whose blast radius is the instance rather
+	// than a node -- manage accounts, and hand out the credentials that make
+	// this instance unnecessary.
+	RoleOperator UserRole = "operator"
+
+	// RoleAdmin may do everything, including everything above.
+	RoleAdmin UserRole = "admin"
+)
+
+// UserRoles is every role, most privileged first.
+//
+// The order is load-bearing: it is what "at least this role" is decided
+// against, and a role added in the wrong place silently widens or narrows
+// every route at once. TestRoleOrderIsPrivilegeOrder holds it.
+func UserRoles() []UserRole { return []UserRole{RoleAdmin, RoleOperator, RoleReader} }
+
+// Valid reports whether r is one of the three.
+func (r UserRole) Valid() bool {
+	for _, known := range UserRoles() {
+		if r == known {
+			return true
+		}
+	}
+	return false
+}
+
+// OrAdmin reads an unset role as admin.
+//
+// Every account created before roles existed has an empty one, and that
+// account was the only account -- it could do everything. Reading empty as
+// "reader" would demote an operator out of their own instance on an upgrade,
+// which is a lockout dressed up as a security improvement. Reading it as admin
+// changes nothing for them and is what the record actually meant.
+func (r UserRole) OrAdmin() UserRole {
+	if r == "" {
+		return RoleAdmin
+	}
+	return r
+}
+
+// AtLeast reports whether this role carries the privileges of want.
+func (r UserRole) AtLeast(want UserRole) bool {
+	have, wanted := -1, -1
+	for i, role := range UserRoles() {
+		if r.OrAdmin() == role {
+			have = i
+		}
+		if want == role {
+			wanted = i
+		}
+	}
+	// An unknown role on either side is refused rather than ordered. A stored
+	// value nobody recognises is not a privilege level, and guessing one is
+	// how a typo becomes an escalation.
+	if have < 0 || wanted < 0 {
+		return false
+	}
+	return have <= wanted
 }
 
 // HasIdentityBinding reports whether this account is linked to a provider

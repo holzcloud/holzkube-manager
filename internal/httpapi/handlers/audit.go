@@ -8,6 +8,7 @@ import (
 
 	"github.com/holzcloud/holzkube-manager/internal/audit"
 	"github.com/holzcloud/holzkube-manager/internal/httpapi"
+	"github.com/holzcloud/holzkube-manager/internal/model"
 )
 
 // maxActionLen bounds the action filter. The token is a short dotted name; a
@@ -26,6 +27,7 @@ func AuditRoutes(d httpapi.Deps) []httpapi.Route {
 			Method:          http.MethodGet,
 			Pattern:         "/api/v1/audit",
 			RequiresSession: true,
+			MinRole:         model.RoleAdmin,
 			Action:          "audit.list",
 			Handler: handler(func(w http.ResponseWriter, r *http.Request) {
 				filter, problem := parseAuditFilter(r.URL.Query())

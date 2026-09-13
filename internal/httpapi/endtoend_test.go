@@ -303,6 +303,7 @@ func newHarness(t *testing.T, opts ...harnessOpt) *harness {
 		handlers.SetupRoutes(deps),
 		handlers.AuthRoutes(deps),
 		handlers.AccountRoutes(deps),
+		handlers.UserRoutes(deps),
 		handlers.AuditRoutes(deps),
 		handlers.InventoryRoutes(deps),
 		handlers.StreamRoutes(deps),

@@ -3,6 +3,7 @@ import { createRoute, Link } from '@tanstack/react-router'
 import { AlertTriangle, CheckCircle2, Download, Info, Lock, Unlock } from 'lucide-react'
 import { useState } from 'react'
 import { api, type EtcdMemberList, type GateVerdict, type NodePlan, type UpgradePlan } from '@/api'
+import { Problem } from '@/components/Problem'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -729,14 +730,6 @@ function Notice({ text, danger }: { text: string; danger?: boolean }) {
         <Info aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
       )}
       <span>{text}</span>
-    </p>
-  )
-}
-
-function Problem({ error }: { error: unknown }) {
-  return (
-    <p className="max-w-prose text-sm text-destructive">
-      {error instanceof Error ? error.message : String(error)}
     </p>
   )
 }

@@ -72,6 +72,7 @@ func OIDCRoutes(d httpapi.Deps) []httpapi.Route {
 			// whose key is inside it.
 			Destructive:     false,
 			RequiresSession: true,
+			MinRole:         model.RoleReader,
 			Action:          "auth.oidc.sudo",
 			Handler:         handler(func(w http.ResponseWriter, r *http.Request) { oidcStart(d, w, r, true) }),
 		},
@@ -86,6 +87,7 @@ func OIDCRoutes(d httpapi.Deps) []httpapi.Route {
 			Method:          http.MethodGet,
 			Pattern:         "/api/v1/auth/oidc/logout",
 			RequiresSession: true,
+			MinRole:         model.RoleReader,
 			Action:          "auth.oidc.logout",
 			Handler:         handler(func(w http.ResponseWriter, r *http.Request) { oidcLogout(d, w, r) }),
 		},
@@ -305,6 +307,22 @@ var errBindFromUntrustedHost = errors.New("oidc: first binding must not happen o
 // errBindBeforeSetup is returned when no operator account exists yet.
 var errBindBeforeSetup = errors.New("oidc: setup has not created an account yet")
 
+// errBindAmbiguous is returned when this instance has more than one account.
+//
+// Binding on first sign-in is trust on first use, and trust on first use needs
+// somebody to trust. With one account there is no question about which account
+// an arriving identity belongs to; with two there is no answer, and the
+// plausible-looking guesses -- match on username, take the admin, take the
+// first -- are each a way for a new subject at the provider to take over
+// somebody else's account.
+//
+// So the binding becomes deliberate rather than automatic. What that costs is
+// one step for an operator who has just added a second account; what it buys
+// is that adding an account never silently changes who a provider identity
+// signs in as.
+var errBindAmbiguous = errors.New("oidc: this instance has more than one account, so a first " +
+	"binding cannot be inferred")
+
 // bindFirstIdentity links the provider identity to the one operator account.
 //
 // Two conditions, and both are about the same question: who is allowed to
@@ -327,6 +345,13 @@ func bindFirstIdentity(d httpapi.Deps, r *http.Request, issuer string, identity 
 
 	u, err := d.Auth.SingleAccount(r.Context())
 	if err != nil {
+		// Two different conditions arrive here as one error, and they are
+		// worth telling apart: no account at all is "run setup", and several
+		// accounts is "an admin has to link this one deliberately".
+		users, listErr := d.Auth.Users(r.Context())
+		if listErr == nil && len(users) > 1 {
+			return model.User{}, errBindAmbiguous
+		}
 		return model.User{}, errBindBeforeSetup
 	}
 
@@ -345,6 +370,8 @@ func writeBindProblem(d httpapi.Deps, w http.ResponseWriter, r *http.Request, er
 		failSignIn(w, r, "bind-host")
 	case errors.Is(err, errBindBeforeSetup):
 		failSignIn(w, r, "setup-required")
+	case errors.Is(err, errBindAmbiguous):
+		failSignIn(w, r, "bind-ambiguous")
 	case errors.Is(err, auth.ErrAlreadyBound):
 		failSignIn(w, r, "other-identity")
 	default:

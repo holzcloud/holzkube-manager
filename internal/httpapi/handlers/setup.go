@@ -144,7 +144,13 @@ func createFirstUser(d httpapi.Deps, w http.ResponseWriter, r *http.Request) {
 		ID:           model.UserID(id),
 		Username:     username,
 		PasswordHash: hash,
-		CreatedAt:    time.Now().UTC(),
+		// The first account is an admin, and there is nothing to decide here:
+		// it is the only account, so any other role would leave an instance
+		// nobody can manage. The wizard does not ask, because a wizard that
+		// offered the choice would be offering the operator a way to lock
+		// themselves out on the first screen.
+		Role:      model.RoleAdmin,
+		CreatedAt: time.Now().UTC(),
 	})
 	if err != nil {
 		httpapi.WriteInternal(w, r, d.Logger, err)

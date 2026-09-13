@@ -146,6 +146,16 @@ const (
 	// without saying so, and exactly one of the two changes would happen.
 	CodeStagedPending = "store.staged-pending"
 
+	// CodeForbiddenRole: the account is authenticated and does not carry the
+	// role this route needs (V2-AUTH-02).
+	//
+	// It is a 403 and not a 404, and the difference is a judgement rather than
+	// an oversight. Hiding the route would hide it from an operator who has an
+	// account on this instance and is simply the wrong one for this job --
+	// which turns "ask an admin" into "file a bug". Everyone who can receive
+	// this has already authenticated against this installation.
+	CodeForbiddenRole = "forbidden.role"
+
 	// CodeDryRun: this instance was started with --dry-run and applies
 	// nothing. It is a forbidden rather than an internal, because the request
 	// is fine and the instance is the reason.
