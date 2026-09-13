@@ -438,16 +438,25 @@ func TestSudoWindowExpires(t *testing.T) {
 // after the original window would have closed and is carried by the refresh the
 // first one earned.
 func TestDestructiveActionRestartsTheWindow(t *testing.T) {
-	// Three seconds, where this used to say four hundred milliseconds, and the
-	// length is the whole repair. This test measures a property by waiting, and
-	// what makes waiting sound is that the wait dominates everything else
-	// going on. Everything else here is argon2id: opening the window verifies a
-	// password, and each change verifies one and hashes another. CI calibrates
-	// a single hash to about 250ms on its runners, so the old window had
-	// roughly one hash of margin either side -- and CI run 33 spent it and
-	// reported "the window was not restarted" about a window that had simply
-	// closed while a password was being hashed.
-	const window = 3 * time.Second
+	// The window is measured from this machine rather than written down, and
+	// two CI failures are why.
+	//
+	// The only destructive action this harness can actually perform is a
+	// password change, and a password change is two argon2id hashes: verify
+	// the current one, hash the new one. Both of them happen inside the window
+	// under test. A 400ms window failed on CI's Linux runners, which calibrate
+	// one hash at about 250ms; a 3s window then failed on its macOS runners,
+	// which measured 1.73s for the same hash. No constant is right for both,
+	// and a constant large enough for the slowest machine anybody might run
+	// this on is a test nobody waits for on a fast one.
+	//
+	// So the cost is measured and the window is sized from it. Eight hashes is
+	// four times what the two changes need, which leaves the margin large
+	// enough that request latency cannot eat it.
+	hashCost := timeOneHash(t)
+	window := max(8*hashCost, 2*time.Second)
+	t.Logf("one argon2id hash costs %s here, so the window under test is %s",
+		hashCost.Round(time.Millisecond), window.Round(time.Millisecond))
 
 	s := newServer(t, window)
 	c := s.newClient(t)
@@ -485,6 +494,31 @@ func TestDestructiveActionRestartsTheWindow(t *testing.T) {
 	if resp, raw := c.changePassword(newPass, thirdPass); resp.StatusCode != http.StatusNoContent {
 		t.Fatalf("second change: got %d, want 204 -- the window was not restarted (body: %s)", resp.StatusCode, raw)
 	}
+}
+
+// timeOneHash measures what one argon2id hash costs on this machine.
+//
+// The parameters were already calibrated when the first auth.Service was
+// built, so this pays for one hash at the settled cost rather than for another
+// calibration.
+func timeOneHash(t *testing.T) time.Duration {
+	t.Helper()
+
+	var cost time.Duration
+
+	// One throwaway hash first. The very first one on a cold process measured
+	// 2.28s here against 330ms for every one after it, and sizing the window
+	// from the cold number makes this test wait twenty seconds for no reason.
+	// By the time the window is open, setup and the re-authentication have
+	// each hashed, so warm is the cost the measured half actually pays.
+	for range 2 {
+		start := time.Now()
+		if _, err := auth.Hash("a-passphrase-nothing-else-uses"); err != nil {
+			t.Fatalf("hash: %v", err)
+		}
+		cost = time.Since(start)
+	}
+	return cost
 }
 
 // sleepUntil waits for an instant rather than for a duration.
