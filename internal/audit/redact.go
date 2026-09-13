@@ -298,6 +298,11 @@ var allowlist = map[string][]string{
 	// the table shows it.
 	"etcd.remove-member": {},
 
+	// Renewing this installation's own client certificate for a cluster
+	// (V2-OPS-02). No parameters: the cluster is on the record already and the
+	// certificate itself never goes near the archive.
+	"cluster.renew-client-certificate": {},
+
 	// A snapshot is a GET: no body, nothing to permit. It is listed for the
 	// same reason -- and because "somebody took a copy of this cluster's etcd"
 	// is exactly the kind of event an archive exists to hold, even when the

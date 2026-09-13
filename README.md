@@ -500,6 +500,45 @@ Every condition has to hold. A class with no conditions is refused rather than
 stored — it would match nothing, and the reading that makes it match everything
 is the one that costs a cluster.
 
+### Certificates
+
+holzkube-manager reaches a cluster with an admin certificate it minted for
+itself at adoption, from that cluster's own Talos certificate authority. It is
+good for a year, and when it expires **every node in that cluster becomes
+unreachable at once** — the cluster is fine, and this can no longer get into it.
+
+So the cluster card counts down, and escalates: a badge at 90 days, a banner on
+every page at 30, red at 7. Each card carries the button that answers it:
+**Renew this cluster's certificate**.
+
+Renewing touches no node and restarts nothing. A node trusts the *authority*,
+not any particular certificate issued from it, so a fresh one is accepted the
+moment it is presented.
+
+The new certificate is proven before it is kept. Minting one is trivial; the way
+this goes wrong is replacing a working credential with one that is not, and
+finding out at the moment the old one expires — precisely when nobody can get in
+to fix it. So a connection is opened with the new certificate and a node has to
+answer through it before anything is written, and every machine in the cluster
+is tried, because "this certificate does not work" and "the node I picked is
+switched off" are different findings. If none answers, **the old certificate is
+kept and nothing changes**; the message says so rather than reporting a broken
+cluster.
+
+Two refusals worth knowing:
+
+- **the stored bundle has no authority key.** The cluster was adopted from a
+  talosconfig carrying an admin certificate and nothing to issue from. Import it
+  again with a talosconfig that carries the authority, or take a fresh one from
+  a control-plane node with `talosctl config new`.
+- **no node accepted it.** Either the cluster is unreachable, or its authority
+  was rotated outside this tool — see *What this product does not do*.
+
+`holzkubectl renew-certificate <cluster>` does the same thing, which is what
+makes this a cron entry rather than a banner somebody has to be logged in to
+see. A failed run leaves the old certificate in place, which is what makes that
+defensible.
+
 ### Growing and shrinking a cluster
 
 Each cluster card answers **what can this cluster spare?** — which of its nodes
@@ -586,6 +625,9 @@ holzkubectl clusters              the clusters this instance manages
 holzkubectl jobs                  long-running operations and where they are
 holzkubectl classes               the machine classes and what they name now
 holzkubectl scale <cluster>       which of a cluster's nodes may be removed
+holzkubectl renew-certificate <cluster>
+                                  issue this installation a fresh admin
+                                  certificate for the cluster
 holzkubectl label <id> k=v ...    replace a machine's labels (none clears them)
 holzkubectl template plan <file>  what a cluster template would mean
 holzkubectl template export <id>  write a cluster down as a template
@@ -644,8 +686,36 @@ silence.
 
 ## What this product does not do
 
-One operation it performs half of, said here because a product that does the
-first half silently is a product whose operator finds out during the incident.
+Operations it performs half of, said here because a product that does the first
+half silently is a product whose operator finds out during the incident.
+
+### It renews its own certificate and does not rotate a cluster's authority
+
+**Renewing** is built. Each cluster card has a button that issues this
+installation a fresh admin certificate from the cluster's own Talos certificate
+authority, which it already holds — see *Certificates* below. It touches no
+node, because a node trusts the authority rather than any one certificate issued
+from it.
+
+**Rotating the authority** is not built, and is a different operation: it
+changes what every node trusts. Doing it means adding the new authority to every
+node's accepted set, rolling the configuration, switching the issuing authority,
+rolling again, and only then removing the old one — four configuration passes
+across every machine, where stopping in the middle leaves a cluster that trusts
+two authorities, and getting the order wrong leaves one that trusts neither. It
+is the widest silent damage radius in this product.
+
+It is not built because it cannot be *proven* here. Everything else in this
+repository has been run against a simulated Talos node that changes its state
+for real; a rotation that passes against a simulator and has never touched
+hardware is a green test and a claim nobody should act on. A CA rotation that
+almost works is a cluster nobody can reach.
+
+If you need one today: `talosctl rotate-ca` does it, and afterwards this
+installation's stored authority is the old one — adopt the cluster again with a
+fresh talosconfig. Renewing here will refuse until you do, and the refusal says
+so: *"the certificate authority in this installation's store is no longer the
+one the cluster trusts."*
 
 ### It restores etcd onto one node and does not rebuild the rest
 

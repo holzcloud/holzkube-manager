@@ -26,7 +26,10 @@ const REFUSAL =
   'member. Removing it does not make the cluster smaller, it ends it'
 
 function answer(body: unknown) {
-  return vi.fn(() =>
+  // The parameters are declared even though the body ignores them: without
+  // them the mock's call tuple is empty and `calls[0][0]` does not typecheck,
+  // which is how the URL assertion below would have been quietly dropped.
+  return vi.fn((_input: RequestInfo | URL, _init?: RequestInit) =>
     Promise.resolve(
       new Response(JSON.stringify(body), {
         status: 200,
@@ -73,7 +76,8 @@ describe('the cluster scale panel', () => {
     await userEvent.click(screen.getByRole('button', { name: /What can this cluster spare/i }))
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))
-    expect(String(fetchMock.mock.calls[0][0])).toContain('/api/v1/clusters/c-1/scale')
+    const [url] = fetchMock.mock.calls[0] ?? []
+    expect(String(url)).toContain('/api/v1/clusters/c-1/scale')
   })
 
   it("shows the server's own refusal rather than one of its own", async () => {
