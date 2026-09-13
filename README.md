@@ -554,6 +554,12 @@ green. A local binary built against an older Go than `go.mod` targets refuses to
 run at all, which is why `task lint:go` prints the version it is using next to
 the one CI pins.
 
+When the local binary refuses, `task lint:go:install` fetches the pinned version
+into `./bin` — the same tarball, at the same version, that the CI action
+downloads. It is three lines and it ends a sentence this project has said too
+often: "the linter does not run here", which costs a round trip through CI for
+every finding and turns a misnamed doc comment into an eight-minute wait.
+
 **A green local run is not a green CI run** unless it ran the same things.
 
 ## Documentation
