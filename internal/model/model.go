@@ -35,6 +35,38 @@ type User struct {
 	PasswordHash string    `json:"password_hash"`
 	CreatedAt    time.Time `json:"created_at"`
 
+	// Kind separates a person from a machine.
+	//
+	// It is empty on every account created before service accounts existed,
+	// and OrPerson reads empty as a person -- which is what those accounts
+	// are. The distinction is not cosmetic: a person signs in with a password
+	// and holds a cookie, a service account presents a token on every request,
+	// and each of those is refused the other's way in.
+	Kind UserKind `json:"kind,omitempty"`
+
+	// TokenHash is the SHA-256 of a service account's token, hex encoded, and
+	// empty for a person.
+	//
+	// SHA-256 and not argon2id, and that is a decision rather than an
+	// oversight. argon2id exists to make a *low-entropy* secret expensive to
+	// guess; a token here is 256 bits from crypto/rand, and no amount of
+	// stretching improves on that while every stretch is paid on every single
+	// API call a machine makes. What matters instead is that the comparison is
+	// constant-time and that the token is never stored.
+	TokenHash string `json:"token_hash,omitempty"`
+
+	// TokenIssuedAt is when the current token was minted, so an operator
+	// looking at a list can see which accounts are holding old credentials.
+	TokenIssuedAt time.Time `json:"token_issued_at,omitzero"`
+
+	// LastUsedAt is the last time this account authenticated.
+	//
+	// It is written best-effort and throttled -- see auth.tokenUseThrottle --
+	// because writing it on every request would put a store write in front of
+	// every API call a machine makes, and lose a revision race with whatever
+	// that call was about to do.
+	LastUsedAt time.Time `json:"last_used_at,omitzero"`
+
 	// Role is what this account is allowed to do.
 	//
 	// It is stored rather than derived, and it is empty on every account
@@ -59,6 +91,30 @@ type User struct {
 	// Rev is the compare-and-swap revision. Every stored record carries one.
 	Rev uint64 `json:"rev"`
 }
+
+// UserKind is what kind of thing an account is.
+type UserKind string
+
+const (
+	// KindPerson signs in with a password, holds a session cookie, and is what
+	// every account was before service accounts existed.
+	KindPerson UserKind = "person"
+
+	// KindService presents a token on every request and never holds a session.
+	KindService UserKind = "service"
+)
+
+// OrPerson reads an unset kind as a person, which is what every account stored
+// before service accounts existed is.
+func (k UserKind) OrPerson() UserKind {
+	if k == "" {
+		return KindPerson
+	}
+	return k
+}
+
+// IsService reports whether this account authenticates with a token.
+func (u User) IsService() bool { return u.Kind.OrPerson() == KindService }
 
 // UserRole is what an account may do (V2-AUTH-02).
 //

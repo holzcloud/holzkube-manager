@@ -21,7 +21,7 @@ func runCSRF(t *testing.T, tc csrfCase) (passed bool, denial error) {
 	t.Helper()
 
 	var reached bool
-	mw := CSRF(func(w http.ResponseWriter, _ *http.Request, err error) {
+	mw := CSRF(IsTokenRequest, func(w http.ResponseWriter, _ *http.Request, err error) {
 		denial = err
 		w.WriteHeader(http.StatusForbidden)
 	})
@@ -119,5 +119,37 @@ func TestCSRFLetsReadsThrough(t *testing.T) {
 				t.Errorf("%s was refused: %v", method, denial)
 			}
 		})
+	}
+}
+
+// TestABearerTokenIsExemptFromCSRF is the one exemption, and it is here rather
+// than only in the composition root so that removing the predicate fails a test
+// about the rule instead of a test about wiring.
+//
+// The reason is the attack: cross-site request forgery needs an *ambient*
+// credential -- a cookie the browser attaches to a request the operator never
+// made. A page on another origin can neither read a bearer token nor cause one
+// to be sent.
+func TestABearerTokenIsExemptFromCSRF(t *testing.T) {
+	t.Parallel()
+
+	passed, denial := runCSRF(t, csrfCase{
+		method:  http.MethodPost,
+		tls:     true,
+		headers: map[string]string{"Authorization": "Bearer hkm_whatever"},
+	})
+	if !passed {
+		t.Errorf("a bearer-token request was refused for a missing CSRF header: %v", denial)
+	}
+
+	// And nothing else is exempt. A request with no token still needs the
+	// header, which is what stops the exemption from being a way around the
+	// check rather than a statement about it.
+	passed, denial = runCSRF(t, csrfCase{method: http.MethodPost, tls: true, headers: map[string]string{}})
+	if passed {
+		t.Error("a request with no token and no CSRF header passed")
+	}
+	if denial == nil {
+		t.Error("the refusal carries no reason")
 	}
 }

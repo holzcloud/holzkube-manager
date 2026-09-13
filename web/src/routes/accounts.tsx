@@ -1,6 +1,13 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
-import { api, USER_ROLE_SENTENCE, USER_ROLES, type User, type UserRoleName } from '@/api'
+import {
+  api,
+  type ServiceAccountToken,
+  USER_ROLE_SENTENCE,
+  USER_ROLES,
+  type User,
+  type UserRoleName,
+} from '@/api'
 import { Problem } from '@/components/Problem'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -57,6 +64,20 @@ export function AccountsCard() {
         {users.data && <AccountTable users={users.data} onChanged={refresh} />}
 
         <NewAccountForm onCreated={refresh} />
+
+        <hr className="border-border" />
+
+        <div className="space-y-2">
+          <h3 className="text-sm font-medium">Service accounts</h3>
+          <p className="max-w-prose text-xs text-muted-foreground">
+            An identity for a machine rather than a person. It has a role like any other account and
+            appears in the audit log under its own name, and it signs in by presenting a token on
+            every request instead of holding a session — so it is never asked to re-authenticate for
+            a destructive action. There is no password to ask for, and a token is not something
+            another site can make a browser send.
+          </p>
+          <NewServiceAccountForm onCreated={refresh} />
+        </div>
       </CardContent>
     </Card>
   )
@@ -95,6 +116,17 @@ function AccountRow({
 }) {
   const [resetting, setResetting] = useState(false)
   const [password, setPassword] = useState('')
+  const [token, setToken] = useState<ServiceAccountToken | null>(null)
+
+  const isService = user.kind === 'service'
+
+  const rotate = useMutation({
+    mutationFn: () => api.serviceAccounts.rotate(user.id),
+    onSuccess: (result) => {
+      setToken(result)
+      onChanged()
+    },
+  })
 
   const setRole = useMutation({
     mutationFn: (role: UserRoleName) => api.users.setRole(user.id, role),
@@ -159,20 +191,51 @@ function AccountRow({
       </TableCell>
 
       <TableCell className="text-sm text-muted-foreground">
-        {user.linked_identity ? 'password and single sign-on' : 'password'}
+        {isService ? (
+          <span>
+            token
+            <span className="block text-xs">
+              {user.last_used_at === ''
+                ? 'never used'
+                : `last used ${new Date(user.last_used_at).toLocaleString()}`}
+            </span>
+            {user.token_issued_at !== '' && (
+              <span className="block text-xs">
+                issued {new Date(user.token_issued_at).toLocaleDateString()}
+              </span>
+            )}
+          </span>
+        ) : user.linked_identity ? (
+          'password and single sign-on'
+        ) : (
+          'password'
+        )}
       </TableCell>
 
       <TableCell>
         <div className="flex flex-col items-end gap-1">
           <div className="flex gap-2">
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              onClick={() => setResetting((open) => !open)}
-            >
-              Reset password
-            </Button>
+            {isService ? (
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                disabled={rotate.isPending}
+                title="Mints a new token and stops the old one working. That is the only revocation there is — a token cannot be read back, because only its hash was kept."
+                onClick={() => rotate.mutate()}
+              >
+                Rotate token
+              </Button>
+            ) : (
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() => setResetting((open) => !open)}
+              >
+                Reset password
+              </Button>
+            )}
             <Button
               type="button"
               size="sm"
@@ -213,8 +276,11 @@ function AccountRow({
             </div>
           )}
 
+          {token && <TokenOnce token={token} onDismiss={() => setToken(null)} />}
+
           {setRole.error ? <Problem error={setRole.error} /> : null}
           {reset.error ? <Problem error={reset.error} /> : null}
+          {rotate.error ? <Problem error={rotate.error} /> : null}
           {remove.error ? <Problem error={remove.error} /> : null}
         </div>
       </TableCell>
@@ -296,5 +362,92 @@ function NewAccountForm({ onCreated }: { onCreated: () => void }) {
 
       {create.error ? <Problem error={create.error} /> : null}
     </form>
+  )
+}
+
+/**
+ * A token, shown the only time it exists.
+ *
+ * It is selectable text and not a copy button on purpose: the clipboard is
+ * refused outside a secure origin, which is exactly where this product often
+ * runs, and a token that silently failed to copy is a token somebody closes the
+ * panel on. The dismiss is explicit for the same reason — nothing here should
+ * disappear on a re-render.
+ */
+function TokenOnce({ token, onDismiss }: { token: ServiceAccountToken; onDismiss: () => void }) {
+  return (
+    <div
+      role="alert"
+      aria-label="New service account token"
+      className="w-full space-y-2 rounded-md border border-amber-500/50 bg-amber-500/10 px-3 py-2"
+    >
+      <code className="block break-all font-mono text-xs">{token.token}</code>
+      <p className="max-w-prose text-xs text-muted-foreground">{token.notice}</p>
+      <Button type="button" size="sm" variant="outline" onClick={onDismiss}>
+        I have copied it
+      </Button>
+    </div>
+  )
+}
+
+function NewServiceAccountForm({ onCreated }: { onCreated: () => void }) {
+  const [username, setUsername] = useState('')
+  const [role, setRole] = useState<UserRoleName>('reader')
+  const [token, setToken] = useState<ServiceAccountToken | null>(null)
+
+  const create = useMutation({
+    mutationFn: () => api.serviceAccounts.create(username, role),
+    onSuccess: (result) => {
+      setToken({ token: result.token, notice: result.notice })
+      setUsername('')
+      setRole('reader')
+      onCreated()
+    },
+  })
+
+  return (
+    <div className="space-y-2">
+      <form
+        className="flex flex-wrap items-end gap-2"
+        onSubmit={(event) => {
+          event.preventDefault()
+          create.mutate()
+        }}
+      >
+        <div className="space-y-1.5">
+          <Label htmlFor="new-service-username">New service account</Label>
+          <Input
+            id="new-service-username"
+            value={username}
+            className="h-8 w-48"
+            onChange={(event) => setUsername(event.target.value)}
+          />
+        </div>
+
+        <div className="space-y-1.5">
+          <Label htmlFor="new-service-role">Role</Label>
+          <Select value={role} onValueChange={(value) => setRole(value as UserRoleName)}>
+            <SelectTrigger id="new-service-role" className="h-8 w-32">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {USER_ROLES.map((each) => (
+                <SelectItem key={each} value={each} title={USER_ROLE_SENTENCE[each]}>
+                  {each}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+
+        <Button type="submit" size="sm" disabled={username.length < 3 || create.isPending}>
+          {create.isPending ? 'Creating…' : 'Create service account'}
+        </Button>
+
+        {create.error ? <Problem error={create.error} /> : null}
+      </form>
+
+      {token && <TokenOnce token={token} onDismiss={() => setToken(null)} />}
+    </div>
   )
 }

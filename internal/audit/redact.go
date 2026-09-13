@@ -129,6 +129,21 @@ var allowlist = map[string][]string{
 	// Likewise: the account is in the path and there is no body.
 	"user.delete": {},
 
+	// Service accounts, v1.16 phase 4. The username and the role, for the same
+	// reason user.create permits them: "a machine identity was created"
+	// without them cannot answer who can reach this cluster and since when.
+	//
+	// The token never appears, and here that is not the fail-closed default
+	// doing the work -- it is not in the request body at all. It is minted
+	// server-side and returned once, so there is nothing for a request log to
+	// capture even in principle.
+	"service-account.create": {"username", "role"},
+
+	// A rotation has no body. The account is in the path, and the fact is that
+	// its previous token stopped working at this moment -- which is exactly
+	// what somebody investigating a machine that suddenly got 401s needs.
+	"service-account.rotate": {},
+
 	// The kubeconfig fetch, v1.16 phase 2. The cluster is in the path and
 	// there is no body, so the list is empty -- and the entry exists because
 	// the event does, which is the whole reason this route is audited when the

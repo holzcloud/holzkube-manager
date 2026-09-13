@@ -297,6 +297,20 @@ func New(d Deps) http.Handler {
 		middleware.RequestID(),
 		middleware.Log(d.Logger),
 		middleware.Session(d.Auth.Sessions()),
+		// Beside the session loader rather than inside it: a token and a
+		// cookie are alternatives, and a request carrying a token gets no
+		// session at all.
+		middleware.BearerToken(func(r *http.Request) (*http.Request, bool) {
+			u, err := d.Auth.AuthenticateToken(r.Context(), middleware.BearerOf(r))
+			if err != nil {
+				// Not an error here. An unauthenticated request meets the
+				// route's own gate, which has one sentence for "you are not
+				// signed in" -- better than two that differ by which
+				// credential was tried.
+				return r, false
+			}
+			return r.WithContext(auth.WithTokenActor(r.Context(), u)), true
+		}),
 	)
 
 	return outer(mux)
@@ -324,9 +338,12 @@ func New(d Deps) http.Handler {
 // auth.unauthenticated remain unrecorded here by choice, not by accident.
 func (d Deps) wrapRoute(rt Route) http.Handler {
 	inner := middleware.Chain(
-		middleware.CSRF(func(w http.ResponseWriter, r *http.Request, err error) {
-			WriteProblem(w, r, CSRFFailed(err.Error()))
-		}),
+		// Exempt for a bearer token, and for one reason: CSRF is an attack on
+		// ambient credentials, and a token is not ambient. See CSRF's own doc.
+		middleware.CSRF(middleware.IsTokenRequest,
+			func(w http.ResponseWriter, r *http.Request, err error) {
+				WriteProblem(w, r, CSRFFailed(err.Error()))
+			}),
 		middleware.Authn(rt.RequiresSession,
 			func(r *http.Request) bool { return d.Auth.IsAuthenticated(r.Context()) },
 			func(w http.ResponseWriter, r *http.Request) {
@@ -372,9 +389,37 @@ func (d Deps) wrapRoute(rt Route) http.Handler {
 				}
 				WriteProblem(w, r, ClusterLocked(err.Error()))
 			}),
+		// A bearer token satisfies the sudo gate, and that is a security
+		// argument rather than a convenience.
+		//
+		// The window exists against a *stolen cookie*: somebody who has the
+		// session and not the password. Re-asking for the password is what
+		// separates them. A bearer token has no such gap -- it is not ambient,
+		// it is put on each request deliberately by whatever holds it, and
+		// there is no second secret to ask for. Demanding one anyway would
+		// mean either giving every service account a password (a second way
+		// in, weaker than the first) or making destructive routes unreachable
+		// by automation, which is most of what automation is for.
+		//
+		// What replaces the window is the token itself: it is per account, it
+		// is rotatable, and every use of it is in the audit archive under that
+		// account's name.
 		middleware.Sudo(rt.Destructive,
-			func(r *http.Request) bool { return d.Auth.IsSudoOpen(r.Context(), d.SudoWindow) },
-			func(r *http.Request) { d.Auth.TouchSudoWindow(r.Context()) },
+			func(r *http.Request) bool {
+				if middleware.IsTokenRequest(r) {
+					return true
+				}
+				return d.Auth.IsSudoOpen(r.Context(), d.SudoWindow)
+			},
+			func(r *http.Request) {
+				// Nothing to touch on a token request: there is no session to
+				// stamp, and writing one would be the request creating the
+				// session it deliberately does not have.
+				if middleware.IsTokenRequest(r) {
+					return
+				}
+				d.Auth.TouchSudoWindow(r.Context())
+			},
 			func(w http.ResponseWriter, r *http.Request) {
 				WriteProblem(w, r, SudoRequired())
 			}),

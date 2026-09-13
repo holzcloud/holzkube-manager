@@ -51,10 +51,26 @@ const (
 // SameSite=Lax on the cookie is necessary but not sufficient on its own: it is
 // a browser default that browsers have historically relaxed, and it says
 // nothing about a non-browser caller.
-func CSRF(deny func(http.ResponseWriter, *http.Request, error)) Middleware {
+// exempt names the requests this check does not apply to.
+//
+// There is one, and it is a fact about the attack rather than a convenience:
+// cross-site request forgery is an attack on *ambient* credentials, a cookie
+// the browser attaches to a request the operator never made. A bearer token is
+// not ambient. It is put on the request by whatever holds it, and a page on
+// another origin can neither read it nor cause it to be sent -- so there is
+// nothing here for the header to protect, and demanding it from a machine
+// would be a ritual every client has to be told about.
+//
+// It is a predicate passed in rather than a check made here, so that the
+// decision is visible at the composition root next to the rest of the chain.
+func CSRF(exempt func(*http.Request) bool, deny func(http.ResponseWriter, *http.Request, error)) Middleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if !IsMutating(r.Method) {
+				next.ServeHTTP(w, r)
+				return
+			}
+			if exempt != nil && exempt(r) {
 				next.ServeHTTP(w, r)
 				return
 			}
