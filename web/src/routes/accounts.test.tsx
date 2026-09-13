@@ -122,7 +122,9 @@ describe('the accounts table', () => {
    * and the only thing anybody can do to a token is replace it.
    */
   it('offers a service account a rotation rather than a password reset', () => {
-    wrap([account({ username: 'ci-bot', kind: 'service', token_issued_at: '2026-09-12T00:00:00Z' })])
+    wrap([
+      account({ username: 'ci-bot', kind: 'service', token_issued_at: '2026-09-12T00:00:00Z' }),
+    ])
 
     const row = screen.getByText('ci-bot').closest('tr')
     if (row === null) {
