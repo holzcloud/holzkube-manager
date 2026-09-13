@@ -85,8 +85,29 @@ tasks:
       # which is how this project once carried an "the linter cannot run here"
       # note for a month while CI ran it on every push and reported the
       # findings to nobody. A version on screen makes the two comparable.
+      #
+      # If the local binary refuses to run, install the pinned one rather than
+      # working around it. `task lint:go:install` does exactly what CI does.
       - golangci-lint --version
       - golangci-lint run
+
+  lint:go:install:
+    desc: Install the exact golangci-lint CI pins, into ./bin.
+    # The same tarball the CI action downloads, at the same version, for this
+    # host's architecture. It exists because "the linter does not run here" is
+    # a sentence that costs a round trip through CI for every lint finding,
+    # and this project has paid that cost enough times to write the three
+    # lines that end it.
+    cmds:
+      - mkdir -p bin
+      - |
+        os=$(go env GOOS)
+        arch=$(go env GOARCH)
+        name="golangci-lint-{{.GOLANGCI_VERSION | trimPrefix "v"}}-${os}-${arch}"
+        url="https://github.com/golangci/golangci-lint/releases/download/{{.GOLANGCI_VERSION}}/${name}.tar.gz"
+        echo "fetching ${url}"
+        curl -sSfL "$url" | tar xz -C bin --strip-components=1 "${name}/golangci-lint"
+      - ./bin/golangci-lint --version
 
   lint:web:
     desc: Lint and format-check the frontend sources.
