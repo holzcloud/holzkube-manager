@@ -35,6 +35,31 @@ var ErrKernelArgDrift = errors.New("upgrade: this node's kernel arguments differ
 // what was installed (UPG-07).
 var ErrNotUpgraded = errors.New("upgrade: the node is not running the version that was installed")
 
+// RollbackNotice is the remedy every not-upgraded verdict carries.
+//
+// UPG-07 exists to tell the operator that an upgrade did not take. Saying so
+// and stopping there hands somebody a broken node at the moment they are least
+// able to go and research what to do about it -- and Talos has an answer that
+// this product does not implement, which is the worst combination to leave
+// unstated.
+//
+// It rides on the error rather than living in the interface because the job
+// screen renders a step's detail verbatim, so the error *is* the screen here.
+// That is the same reason talos.SnapshotNotice is appended to the snapshot's
+// error rather than written next to the button.
+//
+// What it deliberately does not do is give a command line. The two-step shape
+// is what machinery's API says (MachineService.Rollback exists and this product
+// does not call it); the exact talosctl invocation is Talos' documentation's to
+// state, and a flag spelled wrongly here would be worse than no flag on the one
+// screen where somebody is going to paste it.
+const RollbackNotice = "holzkube-manager does not undo an upgrade. Talos installs to one of two " +
+	"boot partitions and keeps the previous installation on the other, and `talosctl rollback` " +
+	"against this node boots it -- per node, and only until that node is upgraded again. It " +
+	"undoes the Talos version and nothing else: a Kubernetes upgrade, and anything etcd did " +
+	"while the node was on the new version, are not affected. See Talos' documentation for the " +
+	"exact invocation."
+
 // SchematicVerdict is what is known about a node's schematic.
 type SchematicVerdict struct {
 	// ID is the schematic, read off the node and never guessed (D-12).
@@ -348,29 +373,41 @@ func VerifyUpgraded(
 		obs.Unhealthy = append(obs.Unhealthy, s.ID)
 	}
 
+	return obs, VerdictFor(obs, want, wantSchematic)
+}
+
+// VerdictFor is the comparison VerifyUpgraded makes, without the reads.
+//
+// It is separated for the reason gate.go separates decide(): the reads need a
+// node and the judgement does not, so keeping them together would mean every
+// test of the judgement had to stage a node that reports the thing being
+// judged. The four verdicts below are then testable as what they are -- four
+// sentences an operator gets handed at a bad moment.
+func VerdictFor(obs Observed, want Version, wantSchematic string) error {
 	got, err := ParseVersion(obs.TalosVersion)
 	if err != nil {
-		return obs, fmt.Errorf("%w: it reports %q, which is not a version", ErrNotUpgraded, obs.TalosVersion)
+		return fmt.Errorf("%w: it reports %q, which is not a version. %s",
+			ErrNotUpgraded, obs.TalosVersion, RollbackNotice)
 	}
 	if got.Major != want.Major || got.Minor != want.Minor || got.Patch != want.Patch {
-		return obs, fmt.Errorf("%w: %s was installed and the node reports %s. The upgrade call "+
+		return fmt.Errorf("%w: %s was installed and the node reports %s. The upgrade call "+
 			"succeeded and the node did not end up on that version, which is exactly the case "+
-			"'the API said OK' does not cover", ErrNotUpgraded, want, got)
+			"'the API said OK' does not cover. %s", ErrNotUpgraded, want, got, RollbackNotice)
 	}
 
 	if wantSchematic != "" && obs.SchematicID != wantSchematic {
-		return obs, fmt.Errorf("%w: the node is on %s and reports schematic %q instead of %q. "+
+		return fmt.Errorf("%w: the node is on %s and reports schematic %q instead of %q. "+
 			"The version is right and the image is not, which means the system extensions this "+
-			"node had are gone",
-			ErrUnknownSchematic, got, orNone(obs.SchematicID), wantSchematic)
+			"node had are gone. %s",
+			ErrUnknownSchematic, got, orNone(obs.SchematicID), wantSchematic, RollbackNotice)
 	}
 
 	if !obs.Healthy {
-		return obs, fmt.Errorf("%w: the node is on %s and these services are not running: %s",
-			ErrNotUpgraded, got, strings.Join(obs.Unhealthy, ", "))
+		return fmt.Errorf("%w: the node is on %s and these services are not running: %s. %s",
+			ErrNotUpgraded, got, strings.Join(obs.Unhealthy, ", "), RollbackNotice)
 	}
 
-	return obs, nil
+	return nil
 }
 
 func orNone(s string) string {
