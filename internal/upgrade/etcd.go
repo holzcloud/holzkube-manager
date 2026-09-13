@@ -127,13 +127,17 @@ func Members(ctx context.Context, cc *talos.ClusterClient, machines []model.Mach
 	return out, nil
 }
 
-// refuseIfTheClusterCannotSpareAVoter is the one place that decides whether a
-// cluster survives losing a voting etcd member.
+// RefuseIfCannotSpareAVoter is the one place that decides whether a cluster
+// survives losing a voting etcd member.
 //
-// One place, because there are two doors into it and they must not answer
-// differently: RemoveMember, which takes a member out by id, and RemoveNode,
-// which is the button on a node's page. The second went two phases consulting
-// no membership at all, so the refusal existed beside it and never ran.
+// One place, because there are three doors into it and they must not answer
+// differently: RemoveMember, which takes a member out by id; RemoveNode, which
+// is the button on a node's page; and internal/scale, which draws the screen
+// saying which nodes may be removed. The second went two phases consulting no
+// membership at all, so the refusal existed beside it and never ran -- and a
+// screen that decided for itself which nodes are removable would be the same
+// failure again, one layer up and harder to see, because it would be wrong
+// quietly rather than at the moment somebody clicks.
 //
 // Two cases, separated because the consequences are not the same size:
 //
@@ -151,7 +155,7 @@ func Members(ctx context.Context, cc *talos.ClusterClient, machines []model.Mach
 // of one is exempt from the *upgrade* gate because it has no quorum to lose
 // and refusing would make the smallest homelab unupgradeable -- and the node
 // comes back. Nothing comes back from a removal.
-func refuseIfTheClusterCannotSpareAVoter(list MemberList, name string) error {
+func RefuseIfCannotSpareAVoter(list MemberList, name string) error {
 	switch {
 	case list.VotingCount <= 1:
 		return fmt.Errorf("%w: %s is the only etcd member. Removing it does not make the "+
@@ -186,7 +190,7 @@ func RemoveMember(
 	}
 
 	if member.Voting {
-		if err := refuseIfTheClusterCannotSpareAVoter(list, member.Name); err != nil {
+		if err := RefuseIfCannotSpareAVoter(list, member.Name); err != nil {
 			return err
 		}
 	}
@@ -277,7 +281,7 @@ func RemoveNode(
 				"membership could not be read, so there is no way to tell whether the cluster "+
 				"survives losing it. Nothing has been changed: %w", nameOf(m), err)
 		}
-		if err := refuseIfTheClusterCannotSpareAVoter(list, nameOf(m)); err != nil {
+		if err := RefuseIfCannotSpareAVoter(list, nameOf(m)); err != nil {
 			return err
 		}
 
