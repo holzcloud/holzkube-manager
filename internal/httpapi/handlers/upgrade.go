@@ -132,7 +132,7 @@ func UpgradeRoutes(d httpapi.Deps) []httpapi.Route {
 			Pattern:         "/api/v1/machines/{id}/remove-from-cluster",
 			RequiresSession: true,
 			Destructive:     true,
-			Action:          "node.remove-from-cluster",
+			Action:          ActionRemoveFromCluster,
 			ClusterScope:    clusterFromBody,
 			Handler:         handler(removeNodeFromCluster(d)),
 		},
@@ -539,7 +539,7 @@ func removeNodeFromCluster(d httpapi.Deps) http.HandlerFunc {
 		}
 
 		if err := d.Confirmer.Check(body.Confirmation, jobs.Intent{
-			Action:  "node.remove-from-cluster",
+			Action:  ActionRemoveFromCluster,
 			Machine: string(id),
 			Params:  map[string]string{"cluster": body.Cluster},
 		}); err != nil {

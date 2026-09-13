@@ -88,7 +88,7 @@ export function NodeDetailPage() {
         </div>
 
         <div className="flex flex-wrap gap-2">
-          <NodeActions machine={m} />
+          <NodeActions machine={m} onRemoved={() => void navigate({ to: '/nodes' })} />
           <Button
             variant="outline"
             size="sm"
