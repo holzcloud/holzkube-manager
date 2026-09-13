@@ -1,6 +1,6 @@
 # Milestone v1.15 — Abschluss
 
-**Abgeschlossen:** 2026-09-12
+**Abgeschlossen:** 2026-09-12 (Nachtrag 2026-09-13)
 **Status:** alle drei Phasen erfüllt; gebaut, ausgeführt, als Beta ausgeliefert
 **Nicht abnahmefähig aus einem Grund, der nicht v1.15 gehört:** OPS-05 🚫
 
@@ -86,6 +86,40 @@ procfs detected`), und `/dev/kvm` gibt es hier nicht.
 **Fenster 83** — die acht auditierten Aktionen ohne Allowlist-Eintrag aus
 Phase 6 und 7. Irreparabel: D-16 definiert keinen Löschpfad, und eine Migration
 bräche die Hash-Kette.
+
+## Nachtrag, 2026-09-13: was nach dem Abschluss noch kam
+
+Dieser Abschluss wurde geschrieben und danach fünf Commits lang weitergearbeitet.
+Der Auslöser war eine einzige Entdeckung: **CI war auf `main` neun Commits lang
+rot, und niemand hat hingesehen** — diese Sitzung nicht, die sieben davon selbst
+gepusht hat (Fenster 92).
+
+Daraus sind fünf echte Befunde geworden, jeder von einem anderen Mechanismus
+gefunden:
+
+| Gefunden durch | Befund |
+|---|---|
+| CI-Logs lesen | Der Linter lief die ganze Zeit und war rot; Fenster 77 hatte eine falsche Prämisse |
+| `-race` plus ein aufgeweitetes Fenster | Der Simulator antwortete an einer Adresse, die der Node aufgegeben hatte — genau der Fehler, gegen den `ip_changes_on_reboot` existiert (Fenster 93) |
+| Routen gegen die Oberfläche prüfen | `remove-from-cluster` seit Phase 9 unerreichbar (Fenster 95) |
+| Diesen Dialog bauen | Seine **getippte Bestätigung wurde serverseitig nie erzwungen** — der Browser war das einzige Gatter (Fenster 94) |
+| Problem-Codes gegen den Vertrag prüfen | Zwei Codes, die ein Client bekommen und nirgends nachschlagen konnte (Fenster 96) |
+
+**Die beiden Prüfungen sind jetzt Tests**, und beide Wächter waren erst falsch,
+bevor sie richtig waren — das ist der Teil, der es wert ist, festgehalten zu
+werden. Der Routen-Wächter lief grün, während das Support-Bundle gelöscht war,
+weil eine Testdatei den href behauptet. Der Tote-Code-Wächter war **völlig
+wirkungslos**: jeder Code trägt einen Doku-Kommentar, der mit seinem Namen
+beginnt, also erreichte das Textzählen immer zwei. Beides fiel nur auf, weil der
+Fehler absichtlich eingebaut und der Test beim Grünbleiben beobachtet wurde.
+
+Eine vierte Prüfung — Job-Arten gegen registrierte Builder — fand nichts: sechs
+und sechs. Das ist das Signal, in dieser Richtung aufzuhören.
+
+**Ausgeliefert:** `v1.15.0-beta.2` (linux/amd64) mit all dem darin. Die beta.1
+vom Vortag hat den Fingerprint-Pin, das erzwungene Bestätigungs-Gatter und die
+drei neuen Oberflächen-Einstiege **nicht** — also genau das, was jemand auf
+Blech testen würde.
 
 ## Was als Nächstes sinnvoll wäre
 
