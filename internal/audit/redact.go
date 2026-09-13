@@ -162,6 +162,17 @@ var allowlist = map[string][]string{
 	// The class is in the path and there is no body.
 	"machine-class.delete": {},
 
+	// The cluster-template plan, v1.16 phase 6. Nothing is permitted in clear,
+	// and the reason is the body rather than the fields: it is a YAML document
+	// and the audit middleware captures a decoded JSON one, so there are no
+	// parameters here to allow or refuse.
+	//
+	// The event is worth recording anyway. A plan changes nothing, but it is
+	// what somebody reads immediately before changing something, and an
+	// archive that holds the change and not the question that preceded it is
+	// an archive missing the half that explains it.
+	"cluster-template.plan": {},
+
 	// The kubeconfig fetch, v1.16 phase 2. The cluster is in the path and
 	// there is no body, so the list is empty -- and the entry exists because
 	// the event does, which is the whole reason this route is audited when the

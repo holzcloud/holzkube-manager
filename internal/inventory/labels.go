@@ -14,6 +14,7 @@ import (
 	"maps"
 	"strings"
 
+	"github.com/holzcloud/holzkube-manager/internal/clustertemplate"
 	"github.com/holzcloud/holzkube-manager/internal/model"
 	"github.com/holzcloud/holzkube-manager/internal/store"
 )
@@ -123,4 +124,42 @@ func (s *Service) MachinesMatching(ctx context.Context, sel model.LabelSelector)
 		}
 	}
 	return views, nil
+}
+
+// Fleet is everything a cluster template is planned against.
+//
+// One method and one read of each entity, because a plan is a statement about
+// one moment: three separate calls could see a machine labelled in the second
+// and a class rewritten in the third, and produce a plan that was never true of
+// anything.
+func (s *Service) Fleet(ctx context.Context) (clustertemplate.Fleet, error) {
+	clusters, err := s.deps.Store.Clusters().List(ctx)
+	if err != nil {
+		return clustertemplate.Fleet{}, err
+	}
+	machines, err := s.deps.Store.Machines().List(ctx)
+	if err != nil {
+		return clustertemplate.Fleet{}, err
+	}
+	classes, err := s.deps.Store.MachineClasses().List(ctx)
+	if err != nil {
+		return clustertemplate.Fleet{}, err
+	}
+	return clustertemplate.Fleet{Clusters: clusters, Machines: machines, Classes: classes}, nil
+}
+
+// ClusterAndMachines reads a cluster and every machine in it, for the export.
+func (s *Service) ClusterAndMachines(ctx context.Context, id model.ClusterID) (model.Cluster, []model.Machine, error) {
+	cluster, err := s.deps.Store.Clusters().Get(ctx, id)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return model.Cluster{}, nil, ErrNotFound
+		}
+		return model.Cluster{}, nil, err
+	}
+	machines, err := s.deps.Store.Machines().List(ctx)
+	if err != nil {
+		return model.Cluster{}, nil, err
+	}
+	return cluster, machines, nil
 }

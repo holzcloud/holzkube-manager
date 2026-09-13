@@ -3,6 +3,7 @@ import { createRoute } from '@tanstack/react-router'
 import { Lock, LockOpen, ShieldQuestion } from 'lucide-react'
 import { useState } from 'react'
 import { api, type Cluster } from '@/api'
+import { ClusterTemplatePanel } from '@/components/ClusterTemplate'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -55,6 +56,7 @@ export function ClustersPage() {
 
       <ImportWizard />
       <CreateCluster />
+      <ClusterTemplatePanel clusterID={(data ?? [])[0]?.id} />
     </section>
   )
 }
