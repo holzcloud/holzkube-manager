@@ -283,6 +283,7 @@ func (n *conn) streamPolicy(
 		ClientStream: cs,
 		conn:         n,
 		op:           shortMethod(method),
+		caller:       ctx,
 		cancel:       cancel,
 		unbounded:    class.Unbounded(),
 		firstByte:    StreamFirstByteDeadline,
@@ -295,8 +296,22 @@ func (n *conn) streamPolicy(
 type policyStream struct {
 	grpc.ClientStream
 
-	conn   *conn
-	op     string
+	conn *conn
+	op   string
+
+	// caller is the context this stream was opened from, kept so that a
+	// failure can be classified against the question classify actually means
+	// to ask: did the caller change their mind?
+	//
+	// s.Context() cannot answer it. It is a child of this one that s.cancel
+	// cancels, and s.cancel is this package's own cleanup of a stream that has
+	// just failed -- so by the time a failure is classified, the stream's
+	// context always reads as cancelled and classify always returned the error
+	// untouched. KindUnreachable and KindRejected were therefore unreachable on
+	// every stream in this product, and the breaker never heard about a node
+	// that stopped answering mid-stream.
+	caller context.Context //nolint:containedctx // a stream outlives the call that opened it and has to carry its own
+
 	cancel context.CancelFunc
 
 	// unbounded marks a stream of the stream class: no total deadline, bounded
@@ -388,9 +403,8 @@ func (s *policyStream) RecvMsg(m any) error {
 		return err
 	}
 
-	s.cancel()
-
 	if s.starved.Load() {
+		s.cancel()
 		return &Error{
 			Op:      s.op,
 			Machine: s.conn.target.Machine,
@@ -399,7 +413,13 @@ func (s *policyStream) RecvMsg(m any) error {
 		}
 	}
 
-	return classify(s.Context(), s.op, s.conn.target.Machine, len(s.Trailer()) > 0, err)
+	// The trailer is read before the cancel, because cancelling is what makes
+	// a trailer unavailable, and "were there trailers" is the whole of the
+	// distinction between a node that never answered and one that refused.
+	answered := len(s.Trailer()) > 0
+	classified := classify(s.caller, s.op, s.conn.target.Machine, answered, err)
+	s.cancel()
+	return classified
 }
 
 // shortMethod is the trailing element of a gRPC full method name.

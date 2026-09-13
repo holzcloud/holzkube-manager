@@ -211,10 +211,13 @@ type Server struct {
 	closed bool
 }
 
-// New builds and starts a simulated node. It returns a running server or an
-// error, never a half-built value: a simulator that is listening on one of its
-// two listeners is worse than one that failed.
-func New(opts Options) (*Server, error) {
+// newServer builds the server value and opens nothing.
+//
+// It is separate from New so that a test can build the value New builds and
+// then hand serveOn a pair of listeners it can inspect. Rebuilding this struct
+// inside a test would be the usual kind of duplication: the test would go on
+// passing while the thing it claims to be about had changed underneath it.
+func newServer(opts Options) (*Server, error) {
 	if opts.TalosVersion == "" {
 		opts.TalosVersion = DefaultTalosVersion
 	}
@@ -248,7 +251,7 @@ func New(opts Options) (*Server, error) {
 		return nil, err
 	}
 
-	s := &Server{
+	return &Server{
 		opts:      opts,
 		pki:       p,
 		node:      newNodeState(opts),
@@ -256,6 +259,16 @@ func New(opts Options) (*Server, error) {
 		done:      make(chan struct{}),
 		scenarios: make(map[ScenarioName]Scenario),
 		calls:     make(map[string]int),
+	}, nil
+}
+
+// New builds and starts a simulated node. It returns a running server or an
+// error, never a half-built value: a simulator that is listening on one of its
+// two listeners is worse than one that failed.
+func New(opts Options) (*Server, error) {
+	s, err := newServer(opts)
+	if err != nil {
+		return nil, err
 	}
 
 	raw, err := net.Listen("tcp", "127.0.0.1:0")
@@ -263,6 +276,16 @@ func New(opts Options) (*Server, error) {
 		return nil, fmt.Errorf("talossim: listen on loopback: %w", err)
 	}
 
+	return s.serveOn(raw, bufconn.Listen(bufSize))
+}
+
+// serveOn finishes construction on the two listeners it is handed, and closes
+// both if it cannot finish.
+//
+// The listeners are arguments rather than something this opens for itself
+// because New's promise is about them, and a promise about listeners is only
+// checkable by a test that can see them.
+func (s *Server) serveOn(raw net.Listener, pipe *bufconn.Listener) (*Server, error) {
 	// Wrapped from the start rather than only while a scenario is active: the
 	// connections flap_connection has to sever are the ones accepted before it
 	// was injected, and a listener swapped in later would not know about them.
@@ -271,7 +294,7 @@ func New(opts Options) (*Server, error) {
 	s.tcp = tcp
 	s.tcpAddr = tcp.Addr().String()
 	s.addrHistory = []string{s.tcpAddr}
-	s.pipe = bufconn.Listen(bufSize)
+	s.pipe = pipe
 
 	// TLS is configured once, on the server, rather than by wrapping each
 	// listener: grpc.Creds then performs exactly one handshake per connection on
@@ -285,7 +308,7 @@ func New(opts Options) (*Server, error) {
 	// for the same reason the unary one does: a node that has gone silent has
 	// gone silent for Logs too.
 	s.srv = grpc.NewServer(
-		grpc.Creds(credentials.NewTLS(p.serverTLS())),
+		grpc.Creds(credentials.NewTLS(s.pki.serverTLS())),
 		grpc.ChainUnaryInterceptor(s.recordPeer, s.scenarioUnary),
 		grpc.ChainStreamInterceptor(s.scenarioStream),
 	)
@@ -295,7 +318,17 @@ func New(opts Options) (*Server, error) {
 	// Seeding happens before the listeners are served, so no caller can
 	// observe the node in the half-populated state between construction and
 	// the first resource being written.
+	//
+	// Both listeners are already open here, and a failure used to return
+	// without closing either. New's doc promises "never a half-built value",
+	// and a leaked listener holding a loopback port for the life of the
+	// process is exactly the half-built value it promises not to leave behind
+	// -- worse in a test binary than in production, because a test binary
+	// builds hundreds of these.
 	if err := s.seedCOSI(context.Background()); err != nil {
+		s.srv.Stop()
+		_ = tcp.Close()
+		_ = pipe.Close()
 		return nil, err
 	}
 
