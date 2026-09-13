@@ -288,6 +288,7 @@ func TestTheRouteEachVerbAsksFor(t *testing.T) {
 		{[]string{"clusters"}, http.MethodGet, "/api/v1/clusters"},
 		{[]string{"jobs"}, http.MethodGet, "/api/v1/jobs"},
 		{[]string{"classes"}, http.MethodGet, "/api/v1/machine-classes"},
+		{[]string{"scale", "prod"}, http.MethodGet, "/api/v1/clusters/prod/scale"},
 		{[]string{"label", "m1", "a=b"}, http.MethodPut, "/api/v1/machines/m1/labels"},
 		{[]string{"template", "export", "prod"}, http.MethodGet, "/api/v1/clusters/prod/template"},
 		{[]string{"kubeconfig", "prod"}, http.MethodGet, "/api/v1/clusters/prod/kubeconfig"},
@@ -307,6 +308,46 @@ func TestTheRouteEachVerbAsksFor(t *testing.T) {
 				t.Errorf("asked for %s %s, want %s %s", method, path, tc.method, tc.path)
 			}
 		})
+	}
+}
+
+// TestAScaleRefusalIsPrintedWholeAndNotAsAColumn.
+//
+// The refusal is the only thing on this screen that says what to do instead,
+// and it is a sentence rather than a word. A table cell that showed "no" and
+// dropped it would be a tool refusing without a reason.
+func TestAScaleRefusalIsPrintedWholeAndNotAsAColumn(t *testing.T) {
+	const refusal = "cp-1 is the only etcd member. Removing it does not make the cluster " +
+		"smaller, it ends it. To take this node out of service, reset it"
+
+	instance(t, answer(`{"plan":{
+		"name":"homelab","control_plane":1,"workers":1,
+		"members_known":true,"voting":1,"tolerates":0,
+		"removals":[
+			{"name":"cp-1","role":"controlplane","allowed":false,"reason":"`+refusal+`"},
+			{"name":"w-1","role":"worker","allowed":true}
+		],
+		"additions":[{"name":"new-1","ready":false,"reason":"This machine is down."}],
+		"advice":["One voting member. Add two."],
+		"sentence":"homelab: 1 control-plane node(s) and 1 worker(s)."
+	},"notice":"Nothing here changes the cluster."}`))
+
+	out, err := capture(t, "scale", "prod")
+	if err != nil {
+		t.Fatalf("scale: %v", err)
+	}
+
+	for _, want := range []string{
+		"homelab: 1 control-plane node(s) and 1 worker(s).",
+		"One voting member. Add two.",
+		refusal,
+		"could not join: new-1",
+		"This machine is down.",
+		"Nothing here changes the cluster.",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("the scale output does not carry %q:\n%s", want, out)
+		}
 	}
 }
 
@@ -338,6 +379,8 @@ func TestAVerbThisToolDoesNotHaveAsksForTheUsage(t *testing.T) {
 		{"label"},
 		{"template"},
 		{"template", "aplly", "x"},
+		{"scale"},
+		{"scale", "a", "b"},
 		{"kubeconfig"},
 		{"kubeconfig", "a", "b"},
 	} {

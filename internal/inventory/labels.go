@@ -16,6 +16,7 @@ import (
 
 	"github.com/holzcloud/holzkube-manager/internal/clustertemplate"
 	"github.com/holzcloud/holzkube-manager/internal/model"
+	"github.com/holzcloud/holzkube-manager/internal/scale"
 	"github.com/holzcloud/holzkube-manager/internal/store"
 )
 
@@ -162,4 +163,47 @@ func (s *Service) ClusterAndMachines(ctx context.Context, id model.ClusterID) (m
 		return model.Cluster{}, nil, err
 	}
 	return cluster, machines, nil
+}
+
+// ScaleInput assembles everything a scale plan is computed from except the
+// etcd membership.
+//
+// Except the membership, deliberately: reading it means opening a client to a
+// control-plane node, which is the upgrade service's job and not this one's.
+// The caller puts the two halves together. That is the composition root doing
+// composition rather than this package growing a reason to dial a node.
+//
+// Stage is carried alongside each record because internal/scale reaches
+// nothing and so cannot compute it: it comes from live observation held here.
+func (s *Service) ScaleInput(ctx context.Context, id model.ClusterID) (scale.Input, error) {
+	cluster, err := s.deps.Store.Clusters().Get(ctx, id)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return scale.Input{}, ErrNotFound
+		}
+		return scale.Input{}, err
+	}
+
+	machines, err := s.deps.Store.Machines().List(ctx)
+	if err != nil {
+		return scale.Input{}, err
+	}
+
+	in := scale.Input{Cluster: cluster}
+	for _, rec := range machines {
+		stage, _ := s.status(rec.ID, rec.Snapshot.ObservedAt)
+		node := scale.Node{Machine: rec, Stage: stage}
+
+		switch rec.Cluster {
+		case id:
+			in.Nodes = append(in.Nodes, node)
+		case "":
+			// A machine belonging to no cluster is a candidate for this one.
+			// A machine belonging to a *different* cluster is neither, and is
+			// left out rather than listed as unavailable: it is not this
+			// cluster's business.
+			in.Spare = append(in.Spare, node)
+		}
+	}
+	return in, nil
 }

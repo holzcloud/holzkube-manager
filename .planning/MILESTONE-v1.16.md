@@ -153,13 +153,37 @@ Servertyp hält, der ihn erzeugt. Derselbe Fehler: das Plan-Route nimmt YAML,
 das CLI schickte `application/json`, und es funktionierte nur, weil nichts
 davor hinsieht.
 
-### Phase 8: Cluster skalieren (Omni: „Scale a Cluster Up or Down")
+### Phase 8: Cluster skalieren (Omni: „Scale a Cluster Up or Down") — GEBAUT
 
 Knoten hinzufügen gibt es (Provisioning); Knoten entfernen gibt es als
 `node.remove-from-cluster`. Was fehlt, ist die Sicht darauf als eine Operation
 auf dem Cluster statt als zwei Operationen auf Knoten — einschließlich der
 Frage, die Omni hier beantwortet und holzkube nicht: wann ein
 Control-Plane-Knoten *nicht* entfernt werden darf.
+
+Die Antwort auf genau diese Frage gab es nirgends, und das war schlimmer als
+eine fehlende Ansicht: **`node.remove-from-cluster` hat die etcd-Mitgliedschaft
+überhaupt nicht gelesen.** Die Weigerung existierte — `ErrLastVotingMember`,
+mit Problem-Code und Handler-Mapping — und hing an `RemoveMember`, einer
+anderen Funktion. Der Knopf auf der Knotenseite ging direkt zu
+`EtcdLeaveCluster` und wischte dann die Systemplatte. Zwischen einem
+Ein-Knoten-Cluster und einem Wipe stand nur der Bestätigungsdialog, und ein
+Bestätigungsdialog fragt, ob jemand das gemeint hat, was er schon geklickt hat;
+er weiß nicht, was es kostet. Dazu kam, dass die Weigerung selbst falsch war:
+`Tolerates == 0 && VotingCount > 1` schloss den einen Fall aus, aus dem es
+keine Reparatur gibt.
+
+Gebaut: `internal/scale` als reines Lesemodell (erreicht nichts, rechnet nur),
+Route `GET /api/v1/clusters/{id}/scale`, ein Panel pro Cluster-Karte, das erst
+auf Nachfrage etcd liest, und `holzkubectl scale`. Jede Weigerung kommt aus
+`upgrade.RefuseIfCannotSpareAVoter` — derselben Funktion, die auch die Route
+ruft — und wird unverändert durchgereicht. Eine Oberfläche mit eigener Lesart
+der Regel sieht richtig aus, bis jemand klickt.
+
+Die Arithmetik ist der eigentliche Inhalt: eine Mehrheit von *n* ist *n/2+1*,
+also verträgt eine gerade Anzahl stimmberechtigter Mitglieder genau so viel wie
+die ungerade darunter. Vier fühlen sich sicherer an als drei und sind es nicht.
+Das ist der Fehler, den Betreiber machen, und er sieht aus wie Vorsicht.
 
 Teilweise vorhanden: `upgrade.ErrLastVotingMember` stellt genau diese Frage
 schon für Upgrades.

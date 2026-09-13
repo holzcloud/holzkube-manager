@@ -22,6 +22,7 @@ const usage = `holzkubectl — a command-line client for a holzkube-manager inst
   holzkubectl clusters              the clusters this instance manages
   holzkubectl jobs                  long-running operations and where they are
   holzkubectl classes               the machine classes and what they name now
+  holzkubectl scale <cluster>       which of a cluster's nodes may be removed
   holzkubectl label <id> k=v ...    replace a machine's labels (none clears them)
   holzkubectl template plan <file>  what a cluster template would mean
   holzkubectl template export <id>  write a cluster down as a template
@@ -85,6 +86,8 @@ func run(ctx context.Context, args []string) error {
 		return listJobs(ctx, client, asJSON)
 	case "classes":
 		return listClasses(ctx, client, asJSON)
+	case "scale":
+		return clusterScale(ctx, client, args[1:], asJSON)
 	case "label":
 		return setLabels(ctx, client, args[1:], asJSON)
 	case "template":
@@ -174,6 +177,34 @@ type classRow struct {
 	Name     string `json:"name"`
 	Sentence string `json:"sentence"`
 	Count    int    `json:"count"`
+}
+
+type scaleRow struct {
+	Name         string `json:"name"`
+	ControlPlane int    `json:"control_plane"`
+	Workers      int    `json:"workers"`
+
+	MembersKnown bool `json:"members_known"`
+	Voting       int  `json:"voting"`
+	Tolerates    int  `json:"tolerates"`
+
+	Removals  []scaleRemovalRow   `json:"removals"`
+	Additions []scaleCandidateRow `json:"additions"`
+	Advice    []string            `json:"advice"`
+	Sentence  string              `json:"sentence"`
+}
+
+type scaleRemovalRow struct {
+	Name    string `json:"name"`
+	Role    string `json:"role"`
+	Allowed bool   `json:"allowed"`
+	Reason  string `json:"reason"`
+}
+
+type scaleCandidateRow struct {
+	Name   string `json:"name"`
+	Ready  bool   `json:"ready"`
+	Reason string `json:"reason"`
 }
 
 type planRow struct {
@@ -336,6 +367,75 @@ func listClasses(ctx context.Context, c *Client, asJSON bool) error {
 		fmt.Fprintf(w, "%s\t%s\t%d\t%s\n", cl.ID, cl.Name, cl.Count, cl.Sentence)
 	}
 	return w.Flush()
+}
+
+// clusterScale prints what changing a cluster's size would mean.
+//
+// The refusals are printed whole, on their own lines, rather than squeezed into
+// a column. They are the only thing here that says what to do instead, and a
+// table that truncated one would be a tool refusing without a reason.
+func clusterScale(ctx context.Context, c *Client, args []string, asJSON bool) error {
+	if len(args) != 1 {
+		return errUsage
+	}
+
+	var raw []byte
+	if err := c.Do(ctx, request{
+		Method: http.MethodGet,
+		Path:   "/api/v1/clusters/" + args[0] + "/scale",
+	}, &raw); err != nil {
+		return err
+	}
+	if asJSON {
+		return printJSON(raw)
+	}
+
+	var body struct {
+		Plan   scaleRow `json:"plan"`
+		Notice string   `json:"notice"`
+	}
+	if err := json.Unmarshal(raw, &body); err != nil {
+		return err
+	}
+	p := body.Plan
+
+	fmt.Println(p.Sentence)
+	for _, line := range p.Advice {
+		fmt.Printf("  %s\n", line)
+	}
+
+	fmt.Println()
+	w := table()
+	fmt.Fprintln(w, "NODE\tROLE\tMAY BE REMOVED")
+	for _, r := range p.Removals {
+		verdict := "yes"
+		if !r.Allowed {
+			verdict = "no"
+		}
+		fmt.Fprintf(w, "%s\t%s\t%s\n", r.Name, r.Role, verdict)
+	}
+	if err := w.Flush(); err != nil {
+		return err
+	}
+
+	for _, r := range p.Removals {
+		if !r.Allowed {
+			fmt.Printf("\n%s: %s\n", r.Name, r.Reason)
+		}
+	}
+
+	for _, a := range p.Additions {
+		if a.Ready {
+			fmt.Printf("\ncould join: %s\n", a.Name)
+		} else {
+			fmt.Printf("\ncould not join: %s — %s\n", a.Name, a.Reason)
+		}
+	}
+
+	if body.Notice != "" {
+		fmt.Printf("\n%s\n", body.Notice)
+	}
+	return nil
 }
 
 // setLabels replaces a machine's labels, which is what the route does.
