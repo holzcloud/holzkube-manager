@@ -1487,13 +1487,26 @@ so the two are not distinguishable by timing. **A token never signs in a
 person** — a person has no token hash, and there is no route that would mint one
 for them (409 `conflict.not-a-service-account`).
 
-The mirror of that is `POST /api/v1/account/password`, which answers 409
+The mirror of that is the two routes that take a password — `POST
+/api/v1/account/password` and `POST /api/v1/auth/sudo` — which answer 409
 `conflict.not-a-person` to a service account: it authenticates with a token and
-has no password to change, so the answer is to rotate the token. The route is
-genuinely reachable by one — it needs only `RoleReader`, and a bearer token
-satisfies both the CSRF check and the sudo window — and it answered `500
-internal.unexpected` until v1.16, because `Verify` against an empty hash returns
-an error rather than false. There was nothing unexpected about it.
+has no password to change and none to re-authenticate with — and does not need
+one, since its token already satisfies the re-authentication window. Both routes
+are genuinely reachable by a service account: each needs only `RoleReader`, and
+a bearer token satisfies the CSRF check and the sudo window, so every gate in
+front of them hands the request through. Both answered `500 internal.unexpected`
+until v1.16, because `Verify` against an empty hash returns an error rather than
+false. There was nothing unexpected about it.
+
+The sudo refusal comes **before** the login throttle. The throttle exists to
+slow a password guesser and this caller is not guessing — it has proven its
+identity with a token — so spending an address's budget on it would let one
+misconfigured automation delay a person signing in from the same address.
+
+`internal/httpapi/handlers/password_test.go` holds this over the package's own
+source: every function that calls `auth.Verify` must also ask whether the
+account has a password. Two routes were separately, identically wrong, and the
+third one to take a password is the one that would not have looked.
 
 Unlike the sign-in refusal above, this one **names the reason**. The two are
 different questions: there, an anonymous caller is guessing at usernames and
