@@ -2,6 +2,7 @@ version: '3'
 
 vars:
   BINARY: bin/holzkube-managerd
+  CLI: bin/holzkubectl
   WEB_DIST: internal/httpapi/dist
   # A working-tree build is honestly called what git calls it; goreleaser passes
   # the real tag through the same variable. The substitution is plain shell so
@@ -50,9 +51,18 @@ tasks:
     cmds:
       - go build -ldflags "{{.LDFLAGS}}" -o {{.BINARY}} ./cmd/holzkube-managerd
 
+  build:cli:
+    desc: Compile holzkubectl, the command-line client.
+    # No dependency on build:web, deliberately. The CLI embeds nothing and
+    # talks to a server over HTTP, so making it wait on `npm ci` would be a
+    # two-minute build for a two-megabyte binary that does not contain any of
+    # it.
+    cmds:
+      - go build -ldflags "{{.LDFLAGS}}" -o {{.CLI}} ./cmd/holzkubectl
+
   build:
-    desc: Build everything into bin/holzkube-managerd.
-    deps: ["build:go"]
+    desc: Build everything into bin/.
+    deps: ["build:go", "build:cli"]
 
   test:
     desc: Run the Go tests with the race detector.

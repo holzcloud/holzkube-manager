@@ -8,6 +8,29 @@ disagreement is a bug in one of them — not a matter of taste.
 All API routes live under `/api/v1/`. Requests and responses are JSON. Errors
 are always RFC 9457 `application/problem+json`.
 
+## Clients
+
+This API has two clients, and both are in this repository:
+
+- **the web UI** (`web/src/`), which signs in with a session cookie and is
+  bound by the CSRF contract below. `web/src/api.ts` is the only place in it
+  that calls `fetch`, which is what keeps the contract from being forgotten at
+  one call site out of thirty;
+- **`holzkubectl`** (`cmd/holzkubectl/`), which authenticates with a
+  service-account bearer token and is therefore exempt from the CSRF contract
+  and from the sudo window — see *Service accounts*.
+
+Both are clients in the strict sense and neither reimplements a rule. Every
+verdict either of them shows was reached here. A second implementation of a
+rule is a second thing to keep in step, and the two disagreeing is worse than
+one of them not existing.
+
+That is a property to hold rather than a hope: a client decoding a key this API
+does not send does not fail, it prints a zero. `cmd/holzkubectl/wire_test.go`
+holds every name that tool decodes against the server type that produces it,
+because two of its columns were wrong that way on the first attempt and both
+looked like answers.
+
 ## Error Taxonomy
 
 The taxonomy is **closed and stable**. Every `type` is an absolute URI under
@@ -1215,7 +1238,10 @@ harder to see.
 `POST /api/v1/cluster-templates/plan` takes a template **as the request body, in
 YAML** — not wrapped in a JSON envelope. The document is one an operator wrote
 in an editor and keeps in a repository, and escaping every newline to post it
-produces a file nobody can read in a request log.
+produces a file nobody can read in a request log. Clients send it as
+`Content-Type: application/yaml`; this is the one route in the API whose request
+body is not JSON, and a client that assumes JSON everywhere labels this document
+as something it is not.
 
 It answers with what the document would mean for the machines this installation
 knows about right now: which machines each side resolves to, what does not add
