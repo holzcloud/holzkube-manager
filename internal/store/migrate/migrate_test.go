@@ -482,3 +482,43 @@ func tarballEntries(t *testing.T, path string) []string {
 	}
 	return names
 }
+
+// TestMigrateVersionFiveGainsMachineClasses drives the 5 -> 6 step.
+//
+// What it checks beyond "the directory exists" is that nothing was put in it.
+// A machine class is a selector over labels, labels are the operator's own
+// words, and nobody has written any yet — so a migration that backfilled a
+// class would be inventing a fact about somebody's fleet, and the place that
+// costs is the cluster a class ends up pointing at.
+func TestMigrateVersionFiveGainsMachineClasses(t *testing.T) {
+	dir := copyFixture(t, "version-5")
+
+	if err := Run(dir); err != nil {
+		t.Fatalf("Run on a version-5 directory: %v", err)
+	}
+
+	if got := readVersionFile(t, dir); got != strconv.Itoa(CurrentVersion) {
+		t.Fatalf("VERSION = %q, want %d", got, CurrentVersion)
+	}
+
+	info, err := os.Stat(filepath.Join(dir, "machine-classes"))
+	if err != nil {
+		t.Fatalf("the machine-classes directory was not created: %v", err)
+	}
+	if perm := info.Mode().Perm(); perm != 0o700 {
+		t.Errorf("machine-classes is %04o, want 0700", perm)
+	}
+
+	entries, err := os.ReadDir(filepath.Join(dir, "machine-classes"))
+	if err != nil {
+		t.Fatalf("read machine-classes: %v", err)
+	}
+	if len(entries) != 0 {
+		t.Errorf("the migration created %d machine classes. Nothing knows what an operator's "+
+			"labels mean, so anything written here is invented", len(entries))
+	}
+
+	if _, err := os.Stat(filepath.Join(dir, "users", "alice.json")); err != nil {
+		t.Fatalf("the existing record did not survive the migration: %v", err)
+	}
+}

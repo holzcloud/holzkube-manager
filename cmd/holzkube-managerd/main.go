@@ -626,6 +626,7 @@ func routeTable(deps httpapi.Deps) []httpapi.Route {
 		handlers.AuditRoutes(deps),
 		handlers.SchematicRoutes(deps),
 		handlers.InventoryRoutes(deps),
+		handlers.LabelRoutes(deps),
 		handlers.StreamRoutes(deps),
 		handlers.JobRoutes(deps),
 		handlers.ConfigRoutes(deps),

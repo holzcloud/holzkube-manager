@@ -150,6 +150,10 @@ type patchStore struct {
 	recordStore[model.PatchID, model.Patch]
 }
 
+type machineClassStore struct {
+	recordStore[model.MachineClassID, model.MachineClass]
+}
+
 type clusterSecretStore struct {
 	inner recordStore[model.ClusterID, model.ClusterSecrets]
 }
@@ -211,6 +215,18 @@ func newPatchStore(dir string, locks *store.EntityLocks) *patchStore {
 		key:    func(p model.Patch) model.PatchID { return p.ID },
 		rev:    func(p model.Patch) uint64 { return p.Rev },
 		setRev: func(p *model.Patch, v uint64) { p.Rev = v },
+	}}
+}
+
+func newMachineClassStore(dir string, locks *store.EntityLocks) *machineClassStore {
+	return &machineClassStore{recordStore[model.MachineClassID, model.MachineClass]{
+		locks:  locks,
+		dir:    dir,
+		kind:   kindMachineClasses,
+		noun:   "machine class",
+		key:    func(c model.MachineClass) model.MachineClassID { return c.ID },
+		rev:    func(c model.MachineClass) uint64 { return c.Rev },
+		setRev: func(c *model.MachineClass, v uint64) { c.Rev = v },
 	}}
 }
 

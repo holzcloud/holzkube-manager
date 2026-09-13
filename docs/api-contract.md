@@ -1204,6 +1204,45 @@ is not a missing code: it is every one of these failures arriving as
 `internal.unexpected` — which by contract carries no detail — and staying that
 way forever in an archive with no deletion path.
 
+## Labels and machine classes
+
+`PUT /api/v1/machines/{id}/labels` **replaces** a machine's labels. Replaces and
+not merges: a merge cannot remove anything, so an interface built on one needs a
+second operation to delete, and an operator who took a row out of a form would
+find it still there afterwards.
+
+A label is the operator's own word about a machine, and that is a contract and
+not a description. Everything else on a machine record is something the node
+said about itself and is overwritten by the next observation; **nothing observed
+ever writes a label**. That is what makes a selector over labels stable — one
+over observed facts would silently re-form its set when a node rebooted with a
+different disk.
+
+A label set is bounded (32 labels, 63 characters each side) and refused whole
+when any entry cannot be read on a screen: a leading or trailing space, or an
+unprintable character. Every reason is reported at once in the detail, so a
+screen shows them together rather than teaching one per round trip.
+
+`GET /api/v1/machine-classes` lists the named selectors, `PUT
+/api/v1/machine-classes/{id}` writes one and `DELETE` removes it.
+
+A selector is an **all-of** over three kinds of condition — `equals`, `present`
+and `absent`. There is no "not equal to", deliberately: it reads as a statement
+about the machine and quietly includes every machine the label was never written
+on, which is how a selector meant to exclude two nodes selects a hundred.
+
+**An empty selector matches nothing, and one is refused rather than stored.**
+This is the single most consequential decision in this area. "No conditions"
+reads naturally as "everything", which is what a query language usually means by
+it — and the thing on the other end of a machine class is a cluster, so a
+selector cleared by accident must not quietly become the whole fleet.
+
+Each class is reported with the membership it names **now**, and with a
+`sentence` describing its selector in words. The membership is computed on every
+read rather than stored: a class is a question and not a group, so a machine
+joins by being labelled and leaves by being unlabelled — one place to look when
+the membership is not what somebody expected, instead of two that can disagree.
+
 ## Accounts and roles
 
 Every route that needs a session also names the least privileged role that may
