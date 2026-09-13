@@ -436,30 +436,150 @@ export function EtcdPanel({ cluster }: { cluster: string }) {
         </p>
 
         {/*
-          The other half of the sentence, said here because here is where
-          somebody forms the belief. A product that offers a backup button and
-          no restore is a product whose operator finds out during the disaster;
-          the backup card on the settings screen says the same kind of thing
-          about its own tarballs, for the same reason.
+          Restoring lives here now, and the argument that used to say it should
+          not is answered rather than dropped. It said: a restore runs on
+          exactly one control-plane node, because doing it on two produces two
+          clusters that each believe they are the original, and that is a
+          decision for somebody at a console rather than a button in a browser
+          during an incident.
 
-          Restoring is deliberately not here rather than not yet. It rewinds
-          the cluster to the snapshot's moment and discards everything after
-          it, and it runs on exactly one control-plane node -- doing it on two
-          produces two clusters that both believe they are the original. That
-          is a decision for somebody at a console with the cluster in front of
-          them, not a button in a browser during an incident.
+          The first half of that is a property this route has: it names a
+          machine, and the typed confirmation is that machine's own id rather
+          than a word. The second half is why the panel spends more space on
+          what happens afterwards than on the button -- the other control-plane
+          nodes have to be reset and rejoined by hand, and nothing here does
+          that for anybody.
         */}
-        <p className="max-w-prose text-xs text-muted-foreground">
-          <strong>holzkube-manager does not restore a snapshot.</strong> Recovery is two steps with{' '}
-          <code>talosctl</code> — upload the snapshot to one control-plane node with{' '}
-          <code>talosctl etcd recover</code>, then bootstrap that same node in recovery mode — and
-          Talos' own documentation is the reference for the exact invocation. It is not here
-          deliberately: a restore rewinds the cluster to this moment and discards everything after
-          it, and running it on more than one node produces two clusters that each believe they are
-          the original. Keep the file somewhere that survives the cluster.
-        </p>
+        <RestorePanel cluster={cluster} />
       </CardContent>
     </Card>
+  )
+}
+
+/**
+ * Restoring a cluster's etcd from a snapshot.
+ *
+ * The panel is mostly sentences, and that is the design rather than padding.
+ * The operation itself is a file, a node and a button; what an operator needs
+ * before pressing it is what it costs and what it does not do for them. This
+ * screen used to say the product could not restore at all, with an argument
+ * for why a browser is the wrong place for one. The argument is answered in
+ * the code -- one named node, confirmed by its own id -- and what remains of
+ * it is here, where somebody forms the belief.
+ */
+function RestorePanel({ cluster }: { cluster: string }) {
+  const machines = useQuery({ queryKey: ['machines'], queryFn: () => api.machines.list() })
+
+  const [target, setTarget] = useState('')
+  const [file, setFile] = useState<File | null>(null)
+  const [skipHashCheck, setSkipHashCheck] = useState(false)
+  const [typed, setTyped] = useState('')
+
+  const controlPlanes = (machines.data ?? []).filter(
+    (m) => m.cluster === cluster && m.role === 'controlplane',
+  )
+
+  const restore = useMutation({
+    mutationFn: () => {
+      if (file === null) {
+        throw new Error('no snapshot chosen')
+      }
+      return api.etcd.restore(target, file, skipHashCheck)
+    },
+  })
+
+  // Every one of these is a way to restore onto the wrong thing or nothing.
+  const ready = target !== '' && file !== null && typed === target
+
+  return (
+    <section className="space-y-3 rounded-md border border-destructive/40 p-4">
+      <h3 className="text-sm font-medium">Restore this cluster's etcd</h3>
+
+      <p className="max-w-prose text-xs text-muted-foreground">
+        A restore replaces the cluster's etcd with the contents of the snapshot. Everything written
+        since it was taken is gone — every object created, every change applied, every secret
+        rotated. The cluster is unavailable while it happens.
+      </p>
+      <p className="max-w-prose text-xs text-muted-foreground">
+        <strong>It runs on one control-plane node and leaves the others behind.</strong> The node
+        you choose becomes the cluster's data; the other control-plane nodes still hold the etcd
+        that was just replaced and will not agree with it, so they have to be reset and rejoined
+        afterwards. Nothing here does that for you. This is what you do when the alternative is
+        rebuilding the cluster.
+      </p>
+
+      <div className="max-w-md space-y-1.5">
+        <Label htmlFor="restore-target">Restore onto</Label>
+        <Select value={target} onValueChange={setTarget}>
+          <SelectTrigger id="restore-target" className="h-8">
+            <SelectValue placeholder="Choose a control-plane node" />
+          </SelectTrigger>
+          <SelectContent>
+            {controlPlanes.map((m) => (
+              <SelectItem key={m.id} value={m.id}>
+                {m.hostname.value || m.id}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+
+      <div className="max-w-md space-y-1.5">
+        <Label htmlFor="restore-file">Snapshot</Label>
+        <Input
+          id="restore-file"
+          type="file"
+          className="h-8"
+          onChange={(event) => setFile(event.target.files?.[0] ?? null)}
+        />
+      </div>
+
+      <label className="flex max-w-prose items-start gap-2 text-xs">
+        <input
+          type="checkbox"
+          className="mt-0.5"
+          checked={skipHashCheck}
+          onChange={(event) => setSkipHashCheck(event.target.checked)}
+          aria-label="Skip the snapshot's integrity check"
+        />
+        <span className="text-muted-foreground">
+          Skip the snapshot's integrity check. Turn this on <em>only</em> for a copy of a node's
+          etcd data directory — such a copy has no hash to check, and it is what you are left with
+          on a cluster that had already lost quorum. For a snapshot downloaded from this screen,
+          leaving it off is the one check that catches a truncated file.
+        </span>
+      </label>
+
+      {target !== '' && (
+        <div className="max-w-md space-y-1.5">
+          <Label htmlFor="restore-confirm">
+            Type the node's id to confirm: <code className="text-[11px]">{target}</code>
+          </Label>
+          <Input
+            id="restore-confirm"
+            value={typed}
+            onChange={(event) => setTyped(event.target.value)}
+            placeholder={target}
+          />
+        </div>
+      )}
+
+      <Button
+        type="button"
+        variant="destructive"
+        disabled={!ready || restore.isPending}
+        onClick={() => restore.mutate()}
+      >
+        {restore.isPending ? 'Restoring…' : 'Restore etcd from this snapshot'}
+      </Button>
+
+      {restore.error ? <Problem error={restore.error} /> : null}
+      {restore.data && (
+        <p role="status" className="max-w-prose text-xs">
+          Restored from {restore.data.uploaded_bytes.toLocaleString()} bytes. {restore.data.notice}
+        </p>
+      )}
+    </section>
   )
 }
 

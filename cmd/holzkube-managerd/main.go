@@ -358,6 +358,13 @@ func run(args []string) error {
 			return inv.Connect(ctx, id)
 		},
 		Machines: inv.MachinesOf,
+		RoleOf: func(ctx context.Context, id model.MachineID) (model.MachineRole, error) {
+			m, err := inv.Machine(ctx, id)
+			if err != nil {
+				return "", err
+			}
+			return m.Role, nil
+		},
 		Record: func(ctx context.Context, id model.MachineID) error {
 			inv.Refresh(ctx, id)
 			return nil

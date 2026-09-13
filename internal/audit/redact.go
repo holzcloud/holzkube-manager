@@ -229,6 +229,18 @@ var allowlist = map[string][]string{
 	// record is only that it happened.
 	"etcd.snapshot": {},
 
+	// A restore, and the most consequential entry in this table. The node is
+	// in the path; what is worth keeping in clear is whether the operator
+	// turned off the snapshot's integrity check, because a restore from a
+	// data-directory copy and a restore from an API snapshot are two different
+	// claims about what the cluster now holds, and six months later the
+	// archive is the only place that difference still exists.
+	//
+	// The snapshot itself is the request body and never reaches the archive:
+	// the audit middleware captures a decoded JSON body, and this body is an
+	// etcd database.
+	"etcd.restore": {"skip_hash_check"},
+
 	// Whether a node was locked, and why. The reason is the content: a lock
 	// record that says a lock happened and not why is a record of nothing, and
 	// the reason is an operator's own sentence about their own fleet.

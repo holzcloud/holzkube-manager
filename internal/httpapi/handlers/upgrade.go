@@ -121,6 +121,23 @@ func UpgradeRoutes(d httpapi.Deps) []httpapi.Route {
 			Handler:         handler(etcdSnapshot(d)),
 		},
 		{
+			// The restore receives a stream rather than writing one, which is
+			// why it is not marked Streaming: that flag is about the response,
+			// and this route's response is a small JSON body. What it does
+			// need is the process-wide read deadline cleared, and the handler
+			// does that with http.ResponseController for the same reason the
+			// SSE route clears the write one.
+			//
+			// Destructive, and it is the most destructive route in this
+			// product: everything written since the snapshot is gone.
+			Method:          http.MethodPost,
+			Pattern:         "/api/v1/machines/{id}/etcd/restore",
+			RequiresSession: true,
+			Destructive:     true,
+			Action:          "etcd.restore",
+			Handler:         handler(etcdRestore(d)),
+		},
+		{
 			Method:          http.MethodPost,
 			Pattern:         "/api/v1/machines/{id}/lock",
 			RequiresSession: true,
@@ -470,6 +487,64 @@ func etcdSnapshot(d httpapi.Deps) http.HandlerFunc {
 			}
 			return
 		}
+	}
+}
+
+// RestoreConfirmation is what the operator has to type.
+//
+// It is the node's own UUID and not a word, and that is the difference from
+// every other typed confirmation in this product. The others ask "did you mean
+// to do this"; this one asks "did you mean to do it *here*", because a restore
+// aimed at the wrong control-plane node is not a slower version of the right
+// one -- it makes that node's data the cluster's and discards the rest.
+const RestoreConfirmationField = "machine"
+
+func etcdRestore(d httpapi.Deps) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if p := upgradeConfigured(d); p != nil {
+			httpapi.WriteProblem(w, r, p)
+			return
+		}
+
+		id := model.MachineID(r.PathValue("id"))
+
+		// The confirmation and the flag ride in the query string rather than
+		// in a JSON envelope, because the body is the snapshot. Wrapping a
+		// multi-gigabyte database in base64 inside JSON to carry two small
+		// values next to it would cost a third of its size on the wire and all
+		// of it in memory.
+		if got := r.URL.Query().Get(RestoreConfirmationField); got != string(id) {
+			httpapi.WriteProblem(w, r, httpapi.Validation(
+				"Restoring replaces this cluster's etcd. Confirm by naming the node the snapshot "+
+					"will be restored onto -- a restore aimed at the wrong node makes that node's "+
+					"data the cluster's and discards the rest.",
+				httpapi.FieldError{
+					Field:  RestoreConfirmationField,
+					Reason: "must be the machine id in the path",
+				}))
+			return
+		}
+
+		// The read deadline, cleared for this request only. readTimeout bounds
+		// how long a whole request body may take to arrive, and an etcd
+		// database is as large as it is; leaving it in place would make this
+		// route work in a test and fail on any cluster worth restoring.
+		if err := http.NewResponseController(w).SetReadDeadline(time.Time{}); err != nil {
+			httpapi.WriteInternal(w, r, d.Logger, fmt.Errorf("clearing the read deadline: %w", err))
+			return
+		}
+
+		n, err := d.Upgrade.Restore(r.Context(), id,
+			r.Body, r.URL.Query().Get("skip_hash_check") == "true")
+		if err != nil {
+			writeUpgradeError(w, r, d, err)
+			return
+		}
+
+		writeJSON(w, http.StatusOK, map[string]any{
+			"uploaded_bytes": n,
+			"notice":         talos.RestoreNotice,
+		})
 	}
 }
 
