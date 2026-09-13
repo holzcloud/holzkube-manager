@@ -281,9 +281,9 @@ func TestTracerVersionsIncludeThePrereleaseTail(t *testing.T) {
 	}
 }
 
-func newClient(t *testing.T, baseURL string) *imagefactory.Client {
+func newClient(t *testing.T, baseURL string, extra ...imagefactory.Option) *imagefactory.Client {
 	t.Helper()
-	return newClientWithBudgets(t, baseURL, testBudget, testBudget, testBudget)
+	return newClientWithBudgets(t, baseURL, testBudget, testBudget, testBudget, extra...)
 }
 
 // testBudget is what every offline test in this package bounds its requests
@@ -295,12 +295,18 @@ const testBudget = 5 * time.Second
 
 // newClientWithBudgets names all three budgets, which is what a test about
 // budgets has to be able to do.
-func newClientWithBudgets(t *testing.T, baseURL string, json, probe, manifest time.Duration) *imagefactory.Client {
+func newClientWithBudgets(
+	t *testing.T,
+	baseURL string,
+	json, probe, manifest time.Duration,
+	extra ...imagefactory.Option,
+) *imagefactory.Client {
 	t.Helper()
-	c, err := imagefactory.New(baseURL,
+	c, err := imagefactory.New(baseURL, append([]imagefactory.Option{
 		imagefactory.WithTimeout(json),
 		imagefactory.WithProbeTimeout(probe),
-		imagefactory.WithManifestTimeout(manifest))
+		imagefactory.WithManifestTimeout(manifest),
+	}, extra...)...)
 	if err != nil {
 		t.Fatalf("New(%q): %v", baseURL, err)
 	}

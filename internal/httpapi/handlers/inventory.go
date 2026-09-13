@@ -297,7 +297,7 @@ func clusterFingerprint(d httpapi.Deps) http.HandlerFunc {
 			Endpoint string `json:"endpoint"`
 		}
 		if err := decodeJSON(w, r, &body); err != nil {
-			httpapi.WriteProblem(w, r, httpapi.Validation(err.Error()))
+			httpapi.WriteProblem(w, r, decodeProblem(err))
 			return
 		}
 		if strings.TrimSpace(body.Endpoint) == "" {
@@ -412,7 +412,7 @@ func createCluster(d httpapi.Deps) http.HandlerFunc {
 			Endpoint string `json:"endpoint"`
 		}
 		if err := decodeJSON(w, r, &body); err != nil {
-			httpapi.WriteProblem(w, r, httpapi.Validation(err.Error()))
+			httpapi.WriteProblem(w, r, decodeProblem(err))
 			return
 		}
 
@@ -496,7 +496,7 @@ func setClusterLock(d httpapi.Deps) http.HandlerFunc {
 			Locked bool `json:"locked"`
 		}
 		if err := decodeJSON(w, r, &body); err != nil {
-			httpapi.WriteProblem(w, r, httpapi.Validation(err.Error()))
+			httpapi.WriteProblem(w, r, decodeProblem(err))
 			return
 		}
 
@@ -570,7 +570,7 @@ func addMachine(d httpapi.Deps) http.HandlerFunc {
 			Addr    string `json:"addr"`
 		}
 		if err := decodeJSON(w, r, &body); err != nil {
-			httpapi.WriteProblem(w, r, httpapi.Validation(err.Error()))
+			httpapi.WriteProblem(w, r, decodeProblem(err))
 			return
 		}
 		if strings.TrimSpace(body.Addr) == "" {

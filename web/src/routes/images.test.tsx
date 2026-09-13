@@ -13,6 +13,7 @@ import { problemType } from '@/test/problem-fixtures'
 import {
   ARCH_STORAGE_KEY,
   ASSETS_WAIT_SECONDS,
+  COPY_FEEDBACK_MS,
   CREATE_WAIT_SECONDS,
   hasControlCharacter,
   ImagesView,
@@ -551,6 +552,70 @@ describe('ImagesView — the authoring half', () => {
     expect(alert).toHaveTextContent(/control character/i)
     expect(screen.getByRole('button', { name: 'Create schematic' })).toBeDisabled()
     expect(bodiesPostedTo(fetchMock, '/api/v1/schematics')).toHaveLength(0)
+  })
+
+  /**
+   * META slot 0 is the machine UUID override, which is the one slot nobody
+   * picks by accident -- and it is exactly where `Number('')` sends a row whose
+   * key field has been cleared. The form said nothing, the request carried
+   * `key: 0`, and the schematic claimed an override the operator had not asked
+   * for.
+   */
+  it('refuses a cleared META key rather than sending slot 0', async () => {
+    const fetchMock = stubFactory()
+    const user = userEvent.setup()
+
+    renderImages()
+    await catalogLoaded()
+
+    await user.type(screen.getByLabelText('Name'), 'cleared-key')
+    await user.click(screen.getByRole('button', { name: 'Add META value' }))
+    await user.type(screen.getByLabelText('META value 1'), 'something')
+    fireEvent.change(screen.getByLabelText('META key 1'), { target: { value: '' } })
+
+    const alert = await screen.findByRole('alert', { name: 'META key 1 is not usable' })
+    expect(alert).toHaveTextContent(/0 to 255/)
+    expect(screen.getByRole('button', { name: 'Create schematic' })).toBeDisabled()
+    expect(bodiesPostedTo(fetchMock, '/api/v1/schematics')).toHaveLength(0)
+  })
+
+  it('refuses a META key past 255 here rather than letting the server explain it', async () => {
+    const fetchMock = stubFactory()
+    const user = userEvent.setup()
+
+    renderImages()
+    await catalogLoaded()
+
+    await user.type(screen.getByLabelText('Name'), 'wide-key')
+    await user.click(screen.getByRole('button', { name: 'Add META value' }))
+    await user.type(screen.getByLabelText('META value 1'), 'something')
+    fireEvent.change(screen.getByLabelText('META key 1'), { target: { value: '300' } })
+
+    expect(
+      await screen.findByRole('alert', { name: 'META key 1 is not usable' }),
+    ).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Create schematic' })).toBeDisabled()
+    expect(bodiesPostedTo(fetchMock, '/api/v1/schematics')).toHaveLength(0)
+  })
+
+  it('sends a valid META key as a number', async () => {
+    const fetchMock = stubFactory()
+    const user = userEvent.setup()
+
+    renderImages()
+    await catalogLoaded()
+
+    await user.type(screen.getByLabelText('Name'), 'good-key')
+    await user.click(screen.getByRole('button', { name: 'Add META value' }))
+    await user.type(screen.getByLabelText('META value 1'), 'something')
+    fireEvent.change(screen.getByLabelText('META key 1'), { target: { value: '12' } })
+
+    expect(screen.queryByRole('alert', { name: 'META key 1 is not usable' })).toBeNull()
+    await user.click(screen.getByRole('button', { name: 'Create schematic' }))
+
+    await waitFor(() => expect(bodiesPostedTo(fetchMock, '/api/v1/schematics')).toHaveLength(1))
+    const bodies = bodiesPostedTo(fetchMock, '/api/v1/schematics') as { meta: unknown }[]
+    expect(bodies[0]?.meta).toEqual([{ key: 12, value: 'something' }])
   })
 
   /**
@@ -1491,6 +1556,87 @@ describe('ImagesView — the saved schematics', () => {
 
     await user.click(detail.getByRole('button', { name: 'Copy Schematic ID' }))
     await waitFor(async () => expect(await navigator.clipboard.readText()).toBe(USABLE.id))
+  })
+
+  /**
+   * The button had one boolean for three situations. Once it read "Copied" it
+   * read "Copied" for the life of the panel, so a second copy -- of a different
+   * reference, from a different row -- changed nothing on screen and an
+   * operator had no way to tell the click had registered.
+   */
+  it('returns the copy button to its resting label so a second copy is visible', async () => {
+    stubFactory({ saved: [USABLE] })
+    const user = userEvent.setup()
+
+    renderImages()
+    const detail = await openDetail(user, USABLE)
+
+    await detail.findByLabelText('ISO reference')
+    const button = detail.getByRole('button', { name: 'Copy ISO' })
+    expect(button).toHaveTextContent('Copy')
+
+    await user.click(button)
+    await waitFor(() => expect(button).toHaveTextContent('Copied'))
+
+    // Real time rather than fake: this component is inside a react-query tree
+    // and swapping the clock out from under it makes every later case in this
+    // file wait on a timer that no longer advances.
+    await waitFor(() => expect(button).not.toHaveTextContent('Copied'), {
+      timeout: COPY_FEEDBACK_MS * 3,
+    })
+    expect(button).toHaveTextContent('Copy')
+  })
+
+  /**
+   * A clipboard the browser refuses is the ordinary case outside a secure
+   * origin, which is where this product lives whenever it is reached by IP
+   * address. Rendering that as the resting label told the operator nothing had
+   * been asked for.
+   */
+  it('says so when the browser has no clipboard at all', async () => {
+    stubFactory({ saved: [USABLE] })
+    const user = userEvent.setup()
+
+    const original = navigator.clipboard
+    Object.defineProperty(navigator, 'clipboard', { value: undefined, configurable: true })
+
+    try {
+      renderImages()
+      const detail = await openDetail(user, USABLE)
+
+      await detail.findByLabelText('ISO reference')
+      const button = detail.getByRole('button', { name: 'Copy ISO' })
+      await user.click(button)
+
+      await waitFor(() => expect(button).toHaveTextContent('Copy failed'))
+    } finally {
+      Object.defineProperty(navigator, 'clipboard', { value: original, configurable: true })
+    }
+  })
+
+  it('says so when the browser refuses the clipboard', async () => {
+    stubFactory({ saved: [USABLE] })
+    const user = userEvent.setup()
+
+    const refusing = {
+      writeText: () => Promise.reject(new Error('not allowed')),
+      readText: () => Promise.resolve(''),
+    }
+    const original = navigator.clipboard
+    Object.defineProperty(navigator, 'clipboard', { value: refusing, configurable: true })
+
+    try {
+      renderImages()
+      const detail = await openDetail(user, USABLE)
+
+      await detail.findByLabelText('ISO reference')
+      const button = detail.getByRole('button', { name: 'Copy ISO' })
+      await user.click(button)
+
+      await waitFor(() => expect(button).toHaveTextContent('Copy failed'))
+    } finally {
+      Object.defineProperty(navigator, 'clipboard', { value: original, configurable: true })
+    }
   })
 
   it('deletes through the existing sudo dialog and adds no confirmation of its own', async () => {

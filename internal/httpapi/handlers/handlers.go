@@ -12,8 +12,13 @@ package handlers
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
+	"reflect"
+	"strings"
+
+	"github.com/holzcloud/holzkube-manager/internal/httpapi"
 )
 
 // maxBodyBytes caps a request body. Unbounded decoding of attacker-controlled
@@ -55,3 +60,93 @@ func writeJSON(w http.ResponseWriter, status int, body any) {
 
 // handler is a small adapter so route tables read as data.
 func handler(fn http.HandlerFunc) http.Handler { return fn }
+
+// decodeProblem turns encoding/json's error into something an operator can act
+// on.
+//
+// Eighteen routes answered a bad body with httpapi.Validation(err.Error()),
+// which put sentences like
+//
+//	json: cannot unmarshal string into Go struct field schematicInput.meta.key of type uint8
+//
+// into a contracted API response. Three things are wrong with that and only one
+// of them is cosmetic. It names Go types and this package's own struct names,
+// which are not part of any contract and change without notice. It is not a
+// sentence anybody outside this repository can act on. And it puts the field
+// name inside prose, where the "errors" member of the problem exists precisely
+// so a client can highlight the input that was wrong.
+//
+// So the decoder's judgement is kept -- it is the thing that actually knows
+// which field failed -- and only its wording is replaced.
+func decodeProblem(err error) *httpapi.Problem {
+	var maxBytes *http.MaxBytesError
+	var typeErr *json.UnmarshalTypeError
+	var syntaxErr *json.SyntaxError
+
+	switch {
+	case errors.Is(err, io.EOF):
+		return httpapi.Validation("The request body is empty; this route needs a JSON object.")
+
+	case errors.As(err, &maxBytes):
+		return httpapi.Validation(fmt.Sprintf(
+			"The request body is larger than the %d byte limit and was not read.", maxBytes.Limit))
+
+	case errors.As(err, &typeErr):
+		field := typeErr.Field
+		if field == "" {
+			return httpapi.Validation(fmt.Sprintf(
+				"The request body has a value of the wrong type: a %s was given where a %s was expected.",
+				typeErr.Value, jsonTypeName(typeErr.Type)))
+		}
+		return httpapi.Validation(
+			"A field in the request body has the wrong type.",
+			httpapi.FieldError{
+				Field:  field,
+				Reason: fmt.Sprintf("was given a %s; it must be a %s", typeErr.Value, jsonTypeName(typeErr.Type)),
+			})
+
+	case errors.As(err, &syntaxErr):
+		return httpapi.Validation(fmt.Sprintf(
+			"The request body is not valid JSON; it stops making sense at byte %d.", syntaxErr.Offset))
+
+	case strings.HasPrefix(err.Error(), unknownFieldPrefix):
+		field := strings.Trim(strings.TrimPrefix(err.Error(), unknownFieldPrefix), `"`)
+		return httpapi.Validation(
+			"The request body carries a field this route does not accept. Unknown fields are refused "+
+				"rather than ignored, so a misspelled setting is visible instead of silently absent.",
+			httpapi.FieldError{Field: field, Reason: "not a field of this request"})
+	}
+
+	// Anything else: say what happened without repeating a message whose
+	// wording this package does not control.
+	return httpapi.Validation("The request body could not be read as JSON.")
+}
+
+// unknownFieldPrefix is how encoding/json says a field was not in the struct.
+// A message that changes shape costs the field name and nothing else: the
+// response is still a 400 that says the body could not be read.
+const unknownFieldPrefix = "json: unknown field "
+
+// jsonTypeName names a Go type the way JSON does, because "uint8" is not a
+// thing a client sends.
+func jsonTypeName(t reflect.Type) string {
+	if t == nil {
+		return "different type"
+	}
+	switch t.Kind() {
+	case reflect.String:
+		return "string"
+	case reflect.Bool:
+		return "boolean"
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
+		reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64,
+		reflect.Float32, reflect.Float64:
+		return "number"
+	case reflect.Slice, reflect.Array:
+		return "array"
+	case reflect.Map, reflect.Struct:
+		return "object"
+	default:
+		return "different type"
+	}
+}
