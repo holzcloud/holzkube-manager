@@ -70,6 +70,24 @@ const (
 	// current contents, so it owes an answer immediately; one that has not
 	// delivered even its initial snapshot has not started.
 	ClassWatch
+
+	// ClassUpload is a client stream: this process sends and the node answers
+	// once, at the end.
+	//
+	// It is its own class because the other three bound the wrong thing for
+	// it. A total deadline would bound the size of somebody's etcd database --
+	// an upload that is still uploading has not failed, which is the same
+	// argument ClassStream makes. And the idle timeout has nothing to watch:
+	// the node is silent for the whole upload by design, because it has
+	// nothing to say until it has the file.
+	//
+	// What is left to bound is the acknowledgement, and UploadAckDeadline is
+	// longer than StreamFirstByteDeadline for a specific reason: the node is
+	// writing the snapshot to disk as it arrives, and the last thing it does
+	// before answering is flush it. On a slow disk with a large database that
+	// flush is the slowest part of the whole call, and ten seconds would fail
+	// exactly the uploads that were about to succeed.
+	ClassUpload
 )
 
 // The confirmed deadlines.
@@ -100,6 +118,10 @@ const (
 	// for something -- never a caller that has simply stopped reading, whose
 	// backpressure is not a fault.
 	StreamIdleTimeout = 60 * time.Second
+
+	// UploadAckDeadline is how long a node may take to acknowledge an upload
+	// after this process has sent the last byte. See ClassUpload.
+	UploadAckDeadline = 2 * time.Minute
 )
 
 // Deadline is the class's total budget, and zero for the stream class.
@@ -111,7 +133,7 @@ func (c DeadlineClass) Deadline() time.Duration {
 		return FastReadDeadline
 	case ClassMutation:
 		return MutationDeadline
-	case ClassStream, ClassWatch:
+	case ClassStream, ClassWatch, ClassUpload:
 		return 0
 	default:
 		return 0
@@ -121,7 +143,21 @@ func (c DeadlineClass) Deadline() time.Duration {
 // Unbounded reports whether a class runs without a total deadline, and is
 // therefore bounded by the first-byte deadline and by StreamIdle instead.
 func (c DeadlineClass) Unbounded() bool {
-	return c == ClassStream || c == ClassWatch
+	return c == ClassStream || c == ClassWatch || c == ClassUpload
+}
+
+// FirstByte is how long the node has to say its first word, and it is the one
+// bound every unbounded class still carries.
+//
+// ClassUpload's is longer than the rest because its "first byte" is the
+// acknowledgement at the end of an upload, after the node has flushed a
+// database to disk -- see ClassUpload. For every other class it is the start of
+// an answer that is already being computed.
+func (c DeadlineClass) FirstByte() time.Duration {
+	if c == ClassUpload {
+		return UploadAckDeadline
+	}
+	return StreamFirstByteDeadline
 }
 
 // StreamIdle is how long a stream of this class may go without producing
@@ -149,6 +185,8 @@ func (c DeadlineClass) String() string {
 		return "stream"
 	case ClassWatch:
 		return "watch"
+	case ClassUpload:
+		return "upload"
 	default:
 		return fmt.Sprintf("DeadlineClass(%d)", int(c))
 	}
@@ -201,6 +239,7 @@ const (
 	MethodReset              = machineService + "Reset"
 	MethodLogs               = machineService + "Logs"
 	MethodEtcdSnapshot       = machineService + "EtcdSnapshot"
+	MethodEtcdRecover        = machineService + "EtcdRecover"
 	MethodPacketCapture      = machineService + "PacketCapture"
 	MethodDiskUsage          = machineService + "DiskUsage"
 	MethodDisks              = storageService + "Disks"
@@ -269,7 +308,6 @@ var deadlineClasses = map[string]DeadlineClass{
 	machineService + "EtcdRemoveMemberByID":  ClassMutation,
 	machineService + "EtcdForfeitLeadership": ClassMutation,
 	machineService + "EtcdDefragment":        ClassMutation,
-	machineService + "EtcdRecover":           ClassMutation,
 	machineService + "EtcdDowngradeEnable":   ClassMutation,
 	machineService + "EtcdDowngradeValidate": ClassMutation,
 	machineService + "EtcdDowngradeCancel":   ClassMutation,
@@ -286,6 +324,11 @@ var deadlineClasses = map[string]DeadlineClass{
 	MethodDiskUsage:              ClassStream,
 	machineService + "ImageList": ClassStream,
 	MethodEtcdSnapshot:           ClassStream,
+
+	// Upload: a client stream. One member, and that is the shape of the
+	// product rather than an accident -- this is the only thing holzkube sends
+	// to a node that is not a configuration document.
+	MethodEtcdRecover: ClassUpload,
 
 	// The streaming upgrade, added in phase 9. It takes the stream class and
 	// not the mutation class, and the difference is the whole reason it is on

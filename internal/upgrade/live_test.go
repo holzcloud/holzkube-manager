@@ -517,3 +517,146 @@ func TestTalosOwnArgumentsAreNotDrift(t *testing.T) {
 			drift.OnlyOnNode, drift.OnlyInConfig)
 	}
 }
+
+// The restore path, end to end against the simulator (Omni parity phase 1).
+//
+// The measurement that makes these worth writing is that the simulator's node
+// state actually changes: talossim keeps the uploaded snapshot and what a
+// recovery bootstrap started etcd from as two separate fields, so a test can
+// tell "uploaded and never recovered from" apart from "restored", which is the
+// half-done state this operation is built around.
+
+// TestARestoreReplacesEtcdWithTheSnapshot is the whole path.
+func TestARestoreReplacesEtcdWithTheSnapshot(t *testing.T) {
+	t.Parallel()
+
+	sim, cc := liveNode(t)
+
+	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+	defer cancel()
+
+	// A real snapshot, taken from this node, so the integrity check the node
+	// makes is being exercised rather than skipped.
+	var taken bytes.Buffer
+	if _, err := upgrade.Snapshot(ctx, cc, &taken); err != nil {
+		t.Fatalf("Snapshot: %v", err)
+	}
+
+	n, err := upgrade.Restore(ctx, cc, upgrade.RestoreRequest{
+		Snapshot: bytes.NewReader(taken.Bytes()),
+		Role:     model.RoleControlPlane,
+	})
+	if err != nil {
+		t.Fatalf("Restore: %v", err)
+	}
+	if n != int64(taken.Len()) {
+		t.Errorf("the restore reported %d bytes uploaded and the snapshot was %d", n, taken.Len())
+	}
+
+	state := sim.Node()
+	if state.RecoverCalls != 1 {
+		t.Errorf("the node saw %d EtcdRecover uploads, want 1", state.RecoverCalls)
+	}
+	if !bytes.Equal(state.UploadedSnapshot, taken.Bytes()) {
+		t.Errorf("the node holds %d bytes and the snapshot was %d; the upload did not arrive intact",
+			len(state.UploadedSnapshot), taken.Len())
+	}
+	if !bytes.Equal(state.RecoveredFrom, taken.Bytes()) {
+		t.Error("the node did not start etcd from the uploaded snapshot. An upload that is never " +
+			"recovered from leaves the cluster running its old data while somebody believes it " +
+			"was restored")
+	}
+}
+
+// TestAnUploadThatIsNotFollowedByARecoveryIsNotARestore pins the half-done
+// state, because it is the one an operator most needs told apart from success.
+func TestAnUploadThatIsNotFollowedByARecoveryIsNotARestore(t *testing.T) {
+	t.Parallel()
+
+	sim, cc := liveNode(t)
+
+	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+	defer cancel()
+
+	// Bytes that are not an etcd API snapshot, so the node's integrity check
+	// refuses the recovery after accepting the upload.
+	_, err := upgrade.Restore(ctx, cc, upgrade.RestoreRequest{
+		Snapshot: bytes.NewReader([]byte("not a snapshot at all")),
+		Role:     model.RoleControlPlane,
+	})
+	if err == nil {
+		t.Fatal("a restore from bytes the node refuses reported success")
+	}
+	if !strings.Contains(err.Error(), "still running the data it had") {
+		t.Errorf("the failure %q does not say the cluster was left alone, which is the one thing "+
+			"an operator needs to know at that moment", err)
+	}
+
+	state := sim.Node()
+	if len(state.UploadedSnapshot) == 0 {
+		t.Error("the upload did not reach the node, so this is testing the wrong failure")
+	}
+	if len(state.RecoveredFrom) != 0 {
+		t.Error("etcd was started from bytes that failed their integrity check")
+	}
+}
+
+// TestSkippingTheHashCheckIsHowADataDirectoryCopyIsRestored is the flag's one
+// legitimate use, and it is the case an operator is most likely to be in: a
+// cluster that had already lost quorum leaves nothing but a copied data
+// directory, which carries no hash to check.
+func TestSkippingTheHashCheckIsHowADataDirectoryCopyIsRestored(t *testing.T) {
+	t.Parallel()
+
+	sim, cc := liveNode(t)
+
+	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+	defer cancel()
+
+	copied := []byte("a copy of somebody's etcd data directory")
+	if _, err := upgrade.Restore(ctx, cc, upgrade.RestoreRequest{
+		Snapshot:      bytes.NewReader(copied),
+		Role:          model.RoleControlPlane,
+		SkipHashCheck: true,
+	}); err != nil {
+		t.Fatalf("Restore with SkipHashCheck: %v", err)
+	}
+
+	if !bytes.Equal(sim.Node().RecoveredFrom, copied) {
+		t.Error("the node did not recover from the copied data directory")
+	}
+}
+
+// TestARestoreRefusesAWorkerAndAnEmptySnapshot checks the two refusals that
+// happen before anything is sent.
+func TestARestoreRefusesAWorkerAndAnEmptySnapshot(t *testing.T) {
+	t.Parallel()
+
+	sim, cc := liveNode(t)
+
+	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+	defer cancel()
+
+	_, err := upgrade.Restore(ctx, cc, upgrade.RestoreRequest{
+		Snapshot: bytes.NewReader([]byte("anything")),
+		Role:     model.RoleWorker,
+	})
+	if !errors.Is(err, upgrade.ErrNotControlPlane) {
+		t.Errorf("restoring onto a worker returned %v, want ErrNotControlPlane", err)
+	}
+
+	_, err = upgrade.Restore(ctx, cc, upgrade.RestoreRequest{
+		Snapshot: bytes.NewReader(nil),
+		Role:     model.RoleControlPlane,
+	})
+	if !errors.Is(err, upgrade.ErrEmptySnapshot) {
+		t.Errorf("restoring an empty snapshot returned %v, want ErrEmptySnapshot", err)
+	}
+
+	// Neither reached the node. A refusal that had already uploaded something
+	// would be a refusal that changed the cluster.
+	if state := sim.Node(); state.RecoverCalls != 0 {
+		t.Errorf("the node saw %d uploads from two refusals that should have stopped here",
+			state.RecoverCalls)
+	}
+}

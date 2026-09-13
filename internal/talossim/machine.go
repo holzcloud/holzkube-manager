@@ -1,6 +1,7 @@
 package talossim
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
@@ -42,6 +43,18 @@ type nodeState struct {
 
 	bootstrapped   bool
 	bootstrapCalls int
+
+	// uploadedSnapshot is what EtcdRecover has left on the node, and
+	// recoveredFrom is what a recovery bootstrap then started etcd from.
+	//
+	// They are two fields and not one because uploading and recovering are two
+	// operations on a real node, and the interesting failure lives between
+	// them: a recovery bootstrap on a node that has no uploaded snapshot must
+	// refuse, and a simulator with one field could not tell that state apart
+	// from "recovered successfully".
+	uploadedSnapshot []byte
+	recoveredFrom    []byte
+	recoverCalls     int
 
 	reboots  int
 	lastBoot time.Time
@@ -96,6 +109,18 @@ type NodeState struct {
 	// AppliedConfigs counts configurations actually applied. A dry-run apply
 	// is not counted, because a dry run that changed the node would not be one.
 	AppliedConfigs int
+
+	// RecoverCalls counts EtcdRecover uploads. UploadedSnapshot is what the
+	// last one left on the node; RecoveredFrom is what a recovery bootstrap
+	// then started etcd from.
+	//
+	// The last two are separate for the reason acceptSnapshot gives: an upload
+	// that succeeded and a recovery that was never asked for is a cluster
+	// running its old etcd while somebody believes it was restored, and a test
+	// can only tell those apart if the simulator can.
+	RecoverCalls     int
+	UploadedSnapshot []byte
+	RecoveredFrom    []byte
 }
 
 func newNodeState(opts Options) *nodeState {
@@ -186,6 +211,11 @@ func (n *nodeState) snapshot() NodeState {
 		Resets:         n.resets,
 		PoweredOff:     n.poweredOff,
 		AppliedConfigs: n.appliedConfigs,
+		RecoverCalls:   n.recoverCalls,
+		// Cloned, because NodeState promises a caller holding it cannot race
+		// the server, and a shared backing array is exactly that race.
+		UploadedSnapshot: bytes.Clone(n.uploadedSnapshot),
+		RecoveredFrom:    bytes.Clone(n.recoveredFrom),
 	}
 }
 
@@ -236,6 +266,56 @@ func (n *nodeState) bootstrap() error {
 			"talossim: %s is already bootstrapped: etcd data directory is not empty", n.hostname)
 	}
 
+	n.bootstrapped = true
+	return nil
+}
+
+// acceptSnapshot stores what an EtcdRecover upload delivered.
+//
+// It does not start etcd and does not mark the node bootstrapped, because
+// EtcdRecover on a real node does neither: it writes the file and stops. A
+// simulator that recovered here would hide the failure mode this pair exists
+// to make testable -- an upload that succeeded and a recovery that was never
+// asked for, which leaves a cluster running its old etcd while somebody
+// believes it was restored.
+func (n *nodeState) acceptSnapshot(b []byte) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+
+	n.recoverCalls++
+	n.uploadedSnapshot = b
+}
+
+// recoverBootstrap starts etcd from an uploaded snapshot.
+//
+// Unlike an ordinary bootstrap it is allowed on a node that already has an
+// etcd data directory -- replacing that directory is the entire operation. It
+// refuses a node with no uploaded snapshot, which is what a real node does:
+// there is nothing to recover from.
+func (n *nodeState) recoverBootstrap(skipHashCheck bool) error {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+
+	n.bootstrapCalls++
+
+	if n.uploadedSnapshot == nil {
+		return status.Errorf(codes.FailedPrecondition,
+			"talossim: %s has no uploaded snapshot to recover from; send one with EtcdRecover first",
+			n.hostname)
+	}
+
+	// The integrity check a real node makes, and the reason skipHashCheck
+	// exists. A snapshot taken through the etcd API carries a hash; one copied
+	// off a data directory does not, and Talos asks the caller to say which it
+	// is rather than guessing. The simulator's stand-in for "has a hash" is the
+	// prefix EtcdSnapshot writes, which is the only thing about these bytes
+	// that is ever true.
+	if !skipHashCheck && !bytes.HasPrefix(n.uploadedSnapshot, []byte(snapshotPrefix)) {
+		return status.Errorf(codes.InvalidArgument,
+			"talossim: the uploaded snapshot fails its integrity check on %s", n.hostname)
+	}
+
+	n.recoveredFrom = n.uploadedSnapshot
 	n.bootstrapped = true
 	return nil
 }
@@ -518,11 +598,20 @@ func (m *machineService) SystemStat(_ context.Context, _ *emptypb.Empty) (*machi
 	}, nil
 }
 
-func (m *machineService) Bootstrap(_ context.Context, _ *machine.BootstrapRequest) (*machine.BootstrapResponse, error) {
+func (m *machineService) Bootstrap(_ context.Context, req *machine.BootstrapRequest) (*machine.BootstrapResponse, error) {
 	if err := m.server.node.up(); err != nil {
 		return nil, err
 	}
-	if err := m.server.node.bootstrap(); err != nil {
+
+	// Two operations behind one RPC, and the simulator keeps them apart for
+	// the reason the product's two client methods do: an ordinary bootstrap
+	// refuses a node that already has etcd, and a recovery bootstrap is
+	// defined by replacing it.
+	if req.GetRecoverEtcd() {
+		if err := m.server.node.recoverBootstrap(req.GetRecoverSkipHashCheck()); err != nil {
+			return nil, err
+		}
+	} else if err := m.server.node.bootstrap(); err != nil {
 		return nil, err
 	}
 
