@@ -42,6 +42,24 @@ func newFixture(t *testing.T, opts talossim.Options) *fixture {
 func newFixtureWith(t *testing.T, opts talossim.Options, heartbeat time.Duration) *fixture {
 	t.Helper()
 
+	return newFixtureWrapped(t, opts, heartbeat, nil)
+}
+
+// newFixtureWrapped is newFixtureWith with the store handed through a
+// decorator before the service sees it.
+//
+// It exists for the one class of test that cannot be written against the
+// persistence seam from outside: a test about what happens when two writers
+// race for the same record needs to choose the moment the second one arrives,
+// and a real store offers no way to ask for that moment. wrap may be nil.
+func newFixtureWrapped(
+	t *testing.T,
+	opts talossim.Options,
+	heartbeat time.Duration,
+	wrap func(store.Store) store.Store,
+) *fixture {
+	t.Helper()
+
 	cl, err := talossim.NewCluster("homelab", "https://192.168.1.41:6443")
 	if err != nil {
 		t.Fatalf("NewCluster: %v", err)
@@ -75,8 +93,13 @@ func newFixtureWith(t *testing.T, opts talossim.Options, heartbeat time.Duration
 		}
 	})
 
+	seen := store.Store(st)
+	if wrap != nil {
+		seen = wrap(st)
+	}
+
 	svc := inventory.New(inventory.Deps{
-		Store:     st,
+		Store:     seen,
 		Heartbeat: heartbeat,
 		// The direct dialer against the simulator's real loopback listener:
 		// the fingerprint probe opens its own TLS connection, so the

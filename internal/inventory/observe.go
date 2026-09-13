@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/x509"
 	"errors"
+	"fmt"
 	"log/slog"
 	"math/rand/v2"
 	"strings"
@@ -43,33 +44,57 @@ func (s *Service) recordMachine(
 		}
 	}
 
-	rec, err := s.deps.Store.Machines().Get(ctx, facts.UUID)
-	switch {
-	case err == nil:
-	case errors.Is(err, store.ErrNotFound):
-		rec = model.Machine{ID: facts.UUID, AdoptedAt: now, Role: model.RoleUnknown}
-	default:
-		return model.Machine{}, err
+	// Read, decide, write -- and retry the whole thing rather than the write,
+	// because every decision below is made against the record that was read.
+	// A refresh landing its snapshot between the two is the ordinary case now
+	// that persistSnapshot no longer gives up on the first collision, and
+	// there is nothing here that a second look does not simply redo.
+	apply := func(rec model.Machine) model.Machine {
+		if cluster != "" {
+			rec.Cluster = cluster
+		}
+		if role != "" && role != model.RoleUnknown {
+			rec.Role = role
+		}
+		if rec.Role == "" {
+			rec.Role = model.RoleUnknown
+		}
+		if facts.Hostname != "" {
+			rec.Hostname = facts.Hostname
+		}
+		if addr != "" {
+			rec.Addr = addr
+			rec.LostAddrAt = time.Time{}
+		}
+		return rec
 	}
 
-	if cluster != "" {
-		rec.Cluster = cluster
-	}
-	if role != "" && role != model.RoleUnknown {
-		rec.Role = role
-	}
-	if rec.Role == "" {
-		rec.Role = model.RoleUnknown
-	}
-	if facts.Hostname != "" {
-		rec.Hostname = facts.Hostname
-	}
-	if addr != "" {
-		rec.Addr = addr
-		rec.LostAddrAt = time.Time{}
+	for range writeAttempts {
+		rec, err := s.deps.Store.Machines().Get(ctx, facts.UUID)
+		switch {
+		case err == nil:
+		case errors.Is(err, store.ErrNotFound):
+			// Rev stays zero, which is what a create carries. If the machine
+			// was filed by somebody else in the meantime the Put conflicts and
+			// the next pass reads their record instead of replacing it.
+			rec = model.Machine{ID: facts.UUID, AdoptedAt: now, Role: model.RoleUnknown}
+		default:
+			return model.Machine{}, err
+		}
+
+		saved, err := s.deps.Store.Machines().Put(ctx, apply(rec))
+		switch {
+		case err == nil:
+			return saved, nil
+		case errors.Is(err, store.ErrConflict):
+			continue
+		default:
+			return model.Machine{}, err
+		}
 	}
 
-	return s.deps.Store.Machines().Put(ctx, rec)
+	return model.Machine{}, fmt.Errorf("%w: the record for machine %s changed under %d successive attempts",
+		store.ErrConflict, facts.UUID, writeAttempts)
 }
 
 // evictAddressHolders marks every other machine that claims addr as no longer
@@ -367,15 +392,82 @@ func (s *Service) Refresh(ctx context.Context, id model.MachineID) {
 		}
 	}
 
-	rec.Snapshot = snap
-	rec.SeenAt = now
-	if facts.Hostname != "" {
-		rec.Hostname = facts.Hostname
-	}
-	if _, err := s.deps.Store.Machines().Put(ctx, rec); err != nil {
+	if err := s.persistSnapshot(ctx, rec, snap, now, facts.Hostname); err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			// The machine was forgotten while its refresh was in flight. Its
+			// absence is the answer, and a Put here would recreate it.
+			return
+		}
 		s.deps.Logger.Error("inventory refresh could not persist the snapshot",
 			slog.String("machine", string(id)), slog.Any("error", err))
 	}
+}
+
+// writeAttempts bounds the compare-and-swap loops in this file.
+//
+// Three rather than one because the first attempt is the one that raced, and
+// rather than unbounded because a machine whose record is being rewritten
+// faster than a read and a write can complete has a different problem than a
+// lost update, and spinning on it would hide that problem behind a busy loop.
+// A writer that loses three times in a row says so instead.
+const writeAttempts = 3
+
+// persistSnapshot writes an observation onto the machine record, merging
+// rather than overwriting when another writer got there first.
+//
+// Refresh reads the record at the top and writes it back at the bottom, and
+// between those two points it talks to a node over the network -- the widest
+// window in this service. Two writers legitimately live in that window: the
+// supervisor's heartbeat and a manual POST /machines/{id}/refresh can overlap,
+// and recordMachine can file a moved address for the same machine while a
+// refresh is in flight. The loser used to receive store.ErrConflict, log it,
+// and drop the round's observation on the floor.
+//
+// Retrying with the record read at the top would be the opposite bug: it would
+// hand back the address, role, cluster and lock as they were before the winner
+// changed them, which is a silent undo of somebody's write dressed up as a
+// heartbeat. So the retry re-reads and applies only the three fields an
+// observation owns -- the snapshot, the time it was taken, and the hostname
+// the node itself just reported -- and leaves every other field at whatever
+// the winner wrote.
+func (s *Service) persistSnapshot(
+	ctx context.Context,
+	rec model.Machine,
+	snap model.MachineSnapshot,
+	now time.Time,
+	hostname string,
+) error {
+	apply := func(m model.Machine) model.Machine {
+		m.Snapshot = snap
+		m.SeenAt = now
+		if hostname != "" {
+			m.Hostname = hostname
+		}
+		return m
+	}
+
+	for attempt := range writeAttempts {
+		if attempt > 0 {
+			fresh, err := s.deps.Store.Machines().Get(ctx, rec.ID)
+			if err != nil {
+				return err
+			}
+			rec = fresh
+		}
+
+		_, err := s.deps.Store.Machines().Put(ctx, apply(rec))
+		switch {
+		case err == nil:
+			return nil
+		case errors.Is(err, store.ErrConflict):
+			continue
+		default:
+			return err
+		}
+	}
+
+	return fmt.Errorf("%w: the machine record changed under %d successive attempts",
+		store.ErrConflict, writeAttempts)
 }
 
 func (s *Service) observationFor(id model.MachineID) *observation {
