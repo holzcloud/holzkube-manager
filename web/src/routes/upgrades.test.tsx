@@ -1,7 +1,8 @@
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { render, screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import type { EtcdMemberList, GateVerdict } from '@/api'
-import { GatePanel, MemberTable } from '@/routes/upgrades'
+import { EtcdPanel, GatePanel, MemberTable } from '@/routes/upgrades'
 
 /**
  * The two claims this screen makes that are not about layout.
@@ -131,5 +132,56 @@ describe('the etcd member list', () => {
   it('states what the member count means rather than only showing it', () => {
     render(<MemberTable list={list} onRemove={vi.fn()} />)
     expect(screen.getByText(/stops the cluster accepting writes/)).toBeInTheDocument()
+  })
+})
+
+/**
+ * What the snapshot card says the product will not do.
+ *
+ * A backup button with no restore behind it is a promise the operator
+ * discovers is empty during the disaster. Saying so here — where somebody
+ * forms the belief, next to the download — is the same thing the settings
+ * screen does about its own backup tarballs, and the same thing the removal
+ * dialog does about cordon and drain.
+ */
+describe('the etcd snapshot card', () => {
+  function wrapEtcd() {
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    })
+    return render(
+      <QueryClientProvider client={client}>
+        <EtcdPanel cluster="c-1" />
+      </QueryClientProvider>,
+    )
+  }
+
+  it('offers the snapshot as a link the browser streams to disk', () => {
+    wrapEtcd()
+    expect(screen.getByRole('link', { name: /etcd snapshot/i })).toHaveAttribute(
+      'href',
+      expect.stringContaining('/api/v1/clusters/c-1/etcd/snapshot'),
+    )
+  })
+
+  it('says plainly that it does not restore one', () => {
+    wrapEtcd()
+    expect(screen.getByText(/does not restore a snapshot/i)).toBeInTheDocument()
+  })
+
+  it('names the two steps that do, rather than leaving the operator to find out', () => {
+    wrapEtcd()
+    expect(screen.getByText(/talosctl etcd recover/)).toBeInTheDocument()
+    expect(screen.getByText(/bootstrap that same node in recovery mode/i)).toBeInTheDocument()
+  })
+
+  it('says why it is not a button, and it is not "not yet"', () => {
+    wrapEtcd()
+
+    // The two facts that make this a decision rather than a gap: a restore
+    // discards everything after the snapshot, and running it on two nodes
+    // produces two clusters that each believe they are the original.
+    expect(screen.getByText(/discards everything after/i)).toBeInTheDocument()
+    expect(screen.getByText(/two clusters that each believe/i)).toBeInTheDocument()
   })
 })
