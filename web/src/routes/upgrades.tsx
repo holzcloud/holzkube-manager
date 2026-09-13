@@ -399,7 +399,7 @@ function NodeTable({ nodes }: { nodes: NodePlan[] }) {
 /* etcd                                                                    */
 /* ---------------------------------------------------------------------- */
 
-function EtcdPanel({ cluster }: { cluster: string }) {
+export function EtcdPanel({ cluster }: { cluster: string }) {
   const members = useQuery({
     queryKey: ['etcd', cluster],
     queryFn: () => api.etcd.members(cluster),
@@ -433,6 +433,30 @@ function EtcdPanel({ cluster }: { cluster: string }) {
           A snapshot through the etcd API is a consistent point-in-time copy and needs a quorum. A
           cluster that has lost one cannot answer that, so this fails there — what is left then is
           the member's own database file, copied off the node, which is not the same thing.
+        </p>
+
+        {/*
+          The other half of the sentence, said here because here is where
+          somebody forms the belief. A product that offers a backup button and
+          no restore is a product whose operator finds out during the disaster;
+          the backup card on the settings screen says the same kind of thing
+          about its own tarballs, for the same reason.
+
+          Restoring is deliberately not here rather than not yet. It rewinds
+          the cluster to the snapshot's moment and discards everything after
+          it, and it runs on exactly one control-plane node -- doing it on two
+          produces two clusters that both believe they are the original. That
+          is a decision for somebody at a console with the cluster in front of
+          them, not a button in a browser during an incident.
+        */}
+        <p className="max-w-prose text-xs text-muted-foreground">
+          <strong>holzkube-manager does not restore a snapshot.</strong> Recovery is two steps with{' '}
+          <code>talosctl</code> — upload the snapshot to one control-plane node with{' '}
+          <code>talosctl etcd recover</code>, then bootstrap that same node in recovery mode — and
+          Talos' own documentation is the reference for the exact invocation. It is not here
+          deliberately: a restore rewinds the cluster to this moment and discards everything after
+          it, and running it on more than one node produces two clusters that each believe they are
+          the original. Keep the file somewhere that survives the cluster.
         </p>
       </CardContent>
     </Card>

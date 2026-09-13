@@ -394,6 +394,27 @@ body without the PEM armour.
 Logs are capped per stream. The **newest** bytes are kept, cut on a line
 boundary, with a first line saying how much was dropped.
 
+### etcd snapshots, and what this product will not do with them
+
+The upgrades screen takes a snapshot through the etcd API — a consistent
+point-in-time copy, which needs a quorum, so a cluster that has lost one cannot
+produce it.
+
+**holzkube-manager does not restore one.** Recovery is two steps with
+`talosctl`: upload the snapshot to **one** control-plane node with `talosctl
+etcd recover`, then bootstrap that same node in recovery mode. Talos'
+documentation is the reference for the exact invocation.
+
+That is a decision rather than a gap. A restore rewinds the cluster to the
+snapshot's moment and discards everything after it, and running it on more than
+one node produces two clusters that each believe they are the original — which
+is a thing to do at a console with the cluster in front of you, not a button in
+a browser during an incident. The screen says so next to the download, because
+that is where somebody forms the belief that there is a restore button
+somewhere.
+
+Keep the file somewhere that survives the cluster.
+
 ## Metrics
 
 ```
