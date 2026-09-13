@@ -5,7 +5,7 @@ current_phase: 3
 current_phase_name: "Prometheus-/metrics (v1.15)"
 status: milestone-closed
 stopped_at: v1.15 vollstaendig, CI gruen, Routen-Audit abgearbeitet (Fenster 92-95 zu). OPS-05 bleibt der einzige Release-Blocker (Fenster 87)
-last_updated: "2026-09-13T10:45:00.000Z"
+last_updated: "2026-09-13T11:00:00.000Z"
 last_activity: 2026-09-13
 last_activity_desc: CI red for nine commits (fixed); a route audit found a confirmation the server never enforced
 state_head: a474d2522823cbfb436ee720dee35494890281a3
@@ -58,6 +58,19 @@ Code. Nebenbei sind zwei alte, stille Supervisions-Fehler gefallen: ein
 Lesevorgang vor `Start()` verhinderte jede Überwachung, und `Supervise()` band
 den Supervisor an den Request-Context des HTTP-Handlers. Siehe
 `.planning/phases/v1.15-02-cosi-watches/02-SUMMARY.md`.
+
+**Die Routen-Prüfung ist jetzt ein Test und keine Beobachtung mehr.**
+`TestEveryRouteIsReachableFromTheInterface` läuft die Routen-Tabelle gegen
+`web/src`; eine Route ohne Einstieg ist rot, es sei denn, sie steht mit
+Begründung in `notInTheInterface`. Zwei Grenzen stehen im Test selbst, weil sie
+gemessen und nicht vermutet sind: ein Pfad, der nur in einem **Kommentar**
+vorkommt, gilt als erwähnt (das Passwort-Beispiel fällt deshalb durch), und
+bedingt registrierte Routen (die zwei OIDC-Routen) sind unsichtbar, weil die
+Tabelle mit leeren `Deps` gelaufen wird. **Testdateien sind ausgenommen**, und
+das war der Unterschied zwischen einem Wächter, der funktioniert, und einem, der
+nicht funktioniert: mit ihnen drin blieb das entfernte Support-Bundle
+unentdeckt, weil `clusters.test.tsx` den href behauptet. Zwei der drei
+historischen Auslassungen werden reproduzierbar gefangen.
 
 **Eine systematische Routen-Prüfung nach dem zweiten Fund hat einen dritten
 Fall geliefert — und dahinter ein Loch, das kein Einstiegsproblem war.** Alle
