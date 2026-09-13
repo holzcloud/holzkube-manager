@@ -307,7 +307,7 @@ func issueConfirmation(d httpapi.Deps) http.HandlerFunc {
 			Typed string `json:"typed"`
 		}
 		if err := decodeJSON(w, r, &body); err != nil {
-			httpapi.WriteProblem(w, r, httpapi.Validation(err.Error()))
+			httpapi.WriteProblem(w, r, decodeProblem(err))
 			return
 		}
 
@@ -381,7 +381,7 @@ func nodeAction(d httpapi.Deps, kind model.JobKind) http.HandlerFunc {
 			Params       map[string]string `json:"params"`
 		}
 		if err := decodeJSON(w, r, &body); err != nil {
-			httpapi.WriteProblem(w, r, httpapi.Validation(err.Error()))
+			httpapi.WriteProblem(w, r, decodeProblem(err))
 			return
 		}
 

@@ -113,6 +113,22 @@ type Config struct {
 	InsecureHTTP    bool
 	DryRun          bool
 	AllowPreRelease bool
+
+	// ImageFactoryURL is the Image Factory this instance builds schematics
+	// against.
+	//
+	// imagefactory.DefaultBaseURL says it is "a constant rather than a default
+	// buried in New so that a deployment pointing at a private Factory has one
+	// obvious thing to override", and for a long time nothing did: there was no
+	// way to name a different Factory short of editing the source. An air-gapped
+	// site running its own Factory is the case it exists for, and it is also
+	// how the drift observer can be pointed somewhere a test controls.
+	//
+	// The string is not validated here beyond being non-empty. imagefactory.New
+	// is what knows what a usable base URL is, and duplicating that judgement
+	// would give two answers to one question; the composition root calls it
+	// before serving, so a bad value is still a start failure.
+	ImageFactoryURL string
 	SudoWindow      time.Duration
 	SessionLifetime time.Duration
 	LogLevel        slog.Level
@@ -325,6 +341,25 @@ func optionTable(defaultDataDir string) []option {
 				return nil
 			},
 			render: func(c Config) string { return strconv.FormatBool(c.AllowPreRelease) },
+		},
+		{
+			// The default is spelled here and asserted equal to
+			// imagefactory.DefaultBaseURL by the config tests. Importing that
+			// package for one string would put the Factory client in the
+			// dependency graph of every binary that reads a configuration,
+			// including the ones that never speak to a Factory.
+			name: "image-factory", env: "IMAGE_FACTORY_URL", def: "https://factory.talos.dev",
+			usage: "the Image Factory to build schematics against; point it at a private " +
+				"Factory for an air-gapped site (env " + EnvPrefix + "IMAGE_FACTORY_URL)",
+			apply: func(c *Config, raw string) error {
+				v := strings.TrimSpace(raw)
+				if v == "" {
+					return errors.New("must name a Factory; there is no usable empty default")
+				}
+				c.ImageFactoryURL = v
+				return nil
+			},
+			render: func(c Config) string { return c.ImageFactoryURL },
 		},
 		{
 			name: "sudo-window", env: "SUDO_WINDOW", def: "5m0s",

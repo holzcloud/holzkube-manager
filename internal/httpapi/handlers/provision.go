@@ -168,7 +168,7 @@ func provisionScan(d httpapi.Deps) http.HandlerFunc {
 			Addrs []string `json:"addrs"`
 		}
 		if err := decodeJSON(w, r, &body); err != nil {
-			httpapi.WriteProblem(w, r, httpapi.Validation(err.Error()))
+			httpapi.WriteProblem(w, r, decodeProblem(err))
 			return
 		}
 
@@ -205,7 +205,7 @@ func provisionInspect(d httpapi.Deps) http.HandlerFunc {
 			Fingerprint string `json:"fingerprint"`
 		}
 		if err := decodeJSON(w, r, &body); err != nil {
-			httpapi.WriteProblem(w, r, httpapi.Validation(err.Error()))
+			httpapi.WriteProblem(w, r, decodeProblem(err))
 			return
 		}
 		if strings.TrimSpace(body.Addr) == "" {
@@ -273,7 +273,7 @@ func provisionPlan(d httpapi.Deps) http.HandlerFunc {
 
 		var body provisionRequestBody
 		if err := decodeJSON(w, r, &body); err != nil {
-			httpapi.WriteProblem(w, r, httpapi.Validation(err.Error()))
+			httpapi.WriteProblem(w, r, decodeProblem(err))
 			return
 		}
 
@@ -299,7 +299,7 @@ func provisionApply(d httpapi.Deps) http.HandlerFunc {
 
 		var body provisionRequestBody
 		if err := decodeJSON(w, r, &body); err != nil {
-			httpapi.WriteProblem(w, r, httpapi.Validation(err.Error()))
+			httpapi.WriteProblem(w, r, decodeProblem(err))
 			return
 		}
 
@@ -381,7 +381,7 @@ func provisionConfirm(d httpapi.Deps) http.HandlerFunc {
 			Typed string `json:"typed"`
 		}
 		if err := decodeJSON(w, r, &body); err != nil {
-			httpapi.WriteProblem(w, r, httpapi.Validation(err.Error()))
+			httpapi.WriteProblem(w, r, decodeProblem(err))
 			return
 		}
 
@@ -467,7 +467,7 @@ func resolveBootstrapRecovery(d httpapi.Deps) http.HandlerFunc {
 			Note string `json:"note"`
 		}
 		if err := decodeJSON(w, r, &body); err != nil {
-			httpapi.WriteProblem(w, r, httpapi.Validation(err.Error()))
+			httpapi.WriteProblem(w, r, decodeProblem(err))
 			return
 		}
 		if body.Bootstrapped == nil {

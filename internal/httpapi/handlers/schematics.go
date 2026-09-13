@@ -272,8 +272,25 @@ func factoryVersions(d httpapi.Deps) http.HandlerFunc {
 		// candidate is what FACT-05 exists to prevent.
 		newest, err := imagefactory.NewestStable(versions)
 		if err != nil {
-			httpapi.WriteProblem(w, r, httpapi.Upstream(httpapi.CodeUpstreamFactoryUnavailable,
-				"The Factory listed no stable Talos version."))
+			// The reason, not just the fact. An operator looking at a Factory
+			// that offers nothing but release candidates needs to know that
+			// holzkube-manager declined to promote one -- otherwise the obvious
+			// reading is that this product cannot read the list, and the next
+			// thing they do is restart it. The counts come from the same lists
+			// that were just split, so the sentence is a measurement rather
+			// than a guess.
+			//
+			// NewestStable's own error is not echoed: it opens with a Go
+			// package name, which is not part of any contract this API makes.
+			detail := fmt.Sprintf(
+				"The Factory listed %d Talos versions and none of them is stable.", len(versions))
+			if len(prerelease) > 0 {
+				detail = fmt.Sprintf(
+					"The Factory listed %d Talos versions, %d of them prereleases, and none stable. "+
+						"A prerelease is never promoted to stand in for a stable version.",
+					len(versions), len(prerelease))
+			}
+			httpapi.WriteProblem(w, r, httpapi.Upstream(httpapi.CodeUpstreamFactoryUnavailable, detail))
 			return
 		}
 
@@ -339,7 +356,7 @@ func createSchematic(d httpapi.Deps) http.HandlerFunc {
 		var in schematicInput
 		r.Body = io.NopCloser(bytes.NewReader(raw))
 		if err := decodeJSON(w, r, &in); err != nil {
-			httpapi.WriteProblem(w, r, httpapi.Validation(err.Error()))
+			httpapi.WriteProblem(w, r, decodeProblem(err))
 			return
 		}
 		if problem := in.validate(); problem != nil {

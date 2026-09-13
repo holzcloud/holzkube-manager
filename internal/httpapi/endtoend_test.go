@@ -400,6 +400,14 @@ type problemBody struct {
 	Detail   string `json:"detail"`
 	Instance string `json:"instance"`
 	Code     string `json:"code"`
+
+	// Errors is RFC 9457's member for "which input was wrong". It is read by
+	// the tests about decoding, because naming the field there rather than in
+	// the prose is the whole point of having it.
+	Errors []struct {
+		Field  string `json:"field"`
+		Reason string `json:"reason"`
+	} `json:"errors"`
 }
 
 func decodeProblem(t *testing.T, resp *http.Response, raw []byte) problemBody {

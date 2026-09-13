@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"reflect"
 	"regexp"
 	"strings"
 	"sync"
@@ -161,6 +162,16 @@ type Client struct {
 	jsonBudget     time.Duration
 	probeBudget    time.Duration
 	manifestBudget time.Duration
+
+	// onDrift is told when a response carried a field this package does not
+	// know. It is a callback and not a logger because this package has no
+	// logger and should not acquire one to say a single sentence: the
+	// composition root already has one, and it is the place that knows whether
+	// a Factory addition is worth a line in the operator's log or a metric.
+	//
+	// Nil is the shipped default and means the drift is decoded past in
+	// silence, which is what every caller that has not thought about it gets.
+	onDrift func(path, field string)
 }
 
 // budgetClass is which of the three workloads a request belongs to.
@@ -307,6 +318,20 @@ func WithTimeout(d time.Duration) Option {
 			return fmt.Errorf("imagefactory: timeout must be positive, got %s", d)
 		}
 		c.jsonBudget = d
+		return nil
+	}
+}
+
+// WithDriftObserver is told, once per response, when the Factory answered with
+// a field this package does not know.
+//
+// It exists because decodeCapped stopped refusing such a response (see its
+// comment for why) and the loudness had to go somewhere. The observer runs on
+// the calling goroutine inside the request, so it must not block: a logger
+// call is what it is for.
+func WithDriftObserver(fn func(path, field string)) Option {
+	return func(c *Client) error {
+		c.onDrift = fn
 		return nil
 	}
 }
@@ -574,35 +599,98 @@ func (c *Client) do(req *http.Request, dst any) error {
 		// between "retry later" and "this request is wrong".
 		return fmt.Errorf("%w: %s %s: HTTP %d", ErrUpstreamUnavailable, req.Method, req.URL.Path, resp.StatusCode)
 	}
-	return decodeCapped(resp.Body, dst)
+	drifted, err := decodeCapped(resp.Body, dst)
+	if err != nil {
+		return err
+	}
+	if drifted != "" && c.onDrift != nil {
+		c.onDrift(req.URL.Path, drifted)
+	}
+	return nil
 }
 
-// decodeCapped reads at most maxResponseBytes and decodes them strictly.
+// unknownFieldPrefix is how encoding/json says a field was not in the struct.
 //
-// Strictly means two things beyond the cap. Unknown fields are rejected, so an
-// upstream schema change is loud rather than a field silently dropped on the
-// floor; and content after the JSON document is rejected, so a response that is
-// two documents is not read as its first one.
-func decodeCapped(body io.Reader, dst any) error {
+// Matching a message is not something to do lightly, and what makes it safe
+// here is that nothing depends on the match succeeding: a message that changes
+// shape makes decodeCapped fall through to the tolerant decode without a drift
+// report, which is the same outcome minus one log line. It is not a path where
+// a missed match silently changes what the operator is shown.
+const unknownFieldPrefix = "json: unknown field "
+
+// decodeCapped reads at most maxResponseBytes and decodes them.
+//
+// It returns the name of the first field the response carried that this
+// package does not know, or the empty string when there was none.
+//
+// THIS USED TO REFUSE such a response, and refusing was wrong in a way worth
+// writing down, because the reasoning that produced it is good reasoning. The
+// argument was: a field silently dropped is a field nobody notices until an
+// operator wonders why a value they can see in the Factory's own API is not
+// here. That is true. What it missed is the cost on the other side. The
+// Factory is a third party that adds fields without telling anyone, the
+// extension catalog is read on every visit to the Images screen, and every
+// field in an Extension is optional to this product's purpose -- so one
+// additive upstream field took the whole screen down, for everybody, until
+// somebody shipped a new holzkube-manager. A screen that shows an operator a
+// catalog missing a field they did not ask for is strictly better than a
+// screen that shows them a 502.
+//
+// So the loudness moves rather than disappearing: the strict decode still
+// runs, it just reports instead of refusing, and do() hands the name to
+// whatever the caller wired to onDrift. An addition is still something
+// somebody finds out about the same day. It is now a log line rather than an
+// outage.
+//
+// Two things are still refused, and neither is additive drift. A body past the
+// cap is not decoded at all -- unbounded decoding of a third party's response
+// is a denial of service with no upside. And content after the JSON document
+// is refused, because a response that is two documents read as its first one
+// is not a tolerated addition, it is a different answer than the one that
+// arrived.
+func decodeCapped(body io.Reader, dst any) (string, error) {
 	// One byte past the cap: reading exactly the cap cannot distinguish a body
 	// that fits from one that was truncated.
 	raw, err := io.ReadAll(io.LimitReader(body, maxResponseBytes+1))
 	if err != nil {
-		return fmt.Errorf("%w: read response: %w", ErrUpstreamUnavailable, err)
+		return "", fmt.Errorf("%w: read response: %w", ErrUpstreamUnavailable, err)
 	}
 	if len(raw) > maxResponseBytes {
-		return fmt.Errorf("%w: response exceeds the %d byte cap and was not decoded", ErrUpstreamUnavailable, maxResponseBytes)
+		return "", fmt.Errorf("%w: response exceeds the %d byte cap and was not decoded", ErrUpstreamUnavailable, maxResponseBytes)
 	}
 
-	dec := json.NewDecoder(bytes.NewReader(raw))
-	dec.DisallowUnknownFields()
-	if err := dec.Decode(dst); err != nil {
-		return fmt.Errorf("%w: decode response: %w", ErrUpstreamUnavailable, err)
+	strict := json.NewDecoder(bytes.NewReader(raw))
+	strict.DisallowUnknownFields()
+	err = strict.Decode(dst)
+
+	var drifted string
+	if err != nil && strings.HasPrefix(err.Error(), unknownFieldPrefix) {
+		drifted = strings.Trim(strings.TrimPrefix(err.Error(), unknownFieldPrefix), `"`)
+
+		// The strict decode stopped where it found the field, so dst holds
+		// however much of the document it had reached. Zeroing it is what
+		// makes the tolerant decode below a decode of the whole response and
+		// not a merge into a half-filled value.
+		reflect.ValueOf(dst).Elem().SetZero()
+
+		tolerant := json.NewDecoder(bytes.NewReader(raw))
+		err = tolerant.Decode(dst)
 	}
-	if err := dec.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
-		return fmt.Errorf("%w: response carries trailing content after the JSON document", ErrUpstreamUnavailable)
+	if err != nil {
+		return "", fmt.Errorf("%w: decode response: %w", ErrUpstreamUnavailable, err)
 	}
-	return nil
+
+	// Re-read rather than continuing from either decoder: which one consumed
+	// the document depends on whether there was drift, and a check that has to
+	// ask that question is a check that will eventually be asked it wrongly.
+	trailing := json.NewDecoder(bytes.NewReader(raw))
+	if err := trailing.Decode(&json.RawMessage{}); err != nil {
+		return "", fmt.Errorf("%w: decode response: %w", ErrUpstreamUnavailable, err)
+	}
+	if err := trailing.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+		return "", fmt.Errorf("%w: response carries trailing content after the JSON document", ErrUpstreamUnavailable)
+	}
+	return drifted, nil
 }
 
 // BaseURL returns the Factory this client talks to, for logging and for error

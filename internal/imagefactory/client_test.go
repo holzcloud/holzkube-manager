@@ -52,19 +52,52 @@ func TestClientRefusesAnOversizedResponse(t *testing.T) {
 	}
 }
 
-// TestClientRefusesAnUnknownField makes an upstream schema change loud. A field
-// silently dropped here is a field nobody notices until an operator wonders why
-// a value they can see in the Factory's own API is not in holzkube-manager.
-func TestClientRefusesAnUnknownField(t *testing.T) {
+// TestClientReportsAnUnknownFieldAndStillAnswers is the two halves of what
+// replaced a refusal.
+//
+// The Factory adds fields without telling anyone, and this catalog is read on
+// every visit to the Images screen. Refusing the response meant one additive
+// upstream field took that screen down for everybody until a new
+// holzkube-manager shipped. Decoding past it silently would be the other
+// mistake: nobody would find out until an operator asked why a value visible
+// in the Factory's own API is missing here. So the answer arrives and the
+// addition is reported.
+func TestClientReportsAnUnknownFieldAndStillAnswers(t *testing.T) {
 	body := `[{"name":"siderolabs/intel-ucode","ref":"r","digest":"d","author":"a","description":"x","surprise":1}]`
-	client := newClient(t, serverReturning(t, http.StatusOK, body))
 
-	_, err := client.Extensions(t.Context(), catalogVersion)
-	if !errors.Is(err, imagefactory.ErrUpstreamUnavailable) {
-		t.Fatalf("error = %v, want ErrUpstreamUnavailable", err)
+	var gotPath, gotField string
+	client := newClient(t, serverReturning(t, http.StatusOK, body),
+		imagefactory.WithDriftObserver(func(path, field string) {
+			gotPath, gotField = path, field
+		}))
+
+	catalog, err := client.Extensions(t.Context(), catalogVersion)
+	if err != nil {
+		t.Fatalf("an additive upstream field took the extension catalog down: %v", err)
 	}
-	if !strings.Contains(err.Error(), "surprise") {
-		t.Errorf("the error does not name the unknown field: %v", err)
+	if len(catalog) != 1 || catalog[0].Name != "siderolabs/intel-ucode" {
+		t.Fatalf("catalog = %+v, want the one extension the response carried", catalog)
+	}
+	if catalog[0].Ref != "r" || catalog[0].Description != "x" {
+		t.Errorf("the fields this package does know were not decoded: %+v", catalog[0])
+	}
+
+	if gotField != "surprise" {
+		t.Errorf("the drift observer was told %q, want the unknown field's name; an addition "+
+			"nobody is told about is one nobody finds out about", gotField)
+	}
+	if !strings.Contains(gotPath, "extensions") {
+		t.Errorf("the drift observer was told path %q, which does not say which response drifted", gotPath)
+	}
+}
+
+// TestAnUnknownFieldIsStillRefusedWhenTheRestIsNotJSON keeps the tolerance from
+// swallowing a genuinely broken response.
+func TestAnUnknownFieldIsStillRefusedWhenTheRestIsNotJSON(t *testing.T) {
+	client := newClient(t, serverReturning(t, http.StatusOK, `[{"name":"x","surprise":1,}]`))
+
+	if _, err := client.Extensions(t.Context(), catalogVersion); !errors.Is(err, imagefactory.ErrUpstreamUnavailable) {
+		t.Fatalf("error = %v, want ErrUpstreamUnavailable for a malformed body", err)
 	}
 }
 
