@@ -2,7 +2,9 @@ package talossim
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io"
 	"strings"
 
 	"github.com/siderolabs/talos/pkg/machinery/api/common"
@@ -276,6 +278,58 @@ func (m *machineService) EtcdLeaveCluster(_ context.Context, _ *machine.EtcdLeav
 	}, nil
 }
 
+// snapshotPrefix opens every snapshot this simulator produces.
+//
+// It is the stand-in for the one property of these bytes that is ever true:
+// that they came from an etcd API snapshot and therefore carry an integrity
+// hash. recoverBootstrap checks for it unless the caller passed
+// skipHashCheck, which is the same distinction a real node makes between a
+// snapshot taken through the API and one copied off a data directory.
+const snapshotPrefix = "talossim-etcd-snapshot-"
+
+// EtcdRecover accepts an uploaded etcd snapshot.
+//
+// It is the product's only client stream, so what is simulated here is the
+// shape as much as the effect: the node reads until the caller closes, then
+// answers once. A handler that answered early would let a bug in the upload
+// path pass as a success.
+//
+// The upload does not restore anything. It leaves the file on the node and the
+// node goes on running whatever etcd it was running -- see acceptSnapshot for
+// why the simulator keeps that apart from the recovery.
+func (m *machineService) EtcdRecover(stream machine.MachineService_EtcdRecoverServer) error {
+	m.server.recordCall("EtcdRecover")
+
+	if err := m.server.node.up(); err != nil {
+		return err
+	}
+
+	var received []byte
+	for {
+		chunk, err := stream.Recv()
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			return err
+		}
+		received = append(received, chunk.GetBytes()...)
+	}
+
+	if len(received) == 0 {
+		// A zero-length upload is the failure worth having: it looks like a
+		// success everywhere except in the data directory.
+		return status.Error(codes.InvalidArgument,
+			"talossim: the uploaded snapshot is empty, which is not a snapshot")
+	}
+
+	m.server.node.acceptSnapshot(received)
+
+	return stream.SendAndClose(&machine.EtcdRecoverResponse{
+		Messages: []*machine.EtcdRecover{{Metadata: m.server.node.metadata()}},
+	})
+}
+
 // EtcdSnapshot streams a snapshot of the etcd database.
 //
 // The bytes are not a real bolt database, and nothing in this product parses
@@ -302,7 +356,7 @@ func (m *machineService) EtcdSnapshot(_ *machine.EtcdSnapshotRequest, stream mac
 	}
 
 	for i := range 3 {
-		chunk := []byte(fmt.Sprintf("talossim-etcd-snapshot-chunk-%d-of-%s\n", i, n.Hostname))
+		chunk := []byte(fmt.Sprintf("%schunk-%d-of-%s\n", snapshotPrefix, i, n.Hostname))
 		if err := stream.Send(&common.Data{Bytes: chunk}); err != nil {
 			return err
 		}

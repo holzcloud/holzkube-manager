@@ -77,7 +77,7 @@ func TestClassTable(t *testing.T) {
 			m + "Upgrade", m + "Rollback", m + "MetaWrite", m + "MetaDelete",
 			m + "ServiceStart", m + "ServiceStop", m + "ServiceRestart", m + "ImagePull",
 			m + "EtcdLeaveCluster", m + "EtcdRemoveMemberByID", m + "EtcdForfeitLeadership",
-			m + "EtcdDefragment", m + "EtcdRecover",
+			m + "EtcdDefragment",
 			m + "EtcdDowngradeEnable", m + "EtcdDowngradeValidate", m + "EtcdDowngradeCancel",
 		},
 		talos.ClassStream: {
@@ -101,6 +101,20 @@ func TestClassTable(t *testing.T) {
 		// added to improve on.
 		talos.ClassWatch: {
 			c + "Watch",
+		},
+		// v1.16 phase 1, and a DEVIATION from the confirmed policy, which
+		// classifies EtcdRecover as a mutation. It is recorded as a window.
+		//
+		// The argument is that the policy never had an uploading call to think
+		// about. Every other mutation is a request that fits in a packet and
+		// starts work on the node, which is exactly what the mutation class's
+		// own doc says it bounds: "the call that *initiates* a mutation".
+		// EtcdRecover initiates nothing -- BootstrapFromSnapshot does -- and it
+		// does not fit in a packet. It is a client stream carrying an etcd
+		// database, and thirty seconds is a bound on how large that database is
+		// allowed to be.
+		talos.ClassUpload: {
+			m + "EtcdRecover",
 		},
 	}
 
