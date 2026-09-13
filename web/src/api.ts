@@ -2133,6 +2133,27 @@ export const api = {
       ),
   },
 
+  certificate: {
+    /**
+     * Issues this installation a fresh admin certificate for one cluster.
+     *
+     * It touches no node. The certificate is minted from the cluster's own
+     * Talos certificate authority, which this installation holds, and a node
+     * trusts the authority rather than any particular certificate issued from
+     * it — so a fresh one works the moment it is presented.
+     *
+     * The server proves it against a node before keeping it, and answers
+     * `conflict.certificate-rejected` when it could not. That is the *safe*
+     * outcome and not a broken cluster: nothing changed.
+     */
+    renew: (cluster: string): Promise<Cluster> =>
+      sendJSON(
+        'POST',
+        `/api/v1/clusters/${encodeURIComponent(cluster)}/client-certificate`,
+        clusterSchema,
+      ),
+  },
+
   scale: {
     /**
      * What changing this cluster's size would mean.

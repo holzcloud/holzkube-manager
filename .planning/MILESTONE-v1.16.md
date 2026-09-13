@@ -190,7 +190,7 @@ schon für Upgrades.
 
 **Belegbar hier:** die Entscheidungslogik. Der Vollzug hängt an Hardware.
 
-### Phase 9: CA-Rotation (Omni: „CA Rotation")
+### Phase 9: CA-Rotation (Omni: „CA Rotation") — HALB GEBAUT, UND DAS STEHT SO DA
 
 V2-OPS-02. Der V2-Rückstau nennt es selbst „der Radius mit dem breitesten
 stillen Schaden im Produkt".
@@ -198,6 +198,36 @@ stillen Schaden im Produkt".
 **Belegbar hier:** die Mechanik gegen talossim und jede Ablehnung.
 **Nicht belegbar hier:** dass ein echter Cluster die Rotation überlebt. Dieser
 Satz ist kein Vorbehalt, sondern die Beschreibung des Auslieferungszustands.
+
+Die Phase zerfällt in zwei Operationen, die in Omni unter einem Namen stehen
+und hier nicht dasselbe Risiko haben:
+
+**Erneuern des eigenen Client-Zertifikats — gebaut.** Das ist die Hälfte, an
+der die Leiter aus D-23 seit ihrem Bestehen zählt: „The client certificate for
+homelab expires within a week. When it does, every node in this cluster becomes
+unreachable at once." Es gab nichts zu klicken. Ein Countdown auf eine Tür, die
+es nicht gibt, ist schlimmer als kein Countdown — er bringt einem Betreiber
+bei, dass die Warnungen auf diesem Bildschirm nichts zum Handeln sind. Das
+Erneuern fasst **keinen Knoten an**: ein Knoten vertraut der Autorität, nicht
+einem bestimmten daraus ausgestellten Zertifikat. Das neue wird gegen einen
+Knoten bewiesen, bevor es gespeichert wird; schlägt das fehl, bleibt das alte
+liegen und nichts hat sich geändert. Diese Reihenfolge *ist* die Operation.
+
+**Rotation der Autorität selbst — nicht gebaut, und das steht in der README.**
+Sie ändert, wem jeder Knoten vertraut: neue Autorität in die akzeptierte Menge
+jedes Knotens, Konfiguration ausrollen, ausstellende Autorität umschalten,
+nochmal ausrollen, alte entfernen. Vier Durchläufe über jede Maschine, wobei
+ein Abbruch in der Mitte einen Cluster hinterlässt, der zwei Autoritäten
+vertraut, und eine falsche Reihenfolge einen, der keiner vertraut. Gegen
+talossim ginge das zu bauen; grün wäre es dann auch. Aber grün gegen einen
+Simulator und nie gegen Blech ist bei genau dieser Operation keine Aussage,
+auf die jemand handeln sollte — die Ausschlussbegründung aus v1.15 („eine
+CA-Rotation, die *fast* funktioniert, ist ein Cluster, den niemand mehr
+erreicht") bleibt wahr, auch wenn die Entscheidung, sie nicht zu bauen,
+überschrieben wurde. Was stattdessen da ist: die Ablehnung benennt den Fall.
+Wer extern rotiert hat, bekommt beim Erneuern „the certificate authority in
+this installation's store is no longer the one the cluster trusts" statt eines
+stillen Fehlschlags.
 
 ## C — was gebaut, aber hier nicht belegt werden kann
 

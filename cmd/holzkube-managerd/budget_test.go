@@ -648,6 +648,20 @@ var routeBudgets = []routeBudget{
 			"it is first because a refusal after the etcd leave would be a refusal in name.",
 	},
 	{
+		route: "POST /api/v1/clusters/{id}/client-certificate",
+		calls: []upstreamCall{
+			{name: "NewClusterClient: Version (proving the new certificate, first node that answers)", class: nodeProbeCall},
+		},
+		routeDeadline: handlers.EtcdRouteBudget,
+		verdict:       withinBudget,
+		clipping:      uncut,
+		why: "One connection, and it is the whole point of the route rather than an " +
+			"incidental read: the certificate is minted locally and written only after a node " +
+			"has answered through it. Every machine in the cluster is tried in turn, which is " +
+			"why the ceiling has room for more than one attempt -- a cluster where the first " +
+			"node happens to be switched off must not conclude that its certificate is bad.",
+	},
+	{
 		route: "GET /api/v1/clusters/{id}/scale",
 		calls: []upstreamCall{
 			{name: "NewClusterClient: Version", class: nodeProbeCall},
