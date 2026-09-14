@@ -144,7 +144,12 @@ func (s *Service) PlanTalos(ctx context.Context, cluster model.ClusterID, to str
 		return Plan{}, fmt.Errorf("upgrade: cluster %s has no machines in the inventory", cluster)
 	}
 
-	plan := Plan{Cluster: cluster, To: target.String()}
+	// Nodes is empty rather than nil: a cluster with no machines would
+	// otherwise send `"nodes": null`, and the browser's schema declares it
+	// z.array(...).default([]) -- a zod default applies to undefined and not
+	// to null, so the parse throws and the screen never renders. Same rule as
+	// the inventory handler's "never null".
+	plan := Plan{Cluster: cluster, To: target.String(), Nodes: make([]NodePlan, 0)}
 
 	// The chain first, because a target two minors away is not one run and the
 	// operator has to see that before anything else on this screen means what
@@ -320,7 +325,7 @@ func (s *Service) PlanKubernetes(ctx context.Context, cluster model.ClusterID, t
 		return Plan{}, fmt.Errorf("upgrade: cluster %s has no machines in the inventory", cluster)
 	}
 
-	plan := Plan{Cluster: cluster, To: target.String()}
+	plan := Plan{Cluster: cluster, To: target.String(), Nodes: make([]NodePlan, 0)}
 
 	from, ok := lowestKubernetes(machines)
 	if !ok {

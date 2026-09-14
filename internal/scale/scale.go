@@ -127,11 +127,24 @@ type Candidate struct {
 
 // Make computes the plan. It reaches nothing.
 func Make(in Input) Plan {
+	// Empty rather than nil, and this is a wire decision rather than a style
+	// one. Go marshals a nil slice as null; the browser's schemas declare
+	// these as z.array(...).default([]), and a zod default applies to
+	// undefined and not to null. A cluster with no machines -- the first one
+	// an operator ever looks at -- therefore sent three nulls, the parse
+	// threw, the query retried, and the panel sat on its loading line with
+	// nothing in the console or the log.
+	//
+	// The contract states the rule in the inventory handler: "Never null: a
+	// null reads to a client as 'the server did not check', which is a weaker
+	// claim than 'there are none'."
 	p := Plan{
 		Cluster:        in.Cluster.ID,
 		Name:           in.Cluster.Name,
 		MembersProblem: in.MembersProblem,
 		MembersKnown:   in.MembersProblem == "",
+		Removals:       make([]Removal, 0, len(in.Nodes)),
+		Additions:      make([]Candidate, 0, len(in.Spare)),
 	}
 	if p.MembersKnown {
 		p.Voting = in.Members.VotingCount
@@ -223,6 +236,7 @@ func offer(n Node) Candidate {
 // numbers rather than asserting a conclusion, because an operator who is told
 // "add two" and not why will add one.
 func advise(p Plan) []string {
+	out := make([]string, 0, 3)
 	if !p.MembersKnown {
 		// MembersProblem is a whole clause written by whoever failed to read
 		// the membership, not a fragment to introduce. Prefixing it produced
@@ -230,10 +244,9 @@ func advise(p Plan) []string {
 		// etcd's membership could not be read (...)" -- which no test caught,
 		// because every test here supplies its own short problem string and
 		// only the running server supplies the real one.
-		return []string{p.MembersProblem + ", so nothing here counts votes."}
+		return append(out, p.MembersProblem+", so nothing here counts votes.")
 	}
 
-	var out []string
 	switch {
 	case p.Voting == 0:
 		out = append(out, "etcd reports no voting members. That is not a cluster this can "+

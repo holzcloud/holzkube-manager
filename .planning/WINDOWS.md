@@ -2,9 +2,9 @@
 schema_version: 1
 open_count: 61
 waived_count: 0
-fixed_count: 53
-total_count: 114
-last_updated: 2026-09-14T07:45:00.000Z
+fixed_count: 54
+total_count: 115
+last_updated: 2026-09-14T08:10:00.000Z
 ---
 
 # Broken Windows Ledger
@@ -137,6 +137,7 @@ last_updated: 2026-09-14T07:45:00.000Z
 | 113 | 16 | deviation | internal/scale/scale.go |  | EIN SATZ STAND ZWEIMAL DA, UND ZWAR NUR IM LAUFENDEN SERVER. Die Skalierungs-Ansicht gab aus: "etcd's membership could not be read, so nothing here counts votes. etcd's membership could not be read (upgrade: this cluster has no control-plane node in the inventory)." Der Handler schreibt MembersProblem als vollstaendigen Satzteil, und advise() stellte ihm seine eigene Kopie desselben Satzes voran. Kein Test hat es gesehen, weil jeder Test hier seinen eigenen kurzen Problemtext uebergibt und nur der echte Server den echten liefert -- gefunden, indem holzkubectl gegen das laufende Binary lief. | fixed | GESCHLOSSEN 2026-09-14. MembersProblem besitzt seinen Satz; advise() haengt nur noch den Nachsatz an. Der Test uebergibt jetzt die Form, die der Server wirklich erzeugt, und zaehlt die Wiederholung. | 2026-09-14T07:30:00.000Z | 2026-09-14T07:30:00.000Z |
 
 | 114 | 16 | deviation | web/vite.config.ts |  | ZWEI SCHRIFTSCHNITTE WURDEN VON DER EIGENEN CONTENT-SECURITY-POLICY BLOCKIERT, UND NICHTS HAT ES GEMELDET. Der Server liefert font-src 'self'; der Bundler inlined jedes Asset unterhalb seines Groessenlimits als data:-URI, und die beiden kleinsten Schriftschnitte -- die kyrillisch-erweiterten Schnitte beider Familien -- fielen darunter. Der Browser verweigert sie also, und jeder Text, der sie braucht, faellt auf eine Systemschrift zurueck. Nichts schlaegt fehl: die Seite rendert, die Anfragen werden nie gestellt, der Server loggt nichts, und jeder Test in diesem Repository war gruen. Sichtbar ist es an genau einer Stelle -- in der Konsole eines Browsers, der das echte Bundle geladen hat, und genau dort wurde es gefunden. | fixed | GESCHLOSSEN 2026-09-14. assetsInlineLimit: 0 -- die Policy ist die strenge, und der Build ist das, was nachgeben soll. internal/httpapi/assets_test.go haelt das Bundle jetzt gegen die Policy, die dieses Paket selbst ausliefert (gelesen, nicht nacherzaehlt), und prueft zusaetzlich, dass ueberhaupt Schriftdateien da sind -- sonst waere 'keine Schriften' auch gruen. Fehler rot gesehen: Inline-Limit wieder hochgesetzt, Bundle neu gebaut, Waechter meldet die Datei und die Policy. | 2026-09-14T07:45:00.000Z | 2026-09-14T07:45:00.000Z |
+| 115 | 16 | deviation | internal/scale/scale.go |  | VIER READ-MODELLE SCHICKTEN null STATT EINER LEEREN LISTE, UND ZWAR GENAU IM LEERSTEN FALL -- DEM ERSTEN, DEN EIN BEDIENER SIEHT. Go marshalt eine nil-Slice als null; die Schemata der Oberflaeche deklarieren diese Felder als z.array(...).default([]), und ein zod-Default greift bei undefined und nicht bei null. Der Parse wirft also, TanStack Query wiederholt, und die Ansicht bleibt auf ihrer Ladezeile stehen. NICHTS MELDET ETWAS: ein 200 ging hinaus, im Server-Log steht kein Fehler, in der Browser-Konsole steht kein Fehler, jeder Test in diesem Repository war gruen -- weil jeder Test seine Fixtures mit gefuellten Listen liefert. Betroffen: scale.Plan (Removals, Additions, Advice), clustertemplate.Plan (Problems, Notes), clustertemplate.NodeSetPlan (Machines), upgrade.Plan (Nodes). Der Vertrag sagt die Regel selbst, im Inventory-Handler: 'Never null: a null reads to a client as "the server did not check", which is a weaker claim than "there are none".' Gefunden durch Klicken im echten Browser gegen einen echten Server. | fixed | GESCHLOSSEN 2026-09-14. Jede der vier Stellen konstruiert ihre Listen jetzt mit make(..., 0). internal/httpapi/readmodel_test.go marshalt die ECHTEN Leerfall-Ausgaben der Funktionen (nicht Zero-Values, die nur die Struktur bewiesen) und sucht null in den Listenfeldern; ein zweiter Test reflektiert ueber die vier Structs, damit eine neu hinzugefuegte Liste hier eine Entscheidung von jemandem ist statt eines stillen Ausrutschers. Fehler in allen vier Paketen rot gesehen. | 2026-09-14T08:10:00.000Z | 2026-09-14T08:10:00.000Z |
 
 ````json
 [
@@ -1507,6 +1508,18 @@ last_updated: 2026-09-14T07:45:00.000Z
     "reason": "GESCHLOSSEN 2026-09-14. assetsInlineLimit: 0 -- die Policy ist die strenge, und der Build ist das, was nachgeben soll. internal/httpapi/assets_test.go haelt das Bundle jetzt gegen die Policy, die dieses Paket selbst ausliefert (gelesen, nicht nacherzaehlt), und prueft zusaetzlich, dass ueberhaupt Schriftdateien da sind -- sonst waere 'keine Schriften' auch gruen. Fehler rot gesehen: Inline-Limit wieder hochgesetzt, Bundle neu gebaut, Waechter meldet die Datei und die Policy.",
     "recorded_at": "2026-09-14T07:45:00.000Z",
     "resolved_at": "2026-09-14T07:45:00.000Z"
+  },
+  {
+    "id": 115,
+    "kind": "deviation",
+    "phase": "16",
+    "file": "internal/scale/scale.go",
+    "line": null,
+    "description": "VIER READ-MODELLE SCHICKTEN null STATT EINER LEEREN LISTE, UND ZWAR GENAU IM LEERSTEN FALL -- DEM ERSTEN, DEN EIN BEDIENER SIEHT. Go marshalt eine nil-Slice als null; die Schemata der Oberflaeche deklarieren diese Felder als z.array(...).default([]), und ein zod-Default greift bei undefined und nicht bei null. Der Parse wirft also, TanStack Query wiederholt, und die Ansicht bleibt auf ihrer Ladezeile stehen. NICHTS MELDET ETWAS: ein 200 ging hinaus, im Server-Log steht kein Fehler, in der Browser-Konsole steht kein Fehler, jeder Test in diesem Repository war gruen -- weil jeder Test seine Fixtures mit gefuellten Listen liefert. Betroffen: scale.Plan (Removals, Additions, Advice), clustertemplate.Plan (Problems, Notes), clustertemplate.NodeSetPlan (Machines), upgrade.Plan (Nodes). Der Vertrag sagt die Regel selbst, im Inventory-Handler: 'Never null: a null reads to a client as \"the server did not check\", which is a weaker claim than \"there are none\".' Gefunden durch Klicken im echten Browser gegen einen echten Server.",
+    "status": "fixed",
+    "reason": "GESCHLOSSEN 2026-09-14. Jede der vier Stellen konstruiert ihre Listen jetzt mit make(..., 0). internal/httpapi/readmodel_test.go marshalt die ECHTEN Leerfall-Ausgaben der Funktionen (nicht Zero-Values, die nur die Struktur bewiesen) und sucht null in den Listenfeldern; ein zweiter Test reflektiert ueber die vier Structs, damit eine neu hinzugefuegte Liste hier eine Entscheidung von jemandem ist statt eines stillen Ausrutschers. Fehler in allen vier Paketen rot gesehen.",
+    "recorded_at": "2026-09-14T08:10:00.000Z",
+    "resolved_at": "2026-09-14T08:10:00.000Z"
   }
 ]
 ````
