@@ -1279,6 +1279,90 @@ Turning the list into a class is the operator's edit, and it is one line. The
 machines are sorted, so two exports of one cluster are the same file and a diff
 between them means something.
 
+## Provisioning: the installer reference, SecureBoot and disk encryption
+
+### The installer reference is resolved, never assembled
+
+`.machine.install.image` is resolved against the Image Factory when the plan is
+made and carried on the request from there, so the reference an operator
+confirmed is the reference the job writes.
+
+It used to be assembled by hand as
+`factory.talos.dev/installer/<id>:<version>`, and that string was wrong in three
+ways at once, each silent:
+
+- **SecureBoot was not in it.** A machine booted from a SecureBoot ISO installed
+  a system that is not SecureBoot. Talos requires the SecureBoot installer for
+  that install — it carries the signed UKI and systemd-boot, and no
+  machine-config flag substitutes for it. `internal/imagefactory` names this
+  pairing as "the ISO/installer drift this file's own comments warn about,
+  arriving from the one direction nothing checked"; provisioning was that
+  direction.
+- **The repository name was assumed.** `internal/imagefactory` keeps an ordered
+  candidate list (`metal-installer`, then the legacy `installer`, each with the
+  SecureBoot suffix when asked for) because which one answers varies by version,
+  and warns when it had to fall back. The hand-built string took the legacy name
+  unconditionally.
+- **The Factory host was hard-coded**, so an installation pointed at a private
+  Factory with `--image-factory` provisioned nodes that pulled their installer
+  from the public one.
+
+A schematic named on a plan therefore now requires a configured Factory, and a
+failure to resolve is a **refusal with no reference** rather than a fallback —
+the same decision `internal/imagefactory` already made for the asset panel.
+Substituting the ordinary installer produces a node that installs, joins, and is
+not SecureBoot, with nothing afterwards saying so. A machine with no schematic
+gets Talos's own published installer; there is nothing to resolve for it.
+
+**`secureboot` is stated by the operator.** A schematic id does not carry it —
+one id resolves under `metal-installer` and `metal-installer-secureboot` to two
+different images, picked by repository name alone — so the only party who knows
+which image was written to the USB stick is whoever wrote it.
+
+The architecture comes from the **stored schematic record**, never from a
+constant (FACT-03).
+
+> **Not fixed here:** `upgrade.InstallerFor` still assembles the reference the
+> same way, so upgrading a SecureBoot node installs the ordinary installer and
+> takes SecureBoot away from a node that had it. Fixing it means first reading
+> whether a node booted SecureBoot, which Talos exposes as a resource and
+> nothing here reads. It is recorded as an open window.
+
+### Disk encryption
+
+`POST /api/v1/provision/plan` and `/apply` accept an `encryption` object:
+`{"state": bool, "ephemeral": bool, "kind": "nodeID"|"tpm"}`. It emits Talos
+`VolumeConfig` documents for the named system volumes alongside the machine
+configuration.
+
+**It applies at install and nowhere else.** Talos encrypts a system volume when
+the volume is empty — "before mounting the partition, format and encrypt it;
+this occurs only if the partition is empty and has no filesystem". Handing the
+same configuration to an installed node does not encrypt what is on it, does not
+fail, and does not warn. That is why there is no route that turns encryption on
+for a running machine: it would report success and change nothing, which is the
+worst failure a security control can have.
+
+Two of Talos's four key kinds are offered and two are refused by name, with
+reasons rather than as unrecognised values:
+
+| kind | |
+|---|---|
+| `nodeID` | offered. Protects a drive that leaves the machine and nothing else; the response sentence says so. |
+| `tpm` | offered **only with `secureboot`**. The seal is a statement about which kernel booted, and without SecureBoot that measurement can be produced by a kernel somebody else chose. The combination is refused rather than quietly downgraded — and this product can make that check because it knows which image the node is about to boot. |
+| `static` | refused. Talos stores the STATE volume's encryption configuration in META in cleartext, so a passphrase written there is a passphrase on the disk it protects — and it would also be in this installation's store and in every backup of it. |
+| `kms` | refused. It is the strongest of the four, and offering it would mean holzkube-manager runs that key server: a node whose key server is down does not boot. This product runs outside the cluster so that it is there in the failure where the cluster is not; a fleet that cannot boot without it would be the opposite arrangement. |
+
+EPHEMERAL is written with `lockToState`, which Talos recommends: wiping or
+replacing STATE then leaves EPHEMERAL unreadable rather than leaving workload
+data recoverable by whoever supplies a new STATE. STATE is not, because a volume
+cannot be locked to itself — and that rule is left to Talos's own validator
+rather than restated, since two places saying it is two places to disagree.
+
+The documents are built from machinery's own types and validated by Talos's
+parser, not written as YAML text. A hand-written document Talos ignores is the
+same outcome as no encryption at all, and it looks like success.
+
 ## Renewing this installation's client certificate
 
 `POST /api/v1/clusters/{id}/client-certificate` issues holzkube-manager a fresh

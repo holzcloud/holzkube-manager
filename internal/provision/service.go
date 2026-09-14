@@ -116,7 +116,7 @@ func (s *Service) Plan(ctx context.Context, req Request) (Preview, error) {
 	p := Preview{
 		Request:            req,
 		Warnings:           warnings,
-		InstallImage:       InstallImage(req.SchematicID, req.TalosVersion),
+		InstallImage:       req.InstallerImage,
 		ControlPlaneAfter:  existing,
 		Bootstrap:          req.ControlPlane && existing == 0,
 		CNINotice:          CNINotice,

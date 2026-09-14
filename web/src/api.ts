@@ -1250,6 +1250,32 @@ export interface ProvisionRequest {
   fingerprint?: string
   hostname?: string
   patch_ids?: string[]
+
+  /**
+   * Whether this machine booted the SecureBoot variant of its schematic.
+   *
+   * A schematic id does not carry it — one id resolves under `metal-installer`
+   * and `metal-installer-secureboot` to two different images, picked by
+   * repository name alone — so the only party who knows is whoever wrote the
+   * USB stick. It selects the installer, which Talos requires to match: the
+   * ordinary installer does not produce a SecureBoot node.
+   */
+  secureboot?: boolean
+
+  /**
+   * Encrypt the node's system volumes at install.
+   *
+   * At install, and only then. Talos encrypts a system volume when the volume
+   * is empty, so this is the one moment in a machine's life when the answer
+   * can still be yes — a node that is already installed keeps its plaintext
+   * partitions and reports nothing.
+   */
+  encryption?: {
+    state: boolean
+    ephemeral: boolean
+    /** `nodeID` or `tpm`. The server answers `static` and `kms` with reasons. */
+    kind: string
+  }
 }
 
 export const bootstrapIntentSchema = z.object({

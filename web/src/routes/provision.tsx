@@ -10,6 +10,7 @@ import {
   type ProvisionPreview,
   type ProvisionRequest,
 } from '@/api'
+import { DiskEncryption } from '@/components/DiskEncryption'
 import { Problem } from '@/components/Problem'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -265,6 +266,12 @@ function PlanStep({ candidate, onBack }: { candidate: Candidate; onBack: () => v
   const [version, setVersion] = useState(candidate.talos_version)
   const [hostname, setHostname] = useState('')
   const [typed, setTyped] = useState('')
+  const [secureBoot, setSecureBoot] = useState(false)
+  const [encryptState, setEncryptState] = useState(false)
+  const [encryptEphemeral, setEncryptEphemeral] = useState(false)
+  const [encryptKind, setEncryptKind] = useState('nodeID')
+
+  const encrypting = encryptState || encryptEphemeral
 
   const request: ProvisionRequest = {
     cluster,
@@ -276,6 +283,10 @@ function PlanStep({ candidate, onBack }: { candidate: Candidate; onBack: () => v
     talos_version: version.trim(),
     fingerprint: candidate.fingerprint,
     hostname: hostname.trim(),
+    secureboot: secureBoot,
+    encryption: encrypting
+      ? { state: encryptState, ephemeral: encryptEphemeral, kind: encryptKind }
+      : undefined,
   }
 
   const plan = useMutation({ mutationFn: () => api.provision.plan(request) })
@@ -381,6 +392,26 @@ function PlanStep({ candidate, onBack }: { candidate: Candidate; onBack: () => v
             </div>
 
             <div className="space-y-1.5 sm:col-span-2">
+              <label className="flex items-start gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  className="mt-1"
+                  checked={secureBoot}
+                  onChange={(e) => setSecureBoot(e.target.checked)}
+                />
+                <span>
+                  This machine booted the <strong>SecureBoot</strong> image
+                  <span className="block text-xs text-muted-foreground">
+                    A schematic id does not say which variant was written to the USB stick — one id
+                    builds both — so this is the only place that knows. It picks the installer, and
+                    Talos requires it to match: the ordinary installer does not produce a SecureBoot
+                    node.
+                  </span>
+                </span>
+              </label>
+            </div>
+
+            <div className="space-y-1.5 sm:col-span-2">
               <Label htmlFor="provision-hostname">Hostname (optional)</Label>
               <Input
                 id="provision-hostname"
@@ -391,6 +422,16 @@ function PlanStep({ candidate, onBack }: { candidate: Candidate; onBack: () => v
           </div>
 
           <DiskPicker disks={candidate.disks} chosen={disk} onChoose={setDisk} />
+
+          <DiskEncryption
+            state={encryptState}
+            ephemeral={encryptEphemeral}
+            kind={encryptKind}
+            secureBoot={secureBoot}
+            onState={setEncryptState}
+            onEphemeral={setEncryptEphemeral}
+            onKind={setEncryptKind}
+          />
 
           <Button disabled={plan.isPending || !cluster || !disk} onClick={() => plan.mutate()}>
             {plan.isPending ? 'Checking…' : 'Show me what this would do'}

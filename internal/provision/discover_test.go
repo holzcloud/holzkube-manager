@@ -181,13 +181,14 @@ func TestAnEvenControlPlaneCountIsWarnedAbout(t *testing.T) {
 	t.Parallel()
 
 	base := provision.Request{
-		Addr:         "10.0.0.5",
-		UUID:         testMachine,
-		Cluster:      testCluster,
-		InstallDisk:  "/dev/nvme0n1",
-		TalosVersion: "v1.13.9",
-		SchematicID:  "abc",
-		ControlPlane: true,
+		Addr:           "10.0.0.5",
+		UUID:           testMachine,
+		Cluster:        testCluster,
+		InstallDisk:    "/dev/nvme0n1",
+		TalosVersion:   "v1.13.9",
+		SchematicID:    "abc",
+		InstallerImage: "factory.example/metal-installer/abc:v1.13.9",
+		ControlPlane:   true,
 	}
 
 	// One existing control-plane node, so this would make two.
@@ -217,15 +218,47 @@ func TestAnEvenControlPlaneCountIsWarnedAbout(t *testing.T) {
 	}
 }
 
+// TestAPlanWithoutAnInstallerReferenceIsRefused.
+//
+// The reference is resolved against the Image Factory when the plan is made
+// and carried from there, so a request arriving here without one is a request
+// that would install whatever a default produced. It used to be assembled from
+// parts at install time, which is how the string that was confirmed and the
+// string that was written came to be able to differ.
+func TestAPlanWithoutAnInstallerReferenceIsRefused(t *testing.T) {
+	t.Parallel()
+
+	req := provision.Request{
+		Addr:         "10.0.0.5",
+		UUID:         testMachine,
+		Cluster:      testCluster,
+		InstallDisk:  "/dev/nvme0n1",
+		TalosVersion: "v1.13.9",
+		SchematicID:  "abc",
+	}
+	_, err := req.Validate(0)
+	if err == nil {
+		t.Fatal("a plan with no installer reference was accepted")
+	}
+	if !strings.Contains(err.Error(), "installer reference") {
+		t.Errorf("the refusal does not name what is missing: %v", err)
+	}
+
+	req.InstallerImage = "factory.example/metal-installer/abc:v1.13.9"
+	if _, err := req.Validate(0); err != nil {
+		t.Errorf("a complete plan was refused: %v", err)
+	}
+}
+
 // TestAPlanWithoutItsIdentityIsRefused pins the field PROV-05's check compares
 // against: without it there is nothing to verify and the check is decoration.
 func TestAPlanWithoutItsIdentityIsRefused(t *testing.T) {
 	t.Parallel()
 
 	incomplete := []provision.Request{
-		{Addr: "10.0.0.5", Cluster: testCluster, InstallDisk: "/dev/sda", TalosVersion: "v1.13.9"},
-		{UUID: testMachine, Cluster: testCluster, InstallDisk: "/dev/sda", TalosVersion: "v1.13.9"},
-		{Addr: "10.0.0.5", UUID: testMachine, InstallDisk: "/dev/sda", TalosVersion: "v1.13.9"},
+		{Addr: "10.0.0.5", Cluster: testCluster, InstallDisk: "/dev/sda", TalosVersion: "v1.13.9", InstallerImage: "i"},
+		{UUID: testMachine, Cluster: testCluster, InstallDisk: "/dev/sda", TalosVersion: "v1.13.9", InstallerImage: "i"},
+		{Addr: "10.0.0.5", UUID: testMachine, InstallDisk: "/dev/sda", TalosVersion: "v1.13.9", InstallerImage: "i"},
 		{Addr: "10.0.0.5", UUID: testMachine, Cluster: testCluster, TalosVersion: "v1.13.9"},
 		{Addr: "10.0.0.5", UUID: testMachine, Cluster: testCluster, InstallDisk: "/dev/sda"},
 	}

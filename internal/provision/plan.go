@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/holzcloud/holzkube-manager/internal/diskencryption"
 	"github.com/holzcloud/holzkube-manager/internal/model"
 	"github.com/holzcloud/holzkube-manager/internal/talos"
 )
@@ -161,6 +162,45 @@ type Request struct {
 
 	// PatchIDs are stored patches applied to the generated configuration.
 	PatchIDs []string `json:"patch_ids,omitempty"`
+
+	// Encryption, when set, encrypts the node's system volumes at install.
+	//
+	// At install, and only then: Talos encrypts a system volume when the
+	// volume is empty, so this is the one moment in a machine's life when the
+	// answer can still be yes. A node that is already installed cannot be
+	// encrypted by changing its configuration -- it keeps its plaintext
+	// partitions and reports nothing -- which is why this lives on the
+	// provisioning request rather than anywhere a running node can be reached.
+	Encryption *diskencryption.Request `json:"encryption,omitempty"`
+
+	// SecureBoot says the machine booted the SecureBoot variant of its
+	// schematic.
+	//
+	// A schematic id does not carry it: one id resolves under
+	// `metal-installer` and under `metal-installer-secureboot` to two
+	// different images, picked by repository name alone. So the only party who
+	// knows is whoever wrote the USB stick, and this is their answer.
+	SecureBoot bool `json:"secureboot,omitempty"`
+
+	// InstallerImage is the exact reference `.machine.install.image` gets.
+	//
+	// It is **resolved** rather than built, by the Image Factory client, and
+	// carried on the request so that the reference an operator confirmed is
+	// the reference that gets written. It replaced a hand-assembled string
+	// that was wrong in three ways at once, each of them silent:
+	//
+	//   - it never carried SecureBoot, so a machine booted from a SecureBoot
+	//     ISO installed a system that is not SecureBoot. Talos requires the
+	//     SecureBoot installer for that -- it carries the signed UKI and
+	//     systemd-boot, and no machine-config flag substitutes for it.
+	//   - it hard-coded the legacy `installer` repository rather than asking
+	//     which name answers. internal/imagefactory keeps an ordered candidate
+	//     list precisely because the answer varies, and warns when it had to
+	//     fall back.
+	//   - it hard-coded `factory.talos.dev`, so an installation pointed at a
+	//     private Factory with --image-factory provisioned nodes that pull
+	//     their installer from the public one.
+	InstallerImage string `json:"installer_image,omitempty"`
 }
 
 // Validate checks a request against the cluster it is for.
@@ -178,6 +218,11 @@ func (r Request) Validate(controlPlaneCount int) (warnings []string, err error) 
 	}
 	if r.Cluster == "" {
 		return nil, errors.New("provision: name the cluster this machine joins")
+	}
+	if r.InstallerImage == "" {
+		return nil, errors.New("provision: the plan carries no installer reference. It is " +
+			"resolved against the Image Factory rather than assembled here, and a request that " +
+			"reaches this point without one would install whatever a default produced")
 	}
 	if r.InstallDisk == "" {
 		return nil, errors.New("provision: choose the disk Talos installs to")
@@ -205,22 +250,65 @@ func (r Request) Validate(controlPlaneCount int) (warnings []string, err error) 
 		}
 	}
 
+	if r.Encryption != nil && r.Encryption.Enabled() {
+		if err := r.Encryption.Validate(r.SecureBoot); err != nil {
+			return nil, err
+		}
+		// Not a refusal. Encrypting one system volume and not the other is a
+		// choice an operator can mean, and the sentence says which one is left
+		// in the clear -- but it belongs on the confirmation screen rather
+		// than only in a field somebody ticked two steps earlier.
+		if !r.Encryption.State || !r.Encryption.Ephemeral {
+			warnings = append(warnings, r.Encryption.Sentence())
+		}
+	}
+
 	return warnings, nil
 }
 
-// InstallImage is the installer reference `.machine.install.image` gets
-// (PROV-08).
+// InstallImage builds an installer reference by hand.
 //
-// It is derived from the *same* schematic id as the ISO, and that is the whole
-// point of the function existing rather than the caller writing the string.
-// A machine that boots an ISO with system extensions and then installs a stock
-// installer comes up without them -- the install succeeds, the node joins, and
-// the extensions are simply gone. Nothing reports it.
+// **It is wrong in three ways and it is still here because one caller has no
+// better option yet.** Provisioning stopped using it: a plan now carries a
+// reference resolved by imagefactory.Client.InstallerImage, which asks which
+// repository name answers, carries SecureBoot, and builds against the Factory
+// this installation was configured with. The upgrade path cannot do the same
+// thing yet, because it would first have to read whether the node it is
+// upgrading booted SecureBoot -- Talos exposes that as a resource and nothing
+// here reads it -- so upgrade.InstallerFor still calls this.
+//
+// The three:
+//
+//   - **SecureBoot is not in it.** Upgrading a SecureBoot node with the
+//     ordinary installer produces a node that is no longer SecureBoot. Talos
+//     requires the SecureBoot installer for that install; no machine-config
+//     flag substitutes for it.
+//   - **The repository name is assumed**, not resolved. internal/imagefactory
+//     keeps an ordered candidate list because which name answers varies, and
+//     it warns when it falls back.
+//   - **The Factory host is hard-coded**, so an installation pointed at a
+//     private Factory upgrades nodes from the public one.
+//
+// See .planning/WINDOWS.md for the entry that closes when the upgrade path
+// reads a node's SecureBoot state.
 func InstallImage(schematicID, talosVersion string) string {
 	if schematicID == "" {
-		return "ghcr.io/siderolabs/installer:" + talosVersion
+		return StockInstaller(talosVersion)
 	}
 	return "factory.talos.dev/installer/" + schematicID + ":" + talosVersion
+}
+
+// StockInstaller is the reference for a machine that was not built from an
+// Image Factory schematic (PROV-08).
+//
+// It is the one case where there is nothing to resolve: no schematic means no
+// Factory repository, and Talos's own published installer is the answer. Every
+// other case goes through imagefactory.Client.InstallerImage, which asks which
+// repository name answers rather than assuming one, carries SecureBoot, and
+// builds the reference against the Factory this installation was actually
+// configured with.
+func StockInstaller(talosVersion string) string {
+	return "ghcr.io/siderolabs/installer:" + talosVersion
 }
 
 // VerifyMachine is PROV-05: the identity check immediately before the write.

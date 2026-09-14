@@ -24,6 +24,7 @@ import (
 	"github.com/holzcloud/holzkube-manager/internal/auth"
 	"github.com/holzcloud/holzkube-manager/internal/httpapi"
 	"github.com/holzcloud/holzkube-manager/internal/httpapi/handlers"
+	"github.com/holzcloud/holzkube-manager/internal/imagefactory"
 	"github.com/holzcloud/holzkube-manager/internal/inventory"
 	"github.com/holzcloud/holzkube-manager/internal/jobs"
 	"github.com/holzcloud/holzkube-manager/internal/machineconfig"
@@ -76,6 +77,7 @@ type harnessConfig struct {
 	registerProvisionJob func(*jobs.Engine, *harness)
 	upgrade              func(*harness) *upgrade.Service
 	allowedHosts         []string
+	factoryBase          string
 }
 
 // withAllowedHosts turns the host allowlist on.
@@ -90,6 +92,15 @@ func withAllowedHosts(hosts ...string) harnessOpt {
 // withInventory adds an inventory service built over the harness's store.
 func withInventory(build func(store *fsstore.Store) *inventory.Service) harnessOpt {
 	return func(c *harnessConfig) { c.inventory = build }
+}
+
+// withFactory points the harness at an Image Factory.
+//
+// It exists because provisioning stopped assembling installer references by
+// hand: a plan that names a schematic now resolves its installer against the
+// Factory, so a test about that path needs one to answer.
+func withFactory(base string) harnessOpt {
+	return func(c *harnessConfig) { c.factoryBase = base }
 }
 
 // withStreaming adds the hub, the node-stream manager and the stream route.
@@ -190,6 +201,13 @@ func newHarness(t *testing.T, opts ...harnessOpt) *harness {
 		SudoWindow:   5 * time.Minute,
 		AuditChain:   httpapi.ChainStatus{OK: chainOK, BrokenAtLine: brokenLine, File: chainFile},
 		AllowedHosts: cfg.allowedHosts,
+	}
+	if cfg.factoryBase != "" {
+		fc, err := imagefactory.New(cfg.factoryBase)
+		if err != nil {
+			t.Fatalf("imagefactory.New: %v", err)
+		}
+		deps.Factory = fc
 	}
 	h2 := &harness{}
 

@@ -255,8 +255,13 @@ func buildConfig(ctx context.Context, d Deps, req Request) ([]byte, error) {
 	// writes, and the image comes from the *same* schematic id as the ISO
 	// (PROV-08). A machine that boots an ISO with extensions and installs a
 	// stock installer comes up without them, and nothing reports it.
+	// req.InstallerImage, verbatim. It was resolved when the plan was made and
+	// shown on the screen the operator confirmed, so what gets installed is
+	// what they agreed to -- rather than a string rebuilt here from parts,
+	// which is how the reference and the confirmation came to be able to
+	// disagree.
 	install := fmt.Sprintf("machine:\n  install:\n    disk: %s\n    image: %s\n",
-		req.InstallDisk, InstallImage(req.SchematicID, req.TalosVersion))
+		req.InstallDisk, req.InstallerImage)
 	patches = append(patches, install)
 
 	if req.Hostname != "" {
@@ -279,6 +284,8 @@ func buildConfig(ctx context.Context, d Deps, req Request) ([]byte, error) {
 		TalosVersion:      contractOf(req.TalosVersion),
 		KubernetesVersion: kubernetes,
 		Patches:           patches,
+		Encryption:        req.Encryption,
+		SecureBoot:        req.SecureBoot,
 	})
 }
 
@@ -327,7 +334,15 @@ func isAlready(err error) bool {
 //
 // They are stored so that a resumed job provisions the machine that was asked
 // for rather than a default -- the same reason a reset stores its flags.
-func (r Request) Params() map[string]string {
+//
+// It returns an error, and that is a change made for the encryption
+// parameter's sake. The patch list used to be marshalled with its error
+// discarded, on the reasoning that marshalling a slice of strings cannot fail;
+// the same shape for the encryption request would mean an operator who asked
+// for encrypted volumes, watched the job start, and got a plaintext node with
+// nothing reported. "It cannot fail" is the reasoning that produces silent
+// failures, so neither is written that way now.
+func (r Request) Params() (map[string]string, error) {
 	out := map[string]string{
 		"addr":          r.Addr,
 		"uuid":          string(r.UUID),
@@ -335,6 +350,12 @@ func (r Request) Params() map[string]string {
 		"control_plane": strconv.FormatBool(r.ControlPlane),
 		"install_disk":  r.InstallDisk,
 		"talos_version": r.TalosVersion,
+
+		// The resolved reference, stored like every other decision this job
+		// was given. Re-resolving it on resume would ask the Factory a
+		// question whose answer may have moved, and install something the
+		// operator never saw.
+		"installer_image": r.InstallerImage,
 	}
 	if r.SchematicID != "" {
 		out["schematic_id"] = r.SchematicID
@@ -347,11 +368,20 @@ func (r Request) Params() map[string]string {
 	}
 	if len(r.PatchIDs) > 0 {
 		raw, err := json.Marshal(r.PatchIDs)
-		if err == nil {
-			out["patch_ids"] = string(raw)
+		if err != nil {
+			return nil, fmt.Errorf("provision: store the patch ids: %w", err)
 		}
+		out["patch_ids"] = string(raw)
 	}
-	return out
+	if r.Encryption != nil && r.Encryption.Enabled() {
+		raw, err := json.Marshal(r.Encryption)
+		if err != nil {
+			return nil, fmt.Errorf("provision: store the encryption request: %w", err)
+		}
+		out["encryption"] = string(raw)
+		out["secureboot"] = strconv.FormatBool(r.SecureBoot)
+	}
+	return out, nil
 }
 
 // RequestFromParams reads a request back.
@@ -378,6 +408,26 @@ func RequestFromParams(params map[string]string) (Request, error) {
 		if err := json.Unmarshal([]byte(raw), &r.PatchIDs); err != nil {
 			return Request{}, fmt.Errorf("provision: the stored patch ids do not parse: %w", err)
 		}
+	}
+	if raw := params["encryption"]; raw != "" {
+		// Stored and read back rather than recomputed, for the reason JOB-07
+		// gives about every other parameter: a job resumed with a default
+		// runs an operation nobody asked for -- and here the default is "no
+		// encryption", which would silently install a plaintext node for an
+		// operator who asked for an encrypted one and watched the job start.
+		if err := json.Unmarshal([]byte(raw), &r.Encryption); err != nil {
+			return Request{}, fmt.Errorf("provision: the stored encryption request does not parse: %w", err)
+		}
+	}
+	if v := params["installer_image"]; v != "" {
+		r.InstallerImage = v
+	}
+	if raw := params["secureboot"]; raw != "" {
+		v, err := strconv.ParseBool(raw)
+		if err != nil {
+			return Request{}, fmt.Errorf("provision: the stored secureboot flag does not parse: %w", err)
+		}
+		r.SecureBoot = v
 	}
 
 	if _, err := r.Validate(0); err != nil {

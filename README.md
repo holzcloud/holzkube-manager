@@ -500,6 +500,57 @@ Every condition has to hold. A class with no conditions is refused rather than
 stored — it would match nothing, and the reading that makes it match everything
 is the one that costs a cluster.
 
+### Encrypting a node's disks
+
+A machine being provisioned can have its system volumes encrypted with LUKS2 —
+**STATE**, which holds the node's own secrets and certificates, and
+**EPHEMERAL**, which holds whatever the workloads write.
+
+**It is decided at install or not at all.** Talos encrypts a system volume while
+the volume is empty; handing the same configuration to a node that is already
+installed does not encrypt what is on it, does not fail, and does not warn. So
+this is a checkbox on the provisioning screen and there is deliberately no way
+to turn it on later — a switch that reported success and changed nothing would
+be worse than no switch.
+
+Two key kinds are offered:
+
+- **derived from the machine (`nodeID`)** — protects a drive that leaves the
+  machine: a disposal, a warranty return, a stolen disk. It does not protect
+  against anyone who has the machine, and the screen says so next to the choice.
+- **sealed by the TPM** — strong, and only with SecureBoot. The seal is a
+  statement about which kernel booted, and without SecureBoot that measurement
+  can be produced by a kernel somebody else chose. holzkube-manager knows which
+  image the node is about to boot, so it refuses the combination rather than
+  installing the weaker thing quietly.
+
+Two are refused, with the reason rather than a validation error:
+
+- **a passphrase in the configuration** — Talos stores the STATE volume's
+  encryption config in META in cleartext, so the passphrase protecting the disk
+  ends up on the disk. It would also be in this installation's store and in
+  every backup of it.
+- **a network key server (KMS)** — the strongest of the four, and taking it
+  would mean this product runs that server. A node whose key server is down does
+  not boot. holzkube-manager runs outside the cluster so that it is there in the
+  failure where the cluster is not; a fleet that cannot boot without it would be
+  the opposite arrangement.
+
+### Which installer a machine gets
+
+The provisioning screen asks whether the machine booted the **SecureBoot** image.
+It has to ask: a schematic id builds both variants, and which one was written to
+the USB stick is not recoverable from the id. The answer picks the installer, and
+Talos requires it to match — the ordinary installer does not produce a SecureBoot
+node.
+
+The installer reference is then **resolved against the Image Factory** rather
+than assembled, so it names the repository that actually answers, carries
+SecureBoot, and points at the Factory this installation was configured with. If
+it cannot be resolved the plan is refused rather than falling back: substituting
+the ordinary installer gives you a node that installs, joins, and is not
+SecureBoot, and nothing afterwards says so.
+
 ### Certificates
 
 holzkube-manager reaches a cluster with an admin certificate it minted for

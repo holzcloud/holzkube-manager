@@ -1,10 +1,10 @@
 ---
 schema_version: 1
-open_count: 60
+open_count: 61
 waived_count: 0
-fixed_count: 45
-total_count: 105
-last_updated: 2026-09-13T12:30:00.000Z
+fixed_count: 47
+total_count: 108
+last_updated: 2026-09-14T06:10:00.000Z
 ---
 
 # Broken Windows Ledger
@@ -122,6 +122,10 @@ last_updated: 2026-09-13T12:30:00.000Z
 
 | 104 | 16 | deviation | internal/httpapi/handlers/auth.go |  | BEIDE ROUTEN, DIE EIN PASSWORT NEHMEN, ANTWORTETEN EINEM SERVICE-ACCOUNT MIT 500. auth.ErrNotAPerson existierte seit der Service-Account-Phase mit Doc-Kommentar und wurde von nichts zurueckgegeben und von nichts geprueft -- dieselbe Form wie die etcd-Entfernung: eine Weigerung, die neben dem Pfad liegt, der sie braucht. Erreichbar sind beide Routen: sie brauchen nur RoleReader, und ein Bearer-Token erfuellt CSRF-Pruefung und Sudo-Fenster. Beim Handler ankam Verify(current, "") gegen einen leeren Hash -- kein falsches Passwort, sondern ein undekodierbares -- also ein Fehler statt false, und daraus 500 internal.unexpected mit einer Logzeile ueber einen unerwarteten internen Zustand. Unerwartet war daran nichts. Jetzt 409 conflict.not-a-person, bei /auth/sudo vor dem Throttle, weil dieser Aufrufer nicht raet. | fixed | GESCHLOSSEN 2026-09-13. Beide behoben und, weil zwei getrennte identische Fehler bedeuten, dass die dritte Passwort-Route auch nicht hinsehen wuerde, mit einem Quell-Waechter gehalten: jede Funktion im Paket, die auth.Verify ruft, muss auch fragen, ob das Konto ein Passwort hat. | 2026-09-13T12:30:00.000Z | 2026-09-13T12:30:00.000Z |
 | 105 | 16 | deviation | cmd/holzkubectl/wire_test.go |  | METHODISCHE NOTIZ AUS ZWEI FEHLGESCHLAGENEN FEHLEREINBAUTEN: ein Test, der nur das Sentinel prueft (errors.Is) oder nur 'hat sich geaendert', kann gegen seinen eigenen eingebauten Fehler gruen bleiben. Zweimal passiert. Bei den etcd-Weigerungen blieben beide Faelle gruen, weil sich die Bedingungen ueberlappen und der falsche -- aktiv nutzlose -- Rat trotzdem ein ErrLastVotingMember ist. Bei der Zertifikatserneuerung blieb der Fehler 'der Countdown wird nicht aktualisiert' gruen, weil altes und neues Zertifikat in derselben Sekunde ablaufen, wenn man Sekunden nach der Adoption erneuert. Beide Tests pruefen jetzt den Satz bzw. starten aus dem Zustand, fuer den es das Feature gibt. KEIN OFFENER DEFEKT -- der Eintrag steht als Merksatz: einen eingebauten Fehler rot zu sehen ist die Pruefung, und wenn er gruen bleibt, ist der Test schwach, nicht der Fehler harmlos. | fixed | GESCHLOSSEN 2026-09-13 mit der Runde, die es gefunden hat. | 2026-09-13T12:30:00.000Z | 2026-09-13T12:30:00.000Z |
+
+| 106 | 16 | deviation | internal/provision/plan.go |  | DIE INSTALLER-REFERENZ WURDE PER HAND ZUSAMMENGESETZT UND WAR DABEI DREIFACH FALSCH, jedes Mal still. InstallImage baute 'factory.talos.dev/installer/<id>:<version>' fuer jede Maschine. (1) SecureBoot kam darin nicht vor: eine Maschine, die von einer SecureBoot-ISO gebootet hat, installierte ein System, das kein SecureBoot ist -- Talos verlangt dafuer den SecureBoot-Installer, und kein Feld in der Machine-Config ersetzt ihn. internal/imagefactory benennt genau diese Paarung als 'the ISO/installer drift this file's own comments warn about, arriving from the one direction nothing checked'; Provisioning WAR diese Richtung. (2) Der Repository-Name wurde angenommen statt aufgeloest, und zwar der Legacy-Name, obwohl internal/imagefactory eine geordnete Kandidatenliste fuehrt, weil die Antwort je nach Version variiert. (3) Der Factory-Host war fest verdrahtet, also zog eine Installation mit --image-factory auf eine private Factory ihre Installer trotzdem von der oeffentlichen. | fixed | GESCHLOSSEN 2026-09-14 fuer den Provisioning-Pfad: die Referenz wird beim Plan gegen die Factory aufgeloest und von dort mitgetragen, ein Fehlschlag ist eine Ablehnung ohne Referenz statt eines Fallbacks. Alle drei Fehler vor dem Fix rot gesehen. | 2026-09-14T06:10:00.000Z | 2026-09-14T06:10:00.000Z |
+| 107 | 16 | stub | internal/upgrade/verify.go |  | DERSELBE FEHLER IM UPGRADE-PFAD, UND DORT SCHLIMMER. upgrade.InstallerFor ruft weiterhin provision.InstallImage, also installiert ein Upgrade eines SecureBoot-Knotens den gewoehnlichen Installer und nimmt dem Knoten SecureBoot weg -- auf einem Pfad, den ein Betreiber gegen einen Cluster laufen laesst, auf den er sich verlaesst, und nichts im Ergebnis sagt es. Beim Provisioning kann der Betreiber die Frage beantworten; beim Upgrade muesste holzkube erst LESEN, ob der Knoten SecureBoot gebootet hat. Talos stellt das als Ressource bereit und nichts hier liest sie. Der Doc-Kommentar von InstallImage sagt jetzt ausdruecklich, was an ihm falsch ist und wer ihn noch ruft. SCHLIESSBEDINGUNG: den SecureBoot-Zustand eines Knotens lesen (talos-Seam, talossim, Deadline-Klasse) und die Upgrade-Referenz genauso aufloesen wie die Provisioning-Referenz. | open |  | 2026-09-14T06:10:00.000Z |  |
+| 108 | 16 | deviation | internal/provision/job.go |  | JOB-PARAMETER KONNTEN STILL VERLOREN GEHEN. Request.Params marshallte die Patch-Liste mit verworfenem Fehler ('if err == nil'), nach der Ueberlegung, dass das Marshalling eines String-Slices nicht fehlschlagen kann. Fuer die neue Verschluesselungs-Anfrage haette dieselbe Form bedeutet: ein Betreiber bittet um verschluesselte Volumes, sieht den Job starten und bekommt einen Klartext-Knoten, ohne dass irgendetwas es meldet. 'Kann nicht fehlschlagen' ist die Ueberlegung, die stille Fehler erzeugt. | fixed | GESCHLOSSEN 2026-09-14. Params gibt jetzt einen Fehler zurueck; beide Aufrufer behandeln ihn. | 2026-09-14T06:10:00.000Z | 2026-09-14T06:10:00.000Z |
 
 ````json
 [
@@ -1384,6 +1388,42 @@ last_updated: 2026-09-13T12:30:00.000Z
     "reason": "GESCHLOSSEN 2026-09-13 mit der Runde, die es gefunden hat.",
     "recorded_at": "2026-09-13T12:30:00.000Z",
     "resolved_at": "2026-09-13T12:30:00.000Z"
+  },
+  {
+    "id": 106,
+    "kind": "deviation",
+    "phase": "16",
+    "file": "internal/provision/plan.go",
+    "line": null,
+    "description": "DIE INSTALLER-REFERENZ WURDE PER HAND ZUSAMMENGESETZT UND WAR DABEI DREIFACH FALSCH, jedes Mal still. InstallImage baute 'factory.talos.dev/installer/<id>:<version>' fuer jede Maschine. (1) SecureBoot kam darin nicht vor: eine Maschine, die von einer SecureBoot-ISO gebootet hat, installierte ein System, das kein SecureBoot ist -- Talos verlangt dafuer den SecureBoot-Installer, und kein Feld in der Machine-Config ersetzt ihn. internal/imagefactory benennt genau diese Paarung als 'the ISO/installer drift this file's own comments warn about, arriving from the one direction nothing checked'; Provisioning WAR diese Richtung. (2) Der Repository-Name wurde angenommen statt aufgeloest, und zwar der Legacy-Name, obwohl internal/imagefactory eine geordnete Kandidatenliste fuehrt, weil die Antwort je nach Version variiert. (3) Der Factory-Host war fest verdrahtet, also zog eine Installation mit --image-factory auf eine private Factory ihre Installer trotzdem von der oeffentlichen.",
+    "status": "fixed",
+    "reason": "GESCHLOSSEN 2026-09-14 fuer den Provisioning-Pfad: die Referenz wird beim Plan gegen die Factory aufgeloest und von dort mitgetragen, ein Fehlschlag ist eine Ablehnung ohne Referenz statt eines Fallbacks. Alle drei Fehler vor dem Fix rot gesehen.",
+    "recorded_at": "2026-09-14T06:10:00.000Z",
+    "resolved_at": "2026-09-14T06:10:00.000Z"
+  },
+  {
+    "id": 107,
+    "kind": "stub",
+    "phase": "16",
+    "file": "internal/upgrade/verify.go",
+    "line": null,
+    "description": "DERSELBE FEHLER IM UPGRADE-PFAD, UND DORT SCHLIMMER. upgrade.InstallerFor ruft weiterhin provision.InstallImage, also installiert ein Upgrade eines SecureBoot-Knotens den gewoehnlichen Installer und nimmt dem Knoten SecureBoot weg -- auf einem Pfad, den ein Betreiber gegen einen Cluster laufen laesst, auf den er sich verlaesst, und nichts im Ergebnis sagt es. Beim Provisioning kann der Betreiber die Frage beantworten; beim Upgrade muesste holzkube erst LESEN, ob der Knoten SecureBoot gebootet hat. Talos stellt das als Ressource bereit und nichts hier liest sie. Der Doc-Kommentar von InstallImage sagt jetzt ausdruecklich, was an ihm falsch ist und wer ihn noch ruft. SCHLIESSBEDINGUNG: den SecureBoot-Zustand eines Knotens lesen (talos-Seam, talossim, Deadline-Klasse) und die Upgrade-Referenz genauso aufloesen wie die Provisioning-Referenz.",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-09-14T06:10:00.000Z",
+    "resolved_at": null
+  },
+  {
+    "id": 108,
+    "kind": "deviation",
+    "phase": "16",
+    "file": "internal/provision/job.go",
+    "line": null,
+    "description": "JOB-PARAMETER KONNTEN STILL VERLOREN GEHEN. Request.Params marshallte die Patch-Liste mit verworfenem Fehler ('if err == nil'), nach der Ueberlegung, dass das Marshalling eines String-Slices nicht fehlschlagen kann. Fuer die neue Verschluesselungs-Anfrage haette dieselbe Form bedeutet: ein Betreiber bittet um verschluesselte Volumes, sieht den Job starten und bekommt einen Klartext-Knoten, ohne dass irgendetwas es meldet. 'Kann nicht fehlschlagen' ist die Ueberlegung, die stille Fehler erzeugt.",
+    "status": "fixed",
+    "reason": "GESCHLOSSEN 2026-09-14. Params gibt jetzt einen Fehler zurueck; beide Aufrufer behandeln ihn.",
+    "recorded_at": "2026-09-14T06:10:00.000Z",
+    "resolved_at": "2026-09-14T06:10:00.000Z"
   }
 ]
 ````

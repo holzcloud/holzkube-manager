@@ -5,10 +5,13 @@ import (
 
 	"github.com/siderolabs/crypto/x509"
 	talosconfig "github.com/siderolabs/talos/pkg/machinery/config"
+	"github.com/siderolabs/talos/pkg/machinery/config/configloader"
+	"github.com/siderolabs/talos/pkg/machinery/config/container"
 	"github.com/siderolabs/talos/pkg/machinery/config/generate"
 	"github.com/siderolabs/talos/pkg/machinery/config/generate/secrets"
 	"github.com/siderolabs/talos/pkg/machinery/config/machine"
 
+	"github.com/holzcloud/holzkube-manager/internal/diskencryption"
 	"github.com/holzcloud/holzkube-manager/internal/model"
 )
 
@@ -51,6 +54,22 @@ type GenerateInput struct {
 
 	// Patches are applied after generation, in order.
 	Patches []string
+
+	// Encryption, when set, adds the system-volume encryption documents
+	// (V2-OPS: Omni's "Disk Encryption").
+	//
+	// It is applied *after* the patches rather than before, and the ordering
+	// is deliberate: a strategic merge patch operates on the v1alpha1 document
+	// and has no business editing these, so adding them last means an
+	// operator's patch cannot quietly weaken or remove the encryption they
+	// asked for in the same request.
+	Encryption *diskencryption.Request
+
+	// SecureBoot says whether the image this node will boot is the SecureBoot
+	// variant. It is a fact about the schematic and it is carried here because
+	// the TPM key kind is only worth anything with it -- see
+	// diskencryption.Request.Validate.
+	SecureBoot bool
 }
 
 // Generate builds a machine configuration for a new node.
@@ -100,10 +119,48 @@ func Generate(in GenerateInput) ([]byte, error) {
 		return nil, fmt.Errorf("machineconfig: encode the generated configuration: %w", err)
 	}
 
-	if len(in.Patches) == 0 {
+	if len(in.Patches) > 0 {
+		raw, err = ApplyPatches(raw, in.Patches)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	return withEncryption(raw, in)
+}
+
+// withEncryption appends the system-volume encryption documents.
+//
+// It goes through machinery's loader and container rather than concatenating
+// YAML, so the result is a configuration that parses as one -- and the
+// container runs Talos's own conflict checks over the whole document set,
+// which is the only thing that can say the documents belong together.
+func withEncryption(raw []byte, in GenerateInput) ([]byte, error) {
+	if in.Encryption == nil || !in.Encryption.Enabled() {
 		return raw, nil
 	}
-	return ApplyPatches(raw, in.Patches)
+
+	docs, err := in.Encryption.Documents(in.SecureBoot)
+	if err != nil {
+		return nil, err
+	}
+
+	loaded, err := configloader.NewFromBytes(raw)
+	if err != nil {
+		return nil, fmt.Errorf("machineconfig: re-read the generated configuration: %w", err)
+	}
+
+	combined, err := container.New(append(loaded.Documents(), docs...)...)
+	if err != nil {
+		return nil, fmt.Errorf("machineconfig: the encryption documents do not belong with this "+
+			"configuration: %w", err)
+	}
+
+	out, err := combined.Bytes()
+	if err != nil {
+		return nil, fmt.Errorf("machineconfig: encode the configuration with encryption: %w", err)
+	}
+	return out, nil
 }
 
 // bundleFrom rebuilds machinery's bundle from the stored record.
