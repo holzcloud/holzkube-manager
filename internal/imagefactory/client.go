@@ -132,7 +132,7 @@ type Client struct {
 	base *url.URL
 	http *http.Client
 
-	// installerMu guards installerRepos.
+	// installerMu guards installerRepos and installerFlights.
 	installerMu sync.Mutex
 
 	// installerRepos caches the resolved installer repository name, keyed by
@@ -146,6 +146,21 @@ type Client struct {
 	// re-questioned once it is older than installerRetry. installer.go owns
 	// every one of those rules.
 	installerRepos map[string]installerRepoEntry
+
+	// installerFlights is the cold resolution currently in progress per cache
+	// key, so that N concurrent callers on one cold key cost the registry one
+	// resolution rather than N. Empty except while a resolution is running.
+	//
+	// It buys correctness as well as load. Without it, two resolvers race for
+	// an empty slot and the loser is served its own entry -- so two callers can
+	// be handed two different repository references for one schematic at one
+	// version, milliseconds apart. storeInstallerRepo's doc comment names that
+	// ordering and says the only fix is single-flighting the whole resolution
+	// rather than guarding the write. This is that.
+	//
+	// installer.go owns it; only the cold path uses it, for the reason stated
+	// there.
+	installerFlights map[string]*installerFlight
 
 	// installerRetry is how long a *provisional* installer-repo entry is served
 	// before the candidates it never ruled out are asked again. Zero means
@@ -409,11 +424,12 @@ func New(baseURL string, opts ...Option) (*Client, error) {
 		http: &http.Client{
 			CheckRedirect: refuseCrossHostRedirect,
 		},
-		installerRepos: map[string]installerRepoEntry{},
-		installerRetry: installerRepoRetryInterval,
-		jsonBudget:     DefaultTimeout,
-		probeBudget:    ProbeTimeout,
-		manifestBudget: ManifestTimeout,
+		installerRepos:   map[string]installerRepoEntry{},
+		installerFlights: map[string]*installerFlight{},
+		installerRetry:   installerRepoRetryInterval,
+		jsonBudget:       DefaultTimeout,
+		probeBudget:      ProbeTimeout,
+		manifestBudget:   ManifestTimeout,
 	}
 	for _, opt := range opts {
 		if err := opt(c); err != nil {
