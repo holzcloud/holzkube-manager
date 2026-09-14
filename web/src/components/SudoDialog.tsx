@@ -108,8 +108,11 @@ export function SudoDialog() {
         <DialogHeader>
           <DialogTitle>Confirm your password</DialogTitle>
           <DialogDescription>
-            {challenge?.action ?? 'This destructive action'} changes something that cannot simply be
-            undone, so holzkube-manager asks for your password again before it runs.
+            {challenge?.action ?? 'This destructive action'}{' '}
+            {challenge?.because ??
+              'changes something that cannot simply be undone, so holzkube-manager asks for your ' +
+                'password again before it runs'}
+            .
           </DialogDescription>
         </DialogHeader>
 

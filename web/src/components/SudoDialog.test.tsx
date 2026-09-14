@@ -279,3 +279,53 @@ describe('SessionExpiryWatcher', () => {
     expect(onExpired).not.toHaveBeenCalled()
   })
 })
+
+/**
+ * The reason the dialog gives is the action's when the action has one.
+ *
+ * The dialog's default sentence -- "changes something that cannot simply be
+ * undone" -- is the reason the sudo window exists and is true of almost
+ * everything behind it. Renewing a cluster certificate is the exception: the
+ * server proves the new certificate against a node before it replaces the one
+ * in use, so a failure changes nothing. Saying the default there would tell an
+ * operator something false about what they are about to do, which is worse than
+ * saying nothing.
+ *
+ * `api.test.ts` proves the label is chosen; this proves it is displayed.
+ */
+describe('the sudo dialog explains the action it is asking about', () => {
+  it('gives a certificate renewal its own reason instead of the general one', async () => {
+    recordingFetch(() => problemResponse(428, 'sudo.required', 'This action is destructive.'))
+    const user = userEvent.setup()
+
+    render(<SudoDialog />)
+
+    const pending = api.certificate.renew('c1')
+    const settled = pending.catch((error: unknown) => error)
+
+    const dialog = await screen.findByRole('dialog')
+    expect(dialog).toHaveTextContent('Renew this cluster’s certificate')
+    expect(dialog).toHaveTextContent('Nothing is lost if it fails')
+    expect(dialog).not.toHaveTextContent('cannot simply be undone')
+
+    await user.click(screen.getByRole('button', { name: 'Cancel' }))
+    await expect(settled).resolves.toMatchObject({ code: 'sudo.required' })
+  })
+
+  it('falls back to the general reason for an action that has no reason of its own', async () => {
+    recordingFetch(() => problemResponse(428, 'sudo.required', 'This action is destructive.'))
+    const user = userEvent.setup()
+
+    render(<SudoDialog />)
+
+    const pending = api.changePassword('old-password-1', 'new-password-1')
+    const settled = pending.catch((error: unknown) => error)
+
+    const dialog = await screen.findByRole('dialog')
+    expect(dialog).toHaveTextContent('Change the operator password')
+    expect(dialog).toHaveTextContent('cannot simply be undone')
+
+    await user.click(screen.getByRole('button', { name: 'Cancel' }))
+    await expect(settled).resolves.toMatchObject({ code: 'sudo.required' })
+  })
+})
