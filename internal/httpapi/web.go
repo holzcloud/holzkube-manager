@@ -19,6 +19,55 @@ import (
 //go:embed all:dist
 var distFS embed.FS
 
+// EmbeddedAssets returns the bundle's text files by path.
+//
+// It exists for assets_test.go, which holds the bundle against the
+// Content-Security-Policy this package serves. The two are written by
+// different tools in different languages and nothing else makes them agree:
+// the bundler inlines small assets as data: URIs, the policy does not permit
+// them, and the result is an asset the browser silently refuses.
+//
+// Text only, because that is what can carry a data: URI.
+func EmbeddedAssets() map[string]string {
+	sub, err := fs.Sub(distFS, "dist")
+	if err != nil {
+		return nil
+	}
+
+	out := map[string]string{}
+	_ = fs.WalkDir(sub, ".", func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			// An embedded filesystem does not produce walk errors. If one
+			// somehow appears, the entry is skipped rather than aborting the
+			// walk: the callers fail on a bundle that comes back empty or
+			// without fonts, which is the outcome that matters, and stopping
+			// here would turn a missing file into a missing map.
+			return nil //nolint:nilerr // deliberate: see above
+		}
+		if d.IsDir() {
+			return nil
+		}
+		switch path.Ext(p) {
+		case ".woff2":
+			// The name is what matters for a font; reading the bytes in order
+			// to discard them would allocate a megabyte for nothing.
+			out[p] = ""
+
+		case ".css", ".js", ".html":
+			raw, readErr := fs.ReadFile(sub, p)
+			if readErr != nil {
+				// Skipped for the same reason as a walk error above: the
+				// callers fail on a bundle that comes back short, and that is
+				// a better failure than an aborted walk.
+				return nil //nolint:nilerr // deliberate: see above
+			}
+			out[p] = string(raw)
+		}
+		return nil
+	})
+	return out
+}
+
 // SetupPath is where an unconfigured instance sends every UI route.
 const SetupPath = "/setup"
 

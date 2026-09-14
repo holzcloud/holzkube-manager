@@ -86,6 +86,23 @@ export default defineConfig({
     // a hard dependency rather than a convention.
     outDir: '../internal/httpapi/dist',
     emptyOutDir: true,
+
+    // Nothing is inlined as a data: URI, and this is a Content-Security-Policy
+    // setting wearing a bundler's clothes.
+    //
+    // The server serves `font-src 'self'`, which does not permit `data:`. The
+    // default inline limit is 4 KiB and rollup was putting the two smallest
+    // font subsets — the Cyrillic-ext faces of both families — under it, so the
+    // browser refused to load exactly those two and fell back for any text that
+    // needed them. Nothing failed: the page renders, the glyphs are simply
+    // somebody else's. It was found by loading the built UI in a browser and
+    // reading the console, which is the only place it is visible at all.
+    //
+    // Zero rather than a larger CSP: the policy is the tight one and the build
+    // is what should bend. The cost is one request for a subset almost nobody
+    // loads, and `assets_test.go` fails the build if an inlined asset comes
+    // back.
+    assetsInlineLimit: 0,
   },
   server: {
     proxy: {
