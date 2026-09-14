@@ -69,7 +69,18 @@ func (p Plan) Usable() bool { return len(p.Problems) == 0 }
 
 // Make computes what a template would do against a fleet.
 func Make(t Template, f Fleet) Plan {
-	p := Plan{Cluster: t.Name}
+	// Empty rather than nil. Go marshals a nil slice as null, the browser's
+	// schemas declare these as z.array(...).default([]), and a zod default
+	// applies to undefined and not to null -- so a template that resolves
+	// cleanly, which is the one an operator most wants to see, sent nulls and
+	// the panel never rendered. The contract's rule, from the inventory
+	// handler: "Never null: a null reads to a client as 'the server did not
+	// check', which is a weaker claim than 'there are none'."
+	p := Plan{
+		Cluster:  t.Name,
+		Problems: make([]string, 0),
+		Notes:    make([]string, 0),
+	}
 
 	for _, c := range f.Clusters {
 		if strings.EqualFold(c.Name, t.Name) {
@@ -112,7 +123,9 @@ func resolve(
 	byClass map[string]model.MachineClass,
 	problems []string,
 ) (NodeSetPlan, []string) {
-	plan := NodeSetPlan{Wanted: set.Count}
+	// Machines likewise: the panel joins this list, and joining null throws
+	// before anything is drawn.
+	plan := NodeSetPlan{Wanted: set.Count, Machines: make([]model.MachineID, 0)}
 
 	switch {
 	case set.MachineClass != "":
