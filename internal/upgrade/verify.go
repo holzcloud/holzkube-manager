@@ -8,7 +8,6 @@ import (
 	"strings"
 
 	"github.com/holzcloud/holzkube-manager/internal/model"
-	"github.com/holzcloud/holzkube-manager/internal/provision"
 	"github.com/holzcloud/holzkube-manager/internal/talos"
 	"gopkg.in/yaml.v3"
 )
@@ -120,14 +119,40 @@ func CheckSchematic(ctx context.Context, cc *talos.ClusterClient) (SchematicVerd
 	}, nil
 }
 
-// InstallerFor builds the installer reference an upgrade uses.
+// ResolveInstaller resolves the installer reference a node is upgraded with.
 //
-// It is provision.InstallImage, deliberately: the reference an upgrade
-// installs and the reference a fresh provision installs are the same thing
-// built the same way, and two functions producing it would be two places for
-// the schematic to go missing.
-func InstallerFor(schematicID string, to Version) string {
-	return provision.InstallImage(schematicID, to.String())
+// A function on Deps rather than one built here, because resolving it means
+// asking the Image Factory which repository name answers -- and doing that
+// needs a Factory client, which belongs to the composition root and not to
+// this package.
+//
+// It replaced a one-line builder that called provision.InstallImage, and the
+// sentence that justified it ("the reference an upgrade installs and the
+// reference a fresh provision installs are the same thing built the same way")
+// was true and was the problem: both were assembled by hand, neither carried
+// SecureBoot, and both named the public Factory whatever this installation was
+// configured with. They are still the same thing, resolved the same way.
+type ResolveInstaller func(ctx context.Context, schematicID, version string, secureBoot bool) (string, error)
+
+// securityStateOf reads whether a node booted with SecureBoot.
+//
+// From the node, on the connection the plan already has open, and never from
+// anything this installation remembers: a node may have been installed by
+// something else, or reinstalled since, and a stored flag would be this
+// product's memory of a decision rather than the machine's account of what it
+// is running.
+func securityStateOf(ctx context.Context, cc *talos.ClusterClient) (bool, error) {
+	readCtx, cancel, err := talos.WithClassDeadline(ctx, talos.MethodCOSIGet)
+	if err != nil {
+		return false, err
+	}
+	defer cancel()
+
+	state, err := cc.SecurityState(readCtx)
+	if err != nil {
+		return false, err
+	}
+	return state.SecureBoot, nil
 }
 
 // KernelArgDrift is UPG-04.

@@ -29,6 +29,18 @@ type Service struct {
 
 // NewService wires one up.
 func NewService(d Deps, releases func(ctx context.Context) ([]string, error)) *Service {
+	// A wiring mistake, refused at construction rather than becoming a nil
+	// call at plan time -- which is a panic, which the middleware turns into a
+	// 500 with no clue in it. The router does the same for a route that
+	// declares an impossible combination: the composition root is where these
+	// are decidable, so it is where they are decided.
+	if d.ResolveInstaller == nil {
+		panic("upgrade: Deps.ResolveInstaller is nil. An upgrade's installer reference is " +
+			"resolved against the Image Factory, with the node's SecureBoot state in it, and " +
+			"there is no default: a reference assembled from parts is how upgrading a " +
+			"SecureBoot node came to install the ordinary installer and take SecureBoot away")
+	}
+
 	return &Service{deps: d, releases: releases}
 }
 
@@ -50,6 +62,13 @@ type NodePlan struct {
 	// shown per node rather than once per run because two nodes in one cluster
 	// can legitimately have different schematics.
 	Installer string `json:"installer"`
+
+	// SecureBoot is how this node reports it booted, read from the node when
+	// the plan was made. It is on the plan rather than only inside the
+	// installer reference because it is the fact that decided the reference,
+	// and an operator looking at a surprising installer name should be able to
+	// see why it is that one.
+	SecureBoot bool `json:"secureboot"`
 
 	// Skipped and SkipReason are UPG-14: a locked node is walked past, not
 	// failed, and the screen says so before the run rather than during it.
@@ -193,7 +212,38 @@ func (s *Service) PlanTalos(ctx context.Context, cluster model.ClusterID, to str
 
 		node.Schematic = verdict.ID
 		node.SchematicSentence = verdict.Sentence
-		node.Installer = InstallerFor(verdict.ID, target)
+
+		// How this node booted, read from the node rather than remembered.
+		// The ordinary installer does not produce a SecureBoot node, so
+		// upgrading one with the wrong installer takes SecureBoot away from a
+		// machine that had it -- and nothing in the result says so. A node
+		// that cannot be asked is blocked rather than upgraded on an
+		// assumption.
+		secureBoot, sberr := securityStateOf(ctx, cc2)
+		if sberr != nil {
+			_ = cc2.Close()
+			node.Blocked = true
+			node.BlockReason = fmt.Sprintf("%s did not report how it booted, so there is no way "+
+				"to tell whether it needs the SecureBoot installer. Upgrading it on an assumption "+
+				"would either take SecureBoot away from a node that has it or fail to install on "+
+				"one that does not: %v", nameOf(m), sberr)
+			plan.Nodes = append(plan.Nodes, node)
+			continue
+		}
+		node.SecureBoot = secureBoot
+
+		installer, ierr := s.deps.ResolveInstaller(ctx, verdict.ID, target.String(), secureBoot)
+		if ierr != nil {
+			_ = cc2.Close()
+			node.Blocked = true
+			node.BlockReason = fmt.Sprintf("the installer for %s could not be resolved: %v. "+
+				"Nothing is substituted here: installing the ordinary installer on a SecureBoot "+
+				"node produces a node that upgrades, joins, and is no longer SecureBoot",
+				nameOf(m), ierr)
+			plan.Nodes = append(plan.Nodes, node)
+			continue
+		}
+		node.Installer = installer
 
 		// UPG-04, on the same connection. The upgrade RPC carries an installer
 		// image and nothing else -- kernel arguments are written at install
@@ -331,7 +381,11 @@ func (s *Service) PlanKubernetes(ctx context.Context, cluster model.ClusterID, t
 // time, so that what is submitted is what was shown: a cluster that gained a
 // node between the screen and the button must not have it silently included.
 func RequestFor(plan Plan) Request {
-	req := Request{To: plan.To, Schematics: map[model.MachineID]string{}}
+	req := Request{
+		To:         plan.To,
+		Schematics: map[model.MachineID]string{},
+		Installers: map[model.MachineID]string{},
+	}
 	for _, n := range plan.Nodes {
 		if n.Skipped {
 			// A locked node is left out of the request entirely rather than
@@ -343,6 +397,9 @@ func RequestFor(plan Plan) Request {
 		req.Machines = append(req.Machines, n.Machine)
 		if n.Schematic != "" {
 			req.Schematics[n.Machine] = n.Schematic
+		}
+		if n.Installer != "" {
+			req.Installers[n.Machine] = n.Installer
 		}
 	}
 	return req

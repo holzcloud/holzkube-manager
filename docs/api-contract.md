@@ -1322,11 +1322,21 @@ which image was written to the USB stick is whoever wrote it.
 The architecture comes from the **stored schematic record**, never from a
 constant (FACT-03).
 
-> **Not fixed here:** `upgrade.InstallerFor` still assembles the reference the
-> same way, so upgrading a SecureBoot node installs the ordinary installer and
-> takes SecureBoot away from a node that had it. Fixing it means first reading
-> whether a node booted SecureBoot, which Talos exposes as a resource and
-> nothing here reads. It is recorded as an open window.
+The **upgrade path resolves it the same way**, and it had the same defect with
+worse consequences: a fresh provision that dropped SecureBoot produced a node
+that never had it, while an upgrade took it away from a node that did.
+
+An upgrade plan now reads each node's `SecurityStates.talos.dev` resource and
+puts `secureboot` on the plan beside the installer it resolved — the fact is
+shown next to the decision it made, so a surprising installer name can be
+explained. It is read **from the node** and never remembered from provisioning:
+a machine may have been installed by something else, or reinstalled since, and a
+stored flag would be this product's memory of a decision rather than the
+machine's account of what it is running.
+
+A node that will not say how it booted is **blocked**, not upgraded on an
+assumption — either assumption is wrong for half the fleet. So is a node whose
+installer cannot be resolved.
 
 ### Disk encryption
 

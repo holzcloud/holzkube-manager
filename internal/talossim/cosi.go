@@ -129,6 +129,9 @@ func (s *Server) seedCOSI(ctx context.Context) error {
 	if err := s.seedHardware(ctx); err != nil {
 		return err
 	}
+	if err := s.seedSecurityState(ctx); err != nil {
+		return err
+	}
 	if err := s.seedKernelCmdline(ctx); err != nil {
 		return err
 	}
@@ -231,6 +234,27 @@ func (s *Server) seedKernelCmdline(ctx context.Context) error {
 
 	if err := s.COSI().Create(ctx, cmdline); err != nil {
 		return fmt.Errorf("talossim: seed %s: %w", runtimeres.KernelCmdlineType, err)
+	}
+	return nil
+}
+
+// seedSecurityState puts the node's own account of how it booted into the
+// state.
+//
+// BootedWithUKI follows SecureBoot rather than being a second option, because
+// that is how a real Talos boots: SecureBoot means a signed unified kernel
+// image. A simulator that let the two be set independently would let a test
+// assert a combination no node produces.
+func (s *Server) seedSecurityState(ctx context.Context) error {
+	state := runtimeres.NewSecurityStateSpec(runtimeres.NamespaceName)
+	state.TypedSpec().SecureBoot = s.opts.SecureBoot
+	state.TypedSpec().BootedWithUKI = s.opts.SecureBoot
+	if s.opts.SecureBoot {
+		state.TypedSpec().UKISigningKeyFingerprint = "SIM-UKI-" + s.opts.Hostname
+	}
+
+	if err := s.COSI().Create(ctx, state); err != nil {
+		return fmt.Errorf("talossim: seed %s: %w", runtimeres.SecurityStateType, err)
 	}
 	return nil
 }
