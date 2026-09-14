@@ -285,7 +285,11 @@ func (r Request) Validate(controlPlaneCount int) (warnings []string, err error) 
 //     flag substitutes for it.
 //   - **The repository name is assumed**, not resolved. internal/imagefactory
 //     keeps an ordered candidate list because which name answers varies, and
-//     it warns when it falls back.
+//     it warns when it falls back. Measured against the public Factory on
+//     2026-09-14 at v1.13.9, the assumed legacy name and the preferred one
+//     resolve to the same digest -- so this half was a latent risk rather than
+//     an observed wrong image at that version. The names are not guaranteed to
+//     agree, which is the whole reason the resolver exists.
 //   - **The Factory host is hard-coded**, so an installation pointed at a
 //     private Factory upgrades nodes from the public one.
 //

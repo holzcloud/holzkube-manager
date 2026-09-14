@@ -222,13 +222,24 @@ func (c *Client) InstallerImage(ctx context.Context, r AssetRequest) (string, []
 //
 // The two SecureBoot names are also not interchangeable, which round 1 recorded
 // the other way round. installer-secureboot is not reliably a legacy alias of
-// metal-installer-secureboot: at the pinned version the two resolve to two
-// different images, measured 2026-08-30 (02-UAT.md G-02-13), while at the
-// oldest supported version they resolve to the same one. So a SecureBoot
-// request that falls back to the legacy name may be handed an image the
-// preferred name would not have selected. That is why the fallback is kept but
-// labelled -- see WarningInstallerSecureBootRepoFallbackUnverified -- rather
-// than either dropped or passed off as equivalent.
+// metal-installer-secureboot, and "not reliably" is the whole claim: the answer
+// has been measured to change. At the pinned version they resolved to two
+// different images on 2026-08-30 (02-UAT.md G-02-13) and to the same image on
+// 2026-09-14; at the oldest supported version they matched on both occasions.
+//
+// The comment above explains why the digest literals were removed -- a digest
+// in a comment is a fact with an expiry date that nothing in the build checks
+// -- and this paragraph used to make the same mistake one level up, by
+// asserting the *relationship* between two digests as a standing fact. It
+// expired the same way. What is durable is that nothing guarantees the two
+// names agree, and that an observation of them agreeing is a snapshot rather
+// than a property.
+//
+// So a SecureBoot request that falls back to the legacy name may be handed an
+// image the preferred name would not have selected. That is why the fallback is
+// kept but labelled -- see WarningInstallerSecureBootRepoFallbackUnverified --
+// rather than either dropped or passed off as equivalent. None of that changes
+// with the measurement, which is the test of whether the reasoning was sound.
 //
 // Be careful about what has actually been probed, because the answer is smaller
 // than the question. TestLiveFactory's installer-name matrix probes the pinned
@@ -592,11 +603,12 @@ func installerFallbackWarning(r AssetRequest, res installerResolution) Warning {
 		Code: WarningInstallerSecureBootRepoFallbackUnverified,
 		Detail: detail + " Both names carry a SecureBoot installer, so this is not the " +
 			"ISO/installer drift a SecureBoot request refuses -- but the legacy SecureBoot " +
-			"repository is not reliably another name for the preferred one. At the pinned Talos " +
-			"version the two resolve to two different images, measured 2026-08-30; at the oldest " +
-			"supported version they resolve to the same one. So the image behind this reference " +
-			"may not be the image the preferred name selects, and an operator who copied that " +
-			"reference earlier is not necessarily holding the same thing.",
+			"repository is not reliably another name for the preferred one. Whether the two " +
+			"resolve to the same image has been measured to change: they differed at the pinned " +
+			"Talos version on 2026-08-30 and matched at that same version on 2026-09-14. That " +
+			"the relationship moves is the point -- it is not something to rely on. So the image " +
+			"behind this reference may not be the image the preferred name selects, and an " +
+			"operator who copied that reference earlier is not necessarily holding the same thing.",
 	}
 }
 
