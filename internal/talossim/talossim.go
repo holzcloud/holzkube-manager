@@ -121,6 +121,17 @@ type Options struct {
 	// this product bootstrapped.
 	Bootstrapped bool
 
+	// FactsUnavailable makes the node answer a connection and fail the facts
+	// read.
+	//
+	// It is the state a partly-degraded node is in: the API is up and
+	// answering, and the resource read behind NodeFacts does not complete. The
+	// simulator produces it by not seeding the hardware information the facts
+	// read starts from, which is the same shape as a read that times out --
+	// and it exists because "nothing is there" and "it is there and cannot be
+	// read" are different findings that were indistinguishable in the record.
+	FactsUnavailable bool
+
 	// SecureBoot is whether this node reports having booted with SecureBoot.
 	//
 	// It exists because the upgrade path has a decision hanging on it: the

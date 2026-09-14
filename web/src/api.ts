@@ -989,6 +989,17 @@ export const machineSchema = z.object({
   pre_release: z.boolean().default(false),
   version_notice: z.string().default(''),
   adopted_at: z.string(),
+
+  /**
+   * When this machine last answered anything at all — which is not the same as
+   * when it was last read.
+   *
+   * A node whose connection succeeds and whose facts read fails moves this and
+   * leaves its readings alone. So a `seen_at` that is newer than the readings
+   * is the shape of a node that is present and cannot be read, which is a
+   * different repair from one that is absent.
+   */
+  seen_at: z.string().optional(),
   watch: watchSchema.default({ live: false, since: '', reason: '', restarts: 0 }),
 
   /** The operator's own words about this machine. Never a Field: nothing

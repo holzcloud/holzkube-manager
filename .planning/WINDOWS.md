@@ -1,10 +1,10 @@
 ---
 schema_version: 1
-open_count: 60
+open_count: 61
 waived_count: 0
-fixed_count: 49
-total_count: 109
-last_updated: 2026-09-14T06:45:00.000Z
+fixed_count: 50
+total_count: 111
+last_updated: 2026-09-14T07:05:00.000Z
 ---
 
 # Broken Windows Ledger
@@ -128,6 +128,9 @@ last_updated: 2026-09-14T06:45:00.000Z
 | 108 | 16 | deviation | internal/provision/job.go |  | JOB-PARAMETER KONNTEN STILL VERLOREN GEHEN. Request.Params marshallte die Patch-Liste mit verworfenem Fehler ('if err == nil'), nach der Ueberlegung, dass das Marshalling eines String-Slices nicht fehlschlagen kann. Fuer die neue Verschluesselungs-Anfrage haette dieselbe Form bedeutet: ein Betreiber bittet um verschluesselte Volumes, sieht den Job starten und bekommt einen Klartext-Knoten, ohne dass irgendetwas es meldet. 'Kann nicht fehlschlagen' ist die Ueberlegung, die stille Fehler erzeugt. | fixed | GESCHLOSSEN 2026-09-14. Params gibt jetzt einen Fehler zurueck; beide Aufrufer behandeln ihn. | 2026-09-14T06:10:00.000Z | 2026-09-14T06:10:00.000Z |
 
 | 109 | 16 | deviation | internal/httpapi/handlers/config.go |  | EIN CAS-KONFLIKT WURDE ALS INTERNER FEHLER GEMELDET. createPatch liest den Eltern-Patch, setzt Superseded und schreibt ihn zurueck; jeder Fehler dabei wurde auf 500 internal.unexpected abgebildet, auch ein Rev-Konflikt. Zwei Betreiber, die denselben Patch gleichzeitig bearbeiten, landen in genau diesem Fenster. Ein 500 sagt einem Betreiber, etwas sei kaputt und er solle aufhoeren; passiert ist, dass die Kette sich unter ihm bewegt hat und die Anfrage gegen ihren aktuellen Kopf wiederholt werden kann. Die Taxonomie hatte die Antwort laengst -- 409 store.conflict -- und diese Route benutzte sie nicht. Gefunden durch eine systematische Durchsicht aller Handler, die schreiben, ohne einen Konflikt zu benennen: vier Treffer, drei davon falsch positiv (Session-Puts ohne Rueckgabewert). | fixed | GESCHLOSSEN 2026-09-14. Der Fehler wurde rot gesehen, gegen einen Store-Dekorator, der einen zweiten Schreiber genau zwischen Lesen und Schreiben setzt -- dieselbe Bauart wie in internal/inventory, jetzt auch im httpapi-Harness verfuegbar. | 2026-09-14T06:45:00.000Z | 2026-09-14T06:45:00.000Z |
+
+| 110 | 16 | deviation | internal/inventory/observe.go |  | EIN KNOTEN, DER ANTWORTET UND NICHT GELESEN WERDEN KANN, WAR NICHT VON EINEM ABWESENDEN ZU UNTERSCHEIDEN. Die Beobachtung baut eine Verbindung auf (der Knoten antwortet also auf Version) und liest dann NodeFacts; schlug das fehl, kehrte die Funktion zurueck, ohne irgendetwas zu speichern. Machine.SeenAt bewegte sich damit nur, wenn eine VOLLSTAENDIGE Beobachtung geklappt hat -- obwohl der Doc-Kommentar des Feldes seit jeher sagt, es sei 'when the machine last answered anything at all'. Das Feld beschrieb zwei Milestones lang ein Verhalten, das der Code nicht hatte, und die beiden Fehlerarten waren ein Datensatz. Sie fuehren zu verschiedenen Reparaturen: die eine zum Kabel oder zur Stromversorgung, die andere zum Knoten selbst. Gefunden durch eine Durchsicht aller gespeicherten Felder, die nirgends gelesen werden -- 13 Treffer, 11 davon ueber JSON von der Oberflaeche gelesen, zwei echt. | fixed | GESCHLOSSEN 2026-09-14. SeenAt wird jetzt auch geschrieben, wenn die Verbindung stand und das Lesen scheiterte -- der Snapshot ausdruecklich nicht, denn ein altes Messergebnis mit neuem Zeitstempel ist genau das, wogegen das Field[T]-Modell existiert. Auf der View und auf der Knotenseite sichtbar. talossim kann jetzt ein Knoten sein, der antwortet und dessen Fakten nicht lesbar sind. Beide Fehler rot gesehen. | 2026-09-14T07:05:00.000Z | 2026-09-14T07:05:00.000Z |
+| 111 | 16 | stub | internal/model/model.go |  | SETTINGS.SETUPCOMPLETED WIRD GESCHRIEBEN UND VON NICHTS GELESEN. Ob das Setup gelaufen ist, entscheidet 'gibt es ein Konto' (handlers/setup.go). Das Flag ist ein zweiter Wahrheitstraeger, der inert ist -- was besser ist als ein zweiter, der widerspricht, aber der Feldname sagt das Gegenteil. Der ganze Settings-Eintrag existiert fuer dieses eine Feld. KEINE AENDERUNG AM VERHALTEN: die abgeleitete Regel ist die bessere, und einen Store-Eintrag zu entfernen kostet eine Migration ohne Gewinn. Der Doc-Kommentar sagt jetzt, dass nichts es liest und was stattdessen entscheidet. SCHLIESSBEDINGUNG: entweder der Eintrag bekommt eine echte Einstellung und damit einen Zweck, oder er wird in einer Migration entfernt. | open |  | 2026-09-14T07:05:00.000Z |  |
 
 ````json
 [
@@ -1438,6 +1441,30 @@ last_updated: 2026-09-14T06:45:00.000Z
     "reason": "GESCHLOSSEN 2026-09-14. Der Fehler wurde rot gesehen, gegen einen Store-Dekorator, der einen zweiten Schreiber genau zwischen Lesen und Schreiben setzt -- dieselbe Bauart wie in internal/inventory, jetzt auch im httpapi-Harness verfuegbar.",
     "recorded_at": "2026-09-14T06:45:00.000Z",
     "resolved_at": "2026-09-14T06:45:00.000Z"
+  },
+  {
+    "id": 110,
+    "kind": "deviation",
+    "phase": "16",
+    "file": "internal/inventory/observe.go",
+    "line": null,
+    "description": "EIN KNOTEN, DER ANTWORTET UND NICHT GELESEN WERDEN KANN, WAR NICHT VON EINEM ABWESENDEN ZU UNTERSCHEIDEN. Die Beobachtung baut eine Verbindung auf (der Knoten antwortet also auf Version) und liest dann NodeFacts; schlug das fehl, kehrte die Funktion zurueck, ohne irgendetwas zu speichern. Machine.SeenAt bewegte sich damit nur, wenn eine VOLLSTAENDIGE Beobachtung geklappt hat -- obwohl der Doc-Kommentar des Feldes seit jeher sagt, es sei 'when the machine last answered anything at all'. Das Feld beschrieb zwei Milestones lang ein Verhalten, das der Code nicht hatte, und die beiden Fehlerarten waren ein Datensatz. Sie fuehren zu verschiedenen Reparaturen: die eine zum Kabel oder zur Stromversorgung, die andere zum Knoten selbst. Gefunden durch eine Durchsicht aller gespeicherten Felder, die nirgends gelesen werden -- 13 Treffer, 11 davon ueber JSON von der Oberflaeche gelesen, zwei echt.",
+    "status": "fixed",
+    "reason": "GESCHLOSSEN 2026-09-14. SeenAt wird jetzt auch geschrieben, wenn die Verbindung stand und das Lesen scheiterte -- der Snapshot ausdruecklich nicht, denn ein altes Messergebnis mit neuem Zeitstempel ist genau das, wogegen das Field[T]-Modell existiert. Auf der View und auf der Knotenseite sichtbar. talossim kann jetzt ein Knoten sein, der antwortet und dessen Fakten nicht lesbar sind. Beide Fehler rot gesehen.",
+    "recorded_at": "2026-09-14T07:05:00.000Z",
+    "resolved_at": "2026-09-14T07:05:00.000Z"
+  },
+  {
+    "id": 111,
+    "kind": "stub",
+    "phase": "16",
+    "file": "internal/model/model.go",
+    "line": null,
+    "description": "SETTINGS.SETUPCOMPLETED WIRD GESCHRIEBEN UND VON NICHTS GELESEN. Ob das Setup gelaufen ist, entscheidet 'gibt es ein Konto' (handlers/setup.go). Das Flag ist ein zweiter Wahrheitstraeger, der inert ist -- was besser ist als ein zweiter, der widerspricht, aber der Feldname sagt das Gegenteil. Der ganze Settings-Eintrag existiert fuer dieses eine Feld. KEINE AENDERUNG AM VERHALTEN: die abgeleitete Regel ist die bessere, und einen Store-Eintrag zu entfernen kostet eine Migration ohne Gewinn. Der Doc-Kommentar sagt jetzt, dass nichts es liest und was stattdessen entscheidet. SCHLIESSBEDINGUNG: entweder der Eintrag bekommt eine echte Einstellung und damit einen Zweck, oder er wird in einer Migration entfernt.",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-09-14T07:05:00.000Z",
+    "resolved_at": null
   }
 ]
 ````
