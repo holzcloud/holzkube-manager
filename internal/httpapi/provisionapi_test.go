@@ -777,3 +777,114 @@ func TestTheResolverIsAskedForThePreferredRepositoryFirst(t *testing.T) {
 		t.Fatal("the Factory was never asked which repository answers")
 	}
 }
+
+// TestASchematicFiledUnderAnotherClusterIsSaidSoOnThePlan.
+//
+// model.Schematic.Cluster promised, in its own doc comment and from the day the
+// field was added, that "a schematic authored for one cluster must not silently
+// be offered for another". Nothing kept it. The field was accepted, validated
+// and stored, and then read by no layer -- it described an intention rather
+// than the code, which is the shape of defect that survives review because
+// every reader takes the comment for the behaviour.
+//
+// What closes it is a warning and not a refusal, and the reason is in the word
+// *silently*: the image is the same image whichever cluster it is installed
+// into, so reuse is an organisational mistake rather than an unsafe one. This
+// test therefore asserts both halves -- that the plan says so, and that it
+// still succeeds.
+func TestASchematicFiledUnderAnotherClusterIsSaidSoOnThePlan(t *testing.T) {
+	t.Parallel()
+
+	h := newProvisionHarnessWith(t, &fakeFactory{})
+
+	// The seeded schematic is unassigned; file it under a cluster that is not
+	// the one this machine joins.
+	rec, err := h.store.Schematics().Get(context.Background(), testSchematic)
+	if err != nil {
+		t.Fatalf("read the seeded schematic: %v", err)
+	}
+	rec.Cluster = model.ClusterID("some-other-cluster")
+	if _, err := h.store.Schematics().Put(context.Background(), rec); err != nil {
+		t.Fatalf("file the schematic under another cluster: %v", err)
+	}
+
+	resp, raw := h.do(t, http.MethodPost, "/api/v1/provision/plan", map[string]any{
+		"cluster":       string(testProvisionCluster),
+		"addr":          h.blank.Host(),
+		"uuid":          "00000000-0000-4000-8000-0000000000cc",
+		"install_disk":  "/dev/nvme0n1",
+		"talos_version": "v1.13.9",
+		"schematic_id":  testSchematic,
+	})
+
+	// Not refused. A plan that cannot be made is a different answer from a
+	// plan that is worth reading twice, and this is the second one.
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("plan: %d (%s)", resp.StatusCode, raw)
+	}
+
+	var preview provision.Preview
+	if err := json.Unmarshal(raw, &preview); err != nil {
+		t.Fatalf("decode preview: %v", err)
+	}
+
+	var said string
+	for _, w := range preview.Warnings {
+		if strings.Contains(w, "some-other-cluster") {
+			said = w
+		}
+	}
+	if said == "" {
+		t.Fatalf("the plan does not mention that the schematic is filed under another cluster: %v",
+			preview.Warnings)
+	}
+	// Both clusters, because "this is filed elsewhere" without saying where is
+	// a sentence an operator cannot act on.
+	if !strings.Contains(said, string(testProvisionCluster)) {
+		t.Errorf("the warning names the schematic's cluster but not the one being joined: %q", said)
+	}
+}
+
+// TestAnUnassignedSchematicIsOfferedEverywhere is the other half of the rule,
+// and the half that would make the warning useless if it were wrong: most
+// schematics are filed under no cluster, because not answering the question is
+// what an operator does by default. A warning on every one of those is a
+// warning nobody reads.
+func TestAnUnassignedSchematicIsOfferedEverywhere(t *testing.T) {
+	t.Parallel()
+
+	h := newProvisionHarnessWith(t, &fakeFactory{})
+
+	// The seeded schematic is already unassigned; assert that rather than
+	// assume it, so this test keeps meaning what it says if the fixture moves.
+	rec, err := h.store.Schematics().Get(context.Background(), testSchematic)
+	if err != nil {
+		t.Fatalf("read the seeded schematic: %v", err)
+	}
+	if rec.Cluster != "" {
+		t.Fatalf("the fixture schematic is filed under %q; this test needs an unassigned one",
+			rec.Cluster)
+	}
+
+	resp, raw := h.do(t, http.MethodPost, "/api/v1/provision/plan", map[string]any{
+		"cluster":       string(testProvisionCluster),
+		"addr":          h.blank.Host(),
+		"uuid":          "00000000-0000-4000-8000-0000000000dd",
+		"install_disk":  "/dev/nvme0n1",
+		"talos_version": "v1.13.9",
+		"schematic_id":  testSchematic,
+	})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("plan: %d (%s)", resp.StatusCode, raw)
+	}
+
+	var preview provision.Preview
+	if err := json.Unmarshal(raw, &preview); err != nil {
+		t.Fatalf("decode preview: %v", err)
+	}
+	for _, w := range preview.Warnings {
+		if strings.Contains(w, "filed under") {
+			t.Errorf("an unassigned schematic was warned about: %q", w)
+		}
+	}
+}

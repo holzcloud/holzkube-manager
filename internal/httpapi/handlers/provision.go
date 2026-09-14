@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -324,8 +325,8 @@ func (b provisionRequestBody) request() provision.Request {
 // says so.
 func resolveInstaller(
 	ctx context.Context, d httpapi.Deps, req provision.Request,
-) (provision.Request, []imagefactory.Warning, *httpapi.Problem) {
-	none := make([]imagefactory.Warning, 0)
+) (provision.Request, []string, *httpapi.Problem) {
+	none := make([]string, 0)
 
 	if req.SchematicID == "" {
 		req.InstallerImage = provision.StockInstaller(req.TalosVersion)
@@ -374,8 +375,48 @@ func resolveInstaller(
 				"SecureBoot.")
 	}
 
+	// The Factory's own warnings, flattened to the sentences the preview
+	// carries, plus the one thing this installation knows and the Factory
+	// cannot: which cluster the record was filed under.
+	notes := make([]string, 0, len(warnings)+1)
+	for _, warning := range warnings {
+		notes = append(notes, warning.Detail)
+	}
+	if note := crossClusterNote(rec, req.Cluster); note != "" {
+		notes = append(notes, note)
+	}
+
 	req.InstallerImage = ref
-	return req, warnings, nil
+	return req, notes, nil
+}
+
+// crossClusterNote says so when the schematic a machine booted is filed under a
+// different cluster than the one the machine is joining.
+//
+// model.Schematic.Cluster has carried the sentence "a schematic authored for
+// one cluster must not silently be offered for another" since the field was
+// added, and nothing kept it: the field was validated, stored, and then read by
+// no layer at all. It described an intention rather than the code.
+//
+// The word that decides the shape of the fix is *silently*. The image is the
+// same image whichever cluster it is installed into -- extensions, kernel
+// arguments and META do not know about clusters -- so reusing one across two is
+// an organisational mistake and not an unsafe one. A refusal would make a
+// legitimate reuse impossible and would have to be argued past with a flag
+// nobody asked for. Being told, on the screen where the plan is confirmed, is
+// what the promise was actually about.
+//
+// A schematic filed under no cluster is offered everywhere on purpose: it is
+// what an operator gets by not answering the question, and it is out of place
+// nowhere.
+func crossClusterNote(rec model.Schematic, joining model.ClusterID) string {
+	if rec.Cluster == "" || rec.Cluster == joining {
+		return ""
+	}
+	return fmt.Sprintf(
+		"This schematic is filed under cluster %q, and this machine is joining %q. The image is "+
+			"the same either way, so nothing is refused here -- but if the filing is right, the "+
+			"cluster on this plan is not.", rec.Cluster, joining)
 }
 
 // withEncryption resolves the encryption half of a request.
@@ -412,7 +453,7 @@ func (b provisionRequestBody) withEncryption(req provision.Request) (provision.R
 // which is the failure the confirmation exists to prevent.
 func prepare(
 	ctx context.Context, d httpapi.Deps, body provisionRequestBody,
-) (provision.Request, []imagefactory.Warning, *httpapi.Problem) {
+) (provision.Request, []string, *httpapi.Problem) {
 	req, warnings, problem := resolveInstaller(ctx, d, body.request())
 	if problem != nil {
 		return req, warnings, problem
@@ -446,12 +487,13 @@ func provisionPlan(d httpapi.Deps) http.HandlerFunc {
 			return
 		}
 
-		// The Factory's own warnings about the installer name it resolved --
-		// a name reached past a candidate that never answered is usable and
-		// provisional, and this is the screen where that matters.
-		for _, warning := range warnings {
-			preview.Warnings = append(preview.Warnings, warning.Detail)
-		}
+		// What resolving the installer learned on the way: the Factory's own
+		// warnings about the repository name it reached -- a name reached past
+		// a candidate that never answered is usable and provisional -- and
+		// whether the schematic is filed under some other cluster. This is the
+		// screen where both matter, because it is the last one before the disk
+		// is written.
+		preview.Warnings = append(preview.Warnings, warnings...)
 		writeJSON(w, http.StatusOK, preview)
 	}
 }
