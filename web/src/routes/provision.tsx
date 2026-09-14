@@ -256,8 +256,31 @@ function StateBadge({ found }: { found: Found }) {
 /* Step three and four: plan it, then write it                             */
 /* ---------------------------------------------------------------------- */
 
-function PlanStep({ candidate, onBack }: { candidate: Candidate; onBack: () => void }) {
+/**
+ * This wizard's stand-in for "no schematic".
+ *
+ * The wire value is the empty string -- a machine that booted a stock ISO has
+ * no schematic, and that is an ordinary answer rather than a missing one -- and
+ * a Select cannot carry an empty option value: Radix reads it as "nothing is
+ * selected". Translated in the two places that touch this control and nowhere
+ * else, so the sentinel never leaves this file.
+ */
+const STOCK = '__stock__'
+
+// Exported for its tests, like FoundTable and DiskPicker above it. The parts of
+// this screen that can mislead somebody into writing the wrong thing are the
+// parts worth rendering in a test, and the schematic control is one: an id that
+// is not the one the ISO was built from installs a system without the
+// extensions the operator chose, and nothing afterwards says so.
+export function PlanStep({ candidate, onBack }: { candidate: Candidate; onBack: () => void }) {
   const clusters = useQuery({ queryKey: ['clusters'], queryFn: () => api.clusters.list() })
+
+  // The schematics this installation holds. Not a convenience: the server
+  // refuses a plan naming a schematic it does not hold, because the stored
+  // record is where the architecture to resolve the installer comes from
+  // (FACT-03). So this list is exactly the set of values the plan route
+  // accepts, and the free-text field it replaced could produce nothing else.
+  const schematics = useQuery({ queryKey: ['schematics'], queryFn: () => api.schematics.list() })
 
   const [cluster, setCluster] = useState('')
   const [controlPlane, setControlPlane] = useState(false)
@@ -272,6 +295,8 @@ function PlanStep({ candidate, onBack }: { candidate: Candidate; onBack: () => v
   const [encryptKind, setEncryptKind] = useState('nodeID')
 
   const encrypting = encryptState || encryptEphemeral
+
+  const chosenSchematic = schematics.data?.find((s) => s.id === schematic)
 
   const request: ProvisionRequest = {
     cluster,
@@ -378,17 +403,39 @@ function PlanStep({ candidate, onBack }: { candidate: Candidate; onBack: () => v
 
             <div className="space-y-1.5">
               <Label htmlFor="provision-schematic">Image Factory schematic</Label>
-              <Input
-                id="provision-schematic"
-                value={schematic}
-                onChange={(e) => setSchematic(e.target.value)}
-                placeholder="the same id as the ISO this machine booted"
-              />
+              <Select
+                value={schematic === '' ? STOCK : schematic}
+                onValueChange={(v) => setSchematic(v === STOCK ? '' : v)}
+              >
+                <SelectTrigger id="provision-schematic">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={STOCK}>Stock Talos — no schematic</SelectItem>
+                  {(schematics.data ?? []).map((s) => (
+                    <SelectItem key={s.id} value={s.id}>
+                      {s.name}
+                      {s.cluster !== '' && s.cluster !== cluster
+                        ? ' · filed under another cluster'
+                        : ''}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
               <p className="text-xs text-muted-foreground">
-                The installer is built from this id. Leave it empty only if the machine booted a
-                stock ISO — an ISO with system extensions and a stock installer produces a node
-                without them.
+                The installer is built from this id, so it must be the same schematic the ISO was
+                built from. Choose stock Talos only if the machine booted a stock ISO — an ISO with
+                system extensions and a stock installer produces a node without them.
               </p>
+              {chosenSchematic !== undefined &&
+                chosenSchematic.cluster !== '' &&
+                chosenSchematic.cluster !== cluster && (
+                  <p className="text-xs text-muted-foreground">
+                    This schematic is filed under a different cluster. The image is the same either
+                    way, so nothing stops you — the plan will say so again before anything is
+                    written.
+                  </p>
+                )}
             </div>
 
             <div className="space-y-1.5 sm:col-span-2">
