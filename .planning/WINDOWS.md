@@ -2,9 +2,9 @@
 schema_version: 1
 open_count: 61
 waived_count: 0
-fixed_count: 51
-total_count: 112
-last_updated: 2026-09-14T07:20:00.000Z
+fixed_count: 52
+total_count: 113
+last_updated: 2026-09-14T07:30:00.000Z
 ---
 
 # Broken Windows Ledger
@@ -133,6 +133,8 @@ last_updated: 2026-09-14T07:20:00.000Z
 | 111 | 16 | stub | internal/model/model.go |  | SETTINGS.SETUPCOMPLETED WIRD GESCHRIEBEN UND VON NICHTS GELESEN. Ob das Setup gelaufen ist, entscheidet 'gibt es ein Konto' (handlers/setup.go). Das Flag ist ein zweiter Wahrheitstraeger, der inert ist -- was besser ist als ein zweiter, der widerspricht, aber der Feldname sagt das Gegenteil. Der ganze Settings-Eintrag existiert fuer dieses eine Feld. KEINE AENDERUNG AM VERHALTEN: die abgeleitete Regel ist die bessere, und einen Store-Eintrag zu entfernen kostet eine Migration ohne Gewinn. Der Doc-Kommentar sagt jetzt, dass nichts es liest und was stattdessen entscheidet. SCHLIESSBEDINGUNG: entweder der Eintrag bekommt eine echte Einstellung und damit einen Zweck, oder er wird in einer Migration entfernt. | open |  | 2026-09-14T07:05:00.000Z |  |
 
 | 112 | 16 | deviation | internal/imagefactory/installer.go |  | EINE DOKUMENTIERTE MESSUNG REPRODUZIERT NICHT MEHR, UND SIE STAND IN EINEM WARNTEXT FUER BETREIBER. installer.go hat behauptet: 'at the pinned version the two [SecureBoot-Namen] resolve to two different images, measured 2026-08-30'. Nachgemessen am 2026-09-14 von Hand gegen factory.talos.dev bei derselben Version v1.13.9: metal-installer-secureboot und installer-secureboot liefern DENSELBEN Digest (sha256:3c4486fe...), ein OCI-Index, stabil ueber mehrere Anfragen; das ordentliche Paar stimmt ebenfalls ueberein, und die beiden Paare unterscheiden sich voneinander. Die Ironie: dieselbe Datei erklaert an anderer Stelle, warum die Digest-Literale entfernt wurden -- 'a digest in a comment is a fact with an expiry date that nothing in the build checks' -- und stellte dann die BEZIEHUNG zwischen zwei Digests als stehende Tatsache dar, die genauso ablaeuft. Ein Test pinnte ausserdem die Formulierung 'different images' und band sich damit an diese eine Beobachtung. | fixed | GESCHLOSSEN 2026-09-14. Alle drei Stellen (Kommentar, betreiberseitiger Warntext, Zod-Doku in der Oberflaeche) sagen jetzt, was dauerhaft ist: nichts garantiert, dass die beiden Namen dasselbe Bild liefern, und die Antwort hat sich nachweislich geaendert -- gemessen unterschiedlich am 2026-08-30, gleich am 2026-09-14. Das Verhalten aendert sich nicht: der Fallback bleibt, bleibt beschriftet, und ein SecureBoot-Request wird weiterhin nie mit einem gewoehnlichen Installer beantwortet. Der Test prueft jetzt die dauerhafte Aussage statt der abgelaufenen Formulierung. | 2026-09-14T07:20:00.000Z | 2026-09-14T07:20:00.000Z |
+
+| 113 | 16 | deviation | internal/scale/scale.go |  | EIN SATZ STAND ZWEIMAL DA, UND ZWAR NUR IM LAUFENDEN SERVER. Die Skalierungs-Ansicht gab aus: "etcd's membership could not be read, so nothing here counts votes. etcd's membership could not be read (upgrade: this cluster has no control-plane node in the inventory)." Der Handler schreibt MembersProblem als vollstaendigen Satzteil, und advise() stellte ihm seine eigene Kopie desselben Satzes voran. Kein Test hat es gesehen, weil jeder Test hier seinen eigenen kurzen Problemtext uebergibt und nur der echte Server den echten liefert -- gefunden, indem holzkubectl gegen das laufende Binary lief. | fixed | GESCHLOSSEN 2026-09-14. MembersProblem besitzt seinen Satz; advise() haengt nur noch den Nachsatz an. Der Test uebergibt jetzt die Form, die der Server wirklich erzeugt, und zaehlt die Wiederholung. | 2026-09-14T07:30:00.000Z | 2026-09-14T07:30:00.000Z |
 
 ````json
 [
@@ -1479,6 +1481,18 @@ last_updated: 2026-09-14T07:20:00.000Z
     "reason": "GESCHLOSSEN 2026-09-14. Alle drei Stellen (Kommentar, betreiberseitiger Warntext, Zod-Doku in der Oberflaeche) sagen jetzt, was dauerhaft ist: nichts garantiert, dass die beiden Namen dasselbe Bild liefern, und die Antwort hat sich nachweislich geaendert -- gemessen unterschiedlich am 2026-08-30, gleich am 2026-09-14. Das Verhalten aendert sich nicht: der Fallback bleibt, bleibt beschriftet, und ein SecureBoot-Request wird weiterhin nie mit einem gewoehnlichen Installer beantwortet. Der Test prueft jetzt die dauerhafte Aussage statt der abgelaufenen Formulierung.",
     "recorded_at": "2026-09-14T07:20:00.000Z",
     "resolved_at": "2026-09-14T07:20:00.000Z"
+  },
+  {
+    "id": 113,
+    "kind": "deviation",
+    "phase": "16",
+    "file": "internal/scale/scale.go",
+    "line": null,
+    "description": "EIN SATZ STAND ZWEIMAL DA, UND ZWAR NUR IM LAUFENDEN SERVER. Die Skalierungs-Ansicht gab aus: \"etcd's membership could not be read, so nothing here counts votes. etcd's membership could not be read (upgrade: this cluster has no control-plane node in the inventory).\" Der Handler schreibt MembersProblem als vollstaendigen Satzteil, und advise() stellte ihm seine eigene Kopie desselben Satzes voran. Kein Test hat es gesehen, weil jeder Test hier seinen eigenen kurzen Problemtext uebergibt und nur der echte Server den echten liefert -- gefunden, indem holzkubectl gegen das laufende Binary lief.",
+    "status": "fixed",
+    "reason": "GESCHLOSSEN 2026-09-14. MembersProblem besitzt seinen Satz; advise() haengt nur noch den Nachsatz an. Der Test uebergibt jetzt die Form, die der Server wirklich erzeugt, und zaehlt die Wiederholung.",
+    "recorded_at": "2026-09-14T07:30:00.000Z",
+    "resolved_at": "2026-09-14T07:30:00.000Z"
   }
 ]
 ````
