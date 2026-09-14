@@ -1309,7 +1309,10 @@ ways at once, each silent:
   candidate list (`metal-installer`, then the legacy `installer`, each with the
   SecureBoot suffix when asked for) because which one answers varies by version,
   and warns when it had to fall back. The hand-built string took the legacy name
-  unconditionally.
+  unconditionally. Measured against the public Factory on 2026-09-14 at v1.13.9,
+  the two ordinary names resolve to the same digest, so this was a latent risk
+  rather than an observed wrong image at that version — the SecureBoot one below
+  was not.
 - **The Factory host was hard-coded**, so an installation pointed at a private
   Factory with `--image-factory` provisioned nodes that pulled their installer
   from the public one.
