@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/holzcloud/holzkube-manager/internal/inventory"
@@ -31,7 +33,68 @@ type provisionHarness struct {
 
 // newProvisionHarness serves a wizard against one simulated machine that is
 // waiting for a configuration.
+// testSchematic is a well-formed schematic id for the tests below.
+const testSchematic = "376567988ad370138ad8b2698212367b8edcb69b5fd68c80be1f2ec7d603b4ba"
+
+// fakeFactory answers the one request the installer resolver makes: a registry
+// manifest GET at /v2/<repo>/<schematic>/manifests/<version>.
+//
+// answered records every repository name it was asked about, in order, which
+// is what lets a test say *which* installer was resolved rather than only that
+// one was. only, when non-empty, is the set of repository names that answer;
+// everything else is a 404, which is how the resolver's candidate order and
+// its SecureBoot naming become observable.
+type fakeFactory struct {
+	mu       sync.Mutex
+	answered []string
+	only     map[string]bool
+}
+
+func (f *fakeFactory) start(t *testing.T) string {
+	t.Helper()
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
+		// /v2/<repo>/<schematic>/manifests/<version>
+		if len(parts) < 5 || parts[0] != "v2" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		repo := parts[1]
+
+		f.mu.Lock()
+		f.answered = append(f.answered, repo)
+		allowed := len(f.only) == 0 || f.only[repo]
+		f.mu.Unlock()
+
+		if !allowed {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", "application/vnd.oci.image.manifest.v1+json")
+		_, _ = w.Write([]byte(`{"schemaVersion":2}`))
+	}))
+	t.Cleanup(srv.Close)
+	return srv.URL
+}
+
+func (f *fakeFactory) asked() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.answered...)
+}
+
 func newProvisionHarness(t *testing.T) *provisionHarness {
+	t.Helper()
+	return newProvisionHarnessWith(t, nil)
+}
+
+// newProvisionHarnessWith is newProvisionHarness with an Image Factory.
+//
+// A harness with no Factory is the honest default: most of these tests are
+// about routes and jobs, and giving every one of them a registry to talk to
+// would hide which ones actually depend on it.
+func newProvisionHarnessWith(t *testing.T, factory *fakeFactory) *provisionHarness {
 	t.Helper()
 
 	blank, err := talossim.New(talossim.Options{
@@ -80,6 +143,7 @@ func newProvisionHarness(t *testing.T) *provisionHarness {
 				func(string) talos.Creds { return blank.MaintenanceCreds() },
 				h.inv.KnownAt, bootstrapper(t, h), h.inv.ControlPlaneCount)
 		}),
+		factoryOpt(t, factory),
 	)
 
 	resp, raw := h.do(t, http.MethodPost, "/api/v1/setup", map[string]string{
@@ -105,7 +169,30 @@ func newProvisionHarness(t *testing.T) *provisionHarness {
 		t.Fatalf("seed the cluster: %v", err)
 	}
 
+	// The schematic record the installer resolution reads its architecture
+	// from. It is seeded here rather than in each test because a machine that
+	// booted a schematic this installation does not hold is its own refusal,
+	// with its own test.
+	if _, err := h.store.Schematics().Put(context.Background(), model.Schematic{
+		ID:           testSchematic,
+		Name:         "homelab",
+		TalosVersion: "v1.13.9",
+		Arch:         "amd64",
+		Usable:       true,
+	}); err != nil {
+		t.Fatalf("seed the schematic: %v", err)
+	}
+
 	return &provisionHarness{harness: h, blank: blank}
+}
+
+// factoryOpt is withFactory when there is one and a no-op when there is not,
+// so the harness builder stays one expression.
+func factoryOpt(t *testing.T, f *fakeFactory) harnessOpt {
+	if f == nil {
+		return func(*harnessConfig) {}
+	}
+	return withFactory(f.start(t))
 }
 
 // bootstrapper opens the harness's lease directory, once per harness: the
@@ -208,7 +295,7 @@ func TestAPlanNamingNoMachineIsRefusedBeforeAnythingIsAccepted(t *testing.T) {
 func TestTheEvenControlPlaneWarningReachesTheScreen(t *testing.T) {
 	t.Parallel()
 
-	h := newProvisionHarness(t)
+	h := newProvisionHarnessWith(t, &fakeFactory{})
 
 	// One control-plane node already in the inventory, so this plan would make
 	// two.
@@ -228,7 +315,7 @@ func TestTheEvenControlPlaneWarningReachesTheScreen(t *testing.T) {
 		"control_plane": true,
 		"install_disk":  "/dev/nvme0n1",
 		"talos_version": "v1.13.9",
-		"schematic_id":  "376567988ad370138ad8b2698212367b8edcb69b5fd68c80be1f2ec7d603b4ba",
+		"schematic_id":  testSchematic,
 	})
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("plan: %d (%s)", resp.StatusCode, raw)
@@ -509,5 +596,184 @@ func TestAConfirmedApplyIsAcceptedAsAJob(t *testing.T) {
 	}
 	if accepted.Job.Kind != string(provision.JobKindProvision) {
 		t.Errorf("the accepted job is a %q", accepted.Job.Kind)
+	}
+}
+
+// TestAStockMachineGetsTalosOwnInstaller.
+//
+// A machine that was not built from an Image Factory schematic has no Factory
+// repository to resolve, and Talos's published installer is the answer. It is
+// the one case where a reference is built rather than resolved, and it is
+// worth pinning so that "there is nothing to resolve" does not quietly become
+// "resolve it anyway and fail".
+func TestAStockMachineGetsTalosOwnInstaller(t *testing.T) {
+	t.Parallel()
+
+	h := newProvisionHarness(t)
+
+	resp, raw := h.do(t, http.MethodPost, "/api/v1/provision/plan", map[string]any{
+		"cluster":       string(testProvisionCluster),
+		"addr":          h.blank.Host(),
+		"uuid":          "00000000-0000-4000-8000-0000000000cc",
+		"install_disk":  "/dev/nvme0n1",
+		"talos_version": "v1.13.9",
+	})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("plan: %d (%s)", resp.StatusCode, raw)
+	}
+
+	var preview provision.Preview
+	if err := json.Unmarshal(raw, &preview); err != nil {
+		t.Fatalf("decode preview: %v", err)
+	}
+	if preview.InstallImage != "ghcr.io/siderolabs/installer:v1.13.9" {
+		t.Errorf("a stock machine installs %q", preview.InstallImage)
+	}
+}
+
+// TestASchematicWithNoFactoryIsRefusedRatherThanGuessed.
+//
+// This is the decision the change made, stated as a test because it is a
+// trade-off and not an obvious win: a plan naming a schematic now needs a
+// Factory to resolve its installer against, and without one it is refused.
+//
+// The alternative is what shipped before -- assemble
+// "factory.talos.dev/installer/<id>:<version>" by hand -- and it was wrong
+// three ways at once. It never carried SecureBoot, so a machine booted from a
+// SecureBoot ISO installed a system that is not SecureBoot. It assumed the
+// legacy repository name rather than asking which one answers. And it named
+// the public Factory, so an installation pointed at a private one with
+// --image-factory provisioned nodes that pulled their installer from
+// somewhere the operator never configured. None of the three reported
+// anything.
+func TestASchematicWithNoFactoryIsRefusedRatherThanGuessed(t *testing.T) {
+	t.Parallel()
+
+	h := newProvisionHarness(t)
+
+	resp, raw := h.do(t, http.MethodPost, "/api/v1/provision/plan", map[string]any{
+		"cluster":       string(testProvisionCluster),
+		"addr":          h.blank.Host(),
+		"uuid":          "00000000-0000-4000-8000-0000000000dd",
+		"install_disk":  "/dev/nvme0n1",
+		"talos_version": "v1.13.9",
+		"schematic_id":  "376567988ad370138ad8b2698212367b8edcb69b5fd68c80be1f2ec7d603b4ba",
+	})
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("plan: %d (%s), want 400", resp.StatusCode, raw)
+	}
+	if !strings.Contains(string(raw), "image-factory") {
+		t.Errorf("the refusal does not say what to configure: %s", raw)
+	}
+
+	// And nothing was substituted. A refusal that still handed back a
+	// reference would be one a client can ignore by not reading the status.
+	if strings.Contains(string(raw), "factory.talos.dev/installer/") {
+		t.Errorf("an installer reference was produced for a refused plan: %s", raw)
+	}
+}
+
+// TestASecureBootMachineGetsTheSecureBootInstaller.
+//
+// The defect this replaced: the installer reference was assembled by hand as
+// "factory.talos.dev/installer/<id>:<version>" for every machine, so a machine
+// booted from a SecureBoot ISO installed a system that is not SecureBoot. The
+// install succeeds, the node joins, and the property the image was built for
+// is gone, with nothing reporting it. internal/imagefactory names this exact
+// pairing as "the ISO/installer drift this file's own comments warn about,
+// arriving from the one direction nothing checked" -- and provisioning was
+// that direction.
+func TestASecureBootMachineGetsTheSecureBootInstaller(t *testing.T) {
+	t.Parallel()
+
+	f := &fakeFactory{}
+	h := newProvisionHarnessWith(t, f)
+
+	plan := func(secureBoot bool) provision.Preview {
+		t.Helper()
+		resp, raw := h.do(t, http.MethodPost, "/api/v1/provision/plan", map[string]any{
+			"cluster":       string(testProvisionCluster),
+			"addr":          h.blank.Host(),
+			"uuid":          "00000000-0000-4000-8000-0000000000ee",
+			"install_disk":  "/dev/nvme0n1",
+			"talos_version": "v1.13.9",
+			"schematic_id":  testSchematic,
+			"secureboot":    secureBoot,
+		})
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("plan: %d (%s)", resp.StatusCode, raw)
+		}
+		var p provision.Preview
+		if err := json.Unmarshal(raw, &p); err != nil {
+			t.Fatalf("decode preview: %v", err)
+		}
+		return p
+	}
+
+	secure := plan(true)
+	if !strings.Contains(secure.InstallImage, "secureboot") {
+		t.Errorf("a SecureBoot machine installs %q", secure.InstallImage)
+	}
+
+	ordinary := plan(false)
+	if strings.Contains(ordinary.InstallImage, "secureboot") {
+		t.Errorf("an ordinary machine installs %q", ordinary.InstallImage)
+	}
+	if secure.InstallImage == ordinary.InstallImage {
+		t.Fatalf("both resolve to the same installer: %q", secure.InstallImage)
+	}
+
+	// The reference points at the Factory this installation was configured
+	// with, not at the public one. That was the third way the hand-built
+	// string was wrong: an installation pointed at a private Factory with
+	// --image-factory provisioned nodes that pulled their installer from
+	// factory.talos.dev.
+	if strings.Contains(secure.InstallImage, "factory.talos.dev") {
+		t.Errorf("the installer is pulled from the public Factory: %q", secure.InstallImage)
+	}
+	for _, want := range []string{testSchematic, "v1.13.9"} {
+		if !strings.Contains(secure.InstallImage, want) {
+			t.Errorf("the installer reference lost %q: %q", want, secure.InstallImage)
+		}
+	}
+}
+
+// TestTheResolverIsAskedForThePreferredRepositoryFirst.
+//
+// The name is resolved rather than assumed, and the old code assumed the
+// *legacy* one. internal/imagefactory keeps an ordered candidate list because
+// which name answers varies by version, and asks for the platform-prefixed
+// name first.
+func TestTheResolverIsAskedForThePreferredRepositoryFirst(t *testing.T) {
+	t.Parallel()
+
+	// Only the preferred name answers, so a resolver that asked for the legacy
+	// one and took it would produce nothing here.
+	f := &fakeFactory{only: map[string]bool{"metal-installer": true}}
+	h := newProvisionHarnessWith(t, f)
+
+	resp, raw := h.do(t, http.MethodPost, "/api/v1/provision/plan", map[string]any{
+		"cluster":       string(testProvisionCluster),
+		"addr":          h.blank.Host(),
+		"uuid":          "00000000-0000-4000-8000-0000000000ff",
+		"install_disk":  "/dev/nvme0n1",
+		"talos_version": "v1.13.9",
+		"schematic_id":  testSchematic,
+	})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("plan: %d (%s)", resp.StatusCode, raw)
+	}
+
+	var p provision.Preview
+	if err := json.Unmarshal(raw, &p); err != nil {
+		t.Fatalf("decode preview: %v", err)
+	}
+	if !strings.Contains(p.InstallImage, "/metal-installer/") {
+		t.Errorf("the resolved reference is %q, want the preferred repository", p.InstallImage)
+	}
+
+	asked := f.asked()
+	if len(asked) == 0 {
+		t.Fatal("the Factory was never asked which repository answers")
 	}
 }
