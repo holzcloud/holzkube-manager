@@ -497,6 +497,21 @@ export interface AuditQuery {
 export interface SudoChallenge {
   /** What the operator was doing, named in the dialog so the ask makes sense. */
   action: string
+
+  /**
+   * Why this one is asking, when the general reason is not true of it.
+   *
+   * The dialog's default says the action "changes something that cannot simply
+   * be undone", which is the reason the sudo window exists and is right for
+   * almost everything behind it. It is not right for all of them: renewing a
+   * cluster certificate keeps the old one if the new one cannot reach a node,
+   * so nothing about it is hard to undo. It is gated because it touches the
+   * credential that reaches a cluster's PKI, which is a different sentence —
+   * and telling an operator something false about what they are about to do is
+   * worse than telling them nothing.
+   */
+  because?: string
+
   /** Called with true once the sudo window is open, false if it was cancelled. */
   settle: (granted: boolean) => void
 }
@@ -517,19 +532,47 @@ export function onSessionExpired(handler: SessionExpiredHandler | null): void {
   sessionExpiredHandler = handler
 }
 
-/** Names the pending action for the sudo prompt, in English (D-09). */
-const ACTION_LABELS: ReadonlyArray<readonly [string, string]> = [
-  ['/api/v1/account/password', 'Change the operator password'],
-  ['/api/v1/schematics/', 'Delete this schematic'],
+/**
+ * Names the pending action for the sudo prompt, in English (D-09), and says
+ * why when the dialog's general reason is not true of it.
+ *
+ * A route that is not here still prompts — the server decides that, not this
+ * table — it is just named generically.
+ */
+const ACTION_LABELS: ReadonlyArray<{
+  /**
+   * Matched against the whole path, anchored.
+   *
+   * A pattern and not a prefix. The first draft of the third entry used the
+   * prefix `/api/v1/clusters/` and so claimed every route under it — including
+   * deleting a cluster, which would have asked the operator to confirm a
+   * certificate renewal while forgetting their cluster. An id in the middle of
+   * a path is exactly where prefix matching stops working, and this route has
+   * one.
+   */
+  match: RegExp
+  action: string
+  because?: string
+}> = [
+  { match: /^\/api\/v1\/account\/password$/, action: 'Change the operator password' },
+  { match: /^\/api\/v1\/schematics\/[^/]+$/, action: 'Delete this schematic' },
+  {
+    match: /^\/api\/v1\/clusters\/[^/]+\/client-certificate$/,
+    action: 'Renew this cluster’s certificate',
+    because:
+      'reaches the credential this installation uses to get into a cluster, so it asks for your ' +
+      'password again before it runs. Nothing is lost if it fails: the certificate is proved ' +
+      'against a node before it replaces the one in use',
+  },
 ]
 
-function labelFor(path: string): string {
-  for (const [prefix, label] of ACTION_LABELS) {
-    if (path.startsWith(prefix)) {
-      return label
+function challengeFor(path: string): { action: string; because?: string } {
+  for (const { match, action, because } of ACTION_LABELS) {
+    if (match.test(path)) {
+      return { action, because }
     }
   }
-  return 'This destructive action'
+  return { action: 'This destructive action' }
 }
 
 /* ---------------------------------------------------------------------- */
@@ -652,7 +695,7 @@ async function askForSudo(path: string): Promise<boolean> {
   }
   const handler = sudoHandler
   return new Promise<boolean>((resolve) => {
-    handler({ action: labelFor(path), settle: resolve })
+    handler({ ...challengeFor(path), settle: resolve })
   })
 }
 

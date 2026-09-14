@@ -253,3 +253,79 @@ describe('the machine schema tolerates a server that does not know about watches
     expect(m.watch.restarts).toBe(3)
   })
 })
+
+/**
+ * What the sudo prompt says it is about.
+ *
+ * D-09 asks every destructive route to be named in English rather than shown as
+ * a path, and `ACTION_LABELS` is where that naming lives. The table is matched
+ * against the path, and the danger in a table like it is not a missing entry --
+ * a route nobody named still prompts, just generically -- but an entry that
+ * claims more than its route: the operator is then told, confidently, that they
+ * are confirming something other than what they are about to do.
+ *
+ * The third entry nearly shipped as the prefix `/api/v1/clusters/`, which
+ * claims every route under it. Deleting a cluster would have asked the operator
+ * to confirm a certificate renewal. The last test here is that fault, put where
+ * a guard can see it.
+ *
+ * Nothing is settled with `true`: a refused challenge is enough to read the
+ * label off, and it keeps these tests away from response fixtures they do not
+ * care about.
+ */
+describe('the sudo prompt names the action it is asking about', () => {
+  /** Runs one destructive call into a 428 and returns the challenge it raised. */
+  async function challengeRaisedBy(call: () => Promise<unknown>): Promise<SudoChallenge> {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => sudoRequired()),
+    )
+    let raised: SudoChallenge | null = null
+    onSudoRequired((challenge: SudoChallenge) => {
+      raised = challenge
+      challenge.settle(false)
+    })
+
+    await expect(call()).rejects.toMatchObject({ code: 'sudo.required' })
+
+    if (raised === null) {
+      throw new Error('the 428 did not raise a sudo challenge')
+    }
+    return raised
+  }
+
+  it('names a password change', async () => {
+    const challenge = await challengeRaisedBy(() =>
+      api.changePassword('old-password-1', 'new-password-1'),
+    )
+    expect(challenge.action).toBe('Change the operator password')
+    // Nothing overrides the dialog's general reason, which is true of this one.
+    expect(challenge.because).toBeUndefined()
+  })
+
+  it('names a schematic deletion, and only for the one schematic in the path', async () => {
+    const challenge = await challengeRaisedBy(() => api.schematics.remove('a'.repeat(64)))
+    expect(challenge.action).toBe('Delete this schematic')
+  })
+
+  /**
+   * Renewal is the reason `because` exists: it is the one destructive route
+   * where "cannot simply be undone" is false. The server proves the new
+   * certificate against a node before it replaces the one in use, so a failure
+   * changes nothing -- and telling an operator something false about what they
+   * are about to do is worse than telling them nothing.
+   */
+  it('names a certificate renewal, and says why that one is asking', async () => {
+    const challenge = await challengeRaisedBy(() => api.certificate.renew('c1'))
+    expect(challenge.action).toBe('Renew this cluster’s certificate')
+    expect(challenge.because).toContain('Nothing is lost if it fails')
+    expect(challenge.because).not.toContain('cannot simply be undone')
+  })
+
+  it('does not call deleting a cluster a certificate renewal', async () => {
+    const challenge = await challengeRaisedBy(() => api.clusters.forget('c1'))
+    expect(challenge.action).not.toContain('certificate')
+    expect(challenge.action).toBe('This destructive action')
+    expect(challenge.because).toBeUndefined()
+  })
+})
