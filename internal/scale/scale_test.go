@@ -157,7 +157,10 @@ func TestAnUnreadableMembershipRefusesEveryControlPlaneNodeAndNoWorker(t *testin
 		[]scale.Node{cp("cp-1"), cp("cp-2"), cp("cp-3"), worker("w-1")},
 		nil,
 		upgrade.MemberList{},
-		"no control-plane node answered",
+		// The shape the server actually produces: a whole clause, not a
+		// fragment. A test that passed "unreachable" here would not have
+		// noticed the sentence being introduced twice.
+		"etcd's membership could not be read (no control-plane node answered)",
 	)
 
 	if p.MembersKnown {
@@ -176,8 +179,19 @@ func TestAnUnreadableMembershipRefusesEveryControlPlaneNodeAndNoWorker(t *testin
 		t.Errorf("a worker was refused because etcd could not be read: %s", r.Reason)
 	}
 
-	if !strings.Contains(strings.Join(p.Advice, " "), "could not be read") {
+	joined := strings.Join(p.Advice, " ")
+	if !strings.Contains(joined, "could not be read") {
 		t.Errorf("the advice counts votes it does not have: %q", p.Advice)
+	}
+
+	// Once, not twice. The problem is a whole clause written by whoever failed
+	// to read the membership, and the advice used to introduce it with its own
+	// copy of the same sentence -- which no test saw, because the tests here
+	// pass a short made-up problem and only the running server passes the real
+	// one. It read: "etcd's membership could not be read, so nothing here
+	// counts votes. etcd's membership could not be read (...)".
+	if n := strings.Count(joined, "could not be read"); n != 1 {
+		t.Errorf("the advice says 'could not be read' %d times:\n%s", n, joined)
 	}
 }
 

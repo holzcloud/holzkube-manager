@@ -224,8 +224,13 @@ func offer(n Node) Candidate {
 // "add two" and not why will add one.
 func advise(p Plan) []string {
 	if !p.MembersKnown {
-		return []string{"etcd's membership could not be read, so nothing here counts votes. " +
-			p.MembersProblem + "."}
+		// MembersProblem is a whole clause written by whoever failed to read
+		// the membership, not a fragment to introduce. Prefixing it produced
+		// "etcd's membership could not be read, so nothing here counts votes.
+		// etcd's membership could not be read (...)" -- which no test caught,
+		// because every test here supplies its own short problem string and
+		// only the running server supplies the real one.
+		return []string{p.MembersProblem + ", so nothing here counts votes."}
 	}
 
 	var out []string
