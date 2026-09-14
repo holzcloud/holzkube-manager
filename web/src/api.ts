@@ -428,6 +428,18 @@ export type SchematicAssets = z.infer<typeof schematicAssetsSchema>
 
 export interface SchematicInput {
   name: string
+
+  /**
+   * The cluster this schematic is filed under, empty for none.
+   *
+   * Not a constraint. The image is the same image whichever cluster it is
+   * installed into, so this is the operator's own filing -- and what it buys is
+   * that the provisioning plan says so when a machine joining one cluster boots
+   * a schematic filed under another. A warning on the last screen before a disk
+   * is written, not a refusal.
+   */
+  cluster: string
+
   talos_version: string
   arch: string
   extensions: string[]

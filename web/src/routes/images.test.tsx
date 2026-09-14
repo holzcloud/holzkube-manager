@@ -86,8 +86,40 @@ function schematicFixture(overrides: Partial<Schematic> = {}): Schematic {
   }
 }
 
+/**
+ * A cluster as GET /api/v1/clusters serves it, with only the fields this screen
+ * reads filled in as anything but a zero value.
+ *
+ * Spelled out rather than built from a shared factory because clusterSchema has
+ * no defaults for most of these: a fixture missing one is a parse error, which
+ * on this screen shows up as the cluster select being empty and nothing saying
+ * why.
+ */
+function clusterFixture(id: string, name: string) {
+  return {
+    id,
+    name,
+    origin: 'adopted',
+    endpoint: 'https://10.0.0.10:6443',
+    locked: false,
+    created_at: '2026-08-29T10:00:00Z',
+    client_cert_not_after: '2027-08-29T10:00:00Z',
+    client_cert_days_left: 350,
+    certificate_warning: '',
+    certificate_urgency: 'none',
+    nodes: 3,
+    control_plane: 1,
+    workers: 2,
+    healthy: 3,
+    degraded: 0,
+    down: 0,
+  }
+}
+
 interface StubOptions {
   versions?: FactoryVersions
+  /** What GET /api/v1/clusters answers with. Empty is the default. */
+  clusters?: Array<ReturnType<typeof clusterFixture>>
   catalog?: Catalog
   /** The 201 body for POST /api/v1/schematics, minus the warnings. */
   created?: Schematic
@@ -212,6 +244,9 @@ function stubFactory(options: StubOptions = {}) {
       })
     }
 
+    if (url.pathname === '/api/v1/clusters' && method === 'GET') {
+      return json({ clusters: options.clusters ?? [] })
+    }
     if (url.pathname === '/api/v1/factory/versions') {
       return json(versions)
     }
@@ -220,10 +255,20 @@ function stubFactory(options: StubOptions = {}) {
       return json({ version, extensions: catalog[version] ?? [] })
     }
     if (url.pathname === '/api/v1/schematics' && method === 'POST') {
-      const body = JSON.parse(String(init?.body)) as { name: string; talos_version: string }
+      const body = JSON.parse(String(init?.body)) as {
+        name: string
+        cluster: string
+        talos_version: string
+      }
       const record = options.created ?? schematicFixture()
       return json(
-        { ...record, name: body.name, talos_version: body.talos_version, warnings: [] },
+        {
+          ...record,
+          name: body.name,
+          cluster: body.cluster,
+          talos_version: body.talos_version,
+          warnings: [],
+        },
         201,
       )
     }
@@ -2018,5 +2063,113 @@ describe('ImagesView — the recovery a missing verdict has', () => {
     await waitFor(() =>
       expect(screen.queryByRole('alert', { name: 'Create failed' })).not.toBeInTheDocument(),
     )
+  })
+})
+
+/**
+ * Filing a schematic under a cluster.
+ *
+ * The field existed on the record from the start and was read by nothing --
+ * stored, validated, and then dropped. The provisioning plan reads it now and
+ * warns when a machine joining one cluster boots a schematic filed under
+ * another, which is what made an input for it worth having: until the server
+ * read the value, offering the operator a control to set it would have been a
+ * control that does nothing.
+ *
+ * It is filing and not a constraint. The image is identical whichever cluster
+ * it is installed into.
+ */
+describe('the schematic form files a schematic under a cluster', () => {
+  const HOMELAB = 'c'.repeat(26)
+  const LAB2 = 'd'.repeat(26)
+
+  it('sends the id of the cluster that was chosen', async () => {
+    const fetchMock = stubFactory({
+      clusters: [clusterFixture(HOMELAB, 'homelab'), clusterFixture(LAB2, 'lab2')],
+    })
+    const user = userEvent.setup()
+
+    renderImages()
+    await catalogLoaded()
+
+    await user.type(screen.getByLabelText('Name'), 'workers')
+    await user.click(screen.getByRole('combobox', { name: 'Cluster' }))
+    await user.click(await screen.findByRole('option', { name: 'lab2' }))
+    await user.click(screen.getByRole('button', { name: 'Create schematic' }))
+
+    await waitFor(() => expect(bodiesPostedTo(fetchMock, '/api/v1/schematics')).toHaveLength(1))
+    const [body] = bodiesPostedTo(fetchMock, '/api/v1/schematics') as [{ cluster: string }]
+    expect(body.cluster).toBe(LAB2)
+  })
+
+  /**
+   * The sentinel is this form's word for "no cluster" and must never reach the
+   * wire. A Select cannot carry the empty string as an option value -- Radix
+   * reads an empty value as "nothing is selected" -- so the translation exists,
+   * and a translation that is forgotten sends the server a cluster id it has
+   * never issued. The server would store it: cluster is a free string there,
+   * validated for representability and not for existence.
+   */
+  it('sends an empty cluster, and never its own sentinel, when none was chosen', async () => {
+    const fetchMock = stubFactory({ clusters: [clusterFixture(HOMELAB, 'homelab')] })
+    const user = userEvent.setup()
+
+    renderImages()
+    await catalogLoaded()
+
+    await user.type(screen.getByLabelText('Name'), 'workers')
+    await user.click(screen.getByRole('button', { name: 'Create schematic' }))
+
+    await waitFor(() => expect(bodiesPostedTo(fetchMock, '/api/v1/schematics')).toHaveLength(1))
+    const [body] = bodiesPostedTo(fetchMock, '/api/v1/schematics') as [{ cluster: string }]
+    expect(body.cluster).toBe('')
+    // Said twice on purpose: the first assertion would also pass if the field
+    // were dropped from the body entirely, and the second names the thing that
+    // must not appear.
+    expect(JSON.stringify(body)).not.toContain('__unfiled__')
+  })
+
+  it('shows the cluster by name in the saved table, not by its id', async () => {
+    stubFactory({
+      clusters: [clusterFixture(HOMELAB, 'homelab')],
+      saved: [schematicFixture({ cluster: HOMELAB, name: 'workers' })],
+    })
+
+    renderImages()
+
+    const row = await screen.findByRole('button', { name: 'Schematic workers' })
+    expect(within(row).getByText('homelab')).toBeInTheDocument()
+    expect(row).not.toHaveTextContent(HOMELAB)
+  })
+
+  /**
+   * Filed under a cluster this installation no longer holds. The id is shown
+   * rather than nothing, because "filed under something that is gone" and
+   * "filed under nothing" are different facts and only one of them wants
+   * attention.
+   */
+  it('shows the id when the cluster it names is gone, rather than an empty cell', async () => {
+    stubFactory({
+      clusters: [],
+      saved: [schematicFixture({ cluster: HOMELAB, name: 'workers' })],
+    })
+
+    renderImages()
+
+    const row = await screen.findByRole('button', { name: 'Schematic workers' })
+    expect(within(row).getByText(HOMELAB)).toBeInTheDocument()
+  })
+
+  it('shows a dash for a schematic filed under no cluster', async () => {
+    stubFactory({
+      clusters: [clusterFixture(HOMELAB, 'homelab')],
+      saved: [schematicFixture({ cluster: '', name: 'workers' })],
+    })
+
+    renderImages()
+
+    const row = await screen.findByRole('button', { name: 'Schematic workers' })
+    expect(within(row).getByText('—')).toBeInTheDocument()
+    expect(row).not.toHaveTextContent('homelab')
   })
 })

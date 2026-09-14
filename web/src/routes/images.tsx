@@ -235,6 +235,17 @@ export function hasControlCharacter(value: string): boolean {
  * to the name cell and not the probe reason is a contract the next reader will
  * take as covering both.
  */
+/**
+ * This form's stand-in for "no cluster".
+ *
+ * The wire value is the empty string, and a Select cannot carry one: Radix
+ * treats an empty option value as "nothing is selected" and uses it to decide
+ * whether to show the placeholder, so an option with that value is an option
+ * that unselects itself. Translated once at submit and nowhere else, so the
+ * sentinel never leaves this file.
+ */
+const UNASSIGNED = '__unfiled__'
+
 function StoredText({ children }: { children: string }) {
   return <bdi>{children}</bdi>
 }
@@ -277,6 +288,7 @@ function ImagesView() {
   const queryClient = useQueryClient()
 
   const [name, setName] = useState('')
+  const [cluster, setCluster] = useState(UNASSIGNED)
   const [chosenVersion, setChosenVersion] = useState<string | null>(null)
   const [showPrerelease, setShowPrerelease] = useState(false)
   const [arch, setArch] = useRememberedArch()
@@ -332,6 +344,12 @@ function ImagesView() {
     setExtensions((previous) => previous.filter((selected) => available.has(selected)))
     setDropped(absent)
   }, [catalogData, extensions])
+
+  // The clusters this schematic can be filed under. A read that is allowed to
+  // fail quietly: filing is optional, so a form that refuses to appear because
+  // the cluster list did not load would make the required part of the screen
+  // depend on the optional part of it.
+  const clusters = useQuery({ queryKey: ['clusters'], queryFn: () => api.clusters.list() })
 
   const create = useMutation({
     mutationFn: (input: SchematicInput) => api.schematics.create(input),
@@ -404,9 +422,12 @@ function ImagesView() {
   // does the form, through this one computation, so the two cannot answer
   // differently.
   //
-  // `cluster` is guarded server-side too and has no input here to guard: this
-  // form does not offer one, and the request it builds carries no cluster. When
-  // one is added it belongs in this computation and nowhere else.
+  // `cluster` is guarded server-side too and is deliberately not in this
+  // computation, which is the opposite of what ledger entry 54 expected when it
+  // was filed -- it assumed a text input. The value comes from a select whose
+  // only options are ids this server minted and sent back, so there is no
+  // operator text to guard: an unrepresentable codepoint cannot get in. Any
+  // future field an operator *types* belongs here and nowhere else.
   const nameError = hasControlCharacter(name) ? CONTROL_CHARACTER_MESSAGE : null
   const kernelArgErrors = kernelArgs.map((value) =>
     hasControlCharacter(value) ? CONTROL_CHARACTER_MESSAGE : null,
@@ -423,6 +444,10 @@ function ImagesView() {
   const submit = useCallback(() => {
     create.mutate({
       name,
+      // UNASSIGNED is this form's word for "no cluster", not the server's: the
+      // wire value for that is the empty string, which a Select cannot hold as
+      // an option value.
+      cluster: cluster === UNASSIGNED ? '' : cluster,
       talos_version: version,
       arch,
       // Only names that came out of the fetched catalog can be here: the
@@ -437,7 +462,7 @@ function ImagesView() {
         .map((row): MetaValue => ({ key: Number(row.key), value: row.value })),
       secureboot: secureBoot,
     })
-  }, [create, name, version, arch, extensions, kernelArgs, meta, secureBoot])
+  }, [create, name, cluster, version, arch, extensions, kernelArgs, meta, secureBoot])
 
   const brokenReason = versions.data?.broken[version]
 
@@ -504,6 +529,27 @@ function ImagesView() {
                   ))}
               </SelectContent>
             </Select>
+          </div>
+
+          <div className="flex flex-col gap-1">
+            <Label htmlFor="schematic-cluster">Cluster</Label>
+            <Select value={cluster} onValueChange={setCluster}>
+              <SelectTrigger id="schematic-cluster" className="h-8 w-56">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={UNASSIGNED}>Not filed under one</SelectItem>
+                {(clusters.data ?? []).map((entry) => (
+                  <SelectItem key={entry.id} value={entry.id}>
+                    {entry.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <p className="max-w-56 text-xs text-muted-foreground">
+              Filing only. The image is the same for every cluster — what this buys is that
+              provisioning a machine into a different one says so before the disk is written.
+            </p>
           </div>
 
           <div className="flex flex-col gap-1">
@@ -1060,6 +1106,20 @@ function SavedSchematics({ onOpen }: { onOpen: (id: string) => void }) {
     queryFn: () => api.schematics.list(),
   })
 
+  // Names for the ids the records carry. A record stores the id, because a
+  // cluster can be renamed and a stored name would then be wrong; the screen
+  // shows the name, because an id is not what an operator calls a cluster.
+  const clusters = useQuery({ queryKey: ['clusters'], queryFn: () => api.clusters.list() })
+  const nameOf = (id: string): string => {
+    if (id === '') {
+      return ''
+    }
+    // Filed under a cluster this installation no longer holds. The id is shown
+    // rather than nothing: "filed under something that is gone" is a different
+    // fact from "filed under nothing", and only one of them needs attention.
+    return clusters.data?.find((entry) => entry.id === id)?.name ?? id
+  }
+
   return (
     <section className="space-y-2">
       <h2 className="font-heading text-lg font-semibold tracking-tight">Saved schematics</h2>
@@ -1084,6 +1144,7 @@ function SavedSchematics({ onOpen }: { onOpen: (id: string) => void }) {
           <TableHeader>
             <TableRow>
               <TableHead>Name</TableHead>
+              <TableHead>Cluster</TableHead>
               <TableHead>Talos version</TableHead>
               <TableHead>Extensions</TableHead>
               <TableHead>Created</TableHead>
@@ -1111,6 +1172,13 @@ function SavedSchematics({ onOpen }: { onOpen: (id: string) => void }) {
               >
                 <TableCell>
                   <StoredText>{record.name}</StoredText>
+                </TableCell>
+                <TableCell>
+                  {record.cluster === '' ? (
+                    <span className="text-muted-foreground">—</span>
+                  ) : (
+                    <StoredText>{nameOf(record.cluster)}</StoredText>
+                  )}
                 </TableCell>
                 <TableCell className="tabular-nums">{record.talos_version}</TableCell>
                 <TableCell className="tabular-nums">{record.extensions.length}</TableCell>
