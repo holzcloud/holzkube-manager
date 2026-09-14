@@ -1297,11 +1297,18 @@ func TestInstallerNameCheckDoesNotReadAFallbackAsAnObservation(t *testing.T) {
 //
 // Round 1 recorded installer-secureboot as a legacy alias of
 // metal-installer-secureboot, and that recording is why the SecureBoot fallback
-// was treated as harmless when installerCandidates was written. It is wrong at
-// the pinned version -- the two names resolve to two different images
-// (02-UAT.md G-02-13) -- so the fallback silently swaps one SecureBoot image
-// for another and the generic provenance warning, which says only that the
-// preferred name was unheard, is not the sentence an operator needs.
+// was treated as harmless when installerCandidates was written. The two names
+// were measured resolving to different images at the pinned version on
+// 2026-08-30 (02-UAT.md G-02-13) and to the same image on 2026-09-14 -- and
+// that the answer moves is exactly why the fallback cannot be treated as
+// harmless. The generic provenance warning, which says only that the preferred
+// name was unheard, is not the sentence an operator needs.
+//
+// This test asserts the durable half and not the measurement. It used to
+// require the phrase "different images", which tied it to one observation:
+// when that observation stopped reproducing, the honest wording stopped
+// satisfying the test. What has to be true is that the warning tells an
+// operator the image may not be the one the preferred name selects.
 //
 // The fallback is kept: both candidates are SecureBoot installers, so the drift
 // the refusal exists to prevent cannot occur through this path, and dropping it
@@ -1331,8 +1338,11 @@ func TestInstallerImageLabelsASecureBootFallbackAsADifferentImage(t *testing.T) 
 			"a different image, and the generic code cannot say so",
 			w.Code, imagefactory.WarningInstallerSecureBootRepoFallbackUnverified)
 	}
-	if !strings.Contains(w.Detail, "different images") {
-		t.Errorf("the warning does not say the two SecureBoot names are different images: %q", w.Detail)
+	if !strings.Contains(w.Detail, "may not be the image the preferred name selects") {
+		t.Errorf("the warning does not say the image may not be the preferred name's: %q", w.Detail)
+	}
+	if !strings.Contains(w.Detail, "not something to rely on") {
+		t.Errorf("the warning presents the relationship between the two names as settled: %q", w.Detail)
 	}
 	if !strings.Contains(w.Detail, preferredSecureBootInstallerRepo) {
 		t.Errorf("the warning does not name the repository that never answered: %q", w.Detail)

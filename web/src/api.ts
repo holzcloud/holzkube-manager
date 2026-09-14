@@ -466,11 +466,12 @@ export const WARNING_INSTALLER_REPO_FALLBACK_UNVERIFIED = 'installer.repo-fallba
  * fact it carries is a different one.
  *
  * `installer-secureboot` was recorded as a legacy alias of
- * `metal-installer-secureboot`, and it is not one: at the pinned Talos version
- * the two names resolve to two different images, while at the oldest supported
- * version they resolve to the same one. Neither "alias" nor "different image" is
- * true of the pair in general, so the answer is labelled per resolution rather
- * than settled once. An operator who copied this reference earlier is not
+ * `metal-installer-secureboot`, and it is not reliably one. Whether the two
+ * resolve to the same image has been measured to change: they differed at the
+ * pinned Talos version on 2026-08-30 and matched at that same version on
+ * 2026-09-14. Neither "alias" nor "different image" is true of the pair in
+ * general, which is why the answer is labelled per resolution rather than
+ * settled once. An operator who copied this reference earlier is not
  * necessarily holding the same thing.
  *
  * It does not weaken the rule that a SecureBoot request is never answered with

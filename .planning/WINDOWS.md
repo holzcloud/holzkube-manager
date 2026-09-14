@@ -2,9 +2,9 @@
 schema_version: 1
 open_count: 61
 waived_count: 0
-fixed_count: 50
-total_count: 111
-last_updated: 2026-09-14T07:05:00.000Z
+fixed_count: 51
+total_count: 112
+last_updated: 2026-09-14T07:20:00.000Z
 ---
 
 # Broken Windows Ledger
@@ -131,6 +131,8 @@ last_updated: 2026-09-14T07:05:00.000Z
 
 | 110 | 16 | deviation | internal/inventory/observe.go |  | EIN KNOTEN, DER ANTWORTET UND NICHT GELESEN WERDEN KANN, WAR NICHT VON EINEM ABWESENDEN ZU UNTERSCHEIDEN. Die Beobachtung baut eine Verbindung auf (der Knoten antwortet also auf Version) und liest dann NodeFacts; schlug das fehl, kehrte die Funktion zurueck, ohne irgendetwas zu speichern. Machine.SeenAt bewegte sich damit nur, wenn eine VOLLSTAENDIGE Beobachtung geklappt hat -- obwohl der Doc-Kommentar des Feldes seit jeher sagt, es sei 'when the machine last answered anything at all'. Das Feld beschrieb zwei Milestones lang ein Verhalten, das der Code nicht hatte, und die beiden Fehlerarten waren ein Datensatz. Sie fuehren zu verschiedenen Reparaturen: die eine zum Kabel oder zur Stromversorgung, die andere zum Knoten selbst. Gefunden durch eine Durchsicht aller gespeicherten Felder, die nirgends gelesen werden -- 13 Treffer, 11 davon ueber JSON von der Oberflaeche gelesen, zwei echt. | fixed | GESCHLOSSEN 2026-09-14. SeenAt wird jetzt auch geschrieben, wenn die Verbindung stand und das Lesen scheiterte -- der Snapshot ausdruecklich nicht, denn ein altes Messergebnis mit neuem Zeitstempel ist genau das, wogegen das Field[T]-Modell existiert. Auf der View und auf der Knotenseite sichtbar. talossim kann jetzt ein Knoten sein, der antwortet und dessen Fakten nicht lesbar sind. Beide Fehler rot gesehen. | 2026-09-14T07:05:00.000Z | 2026-09-14T07:05:00.000Z |
 | 111 | 16 | stub | internal/model/model.go |  | SETTINGS.SETUPCOMPLETED WIRD GESCHRIEBEN UND VON NICHTS GELESEN. Ob das Setup gelaufen ist, entscheidet 'gibt es ein Konto' (handlers/setup.go). Das Flag ist ein zweiter Wahrheitstraeger, der inert ist -- was besser ist als ein zweiter, der widerspricht, aber der Feldname sagt das Gegenteil. Der ganze Settings-Eintrag existiert fuer dieses eine Feld. KEINE AENDERUNG AM VERHALTEN: die abgeleitete Regel ist die bessere, und einen Store-Eintrag zu entfernen kostet eine Migration ohne Gewinn. Der Doc-Kommentar sagt jetzt, dass nichts es liest und was stattdessen entscheidet. SCHLIESSBEDINGUNG: entweder der Eintrag bekommt eine echte Einstellung und damit einen Zweck, oder er wird in einer Migration entfernt. | open |  | 2026-09-14T07:05:00.000Z |  |
+
+| 112 | 16 | deviation | internal/imagefactory/installer.go |  | EINE DOKUMENTIERTE MESSUNG REPRODUZIERT NICHT MEHR, UND SIE STAND IN EINEM WARNTEXT FUER BETREIBER. installer.go hat behauptet: 'at the pinned version the two [SecureBoot-Namen] resolve to two different images, measured 2026-08-30'. Nachgemessen am 2026-09-14 von Hand gegen factory.talos.dev bei derselben Version v1.13.9: metal-installer-secureboot und installer-secureboot liefern DENSELBEN Digest (sha256:3c4486fe...), ein OCI-Index, stabil ueber mehrere Anfragen; das ordentliche Paar stimmt ebenfalls ueberein, und die beiden Paare unterscheiden sich voneinander. Die Ironie: dieselbe Datei erklaert an anderer Stelle, warum die Digest-Literale entfernt wurden -- 'a digest in a comment is a fact with an expiry date that nothing in the build checks' -- und stellte dann die BEZIEHUNG zwischen zwei Digests als stehende Tatsache dar, die genauso ablaeuft. Ein Test pinnte ausserdem die Formulierung 'different images' und band sich damit an diese eine Beobachtung. | fixed | GESCHLOSSEN 2026-09-14. Alle drei Stellen (Kommentar, betreiberseitiger Warntext, Zod-Doku in der Oberflaeche) sagen jetzt, was dauerhaft ist: nichts garantiert, dass die beiden Namen dasselbe Bild liefern, und die Antwort hat sich nachweislich geaendert -- gemessen unterschiedlich am 2026-08-30, gleich am 2026-09-14. Das Verhalten aendert sich nicht: der Fallback bleibt, bleibt beschriftet, und ein SecureBoot-Request wird weiterhin nie mit einem gewoehnlichen Installer beantwortet. Der Test prueft jetzt die dauerhafte Aussage statt der abgelaufenen Formulierung. | 2026-09-14T07:20:00.000Z | 2026-09-14T07:20:00.000Z |
 
 ````json
 [
@@ -1465,6 +1467,18 @@ last_updated: 2026-09-14T07:05:00.000Z
     "reason": "",
     "recorded_at": "2026-09-14T07:05:00.000Z",
     "resolved_at": null
+  },
+  {
+    "id": 112,
+    "kind": "deviation",
+    "phase": "16",
+    "file": "internal/imagefactory/installer.go",
+    "line": null,
+    "description": "EINE DOKUMENTIERTE MESSUNG REPRODUZIERT NICHT MEHR, UND SIE STAND IN EINEM WARNTEXT FUER BETREIBER. installer.go hat behauptet: 'at the pinned version the two [SecureBoot-Namen] resolve to two different images, measured 2026-08-30'. Nachgemessen am 2026-09-14 von Hand gegen factory.talos.dev bei derselben Version v1.13.9: metal-installer-secureboot und installer-secureboot liefern DENSELBEN Digest (sha256:3c4486fe...), ein OCI-Index, stabil ueber mehrere Anfragen; das ordentliche Paar stimmt ebenfalls ueberein, und die beiden Paare unterscheiden sich voneinander. Die Ironie: dieselbe Datei erklaert an anderer Stelle, warum die Digest-Literale entfernt wurden -- 'a digest in a comment is a fact with an expiry date that nothing in the build checks' -- und stellte dann die BEZIEHUNG zwischen zwei Digests als stehende Tatsache dar, die genauso ablaeuft. Ein Test pinnte ausserdem die Formulierung 'different images' und band sich damit an diese eine Beobachtung.",
+    "status": "fixed",
+    "reason": "GESCHLOSSEN 2026-09-14. Alle drei Stellen (Kommentar, betreiberseitiger Warntext, Zod-Doku in der Oberflaeche) sagen jetzt, was dauerhaft ist: nichts garantiert, dass die beiden Namen dasselbe Bild liefern, und die Antwort hat sich nachweislich geaendert -- gemessen unterschiedlich am 2026-08-30, gleich am 2026-09-14. Das Verhalten aendert sich nicht: der Fallback bleibt, bleibt beschriftet, und ein SecureBoot-Request wird weiterhin nie mit einem gewoehnlichen Installer beantwortet. Der Test prueft jetzt die dauerhafte Aussage statt der abgelaufenen Formulierung.",
+    "recorded_at": "2026-09-14T07:20:00.000Z",
+    "resolved_at": "2026-09-14T07:20:00.000Z"
   }
 ]
 ````

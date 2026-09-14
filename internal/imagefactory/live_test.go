@@ -322,14 +322,24 @@ var liveInstallerMatrix = map[string]map[string]liveExpect{
 	// names carry a different image digest than the two ordinary ones
 	// (02-UAT.md G-02-4).
 	//
-	// The 2026-08-30 run added the digests, and they say more than the previous
-	// one recorded. At this version the two *ordinary* names resolve to one
-	// image, so "legacy alias" is true of that pair -- and the two SecureBoot
-	// names resolve to two different images, so it is false of that one
-	// (02-UAT.md G-02-13, correcting round 1's G-02-4 evidence). The digests
-	// themselves are logged by the subtest below rather than written here, for
-	// the reason installer.go's previous pair demonstrates: a digest in a
-	// comment is a fact with an expiry date that nothing in the build checks.
+	// The 2026-08-30 run added the digests, and they said more than the
+	// previous one recorded: at this version the two *ordinary* names resolved
+	// to one image, and the two SecureBoot names to two different ones
+	// (02-UAT.md G-02-13, correcting round 1's G-02-4 evidence).
+	//
+	// Re-measured 2026-09-14, by hand against the public Factory at this same
+	// version: all four still answer, the ordinary pair still agrees, and the
+	// **SecureBoot pair now agrees too** -- one OCI index, same digest, stable
+	// across repeated requests. So the 2026-08-30 relationship no longer
+	// reproduces.
+	//
+	// That is the reason this table records which names *answer* and never
+	// which digest they carry. The digests are logged by the subtest below
+	// rather than written here, for the reason installer.go's previous pair
+	// demonstrates: a digest in a comment is a fact with an expiry date that
+	// nothing in the build checks -- and a *relationship between* two digests
+	// expires exactly the same way, which is what happened to the sentence
+	// above between one measurement and the next.
 	catalogVersion: {
 		"metal-installer": liveAnswers, "installer": liveAnswers,
 		"metal-installer-secureboot": liveAnswers, "installer-secureboot": liveAnswers,
