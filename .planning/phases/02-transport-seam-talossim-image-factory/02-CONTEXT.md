@@ -219,6 +219,31 @@ class membership is changing a confirmed decision, and must amend
 `internal/talossim/scenario.go`, `docs/talossim.md` and
 `internal/talos/deadline.go` in the same commit.
 
+**Amended 2026-09-14 — two classes added, one membership moved.** The table
+below carries the amendment; this paragraph says what changed and why, so that
+"confirmed" does not quietly come to mean "confirmed, plus whatever happened
+since". Both changes were made in code, with their reasoning, and neither
+reached this table until now — which is the thing the paragraph above exists to
+prevent, and it failed twice.
+
+- **`ClassUpload`, and `EtcdRecover` moved into it from Mutation.** The mutation
+  class bounds "the call that *initiates* a mutation", and `EtcdRecover`
+  initiates nothing: `Bootstrap` with `recover_etcd` does. It is a client stream
+  carrying an etcd database, so thirty seconds on it is a ceiling on how large
+  an operator's database may be. Recorded as ledger entry 98 at the time; this
+  is its close.
+- **`ClassWatch`, holding `COSIWatch`.** Added in v1.15 phase 2 with the
+  reasoning in that phase's summary, and never recorded anywhere else at all --
+  not here and not in the ledger. Found while closing entry 98, which is the
+  only reason it is here.
+
+One more thing the original derivation could not have covered, noted rather than
+amended: the table was derived from the 54-method `MachineServiceServer` surface,
+and phase 9 added `LifecycleService/Upgrade`, which is on a different service. It
+is classified `ClassStream` in the code with its reasoning there. A later
+amendment that wants this table to be the whole policy has to widen its stated
+scope first.
+
 The operator asked to be shown a proposal rather than decide these from scratch.
 Derived from the real 54-method `MachineServiceServer` surface at machinery
 v1.13.9, not invented.
@@ -229,8 +254,10 @@ v1.13.9, not invented.
 |---|---|---|
 | **Probe** | 5 s | `Version` used as the liveness check (D-05) |
 | **Fast read** | 10 s | `Version`, `Hostname`, `ServiceList`, `Memory`, `LoadAvg`, `SystemStat`, `CPUInfo`, `CPUFreqStats`, `DiskStats`, `NetworkDeviceStats`, `Mounts`, `Netstat`, `Processes`, `Stats`, `Containers`, `EtcdMemberList`, `EtcdStatus`, `EtcdAlarmList`, COSI Get/List |
-| **Mutation** | 30 s to *initiate* | `ApplyConfiguration`, `Bootstrap`, `Reset`, `Reboot`, `Shutdown`, `Upgrade`, `Rollback`, `MetaWrite`, `MetaDelete`, `ServiceStart/Stop/Restart`, `ImagePull`, `EtcdLeaveCluster`, `EtcdRemoveMemberByID`, `EtcdForfeitLeadership`, `EtcdDefragment`, `EtcdRecover`, `EtcdDowngrade*` — the long work is asynchronous on the node; this bounds the call, not the operation |
+| **Mutation** | 30 s to *initiate* | `ApplyConfiguration`, `Bootstrap`, `Reset`, `Reboot`, `Shutdown`, `Upgrade`, `Rollback`, `MetaWrite`, `MetaDelete`, `ServiceStart/Stop/Restart`, `ImagePull`, `EtcdLeaveCluster`, `EtcdRemoveMemberByID`, `EtcdForfeitLeadership`, `EtcdDefragment`, `EtcdDowngrade*` — the long work is asynchronous on the node; this bounds the call, not the operation |
 | **Stream** | no total deadline | `Logs`, `Dmesg`, `Events`, `Read`, `Copy`, `List`, `DiskUsage`, `ImageList`, `EtcdSnapshot`, `PacketCapture` — bounded instead by a **first-byte deadline of 10 s** and an **idle timeout of 60 s** without data |
+| **Upload** *(amended 2026-09-14)* | no total deadline | `EtcdRecover` — a client stream this process sends. No idle timeout either: the node is silent during the upload by construction, having nothing to say until it has the file. What is left to bound is the acknowledgement, and it gets **2 minutes** rather than the stream class's 10 s, because the node flushes the received database to disk before answering and on a slow disk that flush is the slowest part of the call |
+| **Watch** *(amended 2026-09-14)* | no total deadline | `COSIWatch` — the one class with **no idle timeout**. On a log stream silence means the node has stopped talking; on a resource watch it means nothing has changed, which is the usual state of most nodes. Under the stream class every subscription would have been torn down and rebuilt every 60 s: a poller by a longer route, on a worse interval than the heartbeat it was meant to improve on. The **first-byte deadline still applies** — a watch is opened asking for current contents and owes an answer immediately. What bounds it instead is the heartbeat (INV-13, D-19) |
 
 ### Retry allowlist
 
@@ -242,6 +269,10 @@ every RPC in the **Fast read** class above.
   `second_bootstrap_returns_AlreadyExists` scenario TRANS-07 names
 - every **Stream** — a retry restarts a partially consumed stream, silently
   duplicating or dropping data
+- every **Upload** and every **Watch** *(amended 2026-09-14)* — for the stream
+  class's reason and more so. Re-sending an etcd database that may already have
+  been written is not a retry of a read, and a watch that is re-opened silently
+  starts a second subscription to the same resource
 - `EtcdSnapshot`, `PacketCapture`, `DiskUsage` — reads, but expensive enough
   that a retry storm is its own outage
 
