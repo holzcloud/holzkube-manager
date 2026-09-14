@@ -569,6 +569,13 @@ exactly those bytes.
 - `rev` is the CAS revision, as on every stored record. A `PUT`-shaped update
   carrying a stale `rev` answers `409` `store.conflict`.
 
+`POST /api/v1/patches` answers it too, on the write that supersedes a parent.
+The window is narrow — the handler reads the parent, marks it superseded and
+writes it back — and two operators editing one patch at the same time land in
+it. It used to answer `500 internal.unexpected`, which tells an operator
+something is broken and to stop; what actually happened is that the chain moved
+under them and the request can be made again against its head.
+
 ### Routes
 
 | Method | Path | Destructive | RequiresSession | Action | Request | Response |
