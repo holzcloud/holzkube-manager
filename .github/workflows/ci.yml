@@ -11,6 +11,25 @@ on:
     tags: ['v*']
   pull_request:
 
+  # The second way to cut a release, for a party that can write a branch and
+  # not a tag -- which is the situation an agent session runs in. The tag stays
+  # the source of truth: this input does not bypass it, it asks this workflow to
+  # create it, with the job's own `contents: write` token, only after the gates
+  # below have passed on the very commit being released.
+  #
+  # A tag pushed by GITHUB_TOKEN does not start another workflow run, so this
+  # cannot release the same commit twice.
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to create and release, e.g. v1.16.0-beta.1. Empty runs the gates only.'
+        required: false
+        type: string
+      notes:
+        description: 'Annotation for that tag. Empty means the tag name alone.'
+        required: false
+        type: string
+
 # A superseded pull request run is cancelled; a run on main or on a tag is not.
 # Cancelling a release halfway through leaves a partly uploaded draft.
 concurrency:
@@ -128,7 +147,9 @@ jobs:
     # macos-latest is arm64, the only darwin target .goreleaser.yaml builds, so
     # both gates guard the tag. Drop test-macos from this list if that job goes.
     needs: [ci, test-macos]
-    if: startsWith(github.ref, 'refs/tags/v')
+    # Either a tag was pushed, or this run was asked to create one. Both reach
+    # goreleaser with a tag at HEAD, which is the only state it can release from.
+    if: startsWith(github.ref, 'refs/tags/v') || inputs.tag != ''
     runs-on: ubuntu-latest
     permissions:
       # Creating the draft release and uploading the archives to it. Nothing
@@ -154,6 +175,48 @@ jobs:
           node-version: '22'
           cache: npm
           cache-dependency-path: web/package-lock.json
+
+      # Only on the dispatch path. On a tag push the tag is already here, and
+      # this step does not run.
+      #
+      # The tag is created and pushed BEFORE goreleaser, because goreleaser
+      # derives the version and the changelog range from the tag at HEAD --
+      # without one it would refuse, and with `--snapshot` it would build
+      # something that is not a release. Pushing it also means the repository
+      # ends up in exactly the state the tag-push path produces, so the two
+      # ways of cutting a release differ in who typed the tag and in nothing
+      # else.
+      - name: Create the tag this run releases
+        if: inputs.tag != ''
+        env:
+          TAG: ${{ inputs.tag }}
+          NOTES: ${{ inputs.notes }}
+        run: |
+          set -euo pipefail
+
+          # goreleaser and the update script both read the leading v, and
+          # .github/workflows' own tag filter is 'v*'. A tag that does not match
+          # would produce a release nothing can find, so it is refused here
+          # rather than discovered later.
+          case "$TAG" in
+            v[0-9]*) ;;
+            *) echo "::error::refusing to create '$TAG': a release tag starts with v and a digit"; exit 1 ;;
+          esac
+
+          if git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
+            echo "::error::$TAG already exists; a release tag is never moved"
+            exit 1
+          fi
+
+          git config user.name  'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+
+          # Annotated, because goreleaser reads the annotation and a lightweight
+          # tag has none. The message is the input when there is one and the tag
+          # name when there is not -- never empty, which git refuses anyway.
+          printf '%s\n' "${NOTES:-$TAG}" > /tmp/tag-message
+          git tag -a "$TAG" -F /tmp/tag-message
+          git push origin "refs/tags/$TAG"
 
       - uses: goreleaser/goreleaser-action@v6
         with:
