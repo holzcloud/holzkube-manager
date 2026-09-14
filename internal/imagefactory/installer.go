@@ -300,28 +300,129 @@ func installerCandidates(r AssetRequest) []string {
 func (c *Client) installerRepo(ctx context.Context, r AssetRequest) (installerRepoEntry, error) {
 	key := installerRepoKey(r)
 
-	c.installerMu.Lock()
-	entry, ok := c.installerRepos[key]
-	c.installerMu.Unlock()
-
-	if ok {
-		if entry.proven() || time.Since(entry.at) < c.installerRetry {
-			return entry, nil
+	for {
+		c.installerMu.Lock()
+		entry, ok := c.installerRepos[key]
+		if ok {
+			c.installerMu.Unlock()
+			if entry.proven() || time.Since(entry.at) < c.installerRetry {
+				return entry, nil
+			}
+			return c.requestionInstallerRepo(ctx, r, key, entry), nil
 		}
-		return c.requestionInstallerRepo(ctx, r, key, entry), nil
+
+		// Cold. Either somebody is already asking, in which case wait for their
+		// answer, or nobody is, in which case become the one who asks.
+		if flight, flying := c.installerFlights[key]; flying {
+			c.installerMu.Unlock()
+			result, own := c.followInstallerFlight(ctx, flight)
+			if own {
+				// The leader's caller went away mid-resolution, so its failure
+				// is a statement about that caller and not about the registry.
+				// Start again from the top rather than inherit it: by now
+				// another flight may be in progress, or the cache may be warm.
+				continue
+			}
+			return result.entry, result.err
+		}
+
+		flight := &installerFlight{done: make(chan struct{})}
+		c.installerFlights[key] = flight
+		c.installerMu.Unlock()
+
+		return c.leadInstallerFlight(ctx, r, key, flight)
 	}
+}
+
+// installerFlight is one cold resolution in progress, and the thing every other
+// caller on that key waits for instead of asking the registry itself.
+//
+// Only the cold path uses it, deliberately. The stale path --
+// requestionInstallerRepo -- already has a usable answer in hand for every
+// caller, so the cost of not collapsing it is duplicated registry calls and
+// never a wrong reference; and its "was it our own caller that went away"
+// branch reads the caller's context, which under a shared flight would be some
+// other caller's context. Sharing it would make that branch read the wrong
+// question, and that branch is load-bearing: it is what stops a UI that retries
+// from holding a provisional entry away from promotion forever.
+type installerFlight struct {
+	// done is closed once entry and err are written. Their visibility to a
+	// follower is the happens-before that closing a channel provides; nothing
+	// here is read before it is closed.
+	done  chan struct{}
+	entry installerRepoEntry
+	err   error
+
+	// callerGone records that the leader's own context was cancelled, using the
+	// same discriminator requestionInstallerRepo argues for at length: a
+	// cancelled context means the caller left, while a deadline that expired is
+	// a real observation of a silent registry. A follower inherits the second
+	// and never the first.
+	callerGone bool
+}
+
+type installerFlightResult struct {
+	entry installerRepoEntry
+	err   error
+}
+
+// leadInstallerFlight performs the resolution, publishes it to whoever is
+// waiting, and returns what this caller should be served.
+func (c *Client) leadInstallerFlight(
+	ctx context.Context, r AssetRequest, key string, flight *installerFlight,
+) (installerRepoEntry, error) {
+	// The flight is retired whatever happens, including on a panic in the
+	// resolution: a flight left in the map with a channel nobody will ever
+	// close is a key on which every future caller blocks until its own context
+	// expires, which is worse than any answer.
+	defer func() {
+		c.installerMu.Lock()
+		delete(c.installerFlights, key)
+		c.installerMu.Unlock()
+		close(flight.done)
+	}()
 
 	res, err := c.resolveInstallerRepo(ctx, r, installerCandidates(r)...)
 	if err != nil {
+		flight.err = err
+		flight.callerGone = errors.Is(ctx.Err(), context.Canceled)
 		return installerRepoEntry{}, err
 	}
 
-	entry = installerRepoEntry{repo: res.repo, unresolved: res.unresolved, at: time.Now()}
+	entry := installerRepoEntry{repo: res.repo, unresolved: res.unresolved, at: time.Now()}
 	if !entry.proven() {
 		entry.warning = installerFallbackWarning(r, res)
 	}
 
-	return c.storeInstallerRepo(key, entry), nil
+	// Published through storeInstallerRepo like every other write, rather than
+	// straight into the map. The flight makes concurrent *cold* resolutions on
+	// one key impossible; it does not make this the only writer, because a
+	// stale re-question on the same key can be running alongside it.
+	entry = c.storeInstallerRepo(key, entry)
+	flight.entry = entry
+	return entry, nil
+}
+
+// followInstallerFlight waits for a resolution somebody else is performing.
+//
+// The second return value is true when the follower should resolve for itself
+// instead of taking what came back.
+func (c *Client) followInstallerFlight(
+	ctx context.Context, flight *installerFlight,
+) (installerFlightResult, bool) {
+	select {
+	case <-flight.done:
+	case <-ctx.Done():
+		// This caller's own budget ran out while waiting. Waiting longer for
+		// somebody else's answer is not something this caller can spend, and
+		// the leader carries on for whoever is still there.
+		return installerFlightResult{err: ctx.Err()}, false
+	}
+
+	if flight.err != nil && flight.callerGone {
+		return installerFlightResult{}, true
+	}
+	return installerFlightResult{entry: flight.entry, err: flight.err}, false
 }
 
 // installerRepoKey is the cache key. The SecureBoot flag is formatted rather
@@ -356,23 +457,25 @@ func installerRepoKey(r AssetRequest) string {
 // and anything it would write in its place is strictly less certain. A caller
 // that loses to a proven entry is handed that entry rather than its own.
 //
-// Be precise about what that does and does not buy, because the obvious
-// stronger claim is false. It makes the *cache* converge on the proven name in
-// every ordering. It does not make two concurrent callers agree. In the mirror
-// ordering -- the provisional resolver reaches this mutex first, finds an empty
-// slot, writes and is served its own entry, and the proven resolver arrives
-// afterwards and overwrites -- two callers on one key are served two different
-// references milliseconds apart. That ordering is not exotic: resolveInstallerRepo
-// pushes a candidate into unresolved on any transport error and on any non-2xx
-// that is not a refusal, so a reset, a 429 or a 503 all produce a provisional
-// answer instantly, and provisional routinely finishes first.
+// Be precise about what this guard does and does not buy on its own, because
+// the obvious stronger claim is false of it. It makes the *cache* converge on
+// the proven name in every ordering. It does not make two concurrent callers
+// agree. In the mirror ordering -- the provisional resolver reaches this mutex
+// first, finds an empty slot, writes and is served its own entry, and the proven
+// resolver arrives afterwards and overwrites -- two callers on one key are
+// served two different references milliseconds apart. That ordering is not
+// exotic: resolveInstallerRepo pushes a candidate into unresolved on any
+// transport error and on any non-2xx that is not a refusal, so a reset, a 429 or
+// a 503 all produce a provisional answer instantly, and provisional routinely
+// finishes first.
 //
-// It is nevertheless not the defect G-02-3 filed. That defect was a silent,
-// permanent divergence; this one is disclosed at the moment it happens, because
-// the reference the early caller is served carries the fallback warning that
-// says in words that it is provisional rather than proven and would change.
-// Making the two callers agree needs single-flighting the whole resolution, not
-// a guard on the write -- see the closing paragraph.
+// That half is closed now, and not here: installerFlight single-flights the
+// cold resolution, so two cold resolvers on one key cannot exist and there is no
+// mirror ordering left to lose. This guard is what remains necessary for the
+// stale path, which is deliberately not single-flighted -- a re-question already
+// holds a usable answer for every caller, and its "was it our own caller that
+// went away" branch reads a context that under a shared flight would belong to
+// somebody else.
 //
 // Note what this deliberately does not do: it does not compare timestamps. A
 // compare-and-set on entry.at -- "write only if nobody moved the entry since I
@@ -386,9 +489,10 @@ func installerRepoKey(r AssetRequest) string {
 // is the one thing it is supposed to move.
 //
 // This does not collapse the concurrent registry calls themselves into one.
-// That is a separate question -- it needs single-flighting around the whole
-// resolution rather than around the write -- and it is the load pattern, not
-// the correctness of the answer.
+// That was always a separate question -- it needs single-flighting around the
+// whole resolution rather than around the write. installerFlight answers it for
+// the cold path; on the stale path the duplicate calls remain, bounded by one
+// re-question per key per installerRetry rather than by traffic.
 func (c *Client) storeInstallerRepo(key string, next installerRepoEntry) installerRepoEntry {
 	c.installerMu.Lock()
 	defer c.installerMu.Unlock()

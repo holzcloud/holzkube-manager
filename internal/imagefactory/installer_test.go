@@ -1034,44 +1034,26 @@ func assertProvenInstallerEntry(
 // stale observation is always the one that writes last. Run under -race, this
 // also covers the map access itself.
 //
-// Two things this test does NOT establish, stated here so nobody reads more into
-// a green run than it earns:
+// One thing this test does NOT establish, stated here so nobody reads more into
+// a green run than it earns: "slower" is the fake's doing, not a property of the
+// code. A provisional resolution is not generally the slow one --
+// resolveInstallerRepo pushes a candidate into unresolved on any transport error
+// and on any non-2xx that is not a refusal, so a reset, a 429 or a 503 all
+// produce a provisional answer instantly.
 //
-// First, it forces exactly one of the two orderings. The mirror -- provisional
-// writes first and is served its own entry, proven overwrites afterwards -- is
-// untested here and does hand two concurrent callers two different references.
-// storeInstallerRepo's doc comment argues why that is disclosed rather than
-// silent, and why closing it needs single-flight (WR-02) rather than a write
-// guard.
+// The cold half of this test used to live here and has moved, because the cold
+// path no longer has this shape at all: it is single-flighted, so two concurrent
+// cold resolutions on one key cannot happen and there is no write for the guard
+// below to lose. What replaced it is
+// TestOneColdKeyCostsTheRegistryOneResolution, which states the stronger
+// property single-flight buys and this guard never could -- that the two callers
+// are served the same reference in EVERY ordering, including the mirror one this
+// test's earlier comment had to concede.
 //
-// Second, "slower" here is the fake's doing, not a property of the code. A
-// provisional resolution is not generally the slow one: resolveInstallerRepo
-// pushes a candidate into unresolved on any transport error and on any non-2xx
-// that is not a refusal, so a reset, a 429 or a 503 all produce a provisional
-// answer instantly.
+// The stale path below is deliberately not single-flighted (see installerFlight)
+// so the write guard is still the only thing standing between a slow resolver
+// and a demoted proven entry, and this is still its regression.
 func TestInstallerImageNeverRevertsAProvenNameUnderConcurrentResolution(t *testing.T) {
-	// The cold path: nothing cached, and the resolution that had to fall back
-	// finishes last.
-	t.Run("cold cache", func(t *testing.T) {
-		fake := newFakeFactory(t)
-		// One request finds the preferred name silent -- slowly -- and every
-		// request after it finds the name answering. The silent one resolves
-		// past it to the legacy name and writes a provisional entry last.
-		fake.setRepoSilentForNext("metal-installer", 1, concurrentProbeDelay)
-		client := newClient(t, fake.URL)
-		req := installerRequest(installerModernVersion)
-
-		want := fakeHost(t, fake.URL) + "/metal-installer/" + schematicA + ":" + installerModernVersion
-		for i, ref := range installerImageConcurrently(t, client, req, 2) {
-			if ref != want {
-				t.Errorf("concurrent call %d was served\n  %s\nwant\n  %s\n"+
-					"two concurrent callers must not be handed two repository names for one "+
-					"schematic at one version", i, ref, want)
-			}
-		}
-		assertProvenInstallerEntry(t, client, req, "metal-installer")
-	})
-
 	// The re-question path: a stale provisional entry, one re-question that
 	// proves the preferred name and one that hears nothing.
 	t.Run("stale provisional entry", func(t *testing.T) {
@@ -1377,5 +1359,219 @@ func TestInstallerImageKeepsTheGenericCodeForAnOrdinaryFallback(t *testing.T) {
 	if strings.Contains(warnings[0].Detail, "different images") {
 		t.Errorf("the ordinary fallback claims a difference that was not measured of its pair: %q",
 			warnings[0].Detail)
+	}
+}
+
+// TestOneColdKeyCostsTheRegistryOneResolution is ledger entry 22 (WR-02), and it
+// is two claims rather than one.
+//
+// The load claim is the obvious one: every concurrent caller on a cold key used
+// to issue its own registry resolution, so a fleet screen that derives assets
+// for eight schematics at one version made eight identical walks of the
+// candidate list against a third party that throttles. The key does not include
+// the schematic precisely so that they share an answer, and they shared the
+// answer while still each paying for it.
+//
+// The correctness claim is the one that matters more, and storeInstallerRepo's
+// doc comment has named it since the write guard was written: the guard makes
+// the CACHE converge on the proven name in every ordering, and does not make two
+// concurrent CALLERS agree. In the mirror ordering the provisional resolver
+// reaches the mutex first, is served its own entry, and the proven resolver
+// overwrites afterwards -- so two callers are handed two different repository
+// references for one schematic at one version, milliseconds apart. Nothing about
+// that ordering is exotic; a reset, a 429 or a 503 produces a provisional answer
+// instantly, so provisional routinely finishes first. Single-flighting the whole
+// resolution is what the comment said would close it, and this is that test.
+//
+// The delay is what makes the calls overlap; without it the first would finish
+// before the rest arrive and the test would pass against no mechanism at all.
+// The count assertion is what makes it mean anything.
+func TestOneColdKeyCostsTheRegistryOneResolution(t *testing.T) {
+	fake := newFakeFactory(t)
+	// Slow enough that all eight are certainly inside the resolution, applied to
+	// the preferred candidate so the resolution being shared is a real walk of
+	// the list and not a single instant request.
+	fake.answerManifestAfter("metal-installer", concurrentProbeDelay)
+	client := newClient(t, fake.URL)
+	req := installerRequest(installerModernVersion)
+
+	refs := installerImageConcurrently(t, client, req, 8)
+
+	// Every caller was served the same reference. Stated as "all equal" rather
+	// than "all equal to the expected string" as well, because the failure this
+	// is about is disagreement, and a test that only checked the value would
+	// report eight separate failures for one of them.
+	for i, ref := range refs {
+		if ref != refs[0] {
+			t.Errorf("caller %d was served\n  %s\ncaller 0 was served\n  %s\n"+
+				"two concurrent callers must not be handed two repository names for one "+
+				"schematic at one version", i, ref, refs[0])
+		}
+	}
+	want := fakeHost(t, fake.URL) + "/metal-installer/" + schematicA + ":" + installerModernVersion
+	if refs[0] != want {
+		t.Errorf("ref  = %s\nwant = %s", refs[0], want)
+	}
+
+	if n := fake.count("GET /v2/metal-installer/manifests/" + installerModernVersion); n != 1 {
+		t.Errorf("the registry saw %d manifest requests for one cold key, want 1: eight "+
+			"concurrent callers each resolved for themselves", n)
+	}
+}
+
+// TestAColdFlightServesEveryWaiterTheSameFailure is the other half of sharing a
+// resolution, and it is worth its own test because the temptation is to share
+// only the good outcome.
+//
+// A registry that refuses every candidate refuses them for every caller, so the
+// failure is as shareable as the answer -- and not sharing it would mean the
+// herd this exists to collapse re-forms the moment the registry is unhappy,
+// which is exactly when it can least afford it.
+func TestAColdFlightServesEveryWaiterTheSameFailure(t *testing.T) {
+	fake := newFakeFactory(t)
+	fake.answerManifestAfter("metal-installer", concurrentProbeDelay)
+	client := newClient(t, fake.URL)
+
+	// A version no candidate carries: every name is asked and every name
+	// refuses, which is ErrSchematicNotBuildable rather than an outage.
+	req := installerRequest(installerBrokenVersion)
+
+	errs := installerImageErrorsConcurrently(t, client, req, 6)
+	for i, err := range errs {
+		if !errors.Is(err, imagefactory.ErrSchematicNotBuildable) {
+			t.Errorf("caller %d got %v, want ErrSchematicNotBuildable", i, err)
+		}
+	}
+
+	if n := fake.count("GET /v2/metal-installer/manifests/" + installerBrokenVersion); n != 1 {
+		t.Errorf("the registry saw %d manifest requests for one cold failing key, want 1", n)
+	}
+
+	// A failed resolution is still not cached -- that rule predates this one and
+	// is not weakened by it. The next caller asks again.
+	if _, _, err := client.InstallerImage(t.Context(), req); err == nil {
+		t.Fatal("a second call after a shared failure succeeded")
+	}
+	if n := fake.count("GET /v2/metal-installer/manifests/" + installerBrokenVersion); n != 2 {
+		t.Errorf("the registry saw %d manifest requests after a later call, want 2: the "+
+			"failure was cached", n)
+	}
+}
+
+// installerImageErrorsConcurrently is installerImageConcurrently for the cases
+// where the call is expected to fail: the same simultaneous release, returning
+// the errors instead of asserting there were none.
+func installerImageErrorsConcurrently(
+	t *testing.T,
+	client *imagefactory.Client,
+	r imagefactory.AssetRequest,
+	n int,
+) []error {
+	t.Helper()
+
+	ctx := t.Context()
+	errs := make([]error, n)
+
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	for i := range n {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			_, _, errs[i] = client.InstallerImage(ctx, r)
+		}()
+	}
+	close(start)
+	wg.Wait()
+
+	return errs
+}
+
+// TestAWaiterDoesNotInheritTheLeadersCancellation covers the one branch where a
+// follower refuses what the flight came back with.
+//
+// Sharing a resolution means sharing its failure, and that is right for every
+// failure the registry produced -- a refusal refuses everyone, an outage is
+// everyone's outage. It is wrong for exactly one: the leader's own caller going
+// away. That is a statement about a browser tab, not about factory.talos.dev,
+// and inheriting it would turn one operator closing a panel into a 502 for
+// everybody else who happened to ask at the same moment. The single-flight
+// mechanism would then have invented a failure mode the code it replaced did
+// not have, which is the way a cache makes things worse.
+//
+// The discriminator is the leader's own context, and specifically Canceled
+// rather than any non-nil ctx.Err() -- the same distinction requestionInstallerRepo
+// argues for at length: a deadline expiring is a real observation of a silent
+// registry and must be shared; a cancellation is the caller leaving.
+func TestAWaiterDoesNotInheritTheLeadersCancellation(t *testing.T) {
+	fake := newFakeFactory(t)
+
+	// Both candidates have to be unanswerable for the leader, or its resolution
+	// succeeds and there is no cancellation to inherit. That took two knobs and
+	// two wrong turns worth recording, because each one made the test pass
+	// while measuring nothing.
+	//
+	// The first version used answerManifestAfter, whose handler abandons its
+	// wait on cancellation and returns -- writing an implicit 200 at exactly the
+	// moment the leader is cancelled. Whether the leader saw a cancelled request
+	// or a proven name was then a race. The silent knob hijacks the connection
+	// and writes nothing at all, so a cancelled leader always gets a transport
+	// error.
+	//
+	// The second version silenced only the preferred name, and the leader still
+	// succeeded -- on the legacy one, which had already answered. That is the
+	// resolution asking its candidates concurrently rather than walking them,
+	// which is a property of the code this test had quietly assumed away.
+	// Silencing the legacy name too is what leaves the leader with nothing.
+	fake.setRepoUnreachable("installer")
+	fake.setRepoSilentForNext("metal-installer", 1, concurrentProbeDelay)
+	client := newClient(t, fake.URL)
+	req := installerRequest(installerModernVersion)
+
+	leaderCtx, cancelLeader := context.WithCancel(t.Context())
+
+	var wg sync.WaitGroup
+	var leaderErr error
+	var followerRef string
+	var followerErr error
+
+	leading := make(chan struct{})
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		close(leading)
+		_, _, leaderErr = client.InstallerImage(leaderCtx, req)
+	}()
+
+	<-leading
+	// The follower has to be inside followInstallerFlight before the leader is
+	// cancelled, or this test measures two independent calls. A fraction of the
+	// manifest delay is enough and is well short of it.
+	time.Sleep(concurrentProbeDelay / 5)
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		followerRef, _, followerErr = client.InstallerImage(t.Context(), req)
+	}()
+	time.Sleep(concurrentProbeDelay / 5)
+	cancelLeader()
+
+	wg.Wait()
+
+	// The leader gets what its own cancellation earned it. Asserted so that a
+	// future change that quietly makes the leader succeed does not leave this
+	// test passing for the wrong reason: the whole point is a follower that
+	// survives a leader that did not.
+	if leaderErr == nil {
+		t.Fatal("the cancelled leader succeeded; this test no longer exercises its branch")
+	}
+
+	if followerErr != nil {
+		t.Fatalf("the follower inherited the leader's cancellation: %v", followerErr)
+	}
+	want := fakeHost(t, fake.URL) + "/metal-installer/" + schematicA + ":" + installerModernVersion
+	if followerRef != want {
+		t.Errorf("follower ref  = %s\nwant          = %s", followerRef, want)
 	}
 }
