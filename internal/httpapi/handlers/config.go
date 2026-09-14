@@ -329,6 +329,19 @@ func createPatch(d httpapi.Deps) http.HandlerFunc {
 
 			prev.Superseded = true
 			if _, err := d.Store.Patches().Put(r.Context(), prev); err != nil {
+				// A stale Rev here means somebody else superseded the same
+				// parent between the read above and this write. That is a race
+				// between two operators and not a fault: a 500 tells them
+				// something is broken and to stop, when the useful answer is
+				// that the chain moved and the request can be made again
+				// against it.
+				if errors.Is(err, store.ErrConflict) {
+					httpapi.WriteProblem(w, r, httpapi.Conflict("store.conflict",
+						"Another patch was written against the same parent between reading it "+
+							"and superseding it, so this one was not stored. Re-read the chain "+
+							"and write against its current head."))
+					return
+				}
 				httpapi.WriteInternal(w, r, d.Logger, err)
 				return
 			}

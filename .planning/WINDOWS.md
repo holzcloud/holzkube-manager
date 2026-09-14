@@ -2,9 +2,9 @@
 schema_version: 1
 open_count: 60
 waived_count: 0
-fixed_count: 48
-total_count: 108
-last_updated: 2026-09-14T06:40:00.000Z
+fixed_count: 49
+total_count: 109
+last_updated: 2026-09-14T06:45:00.000Z
 ---
 
 # Broken Windows Ledger
@@ -126,6 +126,8 @@ last_updated: 2026-09-14T06:40:00.000Z
 | 106 | 16 | deviation | internal/provision/plan.go |  | DIE INSTALLER-REFERENZ WURDE PER HAND ZUSAMMENGESETZT UND WAR DABEI DREIFACH FALSCH, jedes Mal still. InstallImage baute 'factory.talos.dev/installer/<id>:<version>' fuer jede Maschine. (1) SecureBoot kam darin nicht vor: eine Maschine, die von einer SecureBoot-ISO gebootet hat, installierte ein System, das kein SecureBoot ist -- Talos verlangt dafuer den SecureBoot-Installer, und kein Feld in der Machine-Config ersetzt ihn. internal/imagefactory benennt genau diese Paarung als 'the ISO/installer drift this file's own comments warn about, arriving from the one direction nothing checked'; Provisioning WAR diese Richtung. (2) Der Repository-Name wurde angenommen statt aufgeloest, und zwar der Legacy-Name, obwohl internal/imagefactory eine geordnete Kandidatenliste fuehrt, weil die Antwort je nach Version variiert. (3) Der Factory-Host war fest verdrahtet, also zog eine Installation mit --image-factory auf eine private Factory ihre Installer trotzdem von der oeffentlichen. | fixed | GESCHLOSSEN 2026-09-14 fuer den Provisioning-Pfad: die Referenz wird beim Plan gegen die Factory aufgeloest und von dort mitgetragen, ein Fehlschlag ist eine Ablehnung ohne Referenz statt eines Fallbacks. Alle drei Fehler vor dem Fix rot gesehen. | 2026-09-14T06:10:00.000Z | 2026-09-14T06:10:00.000Z |
 | 107 | 16 | stub | internal/upgrade/verify.go |  | DERSELBE FEHLER IM UPGRADE-PFAD, UND DORT SCHLIMMER. upgrade.InstallerFor ruft weiterhin provision.InstallImage, also installiert ein Upgrade eines SecureBoot-Knotens den gewoehnlichen Installer und nimmt dem Knoten SecureBoot weg -- auf einem Pfad, den ein Betreiber gegen einen Cluster laufen laesst, auf den er sich verlaesst, und nichts im Ergebnis sagt es. Beim Provisioning kann der Betreiber die Frage beantworten; beim Upgrade muesste holzkube erst LESEN, ob der Knoten SecureBoot gebootet hat. Talos stellt das als Ressource bereit und nichts hier liest sie. Der Doc-Kommentar von InstallImage sagt jetzt ausdruecklich, was an ihm falsch ist und wer ihn noch ruft. SCHLIESSBEDINGUNG: den SecureBoot-Zustand eines Knotens lesen (talos-Seam, talossim, Deadline-Klasse) und die Upgrade-Referenz genauso aufloesen wie die Provisioning-Referenz. | fixed | GESCHLOSSEN 2026-09-14. internal/talos liest jetzt SecurityStates.talos.dev (SecureBoot, BootedWithUKI, UKI-Signaturschluessel), talossim kann ein SecureBoot-Knoten sein, und der Upgrade-Plan loest die Installer-Referenz pro Knoten mit diesem Zustand gegen die Factory auf und traegt sie in den Job. Ein Knoten, der nicht sagt, wie er gebootet hat, wird blockiert statt auf einer Annahme aktualisiert. Fehler rot gesehen: der Plan liest den Zustand nicht mehr (Ergebnis: metal-installer statt metal-installer-secureboot). | 2026-09-14T06:10:00.000Z | 2026-09-14T06:40:00.000Z |
 | 108 | 16 | deviation | internal/provision/job.go |  | JOB-PARAMETER KONNTEN STILL VERLOREN GEHEN. Request.Params marshallte die Patch-Liste mit verworfenem Fehler ('if err == nil'), nach der Ueberlegung, dass das Marshalling eines String-Slices nicht fehlschlagen kann. Fuer die neue Verschluesselungs-Anfrage haette dieselbe Form bedeutet: ein Betreiber bittet um verschluesselte Volumes, sieht den Job starten und bekommt einen Klartext-Knoten, ohne dass irgendetwas es meldet. 'Kann nicht fehlschlagen' ist die Ueberlegung, die stille Fehler erzeugt. | fixed | GESCHLOSSEN 2026-09-14. Params gibt jetzt einen Fehler zurueck; beide Aufrufer behandeln ihn. | 2026-09-14T06:10:00.000Z | 2026-09-14T06:10:00.000Z |
+
+| 109 | 16 | deviation | internal/httpapi/handlers/config.go |  | EIN CAS-KONFLIKT WURDE ALS INTERNER FEHLER GEMELDET. createPatch liest den Eltern-Patch, setzt Superseded und schreibt ihn zurueck; jeder Fehler dabei wurde auf 500 internal.unexpected abgebildet, auch ein Rev-Konflikt. Zwei Betreiber, die denselben Patch gleichzeitig bearbeiten, landen in genau diesem Fenster. Ein 500 sagt einem Betreiber, etwas sei kaputt und er solle aufhoeren; passiert ist, dass die Kette sich unter ihm bewegt hat und die Anfrage gegen ihren aktuellen Kopf wiederholt werden kann. Die Taxonomie hatte die Antwort laengst -- 409 store.conflict -- und diese Route benutzte sie nicht. Gefunden durch eine systematische Durchsicht aller Handler, die schreiben, ohne einen Konflikt zu benennen: vier Treffer, drei davon falsch positiv (Session-Puts ohne Rueckgabewert). | fixed | GESCHLOSSEN 2026-09-14. Der Fehler wurde rot gesehen, gegen einen Store-Dekorator, der einen zweiten Schreiber genau zwischen Lesen und Schreiben setzt -- dieselbe Bauart wie in internal/inventory, jetzt auch im httpapi-Harness verfuegbar. | 2026-09-14T06:45:00.000Z | 2026-09-14T06:45:00.000Z |
 
 ````json
 [
@@ -1424,6 +1426,18 @@ last_updated: 2026-09-14T06:40:00.000Z
     "reason": "GESCHLOSSEN 2026-09-14. Params gibt jetzt einen Fehler zurueck; beide Aufrufer behandeln ihn.",
     "recorded_at": "2026-09-14T06:10:00.000Z",
     "resolved_at": "2026-09-14T06:10:00.000Z"
+  },
+  {
+    "id": 109,
+    "kind": "deviation",
+    "phase": "16",
+    "file": "internal/httpapi/handlers/config.go",
+    "line": null,
+    "description": "EIN CAS-KONFLIKT WURDE ALS INTERNER FEHLER GEMELDET. createPatch liest den Eltern-Patch, setzt Superseded und schreibt ihn zurueck; jeder Fehler dabei wurde auf 500 internal.unexpected abgebildet, auch ein Rev-Konflikt. Zwei Betreiber, die denselben Patch gleichzeitig bearbeiten, landen in genau diesem Fenster. Ein 500 sagt einem Betreiber, etwas sei kaputt und er solle aufhoeren; passiert ist, dass die Kette sich unter ihm bewegt hat und die Anfrage gegen ihren aktuellen Kopf wiederholt werden kann. Die Taxonomie hatte die Antwort laengst -- 409 store.conflict -- und diese Route benutzte sie nicht. Gefunden durch eine systematische Durchsicht aller Handler, die schreiben, ohne einen Konflikt zu benennen: vier Treffer, drei davon falsch positiv (Session-Puts ohne Rueckgabewert).",
+    "status": "fixed",
+    "reason": "GESCHLOSSEN 2026-09-14. Der Fehler wurde rot gesehen, gegen einen Store-Dekorator, der einen zweiten Schreiber genau zwischen Lesen und Schreiben setzt -- dieselbe Bauart wie in internal/inventory, jetzt auch im httpapi-Harness verfuegbar.",
+    "recorded_at": "2026-09-14T06:45:00.000Z",
+    "resolved_at": "2026-09-14T06:45:00.000Z"
   }
 ]
 ````

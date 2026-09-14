@@ -32,6 +32,7 @@ import (
 	"github.com/holzcloud/holzkube-manager/internal/model"
 	"github.com/holzcloud/holzkube-manager/internal/nodestream"
 	"github.com/holzcloud/holzkube-manager/internal/provision"
+	"github.com/holzcloud/holzkube-manager/internal/store"
 	"github.com/holzcloud/holzkube-manager/internal/store/fsstore"
 	"github.com/holzcloud/holzkube-manager/internal/streamhub"
 	"github.com/holzcloud/holzkube-manager/internal/talos"
@@ -78,6 +79,7 @@ type harnessConfig struct {
 	upgrade              func(*harness) *upgrade.Service
 	allowedHosts         []string
 	factoryBase          string
+	wrapStore            func(store.Store) store.Store
 }
 
 // withAllowedHosts turns the host allowlist on.
@@ -92,6 +94,18 @@ func withAllowedHosts(hosts ...string) harnessOpt {
 // withInventory adds an inventory service built over the harness's store.
 func withInventory(build func(store *fsstore.Store) *inventory.Service) harnessOpt {
 	return func(c *harnessConfig) { c.inventory = build }
+}
+
+// withStore hands the harness's store through a decorator before the routes
+// see it.
+//
+// It exists for the one class of test that cannot be written from outside the
+// persistence seam: a test about what happens when two writers race for the
+// same record has to choose the moment the second one arrives, and a real
+// store offers no way to ask for that moment. internal/inventory has the same
+// hook for the same reason.
+func withStore(wrap func(store.Store) store.Store) harnessOpt {
+	return func(c *harnessConfig) { c.wrapStore = wrap }
 }
 
 // withFactory points the harness at an Image Factory.
@@ -193,8 +207,13 @@ func newHarness(t *testing.T, opts ...harnessOpt) *harness {
 		chainFile = al.CurrentFile()
 	}
 
+	seen := store.Store(st)
+	if cfg.wrapStore != nil {
+		seen = cfg.wrapStore(st)
+	}
+
 	deps := httpapi.Deps{
-		Store:        st,
+		Store:        seen,
 		Audit:        al,
 		Auth:         au,
 		Logger:       slog.New(slog.NewTextHandler(io.Discard, nil)),
