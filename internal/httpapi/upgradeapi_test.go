@@ -33,12 +33,21 @@ type upgradeHarness struct {
 
 func newUpgradeHarness(t *testing.T) *upgradeHarness {
 	t.Helper()
+	return newUpgradeHarnessWith(t, false)
+}
+
+// newUpgradeHarnessWith is newUpgradeHarness with the node's SecureBoot state
+// chosen, because the installer an upgrade writes depends on it.
+func newUpgradeHarnessWith(t *testing.T, secureBoot bool) *upgradeHarness {
+	t.Helper()
 
 	cl, err := talossim.NewCluster("homelab", "https://192.168.1.41:6443")
 	if err != nil {
 		t.Fatalf("NewCluster: %v", err)
 	}
-	sim, err := talossim.New(talossim.Options{Hostname: "cp-1", Cluster: cl, ControlPlane: true})
+	sim, err := talossim.New(talossim.Options{
+		Hostname: "cp-1", Cluster: cl, ControlPlane: true, SecureBoot: secureBoot,
+	})
 	if err != nil {
 		t.Fatalf("talossim.New: %v", err)
 	}
@@ -66,6 +75,18 @@ func newUpgradeHarness(t *testing.T) *upgradeHarness {
 				Record: func(ctx context.Context, id model.MachineID) error {
 					h.inv.Refresh(ctx, id)
 					return nil
+				},
+
+				// A stand-in for the Factory resolution. It carries SecureBoot
+				// into the name, which is the property these tests care about;
+				// whether the real resolver picks the right repository is
+				// internal/imagefactory's own test.
+				ResolveInstaller: func(_ context.Context, schematicID, version string, secureBoot bool) (string, error) {
+					repo := "metal-installer"
+					if secureBoot {
+						repo += "-secureboot"
+					}
+					return "factory.example/" + repo + "/" + schematicID + ":" + version, nil
 				},
 			}
 			deps.Gate = upgrade.NewGate(deps.Connect, h.inv.ControlPlanesOf)
@@ -362,5 +383,70 @@ func TestLockingANodeNeedsAReasonAndSurvivesTheNodeBeingDown(t *testing.T) {
 	}
 	if !view.Locked || view.LockReason == "" {
 		t.Fatalf("the lock did not take: %+v", view)
+	}
+}
+
+// TestUpgradingASecureBootNodeDoesNotTakeSecureBootAway.
+//
+// The defect this replaced: the installer reference an upgrade wrote was
+// assembled as "factory.talos.dev/installer/<id>:<version>" for every node,
+// with no SecureBoot in it. The ordinary installer does not produce a
+// SecureBoot node, so upgrading one with it took SecureBoot away from a
+// machine that had it -- on a path an operator runs against a cluster they
+// depend on, and with nothing in the result saying so. A fresh provision that
+// dropped SecureBoot produced a node that never had it; this took it from a
+// node that did.
+//
+// The plan now reads how each node actually booted, from the node, and carries
+// the resolved reference into the job.
+func TestUpgradingASecureBootNodeDoesNotTakeSecureBootAway(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name       string
+		secureBoot bool
+	}{
+		{"a SecureBoot node", true},
+		{"an ordinary node", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newUpgradeHarnessWith(t, tc.secureBoot)
+
+			resp, raw := h.do(t, http.MethodPost,
+				"/api/v1/clusters/"+string(h.clusterID(t))+"/upgrade/plan",
+				map[string]any{"to": "v1.14.0"})
+			if resp.StatusCode != http.StatusOK {
+				t.Fatalf("plan: %d (%s)", resp.StatusCode, raw)
+			}
+
+			var plan struct {
+				Nodes []struct {
+					Installer  string `json:"installer"`
+					SecureBoot bool   `json:"secureboot"`
+					Blocked    bool   `json:"blocked"`
+					Reason     string `json:"block_reason"`
+				} `json:"nodes"`
+			}
+			if err := json.Unmarshal(raw, &plan); err != nil {
+				t.Fatalf("decode plan: %v", err)
+			}
+			if len(plan.Nodes) == 0 {
+				t.Fatalf("the plan names no nodes: %s", raw)
+			}
+
+			for _, n := range plan.Nodes {
+				if n.Blocked {
+					t.Fatalf("the node is blocked: %s", n.Reason)
+				}
+				if n.SecureBoot != tc.secureBoot {
+					t.Errorf("the plan reports secureboot=%v for a node that booted %v",
+						n.SecureBoot, tc.secureBoot)
+				}
+				if strings.Contains(n.Installer, "secureboot") != tc.secureBoot {
+					t.Errorf("a node that booted secureboot=%v is upgraded with %q",
+						tc.secureBoot, n.Installer)
+				}
+			}
+		})
 	}
 }

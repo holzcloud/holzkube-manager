@@ -468,6 +468,8 @@ var routeBudgets = []routeBudget{
 		calls: append([]upstreamCall{
 			{name: "NewClusterClient: Version (per node)", class: nodeProbeCall},
 		}, append(nodeFactsCalls(),
+			upstreamCall{name: "SecurityState (per node -- which installer it needs)", class: nodeFastReadCall},
+			upstreamCall{name: "KernelCmdline + MachineConfig (per node -- UPG-04 drift)", class: nodeFastReadCall},
 			upstreamCall{name: "gate: EtcdStatus (per control-plane node)", class: nodeFastReadCall},
 			upstreamCall{name: "gate: EtcdMemberList (per control-plane node)", class: nodeFastReadCall},
 			upstreamCall{name: "gate: EtcdAlarmList (per control-plane node)", class: nodeFastReadCall},
@@ -477,7 +479,9 @@ var routeBudgets = []routeBudget{
 		clipping:          clipped,
 		clippingRationale: nodeReadClippingRationale,
 		why: "The most expensive read in this product, and still a read: it connects to every " +
-			"node to read the schematic Talos recorded at install time, then runs the health " +
+			"node to read the schematic Talos recorded at install time and how that node " +
+			"booted -- the second decides whether it needs the SecureBoot installer -- then " +
+			"runs the health " +
 			"gate's three etcd reads against every control-plane node. The declared calls are " +
 			"what *one* node costs in series; the ceiling covers a homelab-sized cluster of " +
 			"them, which is the size this product is for. A cluster large enough to exceed it " +
@@ -505,6 +509,8 @@ var routeBudgets = []routeBudget{
 		calls: append([]upstreamCall{
 			{name: "NewClusterClient: Version (per node)", class: nodeProbeCall},
 		}, append(nodeFactsCalls(),
+			upstreamCall{name: "SecurityState (per node -- which installer it needs)", class: nodeFastReadCall},
+			upstreamCall{name: "KernelCmdline + MachineConfig (per node -- UPG-04 drift)", class: nodeFastReadCall},
 			upstreamCall{name: "gate: EtcdStatus (per control-plane node)", class: nodeFastReadCall},
 			upstreamCall{name: "gate: EtcdMemberList (per control-plane node)", class: nodeFastReadCall},
 			upstreamCall{name: "gate: EtcdAlarmList (per control-plane node)", class: nodeFastReadCall},
@@ -538,6 +544,8 @@ var routeBudgets = []routeBudget{
 		calls: append([]upstreamCall{
 			{name: "NewClusterClient: Version (per node)", class: nodeProbeCall},
 		}, append(nodeFactsCalls(),
+			upstreamCall{name: "SecurityState (per node -- which installer it needs)", class: nodeFastReadCall},
+			upstreamCall{name: "KernelCmdline + MachineConfig (per node -- UPG-04 drift)", class: nodeFastReadCall},
 			upstreamCall{name: "gate: EtcdStatus (per control-plane node)", class: nodeFastReadCall},
 			upstreamCall{name: "gate: EtcdMemberList (per control-plane node)", class: nodeFastReadCall},
 			upstreamCall{name: "gate: EtcdAlarmList (per control-plane node)", class: nodeFastReadCall},

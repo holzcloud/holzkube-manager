@@ -369,6 +369,11 @@ func run(args []string) error {
 			inv.Refresh(ctx, id)
 			return nil
 		},
+
+		// Resolving an installer needs the Image Factory and the stored
+		// schematic, and neither belongs to the upgrade package. It is wired
+		// here, in the one place that holds both.
+		ResolveInstaller: resolveInstaller(factory, st),
 	}
 	upgradeDeps.Gate = upgrade.NewGate(upgradeDeps.Connect, inv.ControlPlanesOf)
 
@@ -600,6 +605,49 @@ func allowedHosts(cfg config.Config) []string {
 		}
 	}
 	return hosts
+}
+
+// resolveInstaller builds the function an upgrade resolves its installer
+// reference with.
+//
+// It replaced a string assembled from parts, which was wrong in three ways at
+// once and silent about all of them: SecureBoot was not in it, the repository
+// name was assumed rather than resolved, and the Factory host was hard-coded
+// so an installation pointed at a private Factory upgraded nodes from the
+// public one.
+//
+// The architecture comes from the stored schematic record and never from a
+// constant (FACT-03). A schematic this installation does not hold is a refusal
+// rather than a default: without it there is no architecture to ask about, and
+// the reference that a default produced would be one nobody chose.
+func resolveInstaller(factory *imagefactory.Client, st *fsstore.Store) upgrade.ResolveInstaller {
+	return func(ctx context.Context, schematicID, version string, secureBoot bool) (string, error) {
+		if factory == nil {
+			return "", errors.New("this installation is not configured with an Image Factory, " +
+				"so the installer for a schematic cannot be resolved")
+		}
+
+		rec, err := st.Schematics().Get(ctx, model.SchematicID(schematicID))
+		if err != nil {
+			return "", fmt.Errorf("this installation does not hold schematic %s, so the "+
+				"architecture to resolve its installer for is unknown: %w", schematicID, err)
+		}
+
+		arch := imagefactory.Arch(rec.Arch)
+		if !arch.Valid() {
+			return "", fmt.Errorf("schematic %s names architecture %q, which is not one the "+
+				"Image Factory builds assets for", schematicID, rec.Arch)
+		}
+
+		ref, _, err := factory.InstallerImage(ctx, imagefactory.AssetRequest{
+			SchematicID: schematicID,
+			Version:     version,
+			Arch:        arch,
+			Platform:    imagefactory.PlatformMetal,
+			SecureBoot:  secureBoot,
+		})
+		return ref, err
+	}
 }
 
 // routeTable assembles the whole HTTP surface, from each handler package's own

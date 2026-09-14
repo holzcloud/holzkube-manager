@@ -788,3 +788,84 @@ func TestARestoreRefusesAWorkerAndAnEmptySnapshot(t *testing.T) {
 			state.RecoverCalls)
 	}
 }
+
+// nodeWith starts a simulated node with the given options and a client to it.
+func nodeWith(t *testing.T, opts talossim.Options) (*talossim.Server, *talos.ClusterClient) {
+	t.Helper()
+
+	cl, err := talossim.NewCluster("homelab", "https://10.0.0.10:6443")
+	if err != nil {
+		t.Fatalf("NewCluster: %v", err)
+	}
+	opts.Cluster = cl
+	if opts.Hostname == "" {
+		opts.Hostname = "cp-1"
+	}
+	sim, err := talossim.New(opts)
+	if err != nil {
+		t.Fatalf("talossim.New: %v", err)
+	}
+	t.Cleanup(func() { _ = sim.Close() })
+
+	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+	t.Cleanup(cancel)
+
+	cc, err := talos.NewClusterClient(ctx, sim.Dialer(), talos.Target{
+		Cluster: "c1", Machine: "00000000-0000-4000-8000-000000000001", Addr: sim.Host(),
+	}, sim.ClientCreds(), talos.Mode{})
+	if err != nil {
+		t.Fatalf("NewClusterClient: %v", err)
+	}
+	t.Cleanup(func() { _ = cc.Close() })
+
+	return sim, cc
+}
+
+// TestANodeSaysHowItBooted is the read the upgrade path's installer choice
+// hangs on.
+//
+// It is read from the node and never remembered, because a node may have been
+// installed by something other than this installation, or reinstalled since. A
+// stored flag would be this product's memory of a decision rather than the
+// machine's account of what it is running -- and the decision it feeds is
+// which installer to write, where being wrong takes SecureBoot away from a
+// machine that has it.
+func TestANodeSaysHowItBooted(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+	defer cancel()
+
+	_, ordinary := nodeWith(t, talossim.Options{Hostname: "plain-1", ControlPlane: true})
+	state, err := ordinary.SecurityState(ctx)
+	if err != nil {
+		t.Fatalf("SecurityState on an ordinary node: %v", err)
+	}
+	if state.SecureBoot {
+		t.Error("an ordinary node reports SecureBoot")
+	}
+	if state.BootedWithUKI {
+		t.Error("an ordinary node reports booting a unified kernel image")
+	}
+
+	_, secure := nodeWith(t, talossim.Options{
+		Hostname: "secure-1", ControlPlane: true, SecureBoot: true,
+	})
+	state, err = secure.SecurityState(ctx)
+	if err != nil {
+		t.Fatalf("SecurityState on a SecureBoot node: %v", err)
+	}
+	if !state.SecureBoot {
+		t.Fatal("a SecureBoot node reports no SecureBoot")
+	}
+
+	// SecureBoot Talos boots a signed unified kernel image, so the two go
+	// together. A node reporting one and not the other is not a state a real
+	// machine produces, and the simulator must not be able to claim it.
+	if !state.BootedWithUKI {
+		t.Error("a SecureBoot node reports not booting a unified kernel image")
+	}
+	if state.UKISigningKeyFingerprint == "" {
+		t.Error("a SecureBoot node names no signing key")
+	}
+}

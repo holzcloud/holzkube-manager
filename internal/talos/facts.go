@@ -364,6 +364,49 @@ func (c *ClusterClient) KernelCmdline(ctx context.Context) (string, error) {
 	return cmdline.TypedSpec().Cmdline, nil
 }
 
+// SecurityState is what a node reports about how it booted.
+//
+// One field is read of the several the resource carries, and the choice is
+// deliberate: SecureBoot is the one this product has a decision hanging on.
+// Upgrading a SecureBoot node with the ordinary installer takes SecureBoot
+// away from it -- the ordinary installer does not produce a SecureBoot node,
+// and no machine-config field substitutes for the right one -- so the
+// installer reference an upgrade writes depends on this answer.
+//
+// It is read from the node rather than remembered from provisioning, and that
+// is the point. A node may have been installed by something other than this
+// installation, or reinstalled since, and a stored flag would be this
+// product's memory of a decision rather than the machine's own account of what
+// it is running.
+type SecurityState struct {
+	// SecureBoot is whether the node booted with SecureBoot enabled.
+	SecureBoot bool
+
+	// BootedWithUKI is whether it booted a unified kernel image, which is how
+	// a SecureBoot Talos boots. It is carried because the two can disagree,
+	// and a disagreement is worth showing rather than resolving here.
+	BootedWithUKI bool
+
+	// UKISigningKeyFingerprint identifies the key that signed the image this
+	// node booted, when there is one.
+	UKISigningKeyFingerprint string
+}
+
+// SecurityState reads it.
+func (c *ClusterClient) SecurityState(ctx context.Context) (SecurityState, error) {
+	res, err := safe.StateGetByID[*runtimeres.SecurityState](
+		ctx, c.COSI(), runtimeres.SecurityStateID)
+	if err != nil {
+		return SecurityState{}, err
+	}
+	spec := res.TypedSpec()
+	return SecurityState{
+		SecureBoot:               spec.SecureBoot,
+		BootedWithUKI:            spec.BootedWithUKI,
+		UKISigningKeyFingerprint: spec.UKISigningKeyFingerprint,
+	}, nil
+}
+
 // MachineConfigYAML returns the node's active machine configuration as YAML.
 //
 // This is the one read in phase 3 that touches the configuration, and it

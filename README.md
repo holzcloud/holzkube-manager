@@ -551,6 +551,18 @@ it cannot be resolved the plan is refused rather than falling back: substituting
 the ordinary installer gives you a node that installs, joins, and is not
 SecureBoot, and nothing afterwards says so.
 
+### Upgrades and SecureBoot
+
+An upgrade plan reads how each node actually booted and resolves that node's
+installer accordingly. It has to: the ordinary installer does not produce a
+SecureBoot node, so upgrading one with it takes SecureBoot away from a machine
+that had it — and the upgrade succeeds, the node rejoins, and nothing says so.
+
+The fact is read from the node rather than remembered from when this
+installation provisioned it, because it may not have been the one that did. A
+node that will not answer is blocked rather than upgraded on a guess: either
+guess is wrong for half a mixed fleet.
+
 ### Certificates
 
 holzkube-manager reaches a cluster with an admin certificate it minted for
