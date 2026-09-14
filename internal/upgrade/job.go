@@ -69,6 +69,11 @@ type Deps struct {
 	// Record writes back what a node ended up running, so the inventory shows
 	// the new version without waiting for the next observation pass.
 	Record func(ctx context.Context, id model.MachineID) error
+
+	// ResolveInstaller resolves the installer reference for one node, with
+	// that node's SecureBoot state in it. It belongs to the composition root
+	// because resolving means asking the Image Factory.
+	ResolveInstaller ResolveInstaller
 }
 
 // Register teaches a job engine both rolling upgrades.
@@ -106,6 +111,18 @@ type Request struct {
 	// Schematics maps each machine to the Image Factory schematic it was
 	// installed from, read from the node at plan time (UPG-03).
 	Schematics map[model.MachineID]string `json:"schematics,omitempty"`
+
+	// Installers is the exact installer reference each node will be upgraded
+	// with, resolved when the plan was made.
+	//
+	// Resolved and carried, not rebuilt here, and the reason is the defect
+	// this replaced: the reference used to be assembled from parts at step
+	// time as "factory.talos.dev/installer/<id>:<version>". It never carried
+	// SecureBoot, so upgrading a SecureBoot node installed the ordinary
+	// installer -- which does not produce a SecureBoot node -- and took
+	// SecureBoot away from a machine that had it, on a path an operator runs
+	// against a cluster they depend on, with nothing in the result saying so.
+	Installers map[model.MachineID]string `json:"installers,omitempty"`
 }
 
 // talosSteps builds one step per node.
@@ -120,7 +137,14 @@ func talosSteps(d Deps, req Request, cluster model.ClusterID) ([]jobs.Step, erro
 
 	steps := make([]jobs.Step, 0, len(req.Machines))
 	for _, id := range req.Machines {
-		steps = append(steps, talosNodeStep(d, cluster, id, to, req.Schematics[id]))
+		installer := req.Installers[id]
+		if installer == "" {
+			return nil, fmt.Errorf("upgrade: this run carries no installer reference for %s. "+
+				"It is resolved against the Image Factory when the plan is made -- with that "+
+				"node's SecureBoot state in it -- and a step that assembled one here would "+
+				"install something the operator never saw", id)
+		}
+		steps = append(steps, talosNodeStep(d, cluster, id, to, req.Schematics[id], installer))
 	}
 	return steps, nil
 }
@@ -131,8 +155,8 @@ func talosNodeStep(
 	id model.MachineID,
 	to Version,
 	schematic string,
+	installer string,
 ) jobs.Step {
-	installer := InstallerFor(schematic, to)
 
 	return jobs.Step{
 		Name: "upgrade " + string(id) + " to " + to.String(),
@@ -547,6 +571,14 @@ func (r Request) Params() map[string]string {
 		sortStrings(pairs)
 		out["schematics"] = strings.Join(pairs, ",")
 	}
+	if len(r.Installers) > 0 {
+		pairs := make([]string, 0, len(r.Installers))
+		for id, installer := range r.Installers {
+			pairs = append(pairs, string(id)+"="+installer)
+		}
+		sortStrings(pairs)
+		out["installers"] = strings.Join(pairs, ",")
+	}
 	return out
 }
 
@@ -568,6 +600,17 @@ func RequestFromParams(params map[string]string) (Request, error) {
 	for _, id := range strings.Split(raw, ",") {
 		if id = strings.TrimSpace(id); id != "" {
 			r.Machines = append(r.Machines, model.MachineID(id))
+		}
+	}
+
+	if s := params["installers"]; s != "" {
+		r.Installers = map[model.MachineID]string{}
+		for _, pair := range strings.Split(s, ",") {
+			id, installer, ok := strings.Cut(pair, "=")
+			if !ok {
+				return Request{}, fmt.Errorf("upgrade: %q is not a machine=installer pair", pair)
+			}
+			r.Installers[model.MachineID(id)] = installer
 		}
 	}
 

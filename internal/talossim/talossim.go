@@ -121,6 +121,15 @@ type Options struct {
 	// this product bootstrapped.
 	Bootstrapped bool
 
+	// SecureBoot is whether this node reports having booted with SecureBoot.
+	//
+	// It exists because the upgrade path has a decision hanging on it: the
+	// ordinary installer does not produce a SecureBoot node, so upgrading one
+	// with the wrong installer takes SecureBoot away. A simulator that could
+	// not be a SecureBoot node would let that check be written and never
+	// exercised in the direction that matters.
+	SecureBoot bool
+
 	// Members is the cluster membership this node's discovery reports. Leaving
 	// it empty is the truthful simulation of a cluster whose discovery service
 	// is switched off -- which is a supported configuration and must not look
