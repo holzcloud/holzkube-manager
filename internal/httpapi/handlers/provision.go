@@ -1,12 +1,15 @@
 package handlers
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"strings"
 	"time"
 
+	"github.com/holzcloud/holzkube-manager/internal/diskencryption"
 	"github.com/holzcloud/holzkube-manager/internal/httpapi"
+	"github.com/holzcloud/holzkube-manager/internal/imagefactory"
 	"github.com/holzcloud/holzkube-manager/internal/jobs"
 	"github.com/holzcloud/holzkube-manager/internal/model"
 	"github.com/holzcloud/holzkube-manager/internal/provision"
@@ -253,8 +256,37 @@ type provisionRequestBody struct {
 	Hostname     string   `json:"hostname"`
 	PatchIDs     []string `json:"patch_ids"`
 
+	// Encryption asks for the node's system volumes to be encrypted at
+	// install.
+	//
+	Encryption *encryptionBody `json:"encryption,omitempty"`
+
+	// SecureBoot says the machine booted the SecureBoot variant of its
+	// schematic.
+	//
+	// It is stated by the operator rather than derived, and that is not a
+	// shortcut: a schematic id does not carry SecureBoot. One id resolves
+	// under `metal-installer` and under `metal-installer-secureboot` to two
+	// different images, picked by repository name alone, so the only party
+	// that knows which image this machine actually booted is whoever wrote the
+	// USB stick.
+	//
+	// It selects the installer, which Talos requires to match -- the ordinary
+	// installer does not produce a SecureBoot node -- and it is what the TPM
+	// disk-encryption kind is checked against.
+	SecureBoot bool `json:"secureboot"`
+
 	// Confirmation is required on the apply and ignored on the plan.
 	Confirmation string `json:"confirmation"`
+}
+
+// encryptionBody is the wire shape. Kind is a string rather than the domain
+// type so that `static` and `kms` arrive here and are answered with the reason
+// they are not offered, instead of being rejected as unparsable values.
+type encryptionBody struct {
+	State     bool   `json:"state"`
+	Ephemeral bool   `json:"ephemeral"`
+	Kind      string `json:"kind"`
 }
 
 func (b provisionRequestBody) request() provision.Request {
@@ -269,7 +301,124 @@ func (b provisionRequestBody) request() provision.Request {
 		Fingerprint:  b.Fingerprint,
 		Hostname:     b.Hostname,
 		PatchIDs:     b.PatchIDs,
+		SecureBoot:   b.SecureBoot,
 	}
+}
+
+// resolveInstaller fills in the exact reference `.machine.install.image` gets.
+//
+// Resolved here rather than assembled in the provisioning package, and carried
+// on the request from this point on, so that the reference shown on the
+// confirmation screen is the one the job writes. The previous arrangement
+// rebuilt the string at install time from parts, which is how a reference and
+// the confirmation of it came to be able to disagree.
+//
+// A machine with no schematic gets Talos's own published installer: there is
+// no Factory repository to resolve for it.
+//
+// Everything else goes through the Factory, and a failure is a refusal with no
+// reference rather than a fallback. That is the decision internal/imagefactory
+// already made for the asset panel, for the reason that applies twice as hard
+// here: substituting the ordinary installer for the SecureBoot one produces a
+// node that installs, joins, and is not SecureBoot, and nothing afterwards
+// says so.
+func resolveInstaller(
+	ctx context.Context, d httpapi.Deps, req provision.Request,
+) (provision.Request, []imagefactory.Warning, *httpapi.Problem) {
+	none := make([]imagefactory.Warning, 0)
+
+	if req.SchematicID == "" {
+		req.InstallerImage = provision.StockInstaller(req.TalosVersion)
+		return req, none, nil
+	}
+	if d.Factory == nil {
+		return req, none, httpapi.Validation(
+			"This machine was built from an Image Factory schematic, and the installer reference " +
+				"for it has to be resolved against the Factory -- which this installation is not " +
+				"configured with. Configure --image-factory, or provision a machine that boots " +
+				"the stock image.")
+	}
+
+	// The architecture comes from the stored schematic and is never a constant
+	// here. FACT-03 says so and the reason is concrete: this product is
+	// developed on arm64 and its target hardware is amd64, so an architecture
+	// baked in is a bug that works perfectly on the machine that wrote it.
+	rec, err := d.Store.Schematics().Get(ctx, model.SchematicID(req.SchematicID))
+	if err != nil {
+		return req, none, httpapi.Validation(
+			"This installation does not hold the schematic this machine booted, so the "+
+				"architecture to resolve its installer for is unknown. Create or import the "+
+				"schematic first.",
+			httpapi.FieldError{Field: "schematic_id", Reason: "not found"})
+	}
+
+	arch := imagefactory.Arch(rec.Arch)
+	if !arch.Valid() {
+		return req, none, httpapi.Validation(
+			"The stored schematic does not name an architecture this product builds assets for, " +
+				"so its installer cannot be resolved.")
+	}
+
+	ref, warnings, err := d.Factory.InstallerImage(ctx, imagefactory.AssetRequest{
+		SchematicID: req.SchematicID,
+		Version:     req.TalosVersion,
+		Arch:        arch,
+		Platform:    imagefactory.PlatformMetal,
+		SecureBoot:  req.SecureBoot,
+	})
+	if err != nil {
+		return req, none, httpapi.Validation(
+			"The installer for this schematic could not be resolved: " + err.Error() +
+				". Nothing is substituted here, deliberately: installing the ordinary installer " +
+				"for a SecureBoot machine produces a node that installs, joins, and is not " +
+				"SecureBoot.")
+	}
+
+	req.InstallerImage = ref
+	return req, warnings, nil
+}
+
+// withEncryption resolves the encryption half of a request.
+//
+// It parses the key kind and reads the schematic's SecureBoot flag out of the
+// store. Both refusals it can produce are conditions an operator can act on,
+// so they come back as problems rather than as an internal error.
+func (b provisionRequestBody) withEncryption(req provision.Request) (provision.Request, *httpapi.Problem) {
+	if b.Encryption == nil || (!b.Encryption.State && !b.Encryption.Ephemeral) {
+		return req, nil
+	}
+
+	kind, err := diskencryption.ParseKind(b.Encryption.Kind)
+	if err != nil {
+		return req, httpapi.Validation(err.Error(),
+			httpapi.FieldError{Field: "encryption.kind", Reason: "not an offered key kind"})
+	}
+
+	req.Encryption = &diskencryption.Request{
+		State:     b.Encryption.State,
+		Ephemeral: b.Encryption.Ephemeral,
+		Kind:      kind,
+	}
+	return req, nil
+}
+
+// prepare turns a request body into the request every provisioning route acts
+// on: the installer resolved, the encryption parsed, the operator's SecureBoot
+// answer carried through.
+//
+// One function for all three routes -- plan, confirm and apply -- because they
+// must agree. A confirmation issued against one reference and an apply that
+// rebuilt a different one is a confirmation of something that did not happen,
+// which is the failure the confirmation exists to prevent.
+func prepare(
+	ctx context.Context, d httpapi.Deps, body provisionRequestBody,
+) (provision.Request, []imagefactory.Warning, *httpapi.Problem) {
+	req, warnings, problem := resolveInstaller(ctx, d, body.request())
+	if problem != nil {
+		return req, warnings, problem
+	}
+	req, problem = body.withEncryption(req)
+	return req, warnings, problem
 }
 
 func provisionPlan(d httpapi.Deps) http.HandlerFunc {
@@ -285,10 +434,23 @@ func provisionPlan(d httpapi.Deps) http.HandlerFunc {
 			return
 		}
 
-		preview, err := d.Provision.Plan(r.Context(), body.request())
+		req, warnings, problem := prepare(r.Context(), d, body)
+		if problem != nil {
+			httpapi.WriteProblem(w, r, problem)
+			return
+		}
+
+		preview, err := d.Provision.Plan(r.Context(), req)
 		if err != nil {
 			writeProvisionError(w, r, d, err)
 			return
+		}
+
+		// The Factory's own warnings about the installer name it resolved --
+		// a name reached past a candidate that never answered is usable and
+		// provisional, and this is the screen where that matters.
+		for _, warning := range warnings {
+			preview.Warnings = append(preview.Warnings, warning.Detail)
 		}
 		writeJSON(w, http.StatusOK, preview)
 	}
@@ -311,7 +473,11 @@ func provisionApply(d httpapi.Deps) http.HandlerFunc {
 			return
 		}
 
-		req := body.request()
+		req, _, problem := prepare(r.Context(), d, body)
+		if problem != nil {
+			httpapi.WriteProblem(w, r, problem)
+			return
+		}
 
 		// Validated here as well as in the job, because a plan that is missing
 		// its UUID must be refused before it is accepted rather than after: a
@@ -322,7 +488,11 @@ func provisionApply(d httpapi.Deps) http.HandlerFunc {
 			return
 		}
 
-		params := req.Params()
+		params, err := req.Params()
+		if err != nil {
+			httpapi.WriteInternal(w, r, d.Logger, err)
+			return
+		}
 
 		// The intent is rebuilt from what was submitted, never read out of the
 		// token: a token that carried its own description would authorise
@@ -393,7 +563,11 @@ func provisionConfirm(d httpapi.Deps) http.HandlerFunc {
 			return
 		}
 
-		req := body.request()
+		req, _, problem := prepare(r.Context(), d, body.provisionRequestBody)
+		if problem != nil {
+			httpapi.WriteProblem(w, r, problem)
+			return
+		}
 
 		// Validated before a token is issued, so that a token cannot exist for
 		// a run that would be refused anyway.
@@ -410,7 +584,11 @@ func provisionConfirm(d httpapi.Deps) http.HandlerFunc {
 			return
 		}
 
-		params := req.Params()
+		params, err := req.Params()
+		if err != nil {
+			httpapi.WriteInternal(w, r, d.Logger, err)
+			return
+		}
 		token, expires := d.Confirmer.Issue(jobs.Intent{
 			Action:  string(provision.JobKindProvision),
 			Machine: string(req.UUID),

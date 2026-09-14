@@ -236,10 +236,10 @@ stillen Fehlschlags.
 
 | Omni | Warum nicht belegbar |
 |---|---|
-| Register a Bare Metal Machine (PXE/iPXE) | Keine Netboot-Umgebung. Der Bau ist ein URL-Tausch gegen die PXE-Frontend-URL der Factory (V2-PROV-01). |
+| Register a Bare Metal Machine (PXE/iPXE) | **Der Bau ist bereits da** und war es seit der Factory-Phase: die iPXE-Boot-Skript-URL steht pro Schematic in der Oberfläche, und `factory.talos.dev/pxe/...` und `pxe.factory.talos.dev/pxe/...` liefern nachgeprüft dasselbe Skript. Was fehlt, ist eine Netboot-Umgebung, um es zu belegen — nicht Code. |
+| ARM64/SBC | **Der Bau ist bereits da**: die Architektur ist in Schematic, Asset-URLs, Probe-Urteil und Installer-Auflösung durchparametrisiert und in der Oberfläche wählbar (FACT-03). Was fehlt, ist ARM-Hardware. |
 | SideroLink / Join-Token / Machine Registration über Tunnel | Kein WireGuard-Pfad, keine Knoten außerhalb des LAN (V2-TRANS-01). |
-| ARM64/SBC | Keine ARM-Hardware (V2-OPS-03). |
-| Omni KMS Disk Encryption | Braucht Knoten mit verschlüsselten Datenträgern. |
+| Omni KMS Disk Encryption | **Gebaut, ohne das KMS.** `internal/diskencryption` schreibt Talos-`VolumeConfig`-Dokumente für STATE und EPHEMERAL, mit `nodeID` oder `tpm`. `static` und `kms` sind mit Begründung abgelehnt: der statische Schlüssel steht bei STATE im Klartext in META, und ein KMS würde bedeuten, dass dieses Produkt den Schlüsselserver betreibt — ein Knoten, dessen Schlüsselserver weg ist, bootet nicht, und das kehrt genau die Entscheidung um, auf der das Produkt steht. Nicht belegbar hier: dass ein echter Knoten verschlüsselt hochkommt. |
 | Expose a Workload via Service Proxy | Braucht einen laufenden Cluster mit Workloads. |
 | Rotate SideroLink Join Token, Revoke Kubernetes Access Tokens | Folgen aus Tunnel bzw. kubeconfig. |
 
