@@ -1,17 +1,20 @@
 package httpapi_test
 
 import (
+	"context"
 	"encoding/json"
 	"log/slog"
 	"net/http"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/holzcloud/holzkube-manager/internal/httpapi"
 	"github.com/holzcloud/holzkube-manager/internal/inventory"
 	"github.com/holzcloud/holzkube-manager/internal/machineconfig"
 	"github.com/holzcloud/holzkube-manager/internal/model"
+	"github.com/holzcloud/holzkube-manager/internal/store"
 	"github.com/holzcloud/holzkube-manager/internal/store/fsstore"
 	"github.com/holzcloud/holzkube-manager/internal/talos"
 	"github.com/holzcloud/holzkube-manager/internal/talossim"
@@ -257,5 +260,117 @@ func TestTheAuditArchiveNeverGetsAPatchBody(t *testing.T) {
 	}
 	if !hasAction(records.Items, "config.plan") {
 		t.Error("the plan is not in the archive at all")
+	}
+}
+
+// supersedeRace is a store that lets somebody else write the parent patch
+// between the handler's read of it and its write.
+//
+// The window is real and narrow: createPatch reads the parent, sets
+// Superseded, and writes it back. Two operators editing the same patch at once
+// land in it. A real store offers no way to ask for that moment, so the
+// decorator chooses it.
+type supersedeRace struct {
+	store.Store
+	patches *racingPatches
+}
+
+func (s supersedeRace) Patches() store.PatchStore { return s.patches }
+
+type racingPatches struct {
+	store.PatchStore
+
+	mu    sync.Mutex
+	armed bool
+}
+
+// arm makes the next read of a patch the one that gets overtaken.
+//
+// Inert until asked for, because the create path writes and reads patches
+// before the test has anything to say about it.
+func (p *racingPatches) arm() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.armed = true
+}
+
+func (p *racingPatches) Get(ctx context.Context, id model.PatchID) (model.Patch, error) {
+	rec, err := p.PatchStore.Get(ctx, id)
+	if err != nil {
+		return rec, err
+	}
+
+	p.mu.Lock()
+	fire := p.armed
+	p.armed = false
+	p.mu.Unlock()
+
+	if fire {
+		// The competing writer: it touches the same record, which moves its
+		// Rev. The handler is now holding the version it read a moment ago,
+		// which is exactly the state a second operator's request produces.
+		other := rec
+		other.Description = "written by somebody else"
+		// p.Put and not p.PatchStore.Put: Put is not overridden here, so the
+		// qualifier would say something that is not true of this type.
+		if _, err := p.Put(ctx, other); err != nil {
+			return rec, err
+		}
+	}
+	return rec, nil
+}
+
+// TestTwoOperatorsEditingOnePatchGetAConflictAndNotAnInternalError.
+//
+// The write that supersedes a parent used to map every failure to 500
+// internal.unexpected, including a compare-and-swap clash. A 500 tells an
+// operator something is broken and to stop; what actually happened is that the
+// chain moved under them and the request can be made again against its head.
+// The taxonomy already has the answer -- 409 store.conflict -- and this route
+// was not using it.
+func TestTwoOperatorsEditingOnePatchGetAConflictAndNotAnInternalError(t *testing.T) {
+	racing := &racingPatches{}
+
+	h := newHarness(t,
+		withConfig(),
+		withStore(func(st store.Store) store.Store {
+			racing.PatchStore = st.Patches()
+			return supersedeRace{Store: st, patches: racing}
+		}),
+	)
+	h.setupAndLogin(t)
+
+	resp, raw := h.do(t, http.MethodPost, "/api/v1/patches", map[string]any{
+		"name": "hostname",
+		"body": "machine:\n  network:\n    hostname: node-1\n",
+	})
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("create: %d (%s)", resp.StatusCode, raw)
+	}
+	var first model.Patch
+	if err := json.Unmarshal(raw, &first); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+
+	racing.arm()
+
+	resp, raw = h.do(t, http.MethodPost, "/api/v1/patches", map[string]any{
+		"name":   "hostname",
+		"body":   "machine:\n  network:\n    hostname: node-2\n",
+		"parent": string(first.ID),
+	})
+	if resp.StatusCode >= 500 {
+		t.Fatalf("a race between two operators answered %d: %s", resp.StatusCode, raw)
+	}
+	if resp.StatusCode != http.StatusConflict {
+		t.Fatalf("the edit answered %d, want 409 (%s)", resp.StatusCode, raw)
+	}
+
+	p := decodeProblem(t, resp, raw)
+	if p.Code != "store.conflict" {
+		t.Errorf("code = %q, want store.conflict", p.Code)
+	}
+	if !strings.Contains(p.Detail, "current head") {
+		t.Errorf("the refusal does not say what to do about it: %q", p.Detail)
 	}
 }
