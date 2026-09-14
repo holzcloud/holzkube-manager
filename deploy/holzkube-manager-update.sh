@@ -168,14 +168,32 @@ Ein Release entsteht durch einen Tag: git tag -a v1.0.0 -m 'v1.0.0' && git push 
 Der CI-Job 'release' baut daraus die Archive."
 fi
 
+# Ein Release traegt seit v1.16 ZWEI Archive pro Architektur: den Daemon und
+# holzkubectl, das sein eigenes bekommen hat, damit niemand einen Server mit
+# eingebauter Oberflaeche laedt, um an ein Kommandozeilenwerkzeug zu kommen.
+# Beide Namen enden auf "linux_<arch>.tar.gz", also hat die alte Auswahl -- das
+# erste Asset, dessen Name so endet -- ab diesem Release eine Muenze geworfen.
+# Traf sie holzkubectl, scheiterte das Update am tar weiter unten, mit der
+# Meldung "Archiv enthaelt kein holzkube-managerd": wahr, und sie beschuldigt
+# das Archiv statt die Auswahl. Der Dienst wird dabei nicht angefasst, der
+# Schaden ist also ein Abend und kein Ausfall.
+#
+# Der Praefix ist das, was die beiden unterscheidet, und mehr als eine
+# Uebereinstimmung ist ein Fehler und keine Auswahl: lieber abbrechen und den
+# Grund nennen, als sich fuer eines von zweien zu entscheiden, ohne sagen zu
+# koennen warum.
 read -r TAG ASSET_ID ASSET_NAME SUMS_ID < <(printf '%s' "$LATEST_JSON" | python3 -c "
 import json,sys
 r = json.load(sys.stdin)
 want = 'linux_${ARCH}.tar.gz'
-asset = next((a for a in r['assets'] if a['name'].endswith(want)), None)
-sums  = next((a for a in r['assets'] if a['name'] == 'checksums.txt'), None)
-if asset is None:
-    sys.exit('kein Asset fuer ' + want + ' in ' + r['tag_name'])
+hits = [a for a in r['assets']
+        if a['name'].startswith('holzkube-manager_') and a['name'].endswith(want)]
+sums = next((a for a in r['assets'] if a['name'] == 'checksums.txt'), None)
+if not hits:
+    sys.exit('kein holzkube-manager-Archiv fuer ' + want + ' in ' + r['tag_name'])
+if len(hits) > 1:
+    sys.exit('mehrdeutig: ' + ', '.join(a['name'] for a in hits))
+asset = hits[0]
 print(r['tag_name'], asset['id'], asset['name'], sums['id'] if sums else '')
 ") || fail "Release-Metadaten nicht lesbar"
 
