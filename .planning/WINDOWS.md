@@ -2,9 +2,9 @@
 schema_version: 1
 open_count: 61
 waived_count: 0
-fixed_count: 52
-total_count: 113
-last_updated: 2026-09-14T07:30:00.000Z
+fixed_count: 53
+total_count: 114
+last_updated: 2026-09-14T07:45:00.000Z
 ---
 
 # Broken Windows Ledger
@@ -135,6 +135,8 @@ last_updated: 2026-09-14T07:30:00.000Z
 | 112 | 16 | deviation | internal/imagefactory/installer.go |  | EINE DOKUMENTIERTE MESSUNG REPRODUZIERT NICHT MEHR, UND SIE STAND IN EINEM WARNTEXT FUER BETREIBER. installer.go hat behauptet: 'at the pinned version the two [SecureBoot-Namen] resolve to two different images, measured 2026-08-30'. Nachgemessen am 2026-09-14 von Hand gegen factory.talos.dev bei derselben Version v1.13.9: metal-installer-secureboot und installer-secureboot liefern DENSELBEN Digest (sha256:3c4486fe...), ein OCI-Index, stabil ueber mehrere Anfragen; das ordentliche Paar stimmt ebenfalls ueberein, und die beiden Paare unterscheiden sich voneinander. Die Ironie: dieselbe Datei erklaert an anderer Stelle, warum die Digest-Literale entfernt wurden -- 'a digest in a comment is a fact with an expiry date that nothing in the build checks' -- und stellte dann die BEZIEHUNG zwischen zwei Digests als stehende Tatsache dar, die genauso ablaeuft. Ein Test pinnte ausserdem die Formulierung 'different images' und band sich damit an diese eine Beobachtung. | fixed | GESCHLOSSEN 2026-09-14. Alle drei Stellen (Kommentar, betreiberseitiger Warntext, Zod-Doku in der Oberflaeche) sagen jetzt, was dauerhaft ist: nichts garantiert, dass die beiden Namen dasselbe Bild liefern, und die Antwort hat sich nachweislich geaendert -- gemessen unterschiedlich am 2026-08-30, gleich am 2026-09-14. Das Verhalten aendert sich nicht: der Fallback bleibt, bleibt beschriftet, und ein SecureBoot-Request wird weiterhin nie mit einem gewoehnlichen Installer beantwortet. Der Test prueft jetzt die dauerhafte Aussage statt der abgelaufenen Formulierung. | 2026-09-14T07:20:00.000Z | 2026-09-14T07:20:00.000Z |
 
 | 113 | 16 | deviation | internal/scale/scale.go |  | EIN SATZ STAND ZWEIMAL DA, UND ZWAR NUR IM LAUFENDEN SERVER. Die Skalierungs-Ansicht gab aus: "etcd's membership could not be read, so nothing here counts votes. etcd's membership could not be read (upgrade: this cluster has no control-plane node in the inventory)." Der Handler schreibt MembersProblem als vollstaendigen Satzteil, und advise() stellte ihm seine eigene Kopie desselben Satzes voran. Kein Test hat es gesehen, weil jeder Test hier seinen eigenen kurzen Problemtext uebergibt und nur der echte Server den echten liefert -- gefunden, indem holzkubectl gegen das laufende Binary lief. | fixed | GESCHLOSSEN 2026-09-14. MembersProblem besitzt seinen Satz; advise() haengt nur noch den Nachsatz an. Der Test uebergibt jetzt die Form, die der Server wirklich erzeugt, und zaehlt die Wiederholung. | 2026-09-14T07:30:00.000Z | 2026-09-14T07:30:00.000Z |
+
+| 114 | 16 | deviation | web/vite.config.ts |  | ZWEI SCHRIFTSCHNITTE WURDEN VON DER EIGENEN CONTENT-SECURITY-POLICY BLOCKIERT, UND NICHTS HAT ES GEMELDET. Der Server liefert font-src 'self'; der Bundler inlined jedes Asset unterhalb seines Groessenlimits als data:-URI, und die beiden kleinsten Schriftschnitte -- die kyrillisch-erweiterten Schnitte beider Familien -- fielen darunter. Der Browser verweigert sie also, und jeder Text, der sie braucht, faellt auf eine Systemschrift zurueck. Nichts schlaegt fehl: die Seite rendert, die Anfragen werden nie gestellt, der Server loggt nichts, und jeder Test in diesem Repository war gruen. Sichtbar ist es an genau einer Stelle -- in der Konsole eines Browsers, der das echte Bundle geladen hat, und genau dort wurde es gefunden. | fixed | GESCHLOSSEN 2026-09-14. assetsInlineLimit: 0 -- die Policy ist die strenge, und der Build ist das, was nachgeben soll. internal/httpapi/assets_test.go haelt das Bundle jetzt gegen die Policy, die dieses Paket selbst ausliefert (gelesen, nicht nacherzaehlt), und prueft zusaetzlich, dass ueberhaupt Schriftdateien da sind -- sonst waere 'keine Schriften' auch gruen. Fehler rot gesehen: Inline-Limit wieder hochgesetzt, Bundle neu gebaut, Waechter meldet die Datei und die Policy. | 2026-09-14T07:45:00.000Z | 2026-09-14T07:45:00.000Z |
 
 ````json
 [
@@ -1493,6 +1495,18 @@ last_updated: 2026-09-14T07:30:00.000Z
     "reason": "GESCHLOSSEN 2026-09-14. MembersProblem besitzt seinen Satz; advise() haengt nur noch den Nachsatz an. Der Test uebergibt jetzt die Form, die der Server wirklich erzeugt, und zaehlt die Wiederholung.",
     "recorded_at": "2026-09-14T07:30:00.000Z",
     "resolved_at": "2026-09-14T07:30:00.000Z"
+  },
+  {
+    "id": 114,
+    "kind": "deviation",
+    "phase": "16",
+    "file": "web/vite.config.ts",
+    "line": null,
+    "description": "ZWEI SCHRIFTSCHNITTE WURDEN VON DER EIGENEN CONTENT-SECURITY-POLICY BLOCKIERT, UND NICHTS HAT ES GEMELDET. Der Server liefert font-src 'self'; der Bundler inlined jedes Asset unterhalb seines Groessenlimits als data:-URI, und die beiden kleinsten Schriftschnitte -- die kyrillisch-erweiterten Schnitte beider Familien -- fielen darunter. Der Browser verweigert sie also, und jeder Text, der sie braucht, faellt auf eine Systemschrift zurueck. Nichts schlaegt fehl: die Seite rendert, die Anfragen werden nie gestellt, der Server loggt nichts, und jeder Test in diesem Repository war gruen. Sichtbar ist es an genau einer Stelle -- in der Konsole eines Browsers, der das echte Bundle geladen hat, und genau dort wurde es gefunden.",
+    "status": "fixed",
+    "reason": "GESCHLOSSEN 2026-09-14. assetsInlineLimit: 0 -- die Policy ist die strenge, und der Build ist das, was nachgeben soll. internal/httpapi/assets_test.go haelt das Bundle jetzt gegen die Policy, die dieses Paket selbst ausliefert (gelesen, nicht nacherzaehlt), und prueft zusaetzlich, dass ueberhaupt Schriftdateien da sind -- sonst waere 'keine Schriften' auch gruen. Fehler rot gesehen: Inline-Limit wieder hochgesetzt, Bundle neu gebaut, Waechter meldet die Datei und die Policy.",
+    "recorded_at": "2026-09-14T07:45:00.000Z",
+    "resolved_at": "2026-09-14T07:45:00.000Z"
   }
 ]
 ````
