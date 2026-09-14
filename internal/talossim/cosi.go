@@ -90,6 +90,15 @@ func (s *Server) SetHostname(ctx context.Context, hostname string) error {
 // truthful answer but not a useful starting point: the point of the simulator
 // is that a caller can ask it something before the test has done anything.
 func (s *Server) seedCOSI(ctx context.Context) error {
+	// The hardware information is what the facts read starts from, so a node
+	// configured to fail that read simply does not get it. Everything below is
+	// still seeded: the node answers, it is the facts that cannot be read, and
+	// skipping the whole seed would make it a different and less interesting
+	// node.
+	if s.opts.FactsUnavailable {
+		return s.seedTheRest(ctx)
+	}
+
 	info := hardware.NewSystemInformation(hardware.SystemInformationID)
 	info.TypedSpec().Manufacturer = "talossim"
 	info.TypedSpec().ProductName = "simulated node"
@@ -101,6 +110,42 @@ func (s *Server) seedCOSI(ctx context.Context) error {
 		return fmt.Errorf("talossim: seed %s: %w", hardware.SystemInformationType, err)
 	}
 
+	return s.seedTheRest(ctx)
+}
+
+// SetFactsUnavailable takes the node's hardware information away, or puts it
+// back.
+//
+// It is the running-node equivalent of the FactsUnavailable option, for the
+// tests that need a node to start healthy and then stop being readable --
+// which is the sequence an operator actually sees, and the only one in which
+// "it used to work" is part of the evidence.
+func (s *Server) SetFactsUnavailable(ctx context.Context, unavailable bool) error {
+	info := hardware.NewSystemInformation(hardware.SystemInformationID)
+
+	if unavailable {
+		err := s.COSI().Destroy(ctx, info.Metadata())
+		if err != nil && !state.IsNotFoundError(err) {
+			return fmt.Errorf("talossim: remove %s: %w", hardware.SystemInformationType, err)
+		}
+		return nil
+	}
+
+	info.TypedSpec().Manufacturer = "talossim"
+	info.TypedSpec().ProductName = "simulated node"
+	info.TypedSpec().Version = s.opts.TalosVersion
+	info.TypedSpec().SerialNumber = "SIM-" + s.opts.Hostname
+	info.TypedSpec().UUID = nodeUUID(s.opts.Hostname)
+
+	if err := s.COSI().Create(ctx, info); err != nil && !state.IsConflictError(err) {
+		return fmt.Errorf("talossim: restore %s: %w", hardware.SystemInformationType, err)
+	}
+	return nil
+}
+
+// seedTheRest is everything a freshly booted node has apart from its hardware
+// information.
+func (s *Server) seedTheRest(ctx context.Context) error {
 	addr, err := netip.ParseAddr(s.opts.NodeIP)
 	if err != nil {
 		return fmt.Errorf("talossim: node address %q: %w", s.opts.NodeIP, err)
