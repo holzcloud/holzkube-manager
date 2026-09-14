@@ -82,6 +82,15 @@ type MachineView struct {
 
 	AdoptedAt time.Time `json:"adopted_at"`
 
+	// SeenAt is when this machine last answered anything at all, which is not
+	// the same as when it was last read. A node whose connection succeeds and
+	// whose facts read fails moves this and leaves the snapshot alone, so a
+	// SeenAt later than the snapshot's reading is the shape of a node that is
+	// present and cannot be read -- a different repair from one that is
+	// absent, and the reason the field is on the view rather than only in the
+	// record.
+	SeenAt time.Time `json:"seen_at,omitzero"`
+
 	// Watch is whether this node's resource subscription is delivering
 	// (INV-13, D-19). It is not a Field and not part of Stage: it says how
 	// quickly a change will be noticed, not whether anything below is true.
@@ -250,6 +259,7 @@ func (s *Service) viewOf(rec model.Machine) MachineView {
 		PreRelease:         preRelease,
 		VersionNotice:      notice,
 		AdoptedAt:          rec.AdoptedAt,
+		SeenAt:             rec.SeenAt,
 		Watch:              s.watchStatus(rec.ID),
 	}
 

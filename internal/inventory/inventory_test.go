@@ -499,3 +499,75 @@ func TestCreateMintsItsOwnAuthorityAndIsNotLocked(t *testing.T) {
 		t.Error("the rendered talosconfig carries no expiry")
 	}
 }
+
+// TestANodeThatAnswersAndCannotBeReadIsNotTheSameAsAbsent.
+//
+// The distinction the whole product is built on, arriving at the one record
+// that did not make it. A machine whose connection succeeds and whose facts
+// read fails used to persist nothing at all: its SeenAt stayed at the last
+// time a *complete* observation worked, which is not what the field says it is
+// -- "when the machine last answered anything at all" -- so a node that is
+// present and unreadable looked exactly like one that is switched off.
+//
+// They lead to different repairs. The first sends an operator to the node; the
+// second to the cable or the power.
+func TestANodeThatAnswersAndCannotBeReadIsNotTheSameAsAbsent(t *testing.T) {
+	t.Parallel()
+
+	ctx := testContext(t)
+	f := newFixture(t, talossim.Options{ControlPlane: true})
+	c := f.importCluster(ctx, t)
+
+	machines, err := f.svc.MachinesOf(ctx, c.ID)
+	if err != nil || len(machines) == 0 {
+		t.Fatalf("MachinesOf: %v (%d machines)", err, len(machines))
+	}
+	id := machines[0].ID
+
+	// One complete observation first: adoption writes the record, and SeenAt
+	// is the observer's field.
+	f.svc.Refresh(ctx, id)
+
+	before, err := f.svc.MachineRecord(ctx, id)
+	if err != nil {
+		t.Fatalf("MachineRecord: %v", err)
+	}
+	if before.SeenAt.IsZero() {
+		t.Fatal("a machine that was just observed has never been seen")
+	}
+	if before.Snapshot.TalosVersion == "" {
+		t.Fatal("the observation read no version, so there is no snapshot to protect")
+	}
+
+	// Take the hardware information away: the node still answers, and the
+	// facts read behind the observation now fails. This is the shape of a read
+	// that times out against a node that is otherwise up.
+	if err := f.sim.SetFactsUnavailable(ctx, true); err != nil {
+		t.Fatalf("SetFactsUnavailable: %v", err)
+	}
+
+	f.svc.Refresh(ctx, id)
+
+	after, err := f.svc.MachineRecord(ctx, id)
+	if err != nil {
+		t.Fatalf("MachineRecord: %v", err)
+	}
+
+	if !after.SeenAt.After(before.SeenAt) {
+		t.Errorf("the machine answered and SeenAt did not move: %s then %s",
+			before.SeenAt, after.SeenAt)
+	}
+
+	// And the snapshot is untouched. Nothing was read, so there is nothing to
+	// write, and re-stamping the old reading with a new time would turn a
+	// stale fact into one that looks current -- which is what the Field[T]
+	// read model exists against.
+	if !after.Snapshot.ObservedAt.Equal(before.Snapshot.ObservedAt) {
+		t.Errorf("the snapshot was re-stamped without anything being read: %s then %s",
+			before.Snapshot.ObservedAt, after.Snapshot.ObservedAt)
+	}
+	if after.Snapshot.TalosVersion != before.Snapshot.TalosVersion {
+		t.Errorf("the snapshot changed: %q then %q",
+			before.Snapshot.TalosVersion, after.Snapshot.TalosVersion)
+	}
+}

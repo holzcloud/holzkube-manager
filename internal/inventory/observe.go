@@ -286,6 +286,16 @@ func (s *Service) Refresh(ctx context.Context, id model.MachineID) {
 	facts, err := cc.NodeFacts(ctx)
 	if err != nil {
 		obs.fail(health.LevelNode, unreachableReason(err), certificateExpired(err))
+
+		// The connection was made, so the node answered something: this is a
+		// machine that is present and cannot be read, which is a different
+		// finding from one that is absent. Recording it is best-effort -- the
+		// observation's verdict above is the answer, and a failed bookkeeping
+		// write must not turn a reachable node into an error.
+		if seenErr := s.persistSeen(ctx, rec, now); seenErr != nil {
+			s.deps.Logger.Debug("could not record that the machine answered",
+				"machine", rec.ID, "error", seenErr)
+		}
 		return
 	}
 
@@ -446,6 +456,17 @@ func (s *Service) persistSnapshot(
 		return m
 	}
 
+	return s.merge(ctx, rec, apply)
+}
+
+// merge applies a change to a machine record, re-reading and re-applying if
+// somebody else wrote it first.
+//
+// The retry is what makes an observation a merge rather than a last-writer
+// -wins overwrite: the observer and an operator's action write the same record
+// from different fields, and a lost revision race used to throw the
+// observation away silently.
+func (s *Service) merge(ctx context.Context, rec model.Machine, apply func(model.Machine) model.Machine) error {
 	for attempt := range writeAttempts {
 		if attempt > 0 {
 			fresh, err := s.deps.Store.Machines().Get(ctx, rec.ID)
@@ -468,6 +489,28 @@ func (s *Service) persistSnapshot(
 
 	return fmt.Errorf("%w: the machine record changed under %d successive attempts",
 		store.ErrConflict, writeAttempts)
+}
+
+// persistSeen records that the machine answered, without claiming to have read
+// anything from it.
+//
+// It exists because "nothing is there" and "it is there and cannot be read"
+// are different findings that lead to different repairs -- the first sends an
+// operator to the cable or the power, the second to the node itself -- and
+// until this, they were the same record. A node whose connection succeeded and
+// whose facts read failed persisted nothing at all, so its SeenAt stayed at
+// the last time a *complete* observation worked, which is not what SeenAt says
+// it is: "when the machine last answered anything at all".
+//
+// The snapshot is deliberately not touched. Nothing was read, so there is
+// nothing to write, and stamping the old snapshot with a new time would turn a
+// stale reading into one that looks current -- which is the failure the whole
+// Field[T] read model exists against.
+func (s *Service) persistSeen(ctx context.Context, rec model.Machine, now time.Time) error {
+	return s.merge(ctx, rec, func(m model.Machine) model.Machine {
+		m.SeenAt = now
+		return m
+	})
 }
 
 func (s *Service) observationFor(id model.MachineID) *observation {

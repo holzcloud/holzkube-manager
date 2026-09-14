@@ -31,6 +31,32 @@ import { MACHINE_POLL_INTERVAL_MS } from '@/routes/nodes'
  * configuration off this page; a sheet would have been too small within three
  * phases.
  */
+/**
+ * When the node last answered, shown only when that is news.
+ *
+ * It is news in exactly one case: the node is answering and its readings are
+ * not current. That is a machine which is present and cannot be read — a
+ * different repair from one that is absent, and previously indistinguishable
+ * from it, because an observation that failed halfway recorded nothing at all.
+ *
+ * When the node is healthy this says nothing. A line reading "last answered:
+ * four seconds ago" on every page is a line nobody reads on the page where it
+ * matters.
+ */
+export function LastAnswered({ machine }: { machine: Machine }) {
+  if (machine.seen_at === undefined || machine.stage === 'watching') {
+    return null
+  }
+
+  return (
+    <p className="text-sm text-amber-700 dark:text-amber-300">
+      This node last answered {new Date(machine.seen_at).toLocaleString()}. If that is recent and
+      the readings below are not, the machine is reachable and something on it is not responding —
+      which is a different thing from a machine that is down.
+    </p>
+  )
+}
+
 export function NodeDetailPage() {
   const { uuid } = nodeDetailRoute.useParams()
   const navigate = useNavigate()
@@ -86,6 +112,7 @@ export function NodeDetailPage() {
               Back to all nodes
             </Link>
           </p>
+          <LastAnswered machine={m} />
         </div>
 
         <div className="flex flex-wrap gap-2">

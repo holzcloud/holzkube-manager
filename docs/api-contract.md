@@ -1380,6 +1380,27 @@ The documents are built from machinery's own types and validated by Talos's
 parser, not written as YAML text. A hand-written document Talos ignores is the
 same outcome as no encryption at all, and it looks like success.
 
+## `seen_at`: answered, versus read
+
+A machine view carries `seen_at` alongside its readings, and the two answer
+different questions. The readings say when something was last *read* from the
+node; `seen_at` says when the node last **answered anything at all**.
+
+They come apart in one case, and it is the useful one: an observation that
+opens a connection and then fails its facts read moves `seen_at` and leaves the
+snapshot untouched. So a `seen_at` newer than the readings is a machine that is
+present and cannot be read — a different repair from one that is absent, and
+one an operator cannot reach from the stage alone.
+
+The snapshot is deliberately **not** re-stamped in that case. Nothing was read,
+so there is nothing to write, and giving an old reading a new timestamp would
+turn a stale fact into one that looks current — which is what the `Field[T]`
+read model exists against.
+
+For two milestones a half-failed observation persisted nothing at all, so
+`seen_at` only moved when a complete reading worked and the two failures were
+one record. The field's own documentation described the behaviour it now has.
+
 ## Renewing this installation's client certificate
 
 `POST /api/v1/clusters/{id}/client-certificate` issues holzkube-manager a fresh

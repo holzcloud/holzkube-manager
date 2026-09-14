@@ -199,6 +199,20 @@ func (u User) HasIdentityBinding() bool {
 
 // Settings is the singleton instance-wide settings record.
 type Settings struct {
+	// SetupCompleted is written true when the first account is created, and
+	// **nothing reads it**. That is deliberate rather than an oversight, and
+	// it is written down because the field's name says the opposite.
+	//
+	// Whether setup has run is decided by asking whether any account exists
+	// (handlers/setup.go), which is derived from the thing that actually
+	// matters and cannot drift from it. A flag can: a store restored from a
+	// partial backup, or a settings record written by a future version, would
+	// give an answer the user list contradicts -- and then there would be two
+	// rules for one question, which is the failure this codebase keeps
+	// finding.
+	//
+	// It is kept because the record is also when setup happened, which is
+	// worth having, and removing an entity costs a migration for no gain.
 	SetupCompleted bool      `json:"setup_completed"`
 	CreatedAt      time.Time `json:"created_at"`
 

@@ -189,6 +189,17 @@ type Machine struct {
 
 	// AdoptedAt is when this record was created; SeenAt is when the machine
 	// last answered anything at all.
+	//
+	// Anything at all, and that is the whole distinction: an observation that
+	// connects and then fails its facts read moves SeenAt and leaves the
+	// snapshot alone. So a SeenAt later than Snapshot.ObservedAt is a machine
+	// that is present and cannot be read, which is a different repair from one
+	// that is absent -- the node rather than the cable.
+	//
+	// The field said this before the code did. For two milestones a
+	// half-failed observation persisted nothing at all, so SeenAt only ever
+	// moved when a *complete* reading worked, and the two failures were one
+	// record.
 	AdoptedAt time.Time `json:"adopted_at"`
 	SeenAt    time.Time `json:"seen_at,omitzero"`
 
