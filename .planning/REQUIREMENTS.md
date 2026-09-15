@@ -156,6 +156,39 @@ Anerkannt, aber verschoben. Nicht in der aktuellen Roadmap.
 - **V2-AUTH-01**: OIDC/SSO gegen einen bestehenden IdP (Interface ist reserviert)
 - **V2-AUTH-02**: Mehrere Benutzer mit Rollen
 
+### Oberfläche
+
+- **V2-UI-01**: Die Weboberfläche muss auf einem Telefon bedienbar sein. Vom
+  Betreiber am 2026-09-15 als wichtiges Ziel benannt, und es passt zum Produkt:
+  wer eine Cluster-Karte anschaut, weil etwas kaputt ist, steht selten am
+  Schreibtisch — D-15 und der Zertifikats-Countdown existieren genau für den
+  Moment, in dem jemand schnell nachsieht.
+
+  **Ausgangslage, aus dem Quelltext GELESEN und nicht im Browser gemessen** (die
+  Messung braucht den laufenden Daemon und gehört in die Runde, die das baut):
+
+  - Der Shell-Rahmen ist der eigentliche Blocker. `Sidebar` ist
+    `w-56 shrink-0` — 224 px, fest, ohne einen einzigen Breakpoint — und
+    `<main>` trägt `p-6`. Auf einem 390-px-Telefon bleiben damit rechnerisch
+    **118 px** für den Inhalt, bevor irgendetwas anderes falsch sein kann.
+  - Der Inhalt ist weiter, als der Rahmen vermuten lässt. 30
+    Breakpoint-Utilities in 14 von 55 Komponenten, fast alle
+    `sm:grid-cols-*` und `sm:max-w-*`: die Raster stapeln unterhalb von `sm`
+    bereits von selbst, und die Dialoge haben eine Obergrenze. Das ist die
+    Hälfte der Arbeit, die schon getan ist.
+  - `<meta name="viewport" content="width=device-width">` steht korrekt in
+    `index.html`. Sechs Stellen haben `overflow-x-auto`; zwei Dateien tragen
+    eine echte `<table>`, und ob die beiden darunter fallen, ist nicht geprüft.
+  - Keine problematischen festen Mindestbreiten außer 96 px an einem
+    Dropdown.
+
+  **Was das heißt:** die Aufgabe ist der Rahmen (Sidebar als Schublade oder
+  untere Leiste unterhalb eines Breakpoints, Header entsprechend), die beiden
+  Tabellen, und die Größe der Tippziele. Nicht ein Umbau jeder Ansicht.
+
+  **Nicht entschieden:** ob das eine eigene Phase eines Milestones wird oder
+  nebenher läuft, und ob es vor oder nach OPS-05 kommt.
+
 ### Schnittstellen
 
 - **V2-API-01**: `holzkubectl` CLI gegen dieselbe REST-API
