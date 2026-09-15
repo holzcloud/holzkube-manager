@@ -1392,17 +1392,45 @@ func TestGuardBlindSpotsAreEachMeasured(t *testing.T) {
 	}
 }
 
+// stringArrayLiteralDecl cuts the named declaration out before anything is read
+// from it, and it carries the anchoring discipline plan 02-27 established for
+// refusedRangesDecl.
+//
+// What it replaces: `QuoteMeta(name) + "[^=]*=\s*\[([^\]]*)\]"`, which asked
+// only that the name be followed by some run of characters without an `=`. That
+// is the prefix hole round 5 measured on the browser guard, and this reader
+// carried it unchanged -- measured here before the change, against a source
+// carrying only INSTALLER_REPOSITORY_NAMES_LITERAL_LEGACY: READ members=2, with
+// no error at all. The damage it buys is the same: the literal moves or is
+// renamed, a prefixed leftover stays behind in the browser suite, and this guard
+// reports agreement over an array the suite no longer asserts against.
+//
+// The identifier ends where the pattern says it ends. What follows the name is
+// whitespace, then EITHER a type annotation that has to begin with a colon OR
+// the assignment straight away -- the required `:` or `=` IS the word boundary,
+// because `_` is neither. The annotation stays optional and colon-bound for the
+// reason the old comment gave: `readonly string[]` carries a bracket pair of its
+// own and would otherwise be read as an empty array.
+//
+// The line-start anchor is the second half, and it is what makes a declaration
+// surviving only in a `//` line comment stop satisfying this reader: `//` is not
+// whitespace, so `\s*` cannot cover it. What it does NOT close is a declaration
+// inside a block comment or a template literal, where the line itself still
+// begins with `const` -- that remainder is carried as data in
+// stringArrayLiteralBlindSpots and measured by rows, not claimed away here.
+func stringArrayLiteralDecl(name string) *regexp.Regexp {
+	return regexp.MustCompile(
+		`(?m)^\s*(?:export\s+)?const\s+` + regexp.QuoteMeta(name) +
+			`\s*(?::[^=\n]*)?=\s*\[([^\]]*)\]`)
+}
+
 // stringArrayLiteral reads the single-quoted members of a named TypeScript
 // array. It is deliberately literal-only: a member computed at runtime is a
 // member this guard cannot see, and failing is the honest answer.
 func stringArrayLiteral(t *testing.T, source, name string) []string {
 	t.Helper()
 
-	// The assignment, not the first bracket after the name: the type annotation
-	// `readonly string[]` sits between the two and would otherwise be read as an
-	// empty array.
-	body := regexp.MustCompile(regexp.QuoteMeta(name) + `[^=]*=\s*\[([^\]]*)\]`).
-		FindStringSubmatch(source)
+	body := stringArrayLiteralDecl(name).FindStringSubmatch(source)
 	if body == nil {
 		t.Fatalf("%s declares no %s as an array literal; that array is the seam "+
 			"this guard binds to", browserSuitePath, name)

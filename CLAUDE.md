@@ -51,6 +51,17 @@ Raising the pin means: `go get …/machinery@vX.Y.Z`, `go mod tidy`, move
 `MaxSupportedVersion` if the minor changed, run `./bin/task ci`, and deal with
 what the new machinery deprecates rather than suppressing it wholesale.
 
+## How decisions get put to the operator
+
+**When something needs the operator to decide, it is asked as a CHOICE, never as
+an open question.** Named options, each with what it costs and what it buys, and
+a recommendation when there is one. "Was soll ich tun?" makes the operator do the
+work of inventing the alternatives; a list makes them do the work of picking one,
+which is the part only they can do.
+
+This holds for the open decisions this project already has -- cloud providers, a
+Kubernetes client, SAML -- and for every one that comes up mid-task.
+
 ## The method this repository is built on
 
 A guard is worth nothing until it has gone red against the fault deliberately
