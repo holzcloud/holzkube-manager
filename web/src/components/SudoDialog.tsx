@@ -1,5 +1,6 @@
+import { useQuery } from '@tanstack/react-query'
 import { type FormEvent, useCallback, useEffect, useRef, useState } from 'react'
-import { api, onSessionExpired, onSudoRequired, type SudoChallenge } from '@/api'
+import { api, type Me, oidcPath, onSessionExpired, onSudoRequired, type SudoChallenge } from '@/api'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -11,6 +12,7 @@ import {
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { SESSION_QUERY_KEY } from '@/hooks/useSession'
 import { messageFor, type Problem, ProblemError, presentationFor, waitMessage } from '@/lib/problem'
 
 /**
@@ -28,6 +30,30 @@ import { messageFor, type Problem, ProblemError, presentationFor, waitMessage } 
  * unmounts and no state is thrown away.
  */
 export function SudoDialog() {
+  // Whether this session was established through the identity provider. An
+  // operator who signed in that way has no local password to type here, and on
+  // a host the operator declared SSO-only the password routes are refused
+  // outright -- so the dialog that only ever offered a password field was a
+  // dead end: every destructive action in the product, unreachable, with a
+  // form that could not be completed and a refusal that read like a mistake.
+  //
+  // Read with the same query key the settings screen uses, so the answer is the
+  // one already in the cache rather than another round trip at the moment an
+  // operator is waiting on a dialog.
+  // Read from the cache the shell already fills and NEVER fetch: enabled:false
+  // subscribes to the identity without asking for it. This dialog says of
+  // itself that it is presentation only, and a version that issued its own
+  // request the moment a destructive action was refused would have made that
+  // false -- it also broke every one of this file's own tests, which is how it
+  // was caught. Before the shell has an answer there is none here either, and
+  // the password form is the right fallback: it is what a local account uses.
+  const { data: me } = useQuery<Me>({
+    queryKey: SESSION_QUERY_KEY,
+    queryFn: api.me,
+    enabled: false,
+  })
+  const throughProvider = me?.sso === true
+
   const [challenge, setChallenge] = useState<SudoChallenge | null>(null)
   const [password, setPassword] = useState('')
   const [message, setMessage] = useState('')
@@ -106,40 +132,78 @@ export function SudoDialog() {
     >
       <DialogContent showCloseButton={false}>
         <DialogHeader>
-          <DialogTitle>Confirm your password</DialogTitle>
+          <DialogTitle>
+            {throughProvider ? 'Confirm with your identity provider' : 'Confirm your password'}
+          </DialogTitle>
           <DialogDescription>
             {challenge?.action ?? 'This destructive action'}{' '}
             {challenge?.because ??
-              'changes something that cannot simply be undone, so holzkube-manager asks for your ' +
-                'password again before it runs'}
+              (throughProvider
+                ? 'changes something that cannot simply be undone, so holzkube-manager asks your ' +
+                  'identity provider to confirm it is still you'
+                : 'changes something that cannot simply be undone, so holzkube-manager asks for your ' +
+                  'password again before it runs')}
             .
           </DialogDescription>
         </DialogHeader>
 
-        <form onSubmit={submit} className="space-y-4">
-          <div className="space-y-2">
-            <Label htmlFor="sudo-password">Password</Label>
-            <Input
-              id="sudo-password"
-              type="password"
-              value={password}
-              onChange={(event) => setPassword(event.target.value)}
-              autoComplete="current-password"
-              required
-            />
+        {throughProvider ? (
+          <div className="space-y-4">
+            <p className="text-sm text-muted-foreground">
+              You signed in through your identity provider, so there is no password here to type.
+              Confirming takes you there and back.{' '}
+              <strong className="font-medium text-foreground">
+                This action is not carried across
+              </strong>{' '}
+              — when you return, run it again. It will not ask a second time.
+            </p>
+
+            <DialogFooter>
+              <Button type="button" variant="ghost" onClick={() => settle(false)}>
+                Cancel
+              </Button>
+              <Button
+                type="button"
+                onClick={() => {
+                  // Settle the waiting request FIRST. Navigating away with it
+                  // unsettled leaves the caller's promise pending for the life
+                  // of the page -- the defect this file already records once,
+                  // with no error and no toast, only a spinner that never
+                  // stops. Refused is the honest answer: nothing was confirmed.
+                  settle(false)
+                  window.location.assign(oidcPath.reauthenticate)
+                }}
+              >
+                Continue to your provider
+              </Button>
+            </DialogFooter>
           </div>
+        ) : (
+          <form onSubmit={submit} className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="sudo-password">Password</Label>
+              <Input
+                id="sudo-password"
+                type="password"
+                value={password}
+                onChange={(event) => setPassword(event.target.value)}
+                autoComplete="current-password"
+                required
+              />
+            </div>
 
-          {message !== '' && <p className="text-sm text-destructive">{message}</p>}
+            {message !== '' && <p className="text-sm text-destructive">{message}</p>}
 
-          <DialogFooter>
-            <Button type="button" variant="ghost" onClick={() => settle(false)} disabled={busy}>
-              Cancel
-            </Button>
-            <Button type="submit" disabled={busy}>
-              {busy ? 'Confirming…' : 'Confirm'}
-            </Button>
-          </DialogFooter>
-        </form>
+            <DialogFooter>
+              <Button type="button" variant="ghost" onClick={() => settle(false)} disabled={busy}>
+                Cancel
+              </Button>
+              <Button type="submit" disabled={busy}>
+                {busy ? 'Confirming…' : 'Confirm'}
+              </Button>
+            </DialogFooter>
+          </form>
+        )}
       </DialogContent>
     </Dialog>
   )
