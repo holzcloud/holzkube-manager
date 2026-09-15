@@ -3,6 +3,7 @@ package inventory_test
 import (
 	"context"
 	"errors"
+	"io"
 	"log/slog"
 	"os"
 	"strings"
@@ -25,6 +26,20 @@ type fixture struct {
 	store   store.Store
 	sim     *talossim.Server
 	cluster *talossim.Cluster
+}
+
+// fixtureLogSink, when set for the duration of one test, redirects the
+// service's log into it at LevelWarn. It is a package variable rather than a
+// parameter because every fixture constructor would otherwise grow an argument
+// that one test uses; withFixtureLog sets and restores it, and the tests that
+// use it do not run in parallel with each other.
+var fixtureLogSink io.Writer
+
+// withFixtureLog points the next fixture's logger at sink for this test.
+func withFixtureLog(t *testing.T, sink io.Writer) {
+	t.Helper()
+	fixtureLogSink = sink
+	t.Cleanup(func() { fixtureLogSink = nil })
 }
 
 func newFixture(t *testing.T, opts talossim.Options) *fixture {
@@ -98,6 +113,15 @@ func newFixtureWrapped(
 		seen = wrap(st)
 	}
 
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+	if sink := fixtureLogSink; sink != nil {
+		// A test that reads the daemon's own journal needs the warnings the
+		// default fixture throws away: it logs at LevelError to stderr, so a
+		// guard about a WARN line would pass over a daemon that says nothing,
+		// which is the defect such a guard exists for.
+		logger = slog.New(slog.NewTextHandler(sink, &slog.HandlerOptions{Level: slog.LevelWarn}))
+	}
+
 	svc := inventory.New(inventory.Deps{
 		Store:     seen,
 		Heartbeat: heartbeat,
@@ -105,7 +129,7 @@ func newFixtureWrapped(
 		// the fingerprint probe opens its own TLS connection, so the
 		// in-process pipe would have nothing to read a certificate from.
 		Dialer: talos.NewDirectDialer(sim.Port()),
-		Logger: slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError})),
+		Logger: logger,
 	})
 	t.Cleanup(func() {
 		if err := svc.Close(); err != nil {

@@ -1,5 +1,19 @@
 [
   {
+    "version": "v1.16.6",
+    "date": "2026-09-15",
+    "changes": [
+      {
+        "icon": "📋",
+        "text": "When a node does not answer, the journal now says what came back and at which address. It knew all along — the reason is classified and shown per field on the screen — and wrote none of it down, so a real cluster's journal held \"the node stopped answering\" every interval for hours and nothing else. The address is there because a record can be filed against an address its machine does not answer at, and without it that is indistinguishable from a machine that is switched off."
+      },
+      {
+        "icon": "🤫",
+        "text": "It says it twice and then stops: once on the first failure, once when the count crosses into down. A node that is down stays down and is asked again every interval, so logging each attempt is the other way to make a journal useless. The raw error goes to the log and the classified sentence to the screen — a gRPC status string in a dashboard cell pushes the actionable part off the edge."
+      }
+    ]
+  },
+  {
     "version": "v1.16.5",
     "date": "2026-09-15",
     "changes": [

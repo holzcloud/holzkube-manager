@@ -287,7 +287,12 @@ func (s *Service) Refresh(ctx context.Context, id model.MachineID) {
 
 	creds, err := s.clusterCreds(ctx, rec.Cluster)
 	if err != nil {
-		obs.fail(health.LevelNode, "this machine belongs to no cluster with stored credentials", false)
+		if obs.fail(health.LevelNode, "this machine belongs to no cluster with stored credentials", false) {
+			s.deps.Logger.Warn("a machine cannot be observed because its cluster has no stored credentials",
+				slog.String("machine", string(id)),
+				slog.String("cluster", string(rec.Cluster)),
+				slog.Any("error", err))
+		}
 		return
 	}
 
@@ -297,7 +302,18 @@ func (s *Service) Refresh(ctx context.Context, id model.MachineID) {
 		Addr:    rec.Addr,
 	}, creds, s.deps.Mode)
 	if err != nil {
-		obs.fail(health.LevelNode, unreachableReason(err), certificateExpired(err))
+		if obs.fail(health.LevelNode, unreachableReason(err), certificateExpired(err)) {
+			// The ADDRESS is here on purpose. A record can be filed against an
+			// address the machine does not answer at -- adoption takes the
+			// first one a member reports -- and "the node stopped answering"
+			// without saying where it was asked is indistinguishable from a
+			// node that is actually off.
+			s.deps.Logger.Warn("a node did not answer",
+				slog.String("machine", string(id)),
+				slog.String("addr", rec.Addr),
+				slog.String("reason", unreachableReason(err)),
+				slog.Any("error", err))
+		}
 		return
 	}
 	defer cc.Close() //nolint:errcheck // an observation's verdict is not a close error's to change
@@ -308,7 +324,17 @@ func (s *Service) Refresh(ctx context.Context, id model.MachineID) {
 
 	facts, err := cc.NodeFacts(ctx)
 	if err != nil {
-		obs.fail(health.LevelNode, unreachableReason(err), certificateExpired(err))
+		if obs.fail(health.LevelNode, unreachableReason(err), certificateExpired(err)) {
+			// Connected and then could not be read, which is a DIFFERENT repair
+			// from not connecting: the machine is present and something above
+			// the transport refused. SeenAt moves and the snapshot does not,
+			// and this line is what makes that pair legible in a journal.
+			s.deps.Logger.Warn("a node answered the connection and not the question",
+				slog.String("machine", string(id)),
+				slog.String("addr", rec.Addr),
+				slog.String("reason", unreachableReason(err)),
+				slog.Any("error", err))
+		}
 
 		// The connection was made, so the node answered something: this is a
 		// machine that is present and cannot be read, which is a different
@@ -615,7 +641,20 @@ func (o *observation) confirm(level health.Level, at time.Time) {
 	}
 }
 
-func (o *observation) fail(level health.Level, reason string, expired bool) {
+// fail records a level's failure and reports whether this one is worth saying
+// out loud.
+//
+// The bool is the whole reason this returns anything. A node that is down stays
+// down, and the heartbeat asks again every interval, so logging each failure
+// turns the journal into one sentence repeated until the disk fills. Logging
+// none of them is what shipped: the daemon wrote "the node stopped answering"
+// every interval and never once said what it got back, and diagnosing a real
+// cluster then needed a second round trip to the operator.
+//
+// Worth saying is a CHANGE: the first failure after the node was fine, and the
+// moment the count crosses into StageDown. Everything between is the same fact
+// again.
+func (o *observation) fail(level health.Level, reason string, expired bool) bool {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 
@@ -626,16 +665,24 @@ func (o *observation) fail(level health.Level, reason string, expired bool) {
 		if o.stage == health.StageWatching {
 			o.stage = health.StageDegraded
 		}
-		return
+		return prev.ok || prev.reason != reason
 	}
 
 	o.expired = expired
 	o.failures++
+
+	// The COUNT decides, not the stage. Refresh calls enter(StageConnecting)
+	// before every attempt, so by the time this runs the stage says "trying"
+	// and never "already down" -- deriving the answer from it logged the same
+	// failure on every heartbeat, which is the defect this returns a bool for
+	// in the first place. Found by the test, not by reading.
+	crossed := o.failures == downgradeAfter
 	if o.failures >= downgradeAfter {
 		o.stage = health.StageDown
-		return
+	} else {
+		o.stage = health.StageDegraded
 	}
-	o.stage = health.StageDegraded
+	return o.failures == 1 || crossed || prev.reason != reason
 }
 
 // unreachableReason turns a transport failure into a sentence for the screen.
