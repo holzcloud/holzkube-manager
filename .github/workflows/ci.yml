@@ -225,3 +225,18 @@ jobs:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # goreleaser being green means it uploaded what it built. It does not mean
+      # the release carries what an operator downloads, and the two have already
+      # come apart once -- see .github/verify-release.py, which says which four
+      # things it checks and why each of them can be false while everything here
+      # reports success.
+      #
+      # It runs against the API rather than against dist/, because the artifact
+      # an operator installs is the one GitHub is serving, not the one the
+      # runner has on disk.
+      - name: Verify the release an operator would download
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ inputs.tag != '' && inputs.tag || github.ref_name }}
+        run: python3 .github/verify-release.py "$GITHUB_REPOSITORY" "$TAG"
