@@ -1,5 +1,23 @@
 [
   {
+    "version": "v1.16.5",
+    "date": "2026-09-15",
+    "changes": [
+      {
+        "icon": "🗑️",
+        "text": "A cluster can be removed again. The route and the API client both had it; nothing on any screen called them, so an imported cluster could not be taken back out. Forgetting removes this installation's record and the secrets derived from it — the cluster itself is untouched, and its machines stay in the inventory without a cluster, because they are machines that still exist."
+      },
+      {
+        "icon": "➕",
+        "text": "A node can be added by address. Adoption fills the inventory from the membership the adopted node reports, and records each member under the FIRST address it reports — so a machine reachable at some other address had no way in. The code called this \"the always-available second way into the inventory\"; it was neither available nor a way."
+      },
+      {
+        "icon": "🔦",
+        "text": "The guard that exists to stop exactly this was green over both. It reads the whole web interface as one text and asks whether a route's path appears in it — and the API client is part of that text, so a client function nothing calls satisfied it. It now asks the second question separately: does any screen call the client function that issues this route? It found these two on its own."
+      }
+    ]
+  },
+  {
     "version": "v1.16.4",
     "date": "2026-09-15",
     "changes": [
