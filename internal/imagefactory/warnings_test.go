@@ -301,12 +301,13 @@ func TestWarningDetailsMatchTheUI(t *testing.T) {
 	}
 
 	for _, w := range full {
-		if !strings.Contains(ui, w.Detail) {
-			t.Errorf("%s: the UI does not carry this sentence verbatim.\n"+
-				"Go:  %q\nCopy it into %s.", w.Code, w.Detail, uiPath)
+		if !carriedAsStringLiteral(ui, w.Detail) {
+			t.Errorf("%s: the UI does not carry this sentence as a string literal of its own.\n"+
+				"Go:  %q\nCopy it into %s as a complete quoted literal.", w.Code, w.Detail, uiPath)
 		}
-		if !strings.Contains(apiModule, w.Code) {
-			t.Errorf("%s: %s declares no constant for this code", w.Code, apiPath)
+		if !carriedAsStringLiteral(apiModule, w.Code) {
+			t.Errorf("%s: %s declares no constant carrying this code as a complete quoted literal",
+				w.Code, apiPath)
 		}
 	}
 
@@ -327,11 +328,56 @@ func TestWarningDetailsMatchTheUI(t *testing.T) {
 	// own source, so a code added anywhere in it is covered the moment it is
 	// declared.
 	for name, code := range exportedWarningCodes(t) {
-		if !strings.Contains(apiModule, code) {
-			t.Errorf("%s (%s): %s declares no constant for this code. Add the mirror there, "+
-				"and a row to docs/api-contract.md's warning table.", code, name, apiPath)
+		if !carriedAsStringLiteral(apiModule, code) {
+			t.Errorf("%s (%s): %s declares no constant carrying this code as a complete quoted "+
+				"literal. Add the mirror there, and a row to docs/api-contract.md's warning table.",
+				code, name, apiPath)
 		}
 	}
+}
+
+// carriedAsStringLiteral reports whether source carries value as a COMPLETE
+// quoted string literal, and it is the anchoring half of ledger entry 74.
+//
+// What it replaces: strings.Contains(source, value), which asked only that the
+// characters appear somewhere in the file. That is a prefix hole with no word
+// boundary at all, and it was the most permeable of the three sibling readers
+// entry 74 names -- measured before the change, with a source carrying only
+// 'installer.repo-fallback-unverified' while the Go side named
+// installer.repo-fallback: READ. A code whose TS mirror is renamed by appending
+// to it therefore kept this guard green over the exact drift it exists to catch.
+//
+// The delimiter IS the word boundary. `-` and `.` are ordinary characters inside
+// a code and no boundary at all; a closing quote cannot be part of the value, so
+// requiring it is what makes 'x' and 'x-v2' different answers.
+//
+// The BACKTICK IS NOT ACCEPTED, and that is a measurement rather than a
+// preference. The first version of this function took all three TypeScript
+// delimiters on the reasoning that either mirrored file is free to change its
+// quoting style. Injecting the prefix drift it was written to catch --
+// api.ts:507 renamed to 'installer.repo-fallback-unverified-v2' -- left it GREEN,
+// because api.ts:445 is a JSDoc comment carrying `installer.repo-fallback-unverified`
+// in a markdown code span. A backtick delimits a template literal in code and a
+// code span in a doc comment, and this file has far more of the second kind. So
+// accepting it bought a quoting style neither file uses and paid for it by
+// widening exactly the text-not-code blindness below. Single and double quotes
+// only.
+//
+// Literal-only, and deliberately: a code assembled by concatenation or built
+// from a template is a code this guard cannot read, and failing is the honest
+// answer. That is the same decision stringArrayLiteral and exportedWarningCodes
+// already made.
+//
+// What it does NOT close is that a quoted literal in a comment, in a template
+// literal or in JSX text satisfies it exactly as well as one in code does. That
+// remainder is carried as data in containsSweepBlindSpots and measured by rows.
+func carriedAsStringLiteral(source, value string) bool {
+	for _, delimiter := range []string{"'", `"`} {
+		if strings.Contains(source, delimiter+value+delimiter) {
+			return true
+		}
+	}
+	return false
 }
 
 func readUTF8(t *testing.T, path string) string {
