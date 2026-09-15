@@ -119,6 +119,35 @@ export function presentationFor(problem: Problem): Presentation {
 }
 
 /**
+ * The request id, for the one class of answer that deliberately says nothing.
+ *
+ * An `internal.*` problem strips its detail on purpose: the error text can name
+ * a path, a hostname or the contents of a configuration, and this is the family
+ * that exists because nobody vetted it. What the operator is left with is
+ * "Internal error", which is true and unusable — the cause is in the server
+ * log, and until now the screen gave them no way to find the line.
+ *
+ * It is not decoration. A real adoption failed on real hardware with exactly
+ * this message, and finding out why took a person reading fifty log lines and
+ * sending them on. The id is already in the problem and already in the log line
+ * that matches it; only the rendering was missing.
+ *
+ * Added for internal problems alone. Every other family says what happened in
+ * words the operator can act on, and appending a correlation id to those would
+ * be noise on the answers that do not need it.
+ */
+function requestReference(problem: Problem): string {
+  if (!problem.code.startsWith('internal.')) {
+    return ''
+  }
+  const id = (problem.instance ?? '').replace(/^\/requests\//, '')
+  if (id === '') {
+    return ''
+  }
+  return ` The server log has the reason, under request ${id}.`
+}
+
+/**
  * The sentence to show. `detail` when the server sent one, otherwise `title`,
  * otherwise a plain fallback -- but never a naked status code, and never an
  * empty toast.
@@ -127,10 +156,10 @@ export function messageFor(error: unknown): string {
   if (error instanceof ProblemError) {
     const { detail, title } = error.problem
     if (detail !== undefined && detail.trim() !== '') {
-      return detail
+      return detail + requestReference(error.problem)
     }
     if (title.trim() !== '') {
-      return title
+      return title + requestReference(error.problem)
     }
     return 'holzkube-manager refused the request but did not say why. The server log has the details.'
   }

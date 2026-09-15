@@ -1,5 +1,31 @@
 [
   {
+    "version": "v1.16.2",
+    "date": "2026-09-15",
+    "changes": [
+      {
+        "icon": "🤝",
+        "text": "Adopting a real cluster works. It did not: the first real Talos cluster this product was ever pointed at refused adoption with \"Internal error\", and the reason was a document adoption does not read. A Talos machine configuration is multi-document YAML — one v1alpha1 document carrying the secrets, and beside it a growing set of typed documents. machinery decodes a typed document only if this build knows its kind, its loader is all-or-nothing, and there is no option to tolerate one. A DiscoveryServiceConfig document, which machinery v1.13.9 does not have at all, therefore failed the whole parse. Every secret adoption needs is in the v1alpha1 document; not one sibling is read."
+      },
+      {
+        "icon": "🎯",
+        "text": "The machine configuration document is now selected rather than the whole file parsed, using machinery's own discriminator: the document with version v1alpha1 and no kind. Selecting rather than tolerating is what makes this hold for the next document kind Talos ships — tolerating would leave adoption depending on which unknown documents a node happens to carry, and a manager that must know every kind Talos will ever ship is one that breaks on every Talos release."
+      },
+      {
+        "icon": "🚫",
+        "text": "A node serving no machine configuration document at all is now refused as the wrong node — a 400 that names the remedy — instead of failing to parse and arriving as an Internal error nobody can act on."
+      },
+      {
+        "icon": "🔗",
+        "text": "An Internal error now names the request, so the line that explains it can be found in the server log. That family strips its detail on purpose — the underlying text can name a path, a hostname or the contents of a configuration — which leaves the operator with a true and unusable sentence. The id was already in the response and in the matching log line; only the rendering was missing. Finding this one took a person reading fifty journal lines and sending them on."
+      },
+      {
+        "icon": "🧪",
+        "text": "The simulator could never have caught this: it serves a configuration the same machinery generated, so by construction every document in it is one this build knows. The test fixture is now the simulator's own config with the operator's document appended — real secrets, real refusal — and it checks that the old path still fails before checking that the new one works, so a machinery that learns the kind will say so rather than quietly proving nothing."
+      }
+    ]
+  },
+  {
     "version": "v1.16.1",
     "date": "2026-09-15",
     "changes": [

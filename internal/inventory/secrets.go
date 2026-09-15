@@ -1,14 +1,18 @@
 package inventory
 
 import (
+	"bytes"
 	"crypto/tls"
 	"crypto/x509"
+	"errors"
 	"fmt"
+	"io"
 	"time"
 
 	"github.com/siderolabs/talos/pkg/machinery/config/configloader"
 	"github.com/siderolabs/talos/pkg/machinery/config/generate/secrets"
 	"github.com/siderolabs/talos/pkg/machinery/role"
+	"gopkg.in/yaml.v3"
 
 	"github.com/holzcloud/holzkube-manager/internal/model"
 )
@@ -36,6 +40,100 @@ import (
 // the feature.
 const ClientCertTTL = 365 * 24 * time.Hour
 
+// v1alpha1Document returns the machine-configuration document out of what a
+// node serves, discarding every other document in it.
+//
+// A Talos machine configuration is a multi-document YAML file. One document is
+// the v1alpha1 Config that carries `.machine` and `.cluster` -- and therefore
+// every secret adoption needs. The rest are separate typed documents:
+// VolumeConfig, KubeSpanConfig, UserVolumeConfig and a growing list of others,
+// each of which machinery decodes only if this build's machinery knows the
+// kind.
+//
+// That last clause is why this function exists. machinery's loader is
+// all-or-nothing: one document whose kind is not registered fails the whole
+// parse, and it has no option to tolerate one. So a real cluster refused
+// adoption with
+//
+//	error decoding document v1alpha1/DiscoveryServiceConfig/default (line 94):
+//	  "DiscoveryServiceConfig" "v1alpha1": not registered
+//
+// -- a document type this build's machinery (v1.13.9) does not have at all,
+// belonging to a Talos newer than the pin. Nothing in adoption reads it.
+// Nothing in adoption reads ANY of the sibling documents: the bundle comes from
+// v1alpha1 alone. The adoption was refused over a document it does not look at.
+//
+// Selecting one document instead of tolerating failures is deliberate, and the
+// difference matters when the next kind appears. Tolerating would mean
+// adoption's success depends on which unknown documents a node happens to
+// carry; selecting means it depends on the one document it actually reads.
+// A manager that has to know every document kind Talos will ever ship is a
+// manager that breaks on every Talos release.
+//
+// The discriminator is machinery's own, from its decoder: the machine
+// configuration is the document with `version: v1alpha1` and NO `kind`. Every
+// typed document carries a kind.
+func v1alpha1Document(configYAML []byte) ([]byte, error) {
+	dec := yaml.NewDecoder(bytes.NewReader(configYAML))
+
+	for {
+		var doc yaml.Node
+		err := dec.Decode(&doc)
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			// Structure, not content: the message names a line and a YAML
+			// shape and never the bytes.
+			return nil, fmt.Errorf("inventory: the node's machine configuration is not readable YAML: %w", err)
+		}
+
+		version, kind := documentIdentity(&doc)
+		if version != "v1alpha1" || kind != "" {
+			continue
+		}
+
+		out, err := yaml.Marshal(&doc)
+		if err != nil {
+			return nil, fmt.Errorf("inventory: re-encoding the machine configuration document: %w", err)
+		}
+		return out, nil
+	}
+
+	// Not an internal failure and not a parse failure: it is the node being
+	// the wrong node, which is the refusal D-05 already owns. A machine with
+	// no v1alpha1 document is one that has never been configured.
+	return nil, fmt.Errorf("%w: the node serves no v1alpha1 machine configuration document", ErrNotControlPlane)
+}
+
+// documentIdentity reads the two top-level keys that decide what a document is.
+//
+// Missing keys read as empty, which is the right answer rather than an error:
+// a document with neither is not the one being looked for, and saying so by
+// returning empty strings lets the caller skip it like any other.
+func documentIdentity(doc *yaml.Node) (version, kind string) {
+	node := doc
+	if node.Kind == yaml.DocumentNode {
+		if len(node.Content) == 0 {
+			return "", ""
+		}
+		node = node.Content[0]
+	}
+	if node.Kind != yaml.MappingNode {
+		return "", ""
+	}
+
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		switch node.Content[i].Value {
+		case "version":
+			version = node.Content[i+1].Value
+		case "kind":
+			kind = node.Content[i+1].Value
+		}
+	}
+	return version, kind
+}
+
 // deriveSecrets reads a node's machine configuration and returns the cluster's
 // secrets bundle.
 //
@@ -44,7 +142,12 @@ const ClientCertTTL = 365 * 24 * time.Hour
 // only thing that leaves this function is the bundle, and the only thing that
 // leaves the import path is a record in the secrets entity.
 func deriveSecrets(configYAML []byte) (*secrets.Bundle, error) {
-	provider, err := configloader.NewFromBytes(configYAML)
+	machineConfig, err := v1alpha1Document(configYAML)
+	if err != nil {
+		return nil, err
+	}
+
+	provider, err := configloader.NewFromBytes(machineConfig)
 	if err != nil {
 		// The node's own configuration failed to parse. The error text comes
 		// from machinery's loader and describes structure, not content, so it
