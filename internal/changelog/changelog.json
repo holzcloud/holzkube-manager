@@ -1,0 +1,90 @@
+[
+  {
+    "version": "v1.16.0",
+    "date": "2026-09-15",
+    "changes": [
+      {
+        "icon": "🏷️",
+        "text": "The version this instance is running is now on screen, at the bottom of the sidebar, and clicking it opens this list. Until now the only way to find out which build a host was running was to ssh in and ask the binary, which meant nobody asked."
+      },
+      {
+        "icon": "📦",
+        "text": "The first release of milestone v1.16 that is not a beta. Everything in the betas below is in it; nothing has been added but the version display."
+      },
+      {
+        "icon": "⚠️",
+        "text": "One thing this release does NOT have, said plainly because the word stable does not say it: holzkube-manager has still never run on real amd64 hardware. Every operation below is proven against the Talos simulator and against a real Image Factory, and the single run that would close OPS-05 — a blank machine becoming a node through the wizard, taking a configuration, being upgraded — has not happened. Two constants remain estimates until it does: how long a machine may take to reappear after provisioning, and after an upgrade. Both are reported against elapsed time rather than enforced as timeouts, so a wrong number costs a misleading sentence and not a failed operation."
+      }
+    ]
+  },
+  {
+    "version": "v1.16.0-beta.2",
+    "date": "2026-09-15",
+    "changes": [
+      {
+        "icon": "⬇️",
+        "text": "The update script would have tossed a coin over which archive to install. It took the first release asset whose name ended in linux_<arch>.tar.gz, and since holzkubectl got an archive of its own there are two of those. It now names the prefix that tells them apart, and more than one match is refused rather than resolved by luck."
+      },
+      {
+        "icon": "🚀",
+        "text": "A release is published rather than left as a draft, and a beta is deliberately not marked as a prerelease: the endpoint the update script reads skips both, so marking a beta as a prerelease would leave every host on the previous build while reporting itself up to date."
+      },
+      {
+        "icon": "🔎",
+        "text": "The release pipeline checks the release an operator would actually download — both Linux architectures present, exactly one daemon archive each, checksums there, and visible to the update script — because the build reporting success only means it uploaded what it built."
+      }
+    ]
+  },
+  {
+    "version": "v1.16.0-beta.1",
+    "date": "2026-09-14",
+    "changes": [
+      {
+        "icon": "🗳️",
+        "text": "Removing a node from a cluster asks etcd first. Until now it did not read the membership at all: the refusal existed, on a different function, and the button went straight to leaving the cluster and then wiped the disk. The refusal was also wrong — it let the last voting member go. A majority of n is n/2+1, so four voting members tolerate exactly as many failures as three; four feels safer and is not."
+      },
+      {
+        "icon": "📐",
+        "text": "Scaling a cluster is one view rather than two operations on nodes: what this cluster can spare, what adding or removing would mean, and why. It reaches etcd only when asked."
+      },
+      {
+        "icon": "💿",
+        "text": "etcd can be restored from a snapshot, not only backed up. The README used to say so in the other direction: a backup that cannot be restored is a file, not a recovery."
+      },
+      {
+        "icon": "🔑",
+        "text": "kubeconfig without going through talosctl — the tool this product exists to replace."
+      },
+      {
+        "icon": "👥",
+        "text": "Users, roles and service accounts. Machine labels, machine classes and cluster templates. A command-line client, holzkubectl, which is a client of this same API and not a second implementation of anything."
+      },
+      {
+        "icon": "🔐",
+        "text": "Disk encryption at install, with the node's own ID or its TPM. A static key is refused because for the STATE volume it ends up in plaintext in META, and a key server is refused because a node whose key server is gone does not boot — which reverses the decision this product stands on."
+      },
+      {
+        "icon": "🖼️",
+        "text": "The installer image is resolved against the Image Factory instead of being assembled from parts. The old string was wrong three ways at once, each silently: it never carried SecureBoot, so a machine booted from a SecureBoot image installed a system that was not; it hardcoded one repository name; and it hardcoded the public Factory, so an installation pointed at a private one provisioned nodes that pulled from the public one."
+      },
+      {
+        "icon": "📅",
+        "text": "The certificate countdown has a door: this installation's own client certificate can be renewed from the screen that warns about it. The new certificate is proved against a node before it replaces the one in use, so a failure changes nothing."
+      },
+      {
+        "icon": "🩹",
+        "text": "A node that answers but cannot be read is no longer indistinguishable from one that is absent. The two lead to different repairs — the cable or the power supply, against the node itself."
+      }
+    ]
+  },
+  {
+    "version": "v0.1.0",
+    "date": "2026-09-03",
+    "changes": [
+      {
+        "icon": "🌱",
+        "text": "The first public release: the store and its forward-only migrations, the hash-chained audit log, authentication with a re-authentication window for destructive actions, the Talos transport seam with a deadline class per call, and the Image Factory screen."
+      }
+    ]
+  }
+]
