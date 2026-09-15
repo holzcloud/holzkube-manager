@@ -234,3 +234,59 @@ describe('rate limiting is a delay, never a lock', () => {
     expect(waitMessage(30)).toContain('30 seconds')
   })
 })
+
+/**
+ * The request id on an internal error.
+ *
+ * `internal.*` is the one family that deliberately tells the operator nothing:
+ * the underlying error can name a path, a hostname or the contents of a
+ * configuration, so it is stripped. What reaches the screen is "Internal
+ * error" — true, and unusable on its own.
+ *
+ * A real adoption failed on real hardware with exactly that, and finding the
+ * cause took a person reading fifty journal lines and sending them on. The id
+ * was in the problem and in the matching log line the whole time; only the
+ * rendering was missing.
+ */
+describe('an internal error points at the line that explains it', () => {
+  function internal(instance?: string): ProblemError {
+    return new ProblemError({
+      type: `${PROBLEM_BASE_URI}internal`,
+      title: 'Internal error',
+      status: 500,
+      code: 'internal.unexpected',
+      ...(instance === undefined ? {} : { instance }),
+    })
+  }
+
+  it('names the request so the operator can find it in the log', () => {
+    const message = messageFor(internal('/requests/f7f49bc2b32a461c21353928daba8c3e'))
+    expect(message).toContain('Internal error')
+    expect(message).toContain('f7f49bc2b32a461c21353928daba8c3e')
+    // The id as the log line spells it, not the route-shaped instance.
+    expect(message).not.toContain('/requests/')
+  })
+
+  it('says nothing extra when there is no request id to name', () => {
+    expect(messageFor(internal())).toBe('Internal error')
+  })
+
+  /**
+   * Every other family already says what happened in words the operator can
+   * act on. A correlation id on those is noise on the answers that do not need
+   * it.
+   */
+  it('leaves an answer that explains itself alone', () => {
+    const validation = new ProblemError({
+      type: `${PROBLEM_BASE_URI}validation`,
+      title: 'That node cannot be adopted through',
+      status: 400,
+      detail: 'Its machine configuration carries no Kubernetes CA private key.',
+      code: 'validation.not-control-plane',
+      instance: '/requests/deadbeef',
+    })
+    expect(messageFor(validation)).toBe(
+      'Its machine configuration carries no Kubernetes CA private key.',
+    )
+  })
+})
