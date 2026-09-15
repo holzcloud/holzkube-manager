@@ -208,6 +208,32 @@ jobs:
             exit 1
           fi
 
+          # The release the operator will read about has to exist in the
+          # changelog the binary embeds. This is the only moment the two can be
+          # compared: the tag is known here and nowhere earlier, and after this
+          # step it is too late -- a release whose version the panel has never
+          # heard of shows an operator the previous release under a heading
+          # that says nothing is wrong.
+          #
+          # It refuses rather than inventing an entry, because an entry
+          # generated from the commit log is the thing internal/changelog
+          # exists not to be.
+          python3 - "$TAG" <<'CHANGELOG'
+          import json, sys
+          tag = sys.argv[1]
+          with open('internal/changelog/changelog.json') as f:
+              releases = json.load(f)
+          if not any(r['version'] == tag for r in releases):
+              known = ', '.join(r['version'] for r in releases[:5])
+              sys.exit(f"::error::internal/changelog/changelog.json has no entry for {tag}. "
+                       f"Add one before releasing it; the newest entries are: {known}")
+          if releases[0]['version'] != tag:
+              sys.exit(f"::error::{tag} is in the changelog but is not the first entry "
+                       f"({releases[0]['version']} is). The file is newest first, and the panel "
+                       f"opens on the first series it sees.")
+          print(f"changelog carries {tag}")
+          CHANGELOG
+
           git config user.name  'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
 

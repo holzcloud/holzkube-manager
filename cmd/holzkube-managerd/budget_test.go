@@ -909,6 +909,7 @@ func TestEveryRouteThatReachesUpstreamHasABudgetRow(t *testing.T) {
 	noUpstream := map[string]bool{}
 	for _, r := range []string{
 		"GET /api/v1/system/status", "GET /api/v1/system/dry-run",
+		"GET /api/v1/system/version",
 		"POST /api/v1/setup", "GET /api/v1/setup",
 		"POST /api/v1/auth/login", "POST /api/v1/auth/logout", "POST /api/v1/auth/sudo",
 		"GET /api/v1/auth/me",

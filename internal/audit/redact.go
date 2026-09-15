@@ -192,8 +192,11 @@ var allowlist = map[string][]string{
 	// claims to make about itself and which cmd/holzkube-managerd's
 	// allowlist_test.go is what actually holds.
 	"system.status": {},
-	"auth.me":       {},
-	"audit.list":    {},
+	// A read with no parameters at all: the route takes nothing and the
+	// response is the same for every caller who may ask.
+	"system.version": {},
+	"auth.me":        {},
+	"audit.list":     {},
 
 	// Listed with nothing permitted, so the table shows the full set of
 	// mutations rather than leaving any of them to the default. Each carries
