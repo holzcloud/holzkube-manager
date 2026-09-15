@@ -1,9 +1,37 @@
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import type { ReactNode } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 import { api, type Problem } from '@/api'
+import { SESSION_QUERY_KEY } from '@/hooks/useSession'
 import { PROBLEM_BASE_URI } from '@/test/problem-fixtures'
 import { SessionExpiryWatcher, SudoDialog } from './SudoDialog'
+
+/**
+ * The dialog now asks whether this session came through the identity provider,
+ * because an operator who signed in that way has no password to type -- so it
+ * needs a query client the way every other component that reads the identity
+ * does. Wrapped here rather than mocked away: the question it asks is part of
+ * what it renders, and a fixture that answered it some other way would be
+ * testing a different component.
+ */
+function renderDialog(node: ReactNode, identity?: { sso: boolean }) {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  if (identity) {
+    // Seeded rather than fetched, because the dialog never fetches: it reads
+    // the identity the shell already holds. Seeding the same key is what a
+    // signed-in page looks like to it.
+    client.setQueryData(SESSION_QUERY_KEY, {
+      id: 'u1',
+      username: 'holz',
+      dry_run: false,
+      role: 'admin',
+      ...identity,
+    })
+  }
+  return render(<QueryClientProvider client={client}>{node}</QueryClientProvider>)
+}
 
 /**
  * The most expensive behavioural claim this plan makes, proven here instead of
@@ -83,7 +111,7 @@ describe('SudoDialog', () => {
     )
     const user = userEvent.setup()
 
-    render(<SudoDialog />)
+    renderDialog(<SudoDialog />)
 
     const pending = api.changePassword('old-password-1', 'new-password-1')
 
@@ -130,7 +158,7 @@ describe('SudoDialog', () => {
     )
     const user = userEvent.setup()
 
-    render(<SudoDialog />)
+    renderDialog(<SudoDialog />)
 
     // The rejection handler is attached immediately: the promise settles the
     // moment Cancel is clicked, and an unobserved rejection in between would be
@@ -157,7 +185,7 @@ describe('SudoDialog', () => {
     )
     const user = userEvent.setup()
 
-    render(<SudoDialog />)
+    renderDialog(<SudoDialog />)
 
     const pending = api.changePassword('old-password-1', 'new-password-1')
     void pending.catch(() => undefined)
@@ -179,7 +207,7 @@ describe('SudoDialog', () => {
     )
     const user = userEvent.setup()
 
-    render(<SudoDialog />)
+    renderDialog(<SudoDialog />)
     const pending = api.changePassword('old-password-1', 'new-password-1')
     void pending.catch(() => undefined)
 
@@ -207,7 +235,7 @@ describe('SudoDialog', () => {
       () => problemResponse(428, 'sudo.required', 'This action is destructive.'),
     )
 
-    render(<SudoDialog />)
+    renderDialog(<SudoDialog />)
 
     const first = api.changePassword('old-password-1', 'new-password-1')
     const firstSettled = first.catch((error: unknown) => error)
@@ -245,7 +273,7 @@ describe('SessionExpiryWatcher', () => {
     )
     const onExpired = vi.fn()
 
-    render(<SessionExpiryWatcher onExpired={onExpired} />)
+    renderDialog(<SessionExpiryWatcher onExpired={onExpired} />)
 
     await expect(api.audit()).rejects.toMatchObject({ code: 'auth.unauthenticated' })
 
@@ -260,7 +288,7 @@ describe('SessionExpiryWatcher', () => {
     recordingFetch(() => problemResponse(401, 'auth.unauthenticated', 'No session.'))
     const onExpired = vi.fn()
 
-    render(<SessionExpiryWatcher onExpired={onExpired} />)
+    renderDialog(<SessionExpiryWatcher onExpired={onExpired} />)
 
     await expect(api.me()).rejects.toMatchObject({ code: 'auth.unauthenticated' })
     expect(onExpired).not.toHaveBeenCalled()
@@ -272,7 +300,7 @@ describe('SessionExpiryWatcher', () => {
     )
     const onExpired = vi.fn()
 
-    const view = render(<SessionExpiryWatcher onExpired={onExpired} />)
+    const view = renderDialog(<SessionExpiryWatcher onExpired={onExpired} />)
     view.unmount()
 
     await expect(api.audit()).rejects.toMatchObject({ code: 'auth.unauthenticated' })
@@ -298,7 +326,7 @@ describe('the sudo dialog explains the action it is asking about', () => {
     recordingFetch(() => problemResponse(428, 'sudo.required', 'This action is destructive.'))
     const user = userEvent.setup()
 
-    render(<SudoDialog />)
+    renderDialog(<SudoDialog />)
 
     const pending = api.certificate.renew('c1')
     const settled = pending.catch((error: unknown) => error)
@@ -316,7 +344,7 @@ describe('the sudo dialog explains the action it is asking about', () => {
     recordingFetch(() => problemResponse(428, 'sudo.required', 'This action is destructive.'))
     const user = userEvent.setup()
 
-    render(<SudoDialog />)
+    renderDialog(<SudoDialog />)
 
     const pending = api.changePassword('old-password-1', 'new-password-1')
     const settled = pending.catch((error: unknown) => error)
@@ -324,6 +352,62 @@ describe('the sudo dialog explains the action it is asking about', () => {
     const dialog = await screen.findByRole('dialog')
     expect(dialog).toHaveTextContent('Change the operator password')
     expect(dialog).toHaveTextContent('cannot simply be undone')
+
+    await user.click(screen.getByRole('button', { name: 'Cancel' }))
+    await expect(settled).resolves.toMatchObject({ code: 'sudo.required' })
+  })
+})
+
+/**
+ * The dead end an operator walked into on real hardware.
+ *
+ * They signed in through Authentik, clicked a destructive action, and were
+ * handed a field for a password their account does not have -- on a host
+ * declared SSO-only, where the password routes are refused outright. There was
+ * no way through: every destructive action in the product, gated behind a form
+ * that could not be completed.
+ *
+ * The route for it existed the whole time. GET /api/v1/auth/oidc/sudo sends the
+ * browser to the provider with prompt=login, checks on the way back that the
+ * same identity came back and that the provider re-authenticated rather than
+ * reusing a session, and only then opens the window. Nothing offered it.
+ */
+describe('SudoDialog with an identity provider', () => {
+  it('offers the provider instead of a password when the session came through one', async () => {
+    recordingFetch(() => problemResponse(428, 'sudo.required', 'This action is destructive.'))
+    const user = userEvent.setup()
+
+    renderDialog(<SudoDialog />, { sso: true })
+
+    const pending = api.changePassword('old-password-1', 'new-password-1')
+    const settled = pending.catch((error: unknown) => error)
+
+    const dialog = await screen.findByRole('dialog')
+    expect(dialog).toHaveTextContent('Confirm with your identity provider')
+    expect(dialog).toHaveTextContent('no password here to type')
+
+    // The field must be GONE and not merely unused: a password box beside a
+    // provider button invites an operator to type something that is refused
+    // before it is even read, which is the screen they were already looking at.
+    expect(screen.queryByLabelText('Password')).toBeNull()
+    expect(screen.getByRole('button', { name: /continue to your provider/i })).toBeTruthy()
+
+    await user.click(screen.getByRole('button', { name: 'Cancel' }))
+    await expect(settled).resolves.toMatchObject({ code: 'sudo.required' })
+  })
+
+  it('still asks for a password when the session did not come through one', async () => {
+    recordingFetch(() => problemResponse(428, 'sudo.required', 'This action is destructive.'))
+    const user = userEvent.setup()
+
+    renderDialog(<SudoDialog />, { sso: false })
+
+    const pending = api.changePassword('old-password-1', 'new-password-1')
+    const settled = pending.catch((error: unknown) => error)
+
+    const dialog = await screen.findByRole('dialog')
+    expect(dialog).toHaveTextContent('Confirm your password')
+    expect(screen.getByLabelText('Password')).toBeTruthy()
 
     await user.click(screen.getByRole('button', { name: 'Cancel' }))
     await expect(settled).resolves.toMatchObject({ code: 'sudo.required' })
