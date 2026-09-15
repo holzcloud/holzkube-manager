@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { createRoute } from '@tanstack/react-router'
-import { Lock, LockOpen, ShieldQuestion } from 'lucide-react'
+import { Lock, LockOpen, ShieldQuestion, Trash2 } from 'lucide-react'
 import { useState } from 'react'
 import { api, type Cluster } from '@/api'
 import { ClusterScalePanel } from '@/components/ClusterScale'
@@ -69,6 +69,24 @@ export function ClusterCard({ cluster }: { cluster: Cluster }) {
   const setLock = useMutation({
     mutationFn: (locked: boolean) => api.clusters.setLock(cluster.id, locked),
     onSettled: () => void queryClient.invalidateQueries({ queryKey: ['clusters'] }),
+  })
+
+  const forget = useMutation({
+    mutationFn: () => api.clusters.forget(cluster.id),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['clusters'] })
+      void queryClient.invalidateQueries({ queryKey: ['machines'] })
+    },
+  })
+
+  const [nodeAddr, setNodeAddr] = useState('')
+  const addNode = useMutation({
+    mutationFn: (addr: string) => api.machines.add(cluster.id, addr),
+    onSuccess: () => {
+      setNodeAddr('')
+      void queryClient.invalidateQueries({ queryKey: ['machines'] })
+      void queryClient.invalidateQueries({ queryKey: ['clusters'] })
+    },
   })
 
   return (
@@ -210,6 +228,79 @@ export function ClusterCard({ cluster }: { cluster: Cluster }) {
         <RenewCertificate clusterID={cluster.id} />
 
         <ClusterScalePanel clusterID={cluster.id} />
+
+        {/*
+          D-08's second way into the inventory, which until now existed in the
+          API client and nowhere an operator could reach. Adoption fills the
+          inventory from the membership the adopted node reports, and a member
+          is recorded under the FIRST address it reports -- so a machine whose
+          reachable address is not that one needs naming by hand. That is what
+          this is for, and why it sits on the cluster rather than on a screen of
+          its own.
+        */}
+        <form
+          className="flex flex-wrap items-end gap-2 border-t pt-3"
+          onSubmit={(event) => {
+            event.preventDefault()
+            const addr = nodeAddr.trim()
+            if (addr !== '') {
+              addNode.mutate(addr)
+            }
+          }}
+        >
+          <div className="space-y-1">
+            <Label htmlFor={`add-node-${cluster.id}`} className="text-xs">
+              Add a node by address
+            </Label>
+            <Input
+              id={`add-node-${cluster.id}`}
+              value={nodeAddr}
+              onChange={(event) => setNodeAddr(event.target.value)}
+              placeholder="192.168.0.111"
+              className="h-8 w-56 font-mono text-xs"
+            />
+          </div>
+          <Button
+            type="submit"
+            size="sm"
+            variant="outline"
+            disabled={addNode.isPending || nodeAddr.trim() === ''}
+            title="Record a machine at this address as part of this cluster. It is asked who it is; the UUID it answers with is what the record is filed under, never the address."
+          >
+            Add node
+          </Button>
+          {addNode.error ? (
+            <p className="w-full text-xs text-destructive">{(addNode.error as Error).message}</p>
+          ) : null}
+        </form>
+
+        {/*
+          Destructive, so the server answers 428 and the shared interceptor
+          opens the password prompt and replays this exact request -- the same
+          argument node-detail.tsx makes for forgetting a machine: a second
+          confirmation of our own would train the operator to click past the
+          first.
+
+          What it removes is this installation's record of the cluster and the
+          secrets bundle derived from it. The cluster itself is not touched, and
+          its machines survive as records with no cluster rather than being
+          deleted with it: they are physical machines that still exist.
+        */}
+        <div className="border-t pt-3">
+          <Button
+            size="sm"
+            variant="outline"
+            className="text-destructive"
+            disabled={forget.isPending}
+            onClick={() => forget.mutate()}
+            title="Remove this installation's record of the cluster and its derived secrets. The cluster is not touched, and its machines stay in the inventory without a cluster."
+          >
+            <Trash2 aria-hidden="true" className="size-4" /> Forget this cluster
+          </Button>
+          {forget.error ? (
+            <p className="mt-2 text-xs text-destructive">{(forget.error as Error).message}</p>
+          ) : null}
+        </div>
       </CardContent>
     </Card>
   )
