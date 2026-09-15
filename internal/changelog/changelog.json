@@ -1,5 +1,19 @@
 [
   {
+    "version": "v1.16.1",
+    "date": "2026-09-15",
+    "changes": [
+      {
+        "icon": "🏷️",
+        "text": "The release you are running is marked as such again. A released build reports its version without a leading v — goreleaser stamps the tag with the v stripped — while this changelog spells versions exactly as the git tag does, so the two never matched and v1.16.0 marked nothing as \"running here\". The panel normalises instead of insisting, because neither side can simply adopt the other's spelling: the update script compares the tag with its v stripped against what the binary reports, so a binary carrying the v would look out of date on every run and reinstall itself forever."
+      },
+      {
+        "icon": "🔬",
+        "text": "Found by downloading v1.16.0 and running it, not by a test. Every test passed the version in the changelog's own spelling, and the browser check used a development build — which reports something like v1.16.0-4-gabc-dirty and matches no release at all, so the case that was broken looked exactly like the case that is supposed to match nothing."
+      }
+    ]
+  },
+  {
     "version": "v1.16.0",
     "date": "2026-09-15",
     "changes": [
