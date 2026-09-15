@@ -1,5 +1,23 @@
 [
   {
+    "version": "v1.16.8",
+    "date": "2026-09-15",
+    "changes": [
+      {
+        "icon": "🔑",
+        "text": "If you sign in through an identity provider, destructive actions are possible again. The confirmation dialog only ever offered a password field — and an account that signs in through a provider has no local password, while a host declared SSO-only refuses the password routes outright. Every destructive action in the product sat behind a form that could not be filled in, showing a refusal that reads like a mistake."
+      },
+      {
+        "icon": "↩️",
+        "text": "The dialog now sends you to your provider instead. That route existed the whole time and is careful: it asks the provider to authenticate you afresh, checks on the way back that it really did rather than reusing a session, and that the identity returning is the one signed in. Nothing in the interface offered it. The action you were attempting is not carried across the round trip — run it again when you return, and it will not ask twice."
+      },
+      {
+        "icon": "🔦",
+        "text": "Third time in two days that a route existed with nothing calling it, and the first that locked an operator out entirely. The new use guard could not see this one either: it checks functions that SEND a request, and a path the browser NAVIGATES to is never sent. It now checks those too."
+      }
+    ]
+  },
+  {
     "version": "v1.16.7",
     "date": "2026-09-15",
     "changes": [
