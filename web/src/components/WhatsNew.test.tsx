@@ -118,3 +118,45 @@ describe('the release notes panel', () => {
     expect(within(dialog).getByText('0 changes')).toBeInTheDocument()
   })
 })
+
+/**
+ * The two spellings of one version.
+ *
+ * goreleaser stamps the binary with the tag minus its leading v, so a released
+ * build reports "1.16.0" while the changelog — which the release pipeline holds
+ * against the tag — says "v1.16.0". Before this was handled, a released
+ * instance marked no release as the one it was running, and the panel opened on
+ * whatever happened to be first.
+ *
+ * It survived every test in this file, because they all pass the version in the
+ * changelog's own spelling. It survived the browser check too: a development
+ * build reports `v1.16.0-4-gabc-dirty`, which matches no release at all, so the
+ * case that was broken looked like the case that is supposed to match nothing.
+ * It took downloading the release and running it.
+ */
+describe('the running version as a release build spells it', () => {
+  it('marks the running release when the binary reports it without a v', async () => {
+    show('1.16.0')
+
+    const dialog = await screen.findByRole('dialog')
+    expect(dialog).toHaveTextContent('running here')
+  })
+
+  it('opens on the running series when the binary reports it without a v', async () => {
+    show('0.1.0')
+
+    const dialog = await screen.findByRole('dialog')
+    expect(screen.getByRole('button', { name: 'v0.1' })).toHaveAttribute('aria-pressed', 'true')
+    expect(dialog).toHaveTextContent('The first public release.')
+    expect(dialog).not.toHaveTextContent('Removing a node asks etcd first.')
+  })
+
+  it('still marks nothing for a development build, which is no release', async () => {
+    // git describe on a working tree. It must not be normalised into matching
+    // the release it descends from: a dev build is not that release.
+    show('v1.16.0-4-gabc1234-dirty')
+
+    const dialog = await screen.findByRole('dialog')
+    expect(dialog).not.toHaveTextContent('running here')
+  })
+})
