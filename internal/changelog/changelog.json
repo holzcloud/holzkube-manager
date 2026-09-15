@@ -1,5 +1,27 @@
 [
   {
+    "version": "v1.16.7",
+    "date": "2026-09-15",
+    "changes": [
+      {
+        "icon": "👻",
+        "text": "The phantom node is gone. Adoption read a Talos membership entry — which is named after the node's HOSTNAME, not its UUID — and filed that string as a machine id. The check meant to skip the node it had already recorded compared a hostname against a UUID and was never once true, so your control plane was recorded twice: correctly under its UUID, and again under its hostname at whichever address the membership happened to list first. The second record could never answer, because no certificate is minted for that identity."
+      },
+      {
+        "icon": "❓",
+        "text": "Every member is now asked who it is, at each address it reports, in order — the same thing \"add a node by address\" does with an address you type. It is filed under the UUID it answers with, at the address that answered. That also settles which address gets recorded, which used to be left to the order the cluster happened to report them in."
+      },
+      {
+        "icon": "🚫",
+        "text": "A member that answers at none of its addresses gets no record and a warning naming it and every address tried. The inventory can now be missing a machine the cluster knows about, and that is the deliberate trade: a record under a key nothing can reach is the phantom above, and it looks adopted."
+      },
+      {
+        "icon": "🎭",
+        "text": "The same confusion decided the ROLE of a machine added by address: control-plane nodes were filed as workers, and a worker is left out of the etcd reads only control-plane nodes get. Invisible until now, because nothing in the interface could reach that function at all."
+      }
+    ]
+  },
+  {
     "version": "v1.16.6",
     "date": "2026-09-15",
     "changes": [

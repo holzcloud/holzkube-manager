@@ -209,7 +209,13 @@ func (s *Service) AddManual(ctx context.Context, cluster model.ClusterID, addr s
 	role := model.RoleWorker
 	if members, err := cc.Members(ctx); err == nil {
 		for _, m := range members {
-			if model.MachineID(m.ID) == facts.UUID && m.ControlPlane {
+			// Matched on the HOSTNAME. A Talos cluster.Member is named after
+			// the node's hostname, so this used to compare that string against
+			// a UUID and never match -- which meant every machine added by
+			// address was filed as a worker, control-plane nodes included, and
+			// a worker is excluded from the etcd reads only control-plane
+			// nodes get. Same confusion as the one adoptMembers carried.
+			if m.Hostname != "" && m.Hostname == facts.Hostname && m.ControlPlane {
 				role = model.RoleControlPlane
 			}
 		}

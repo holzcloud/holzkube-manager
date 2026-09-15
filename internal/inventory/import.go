@@ -197,9 +197,38 @@ func (s *Service) Import(ctx context.Context, req ImportRequest) (model.Cluster,
 
 // adoptMembers records every node the adopted cluster knows about.
 //
-// The node holzkube-manager adopted through is recorded too, from its own facts rather
-// than from the membership list, so that a cluster with no discovery service
-// still has at least the one node that was definitely reachable.
+// The node holzkube-manager adopted through is recorded from its own facts rather than
+// from the membership list, so that a cluster with no discovery service still
+// has at least the one node that was definitely reachable.
+//
+// EVERY OTHER MEMBER IS ASKED WHO IT IS, and that is the whole shape of this
+// function. A Talos cluster.Member resource is named after the node's HOSTNAME
+// -- m.Metadata().ID() is "holzkube-01", not a UUID -- and this used to file
+// that string as the MachineID. Two things followed, both seen on a real
+// cluster before they were seen here:
+//
+// The adopted node was recorded TWICE. The skip that was meant to leave it out
+// compared the member's id against facts.UUID, so it compared a hostname with a
+// UUID and never matched once. The cluster card counted its own control plane
+// as two machines, one of which answered and one of which never could.
+//
+// And the record broke INV-03 and D-10, which are not style: a record keyed by
+// hostname moves when the operator renames a node, and the UUID is the one
+// thing about a machine that does not.
+//
+// So a member is now dialled at its reported addresses in order and asked for
+// its own facts, exactly as AddManual does for an address an operator types.
+// What it answers is what it is filed under, and the address that answered is
+// the address recorded -- which also settles the question the old code left to
+// luck, because a member reports several addresses and only some are reachable
+// from wherever this daemon runs.
+//
+// A member that answers at none of them gets NO RECORD and a warning naming it
+// and every address tried. That is the operator's decision, taken knowing the
+// cost: the inventory is missing a machine the cluster knows about, and the
+// alternative -- a record not keyed by a UUID -- is the state INV-03 forbids
+// and the one that just produced a phantom node. The warning names what to
+// type into "Add a node by address".
 func (s *Service) adoptMembers(ctx context.Context, cc *talos.ClusterClient, cluster model.Cluster) error {
 	facts, err := cc.NodeFacts(ctx)
 	if err != nil {
@@ -214,32 +243,87 @@ func (s *Service) adoptMembers(ctx context.Context, cc *talos.ClusterClient, clu
 		return err
 	}
 
+	creds, err := s.clusterCreds(ctx, cluster.ID)
+	if err != nil {
+		return err
+	}
+
 	for _, m := range members {
-		if model.MachineID(m.ID) == facts.UUID {
+		// Matched on the HOSTNAME, because that is what a member carries and
+		// what the adopted node's own facts carry. The previous comparison was
+		// between a hostname and a UUID.
+		if m.Hostname != "" && m.Hostname == facts.Hostname {
 			continue
 		}
+
 		role := model.RoleWorker
 		if m.ControlPlane {
 			role = model.RoleControlPlane
 		}
-		addr := ""
-		if len(m.Addresses) > 0 {
-			addr = m.Addresses[0]
+
+		memberFacts, addr, err := s.identifyMember(ctx, cluster.ID, creds, m)
+		if err != nil {
+			s.deps.Logger.Warn("a member of the adopted cluster could not be asked who it is, so it is not in the inventory",
+				slog.String("cluster", string(cluster.ID)),
+				slog.String("hostname", m.Hostname),
+				slog.String("addresses", strings.Join(m.Addresses, ", ")),
+				slog.String("remedy", "add it by address once you know one this host can reach"),
+				slog.Any("error", err))
+			continue
 		}
 
-		// A member is known by hostname and address and has not been asked
-		// anything yet, so its record carries what discovery said and nothing
-		// more. The supervisor confirms it, or marks it unconfirmed; either is
-		// better than leaving a node the cluster knows about out of the
-		// inventory.
-		if _, err := s.recordMachine(ctx, cluster.ID, talos.NodeFacts{
-			UUID:     model.MachineID(m.ID),
-			Hostname: m.Hostname,
-		}, addr, role); err != nil {
+		if _, err := s.recordMachine(ctx, cluster.ID, memberFacts, addr, role); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+// identifyMember dials a member at its reported addresses in order and returns
+// the facts it answers with, plus the address that answered.
+//
+// In order, and not in parallel: the addresses a member reports are ranked by
+// nothing in particular, but trying them one at a time means the address
+// recorded is the first that worked rather than whichever race finished first,
+// which is the difference between a reproducible inventory and one that differs
+// between imports of the same cluster.
+func (s *Service) identifyMember(
+	ctx context.Context,
+	cluster model.ClusterID,
+	creds talos.Creds,
+	m talos.Member,
+) (talos.NodeFacts, string, error) {
+	if len(m.Addresses) == 0 {
+		return talos.NodeFacts{}, "", fmt.Errorf("inventory: member %q reports no address", m.Hostname)
+	}
+
+	var last error
+	for _, addr := range m.Addresses {
+		provisional := talos.Target{
+			Cluster: cluster,
+			Machine: model.MachineID("member:" + m.Hostname),
+			Addr:    addr,
+		}
+
+		cc, err := talos.NewClusterClient(ctx, s.deps.Dialer, provisional, creds, s.deps.Mode)
+		if err != nil {
+			last = err
+			continue
+		}
+
+		facts, err := cc.NodeFacts(ctx)
+		_ = cc.Close()
+		if err != nil {
+			last = err
+			continue
+		}
+		if facts.UUID == "" {
+			last = talos.ErrNoMachineIdentity
+			continue
+		}
+		return facts, addr, nil
+	}
+	return talos.NodeFacts{}, "", last
 }
 
 // newClusterID mints a cluster identifier.
