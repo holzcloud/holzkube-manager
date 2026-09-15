@@ -50,6 +50,23 @@ linters:
           - gosec
           - bodyclose
 
+      # The simulator's job is to behave like a real Talos node, and
+      # `common.Metadata` -- the hostname every reply carries -- is deprecated
+      # in machinery v1.14's protos and still sent by every real node, because
+      # deprecated is not removed. A simulator that dropped it would stop
+      # matching the thing it simulates, and the client code that reads it
+      # would then be tested against a reply shape no node produces.
+      #
+      # Named by rule, by place and by message: SA1019 stays on everywhere
+      # else in this package, so a different deprecation here is still a
+      # finding. When Talos removes the field, this exclusion stops matching
+      # and the sites it covers become errors, which is the right moment to
+      # deal with them.
+      - path: internal/talossim/
+        linters:
+          - staticcheck
+        text: "common.Metadata"
+
       # G304 is "file path from a variable". Three packages own files by design:
       # the store is the only thing allowed to touch state records, the audit log
       # owns its append-only archive, and tlsx owns the TLS material. Taking a

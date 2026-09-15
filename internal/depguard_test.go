@@ -37,8 +37,16 @@ const (
 	// The pinned upstream versions. Changing either of these numbers is a
 	// decision about which Talos API surface holzkube-manager speaks, so it must be a
 	// visible edit here and not a side effect of somebody running `go get -u`.
-	machineryVersion = "v1.13.9"
-	cosiVersion      = "v1.14.1"
+	// Raised to v1.14.0 on 2026-09-15, deliberately and not by resolution. The
+	// operator updates Talos as soon as a release lands, and a real v1.14
+	// cluster could not be adopted by the v1.13.9 build: since v1.14 most of a
+	// machine configuration lives in typed documents beside the v1alpha1 one,
+	// and machinery decodes a document only if it has the kind registered.
+	//
+	// cosiVersion moves with it. It arrives with machinery rather than by
+	// choice, which is why it is asserted here at all.
+	machineryVersion = "v1.14.0"
+	cosiVersion      = "v1.16.3"
 )
 
 // TestBinaryDependencyWeight fails if the product binary ever depends on the

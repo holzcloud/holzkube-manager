@@ -26,6 +26,31 @@ What can honestly be checked here about arm64: that the archive exists, that its
 checksum matches, that it contains `holzkube-managerd`, and that `file` reports
 ARM aarch64. Nothing about whether it runs.
 
+## Talos versions
+
+**The operator updates Talos as soon as a release lands, and wants the newest
+release supported.** That makes the machinery pin a product decision rather than
+housekeeping: a pin that lags means this product advertises support for a Talos
+whose configuration documents its own library cannot decode.
+
+That is not hypothetical. v1.16.1 advertised `v1.12 to v1.14` while pinning
+machinery v1.13.9, and a real v1.14 cluster refused adoption because
+`DiscoveryServiceConfig` — a document kind v1.14 has and v1.13.9 does not — was
+"not registered".
+
+Two things hold it now, and they cover different halves:
+
+- `internal/talos/machineryversion_test.go` compares `gendata.VersionTag`, the
+  machinery actually compiled in, against `MaxSupportedVersion`. It runs in the
+  gate and catches the range claiming more than the library can read.
+- `.github/workflows/talos-upstream.yml` asks weekly whether a newer stable
+  machinery exists and fails when one does. Nothing in a build looks outside the
+  repository, so this is the only thing that can notice.
+
+Raising the pin means: `go get …/machinery@vX.Y.Z`, `go mod tidy`, move
+`MaxSupportedVersion` if the minor changed, run `./bin/task ci`, and deal with
+what the new machinery deprecates rather than suppressing it wholesale.
+
 ## The method this repository is built on
 
 A guard is worth nothing until it has gone red against the fault deliberately

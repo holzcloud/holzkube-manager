@@ -1,20 +1,19 @@
 package inventory
 
 import (
-	"bytes"
 	"crypto/tls"
 	"crypto/x509"
-	"errors"
 	"fmt"
-	"io"
+	"regexp"
 	"time"
 
+	"github.com/siderolabs/talos/pkg/machinery/config"
 	"github.com/siderolabs/talos/pkg/machinery/config/configloader"
 	"github.com/siderolabs/talos/pkg/machinery/config/generate/secrets"
 	"github.com/siderolabs/talos/pkg/machinery/role"
-	"gopkg.in/yaml.v3"
 
 	"github.com/holzcloud/holzkube-manager/internal/model"
+	"github.com/holzcloud/holzkube-manager/internal/talos"
 )
 
 // The secrets bundle is derived from a control-plane node's own machine
@@ -40,98 +39,70 @@ import (
 // the feature.
 const ClientCertTTL = 365 * 24 * time.Hour
 
-// v1alpha1Document returns the machine-configuration document out of what a
-// node serves, discarding every other document in it.
+// unknownDocumentKind reads a document kind out of machinery's refusal to
+// decode it, and reports whether that is what went wrong.
 //
-// A Talos machine configuration is a multi-document YAML file. One document is
-// the v1alpha1 Config that carries `.machine` and `.cluster` -- and therefore
-// every secret adoption needs. The rest are separate typed documents:
-// VolumeConfig, KubeSpanConfig, UserVolumeConfig and a growing list of others,
-// each of which machinery decodes only if this build's machinery knows the
-// kind.
+// A Talos machine configuration is multi-document YAML, and since v1.14 the
+// documents are where a great deal of it lives: the Kubernetes API-server CA,
+// the cluster identity, the volume layout and a dozen others each have their
+// own kind beside the v1alpha1 document. machinery decodes one only if THIS
+// build's machinery has the kind registered, and its loader is all-or-nothing.
 //
-// That last clause is why this function exists. machinery's loader is
-// all-or-nothing: one document whose kind is not registered fails the whole
-// parse, and it has no option to tolerate one. So a real cluster refused
-// adoption with
+// That is why this is a refusal rather than something to work around. A real
+// v1.14 cluster met a build pinned to machinery v1.13.9 and was told "Internal
+// error"; the reason was DiscoveryServiceConfig, a kind v1.13.9 does not have.
 //
-//	error decoding document v1alpha1/DiscoveryServiceConfig/default (line 94):
-//	  "DiscoveryServiceConfig" "v1alpha1": not registered
+// The first attempt at fixing that selected the v1alpha1 document and ignored
+// the rest, on the reasoning that every secret adoption needs lives in it.
+// That was true of v1.13 and is NOT true of v1.14 -- KubeAPIServerCAConfig is
+// its own document now -- so the same approach would have derived a bundle
+// with the Kubernetes CA silently missing, and refused the node as a worker.
+// Wrong, and confidently wrong, which is worse than the Internal error it
+// replaced.
 //
-// -- a document type this build's machinery (v1.13.9) does not have at all,
-// belonging to a Talos newer than the pin. Nothing in adoption reads it.
-// Nothing in adoption reads ANY of the sibling documents: the bundle comes from
-// v1alpha1 alone. The adoption was refused over a document it does not look at.
-//
-// Selecting one document instead of tolerating failures is deliberate, and the
-// difference matters when the next kind appears. Tolerating would mean
-// adoption's success depends on which unknown documents a node happens to
-// carry; selecting means it depends on the one document it actually reads.
-// A manager that has to know every document kind Talos will ever ship is a
-// manager that breaks on every Talos release.
-//
-// The discriminator is machinery's own, from its decoder: the machine
-// configuration is the document with `version: v1alpha1` and NO `kind`. Every
-// typed document carries a kind.
-func v1alpha1Document(configYAML []byte) ([]byte, error) {
-	dec := yaml.NewDecoder(bytes.NewReader(configYAML))
-
-	for {
-		var doc yaml.Node
-		err := dec.Decode(&doc)
-		if errors.Is(err, io.EOF) {
-			break
-		}
-		if err != nil {
-			// Structure, not content: the message names a line and a YAML
-			// shape and never the bytes.
-			return nil, fmt.Errorf("inventory: the node's machine configuration is not readable YAML: %w", err)
-		}
-
-		version, kind := documentIdentity(&doc)
-		if version != "v1alpha1" || kind != "" {
-			continue
-		}
-
-		out, err := yaml.Marshal(&doc)
-		if err != nil {
-			return nil, fmt.Errorf("inventory: re-encoding the machine configuration document: %w", err)
-		}
-		return out, nil
+// So an unknown document is what it looks like: this build cannot read this
+// node's configuration, and the honest answer names the remedy rather than
+// guessing at the parts it does recognise.
+func unknownDocumentKind(err error) (string, bool) {
+	// machinery's own wording, from its decoder:
+	//   error decoding document v1alpha1/DiscoveryServiceConfig/default
+	//   (line 94): "DiscoveryServiceConfig" "v1alpha1": not registered
+	//
+	// Matched on the message because machinery returns no typed error for it.
+	// That is brittle in one direction only: if the wording changes, this stops
+	// recognising the case and the answer falls back to the parse failure below
+	// it, which is the behaviour before this existed rather than something
+	// worse -- and TestAnUnknownDocumentIsNamedAsTooNew goes red and says so.
+	m := unknownKindPattern.FindStringSubmatch(err.Error())
+	if m == nil {
+		return "", false
 	}
-
-	// Not an internal failure and not a parse failure: it is the node being
-	// the wrong node, which is the refusal D-05 already owns. A machine with
-	// no v1alpha1 document is one that has never been configured.
-	return nil, fmt.Errorf("%w: the node serves no v1alpha1 machine configuration document", ErrNotControlPlane)
+	return m[1], true
 }
 
-// documentIdentity reads the two top-level keys that decide what a document is.
-//
-// Missing keys read as empty, which is the right answer rather than an error:
-// a document with neither is not the one being looked for, and saying so by
-// returning empty strings lets the caller skip it like any other.
-func documentIdentity(doc *yaml.Node) (version, kind string) {
-	node := doc
-	if node.Kind == yaml.DocumentNode {
-		if len(node.Content) == 0 {
-			return "", ""
-		}
-		node = node.Content[0]
-	}
-	if node.Kind != yaml.MappingNode {
-		return "", ""
-	}
+var unknownKindPattern = regexp.MustCompile(`"([A-Za-z0-9]+)"\s+"[^"]*":\s*not registered`)
 
-	for i := 0; i+1 < len(node.Content); i += 2 {
-		switch node.Content[i].Value {
-		case "version":
-			version = node.Content[i+1].Value
-		case "kind":
-			kind = node.Content[i+1].Value
-		}
+// missingSecretDocument names the first thing NewBundleFromConfig would
+// dereference and find absent, or "" when all of them are there.
+//
+// The list is machinery's, read off bundle.go rather than guessed: it is
+// exactly the set of accessors that function calls a method on without
+// checking. Keeping it in this order means the name returned is the one that
+// would have panicked.
+func missingSecretDocument(c config.Config) string {
+	switch {
+	case c.K8sAPIServerCAConfig() == nil:
+		return "Kubernetes API-server certificate authority"
+	case c.K8sAggregatorCAConfig() == nil:
+		return "Kubernetes aggregator certificate authority"
+	case c.K8sServiceAccountConfig() == nil:
+		return "Kubernetes service-account key"
+	case c.Cluster() == nil || c.Cluster().Etcd() == nil:
+		return "etcd certificate authority"
+	case c.Machine() == nil || c.Machine().Security() == nil:
+		return "Talos certificate authority"
 	}
-	return version, kind
+	return ""
 }
 
 // deriveSecrets reads a node's machine configuration and returns the cluster's
@@ -142,13 +113,16 @@ func documentIdentity(doc *yaml.Node) (version, kind string) {
 // only thing that leaves this function is the bundle, and the only thing that
 // leaves the import path is a record in the secrets entity.
 func deriveSecrets(configYAML []byte) (*secrets.Bundle, error) {
-	machineConfig, err := v1alpha1Document(configYAML)
+	provider, err := configloader.NewFromBytes(configYAML)
 	if err != nil {
-		return nil, err
-	}
-
-	provider, err := configloader.NewFromBytes(machineConfig)
-	if err != nil {
+		if kind, ok := unknownDocumentKind(err); ok {
+			return nil, fmt.Errorf("%w: its machine configuration contains a %s document, which "+
+				"this build does not know. The node is running a Talos newer than this build "+
+				"was made for (%s to %s). Upgrading holzkube-manager is the remedy; adopting it "+
+				"with this build would mean deriving the cluster's secrets from a configuration "+
+				"only partly understood",
+				talos.ErrUnsupportedVersion, kind, talos.MinSupportedVersion, talos.MaxSupportedVersion)
+		}
 		// The node's own configuration failed to parse. The error text comes
 		// from machinery's loader and describes structure, not content, so it
 		// is safe to wrap -- but the bytes themselves never appear in it.
@@ -160,7 +134,58 @@ func deriveSecrets(configYAML []byte) (*secrets.Bundle, error) {
 		return nil, fmt.Errorf("%w: the node serves no v1alpha1 machine configuration", ErrNotControlPlane)
 	}
 
-	bundle := secrets.NewBundleFromConfig(secrets.NewClock(), provider)
+	// Asked before the bundle is derived, and machinery v1.14 turned that from
+	// a preference into a requirement.
+	//
+	// D-05 used to be answered the other way round: derive the bundle from
+	// whatever the node served, then look at what came out and refuse if the
+	// Talos CA had no private key, which is what a worker looks like. Under
+	// machinery v1.13 that worked, because a worker's config produced a bundle
+	// with empty fields. Under v1.14 it PANICS -- NewBundleFromConfig reads
+	// c.K8sAPIServerCAConfig().IssuingCA(), a worker has no API-server CA
+	// config, and the nil is dereferenced. On a running instance that is a
+	// crash where a refusal belongs.
+	//
+	// So the configuration is asked what it is. A node states its own type and
+	// has no reason to be coy about it; deriving a bundle in order to find out
+	// was always inference where a question would do.
+	//
+	// IsControlPlane covers the init type as well as the control-plane type.
+	// An init node is a control plane that bootstrapped the cluster, it holds
+	// the same material, and refusing it would refuse the one node a
+	// single-node cluster has.
+	if machineType := provider.Machine().Type(); !machineType.IsControlPlane() {
+		return nil, fmt.Errorf("%w: it is a %s node, and its machine configuration carries the "+
+			"Talos CA certificate without its private key, which is what a worker looks like",
+			ErrNotControlPlane, machineType)
+	}
+
+	// Every accessor NewBundleFromConfig dereferences, checked before it is
+	// called, because machinery v1.14 does not check them itself: it reads
+	// c.K8sAPIServerCAConfig().IssuingCA() and panics on a configuration that
+	// has no such document. A node hands this process bytes; a process that
+	// crashes on the bytes it was handed has a worse defect than whatever was
+	// wrong with them.
+	//
+	// It reads as an incomplete control plane rather than as an internal
+	// failure, because that is what it is: the node answered, and what it
+	// served does not carry what a cluster's secrets are made of.
+	if missing := missingSecretDocument(provider); missing != "" {
+		return nil, fmt.Errorf("%w: its machine configuration carries no %s, so the cluster's "+
+			"secrets cannot be derived from it", ErrNotControlPlane, missing)
+	}
+
+	// Since machinery v1.14 this reports rather than swallows. What it can
+	// fail on is a configuration whose certificate material does not load --
+	// which is a statement about the node's own config, not about this
+	// process, so it is wrapped like the parse failure above it and for the
+	// same reason: the message describes structure and the bytes never appear
+	// in it.
+	bundle, err := secrets.NewBundleFromConfig(secrets.NewClock(), provider)
+	if err != nil {
+		return nil, fmt.Errorf("inventory: the node's own secrets could not be read from its "+
+			"machine configuration: %w", err)
+	}
 	if err := controlPlaneMaterialPresent(bundle); err != nil {
 		return nil, err
 	}

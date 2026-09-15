@@ -1,0 +1,29 @@
+# Is there a newer Talos than the one this repository is built against?
+#
+# It is a schedule and not a CI step because nothing in a build looks outside
+# the repository, and it is a schedule rather than an opt-in test because this
+# project already has two of those — ledger entries 5 and 64 record a drift
+# watcher that existed, was never scheduled, and therefore never watched
+# anything.
+#
+# A newer stable release fails the run, and the failure is the notification.
+name: Talos upstream
+
+on:
+  schedule:
+    # Weekly. Talos does not ship daily, and a check that fires more often than
+    # the thing it watches changes is a check people learn to dismiss.
+    - cron: '17 6 * * 1'
+  # So it can be asked on demand rather than waited for.
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  pin:
+    name: Is the machinery pin current
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 .github/check-talos-upstream.py
