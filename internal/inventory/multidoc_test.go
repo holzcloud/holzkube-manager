@@ -1,79 +1,67 @@
 package inventory
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
+	"github.com/siderolabs/talos/pkg/machinery/config/configloader"
+
+	"github.com/holzcloud/holzkube-manager/internal/talos"
 	"github.com/holzcloud/holzkube-manager/internal/talossim"
 )
 
-// A real cluster refused adoption, and it refused over a document adoption does
-// not read.
+// A Talos machine configuration is multi-document YAML, and since v1.14 that is
+// where most of it lives: the Kubernetes API-server CA, the cluster identity,
+// the volume layout and a dozen others each have their own kind beside the
+// v1alpha1 document.
 //
-//	POST /api/v1/clusters -> 500
-//	error decoding document v1alpha1/DiscoveryServiceConfig/default (line 94):
-//	  "DiscoveryServiceConfig" "v1alpha1": not registered
+// machinery decodes a typed document only if THIS build's machinery has the
+// kind registered, and its loader is all-or-nothing. So a node running a Talos
+// newer than the pin serves a configuration this build cannot read — which is
+// how a real cluster came to be told "Internal error" by a build pinned to
+// machinery v1.13.9, over a DiscoveryServiceConfig document that version does
+// not have.
 //
-// A Talos machine configuration is multi-document YAML: one v1alpha1 Config
-// carrying `.machine` and `.cluster`, and beside it a growing set of typed
-// documents. machinery decodes a typed document only if THIS build's machinery
-// has its kind registered, its loader is all-or-nothing, and it offers no
-// option to tolerate one. DiscoveryServiceConfig does not exist in machinery
-// v1.13.9 at all — it belongs to a Talos newer than the pin.
-//
-// Every secret adoption needs is in the v1alpha1 document. Not one of the
-// siblings is read. So the whole adoption failed on a document nobody looks at,
-// and would have failed again on the next kind Talos ships.
-//
-// talossim could never have found this: it serves a configuration this same
-// machinery generated, so by construction every document in it is one this
-// build knows. The fixture below is the simulator's own control-plane config
-// with the operator's document appended — real secrets, real refusal.
-func TestAConfigCarryingAnUnknownDocumentStillYieldsItsSecrets(t *testing.T) {
+// The fix that shipped first selected the v1alpha1 document and ignored the
+// rest, reasoning that every secret adoption needs lives in it. That was true
+// of v1.13 and is false of v1.14. These tests pin the behaviour that replaced
+// it, and the second one pins why.
+
+func TestAConfigWithEveryDocumentKnownYieldsItsSecrets(t *testing.T) {
 	t.Parallel()
 
 	cluster, err := talossim.NewCluster("holzkube", "https://192.168.0.110:6443")
 	if err != nil {
 		t.Fatalf("build a simulated cluster: %v", err)
 	}
-	base := string(cluster.Config(true))
 
-	// Shaped as the operator's node serves it: apiVersion + kind, which is what
-	// every typed document carries and what sends machinery to its registry.
-	const unknown = `---
-apiVersion: v1alpha1
-kind: DiscoveryServiceConfig
-name: default
-enabled: true
-`
-
-	// Asserted rather than assumed: if machinery ever learns this kind, this
-	// test stops reproducing anything and should say so instead of passing.
-	if _, err := deriveSecretsWithoutSelection(base + "\n" + unknown); err == nil {
-		t.Fatal("machinery now decodes DiscoveryServiceConfig; this test no longer " +
-			"reproduces the failure it was written for")
-	} else if !strings.Contains(err.Error(), "not registered") {
-		t.Fatalf("the fixture fails for some other reason than the one under test: %v", err)
-	}
-
-	bundle, err := deriveSecrets([]byte(base + "\n" + unknown))
+	bundle, err := deriveSecrets(cluster.Config(true))
 	if err != nil {
-		t.Fatalf("a configuration with one unknown document yielded no secrets: %v", err)
+		t.Fatalf("a control-plane configuration yielded no secrets: %v", err)
 	}
-	if bundle == nil || bundle.Certs == nil || bundle.Certs.OS == nil || len(bundle.Certs.OS.Key) == 0 {
-		t.Fatal("the bundle carries no Talos CA private key, so adoption would refuse the node")
+	if bundle.Certs.OS == nil || len(bundle.Certs.OS.Key) == 0 {
+		t.Error("no Talos CA private key")
 	}
+	// The one that moved out of v1alpha1 in v1.14, and therefore the one a
+	// document-selecting parse would silently have dropped.
 	if bundle.Certs.K8s == nil || len(bundle.Certs.K8s.Key) == 0 {
-		t.Fatal("the bundle carries no Kubernetes CA private key")
+		t.Error("no Kubernetes CA private key")
 	}
 }
 
-// TestTheDocumentSelectionIsNotOrderDependent.
+// TestSelectingOnlyV1Alpha1WouldLoseTheKubernetesCA is the argument for not
+// doing the obvious thing, kept as a measurement rather than as a comment.
 //
-// The v1alpha1 document is first in what talosctl generates and there is
-// nothing that guarantees it. A node that carries a typed document ahead of it
-// must adopt exactly as well.
-func TestTheDocumentSelectionIsNotOrderDependent(t *testing.T) {
+// Dropping the sibling documents looks safe and reads as robustness. Under
+// machinery v1.14 it produces a bundle with the Kubernetes CA missing, which
+// `controlPlaneMaterialPresent` then reports as "this is a worker" — a
+// confident, wrong answer about a control-plane node, which is worse than the
+// Internal error it would have replaced.
+//
+// If a future machinery moves the material back into v1alpha1, this test fails
+// and the reasoning above has to be re-read rather than assumed.
+func TestSelectingOnlyV1Alpha1WouldLoseTheKubernetesCA(t *testing.T) {
 	t.Parallel()
 
 	cluster, err := talossim.NewCluster("holzkube", "https://192.168.0.110:6443")
@@ -81,41 +69,95 @@ func TestTheDocumentSelectionIsNotOrderDependent(t *testing.T) {
 		t.Fatalf("build a simulated cluster: %v", err)
 	}
 
-	const first = `apiVersion: v1alpha1
-kind: DiscoveryServiceConfig
-name: default
-enabled: true
----
-`
-	if _, err := deriveSecrets([]byte(first + string(cluster.Config(true)))); err != nil {
-		t.Fatalf("an unknown document BEFORE the machine config broke adoption: %v", err)
+	full := string(cluster.Config(true))
+	v1alpha1, _, found := strings.Cut(full, "\n---")
+	if !found {
+		t.Fatal("the generated configuration is a single document; this test's premise is gone")
+	}
+
+	// Probed on the provider rather than through deriveSecrets, because what
+	// the v1alpha1 document alone produces is not a poor bundle: machinery
+	// v1.14 PANICS on it. Asserting the absent accessor states the same fact
+	// without depending on a crash staying a crash.
+	only, err := configloader.NewFromBytes([]byte(v1alpha1))
+	if err != nil {
+		t.Fatalf("the v1alpha1 document alone does not even load: %v", err)
+	}
+	if only.RawV1Alpha1() == nil {
+		t.Fatal("the cut did not produce the v1alpha1 document; this test is measuring nothing")
+	}
+	if only.K8sAPIServerCAConfig() != nil {
+		t.Fatal("the v1alpha1 document alone still carries the Kubernetes API-server CA, so " +
+			"selecting it would be safe after all and the whole-file parse is over-cautious")
+	}
+
+	// And the whole file does carry it, so the difference is the documents and
+	// not something about this fixture.
+	whole, err := configloader.NewFromBytes(cluster.Config(true))
+	if err != nil {
+		t.Fatalf("the whole configuration does not load: %v", err)
+	}
+	if whole.K8sAPIServerCAConfig() == nil {
+		t.Fatal("the whole configuration carries no Kubernetes API-server CA either")
 	}
 }
 
-// TestAConfigWithNoMachineDocumentIsTheWrongNode.
+// TestAnUnknownDocumentIsNamedAsTooNew.
 //
-// The refusal has to stay the one D-05 owns — "that node cannot be adopted
-// through", a 400 naming the remedy — rather than becoming a parse failure and
-// therefore an Internal error, which is what the operator saw and could do
-// nothing with.
-func TestAConfigWithNoMachineDocumentIsTheWrongNode(t *testing.T) {
+// The operator's answer has to be actionable, and the action is "upgrade
+// holzkube-manager" — not "Internal error", and not a bundle derived from the
+// parts this build happened to recognise.
+func TestAnUnknownDocumentIsNamedAsTooNew(t *testing.T) {
 	t.Parallel()
 
-	const onlyTyped = `apiVersion: v1alpha1
-kind: DiscoveryServiceConfig
+	cluster, err := talossim.NewCluster("holzkube", "https://192.168.0.110:6443")
+	if err != nil {
+		t.Fatalf("build a simulated cluster: %v", err)
+	}
+
+	// A kind no machinery has or will have, so this keeps reproducing the case
+	// after the pin is raised again. Naming a real future kind would make the
+	// test expire the moment that kind shipped.
+	const fromTheFuture = `---
+apiVersion: v1alpha1
+kind: ConfigFromAVersionThatDoesNotExistYet
 name: default
-enabled: true
 `
-	_, err := deriveSecrets([]byte(onlyTyped))
+	_, err = deriveSecrets([]byte(string(cluster.Config(true)) + fromTheFuture))
 	if err == nil {
-		t.Fatal("a configuration with no machine document was accepted")
+		t.Fatal("a document this build cannot read was accepted")
 	}
-	if !strings.Contains(err.Error(), "no v1alpha1 machine configuration") {
-		t.Errorf("the refusal does not name what is missing: %v", err)
+	if !errors.Is(err, talos.ErrUnsupportedVersion) {
+		t.Fatalf("an unreadable document is not reported as an unsupported Talos: %v", err)
 	}
-	// The sentinel is what the HTTP layer maps onto a 400 rather than a 500.
-	if !isNotControlPlane(err) {
-		t.Errorf("the refusal is not ErrNotControlPlane, so it would reach the "+
-			"operator as Internal error: %v", err)
+	if !strings.Contains(err.Error(), "ConfigFromAVersionThatDoesNotExistYet") {
+		t.Errorf("the refusal does not name the document that could not be read: %v", err)
+	}
+	if !strings.Contains(err.Error(), talos.MaxSupportedVersion) {
+		t.Errorf("the refusal does not say which versions this build was made for: %v", err)
+	}
+}
+
+// TestAWorkerIsRefusedWithoutDerivingAnything.
+//
+// machinery v1.14 made this load-bearing rather than tidy. Deriving a bundle
+// from a worker's configuration PANICS there — NewBundleFromConfig reads
+// c.K8sAPIServerCAConfig().IssuingCA() and a worker has no API-server CA — so
+// asking the configuration what it is has to happen first. On a running
+// instance the difference is a crash where a refusal belongs.
+func TestAWorkerIsRefusedWithoutDerivingAnything(t *testing.T) {
+	t.Parallel()
+
+	cluster, err := talossim.NewCluster("holzkube", "https://192.168.0.110:6443")
+	if err != nil {
+		t.Fatalf("build a simulated cluster: %v", err)
+	}
+
+	_, err = deriveSecrets(cluster.Config(false))
+	if !errors.Is(err, ErrNotControlPlane) {
+		t.Fatalf("a worker was not refused as one: %v", err)
+	}
+	if !strings.Contains(err.Error(), "worker") {
+		t.Errorf("the refusal does not tell the operator to name a control-plane node: %v", err)
 	}
 }

@@ -1032,6 +1032,17 @@ func applyMode(name string) (machine.ApplyConfigurationRequest_Mode, bool) {
 	case "no-reboot":
 		return machine.ApplyConfigurationRequest_NO_REBOOT, true
 	case "reboot":
+		// Deprecated upstream in favour of AUTO or NO_REBOOT, and kept anyway,
+		// because this is a translation table and not a default. The operator
+		// asked for an unconditional reboot; AUTO means "reboot only if the
+		// change needs one", which is a different operation. Mapping one onto
+		// the other would quietly answer a question nobody asked.
+		//
+		// What upstream is actually deprecating is the *zero value*: REBOOT is
+		// enum 0, so a client that sends no mode at all gets an unconditional
+		// reboot. Every mode this table produces is explicit, so that hazard
+		// does not exist here.
+		//nolint:staticcheck // SA1019: see above -- an explicit reboot is not AUTO
 		return machine.ApplyConfigurationRequest_REBOOT, true
 	case "staged":
 		return machine.ApplyConfigurationRequest_STAGED, true

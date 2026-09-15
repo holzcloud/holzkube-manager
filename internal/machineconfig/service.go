@@ -317,7 +317,13 @@ func validate(raw []byte) (bool, []string) {
 	// one whose requirements a metal node also meets, so a configuration that
 	// passes here passes everywhere, and one that fails is wrong regardless of
 	// where it would run.
-	warnings, err := provider.Validate(validationMode{})
+	// ValidateAsClient and not Validate, and machinery v1.14 deprecating the
+	// latter is what made the distinction visible rather than what created it.
+	// Validate is the in-Talos variant: it is allowed to check things that are
+	// only knowable on the node itself. This process runs beside the cluster
+	// and never on it, so asking the node's question here can only produce a
+	// verdict about a machine that is not this one.
+	warnings, err := provider.ValidateAsClient(validationMode{})
 	messages := append([]string(nil), warnings...)
 	if err != nil {
 		messages = append(messages, err.Error())
