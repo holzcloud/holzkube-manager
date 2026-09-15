@@ -4,6 +4,7 @@ import {
   forgetSudoIntent,
   ResumeAfterProvider,
   rememberSudoIntent,
+  SudoFailureNotice,
 } from '@/components/ResumeAfterProvider'
 
 const navigate = vi.fn()
@@ -80,5 +81,69 @@ describe('ResumeAfterProvider', () => {
       path: '/settings',
       at: expect.any(Number),
     })
+  })
+})
+
+/**
+ * The three refusals, and the screen that used to be a page of JSON.
+ *
+ * The operator hit oidc.no-auth-time three times on their own installation.
+ * Each attempt ended on a problem document the browser rendered as raw JSON in
+ * the address bar -- the failSignIn comment names that exact outcome as "where
+ * this flow has actually left people standing", and the sudo flow had been
+ * deliberately left out of the fix. They could not tell which refusal it was,
+ * and the two that matter are repaired from different places: one is a claim
+ * the provider does not emit, the other is the provider declining to re-prompt.
+ */
+describe('SudoFailureNotice', () => {
+  function withQuery(search: string) {
+    window.history.replaceState({}, '', `/${search}`)
+  }
+
+  afterEach(() => {
+    window.history.replaceState({}, '', '/')
+  })
+
+  it('names the missing claim, and says it cannot succeed by retrying', () => {
+    withQuery('?sudo_error=oidc.no-auth-time')
+
+    render(<SudoFailureNotice />)
+
+    const text = screen.getByText(/auth_time/).textContent ?? ''
+    expect(text).toContain('however many times')
+    expect(text).toContain('local account')
+  })
+
+  it('tells the other two apart', () => {
+    withQuery('?sudo_error=oidc.not-fresh')
+    const stale = render(<SudoFailureNotice />)
+    expect(stale.container.textContent).toContain('did not ask you again')
+    stale.unmount()
+
+    withQuery('?sudo_error=oidc.other-identity')
+    const other = render(<SudoFailureNotice />)
+    expect(other.container.textContent).toContain('different account')
+  })
+
+  it('still says something for a code it does not know', () => {
+    withQuery('?sudo_error=oidc.invented-later')
+
+    render(<SudoFailureNotice />)
+
+    const text = screen.getByText(/oidc.invented-later/).textContent ?? ''
+    expect(text).toContain('Nothing was confirmed')
+  })
+
+  it('takes the code out of the address bar, so a reload does not resurrect it', () => {
+    withQuery('?sudo_error=oidc.not-fresh')
+
+    render(<SudoFailureNotice />)
+
+    expect(window.location.search).toBe('')
+  })
+
+  it('shows nothing when the operator did not come back from a refusal', () => {
+    render(<SudoFailureNotice />)
+    expect(screen.queryByText(/identity provider/i)).toBeNull()
   })
 })
