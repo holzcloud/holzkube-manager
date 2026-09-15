@@ -85,6 +85,22 @@ func (s *Service) recordMachine(
 		saved, err := s.deps.Store.Machines().Put(ctx, apply(rec))
 		switch {
 		case err == nil:
+			// A machine in the inventory has an observer. The invariant lives
+			// HERE, at the one place machines enter the inventory, and not at
+			// each caller -- because as a per-caller obligation it was already
+			// forgotten once, by the path that matters most.
+			//
+			// Adoption recorded every member of the cluster it had just
+			// authenticated to and asked nobody to look at any of them, so a
+			// freshly imported cluster read "not answering" for every node
+			// until the daemon happened to restart and Start picked them up
+			// out of the store. TestAnAdoptedNodeIsObservedWithoutARestart is
+			// that case.
+			//
+			// supervise is idempotent and refuses before Start, so recording a
+			// machine while the service is not running is still the no-op it
+			// was; the warning it logs is the honest one.
+			s.supervise(saved.ID)
 			return saved, nil
 		case errors.Is(err, store.ErrConflict):
 			continue
@@ -155,15 +171,22 @@ func (s *Service) Start(ctx context.Context) error {
 	return nil
 }
 
-// Supervise starts an observer for one machine if it does not already have
-// one. It is what the adoption path calls for each machine it just recorded.
+// Supervise starts an observer for one machine if it does not already have one.
+//
+// It is no longer what any handler calls. recordMachine supervises what it
+// records, so the invariant "a machine in the inventory has an observer" is
+// held at the single place machines enter the inventory rather than by each
+// caller remembering to ask -- which is how the adoption path came to record a
+// whole cluster and ask for none of them. This stays exported for the one thing
+// a caller can legitimately want that recording does not express: starting an
+// observer for a machine that is already on disk.
 //
 // It takes no context on purpose. A supervisor's lifetime is the service's,
-// fixed by Start; the caller here is an HTTP handler, and a handler that
-// supplied the context would be supplying its own request's -- which cancels
-// when the response is written, leaving the node that was just adopted with a
-// supervisor that ran for a few milliseconds and stopped. That is what this
-// signature used to allow and what the handler actually did.
+// fixed by Start; an HTTP handler that supplied the context would be supplying
+// its own request's -- which cancels when the response is written, leaving the
+// node that was just adopted with a supervisor that ran for a few milliseconds
+// and stopped. That is what this signature used to allow and what a handler
+// actually did.
 func (s *Service) Supervise(id model.MachineID) {
 	s.supervise(id)
 }

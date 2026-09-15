@@ -656,7 +656,6 @@ func addMachine(d httpapi.Deps) http.HandlerFunc {
 			httpapi.WriteInternal(w, r, d.Logger, err)
 			return
 		}
-		d.Inventory.Supervise(rec.ID)
 		writeJSON(w, http.StatusCreated, view)
 	}
 }
