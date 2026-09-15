@@ -49,6 +49,17 @@ var clientNotCalledByAScreen = map[string]string{
 }
 
 var (
+	// A path constant the browser NAVIGATES to rather than fetches: the OIDC
+	// flows leave the page, so they are declared as strings and never passed to
+	// send(). The member sweep above cannot see them, and that blindness had a
+	// live victim -- oidcPath.reauthenticate, the whole of how an operator who
+	// signs in through an identity provider confirms a destructive action, was
+	// declared and called by nothing. On an SSO-only host the password routes
+	// are refused outright, so every destructive action in the product was
+	// unreachable behind a form that could not be completed.
+	navGroup  = regexp.MustCompile(`^export const (\w+) = \{`)
+	navMember = regexp.MustCompile(`^  (\w+):\s*'(/api/v1/[^']+)'`)
+
 	clientGroup  = regexp.MustCompile(`^  (\w+):\s*\{`)
 	clientMember = regexp.MustCompile(`^    (\w+):\s*(?:async\s*)?[(<]`)
 	clientSend   = regexp.MustCompile(`send(?:JSON|Blob|Text|YAML)?\(\s*'(GET|POST|PUT|PATCH|DELETE)'\s*,\s*[` + "`" + `']([^` + "`" + `']+)`)
@@ -126,6 +137,69 @@ func TestNoStaleClientExemptions(t *testing.T) {
 			t.Errorf("clientNotCalledByAScreen exempts %q on the grounds that no screen calls "+
 				"it, and a screen now does. Delete the exemption.", member)
 		}
+	}
+}
+
+// navigationPaths maps group.member to the route it names, for paths the
+// browser is sent to rather than fetching.
+func navigationPaths(t *testing.T) map[string]string {
+	t.Helper()
+
+	paths := map[string]string{}
+	var group string
+	for _, line := range strings.Split(readClientSource(t), "\n") {
+		if m := navGroup.FindStringSubmatch(line); m != nil {
+			group = m[1]
+			continue
+		}
+		if strings.HasPrefix(line, "}") {
+			group = ""
+			continue
+		}
+		if m := navMember.FindStringSubmatch(line); m != nil && group != "" {
+			paths[group+"."+m[1]] = m[2]
+		}
+	}
+	return paths
+}
+
+// TestEveryNavigationPathIsUsedByAScreen is the same use question for the paths
+// the browser is sent to.
+//
+// Kept apart from the member sweep rather than folded into it, because the two
+// establish different things and a reader who sees one name should not have to
+// guess whether the other is covered. The blind spot this closes was found by
+// the operator, again: they signed in through their identity provider, hit a
+// destructive action, and were handed a password field for an account they do
+// not have.
+func TestEveryNavigationPathIsUsedByAScreen(t *testing.T) {
+	t.Parallel()
+
+	paths := navigationPaths(t)
+	if len(paths) == 0 {
+		t.Fatal("found no navigation path constants in the API client; this guard reads " +
+			"api.ts by indentation and a client written differently would be read as empty, " +
+			"which is this guard passing by finding nothing")
+	}
+
+	screens := frontendOutsideTheClient(t)
+
+	var unused []string
+	for member, path := range paths {
+		group, name, _ := strings.Cut(member, ".")
+		used := regexp.MustCompile(`\b` + regexp.QuoteMeta(group) + `\s*\.\s*` + regexp.QuoteMeta(name) + `\b`)
+		if !used.MatchString(screens) {
+			unused = append(unused, member+" -- "+path)
+		}
+	}
+	sort.Strings(unused)
+
+	if len(unused) > 0 {
+		t.Errorf("the API client names these routes for the browser to navigate to, and no "+
+			"screen uses them:\n  %s\n\n"+
+			"The path is in web/src, so the reachability guard beside this one is satisfied, "+
+			"and no send() carries it, so the member sweep cannot see it either. Nobody can "+
+			"get there.", strings.Join(unused, "\n  "))
 	}
 }
 
