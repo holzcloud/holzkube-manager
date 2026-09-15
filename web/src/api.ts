@@ -70,6 +70,39 @@ export const systemStatusSchema = z.object({
 
 export type SystemStatus = z.infer<typeof systemStatusSchema>
 
+/**
+ * What this build is, and what changed in it.
+ *
+ * One response for both halves, because they are one claim. A version fetched
+ * from one place and a changelog from another is how a "what's new" panel comes
+ * to describe a release nobody is running.
+ */
+export const releaseChangeSchema = z.object({
+  /** Decoration. Nothing branches on it, and a reader with no emoji font loses
+   *  nothing the text does not already say. */
+  icon: z.string().default(''),
+  text: z.string(),
+})
+
+export const releaseSchema = z.object({
+  version: z.string(),
+  /** The first two components — "v1.16" for "v1.16.0-beta.2". Resolved by the
+   *  server rather than split here: doing it in both places is how the two come
+   *  to disagree about a version with a suffix. */
+  series: z.string(),
+  date: z.string().default(''),
+  changes: z.array(releaseChangeSchema).default([]),
+})
+
+export const versionSchema = z.object({
+  version: z.string().default(''),
+  releases: z.array(releaseSchema).default([]),
+})
+
+export type ReleaseChange = z.infer<typeof releaseChangeSchema>
+export type Release = z.infer<typeof releaseSchema>
+export type VersionInfo = z.infer<typeof versionSchema>
+
 export const auditRecordSchema = z.object({
   seq: z.number(),
   ts: z.string(),
@@ -1699,6 +1732,10 @@ export const applyResultSchema = z.object({
 })
 
 export const api = {
+  /** The running build and its changelog. Behind the session gate, which is
+   *  where the sidebar that shows it already is. */
+  version: (): Promise<VersionInfo> => sendJSON('GET', '/api/v1/system/version', versionSchema),
+
   status: (): Promise<SystemStatus> =>
     sendJSON('GET', '/api/v1/system/status', systemStatusSchema, undefined, {
       interceptUnauthenticated: false,

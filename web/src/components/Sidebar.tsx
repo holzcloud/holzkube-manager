@@ -13,6 +13,7 @@ import {
   Settings,
 } from 'lucide-react'
 import { SourceNotice } from '@/components/SourceNotice'
+import { WhatsNew } from '@/components/WhatsNew'
 import { cn } from '@/lib/utils'
 
 /**
@@ -174,8 +175,15 @@ export function Sidebar() {
         </Link>
       ))}
 
+      {/* The build this instance is running, and the panel behind it. Above the
+          licence notice and below everything else, because it is the answer to
+          "what am I looking at" rather than a place to navigate to. */}
+      <div className="mt-auto px-2 pt-3">
+        <WhatsNew />
+      </div>
+
       {/* AGPL section 13: the running instance has to offer its own source. */}
-      <SourceNotice className="mt-auto px-2 pt-3 text-xs text-sidebar-foreground/60" />
+      <SourceNotice className="px-2 pt-1 text-xs text-sidebar-foreground/60" />
     </nav>
   )
 }

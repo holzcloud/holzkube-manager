@@ -448,6 +448,9 @@ func run(args []string) error {
 		Auth:       authSvc,
 		Logger:     logger,
 		SudoWindow: cfg.SudoWindow,
+		// The same variable --version prints and the support bundle records,
+		// so the number in the sidebar cannot disagree with either.
+		Version: version,
 		// Inside the literal, deliberately. Deps is copied by value into each
 		// …Routes(deps) call below, so a field assigned after this literal is
 		// the zero value inside every handler closure -- a nil dependency with

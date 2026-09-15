@@ -137,6 +137,12 @@ type Deps struct {
 	Logger     *slog.Logger
 	SudoWindow time.Duration
 
+	// Version is the release this binary was built from, as the composition
+	// root knows it. Empty in a test harness that does not care; the version
+	// route then serves an empty string rather than inventing one, because a
+	// made-up version is worse than a missing one.
+	Version string
+
 	// Factory is the Talos Image Factory client the schematic routes speak
 	// through. It is nil in a deployment that serves no schematic routes, and
 	// those handlers answer 502 rather than panicking if it ever is.
