@@ -73,6 +73,27 @@ export function WhatsNew({ className }: { className?: string }) {
 }
 
 /**
+ * Whether two version strings name the same release, ignoring a leading v.
+ *
+ * They disagree about it, and both are right where they are. goreleaser stamps
+ * the binary with its `{{ .Version }}`, which is the tag with the v stripped,
+ * so a released build reports `1.16.0`; the changelog spells versions exactly
+ * as the git tag does, `v1.16.0`, because that is what the release pipeline
+ * checks the file against before it creates the tag. Neither can simply adopt
+ * the other's spelling: deploy/holzkube-manager-update.sh compares the tag with
+ * its v stripped against what the binary reports, so a binary that reported the
+ * v would look out of date on every single run and reinstall itself forever.
+ *
+ * So the panel normalises instead of insisting. This was found by driving the
+ * released artifact rather than a development build -- a dev build reports
+ * `v1.16.0-3-g1234-dirty` from git describe, which matches no release and
+ * therefore hid the mismatch behind a case that is supposed to match nothing.
+ */
+function sameVersion(a: string, b: string): boolean {
+  return a.replace(/^v/, '') === b.replace(/^v/, '')
+}
+
+/**
  * The panel itself, exported so it can be rendered in a test without a query
  * client, a session and a server behind it.
  */
@@ -109,7 +130,7 @@ export function ReleaseNotes({
   // The series the running build belongs to, so the panel opens on what the
   // operator is actually running rather than on whatever happens to be first.
   // They differ the moment somebody opens this on a host that is behind.
-  const runningSeries = releases.find((r) => r.version === version)?.series
+  const runningSeries = releases.find((r) => sameVersion(r.version, version))?.series
   const [selected, setSelected] = useState<string | null>(null)
   const active = selected ?? runningSeries ?? series[0]?.name ?? null
   const shown = series.find((s) => s.name === active)
@@ -164,14 +185,14 @@ export function ReleaseNotes({
                 <span
                   className={cn(
                     'rounded px-2 py-0.5 text-sm font-medium',
-                    release.version === version
+                    sameVersion(release.version, version)
                       ? 'bg-primary text-primary-foreground'
                       : 'bg-muted text-muted-foreground',
                   )}
                 >
                   {release.version}
                 </span>
-                {release.version === version && (
+                {sameVersion(release.version, version) && (
                   <span className="text-xs text-muted-foreground">running here</span>
                 )}
                 <span className="text-xs text-muted-foreground">
