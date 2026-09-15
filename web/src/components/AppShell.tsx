@@ -3,6 +3,7 @@ import { CertificateBanner } from '@/components/CertificateBanner'
 import { ChainBannerContainer } from '@/components/ChainBanner'
 import { DryRunBannerContainer } from '@/components/DryRunBanner'
 import { Header } from '@/components/Header'
+import { ResumeAfterProvider } from '@/components/ResumeAfterProvider'
 import { Sidebar } from '@/components/Sidebar'
 import { useSession } from '@/hooks/useSession'
 
@@ -52,6 +53,12 @@ export function AppShell() {
           every node in that cluster goes unreachable in the same second, and
           the operator who was not warned reads that as a dead cluster (D-23). */}
       <CertificateBanner className="px-4 pt-2" />
+
+      {/* And a fourth: what the operator was doing before the identity
+          provider took the page away. It belongs here rather than on the
+          screen the action started on, because the provider hands the browser
+          back to the dashboard and that is where they are standing. */}
+      <ResumeAfterProvider className="mx-4 mt-2" />
 
       <div className="flex min-h-0 flex-1">
         <Sidebar />
