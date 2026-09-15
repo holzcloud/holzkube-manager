@@ -86,6 +86,90 @@ export function forgetSudoIntent(): void {
  * The banner. It states plainly that nothing was done, because the one thing an
  * operator must not have to guess at is whether a destructive action ran.
  */
+/**
+ * What the three sudo refusals mean, and who fixes each.
+ *
+ * They used to be one sentence behind a problem document the browser rendered
+ * as raw JSON in the address bar. An operator met that three times in a row on
+ * their own cluster, each time on a page they had no reason to read as an
+ * error, and could not tell which refusal they were looking at -- the two that
+ * matter need repairs from different places.
+ */
+const SUDO_ERRORS: Record<string, { title: string; detail: string }> = {
+  'oidc.no-auth-time': {
+    title: 'Your identity provider does not say when it last authenticated you',
+    detail:
+      'Confirming a destructive action means proving you were asked again just now, and the only ' +
+      'thing that proves it is the auth_time claim in the ID token. It is optional in OIDC, and ' +
+      'your provider is not sending it — so this confirmation cannot succeed however many times ' +
+      'you try. Enable auth_time in the provider’s ID-token claims for this application. Until ' +
+      'then, sign in with the local account on the local network to confirm destructive actions.',
+  },
+  'oidc.not-fresh': {
+    title: 'Your identity provider did not ask you again',
+    detail:
+      'It was asked to re-authenticate you and answered with an older session instead. Accepting ' +
+      'that would make this confirmation a redirect with nothing behind it. Sign out at the ' +
+      'provider first and try again, or allow it to re-prompt for this application.',
+  },
+  'oidc.other-identity': {
+    title: 'A different account came back',
+    detail:
+      'The re-authentication was completed by an account other than the one signed in here. ' +
+      'Nothing was confirmed. Sign out at the provider and sign in as the same account.',
+  },
+}
+
+/** Reads ?sudo_error= once and takes it out of the address bar. */
+function useSudoError(): string | null {
+  const [code, setCode] = useState<string | null>(null)
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    const found = params.get('sudo_error')
+    if (found === null) {
+      return
+    }
+    setCode(found)
+    // Taken out of the URL so a reload does not resurrect a refusal the
+    // operator has already read and acted on.
+    params.delete('sudo_error')
+    const rest = params.toString()
+    window.history.replaceState({}, '', window.location.pathname + (rest ? `?${rest}` : ''))
+  }, [])
+
+  return code
+}
+
+export function SudoFailureNotice({ className }: { className?: string }) {
+  const code = useSudoError()
+  const [dismissed, setDismissed] = useState(false)
+
+  if (code === null || dismissed) {
+    return null
+  }
+
+  const known = SUDO_ERRORS[code]
+
+  return (
+    <div
+      className={`rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm ${className ?? ''}`}
+    >
+      <p className="font-medium text-foreground">
+        {known?.title ?? 'The confirmation with your identity provider was refused'}
+      </p>
+      <p className="mt-1 text-muted-foreground">
+        {known?.detail ??
+          `The provider’s answer was refused with the code ${code}. Nothing was confirmed and ` +
+            'nothing ran. The server log carries the reason.'}
+      </p>
+      <Button size="sm" variant="ghost" className="mt-2" onClick={() => setDismissed(true)}>
+        Dismiss
+      </Button>
+    </div>
+  )
+}
+
 export function ResumeAfterProvider({ className }: { className?: string }) {
   const navigate = useNavigate()
   const [intent, setIntent] = useState<SudoIntent | null>(null)

@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"errors"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"time"
@@ -211,6 +212,26 @@ func failSignIn(w http.ResponseWriter, r *http.Request, code string) {
 // anything the caller may influence.
 const afterAuthFailure = "/login"
 
+// failSudo hands a refused re-authentication back to the application instead of
+// leaving the operator on a problem document.
+//
+// The sign-in flow already does this, and the comment above failSignIn says why:
+// a problem document reached by NAVIGATION renders as raw JSON in the address
+// bar, "which is where this flow has actually left people standing". The sudo
+// flow was deliberately excluded from that on the grounds that its caller is
+// already authenticated and /login is the wrong destination -- which is true,
+// and did not make the JSON any more readable. An operator met exactly that: a
+// destructive action refused three times, each ending on a page of JSON they
+// had no reason to read as an error.
+//
+// It goes to afterAuth rather than /login because the session is fine; only the
+// window is shut. The code rides in the query string so the page can say which
+// of the three refusals this was, each of which has a different remedy and a
+// different person to carry it out.
+func failSudo(w http.ResponseWriter, r *http.Request, code string) {
+	http.Redirect(w, r, afterAuth+"?sudo_error="+url.QueryEscape(code), http.StatusFound)
+}
+
 func oidcCallback(d httpapi.Deps, w http.ResponseWriter, r *http.Request) {
 	sm := d.Auth.Sessions()
 	flow := oidc.FlowState{
@@ -394,8 +415,9 @@ func completeSudo(d httpapi.Deps, w http.ResponseWriter, r *http.Request, identi
 	// a second operator's completed flow would open the sudo window on the
 	// first one's session.
 	if !u.HasIdentityBinding() || u.Issuer != d.OIDC.Issuer() || u.Subject != identity.Subject {
-		httpapi.WriteProblem(w, r, httpapi.Forbidden("oidc.other-identity",
-			"The re-authentication was completed by a different account than the one signed in."))
+		d.Logger.Warn("a sudo re-authentication came back as a different account than the one signed in",
+			slog.String("signed-in", u.Username))
+		failSudo(w, r, "oidc.other-identity")
 		return
 	}
 
@@ -403,9 +425,33 @@ func completeSudo(d httpapi.Deps, w http.ResponseWriter, r *http.Request, identi
 	// auth_time is where it says whether it did. A provider that reused an
 	// existing session answers with an old timestamp, and accepting that would
 	// make the sudo gate a redirect with no proof behind it.
+	//
+	// THE TWO CAUSES ARE TOLD APART because they need different repairs from
+	// different people, and this used to answer both with one sentence. A
+	// missing claim is the provider's configuration -- auth_time is OPTIONAL in
+	// OIDC Core unless it is asked for, so a provider that never sends it makes
+	// this gate permanently impassable however often the operator tries. An
+	// auth_time that is merely old is the provider declining to re-prompt, which
+	// the operator fixes by signing out there first. That distinction was
+	// missing when an operator met this on real hardware: three round trips,
+	// three identical 403s, nothing in the journal, and no way to tell which of
+	// the two they were looking at.
+	if identity.AuthTime.IsZero() {
+		d.Logger.Warn("the identity provider sent no auth_time, so a re-authentication cannot be proven",
+			slog.String("issuer", d.OIDC.Issuer()),
+			slog.String("remedy", "the provider must emit the auth_time claim in its ID token; "+
+				"it is optional in OIDC Core and this gate cannot work without it"))
+		failSudo(w, r, "oidc.no-auth-time")
+		return
+	}
 	if !identity.FreshlyAuthenticated(time.Now()) {
-		httpapi.WriteProblem(w, r, httpapi.Forbidden("oidc.not-fresh",
-			"The identity provider did not re-authenticate you. Try again, or sign out there first."))
+		d.Logger.Warn("the identity provider did not re-authenticate for a sudo round trip",
+			slog.String("issuer", d.OIDC.Issuer()),
+			slog.Time("auth_time", identity.AuthTime),
+			slog.Duration("age", time.Since(identity.AuthTime)),
+			slog.String("remedy", "the provider reused an existing session despite prompt=login; "+
+				"sign out there first, or allow it to re-prompt"))
+		failSudo(w, r, "oidc.not-fresh")
 		return
 	}
 
