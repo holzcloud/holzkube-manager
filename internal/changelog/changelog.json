@@ -1,5 +1,27 @@
 [
   {
+    "version": "v1.16.4",
+    "date": "2026-09-15",
+    "changes": [
+      {
+        "icon": "👁️",
+        "text": "A cluster you import is now actually watched. Adoption recorded every node it found and asked nobody to look at any of them, so a freshly imported cluster read \"not answering\" for every machine — including the control plane the import had just authenticated to, because adoption proves it can reach that node before it stores anything. The health column was telling you nothing was there, about a node it had just spoken to."
+      },
+      {
+        "icon": "🔁",
+        "text": "It took a restart to fix itself, and that is why this looked intermittent. Observers were started for whatever was on disk when the daemon came up, so a cluster imported afterwards stayed invisible until the next restart happened to pick it up. Now a machine gets its observer at the moment it enters the inventory, which is the one place that cannot be forgotten."
+      },
+      {
+        "icon": "🧪",
+        "text": "The guard for this existed and was aimed one step to the left: it proved that the observer a handler starts outlives the request that started it, after an earlier bug ended them early. Nobody asked whether the import path started one at all. The new test reproduces the operator's own order — daemon running, cluster imported after — and checks the screen rather than the internals."
+      },
+      {
+        "icon": "🔎",
+        "text": "Three drift guards that compare the web interface against the server no longer accept a renamed leftover. Each matched a name wherever it appeared in the text, so a constant renamed by appending to it — REFUSED_RANGES_LEGACY, or a warning code gaining a suffix — kept them green over exactly the drift they exist to catch. What they still cannot see is now written down and measured, one entry per mechanism, instead of claimed to be nothing."
+      }
+    ]
+  },
+  {
     "version": "v1.16.3",
     "date": "2026-09-15",
     "changes": [
