@@ -1,5 +1,23 @@
 [
   {
+    "version": "v1.16.10",
+    "date": "2026-09-15",
+    "changes": [
+      {
+        "icon": "🕰️",
+        "text": "A refused confirmation now says which refusal it was, and who fixes it. Confirming a destructive action through an identity provider means proving it asked you again just now, and the only proof is the auth_time claim — which is OPTIONAL in OIDC. A provider that does not send it makes this permanently impassable, however often you try, and that read exactly like a provider that merely declined to re-prompt. The two are told apart now: one is the provider's claim configuration, the other is signing out there first."
+      },
+      {
+        "icon": "📄",
+        "text": "And you are no longer left on a page of raw JSON. A problem document reached by navigation renders in the address bar — the sign-in flow was fixed for that long ago and the confirmation flow had been deliberately left out, on the correct grounds that the sign-in page is the wrong destination for somebody already signed in. Correct, and no more readable. It now comes back into the application with an explanation."
+      },
+      {
+        "icon": "🧾",
+        "text": "Both refusals write a line naming the issuer, the auth_time received, how old it was, and the remedy. The server knew all of this and wrote none of it down — the same gap, one day and one subsystem apart."
+      }
+    ]
+  },
+  {
     "version": "v1.16.9",
     "date": "2026-09-15",
     "changes": [

@@ -3,7 +3,7 @@ import { CertificateBanner } from '@/components/CertificateBanner'
 import { ChainBannerContainer } from '@/components/ChainBanner'
 import { DryRunBannerContainer } from '@/components/DryRunBanner'
 import { Header } from '@/components/Header'
-import { ResumeAfterProvider } from '@/components/ResumeAfterProvider'
+import { ResumeAfterProvider, SudoFailureNotice } from '@/components/ResumeAfterProvider'
 import { Sidebar } from '@/components/Sidebar'
 import { useSession } from '@/hooks/useSession'
 
@@ -58,6 +58,11 @@ export function AppShell() {
           provider took the page away. It belongs here rather than on the
           screen the action started on, because the provider hands the browser
           back to the dashboard and that is where they are standing. */}
+      {/* The refusal comes first: it says why nothing happened, and the
+          banner below only says what it was. Reading them the other way round
+          would tell the operator to try again before telling them it cannot
+          currently work. */}
+      <SudoFailureNotice className="mx-4 mt-2" />
       <ResumeAfterProvider className="mx-4 mt-2" />
 
       <div className="flex min-h-0 flex-1">
