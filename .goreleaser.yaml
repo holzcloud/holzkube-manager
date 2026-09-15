@@ -109,4 +109,21 @@ changelog:
       - '^chore\('
 
 release:
-  draft: true
+  # Published, not a draft, and both halves of that are load-bearing for
+  # deploy/holzkube-manager-update.sh rather than a matter of taste.
+  #
+  # The script reads /releases/latest, and that endpoint skips drafts AND
+  # prereleases. A draft was the right default while a release was something a
+  # person cut by hand and then looked at; it is the wrong one now that the
+  # workflow cuts the release only after both gates are green on exactly the
+  # commit being released, because the thing it holds back is no longer
+  # unreviewed -- it is just unreachable.
+  #
+  # prerelease is therefore left at its default of false ON PURPOSE, including
+  # for a -beta tag. Marking a beta as a prerelease reads as the careful choice
+  # and is the one that breaks the update path: every host running the script
+  # would go on installing the last non-prerelease build and say "aktuell",
+  # which is the kind of wrong that looks like nothing happening. If betas
+  # should ever stop being "latest", the script has to learn to ask for them
+  # first -- the two settings move together or not at all.
+  draft: false
