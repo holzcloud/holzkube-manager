@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { type FormEvent, useCallback, useEffect, useRef, useState } from 'react'
 import { api, type Me, oidcPath, onSessionExpired, onSudoRequired, type SudoChallenge } from '@/api'
+import { rememberSudoIntent } from '@/components/ResumeAfterProvider'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -170,6 +171,12 @@ export function SudoDialog() {
                   // of the page -- the defect this file already records once,
                   // with no error and no toast, only a spinner that never
                   // stops. Refused is the honest answer: nothing was confirmed.
+                  // Remembered BEFORE settling, because settling clears the
+                  // challenge this sentence comes from.
+                  rememberSudoIntent(
+                    challenge?.action ?? 'The action you started',
+                    window.location.pathname,
+                  )
                   settle(false)
                   window.location.assign(oidcPath.reauthenticate)
                 }}

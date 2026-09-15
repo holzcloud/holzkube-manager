@@ -1,5 +1,19 @@
 [
   {
+    "version": "v1.16.9",
+    "date": "2026-09-15",
+    "changes": [
+      {
+        "icon": "🧭",
+        "text": "Coming back from your identity provider no longer loses what you were doing in silence. The trip is a full page navigation, so the request waiting behind the confirmation cannot survive it — correctly, since nothing was confirmed yet. But nothing said so, and an action still sitting there undone is indistinguishable from one that failed. A banner now names what you started, states plainly that it did not run, and takes you back to the screen you started it on."
+      },
+      {
+        "icon": "🔒",
+        "text": "What is remembered is the intent and never the request. Replaying the original request across a page navigation would mean keeping it in browser storage — and for the password change, which is gated the same way, that would be the password. Only the sentence and the screen are kept, for ten minutes, and a test pins that shape against a future change that wants to be more helpful."
+      }
+    ]
+  },
+  {
     "version": "v1.16.8",
     "date": "2026-09-15",
     "changes": [
