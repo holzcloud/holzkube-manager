@@ -1,5 +1,31 @@
 [
   {
+    "version": "v1.16.3",
+    "date": "2026-09-15",
+    "changes": [
+      {
+        "icon": "⬆️",
+        "text": "Built against Talos machinery v1.14, which is what a current cluster actually serves. The previous builds advertised support up to v1.14 while pinning the v1.13.9 library — so this product claimed a Talos whose configuration documents its own library could not read, and the first real cluster it was pointed at failed on exactly that."
+      },
+      {
+        "icon": "📄",
+        "text": "A machine configuration is read whole again. v1.16.2 selected the v1alpha1 document and ignored the rest, reasoning that every secret lives in it. That was true of Talos v1.13 and is false of v1.14, where the Kubernetes API-server CA is a document of its own — so that approach would have derived a bundle with the Kubernetes CA missing and refused a control-plane node as a worker. Confidently wrong, which is worse than the error it replaced."
+      },
+      {
+        "icon": "🆕",
+        "text": "A configuration document this build does not know is now a refusal that names it, says which Talos versions this build was made for, and gives the remedy: upgrade holzkube-manager. Not an Internal error, and not a bundle derived from the parts that happened to be recognised — an unknown document can be the one carrying a secret."
+      },
+      {
+        "icon": "💥",
+        "text": "Adoption cannot crash the daemon on a configuration it is handed. machinery v1.14 dereferences five accessors without checking them, so a worker's configuration — which has no API-server CA — panics rather than returning an empty bundle as v1.13 did. The configuration is now asked what kind of node it is before anything is derived, and all five are checked first."
+      },
+      {
+        "icon": "📡",
+        "text": "Two new guards keep the pin honest, because the operator updates Talos as soon as a release lands. One runs in the build and refuses a supported range wider than the compiled-in machinery can read; the other asks weekly whether a newer stable machinery exists and fails when one does — scheduled rather than opt-in, because this project already has a drift watcher nobody scheduled."
+      }
+    ]
+  },
+  {
     "version": "v1.16.2",
     "date": "2026-09-15",
     "changes": [
