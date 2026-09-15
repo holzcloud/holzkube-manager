@@ -31,3 +31,4 @@ web/node_modules/
 # run. They are diagnostics for one run, not artifacts of the repository.
 web/.vitest-attachments/
 web/src/**/__screenshots__/
+__pycache__/
