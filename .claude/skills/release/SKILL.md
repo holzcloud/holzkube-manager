@@ -76,6 +76,21 @@ itself.
 
 9. **Report the URL**, the tag, and the assets. Not a file.
 
+## Which architecture is the one that matters
+
+The operator runs this on a Raspberry Pi. **linux/arm64 is the production
+target** (see CLAUDE.md).
+
+This session's container is x86_64 with no qemu-user and no binfmt_misc, so an
+arm64 binary cannot be run here at all. Every end-to-end check ever made in this
+repository has therefore been of the amd64 artifact. Say that when reporting a
+release: "verified" without naming the architecture reads as a claim about the
+one the operator actually starts, and it has never been true of it.
+
+What is honestly checkable here for arm64: the archive is present, its checksum
+matches, it contains `holzkube-managerd`, and `file` says ARM aarch64. Check
+those, and say what they do not cover.
+
 ## Two settings that move together or not at all
 
 `.goreleaser.yaml` has `draft: false` and leaves `prerelease` at false, and both
