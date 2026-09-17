@@ -741,6 +741,8 @@ func writeInventoryError(w http.ResponseWriter, r *http.Request, d httpapi.Deps,
 		})
 	case errors.Is(err, inventory.ErrClusterLocked):
 		httpapi.WriteProblem(w, r, httpapi.ClusterLocked(err.Error()))
+	case errors.Is(err, inventory.ErrAlreadyAdopted):
+		httpapi.WriteProblem(w, r, httpapi.Conflict(httpapi.CodeAlreadyAdopted, err.Error()))
 	default:
 		if code, ok := upstreamNodeCode(err); ok {
 			httpapi.WriteProblem(w, r, httpapi.Upstream(code, err.Error()))

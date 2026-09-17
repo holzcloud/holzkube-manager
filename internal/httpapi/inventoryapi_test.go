@@ -126,6 +126,43 @@ func TestAdoptionOverHTTP(t *testing.T) {
 	}
 }
 
+// TestAdoptingTheSameClusterTwiceIsAConflict pins ledger 139 at the HTTP
+// boundary: the refusal carries its own code and names the cluster to forget,
+// rather than arriving as internal.unexpected with nothing an operator can act on.
+func TestAdoptingTheSameClusterTwiceIsAConflict(t *testing.T) {
+	c := newInventoryHarness(t)
+	c.adopt(t)
+
+	resp, raw := c.do(t, http.MethodPost, "/api/v1/clusters/fingerprint",
+		map[string]string{"endpoint": c.sim.Host()})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("fingerprint: %d (%s)", resp.StatusCode, raw)
+	}
+	var fp struct {
+		Fingerprint string `json:"fingerprint"`
+	}
+	if err := json.Unmarshal(raw, &fp); err != nil {
+		t.Fatalf("decode fingerprint: %v (%s)", err, raw)
+	}
+
+	resp, raw = c.do(t, http.MethodPost, "/api/v1/clusters", map[string]string{
+		"name":        "homelab2",
+		"talosconfig": string(c.cluster.Talosconfig),
+		"endpoint":    c.sim.Host(),
+		"fingerprint": fp.Fingerprint,
+	})
+	if resp.StatusCode != http.StatusConflict {
+		t.Fatalf("adopting the same cluster twice: %d (%s), want 409", resp.StatusCode, raw)
+	}
+	p := decodeProblem(t, resp, raw)
+	if p.Code != httpapi.CodeAlreadyAdopted {
+		t.Fatalf("code = %q, want %q", p.Code, httpapi.CodeAlreadyAdopted)
+	}
+	if !strings.Contains(p.Detail, `"homelab"`) {
+		t.Errorf("detail %q does not name the cluster to forget", p.Detail)
+	}
+}
+
 // TestNoClusterResponseCarriesASecret is the structural claim model.Cluster
 // and model.ClusterSecrets are separate entities for.
 //
