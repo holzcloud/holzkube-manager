@@ -114,6 +114,7 @@ function clusterFixture(id: string, name: string) {
     healthy: 3,
     degraded: 0,
     down: 0,
+    checking: 0,
   }
 }
 

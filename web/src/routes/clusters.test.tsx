@@ -39,9 +39,26 @@ const cluster: Cluster = {
   healthy: 3,
   degraded: 0,
   down: 0,
+  checking: 0,
 }
 
 describe('a cluster card', () => {
+  it('does not call a node nobody has asked yet "not answering"', () => {
+    // The operator's screenshot, moments after re-adopting their cluster:
+    // "0 healthy, 0 degraded, 1 not answering" about a node that was watching
+    // seconds later. An observer that has not run yet is not a failure.
+    wrap(<ClusterCard cluster={{ ...cluster, nodes: 1, healthy: 0, down: 0, checking: 1 }} />)
+
+    expect(screen.getByText('0 not answering')).toBeInTheDocument()
+    expect(screen.getByText('1 not checked yet')).toBeInTheDocument()
+  })
+
+  it('says nothing about checking once every node has answered', () => {
+    wrap(<ClusterCard cluster={cluster} />)
+
+    expect(screen.queryByText(/not checked yet/)).not.toBeInTheDocument()
+  })
+
   it('offers the support bundle, because a route with nothing to click is a route nobody reaches', () => {
     wrap(<ClusterCard cluster={cluster} />)
 

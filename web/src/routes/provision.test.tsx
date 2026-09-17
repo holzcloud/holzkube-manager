@@ -203,6 +203,7 @@ describe('the schematic control on the plan step', () => {
               healthy: 3,
               degraded: 0,
               down: 0,
+              checking: 0,
             })),
           })
         }

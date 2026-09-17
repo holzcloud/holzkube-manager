@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"net"
 	"os"
 	"strings"
 	"testing"
@@ -647,5 +648,117 @@ func TestAClusterCannotBeAdoptedTwice(t *testing.T) {
 		if m.Cluster != first.ID {
 			t.Errorf("machine %s belongs to %s after the refused adoption, want %s", m.ID, m.Cluster, first.ID)
 		}
+	}
+}
+
+// TestANodeNobodyHasAskedIsNotCountedAsNotAnswering is the guard for the
+// operator's screenshot taken moments after re-adopting their cluster: "0
+// healthy, 0 degraded, 1 not answering", about a node that was watching a few
+// seconds later. The card counted StageUnknown and StageConnecting as Down.
+//
+// Here the service is never started, so no observer runs and the adopted node
+// stays at StageUnknown for as long as the test looks -- the widest version of
+// the window the operator saw.
+func TestANodeNobodyHasAskedIsNotCountedAsNotAnswering(t *testing.T) {
+	t.Parallel()
+
+	ctx := testContext(t)
+	f := newFixture(t, talossim.Options{ControlPlane: true})
+	f.importCluster(ctx, t)
+
+	clusters, err := f.svc.Clusters(ctx)
+	if err != nil {
+		t.Fatalf("Clusters: %v", err)
+	}
+	if len(clusters) != 1 {
+		t.Fatalf("clusters = %d, want 1", len(clusters))
+	}
+	c := clusters[0]
+	if c.Down != 0 {
+		t.Errorf("Down = %d for a node no observer has asked yet -- the card reads 'not answering' "+
+			"about a node nobody has had an answer from, which is a claim and not an absence of one", c.Down)
+	}
+	if c.Checking != 1 {
+		t.Errorf("Checking = %d, want 1: the node has to be counted somewhere, or the card's "+
+			"conditions stop adding up to its node count", c.Checking)
+	}
+}
+
+// TestAMachineWithNoClusterIsNotDown is the guard for what forgetting a cluster
+// left on the operator's Pi: its machines survive as unassigned records by
+// design, and /metrics then counted every one of them as down, with a WARN
+// reading "store: invalid key: empty".
+//
+// A machine with no cluster has no credentials anybody could ask it with. That
+// is not a machine that failed to answer.
+func TestAMachineWithNoClusterIsNotDown(t *testing.T) {
+	t.Parallel()
+
+	ctx := testContext(t)
+	heartbeat := 200 * time.Millisecond
+	f := newFixtureWith(t, talossim.Options{Hostname: "cp-1", ControlPlane: true, Bootstrapped: true}, heartbeat)
+	if err := f.svc.Start(ctx); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	c := f.importCluster(ctx, t)
+	f.await(ctx, t, 30*time.Second, func(v inventory.MachineView) bool {
+		return v.Stage == health.StageWatching
+	}, "the node never reached watching")
+
+	if err := f.svc.ForgetCluster(ctx, c.ID); err != nil {
+		t.Fatalf("ForgetCluster: %v", err)
+	}
+
+	id := f.onlyMachine(ctx, t)
+	until := time.Now().Add(12 * heartbeat)
+	for time.Now().Before(until) {
+		v, err := f.svc.Machine(ctx, id)
+		if err != nil {
+			t.Fatalf("Machine: %v", err)
+		}
+		if v.Stage == health.StageDown {
+			t.Fatal("a machine whose cluster was forgotten went to down: nothing holds " +
+				"credentials to ask it, and that is not the same as it not answering")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+// TestFingerprintOnThisManagersOwnAddressSaysSo is the guard for the operator's
+// import form: they typed 192.168.0.30, the Pi holzkube-manager runs on, where
+// the node is 192.168.0.110. The answer was "the node is unreachable", which is
+// true and sends a person to check a node that was never asked.
+//
+// Loopback stands in for the Pi's LAN address: both are addresses of the
+// machine this process runs on, which is the property being tested.
+func TestFingerprintOnThisManagersOwnAddressSaysSo(t *testing.T) {
+	t.Parallel()
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	addr, ok := ln.Addr().(*net.TCPAddr)
+	if !ok {
+		t.Fatalf("listener address %v is not TCP", ln.Addr())
+	}
+	closed := addr.Port
+	_ = ln.Close()
+
+	svc := inventory.New(inventory.Deps{
+		Store:  newFixture(t, talossim.Options{ControlPlane: true}).store,
+		Dialer: talos.NewDirectDialer(closed),
+		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+	})
+
+	_, err = svc.Fingerprint(testContext(t), "127.0.0.1")
+	if err == nil {
+		t.Fatal("a fingerprint was read from a closed port")
+	}
+	if _, ok := talos.ErrorKindOf(err); !ok {
+		t.Errorf("the transport classification was lost, so the route stops answering upstream.*: %v", err)
+	}
+	if !strings.Contains(err.Error(), "holzkube-manager itself runs on") {
+		t.Errorf("the refusal does not say the address is this manager's own:\n%v", err)
 	}
 }

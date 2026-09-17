@@ -127,6 +127,12 @@ export function ClusterCard({ cluster }: { cluster: Cluster }) {
             <span className="text-amber-700 dark:text-amber-300">{cluster.degraded} degraded</span>
             {', '}
             <span className="text-red-700 dark:text-red-300">{cluster.down} not answering</span>
+            {cluster.checking > 0 && (
+              <>
+                {', '}
+                <span className="text-muted-foreground">{cluster.checking} not checked yet</span>
+              </>
+            )}
           </dd>
 
           <dt className="text-muted-foreground">Client certificate</dt>

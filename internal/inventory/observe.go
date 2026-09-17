@@ -293,6 +293,20 @@ func (s *Service) Refresh(ctx context.Context, id model.MachineID) {
 	}
 
 	obs := s.observationFor(id)
+
+	// A machine whose cluster was forgotten survives as a record on purpose
+	// (ForgetCluster), and nothing holds credentials to ask it with. That is
+	// not a failure to answer, so it is not counted as one: before this it went
+	// to StageDown after two passes and /metrics called every such machine
+	// down, with "store: invalid key: empty" as the reason.
+	if rec.Cluster == "" {
+		if obs.unassigned() {
+			s.deps.Logger.Info("a machine belongs to no cluster, so nothing can ask it until it is adopted again",
+				slog.String("machine", string(id)))
+		}
+		return
+	}
+
 	obs.enter(health.StageConnecting)
 
 	creds, err := s.clusterCreds(ctx, rec.Cluster)
@@ -629,6 +643,19 @@ func (o *observation) enter(stage health.Stage) {
 		return
 	}
 	o.stage = stage
+}
+
+// unassigned puts the observer back to "nobody has asked", and reports whether
+// that changed anything, so the journal says it once rather than every pass.
+func (o *observation) unassigned() bool {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+
+	changed := o.stage != health.StageUnknown || o.failures != 0
+	o.stage = health.StageUnknown
+	o.failures = 0
+	o.expired = false
+	return changed
 }
 
 func (o *observation) confirm(level health.Level, at time.Time) {
