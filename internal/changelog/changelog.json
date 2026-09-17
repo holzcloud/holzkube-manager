@@ -6,13 +6,7 @@
       {
         "icon": "🧬",
         "text": "The same cluster can no longer be adopted twice. It could, and it did more than duplicate: nodes are filed by their machine id, so the second adoption quietly took the node away from the first cluster, which was left showing something no heartbeat could ever confirm. An adoption through a node another cluster already has is now refused, and the message names the cluster to forget first."
-      }
-    ]
-  },
-  {
-    "version": "v1.16.13",
-    "date": "2026-09-17",
-    "changes": [
+      },
       {
         "icon": "🔎",
         "text": "A sign-in or confirmation that comes back from the identity provider and is refused before anything is checked with it now says why in the journal. The last attempt to delete a cluster here came back, was sent to the sign-in page within 32 microseconds, and left not one line — so for three days the wrong cause was assumed. The journal now names the check, says whether the session was still there, and never records the one-time values themselves."
