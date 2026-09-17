@@ -401,7 +401,12 @@ function ImportWizard() {
           <input
             type="file"
             aria-label="Upload a talosconfig"
-            className="text-xs"
+            // A native file input sizes to its own text, so the browser's
+            // "Choose file" button is 16px tall at text-xs -- the smallest
+            // real target measured at 390px. The font carries the size here
+            // rather than a height, because a file input with a fixed height
+            // puts its button against the top edge of an empty box.
+            className="text-xs max-md:text-base"
             onChange={async (e) => {
               const file = e.target.files?.[0]
               if (file) {

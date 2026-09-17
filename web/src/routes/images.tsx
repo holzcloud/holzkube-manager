@@ -571,6 +571,10 @@ function ImagesView() {
           <label className="flex items-center gap-2 pb-1 text-sm">
             <input
               type="checkbox"
+              // 24px below md is the floor WCAG 2.5.8 names. The label around
+              // this already extends the hit area; this makes the element itself
+              // match, so the measurement and the experience say the same thing.
+              className="max-md:size-6"
               checked={showPrerelease}
               onChange={(event) => setShowPrerelease(event.target.checked)}
             />
@@ -580,6 +584,10 @@ function ImagesView() {
           <label className="flex items-center gap-2 pb-1 text-sm">
             <input
               type="checkbox"
+              // 24px below md is the floor WCAG 2.5.8 names. The label around
+              // this already extends the hit area; this makes the element itself
+              // match, so the measurement and the experience say the same thing.
+              className="max-md:size-6"
               checked={secureBoot}
               onChange={(event) => setSecureBoot(event.target.checked)}
             />
@@ -1478,6 +1486,10 @@ function AssetPanel({ record, archSeed }: { record: Schematic; archSeed: Archite
         <label className="flex items-center gap-2 pb-1 text-sm">
           <input
             type="checkbox"
+            // 24px below md is the floor WCAG 2.5.8 names. The label around
+            // this already extends the hit area; this makes the element itself
+            // match, so the measurement and the experience say the same thing.
+            className="max-md:size-6"
             checked={secureBoot}
             onChange={(event) => setSecureBoot(event.target.checked)}
           />
