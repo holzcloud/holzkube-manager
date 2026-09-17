@@ -1,5 +1,23 @@
 [
   {
+    "version": "v1.16.12",
+    "date": "2026-09-17",
+    "changes": [
+      {
+        "icon": "💓",
+        "text": "A node that was up no longer reads as not answering. Every heartbeat refused its own reads before they left the process — a Talos call without a deadline is refused by design, and the background observer never gave its calls one. After two such passes the node was marked down and its live watch was torn down and rebuilt, every forty-five seconds, for as long as the daemon ran. The request to refresh a node by hand carried a deadline, which is why that one looked fine. Found in the journal of the Raspberry Pi this runs on, not by a test: every test started the observer with a deadline and so supplied exactly what production lacked. A guard now starts it the way the daemon does."
+      },
+      {
+        "icon": "⏱️",
+        "text": "Waiting says what it is doing, for how long, and how long that usually takes. A running job shows its elapsed time next to its steps and an expected duration measured from jobs of the same kind that actually succeeded — the median, so one run that waited an hour on a person does not move it for ever. Image builds keep their last real waits in this browser and say plainly when there is no experience yet. The server's time limit stays visible and is labelled as the moment it gives up, never as a prediction."
+      },
+      {
+        "icon": "🚫",
+        "text": "A disabled button says why beside it rather than only in a tooltip, because a phone has no hover."
+      }
+    ]
+  },
+  {
     "version": "v1.16.11",
     "date": "2026-09-17",
     "changes": [
