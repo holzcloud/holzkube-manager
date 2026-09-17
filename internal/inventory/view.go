@@ -158,11 +158,19 @@ type ClusterView struct {
 	ControlPlane int `json:"control_plane"`
 	Workers      int `json:"workers"`
 
-	// Healthy, Degraded and Down count the nodes in each condition, so the
-	// fleet overview does not have to fetch every node to draw a tile.
+	// Healthy, Degraded, Down and Checking count the nodes in each condition,
+	// so the fleet overview does not have to fetch every node to draw a tile.
+	//
+	// Checking is a node nobody has had an answer from YET: an observer that
+	// has not run, or is connecting. It used to be counted as Down, so every
+	// import and every daemon restart put "1 not answering" on a card about a
+	// node that had never been asked -- the operator saw exactly that moments
+	// after re-adopting their cluster. Down is reserved for downgradeAfter
+	// consecutive failures, which is a claim; Checking is the absence of one.
 	Healthy  int `json:"healthy"`
 	Degraded int `json:"degraded"`
 	Down     int `json:"down"`
+	Checking int `json:"checking"`
 }
 
 // Certificate urgency levels, in the order D-23 escalates them.
@@ -410,8 +418,10 @@ func clusterView(c model.Cluster, machines []MachineView, now time.Time) Cluster
 			v.Healthy++
 		case health.StageDegraded:
 			v.Degraded++
-		case health.StageDown, health.StageUnknown, health.StageConnecting:
+		case health.StageDown:
 			v.Down++
+		case health.StageUnknown, health.StageConnecting:
+			v.Checking++
 		}
 	}
 	return v
