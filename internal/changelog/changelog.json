@@ -1,5 +1,31 @@
 [
   {
+    "version": "v1.16.11",
+    "date": "2026-09-17",
+    "changes": [
+      {
+        "icon": "📱",
+        "text": "The interface fits a phone. The sidebar was 224px of a 390px screen — 57% of it — and below it the content had 118px left. The page never scrolled sideways, so nothing announced this; it just looked cramped, and where cramped ran out the content simply left. Twenty-two controls were clipped with no way to reach them, seventeen on Settings alone, including the whole \"New account\" form and the button that changes a password."
+      },
+      {
+        "icon": "🗄️",
+        "text": "Below a tablet width the navigation is now a drawer: a button in the header opens it, the backdrop and following a link close it. Above that width nothing changes at all — the desk layout was not the problem. Measured again afterwards over the same ten screens: nothing out of reach, and the usable width went from 118 to 358 pixels."
+      },
+      {
+        "icon": "👍",
+        "text": "Controls are sized for a thumb on a phone. Not one reached 44px before — the standard was 32 to 36 — and now sixty-two do, while the desk keeps the compact sizes, because a list of rows loses real information when every row grows twelve pixels."
+      },
+      {
+        "icon": "↔️",
+        "text": "A table that scrolls sideways says so. These are 574 and 855 pixels wide on a phone and were fully reachable by swiping, with nothing indicating it — and a cut edge with no scrollbar looks exactly like content that has been cut off for good. It now carries a shade on the right that appears only while there is more, and it can be scrolled with a keyboard."
+      },
+      {
+        "icon": "🛡️",
+        "text": "And a guard holds it. Every push starts the product, signs in, and drives every screen at a phone width and a desk width, failing if anything ends up out of reach. It is part of the chain rather than something to remember to run: this project already has two ledger entries about a watcher that existed and was never scheduled."
+      }
+    ]
+  },
+  {
     "version": "v1.16.10",
     "date": "2026-09-15",
     "changes": [
