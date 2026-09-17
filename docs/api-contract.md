@@ -1228,6 +1228,7 @@ that the prompt means nothing.
 | `validation.talosconfig-invalid` | 400 | the uploaded file is not a usable talosconfig |
 | `validation.fingerprint-mismatch` | 400 | the node presented a certificate other than the confirmed one |
 | `forbidden.cluster-locked` | 403 | the cluster was adopted read-only and this request would have changed something |
+| `conflict.cluster-already-adopted` | 409 | the adoption named a node that already belongs to a stored cluster. Adopting it again would move the node to the new record and leave the old one observing nothing; the detail names the cluster to forget first. |
 
 Each is minted deliberately, in the commit that first emits it. The alternative
 is not a missing code: it is every one of these failures arriving as
