@@ -18,21 +18,29 @@ So `linux/arm64` is the architecture that matters. amd64 is still built — the
 ROADMAP's OPS-05 is an amd64 hardware run and the Talos nodes themselves are
 amd64 — but when only one can be checked, the one to check is arm64.
 
-## What that means for verification, and it is a real limit
+## What that means for verification
 
-**This session's container is x86_64 with no qemu-user and no binfmt_misc. An
-arm64 binary cannot be executed here at all.**
+**Where a session runs decides what it can check, so say which one it was.**
 
-Every end-to-end check in this repository's history has therefore run the amd64
-artifact: downloaded, checksummed, started, driven in a browser. The arm64
-artifact has been built, checksummed and never once run — by anyone, until the
-operator started it on their Pi. That is not a small gap and it must not be
-described as one. A report that says "the release was verified" means the amd64
-build was verified, and should say so.
+**On the operator's Pi (aarch64, srv-node-01)** — where sessions run since
+2026-09-17 — arm64 executes natively, and the production daemon runs beside the
+checkout: `holzkube-manager.service`, data in `/var/lib/holzkube-manager`,
+`holzkube-manager-update.timer` pulling releases hourly. Its journal
+(`journalctl -u holzkube-manager`) is the operator's real traffic against the
+real cluster, and the first read of it found a defect no suite had (ledger 137).
+Read it before assuming the product works. Measured limits there: no
+`go test -race` (ThreadSanitizer refuses the Pi 5 kernel's 47-bit address
+space, so the race detector is CI's alone), no Node unless installed, Go only if
+installed (`~/.local/go`), and no GitHub credentials for push or dispatch.
+Replacing the production binary, restarting the service, or copying its data
+directory (it holds cluster secrets) is the operator's call, every time.
 
-What can honestly be checked here about arm64: that the archive exists, that its
-checksum matches, that it contains `holzkube-managerd`, and that `file` reports
-ARM aarch64. Nothing about whether it runs.
+**In the cloud container (x86_64, no qemu-user, no binfmt_misc)** an arm64
+binary cannot be executed at all. Every end-to-end check before 2026-09-17 ran
+the amd64 artifact; a report from there that says "the release was verified"
+means the amd64 build, and should say so. What that container can honestly
+check about arm64: the archive exists, its checksum matches, it contains
+`holzkube-managerd`, and `file` reports ARM aarch64.
 
 ## Talos versions
 
