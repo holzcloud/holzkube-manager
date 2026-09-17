@@ -1,4 +1,5 @@
 import { Navigate, Outlet } from '@tanstack/react-router'
+import { useState } from 'react'
 import { CertificateBanner } from '@/components/CertificateBanner'
 import { ChainBannerContainer } from '@/components/ChainBanner'
 import { DryRunBannerContainer } from '@/components/DryRunBanner'
@@ -20,6 +21,11 @@ import { useSession } from '@/hooks/useSession'
  */
 export function AppShell() {
   const { setupRequired, authenticated, loading } = useSession()
+
+  // The drawer's state lives here because two things open it and three close
+  // it: the header's button, the backdrop, and following a link. Owned by one
+  // of them, the others would each need their own rule.
+  const [navOpen, setNavOpen] = useState(false)
 
   if (setupRequired) {
     return <Navigate to="/setup" replace />
@@ -66,10 +72,25 @@ export function AppShell() {
       <ResumeAfterProvider className="mx-4 mt-2" />
 
       <div className="flex min-h-0 flex-1">
-        <Sidebar />
+        <Sidebar open={navOpen} onNavigate={() => setNavOpen(false)} />
+
+        {/* The backdrop, below md and only while the drawer is open. It is a
+            button rather than a div so that closing the drawer is reachable
+            without a pointer, and it carries a label because "" is what a
+            screen reader would otherwise read out. */}
+        {navOpen && (
+          <button
+            type="button"
+            aria-label="Close the navigation"
+            className="fixed inset-0 z-40 bg-background/70 md:hidden"
+            onClick={() => setNavOpen(false)}
+          />
+        )}
+
         <div className="flex min-w-0 flex-1 flex-col">
-          <Header />
-          <main className="min-h-0 flex-1 overflow-auto p-6">
+          <Header onOpenNav={() => setNavOpen(true)} />
+          {/* 24px of padding on each side is 12% of a 390px phone. */}
+          <main className="min-h-0 flex-1 overflow-auto p-4 md:p-6">
             <Outlet />
           </main>
         </div>
