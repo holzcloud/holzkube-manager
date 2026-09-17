@@ -6,6 +6,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { cn } from '@/lib/utils'
+import { formatDuration, medianSeconds, secondsBetween, useElapsedSeconds } from '@/lib/waiting'
 import { authenticatedRoute } from '@/routes/__root'
 
 /**
@@ -76,7 +77,7 @@ export function JobsPage() {
         <div className="space-y-3">
           <h2 className="font-heading text-base font-semibold">Waiting for a decision</h2>
           {parked.map((j) => (
-            <JobCard key={j.id} job={j} />
+            <JobCard key={j.id} job={j} typical={typicalSecondsFor(j.kind, jobs)} />
           ))}
         </div>
       )}
@@ -87,14 +88,37 @@ export function JobsPage() {
 
       <div className="space-y-3">
         {rest.map((j) => (
-          <JobCard key={j.id} job={j} />
+          <JobCard key={j.id} job={j} typical={typicalSecondsFor(j.kind, jobs)} />
         ))}
       </div>
     </section>
   )
 }
 
-function JobCard({ job }: { job: Job }) {
+/**
+ * How long a job of this kind usually takes here, from the ones that finished.
+ *
+ * Measured and never guessed, which is the operator's decision of 2026-09-17
+ * and the whole point of ledger entry 62: a constant somebody thought plausible
+ * is an assertion with nothing behind it. Only jobs that reached `done` count --
+ * a failed one stopped early and a parked one waited on a person, and neither
+ * says anything about how long the work takes.
+ */
+export function typicalSecondsFor(kind: string, jobs: readonly Job[]): number | null {
+  const samples: number[] = []
+  for (const job of jobs) {
+    if (job.kind !== kind || job.state !== 'succeeded') {
+      continue
+    }
+    const seconds = secondsBetween(job.started_at, job.finished_at)
+    if (seconds !== null) {
+      samples.push(seconds)
+    }
+  }
+  return medianSeconds(samples)
+}
+
+function JobCard({ job, typical }: { job: Job; typical: number | null }) {
   const queryClient = useQueryClient()
 
   const cancel = useMutation({
@@ -105,6 +129,14 @@ function JobCard({ job }: { job: Job }) {
   const running = job.state === 'running' || job.state === 'pending'
   const presentation = JOB_STATE[job.state]
 
+  // How long this one has been going, and how long its kind usually takes.
+  // PITFALLS.md:164 item 5 asks for both, and for a reason that is specific:
+  // an operator who cannot tell a slow run from a stuck one clicks the button
+  // again, and for bootstrap the second click is a split brain.
+  const elapsed = useElapsedSeconds(job.started_at, running)
+  const step = job.steps[job.current]
+  const stepElapsed = useElapsedSeconds(step?.started_at, running && step?.state === 'running')
+
   return (
     <Card className={job.state === 'parked' ? 'border-amber-600/40' : undefined}>
       <CardHeader className="flex flex-row items-start justify-between gap-2">
@@ -114,21 +146,55 @@ function JobCard({ job }: { job: Job }) {
             {job.machine.slice(0, 8)} {new Date(job.created_at).toLocaleString()}
             {job.actor !== '' && ` by ${job.actor}`}
           </p>
+
+          {/* The elapsed time and what it should be compared against. The
+              expected figure is the MEDIAN OF JOBS OF THIS KIND THAT HAVE
+              ACTUALLY FINISHED on this installation -- not a constant somebody
+              thought plausible, which is what ledger entry 62 is about. Until
+              one has finished it says so, because "no experience yet" is a
+              true statement and a made-up number is not. */}
+          {running && elapsed !== null && (
+            <p className="text-xs text-muted-foreground">
+              Running for{' '}
+              <span className="font-medium text-foreground">{formatDuration(elapsed)}</span>
+              {typical !== null ? (
+                <>
+                  {' · '}
+                  {elapsed > typical * 2
+                    ? `well past the usual ${formatDuration(typical)} for a ${job.kind}`
+                    : `a ${job.kind} here usually takes ${formatDuration(typical)}`}
+                </>
+              ) : (
+                ' · no finished job of this kind to compare against yet'
+              )}
+            </p>
+          )}
         </div>
         <div className="flex items-center gap-2">
           <Badge variant="outline" className={presentation.className}>
             {presentation.label}
           </Badge>
           {running && (
-            <Button
-              size="sm"
-              variant="outline"
-              disabled={cancel.isPending || job.cancel_requested}
-              onClick={() => cancel.mutate()}
-              title="Stops at the next step boundary. What has already run is not undone."
-            >
-              {job.cancel_requested ? 'stopping' : 'Cancel'}
-            </Button>
+            <div className="flex flex-col items-end gap-1">
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={cancel.isPending || job.cancel_requested}
+                onClick={() => cancel.mutate()}
+                title="Stops at the next step boundary. What has already run is not undone."
+              >
+                {job.cancel_requested ? 'stopping' : 'Cancel'}
+              </Button>
+              {/* The reason BESIDE the button and not only in its tooltip.
+                  PITFALLS.md: "A disabled button with a reason prevents the
+                  click that a spinner invites" -- and a reason only a hover
+                  reveals is no reason at all on a phone, which has no hover. */}
+              {job.cancel_requested && (
+                <span className="text-xs text-muted-foreground">
+                  already asked to stop{elapsed !== null && `, ${formatDuration(elapsed)} in`}
+                </span>
+              )}
+            </div>
           )}
         </div>
       </CardHeader>
@@ -171,6 +237,15 @@ function JobCard({ job }: { job: Job }) {
                 )}
                 {step.detail !== '' && (
                   <span className="block text-xs text-muted-foreground">{step.detail}</span>
+                )}
+                {/* The sub-step's own clock. The job's total says whether the
+                    whole thing is slow; this says WHICH part is, which is the
+                    difference between "it is taking a while" and "it has been
+                    on 'wait for the node to come back' for nine minutes". */}
+                {i === job.current && step.state === 'running' && stepElapsed !== null && (
+                  <span className="block text-xs text-muted-foreground">
+                    on this step for {formatDuration(stepElapsed)}
+                  </span>
                 )}
               </span>
             </li>
