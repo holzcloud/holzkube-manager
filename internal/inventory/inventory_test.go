@@ -595,3 +595,57 @@ func TestANodeThatAnswersAndCannotBeReadIsNotTheSameAsAbsent(t *testing.T) {
 			before.Snapshot.TalosVersion, after.Snapshot.TalosVersion)
 	}
 }
+
+// TestAClusterCannotBeAdoptedTwice is the guard for what the operator's Pi
+// holds today: two cluster records, "holzkube" and "holzkube2", for one real
+// cluster with one control plane.
+//
+// The second import succeeded and did worse than duplicate: recordMachine files
+// by UUID and sets the record's cluster, so the node the first cluster was
+// adopted through silently moved to the second. The first was left holding
+// only what nobody could observe, and the operator could not delete either one
+// (ledger 139). An adoption that would take a node from another cluster is
+// refused, and names the cluster that has it.
+func TestAClusterCannotBeAdoptedTwice(t *testing.T) {
+	t.Parallel()
+
+	ctx := testContext(t)
+	f := newFixture(t, talossim.Options{ControlPlane: true})
+
+	first := f.importCluster(ctx, t)
+
+	fp, err := f.svc.Fingerprint(ctx, f.sim.Host())
+	if err != nil {
+		t.Fatalf("Fingerprint: %v", err)
+	}
+	_, err = f.svc.Import(ctx, inventory.ImportRequest{
+		Name:        "homelab2",
+		Talosconfig: f.cluster.Talosconfig,
+		Endpoint:    f.sim.Host(),
+		Fingerprint: fp,
+	})
+	if !errors.Is(err, inventory.ErrAlreadyAdopted) {
+		t.Fatalf("the second adoption of the same node = %v, want ErrAlreadyAdopted -- "+
+			"otherwise the node moves to the new record and the first is left with nothing", err)
+	}
+	if !strings.Contains(err.Error(), `"homelab"`) {
+		t.Errorf("the refusal does not name the cluster that has the node: %v", err)
+	}
+
+	clusters, err := f.store.Clusters().List(ctx)
+	if err != nil {
+		t.Fatalf("Clusters: %v", err)
+	}
+	if len(clusters) != 1 {
+		t.Errorf("%d cluster records after a refused adoption, want 1 -- the refusal wrote something", len(clusters))
+	}
+	machines, err := f.svc.Machines(ctx)
+	if err != nil {
+		t.Fatalf("Machines: %v", err)
+	}
+	for _, m := range machines {
+		if m.Cluster != first.ID {
+			t.Errorf("machine %s belongs to %s after the refused adoption, want %s", m.ID, m.Cluster, first.ID)
+		}
+	}
+}

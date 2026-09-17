@@ -4,12 +4,14 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
 	"time"
 
 	"github.com/holzcloud/holzkube-manager/internal/model"
+	"github.com/holzcloud/holzkube-manager/internal/store"
 	"github.com/holzcloud/holzkube-manager/internal/talos"
 )
 
@@ -149,6 +151,10 @@ func (s *Service) Import(ctx context.Context, req ImportRequest) (model.Cluster,
 			req.Endpoint, err)
 	}
 
+	if err := s.refuseIfAlreadyAdopted(ctx, proof, req.Endpoint); err != nil {
+		return model.Cluster{}, err
+	}
+
 	// Everything below writes. Nothing above it did.
 	now := s.deps.Now().UTC()
 	cluster := model.Cluster{
@@ -193,6 +199,40 @@ func (s *Service) Import(ctx context.Context, req ImportRequest) (model.Cluster,
 	}
 
 	return stored, nil
+}
+
+// refuseIfAlreadyAdopted stops an adoption through a node another stored
+// cluster already has.
+//
+// It asks the node who it is rather than matching the address, because the
+// inventory is keyed on the UUID and an address can change hands (D-10). A
+// record whose cluster no longer exists is not a claim: forgetting a cluster
+// that left a machine behind must not make its nodes unadoptable.
+func (s *Service) refuseIfAlreadyAdopted(ctx context.Context, proof *talos.ClusterClient, endpoint string) error {
+	facts, err := proof.NodeFacts(ctx)
+	if err != nil || facts.UUID == "" {
+		// Not this check's to fail. A node that cannot say who it is could not
+		// be filed under a UUID either, so it cannot collide with a record;
+		// adoptMembers meets the same read and reports it without undoing an
+		// adoption that has otherwise succeeded.
+		return nil
+	}
+	rec, err := s.deps.Store.Machines().Get(ctx, facts.UUID)
+	if errors.Is(err, store.ErrNotFound) || (err == nil && rec.Cluster == "") {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	owner, err := s.deps.Store.Clusters().Get(ctx, rec.Cluster)
+	if errors.Is(err, store.ErrNotFound) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	return fmt.Errorf("%w: %s is already a node of cluster %q; forget that cluster first to adopt it again",
+		ErrAlreadyAdopted, endpoint, owner.Name)
 }
 
 // adoptMembers records every node the adopted cluster knows about.
