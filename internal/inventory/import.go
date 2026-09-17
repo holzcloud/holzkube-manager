@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"strings"
 	"time"
 
@@ -53,10 +54,47 @@ type ImportRequest struct {
 // Fingerprint returns the certificate fingerprint of a prospective node, for
 // the operator to confirm before anything trusts it (D-03).
 func (s *Service) Fingerprint(ctx context.Context, endpoint string) (string, error) {
-	return talos.ServerFingerprint(ctx, s.deps.Dialer, talos.Target{
+	fp, err := talos.ServerFingerprint(ctx, s.deps.Dialer, talos.Target{
 		Machine: model.MachineID("unadopted:" + endpoint),
 		Addr:    endpoint,
 	})
+	if err != nil && isThisHost(endpoint) {
+		// Said only after the attempt failed, never instead of it: whether an
+		// address is this machine's is a guess about intent, and a failure is
+		// the moment that guess is worth offering. The operator met exactly
+		// this -- the Pi's own address typed where the node's belonged, and
+		// "the node is unreachable" sent them to look at a node never asked.
+		return "", fmt.Errorf("%w; %s is an address of the machine holzkube-manager itself runs on, "+
+			"not of a Talos node -- name the control-plane node's address", err, endpoint)
+	}
+	return fp, err
+}
+
+// isThisHost reports whether endpoint is a literal IP address one of this
+// machine's interfaces carries, or loopback. A name is not resolved: this is a
+// hint on a failure, and a DNS lookup is not worth adding to one.
+func isThisHost(endpoint string) bool {
+	host := endpoint
+	if h, _, err := net.SplitHostPort(endpoint); err == nil {
+		host = h
+	}
+	ip := net.ParseIP(strings.Trim(host, "[]"))
+	if ip == nil {
+		return false
+	}
+	if ip.IsLoopback() {
+		return true
+	}
+	addrs, err := net.InterfaceAddrs()
+	if err != nil {
+		return false
+	}
+	for _, a := range addrs {
+		if n, ok := a.(*net.IPNet); ok && n.IP.Equal(ip) {
+			return true
+		}
+	}
+	return false
 }
 
 // Import adopts an existing cluster.
