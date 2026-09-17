@@ -1,5 +1,23 @@
 [
   {
+    "version": "v1.16.15",
+    "date": "2026-09-17",
+    "changes": [
+      {
+        "icon": "🩺",
+        "text": "A node that nobody has asked yet is no longer counted as not answering. Right after an import, and after every restart, the cluster card said \"1 not answering\" for the few seconds before the first check — about a node that was fine. It now says \"not checked yet\" until there is an answer, and \"not answering\" only after checks have actually failed."
+      },
+      {
+        "icon": "🗂️",
+        "text": "A machine whose cluster you forgot is no longer shown as down. It stays in the inventory on purpose, because the hardware still exists, but without a cluster there is nothing to ask it with, and that is not the same as it failing to answer."
+      },
+      {
+        "icon": "🧭",
+        "text": "Importing tells you which field is wrong. Typing the address of the machine holzkube-manager itself runs on now says exactly that instead of \"the node is unreachable\", and uploading a machine configuration (controlplane.yaml) into the talosconfig field says which file is meant — and that the one you picked holds the cluster's CA key."
+      }
+    ]
+  },
+  {
     "version": "v1.16.14",
     "date": "2026-09-17",
     "changes": [
