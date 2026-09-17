@@ -4,11 +4,11 @@ milestone: v1.15
 current_phase: 3
 current_phase_name: "Prometheus-/metrics (v1.15)"
 status: milestone-closed
-stopped_at: v1.15 vollstaendig, CI gruen, Routen-Audit abgearbeitet (Fenster 92-95 zu). OPS-05 bleibt der einzige Release-Blocker (Fenster 87)
-last_updated: "2026-09-13T12:30:00.000Z"
-last_activity: 2026-09-13
-last_activity_desc: CI race detector found a production data race in every destructive action
-state_head: a474d2522823cbfb436ee720dee35494890281a3
+stopped_at: v1.16 Abschnitt B abgearbeitet, ausgeliefert v1.16.11. Uebergabe fuer eine Fortsetzung anderswo: .planning/HANDOVER.md. OPS-05 bleibt der einzige Release-Blocker (Fenster 87)
+last_updated: "2026-09-17T09:00:00.000Z"
+last_activity: 2026-09-17
+last_activity_desc: Handover written so the work can continue elsewhere (.planning/HANDOVER.md)
+state_head: 77d7f4bd8dac248f74193105cdb7b67fcb7d60c0
 progress:
   total_phases: 3
   completed_phases: 3
@@ -17,6 +17,19 @@ progress:
 ---
 
 # Project State
+
+## Dieser Bericht ist aelter als der Stand
+
+**Die Zahlen und der Fokus unten beschreiben den Abschluss von v1.15 am
+2026-09-13.** Danach ist Milestone v1.16 gebaut und elfmal ausgeliefert. Wer
+wissen will, wo die Arbeit *jetzt* steht -- und was auf der Anlage des
+Betreibers offen ist, was diese Umgebung nicht pruefen kann, und wie man den
+Daemon hier ohne Browser faehrt -- liest **`.planning/HANDOVER.md`** (Stand
+2026-09-17) und `.planning/MILESTONE-v1.16.md`.
+
+Was unten steht, wird deshalb nicht umgeschrieben: es ist der Bericht ueber
+v1.15 und als solcher richtig. Die Regel dieses Verzeichnisses ist datiert,
+nicht laufend gepflegt.
 
 ## Project Reference
 

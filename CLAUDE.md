@@ -1,5 +1,13 @@
 # holzkube-manager
 
+## Continuing this work somewhere else
+
+`.planning/HANDOVER.md` is the handover: the state as of 2026-09-17, what is
+still open **on the operator's own machine** (their cluster will not delete,
+and why), the recipes for driving the daemon here without a browser, and the
+three things this environment cannot do at all. It is dated rather than
+maintained; where it and a later file disagree, the later file wins.
+
 ## Where this actually runs
 
 **The operator runs holzkube-manager on a Raspberry Pi, arm64, and that is the
