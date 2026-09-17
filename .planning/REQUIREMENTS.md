@@ -164,30 +164,45 @@ Anerkannt, aber verschoben. Nicht in der aktuellen Roadmap.
   Schreibtisch — D-15 und der Zertifikats-Countdown existieren genau für den
   Moment, in dem jemand schnell nachsieht.
 
-  **Ausgangslage, aus dem Quelltext GELESEN und nicht im Browser gemessen** (die
-  Messung braucht den laufenden Daemon und gehört in die Runde, die das baut):
+  **Ausgangslage, GEMESSEN** am 2026-09-17 in Chromium bei 390x844 gegen den
+  laufenden Daemon, jede Route angemeldet abgefahren. Die vorige Fassung dieses
+  Eintrags hatte sie nur aus dem Quelltext gelesen und traf die Zahl, aber nicht
+  die Schwere:
 
-  - Der Shell-Rahmen ist der eigentliche Blocker. `Sidebar` ist
-    `w-56 shrink-0` — 224 px, fest, ohne einen einzigen Breakpoint — und
-    `<main>` trägt `p-6`. Auf einem 390-px-Telefon bleiben damit rechnerisch
-    **118 px** für den Inhalt, bevor irgendetwas anderes falsch sein kann.
-  - Der Inhalt ist weiter, als der Rahmen vermuten lässt. 30
-    Breakpoint-Utilities in 14 von 55 Komponenten, fast alle
-    `sm:grid-cols-*` und `sm:max-w-*`: die Raster stapeln unterhalb von `sm`
-    bereits von selbst, und die Dialoge haben eine Obergrenze. Das ist die
-    Hälfte der Arbeit, die schon getan ist.
-  - `<meta name="viewport" content="width=device-width">` steht korrekt in
-    `index.html`. Sechs Stellen haben `overflow-x-auto`; zwei Dateien tragen
-    eine echte `<table>`, und ob die beiden darunter fallen, ist nicht geprüft.
-  - Keine problematischen festen Mindestbreiten außer 96 px an einem
-    Dropdown.
+  - Der Rahmen: `Sidebar` 224 px von 390, `main` 166 px, nach eigenem Padding
+    **118 px nutzbar**. 57 % eines Telefons für Navigation.
+  - **Die Seite scrollte nirgends seitwärts** (`scrollWidth` = 390 auf allen
+    zehn Routen). Das war die Annahme, die die Lesung falsch gemacht hat: es
+    sah nicht kaputt aus, es war nur eng — und dort, wo es nicht mehr eng
+    genug ging, verschwand der Inhalt.
+  - **22 Elemente waren abgeschnitten und damit unerreichbar**: 17 auf
+    `/settings`, darunter das ganze "New account"-Formular und der Knopf, der
+    ein Passwort ändert, und 5 auf dem Dashboard. Am Telefon kam ein Betreiber
+    an diese Funktionen nicht heran.
+  - Der Rest war per Wischen im eigenen Container erreichbar (`/images` 352,
+    `/audit` 62, `/clusters` 3) — unschön, nicht kaputt.
 
-  **Was das heißt:** die Aufgabe ist der Rahmen (Sidebar als Schublade oder
-  untere Leiste unterhalb eines Breakpoints, Header entsprechend), die beiden
-  Tabellen, und die Größe der Tippziele. Nicht ein Umbau jeder Ansicht.
+  **Was am 2026-09-17 gebaut ist:** der Rahmen. Unterhalb `md` ist die Sidebar
+  eine Schublade über der Seite, der Header trägt den Griff dazu, Backdrop und
+  Links schließen sie, und `main` bekommt 16 statt 24 px Padding. Nachgemessen
+  an denselben zehn Routen: **abgeschnitten 22 → 0**, nutzbar **118 → 358 px**;
+  bei 768 px und 1280 px steht die Sidebar unverändert fest und der Griff ist
+  aus.
 
-  **Nicht entschieden:** ob das eine eigene Phase eines Milestones wird oder
-  nebenher läuft, und ob es vor oder nach OPS-05 kommt.
+  **Was offen ist:**
+
+  - Ein WÄCHTER. Ohne ihn ist "handytauglich" ein Zustand, der beim nächsten
+    Feature still wieder verschwindet — genau wie die drei Routen, die niemand
+    aufgerufen hat (Ledger 130, 132). Die Messung oben ist ein Skript gegen
+    den laufenden Daemon; sie gehört als eigener CI-Schritt in die Kette, nicht
+    als opt-in (Ledger 5 und 64 führen einen Drift-Wächter, der nie lief).
+  - Die Tippziel-Größen sind nicht geprüft. Gemessen wurde Erreichbarkeit,
+    nicht Bedienbarkeit mit einem Daumen.
+  - Die beiden echten `<table>` bleiben wischbar statt umgebrochen. Ob eine
+    Tabelle auf einem Telefon zu Karten werden soll, ist eine Gestaltungsfrage
+    und keine Reparatur.
+  - Welche Gerätebreiten festgenagelt werden sollen, ist nicht entschieden;
+    gemessen wurde 390, 768 und 1280.
 
 ### Schnittstellen
 

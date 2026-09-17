@@ -125,11 +125,49 @@ export const NAV_AREAS: NavArea[] = [
   },
 ]
 
-export function Sidebar() {
+/**
+ * The navigation, permanent on a desk and a drawer on a phone.
+ *
+ * MEASURED, at 390px in Chromium against the running daemon, before this was
+ * written: the bar is 224px of a 390px screen, which left main at 166px and,
+ * after its own padding, 118px of usable content. Fifty-seven per cent of a
+ * phone spent on navigation. The page never scrolled sideways, so nothing
+ * announced it -- the content was simply squeezed, and on two screens pushed
+ * out of reach entirely: seventeen elements clipped on /settings, including the
+ * whole "New account" form and the button that changes a password.
+ *
+ * Below `md` it is therefore taken out of the flow and slid in over the page.
+ * Above it, nothing changes: the desk layout was not the problem and is not
+ * worth risking to fix the phone.
+ *
+ * `open` and `onNavigate` are owned by the shell rather than by this component,
+ * because the header's button and the backdrop both have to reach the same
+ * state, and a drawer that closed itself on navigation but not on a backdrop
+ * click would be two rules for one thing.
+ */
+export function Sidebar({ open = false, onNavigate }: { open?: boolean; onNavigate?: () => void }) {
   return (
     <nav
       aria-label="Main navigation"
-      className="flex h-full w-56 shrink-0 flex-col gap-1 border-r border-border bg-sidebar p-3"
+      className={cn(
+        'flex h-full w-56 shrink-0 flex-col gap-1 border-r border-border bg-sidebar p-3',
+        // Below md: out of the flow, over the page, and off the left edge until
+        // asked for. transform rather than display, so it slides rather than
+        // appears -- on a phone an element that simply exists where nothing was
+        // reads as the page having jumped.
+        'max-md:fixed max-md:inset-y-0 max-md:left-0 max-md:z-50 max-md:shadow-xl',
+        'max-md:transition-transform max-md:duration-200 max-md:ease-out',
+        open ? 'max-md:translate-x-0' : 'max-md:-translate-x-full',
+        // visibility and not aria-hidden/inert, and the reason is that `open`
+        // is false on a desk too: those are React props and cannot be scoped to
+        // a breakpoint, so hanging them off `open` would have made the
+        // permanent sidebar inert on every screen wide enough not to need a
+        // drawer. `visibility: hidden` takes the shut drawer out of the tab
+        // order and the accessibility tree, and a media query can carry it.
+        open ? 'max-md:visible' : 'max-md:invisible',
+        // Above md the drawer state means nothing: it is simply there.
+        'md:visible md:translate-x-0 md:shadow-none',
+      )}
     >
       <div className="mb-4 px-2 pt-1">
         <span className="font-heading text-lg font-semibold tracking-tight">holzkube-manager</span>
@@ -145,6 +183,7 @@ export function Sidebar() {
           key={area.path}
           to={area.path}
           activeOptions={{ exact: area.path === '/' }}
+          onClick={onNavigate}
           className={cn(
             'flex items-center gap-2 rounded-md border-l-2 border-transparent py-1.5 pr-2 pl-1.5 text-sm text-sidebar-foreground/70',
             'hover:bg-sidebar-accent hover:text-sidebar-accent-foreground',
