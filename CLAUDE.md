@@ -62,6 +62,13 @@ which is the part only they can do.
 This holds for the open decisions this project already has -- cloud providers, a
 Kubernetes client, SAML -- and for every one that comes up mid-task.
 
+**It holds hardest for the last two sentences of a long message, which is where
+it has actually been broken.** A report that ends "sag Bescheid, ob..." or "dann
+brauche ich von dir, welche..." has asked an open question with the choice list
+missing, and the length of what came before is no excuse: that is the moment the
+operator is being handed the work of inventing the options. If a message would
+end in a question, the question is a choice, or it does not go in the message.
+
 ## The method this repository is built on
 
 A guard is worth nothing until it has gone red against the fault deliberately
