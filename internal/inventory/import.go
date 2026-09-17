@@ -209,13 +209,13 @@ func (s *Service) Import(ctx context.Context, req ImportRequest) (model.Cluster,
 // record whose cluster no longer exists is not a claim: forgetting a cluster
 // that left a machine behind must not make its nodes unadoptable.
 func (s *Service) refuseIfAlreadyAdopted(ctx context.Context, proof *talos.ClusterClient, endpoint string) error {
-	facts, err := proof.NodeFacts(ctx)
-	if err != nil || facts.UUID == "" {
-		// Not this check's to fail. A node that cannot say who it is could not
-		// be filed under a UUID either, so it cannot collide with a record;
-		// adoptMembers meets the same read and reports it without undoing an
-		// adoption that has otherwise succeeded.
-		return nil
+	// A node that cannot say who it is could not be filed under a UUID either,
+	// so it cannot collide with a record. That is not this check's to fail:
+	// adoptMembers meets the same read and reports it without undoing an
+	// adoption that has otherwise succeeded.
+	facts, factsErr := proof.NodeFacts(ctx)
+	if factsErr != nil || facts.UUID == "" {
+		return s.logUnidentifiedAdoption(endpoint, factsErr)
 	}
 	rec, err := s.deps.Store.Machines().Get(ctx, facts.UUID)
 	if errors.Is(err, store.ErrNotFound) || (err == nil && rec.Cluster == "") {
@@ -233,6 +233,14 @@ func (s *Service) refuseIfAlreadyAdopted(ctx context.Context, proof *talos.Clust
 	}
 	return fmt.Errorf("%w: %s is already a node of cluster %q; forget that cluster first to adopt it again",
 		ErrAlreadyAdopted, endpoint, owner.Name)
+}
+
+// logUnidentifiedAdoption records that the double-adoption check could not
+// run, and lets the adoption continue.
+func (s *Service) logUnidentifiedAdoption(endpoint string, err error) error {
+	s.deps.Logger.Warn("could not ask the node who it is, so a second adoption of it cannot be ruled out",
+		slog.String("addr", endpoint), slog.Any("error", err))
+	return nil
 }
 
 // adoptMembers records every node the adopted cluster knows about.
