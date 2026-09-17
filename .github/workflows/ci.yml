@@ -109,6 +109,21 @@ jobs:
       - name: Test Go
         run: go test ./... -count=1 -race
 
+      # Last, because it starts the product and drives a browser over every
+      # route, and because it needs the binary the Build step above produced.
+      #
+      # It asserts one thing: that nothing ends up past the right edge with no
+      # way to scroll it back. An operator met that on a phone -- seventeen
+      # controls on /settings, including the whole "New account" form and the
+      # button that changes a password, simply gone, with no scrollbar and
+      # nothing about the page looking wrong.
+      #
+      # In the chain rather than opt-in on purpose: ledger entries 5 and 64
+      # record a drift watcher that existed, was never scheduled, and therefore
+      # never watched anything.
+      - name: Measure the layout at a phone width and a desk width
+        run: npm --prefix web run test:layout
+
   test-macos:
     name: Go tests (macOS)
     runs-on: macos-latest

@@ -86,6 +86,17 @@ tasks:
       # missing.
       - npm --prefix web run test:browser
 
+  test:layout:
+    desc: Measure the interface at a phone width and a desk width; fail if anything is out of reach.
+    # Depends on the binary rather than on the bundle: this drives the whole
+    # product -- the daemon serving the embedded UI, a real session, every route
+    # as an operator reaches it. A component rendered on its own cannot answer
+    # the question, because what pushed seventeen controls off the side of
+    # /settings was the shell around them.
+    deps: ["build:go"]
+    cmds:
+      - npm --prefix web run test:layout
+
   lint:go:
     desc: Lint the Go sources.
     cmds:
@@ -158,6 +169,11 @@ tasks:
       - task: build
       - task: lint:go
       - task: test
+      # Last because it is the slowest: it starts the product and drives a
+      # browser over every route. In the chain rather than opt-in, because
+      # ledger entries 5 and 64 record a drift watcher that existed, was never
+      # scheduled, and therefore never watched anything.
+      - task: test:layout
 
   fmt:
     desc: Format Go and frontend sources in place.

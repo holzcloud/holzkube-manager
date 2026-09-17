@@ -12,7 +12,8 @@
     "test:browser": "vitest run --project browser",
     "test:watch": "vitest",
     "lint": "biome check --config-path .. src",
-    "format": "biome format --config-path .. --write src"
+    "format": "biome format --config-path .. --write src",
+    "test:layout": "node scripts/layout-audit.mjs"
   },
   "dependencies": {
     "@fontsource-variable/geist": "^5.3.0",
