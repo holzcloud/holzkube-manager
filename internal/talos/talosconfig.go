@@ -1,6 +1,7 @@
 package talos
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
 	"crypto/x509"
@@ -15,6 +16,7 @@ import (
 	clientconfig "github.com/siderolabs/talos/pkg/machinery/client/config"
 	"github.com/siderolabs/talos/pkg/machinery/config/generate/secrets"
 	"github.com/siderolabs/talos/pkg/machinery/role"
+	"gopkg.in/yaml.v3"
 
 	"github.com/holzcloud/holzkube-manager/internal/tlsx"
 )
@@ -75,6 +77,10 @@ type Talosconfig struct {
 // uid, and store.go already states that any os.ReadFile outside fsstore is an
 // architecture bug (D-06).
 func ParseTalosconfig(raw []byte) (*Talosconfig, error) {
+	if looksLikeMachineConfig(raw) {
+		return nil, fmt.Errorf("%w: %s", ErrTalosconfigInvalid, machineConfigInsteadOfTalosconfig)
+	}
+
 	cfg, err := clientconfig.FromBytes(raw)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrTalosconfigInvalid, err)
@@ -254,4 +260,36 @@ func RenderTalosconfig(contextName, endpoint string, osCACrt, osCAKey []byte, tt
 		return nil, fmt.Errorf("talos: encode talosconfig: %w", err)
 	}
 	return raw, nil
+}
+
+// machineConfigInsteadOfTalosconfig is the refusal for the one wrong file that
+// is easy to pick: `talosctl gen config` writes it into the same directory as
+// the talosconfig, and on the operator's machine it was named after the node.
+//
+// It says where the right file is and that the wrong one is sensitive, because
+// a machine configuration carries the cluster's CA private key. It repeats
+// nothing from the file.
+const machineConfigInsteadOfTalosconfig = "this is a Talos machine configuration " +
+	"(the controlplane.yaml or worker.yaml that talosctl gen config writes), not a talosconfig. " +
+	"The talosconfig is the file talosctl itself uses, usually ~/.talos/config or the talosconfig " +
+	"written next to the machine configurations; it has context, contexts, ca, crt and key. " +
+	"Keep the machine configuration private: it holds the cluster's certificate authority key"
+
+// looksLikeMachineConfig reports whether the first YAML document is a Talos
+// machine configuration.
+//
+// Only the first document is read. Talos writes the v1alpha1 machine
+// configuration first and appends further documents after it, and a
+// talosconfig is a single document, so the first one decides. Any parse
+// failure answers false and leaves the refusal to the real parser.
+func looksLikeMachineConfig(raw []byte) bool {
+	var head struct {
+		Version string         `yaml:"version"`
+		Machine map[string]any `yaml:"machine"`
+		Context string         `yaml:"context"`
+	}
+	if err := yaml.NewDecoder(bytes.NewReader(raw)).Decode(&head); err != nil {
+		return false
+	}
+	return head.Machine != nil && head.Context == ""
 }
