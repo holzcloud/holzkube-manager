@@ -112,6 +112,12 @@ function Dashboard() {
                   <span className="text-amber-700 dark:text-amber-300">{c.degraded} degraded</span>
                   {', '}
                   <span className="text-red-700 dark:text-red-300">{c.down} not answering</span>
+                  {c.checking > 0 && (
+                    <>
+                      {', '}
+                      <span className="text-muted-foreground">{c.checking} not checked yet</span>
+                    </>
+                  )}
                 </p>
                 <Button asChild variant="secondary" size="sm" className="mt-2">
                   <Link to="/clusters">Open</Link>
