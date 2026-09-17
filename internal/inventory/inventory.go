@@ -73,6 +73,15 @@ type Deps struct {
 // sits in the middle of the 30-60s band the requirement names.
 const DefaultHeartbeat = 45 * time.Second
 
+// RefreshBudget bounds one observation pass: connect, then the fixed series of
+// resource reads NodeFacts performs, then the write.
+//
+// It is the same walk handlers.NodeReadRouteBudget bounds for the two routes
+// that trigger a pass by hand, and the same number. It lives on the pass and
+// not only on the routes because the supervisors call Refresh on a context
+// that never expires.
+const RefreshBudget = 60 * time.Second
+
 // Service is the inventory.
 type Service struct {
 	deps Deps

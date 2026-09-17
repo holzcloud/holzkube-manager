@@ -273,6 +273,16 @@ func jitter(d time.Duration) time.Duration {
 // unreachable node is a state the inventory records, not a failure a caller
 // has to handle.
 func (s *Service) Refresh(ctx context.Context, id model.MachineID) {
+	// The pass carries its own ceiling, because two of its four callers hand
+	// it the supervisors' lifetime, and in production that lifetime has no
+	// deadline. Every Talos call on such a context is refused before it leaves
+	// the process (D-04, ErrNoDeadline), so each heartbeat pass failed, the
+	// node went to StageDown, and the watchdog tore down a watch that was
+	// working -- on a node that was up, every forty-five seconds, forever.
+	// A caller with a shorter budget keeps it: WithTimeout takes the earlier.
+	ctx, cancel := context.WithTimeout(ctx, RefreshBudget)
+	defer cancel()
+
 	rec, err := s.deps.Store.Machines().Get(ctx, id)
 	if err != nil {
 		if !errors.Is(err, store.ErrNotFound) {
