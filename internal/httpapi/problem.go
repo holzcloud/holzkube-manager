@@ -126,6 +126,12 @@ const (
 	// would have changed something (INV-12, D-22).
 	CodeClusterLocked = "forbidden.cluster-locked"
 
+	// CodeAlreadyAdopted: the adoption was aimed at a node another stored
+	// cluster already has. A conflict with what is stored rather than a bad
+	// value: the same request succeeds once that cluster is forgotten, and the
+	// detail names it (ledger 139).
+	CodeAlreadyAdopted = "conflict.cluster-already-adopted"
+
 	// CodeClusterBusy: another mutating job holds this cluster's lease
 	// (JOB-03). It is a conflict rather than a refusal: the request is fine,
 	// the moment is not, and retrying later is the remedy.

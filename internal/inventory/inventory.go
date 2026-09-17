@@ -45,6 +45,15 @@ var (
 
 	// ErrNotFound reports a cluster or machine that is not in the inventory.
 	ErrNotFound = errors.New("inventory: no such record")
+
+	// ErrAlreadyAdopted reports an adoption through a node that already belongs
+	// to a stored cluster.
+	//
+	// Without it the second adoption succeeds and moves the node: machines are
+	// filed by UUID, so recording it for the new cluster takes it from the old
+	// one, which is left holding nothing it can observe. The remedy is to
+	// forget the existing cluster first, and the error names it (ledger 139).
+	ErrAlreadyAdopted = errors.New("inventory: this node already belongs to an adopted cluster")
 )
 
 // Deps is what the service needs.
