@@ -9,6 +9,7 @@ import {
   WARNING_INSTALLER_REPO_FALLBACK_UNVERIFIED,
 } from '@/api'
 import { CODE_UPSTREAM_FACTORY_REJECTED, CODE_UPSTREAM_FACTORY_UNAVAILABLE } from '@/lib/problem'
+import { recordDuration } from '@/lib/waiting'
 import { problemType } from '@/test/problem-fixtures'
 import {
   ARCH_STORAGE_KEY,
@@ -1877,18 +1878,59 @@ describe('ImagesView — the two waits state their ceiling', () => {
     await user.type(screen.getByLabelText('Name'), 'workers')
 
     // Nothing is claimed before there is anything to wait for.
-    expect(screen.queryByText(/may take up to/i)).not.toBeInTheDocument()
+    expect(screen.queryByText(/gives up after/i)).not.toBeInTheDocument()
 
     await user.click(screen.getByRole('button', { name: 'Create schematic' }))
 
-    const stated = await screen.findByText(/may take up to/i)
+    const stated = await screen.findByText(/gives up after/i)
     expect(stated).toHaveTextContent(`${CREATE_WAIT_SECONDS} seconds`)
-    // A ceiling, not a prediction: the wording says what the server may spend,
-    // never what it is expected to spend.
-    expect(stated.textContent ?? '').not.toMatch(/takes about|estimated|roughly/i)
+
+    // The ceiling is still a ceiling. Ledger entry 62 asked for an expected
+    // duration BESIDE it, not instead of it, and the two must not be confused:
+    // this sentence says what the server will spend before giving up, and it
+    // must never read as what the wait is expected to take.
+    expect(stated.textContent ?? '').not.toMatch(/takes about|estimated|roughly|usually/i)
+
+    // And with nothing measured yet, no number is invented. This is the half
+    // that makes "measured, never estimated" checkable rather than a promise:
+    // localStorage is empty in this test, so the screen has to say so.
+    const named = await screen.findByText(/Building the image/i)
+    expect(named).toBeInTheDocument()
+    expect(screen.getByText(/no usual time to compare against/i)).toBeInTheDocument()
 
     release()
-    await waitFor(() => expect(screen.queryByText(/may take up to/i)).not.toBeInTheDocument())
+    await waitFor(() => expect(screen.queryByText(/gives up after/i)).not.toBeInTheDocument())
+  })
+
+  it('names a measured usual time once one has been measured, and never before', async () => {
+    // The other half of ledger entry 62, and the half that decides whether
+    // "expected duration" is a prediction or an invention. The operator's
+    // decision of 2026-09-17 was that this number comes from what actually
+    // happened; this seeds the record of three earlier waits and asserts the
+    // screen reports their middle rather than a constant.
+    recordDuration('factory.create', 20)
+    recordDuration('factory.create', 18)
+    recordDuration('factory.create', 22)
+
+    let release = (): void => undefined
+    const held = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    stubFactory({ hold: { path: '/api/v1/schematics', method: 'POST', release: held } })
+    const user = userEvent.setup()
+
+    renderImages()
+    await catalogLoaded()
+    await user.type(screen.getByLabelText('Name'), 'workers')
+    await user.click(screen.getByRole('button', { name: 'Create schematic' }))
+
+    const usual = await screen.findByText(/Usually about/i)
+    // The median of 18, 20 and 22, phrased as a duration. Not the ceiling,
+    // which is 120 and appears in the same block as a different sentence.
+    expect(usual).toHaveTextContent('20s')
+    expect(screen.queryByText(/no usual time to compare against/i)).not.toBeInTheDocument()
+
+    release()
   })
 
   it('states the assets ceiling while the resolution is in flight and not after', async () => {
@@ -1905,15 +1947,16 @@ describe('ImagesView — the two waits state their ceiling', () => {
     renderImages()
     const detail = await openDetail(user, USABLE)
 
-    const stated = await detail.findByText(/may take up to/i)
+    const stated = await detail.findByText(/gives up after/i)
     expect(stated).toHaveTextContent(`${ASSETS_WAIT_SECONDS} seconds`)
-    expect(stated.textContent ?? '').not.toMatch(/takes about|estimated|roughly/i)
+    expect(stated.textContent ?? '').not.toMatch(/takes about|estimated|roughly|usually/i)
+    expect(await detail.findByText(/Resolving the installer reference/i)).toBeInTheDocument()
 
     release()
     // The references arrive and the sentence goes with them: a ceiling that
     // outlives the wait it bounds is a ceiling that means nothing.
     expect(await detail.findByLabelText('Installer reference')).toBeInTheDocument()
-    await waitFor(() => expect(detail.queryByText(/may take up to/i)).not.toBeInTheDocument())
+    await waitFor(() => expect(detail.queryByText(/gives up after/i)).not.toBeInTheDocument())
   })
 })
 

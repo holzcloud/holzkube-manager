@@ -48,6 +48,13 @@ import {
   CODE_UPSTREAM_FACTORY_UNAVAILABLE,
   messageFor,
 } from '@/lib/problem'
+import {
+  formatDuration,
+  medianSeconds,
+  readDurationHistory,
+  recordDuration,
+  useElapsedSeconds,
+} from '@/lib/waiting'
 import { authenticatedRoute } from '@/routes/__root'
 
 /**
@@ -284,6 +291,59 @@ export type Architecture = (typeof ARCHITECTURES)[number]
 export const ASSETS_WAIT_SECONDS = 35
 export const CREATE_WAIT_SECONDS = 120
 
+/**
+ * A wait that says what it is doing, how long it has been doing it, and how
+ * long that usually takes.
+ *
+ * PITFALLS.md:646 names a bare spinner as the anti-pattern and "named state,
+ * elapsed time, expected duration, current sub-step" as the approach. Ledger
+ * entry 62 records that this screen shipped one static sentence naming the
+ * server's CEILING instead -- a maximum, which tells an operator nothing about
+ * whether this particular run is going normally.
+ *
+ * The expected figure comes from what this browser has actually waited for,
+ * never from a constant: the Image Factory build is a request rather than a
+ * job, so nothing on the server records how long it took, and the only witness
+ * is the browser that waited. Until one has completed it says there is no
+ * experience yet, because that is true and a plausible number is not.
+ *
+ * The ceiling stays, relabelled as what it is. It is still worth showing -- it
+ * is the moment the request is given up on -- but it is the server's patience
+ * and not a prediction.
+ */
+function WaitingFor({
+  state,
+  detail,
+  since,
+  historyKey,
+  ceilingSeconds,
+}: {
+  state: string
+  detail: string
+  since: number
+  historyKey: string
+  ceilingSeconds: number
+}) {
+  const elapsed = useElapsedSeconds(new Date(since).toISOString(), true)
+  const typical = medianSeconds(readDurationHistory(historyKey))
+
+  return (
+    <div className="space-y-1 text-sm text-muted-foreground">
+      <p>
+        <span className="font-medium text-foreground">{state}</span>
+        {elapsed !== null && <> · {formatDuration(elapsed)}</>}
+      </p>
+      <p className="text-xs">{detail}</p>
+      <p className="text-xs">
+        {typical !== null
+          ? `Usually about ${formatDuration(typical)} here. `
+          : 'Nothing has finished here yet, so there is no usual time to compare against. '}
+        The server gives up after {ceilingSeconds} seconds.
+      </p>
+    </div>
+  )
+}
+
 function ImagesView() {
   const queryClient = useQueryClient()
 
@@ -351,9 +411,21 @@ function ImagesView() {
   // depend on the optional part of it.
   const clusters = useQuery({ queryKey: ['clusters'], queryFn: () => api.clusters.list() })
 
+  // When this wait began, so the counter measures the request and not the
+  // render. A ref rather than state: it must not cause a render of its own,
+  // and the ticking counter already provides one every second.
+  const createStartedAt = useRef(0)
+
   const create = useMutation({
-    mutationFn: (input: SchematicInput) => api.schematics.create(input),
+    mutationFn: (input: SchematicInput) => {
+      createStartedAt.current = Date.now()
+      return api.schematics.create(input)
+    },
     onSuccess: (result) => {
+      // Recorded on success only. A refused or timed-out request measures how
+      // long a failure took, and predicting the next wait from it would make
+      // the estimate worse every time something goes wrong.
+      recordDuration('factory.create', (Date.now() - createStartedAt.current) / 1000)
       setCreated(result)
     },
     // On settle rather than on success. Since plan 02-24 a `409` on this route
@@ -681,11 +753,30 @@ function ImagesView() {
           {create.isPending ? 'Creating…' : 'Create schematic'}
         </Button>
 
-        {create.isPending && (
-          <p className="text-sm text-muted-foreground">
-            The Image Factory builds the image while it answers. This may take up to{' '}
-            {CREATE_WAIT_SECONDS} seconds.
+        {/* The reason, BESIDE the button rather than only in a tooltip.
+            PITFALLS.md: "A disabled button with a reason prevents the click
+            that a spinner invites" -- and a tooltip is not a reason on a
+            phone, which has no hover. Only one is shown, the first that
+            applies, because a list of three things to fix reads as a form
+            that is broken rather than as one that is not finished. */}
+        {!create.isPending && (name === '' || version === '' || hasUnusableValue) && (
+          <p className="text-xs text-muted-foreground">
+            {name === ''
+              ? 'Give it a name first.'
+              : version === ''
+                ? 'Choose a Talos version first.'
+                : 'One of the values above is refused; the field says which.'}
           </p>
+        )}
+
+        {create.isPending && (
+          <WaitingFor
+            state="Building the image"
+            detail="The Image Factory builds it while it answers, so this request is the build."
+            since={createStartedAt.current}
+            historyKey="factory.create"
+            ceilingSeconds={CREATE_WAIT_SECONDS}
+          />
         )}
       </form>
 
@@ -1457,9 +1548,15 @@ function AssetPanel({ record, archSeed }: { record: Schematic; archSeed: Archite
   const [arch, setArch] = useState<Architecture>(archSeed)
   const [secureBoot, setSecureBoot] = useState(false)
 
+  const assetsStartedAt = useRef(0)
   const assets = useQuery({
     queryKey: ['schematics', record.id, 'assets', arch, secureBoot],
-    queryFn: () => api.schematics.assets(record.id, { arch, secureboot: secureBoot }),
+    queryFn: async () => {
+      assetsStartedAt.current = Date.now()
+      const answer = await api.schematics.assets(record.id, { arch, secureboot: secureBoot })
+      recordDuration('factory.assets', (Date.now() - assetsStartedAt.current) / 1000)
+      return answer
+    },
   })
 
   return (
@@ -1498,10 +1595,13 @@ function AssetPanel({ record, archSeed }: { record: Schematic; archSeed: Archite
       </div>
 
       {assets.isPending && (
-        <p className="text-sm text-muted-foreground">
-          Resolving… The installer reference is looked up in the registry. This may take up to{' '}
-          {ASSETS_WAIT_SECONDS} seconds.
-        </p>
+        <WaitingFor
+          state="Resolving the installer reference"
+          detail="Each candidate repository is asked whether it has this version."
+          since={assetsStartedAt.current}
+          historyKey="factory.assets"
+          ceilingSeconds={ASSETS_WAIT_SECONDS}
+        />
       )}
 
       {/*
