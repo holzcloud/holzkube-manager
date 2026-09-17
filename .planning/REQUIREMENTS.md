@@ -189,20 +189,38 @@ Anerkannt, aber verschoben. Nicht in der aktuellen Roadmap.
   bei 768 px und 1280 px steht die Sidebar unverändert fest und der Griff ist
   aus.
 
+  **Ebenfalls am 2026-09-17 nachgezogen, nachdem die Liste unten ihre ersten
+  drei Punkte verloren hat:**
+
+  - Der WÄCHTER hängt in der Kette, nicht als opt-in:
+    `web/scripts/layout-audit.mjs`, `task test:layout`, letzter Schritt von
+    `task ci` und von CI. Er fährt alle zehn Routen angemeldet bei 390 und
+    1280 px und wird rot, wenn ein Element rechts hinausragt und **kein
+    scrollbarer Vorfahr** es zurückholt. Die beiden Breiten sind die
+    Entscheidung des Betreibers vom selben Tag.
+  - Die Tippziel-Größen sind gemessen und an den Grundbausteinen behoben,
+    ausschließlich unterhalb `md` (Entscheidung des Betreibers: ein
+    Schreibtisch hat einen Zeiger, und eine Liste verliert echte Information,
+    wenn jede Zeile zwölf Pixel wächst). Bei 390 px: vorher 0 Elemente mit
+    44 px oder mehr und 10 unter 24 px, nachher **62 bei 44 px oder mehr und
+    0 unter 24 px**; bei 1280 px unverändert. Ledger 136.
+  - Die Tabellen bleiben wischbar (zweite Entscheidung des Betreibers), tragen
+    dafür jetzt einen Schatten an der rechten Kante, der nur erscheint, solange
+    rechts etwas ist, plus `aria-label` und Fokussierbarkeit.
+
   **Was offen ist:**
 
-  - Ein WÄCHTER. Ohne ihn ist "handytauglich" ein Zustand, der beim nächsten
-    Feature still wieder verschwindet — genau wie die drei Routen, die niemand
-    aufgerufen hat (Ledger 130, 132). Die Messung oben ist ein Skript gegen
-    den laufenden Daemon; sie gehört als eigener CI-Schritt in die Kette, nicht
-    als opt-in (Ledger 5 und 64 führen einen Drift-Wächter, der nie lief).
-  - Die Tippziel-Größen sind nicht geprüft. Gemessen wurde Erreichbarkeit,
-    nicht Bedienbarkeit mit einem Daumen.
-  - Die beiden echten `<table>` bleiben wischbar statt umgebrochen. Ob eine
-    Tabelle auf einem Telefon zu Karten werden soll, ist eine Gestaltungsfrage
-    und keine Reparatur.
-  - Welche Gerätebreiten festgenagelt werden sollen, ist nicht entschieden;
-    gemessen wurde 390, 768 und 1280.
+  - **10 Elemente liegen bei 390 px weiter zwischen 24 und 43 px.** Überwiegend
+    Icon-Knöpfe in dichten Listen.
+  - **Der Wächter misst Erreichbarkeit, NICHT Tippzielgröße.** Die Zahlen oben
+    sind von Hand gemessen, und dass sie so bleiben, hält derzeit nichts —
+    dieselbe Lage, aus der die Erreichbarkeit gekommen ist.
+  - Ob eine Tabelle auf einem Telefon zu Karten werden soll, bleibt eine
+    Gestaltungsfrage und keine Reparatur.
+  - Die Erwartungswerte fürs Warten (Fenster 62) liegen im `localStorage` eines
+    Browsers, sind also pro Gerät verschieden und auf einem frischen Gerät
+    zunächst gar nicht da. Der Server kennt diese Wartezeit nicht; eine
+    geschätzte Zahl wäre der Preis dafür gewesen, gar nichts zu sagen.
 
 ### Schnittstellen
 

@@ -17,6 +17,7 @@ comments in the source point here for exactly that reason.
 |---|---|
 | `PROJECT.md`, `ROADMAP.md`, `REQUIREMENTS.md` | what the project is for, and in what order it gets built |
 | `STATE.md`, `WINDOWS.md`, `milestone.lock` | where the work currently stands |
+| `HANDOVER.md` | what a session picking this up elsewhere needs and cannot get from the files above: what is open on the operator's own machine, how to drive the product here without a browser, and what this environment cannot check at all |
 | `phases/` | per phase: the plan, the summaries, the verification, the deferred items |
 | `research/` | the groundwork — stack, architecture, and pitfalls found before they were hit |
 
