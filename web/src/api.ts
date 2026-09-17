@@ -1135,6 +1135,11 @@ export const clusterSchema = z.object({
   healthy: z.number(),
   degraded: z.number(),
   down: z.number(),
+  /** Nodes nobody has had an answer from YET — an observer that has not run
+   * or is still connecting. Not a failure, and kept out of `down` for that
+   * reason: counting them there put "1 not answering" on every card right
+   * after an import or a restart. */
+  checking: z.number(),
 })
 
 export type Cluster = z.infer<typeof clusterSchema>
