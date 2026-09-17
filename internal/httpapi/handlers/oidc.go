@@ -246,7 +246,7 @@ func oidcCallback(d httpapi.Deps, w http.ResponseWriter, r *http.Request) {
 	clearFlow(d, r)
 
 	if flow.State == "" || flow.Verifier == "" {
-		failSignIn(w, r, "no-flow")
+		refuseCallback(d, w, r, flow, "no-flow")
 		return
 	}
 
@@ -259,12 +259,12 @@ func oidcCallback(d httpapi.Deps, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !flow.MatchesState(r.URL.Query().Get("state")) {
-		failSignIn(w, r, "state-mismatch")
+		refuseCallback(d, w, r, flow, "state-mismatch")
 		return
 	}
 	code := r.URL.Query().Get("code")
 	if code == "" {
-		failSignIn(w, r, "no-code")
+		refuseCallback(d, w, r, flow, "no-code")
 		return
 	}
 
@@ -286,6 +286,30 @@ func oidcCallback(d httpapi.Deps, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	completeLogin(d, w, r, identity)
+}
+
+// refuseCallback ends a callback that failed before the token exchange, and
+// says in the journal which check it was.
+//
+// These three used to redirect and write nothing. On the operator's Pi a sudo
+// round trip came back, answered in 32 microseconds with a redirect to /login,
+// and left no line at all: the journal could exclude the token exchange and all
+// three named sudo refusals, and could not say which of the remaining three
+// had fired (ledger 138). The redirect a browser follows is not a record.
+//
+// signed_in is there because it separates the two readings that matter. A
+// caller with a live session who arrives with no flow lost only the flow -- a
+// second tab, a flow consumed by an earlier callback -- while a caller with no
+// session lost the cookie, which is a different repair. Nothing from the query
+// string is logged: state and code are single-use credentials.
+func refuseCallback(d httpapi.Deps, w http.ResponseWriter, r *http.Request, flow oidc.FlowState, code string) {
+	d.Logger.WarnContext(r.Context(), "an identity-provider callback was refused before the token exchange",
+		slog.String("code", code),
+		slog.Bool("sudo_flow", flow.Sudo),
+		slog.Bool("signed_in", d.Auth.IsAuthenticated(r.Context())),
+		slog.Bool("state_present", r.URL.Query().Get("state") != ""),
+		slog.Bool("code_present", r.URL.Query().Get("code") != ""))
+	failSignIn(w, r, code)
 }
 
 // completeLogin turns a verified identity into a session.
@@ -454,6 +478,13 @@ func completeSudo(d httpapi.Deps, w http.ResponseWriter, r *http.Request, identi
 		failSudo(w, r, "oidc.not-fresh")
 		return
 	}
+
+	// Logged on success too, because whether this provider sends auth_time at
+	// all was, on the operator's installation, never once measured: every
+	// attempt there failed before the claim was read (ledger 138).
+	d.Logger.Info("a sudo window was opened through the identity provider",
+		slog.String("signed-in", u.Username),
+		slog.Duration("auth_time_age", time.Since(identity.AuthTime)))
 
 	d.Auth.OpenSudoWindow(r.Context())
 	d.Auth.Sessions().Put(r.Context(), sessionKeyIDToken, identity.RawIDToken)
