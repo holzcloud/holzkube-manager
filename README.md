@@ -691,6 +691,10 @@ holzkubectl scale <cluster>       which of a cluster's nodes may be removed
 holzkubectl renew-certificate <cluster>
                                   issue this installation a fresh admin
                                   certificate for the cluster
+holzkubectl rotate-authority <cluster>
+                                  print what rotating the cluster's Talos
+                                  certificate authority would do; add
+                                  --confirm <cluster-name> to do it
 holzkubectl label <id> k=v ...    replace a machine's labels (none clears them)
 holzkubectl template plan <file>  what a cluster template would mean
 holzkubectl template export <id>  write a cluster down as a template
