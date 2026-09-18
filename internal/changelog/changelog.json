@@ -1,5 +1,19 @@
 [
   {
+    "version": "v1.16.18",
+    "date": "2026-09-18",
+    "changes": [
+      {
+        "icon": "🧹",
+        "text": "Forgetting a cluster no longer fails with a message about a revision. The machines of that cluster are being watched the whole time, and a health check landing in the same instant made the write collide with itself — you would have seen an error you cannot act on, and the cluster still there. It now retries and keeps whatever the health check just recorded."
+      },
+      {
+        "icon": "🔍",
+        "text": "The checks that ask whether the Image Factory still answers the way this build expects now run every week on their own. They existed and nothing ever started them, so their silence meant nothing. The first real run says the recordings still match."
+      }
+    ]
+  },
+  {
     "version": "v1.16.17",
     "date": "2026-09-18",
     "changes": [
