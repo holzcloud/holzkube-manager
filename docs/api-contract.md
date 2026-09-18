@@ -1422,7 +1422,7 @@ certificate authority, which this installation holds, and a node trusts that
 authority rather than any particular certificate issued from it — so a fresh one
 is accepted the moment it is presented, with nothing rolled and nothing
 restarted. This is a different operation from rotating the authority itself,
-which changes what every node trusts and is **not built**.
+which changes what every node trusts; that one is below.
 
 **The new certificate is proven before it is kept, and that ordering is the
 operation.** Minting is two lines; the way this goes wrong is replacing a
@@ -1452,6 +1452,56 @@ the thing it exists to protect against.
 |---|---|---|
 | `conflict.no-certificate-authority` | 409 | the stored bundle carries an admin certificate and no authority key, so nothing new can be issued from it. The cluster was adopted from a talosconfig that did not carry the authority; the detail says how to get one. |
 | `conflict.certificate-rejected` | 409 | the new certificate reached no node, **so the old one was kept and nothing changed**. Its own code because this is the safe outcome of a renewal rather than a failure of one: either every node is unreachable, or the authority in this store is no longer the one the cluster trusts. |
+
+## Rotating a cluster's certificate authority
+
+Three routes, and the split is the operation's safety rather than REST taste:
+
+| route | what it does |
+|---|---|
+| `GET /api/v1/clusters/{id}/authority` | the plan: the four passes, every node that will be written, whether a rotation is already in progress, whether the cluster is locked, and the warnings |
+| `POST /api/v1/clusters/{id}/authority/confirm` | takes `{"typed": "<cluster name>"}` and answers a token bound to this cluster and this action |
+| `POST /api/v1/clusters/{id}/authority` | takes `{"confirmation": "<token>"}` and answers `202` with the job |
+
+**The four passes, in the only order that keeps a cluster reachable.** Every
+node accepts the new authority as well as the one it uses now; every node starts
+issuing from the new one; holzkube-manager mints itself a certificate from the
+new authority and proves it against a node before keeping it; every node stops
+accepting the old one. Between passes the cluster trusts two authorities, which
+is a working Talos configuration — so an interrupted rotation is **continued**
+rather than restarted. The authority being moved to is stored on the cluster's
+secrets record for exactly that reason; without it a resumed run would generate
+a second new authority and leave the cluster trusting three.
+
+**The refusal is checked after pass 1 and before pass 2**, which is the last
+moment at which stopping costs nothing. Every node in the cluster has to answer,
+and the ones that did not are named. A node that misses pass 1 refuses the
+certificate every other node accepts after pass 2, and nothing afterwards can
+repair it: reaching it would need the credential it no longer accepts. This is
+the opposite of what a rolling upgrade does with a locked node, and for the
+opposite reason.
+
+It is **Destructive** and it **is** under the cluster lock, unlike the renewal
+above: this one rewrites the configuration of every node, which is precisely
+what an adoption kept read-only (INV-12) says must not happen.
+
+**The Kubernetes authority is not rotated.** Talos keeps the two apart, this
+product speaks the Talos machine API and does not talk to Kubernetes at all, and
+rotating that authority through machine configuration alone would leave every
+kubelet holding a certificate the API server does not accept.
+
+**What the plan's warnings say, and they are part of the contract:** no rotation
+has ever been run against real hardware. Every pass is measured against the
+simulator, which models what a node accepts and who issued its certificate. The
+mechanism and the refusals are proven; your cluster surviving it is not.
+
+The confirmation is checked by re-deriving the intent from the request rather
+than reading it out of the token, so a confirmation issued for rebooting a node
+— or for another cluster — does not authorise a rotation.
+
+| code | HTTP | when |
+|---|---|---|
+| `conflict.no-machines-to-rotate` | 409 | the cluster has no machines recorded, so there is nothing to write |
 
 ## Cluster size
 

@@ -525,9 +525,12 @@ func (s *Server) VerifiedClients() []string {
 // node's own discovery source emits.
 func (s *Server) Identity() talos.Identity {
 	n := s.node.snapshot()
+	// The version is NOT here, and that is the point: the real probe is a TLS
+	// handshake, a certificate carries no version, and a simulator that
+	// supplied one would let a test assert something no production probe ever
+	// returns (TRANS-06, ledger 1).
 	return talos.Identity{
 		Hostname:    n.Hostname,
-		Version:     n.Version,
 		Maintenance: s.opts.Maintenance,
 	}
 }
