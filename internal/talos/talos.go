@@ -121,7 +121,17 @@ type Creds struct {
 type Identity struct {
 	Machine  model.MachineID
 	Hostname string
-	Version  string
+
+	// There is deliberately no Version here. A probe is a TLS handshake and
+	// nothing more -- it must work against a node in maintenance mode, which
+	// has no cluster PKI to authenticate to -- and a version is not in a
+	// certificate. The field existed, the direct dialer left it empty (ledger
+	// 1), and talossim filled it from the node it models: a test could
+	// therefore assert a version that production never carries, which is
+	// exactly the simulator-passes-what-hardware-cannot hazard TRANS-06 is
+	// about. Where the version of an unconfigured machine is actually wanted,
+	// the provisioning path asks for it with a Version RPC over a maintenance
+	// client (internal/provision/plan.go).
 
 	// Maintenance reports that the node is running the maintenance-mode API
 	// surface rather than the full one. It is the peer's own claim: a
