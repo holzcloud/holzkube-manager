@@ -1,0 +1,74 @@
+# Has factory.talos.dev moved away from what this repository records?
+#
+# internal/imagefactory tests against recorded fixtures: a version list, an
+# extension catalogue, a schematic id the Factory assigned, and the matrix of
+# which installer repositories answer at which Talos version. Every one of them
+# is a recording of an answer a third party gave once. A fake that has drifted
+# from the real service looks exactly like a fake that has not, and the offline
+# suite cannot tell the difference -- which is the whole reason the live tests
+# exist.
+#
+# They are opt-in, and ledger entries 5, 30, 35 and 64 all record the same
+# thing about them: a drift watcher that nothing schedules never watches
+# anything. This is the schedule. It is the same argument the Talos upstream
+# check is built on, and the same shape.
+#
+# A failure here is not a broken build. It means the recordings and the service
+# disagree, and the repair is to look at which one moved.
+name: Image Factory drift
+
+on:
+  schedule:
+    # Weekly, on a different day from the Talos upstream check: two schedules
+    # that fire together produce one notification people read as one thing.
+    - cron: '23 5 * * 4'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  # Never two of these at once. The live tests POST schematics to a public
+  # service, and the run that measures throttling must not be throttled by its
+  # own sibling.
+  group: factory-drift
+  cancel-in-progress: false
+
+jobs:
+  drift:
+    name: Do the recordings still match factory.talos.dev
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      # Three attempts, spaced, and the reason is in the ledger rather than in
+      # caution: factory.talos.dev has been observed throttling this repository
+      # (entry 5), and a throttled run measures nothing while looking exactly
+      # like a failure. A retry does not hide drift -- drift fails all three --
+      # it only stops a rate limit from being reported as one.
+      - name: Live contract and canonical-id checks
+        env:
+          HOLZKUBE_MANAGER_FACTORY_LIVE: '1'
+        run: |
+          for attempt in 1 2 3; do
+            echo "::group::attempt $attempt"
+            if go test ./internal/imagefactory/ -count=1 -v \
+                 -run 'TestLiveFactory|TestLiveCanonical'; then
+              echo "::endgroup::"
+              exit 0
+            fi
+            echo "::endgroup::"
+            if [ "$attempt" -lt 3 ]; then
+              echo "attempt $attempt failed; waiting before the next one"
+              sleep 300
+            fi
+          done
+          echo "Three attempts failed. Either the recordings in internal/imagefactory/testdata"
+          echo "and the live service disagree, or factory.talos.dev refused this repository for"
+          echo "fifteen minutes. The log above says which: a drift failure names the value that"
+          echo "changed, a throttle names the status code."
+          exit 1
