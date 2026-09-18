@@ -159,8 +159,7 @@ func (s *Service) ForgetCluster(ctx context.Context, id model.ClusterID) error {
 		if m.Cluster != id {
 			continue
 		}
-		m.Cluster = ""
-		if _, err := s.deps.Store.Machines().Put(ctx, m); err != nil {
+		if err := s.unassign(ctx, m.ID); err != nil {
 			return err
 		}
 	}
@@ -173,6 +172,51 @@ func (s *Service) ForgetCluster(ctx context.Context, id model.ClusterID) error {
 		return err
 	}
 	return s.deps.Store.Clusters().Delete(ctx, id)
+}
+
+// unassign takes one machine out of its cluster, and retries the whole
+// read-decide-write rather than the write.
+//
+// A supervisor is observing every machine in the inventory the entire time, so
+// a record read here is a record a heartbeat may write a snapshot onto a
+// millisecond later -- and the Put then carries a revision that no longer
+// exists. Without this, forgetting a cluster failed with "revision conflict"
+// whenever a refresh landed in that window, which is a coin toss weighted by
+// how busy the machine is: it never happened on the operator's Pi and failed on
+// the first CI run that had the test for it. The operator would have seen the
+// cluster stay, with an error naming a revision.
+//
+// Retrying the read too is what makes it correct rather than merely luckier:
+// the snapshot the heartbeat just wrote is kept, and only the cluster field is
+// taken off the record that is actually stored. It is the same loop
+// recordMachine uses, for the same reason.
+func (s *Service) unassign(ctx context.Context, id model.MachineID) error {
+	for range writeAttempts {
+		rec, err := s.deps.Store.Machines().Get(ctx, id)
+		if err != nil {
+			if errors.Is(err, store.ErrNotFound) {
+				// Forgotten by somebody else in the meantime, which is the
+				// outcome this was aiming at.
+				return nil
+			}
+			return err
+		}
+		if rec.Cluster == "" {
+			return nil
+		}
+		rec.Cluster = ""
+
+		switch _, err := s.deps.Store.Machines().Put(ctx, rec); {
+		case err == nil:
+			return nil
+		case errors.Is(err, store.ErrConflict):
+			continue
+		default:
+			return err
+		}
+	}
+	return fmt.Errorf("%w: the record for machine %s changed under %d successive attempts while "+
+		"its cluster was being forgotten", store.ErrConflict, id, writeAttempts)
 }
 
 // AddManual records a machine the operator named by address.

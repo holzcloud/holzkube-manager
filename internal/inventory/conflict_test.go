@@ -4,6 +4,7 @@ import (
 	"context"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/holzcloud/holzkube-manager/internal/model"
 	"github.com/holzcloud/holzkube-manager/internal/store"
@@ -266,5 +267,58 @@ func TestFilingAMachineSurvivesLosingTheRevisionRace(t *testing.T) {
 	if !saved.Locked || saved.LockReason != "written while the machine was being filed" {
 		t.Error("the lock the interposed writer set is gone: the retry wrote back the record it " +
 			"had read before the collision")
+	}
+}
+
+// TestForgettingAClusterSurvivesAConcurrentWrite is the defect CI found and
+// this Pi did not: ForgetCluster read every machine, cleared its cluster and
+// wrote it back with no retry, while a supervisor was observing every one of
+// them the whole time. A heartbeat landing in that window made the write carry
+// a revision that no longer existed, and the operator saw "revision conflict"
+// and a cluster that stayed.
+//
+// The race is forced here rather than waited for: a load-dependent test that
+// passes on a quiet machine and fails on a busy one is how this got to CI in
+// the first place.
+func TestForgettingAClusterSurvivesAConcurrentWrite(t *testing.T) {
+	t.Parallel()
+
+	ctx := testContext(t)
+
+	wrap, hook := interposed(func(ms store.MachineStore) {
+		// Exactly what a heartbeat does in that window: read the record and
+		// write a snapshot onto it, taking the revision with it.
+		machines, err := ms.List(ctx)
+		if err != nil || len(machines) == 0 {
+			t.Errorf("the interposed writer could not read the inventory: %v", err)
+			return
+		}
+		rec := machines[0]
+		rec.SeenAt = rec.SeenAt.Add(time.Second)
+		if _, err := ms.Put(ctx, rec); err != nil {
+			t.Errorf("the interposed writer could not write: %v", err)
+		}
+	})
+	f := newFixtureWrapped(t, talossim.Options{ControlPlane: true}, 0, wrap)
+
+	cluster := f.importCluster(ctx, t)
+	hook.arm()
+
+	if err := f.svc.ForgetCluster(ctx, cluster.ID); err != nil {
+		t.Fatalf("ForgetCluster lost a revision race and gave up: %v. The operator sees the "+
+			"cluster stay, with an error naming a revision they have no way to act on", err)
+	}
+
+	machines, err := f.svc.Machines(ctx)
+	if err != nil {
+		t.Fatalf("Machines: %v", err)
+	}
+	for _, m := range machines {
+		if m.Cluster != "" {
+			t.Errorf("machine %s still belongs to %s after the cluster was forgotten", m.ID, m.Cluster)
+		}
+	}
+	if !hook.collided() {
+		t.Error("the competing write never happened, so this test proved nothing about the race")
 	}
 }
