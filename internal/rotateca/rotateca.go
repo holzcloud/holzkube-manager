@@ -235,52 +235,6 @@ func dedupeCertificates(in [][]byte) [][]byte {
 	return out
 }
 
-// sameCertificateSet compares two lists as sets, because "already done" is a
-// question about which authorities are listed and not about their order.
-func sameCertificateSet(a, b [][]byte) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for _, want := range a {
-		found := false
-		for _, have := range b {
-			if sameCertificate(want, have) {
-				found = true
-				break
-			}
-		}
-		if !found {
-			return false
-		}
-	}
-	return true
-}
-
-// IssuePatch is pass 2: the node issues from the new authority.
-//
-// The KEY goes only to a control-plane node, and that is Talos's own split
-// rather than caution: trustd runs on the control plane and issues
-// certificates to joining nodes, so it needs the authority's key, and a worker
-// carries the certificate alone. Handing a worker the key would put the
-// cluster's whole Talos PKI on a machine that has no reason to hold it, and
-// this rotation would be the thing that put it there.
-func IssuePatch(a Authority, role model.MachineRole) string {
-	if role == model.RoleControlPlane {
-		return "machine:\n" +
-			"  ca:\n" +
-			"    crt: " + encodeBase64(a.Crt) + "\n" +
-			"    key: " + encodeBase64(a.Key) + "\n"
-	}
-	// An empty key is how Talos itself writes a worker's configuration. It is
-	// the field being present and empty rather than absent, because a strategic
-	// merge that omits it keeps whatever the node has -- which on a node that
-	// was once a control plane is the old authority's key.
-	return "machine:\n" +
-		"  ca:\n" +
-		"    crt: " + encodeBase64(a.Crt) + "\n" +
-		"    key: \"\"\n"
-}
-
 // PruneConfig is pass 4: the node stops accepting everything but the new
 // authority.
 //
