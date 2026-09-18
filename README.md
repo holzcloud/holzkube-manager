@@ -752,33 +752,58 @@ silence.
 Operations it performs half of, said here because a product that does the first
 half silently is a product whose operator finds out during the incident.
 
-### It renews its own certificate and does not rotate a cluster's authority
+### It rotates a cluster's authority and has never proven it on hardware
 
-**Renewing** is built. Each cluster card has a button that issues this
-installation a fresh admin certificate from the cluster's own Talos certificate
-authority, which it already holds — see *Certificates* below. It touches no
-node, because a node trusts the authority rather than any one certificate issued
-from it.
+**Renewing** this installation's own certificate is the easy half, and it is
+built: each cluster card has a button that issues a fresh admin certificate from
+the cluster's own Talos certificate authority, which this installation already
+holds — see *Certificates* below. It touches no node, because a node trusts the
+authority rather than any one certificate issued from it.
 
-**Rotating the authority** is not built, and is a different operation: it
-changes what every node trusts. Doing it means adding the new authority to every
-node's accepted set, rolling the configuration, switching the issuing authority,
-rolling again, and only then removing the old one — four configuration passes
-across every machine, where stopping in the middle leaves a cluster that trusts
-two authorities, and getting the order wrong leaves one that trusts neither. It
-is the widest silent damage radius in this product.
+**Rotating the authority** changes what every node trusts, and it is now built
+too — as a job, in four passes, in this order:
 
-It is not built because it cannot be *proven* here. Everything else in this
-repository has been run against a simulated Talos node that changes its state
-for real; a rotation that passes against a simulator and has never touched
-hardware is a green test and a claim nobody should act on. A CA rotation that
-almost works is a cluster nobody can reach.
+1. every node accepts the new authority as well as the one it uses now,
+2. every node starts issuing from the new authority,
+3. holzkube-manager takes a certificate from the new authority and proves it
+   against a node before keeping it,
+4. every node stops accepting the old authority.
 
-If you need one today: `talosctl rotate-ca` does it, and afterwards this
-installation's stored authority is the old one — adopt the cluster again with a
-fresh talosconfig. Renewing here will refuse until you do, and the refusal says
-so: *"the certificate authority in this installation's store is no longer the
-one the cluster trusts."*
+Between the passes the cluster trusts two authorities, which is a working state,
+so an interrupted rotation is continued rather than restarted: the authority
+being moved to is stored, every pass has a read-only check beside it, and the
+job says which pass it was on. Getting the order wrong is what leaves a cluster
+that trusts nobody, so the order is enforced in two places — the sequence of the
+passes, and a refusal in each pass that reads the node's own configuration
+first.
+
+**The refusal that matters: every node in the cluster has to answer.** It is
+checked after pass 1 and before pass 2, the last moment at which stopping costs
+nothing. A node that misses pass 1 refuses the certificate every other node
+accepts after pass 2, and nothing afterwards can repair it — reaching it would
+need the credential it no longer accepts. So a node that is merely switched off
+stops the rotation, which is the opposite of what a rolling upgrade does with a
+locked node, and for the opposite reason.
+
+**What is not proven: that a real cluster survives it.** Every pass is measured
+against the simulator, which was taught for this to adopt an applied
+configuration as its active one and to derive its TLS from it — which client
+authorities it accepts, and who issued its own certificate. That makes the
+mechanism and every refusal measurable. It does not make this a claim about your
+hardware, and the dialog says so before you type the cluster's name. Ledger
+entry 103 stays open until a rotation has run on real metal.
+
+**The Kubernetes authority is not rotated.** Talos keeps the two apart, and this
+product speaks the Talos machine API and does not talk to Kubernetes at all.
+Rotating the Kubernetes authority through machine configuration alone would
+leave every kubelet holding a certificate from an authority the API server no
+longer has, so it is refused rather than half done. `talosctl rotate-ca
+--kubernetes` is the tool for that one.
+
+If a rotation happened outside this tool, this installation's stored authority
+is the old one: adopt the cluster again with a fresh talosconfig. Renewing here
+refuses until you do, and the refusal says so: *"the certificate authority in
+this installation's store is no longer the one the cluster trusts."*
 
 ### It restores etcd onto one node and does not rebuild the rest
 

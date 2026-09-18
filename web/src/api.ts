@@ -1605,6 +1605,48 @@ export const acceptedJobSchema = z.object({
 
 export type AcceptedJob = z.infer<typeof acceptedJobSchema>
 
+/**
+ * What rotating a cluster's Talos certificate authority would do.
+ *
+ * The passes and the warnings come from the server rather than being written
+ * here, and that is deliberate: they are statements about what this build does
+ * and what it cannot prove, and a copy in the browser is a copy that drifts
+ * from the operation it describes.
+ */
+export const authorityPreviewSchema = z.object({
+  cluster: z.string(),
+  name: z.string(),
+  /** The cluster's name. Typing it is what the server checks before it will
+   * issue a confirmation at all. */
+  confirm_phrase: z.string(),
+  nodes: z.array(
+    z.object({
+      id: z.string(),
+      hostname: z.string().default(''),
+      role: z.string(),
+    }),
+  ),
+  /** A rotation was started on this cluster and did not finish. Submitting
+   * continues it rather than starting a second one. */
+  in_progress: z.boolean(),
+  /** Adopted read-only: the route refuses while this holds, so the button says
+   * so instead of offering a click that ends in a 403. */
+  locked: z.boolean(),
+  passes: z.array(z.string()),
+  warnings: z.array(z.string()),
+})
+
+export type AuthorityPreview = z.infer<typeof authorityPreviewSchema>
+
+/** The rotation's own confirmation answer: the same token shape, with the
+ * cluster echoed instead of a machine's parameters. */
+export const authorityConfirmationSchema = z.object({
+  token: z.string(),
+  expires: z.string(),
+  action: z.string(),
+  cluster: z.string(),
+})
+
 export const confirmationSchema = z.object({
   token: z.string(),
   expires: z.string(),
@@ -2265,6 +2307,49 @@ export const api = {
         'POST',
         `/api/v1/service-accounts/${encodeURIComponent(id)}/token`,
         serviceAccountTokenSchema,
+      ),
+  },
+
+  authority: {
+    /**
+     * What a rotation would do, and what it cannot promise.
+     *
+     * Read before anything is offered, because the dialog IS the operation's
+     * safety: this is the one thing in the product that can leave a cluster
+     * trusting nobody, and the four passes and the warnings are the part an
+     * operator has to have read.
+     */
+    preview: (cluster: string): Promise<AuthorityPreview> =>
+      sendJSON(
+        'GET',
+        `/api/v1/clusters/${encodeURIComponent(cluster)}/authority`,
+        authorityPreviewSchema,
+      ),
+
+    /**
+     * Type the cluster's name to get a token.
+     *
+     * The token is bound to this cluster and this action: a confirmation for
+     * rebooting a node, or for another cluster, does not authorise it. The
+     * server re-derives what it authorises from the request rather than
+     * reading it out of the token.
+     */
+    confirm: (cluster: string, typed: string): Promise<{ token: string; expires: string }> =>
+      sendJSON(
+        'POST',
+        `/api/v1/clusters/${encodeURIComponent(cluster)}/authority/confirm`,
+        authorityConfirmationSchema,
+        { typed },
+      ),
+
+    /** Start the rotation. It comes back as a job, because it is four passes
+     * over every node and the browser is not what carries them. */
+    rotate: (cluster: string, confirmation: string): Promise<AcceptedJob> =>
+      sendJSON(
+        'POST',
+        `/api/v1/clusters/${encodeURIComponent(cluster)}/authority`,
+        acceptedJobSchema,
+        { confirmation },
       ),
   },
 
