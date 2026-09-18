@@ -1,5 +1,19 @@
 [
   {
+    "version": "v1.16.16",
+    "date": "2026-09-18",
+    "changes": [
+      {
+        "icon": "👆",
+        "text": "Thirteen controls were still too small for a thumb on a phone, and now none are: the dropdowns on Images, Audit and Settings, three checkboxes whose label was the part being tapped, the talosconfig file picker, and the clickable rows in the audit log. The desk keeps its compact sizes."
+      },
+      {
+        "icon": "📏",
+        "text": "And the size is measured on every push from now on, not written down once. The layout check already drove every screen at a phone width to find content out of reach; it now also measures every button, link and field against 44 pixels there — reach and being able to hit it are different things, and only the first was ever checked."
+      }
+    ]
+  },
+  {
     "version": "v1.16.15",
     "date": "2026-09-17",
     "changes": [
