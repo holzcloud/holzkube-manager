@@ -99,6 +99,19 @@ type ClusterSecrets struct {
 	BootstrapToken string `json:"bootstrap_token"`
 	MachineToken   string `json:"machine_token"`
 
+	// NextOSCACrt and NextOSCAKey hold the authority a rotation is moving TO,
+	// from the moment it is generated until the rotation is complete
+	// (V2-OPS-02, ledger 103).
+	//
+	// They are stored rather than kept in the job, and that is what makes the
+	// four passes resumable: every pass is written in terms of "the new
+	// authority", and a process that died between two of them would otherwise
+	// generate a second one and leave the cluster trusting three. They are
+	// empty on every cluster that is not mid-rotation, which is the normal
+	// state, and cleared by the rotation's last step.
+	NextOSCACrt []byte `json:"next_os_ca_crt,omitempty"`
+	NextOSCAKey []byte `json:"next_os_ca_key,omitempty"`
+
 	// ClientCrt and ClientKey are the certificate holzkube-manager issued itself from
 	// OSCA at adoption and dials with since. They are stored rather than
 	// re-derived per connection so that the expiry shown to the operator is

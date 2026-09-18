@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/holzcloud/holzkube-manager/internal/clustertemplate"
+	"github.com/holzcloud/holzkube-manager/internal/httpapi/handlers"
 	"github.com/holzcloud/holzkube-manager/internal/inventory"
 	"github.com/holzcloud/holzkube-manager/internal/model"
 	"github.com/holzcloud/holzkube-manager/internal/scale"
@@ -54,6 +55,12 @@ func TestEveryNameThisToolDecodesIsOneTheServerSends(t *testing.T) {
 			// class -- which machines, right now -- and neither is stored.
 			addedByTheHandler: []string{"sentence", "count"},
 		},
+		{
+			what:   "a certificate-authority rotation plan",
+			client: authorityPlan{},
+			server: handlers.AuthorityPreview{},
+		},
+		{what: "a rotation's node", client: authorityPlanNode{}, server: handlers.AuthorityNode{}},
 		{what: "a scale plan", client: scaleRow{}, server: scale.Plan{}},
 		{what: "a removal decision", client: scaleRemovalRow{}, server: scale.Removal{}},
 		{what: "a join candidate", client: scaleCandidateRow{}, server: scale.Candidate{}},

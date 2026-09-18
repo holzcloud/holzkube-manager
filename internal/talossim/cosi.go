@@ -81,6 +81,56 @@ func (s *Server) SetHostname(ctx context.Context, hostname string) error {
 	return nil
 }
 
+// setMachineConfig replaces the node's active machine configuration.
+//
+// It is what makes ApplyConfiguration an operation rather than a counter: the
+// resource this writes is the one facts.go and every other reader in this
+// product gets when it asks a node for its configuration, so an operation that
+// writes configuration and reads it back is measured against what the node
+// would actually serve.
+//
+// An unparseable configuration is refused rather than stored. A real node
+// validates before it writes, and a simulator that accepted anything would let
+// a test pass on a document Talos rejects.
+func (s *Server) setMachineConfig(ctx context.Context, raw []byte) error {
+	provider, err := configloader.NewFromBytes(raw)
+	if err != nil {
+		return fmt.Errorf("talossim: the applied machine configuration does not load: %w", err)
+	}
+
+	next := configres.NewMachineConfig(provider)
+
+	// Destroy and create rather than update, and that was measured: an update
+	// that copied the whole resource copied its metadata too, so every attempt
+	// carried the wrong version and StateUpdateWithConflicts retried until the
+	// caller's deadline. A real node replaces its configuration wholesale, so
+	// this is also the closer model.
+	if err := s.COSI().Destroy(ctx, next.Metadata()); err != nil && !state.IsNotFoundError(err) {
+		return fmt.Errorf("talossim: replacing the machine configuration: %w", err)
+	}
+	if err := s.COSI().Create(ctx, next); err != nil {
+		return fmt.Errorf("talossim: storing the applied machine configuration: %w", err)
+	}
+
+	// And the node's TLS follows its configuration, which is the half that
+	// makes a CA rotation measurable: the authorities it accepts a client
+	// certificate from, and the one its own certificate is issued by. Read
+	// through machinery's own accessors rather than by parsing the YAML again
+	// here, so the simulator and the product read the same fields.
+	var acceptedCAs [][]byte
+	for _, a := range provider.Machine().Security().AcceptedCAs() {
+		acceptedCAs = append(acceptedCAs, a.Crt)
+	}
+	issuing := provider.Machine().Security().IssuingCA()
+	if issuing == nil {
+		return nil
+	}
+	if err := s.pki.rotate(issuing.Crt, issuing.Key, acceptedCAs); err != nil {
+		return err
+	}
+	return nil
+}
+
 // seedCOSI puts the resources a freshly booted node would already have into
 // the state.
 //
