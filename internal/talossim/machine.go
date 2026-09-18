@@ -693,7 +693,7 @@ func (m *machineService) EtcdStatus(_ context.Context, _ *emptypb.Empty) (*machi
 // A dry run is answered but not recorded: an apply that changed the node in
 // dry-run mode would not be a dry run, and D-03 makes "no mutation reached the
 // node" a property the transport has to be able to prove here.
-func (m *machineService) ApplyConfiguration(_ context.Context, req *machine.ApplyConfigurationRequest) (*machine.ApplyConfigurationResponse, error) {
+func (m *machineService) ApplyConfiguration(ctx context.Context, req *machine.ApplyConfigurationRequest) (*machine.ApplyConfigurationResponse, error) {
 	if err := m.server.node.up(); err != nil {
 		return nil, err
 	}
@@ -706,6 +706,24 @@ func (m *machineService) ApplyConfiguration(_ context.Context, req *machine.Appl
 		details = "dry run: configuration validated, nothing written"
 	} else {
 		m.server.node.applyConfig()
+		// The configuration becomes the node's ACTIVE configuration, and not
+		// just a counter. Ledger 3 records the previous behaviour -- the apply
+		// was counted and the bytes were dropped -- and what that cost is
+		// specific: a test of any operation that writes configuration and then
+		// reads it back proved only that an RPC had been issued. The CA
+		// rotation is exactly that shape, four times over, so the simulator
+		// has to be able to say what a node now trusts.
+		// Only a node that HAS a configuration adopts one. A simulator built
+		// without a Cluster models a machine with no cluster PKI: it serves no
+		// MachineConfig resource, so there is nothing to replace and nothing to
+		// serve back, and it keeps the old behaviour of counting the apply.
+		// That is also the surface the provisioning path uses, which applies
+		// through maintenance mode rather than here.
+		if m.server.opts.Cluster != nil {
+			if err := m.server.setMachineConfig(ctx, req.GetData()); err != nil {
+				return nil, status.Error(codes.InvalidArgument, err.Error())
+			}
+		}
 	}
 
 	return &machine.ApplyConfigurationResponse{

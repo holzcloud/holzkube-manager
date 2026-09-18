@@ -1229,6 +1229,7 @@ that the prompt means nothing.
 | `validation.fingerprint-mismatch` | 400 | the node presented a certificate other than the confirmed one |
 | `forbidden.cluster-locked` | 403 | the cluster was adopted read-only and this request would have changed something |
 | `conflict.cluster-already-adopted` | 409 | the adoption named a node that already belongs to a stored cluster. Adopting it again would move the node to the new record and leave the old one observing nothing; the detail names the cluster to forget first. |
+| `conflict.no-machines-to-rotate` | 409 | a certificate-authority rotation was asked for on a cluster with no machines recorded. The rotation writes every node's configuration, so an empty inventory has nothing to rotate. |
 
 Each is minted deliberately, in the commit that first emits it. The alternative
 is not a missing code: it is every one of these failures arriving as

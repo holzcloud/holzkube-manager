@@ -26,6 +26,10 @@ const usage = `holzkubectl — a command-line client for a holzkube-manager inst
   holzkubectl renew-certificate <cluster>
                                     issue this installation a fresh admin
                                     certificate for the cluster
+  holzkubectl rotate-authority <cluster>
+                                    print what rotating the cluster's Talos
+                                    certificate authority would do; add
+                                    --confirm <cluster-name> to do it
   holzkubectl label <id> k=v ...    replace a machine's labels (none clears them)
   holzkubectl template plan <file>  what a cluster template would mean
   holzkubectl template export <id>  write a cluster down as a template
@@ -93,6 +97,8 @@ func run(ctx context.Context, args []string) error {
 		return clusterScale(ctx, client, args[1:], asJSON)
 	case "renew-certificate":
 		return renewCertificate(ctx, client, args[1:], asJSON)
+	case "rotate-authority":
+		return rotateAuthority(ctx, client, args[1:], asJSON)
 	case "label":
 		return setLabels(ctx, client, args[1:], asJSON)
 	case "template":
@@ -487,6 +493,173 @@ func renewCertificate(ctx context.Context, c *Client, args []string, asJSON bool
 	}
 	fmt.Printf("%s: renewed, expiring %s. No node was touched.\n",
 		cluster.Name, cluster.CertNotAfter)
+	return nil
+}
+
+// rotateAuthority rotates a cluster's Talos certificate authority.
+//
+// Two forms, and the split is the point. Without --confirm it PRINTS the plan:
+// the four passes, the nodes that will be written, and the warnings -- the same
+// text the screen shows, because they come from the same route. With --confirm
+// <name> it types the cluster's name the way the dialog does and submits.
+//
+// There is no single-flag form that skips the reading. The one operation in
+// this product that can leave a cluster trusting nobody is not one a shell
+// history should be able to repeat by accident.
+func rotateAuthority(ctx context.Context, c *Client, args []string, asJSON bool) error {
+	if len(args) == 0 {
+		return errUsage
+	}
+	id := args[0]
+
+	typed := ""
+	rest := args[1:]
+	for i := 0; i < len(rest); i++ {
+		if rest[i] != "--confirm" {
+			return errUsage
+		}
+		if i+1 >= len(rest) {
+			return errUsage
+		}
+		typed = rest[i+1]
+		i++
+	}
+
+	var raw []byte
+	if err := c.Do(ctx, request{
+		Method: http.MethodGet,
+		Path:   "/api/v1/clusters/" + id + "/authority",
+	}, &raw); err != nil {
+		return err
+	}
+
+	var plan authorityPlan
+	if err := json.Unmarshal(raw, &plan); err != nil {
+		return err
+	}
+
+	if typed == "" {
+		if asJSON {
+			return printJSON(raw)
+		}
+		return printAuthorityPlan(plan)
+	}
+
+	// The phrase is checked by the server too. It is compared here first so
+	// that a typo costs a line of output instead of a request that reads as a
+	// refusal from the cluster.
+	if typed != plan.ConfirmPhrase {
+		return fmt.Errorf("%q is not this cluster's name, which is %q: rotating its certificate "+
+			"authority needs the name typed exactly", typed, plan.ConfirmPhrase)
+	}
+	if plan.Locked {
+		return fmt.Errorf("%s is adopted read-only, so nothing may change it. Unlock it first",
+			plan.Name)
+	}
+
+	body, err := json.Marshal(map[string]string{"typed": typed})
+	if err != nil {
+		return err
+	}
+	var confirmRaw []byte
+	if err := c.Do(ctx, request{
+		Method:      http.MethodPost,
+		Path:        "/api/v1/clusters/" + id + "/authority/confirm",
+		ContentType: "application/json",
+		Body:        body,
+	}, &confirmRaw); err != nil {
+		return err
+	}
+	var confirmation struct {
+		Token string `json:"token"`
+	}
+	if err := json.Unmarshal(confirmRaw, &confirmation); err != nil {
+		return err
+	}
+
+	submit, err := json.Marshal(map[string]string{"confirmation": confirmation.Token})
+	if err != nil {
+		return err
+	}
+	var jobRaw []byte
+	if err := c.Do(ctx, request{
+		Method:      http.MethodPost,
+		Path:        "/api/v1/clusters/" + id + "/authority",
+		ContentType: "application/json",
+		Body:        submit,
+	}, &jobRaw); err != nil {
+		return err
+	}
+	if asJSON {
+		return printJSON(jobRaw)
+	}
+
+	var accepted struct {
+		Job struct {
+			ID    string `json:"id"`
+			Steps []struct {
+				Name string `json:"name"`
+			} `json:"steps"`
+		} `json:"job"`
+	}
+	if err := json.Unmarshal(jobRaw, &accepted); err != nil {
+		return err
+	}
+	fmt.Printf("rotation started: job %s, %d steps. Watch it with: holzkubectl jobs\n",
+		accepted.Job.ID, len(accepted.Job.Steps))
+	return nil
+}
+
+// authorityPlan is the preview route's answer.
+type authorityPlan struct {
+	Name          string              `json:"name"`
+	ConfirmPhrase string              `json:"confirm_phrase"`
+	InProgress    bool                `json:"in_progress"`
+	Locked        bool                `json:"locked"`
+	Passes        []string            `json:"passes"`
+	Warnings      []string            `json:"warnings"`
+	Nodes         []authorityPlanNode `json:"nodes"`
+}
+
+// authorityPlanNode is one node in the plan. A named type rather than an
+// anonymous struct because wire_test.go holds it against the server's.
+type authorityPlanNode struct {
+	ID       string `json:"id"`
+	Hostname string `json:"hostname"`
+	Role     string `json:"role"`
+}
+
+func printAuthorityPlan(plan authorityPlan) error {
+	fmt.Printf("%s: rotating the Talos certificate authority\n\n", plan.Name)
+	if plan.InProgress {
+		fmt.Println("A rotation is already in progress on this cluster. Submitting continues it.")
+		fmt.Println()
+	}
+	if plan.Locked {
+		fmt.Println("This cluster is adopted read-only. Unlock it before rotating.")
+		fmt.Println()
+	}
+
+	fmt.Println("What happens, in order:")
+	for i, pass := range plan.Passes {
+		fmt.Printf("  %d. %s\n", i+1, pass)
+	}
+
+	fmt.Printf("\nNodes that will be written (%d), and every one of them has to answer:\n",
+		len(plan.Nodes))
+	for _, n := range plan.Nodes {
+		name := n.Hostname
+		if name == "" {
+			name = "(no hostname recorded)"
+		}
+		fmt.Printf("  %-38s %-14s %s\n", n.ID, n.Role, name)
+	}
+
+	fmt.Println()
+	for _, w := range plan.Warnings {
+		fmt.Printf("! %s\n", w)
+	}
+	fmt.Printf("\nTo do it: holzkubectl rotate-authority <cluster> --confirm %q\n", plan.ConfirmPhrase)
 	return nil
 }
 

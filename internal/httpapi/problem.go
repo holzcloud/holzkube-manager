@@ -126,6 +126,11 @@ const (
 	// would have changed something (INV-12, D-22).
 	CodeClusterLocked = "forbidden.cluster-locked"
 
+	// CodeNoMachinesToRotate: a CA rotation was asked for on a cluster with no
+	// machines recorded. A conflict rather than a validation error: the request
+	// is fine and the inventory is empty.
+	CodeNoMachinesToRotate = "conflict.no-machines-to-rotate"
+
 	// CodeAlreadyAdopted: the adoption was aimed at a node another stored
 	// cluster already has. A conflict with what is stored rather than a bad
 	// value: the same request succeeds once that cluster is forgotten, and the
