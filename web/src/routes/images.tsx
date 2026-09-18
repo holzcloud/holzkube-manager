@@ -640,12 +640,13 @@ function ImagesView() {
             </Select>
           </div>
 
-          <label className="flex items-center gap-2 pb-1 text-sm">
+          <label className="flex items-center gap-2 pb-1 text-sm max-md:min-h-11">
             <input
               type="checkbox"
-              // 24px below md is the floor WCAG 2.5.8 names. The label around
-              // this already extends the hit area; this makes the element itself
-              // match, so the measurement and the experience say the same thing.
+              // The box that gets tapped is the LABEL, because clicking its text
+              // toggles this box -- so the label carries the 44px below md and
+              // this carries the 24px WCAG 2.5.8 names for the control itself.
+              // Measured both: the label was 28px until it said min-h-11.
               className="max-md:size-6"
               checked={showPrerelease}
               onChange={(event) => setShowPrerelease(event.target.checked)}
@@ -653,12 +654,13 @@ function ImagesView() {
             Show pre-release versions
           </label>
 
-          <label className="flex items-center gap-2 pb-1 text-sm">
+          <label className="flex items-center gap-2 pb-1 text-sm max-md:min-h-11">
             <input
               type="checkbox"
-              // 24px below md is the floor WCAG 2.5.8 names. The label around
-              // this already extends the hit area; this makes the element itself
-              // match, so the measurement and the experience say the same thing.
+              // The box that gets tapped is the LABEL, because clicking its text
+              // toggles this box -- so the label carries the 44px below md and
+              // this carries the 24px WCAG 2.5.8 names for the control itself.
+              // Measured both: the label was 28px until it said min-h-11.
               className="max-md:size-6"
               checked={secureBoot}
               onChange={(event) => setSecureBoot(event.target.checked)}
@@ -1580,7 +1582,7 @@ function AssetPanel({ record, archSeed }: { record: Schematic; archSeed: Archite
           </Select>
         </div>
 
-        <label className="flex items-center gap-2 pb-1 text-sm">
+        <label className="flex items-center gap-2 pb-1 text-sm max-md:min-h-11">
           <input
             type="checkbox"
             // 24px below md is the floor WCAG 2.5.8 names. The label around

@@ -335,7 +335,11 @@ function AuditRow({
       tabIndex={0}
       role="button"
       aria-label={`Record ${record.seq}: ${record.action}`}
-      className={orphanedIntent ? 'cursor-pointer bg-destructive/10' : 'cursor-pointer'}
+      // The whole row is the target -- role=button, tabIndex, onClick -- so the
+      // row is what has to be thumb-sized below md. It was 38px, and the six
+      // pixels are the difference between the operator's decision of 44 and a
+      // list that grows for no reason on a desk.
+      className={`max-md:h-11 ${orphanedIntent ? 'cursor-pointer bg-destructive/10' : 'cursor-pointer'}`}
     >
       <TableCell className="tabular-nums">{record.ts}</TableCell>
       <TableCell>{record.actor === '' ? '—' : record.actor}</TableCell>
