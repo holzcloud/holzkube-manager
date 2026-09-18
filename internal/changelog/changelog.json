@@ -1,5 +1,27 @@
 [
   {
+    "version": "v1.16.17",
+    "date": "2026-09-18",
+    "changes": [
+      {
+        "icon": "🔑",
+        "text": "A cluster's Talos certificate authority can be rotated. This is the operation the product has been saying it does not do, and it is the widest silent damage radius in it: rotating changes what every node trusts. It runs as a job in four passes — every node accepts the new authority, every node starts issuing from it, holzkube-manager takes a certificate from it and proves it against a node, and only then does the old one stop being accepted. Between the passes the cluster trusts two authorities, which is a working state, so an interrupted rotation is continued rather than restarted."
+      },
+      {
+        "icon": "🛑",
+        "text": "It refuses unless every node answers, and it checks that after the first pass rather than at the start — the last moment where stopping costs nothing. A node that misses the first pass refuses the certificate every other node accepts after the second, and nothing afterwards can repair it, because reaching it would need the credential it no longer accepts. So a node that is merely switched off stops the rotation and gets named."
+      },
+      {
+        "icon": "⌨️",
+        "text": "The dialog shows the four passes, the nodes that will be written and what this cannot promise, and it wants the cluster's name typed — checked again on the server, so a client that skipped the box gets nothing. The same thing from the command line: holzkubectl rotate-authority prints the plan and does nothing until --confirm names the cluster."
+      },
+      {
+        "icon": "⚠️",
+        "text": "What it does not promise: that your cluster survives it. Every pass is measured against the simulator, which learned for this to adopt a configuration it is given and to derive its own TLS from it. Nobody has run this against real hardware. The dialog says so before you type anything, and the Kubernetes authority is deliberately not touched."
+      }
+    ]
+  },
+  {
     "version": "v1.16.16",
     "date": "2026-09-18",
     "changes": [
