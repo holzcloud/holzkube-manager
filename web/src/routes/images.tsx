@@ -705,10 +705,17 @@ function ImagesView() {
           {catalog.isSuccess && (
             <fieldset className="grid gap-1" aria-label="System extensions">
               {catalog.data.extensions.map((extension) => (
-                <label key={extension.name} className="flex items-start gap-2 text-sm">
+                <label
+                  key={extension.name}
+                  // One row per extension, and the row is the target: its text
+                  // toggles the box. 36px until the minimum was added -- found
+                  // in CI and not here, because this list comes from the Image
+                  // Factory and an empty catalog has nothing to measure.
+                  className="flex items-start gap-2 py-1 text-sm max-md:min-h-11"
+                >
                   <input
                     type="checkbox"
-                    className="mt-1"
+                    className="mt-1 max-md:mt-2.5 max-md:size-6"
                     checked={extensions.includes(extension.name)}
                     onChange={() => toggleExtension(extension.name)}
                   />

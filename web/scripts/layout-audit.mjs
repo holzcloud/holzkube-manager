@@ -193,6 +193,16 @@ const findSmallTargets = (min) => {
   return out
 }
 
+/** How many controls the touch pass looked at, so a thin page is visible. */
+const countTargets = () =>
+  [...document.querySelectorAll('button,a[href],summary,input,select,textarea,[role="button"]')].filter(
+    (el) => {
+      const style = getComputedStyle(el)
+      const box = el.getBoundingClientRect()
+      return style.visibility !== 'hidden' && style.display !== 'none' && box.width >= 1 && box.height >= 1
+    },
+  ).length
+
 const dir = await mkdtemp(join(tmpdir(), 'holzkube-layout-'))
 const port = await freePort()
 const base = `http://127.0.0.1:${port}`
@@ -240,12 +250,20 @@ try {
     for (const route of ROUTES) {
       await page.goto(base + route)
       // The shell renders, then the queries land and the page grows. Measuring
-      // before that is measuring an empty screen, which passes everything.
-      await page.waitForTimeout(700)
+      // before that is measuring an empty screen, which passes everything --
+      // and a fixed wait is the flake one builds oneself: 700ms was enough on
+      // a CI runner and not on the operator's Pi, where /images measured 15
+      // controls instead of 32 because the Image Factory catalog had not
+      // arrived. Network idle first, then a short settle for the render the
+      // last response triggers.
+      await page.waitForLoadState('networkidle', { timeout: 20_000 }).catch(() => {})
+      await page.waitForTimeout(400)
 
       const clipped = await page.evaluate(findClipped, width)
+      let counted = ''
       if (width === TOUCH_WIDTH) {
         const small = await page.evaluate(findSmallTargets, TOUCH_MIN)
+        counted = `  (${await page.evaluate(countTargets)} controls)`
         if (small.length > 0) {
           failures += 1
           console.error(`  SMALL     ${String(width).padStart(4)}px  ${route}  (${small.length})`)
@@ -255,7 +273,11 @@ try {
         }
       }
       if (clipped.length === 0) {
-        console.log(`  ok        ${String(width).padStart(4)}px  ${route}`)
+        // The count is printed because this guard measures what the page
+        // happens to show. /images lists one control per Image Factory
+        // extension, and a catalog that did not load measures as a clean run:
+        // that is how 17 undersized rows passed here and failed in CI.
+        console.log(`  ok        ${String(width).padStart(4)}px  ${route}${counted}`)
         continue
       }
 
