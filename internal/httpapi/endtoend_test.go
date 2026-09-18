@@ -32,6 +32,7 @@ import (
 	"github.com/holzcloud/holzkube-manager/internal/model"
 	"github.com/holzcloud/holzkube-manager/internal/nodestream"
 	"github.com/holzcloud/holzkube-manager/internal/provision"
+	"github.com/holzcloud/holzkube-manager/internal/rotateca"
 	"github.com/holzcloud/holzkube-manager/internal/store"
 	"github.com/holzcloud/holzkube-manager/internal/store/fsstore"
 	"github.com/holzcloud/holzkube-manager/internal/streamhub"
@@ -287,6 +288,22 @@ func newHarness(t *testing.T, opts ...harnessOpt) *harness {
 			t.Fatalf("NewConfirmer: %v", err)
 		}
 
+		// The CA rotation, wired the way the composition root wires it: same
+		// connector, same inventory, and pass 3 handed to the inventory
+		// because that is where "mint, prove, then keep" already lives.
+		if inv != nil {
+			rotateca.Register(engine, rotateca.Deps{
+				Store:    st,
+				Logger:   deps.Logger,
+				Connect:  inv.Connect,
+				Machines: inv.MachinesOf,
+				AdoptAuthority: func(ctx context.Context, cluster model.ClusterID, a rotateca.Authority) error {
+					return inv.AdoptAuthority(ctx, cluster, a.Crt, a.Key)
+				},
+				Now: time.Now,
+			})
+		}
+
 		deps.Jobs = engine
 		deps.Confirmer = confirmer
 		h2.jobs = engine
@@ -348,6 +365,7 @@ func newHarness(t *testing.T, opts ...harnessOpt) *harness {
 		handlers.ConfigRoutes(deps),
 		handlers.ProvisionRoutes(deps),
 		handlers.UpgradeRoutes(deps),
+		handlers.AuthorityRoutes(deps),
 	)
 
 	srv := httptest.NewTLSServer(httpapi.New(deps))
