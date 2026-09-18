@@ -6,6 +6,7 @@ import { api, type Cluster } from '@/api'
 import { ClusterScalePanel } from '@/components/ClusterScale'
 import { ClusterTemplatePanel } from '@/components/ClusterTemplate'
 import { RenewCertificate } from '@/components/RenewCertificate'
+import { RotateAuthority } from '@/components/RotateAuthority'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -232,6 +233,8 @@ export function ClusterCard({ cluster }: { cluster: Cluster }) {
         </Button>
 
         <RenewCertificate clusterID={cluster.id} />
+
+        <RotateAuthority clusterID={cluster.id} />
 
         <ClusterScalePanel clusterID={cluster.id} />
 
