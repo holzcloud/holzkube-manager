@@ -9,9 +9,11 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"math/big"
 	"net"
+	"sync"
 	"time"
 )
 
@@ -36,8 +38,23 @@ const certValidity = time.Hour
 // authority and installs nothing into a trust store, and that sentence has to
 // stay true.
 type pki struct {
+	// mu guards everything a CA rotation replaces. The listener reads this on
+	// every handshake, so a rotation mid-test is a write while reads are in
+	// flight -- which is what the race detector in CI exists to catch.
+	mu sync.RWMutex
+
 	caCert *x509.Certificate
 	caKey  crypto.Signer
+
+	// accepted are the additional authorities a client certificate may come
+	// from: machine.acceptedCAs of the node's active configuration. Talos
+	// accepts machine.ca implicitly, which is why caCert is not in here.
+	accepted []*x509.Certificate
+
+	// names are what a re-issued server certificate has to carry, kept so a
+	// rotation mints the same node rather than a differently named one.
+	hostname string
+	nodeIP   string
 
 	server tls.Certificate
 	client tls.Certificate
@@ -102,6 +119,8 @@ func newPKI(hostname, nodeIP string, osCA *pemPair, maintenance bool) (*pki, err
 	p := &pki{
 		caCert:      caCert,
 		caKey:       caKey,
+		hostname:    hostname,
+		nodeIP:      nodeIP,
 		server:      tls.Certificate{Certificate: [][]byte{serverDER}, PrivateKey: serverKey, Leaf: mustLeaf(serverDER)},
 		client:      tls.Certificate{Certificate: [][]byte{clientDER}, PrivateKey: clientKey, Leaf: mustLeaf(clientDER)},
 		maintenance: maintenance,
@@ -236,11 +255,108 @@ func dedupe(values ...string) []string {
 	return out
 }
 
-// pool returns a certificate pool trusting this authority.
+// certificateFromPEM parses one PEM certificate, and refuses anything else.
+func certificateFromPEM(raw []byte) (*x509.Certificate, error) {
+	block, _ := pem.Decode(raw)
+	if block == nil {
+		return nil, errors.New("not a PEM document")
+	}
+	cert, err := x509.ParseCertificate(block.Bytes)
+	if err != nil {
+		return nil, err
+	}
+	return cert, nil
+}
+
+// pool returns a certificate pool trusting this authority and every authority
+// the active configuration additionally accepts.
 func (p *pki) pool() *x509.CertPool {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return p.poolLocked()
+}
+
+func (p *pki) poolLocked() *x509.CertPool {
 	pool := x509.NewCertPool()
 	pool.AddCert(p.caCert)
+	for _, c := range p.accepted {
+		pool.AddCert(c)
+	}
 	return pool
+}
+
+// rotate makes the node serve, and verify against, the authorities its newly
+// applied configuration names.
+//
+// This is what lets a CA rotation be measured here at all. Without it the
+// simulator keeps serving a certificate from the authority it was built with
+// and keeps verifying clients against it, so pass 2 would "succeed" and the
+// node would go on accepting exactly what it accepted before -- the simulator
+// passing a rotation a real node would not (TRANS-06), and the rotation's own
+// proof step would fail against a node that never rotated.
+//
+// issuingKey may be empty: that is a worker, which carries the authority's
+// certificate and not its key. Such a node cannot mint itself a new server
+// certificate, so it keeps the one it has and only its accepted set moves --
+// which is what a real worker does, since trustd on the control plane issues
+// its certificates.
+func (p *pki) rotate(issuingCrt, issuingKey []byte, accepted [][]byte) error {
+	if len(issuingCrt) == 0 {
+		return nil
+	}
+
+	caCert, err := certificateFromPEM(issuingCrt)
+	if err != nil {
+		return fmt.Errorf("talossim: the applied configuration's machine.ca: %w", err)
+	}
+
+	var extra []*x509.Certificate
+	for _, raw := range accepted {
+		c, err := certificateFromPEM(raw)
+		if err != nil {
+			return fmt.Errorf("talossim: the applied configuration's machine.acceptedCAs: %w", err)
+		}
+		extra = append(extra, c)
+	}
+
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	p.accepted = extra
+
+	if len(issuingKey) == 0 || caCert.Equal(p.caCert) {
+		// Nothing to re-issue: either this node cannot (no key) or the issuer
+		// has not moved.
+		if len(issuingKey) == 0 {
+			return nil
+		}
+	}
+
+	_, caKey, err := authority(&pemPair{Crt: issuingCrt, Key: issuingKey})
+	if err != nil {
+		return err
+	}
+
+	ips := []net.IP{net.IPv4(127, 0, 0, 1), net.IPv6loopback}
+	if ip := net.ParseIP(p.nodeIP); ip != nil {
+		ips = append(ips, ip)
+	}
+	serverKey, serverDER, err := issue(caCert, caKey, &x509.Certificate{
+		Subject:     pkix.Name{CommonName: ServerName, Organization: []string{"talossim"}},
+		KeyUsage:    x509.KeyUsageDigitalSignature,
+		ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+		DNSNames:    dedupe(ServerName, p.hostname),
+		IPAddresses: ips,
+	})
+	if err != nil {
+		return fmt.Errorf("talossim: re-issuing the node certificate after a rotation: %w", err)
+	}
+
+	p.caCert, p.caKey = caCert, caKey
+	p.server = tls.Certificate{
+		Certificate: [][]byte{serverDER}, PrivateKey: serverKey, Leaf: mustLeaf(serverDER),
+	}
+	return nil
 }
 
 // serverTLS is the listener configuration: real mTLS.
@@ -249,11 +365,26 @@ func (p *pki) pool() *x509.CertPool {
 // simulator worth having. A fake that accepted any client certificate would let
 // a test claiming to prove mTLS pass against a server that ignores client
 // certificates entirely (T-02-06).
+// It reads the current material on every handshake rather than once at
+// startup, because a CA rotation replaces it while the listener is up: a
+// configuration captured at grpc.Creds time would make the node keep
+// presenting the authority it was built with, for ever.
 func (p *pki) serverTLS() *tls.Config {
+	return &tls.Config{
+		MinVersion: tls.VersionTLS12,
+		GetConfigForClient: func(*tls.ClientHelloInfo) (*tls.Config, error) {
+			p.mu.RLock()
+			defer p.mu.RUnlock()
+			return p.currentServerTLSLocked(), nil
+		},
+	}
+}
+
+func (p *pki) currentServerTLSLocked() *tls.Config {
 	cfg := &tls.Config{
 		Certificates: []tls.Certificate{p.server},
 		ClientAuth:   tls.RequireAndVerifyClientCert,
-		ClientCAs:    p.pool(),
+		ClientCAs:    p.poolLocked(),
 		MinVersion:   tls.VersionTLS12,
 	}
 	if p.maintenance {
@@ -270,6 +401,9 @@ func (p *pki) serverTLS() *tls.Config {
 // clientTLS is the configuration a client uses to reach this node: it trusts
 // the node's authority and presents a certificate that authority issued.
 func (p *pki) clientTLS() *tls.Config {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+
 	return &tls.Config{
 		Certificates: []tls.Certificate{p.client},
 		RootCAs:      p.pool(),

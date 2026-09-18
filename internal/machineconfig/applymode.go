@@ -79,6 +79,16 @@ var noRebootPaths = []string{
 	".machine.pods",
 	".machine.udev",
 	".machine.seccompProfiles",
+
+	// The two authority fields a CA rotation writes (V2-OPS-02). Talos applies
+	// them by restarting the services that hold them -- apid and trustd -- and
+	// `talosctl rotate-ca` rotates without rebooting anything, which is the
+	// basis for these two entries. Without them the rotation's own applies
+	// would be reported as needing a reboot, and a reboot per node per pass is
+	// four reboots of every machine in the cluster for a change none of them
+	// needs.
+	".machine.ca",
+	".machine.acceptedCAs",
 }
 
 // installPrefix is the path whose changes report success and do nothing until

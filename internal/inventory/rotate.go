@@ -161,3 +161,53 @@ func (s *Service) provesItself(ctx context.Context, id model.ClusterID, ca, crt,
 		"authority rotated outside holzkube-manager looks like from here",
 		ErrCertificateRejected, last)
 }
+
+// AdoptAuthority is pass 3 of a CA rotation: this installation stops holding
+// the cluster's old authority and starts holding the new one.
+//
+// It is here rather than in the rotation package because the minting and the
+// proof already live here -- V2-OPS-02's first half -- and a second
+// implementation of "mint, prove, then keep" would be a second place for that
+// ORDER to be got wrong. The order is the safety property: the certificate is
+// used to reach a node before the store is written, so a rotation that got
+// this far and cannot get in leaves the old credential in place and fails
+// loudly, rather than replacing a working credential with one nobody accepts.
+//
+// The new authority is the trust anchor for the proof as well as the issuer of
+// the certificate, because by this point in the rotation every node issues
+// from it: a proof against the old anchor would be testing the state the
+// rotation has just left.
+func (s *Service) AdoptAuthority(ctx context.Context, id model.ClusterID, caCrt, caKey []byte) error {
+	sec, err := s.deps.Store.ClusterSecrets().Get(ctx, id)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return ErrNotFound
+		}
+		return err
+	}
+	if len(caCrt) == 0 || len(caKey) == 0 {
+		return fmt.Errorf("%w: the rotation passed no authority", ErrNoCertificateAuthority)
+	}
+
+	crt, key, notAfter, err := mintFrom(caCrt, caKey)
+	if err != nil {
+		return err
+	}
+	if err := s.provesItself(ctx, id, caCrt, crt, key); err != nil {
+		return err
+	}
+
+	sec.OSCACrt, sec.OSCAKey = caCrt, caKey
+	sec.ClientCrt, sec.ClientKey = crt, key
+	if _, err := s.deps.Store.ClusterSecrets().Put(ctx, sec); err != nil {
+		return err
+	}
+
+	cluster, err := s.deps.Store.Clusters().Get(ctx, id)
+	if err != nil {
+		return err
+	}
+	cluster.ClientCertNotAfter = notAfter
+	_, err = s.deps.Store.Clusters().Put(ctx, cluster)
+	return err
+}

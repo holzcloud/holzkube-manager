@@ -31,6 +31,7 @@ import (
 	"github.com/holzcloud/holzkube-manager/internal/model"
 	"github.com/holzcloud/holzkube-manager/internal/nodestream"
 	"github.com/holzcloud/holzkube-manager/internal/provision"
+	"github.com/holzcloud/holzkube-manager/internal/rotateca"
 	"github.com/holzcloud/holzkube-manager/internal/store/fsstore"
 	"github.com/holzcloud/holzkube-manager/internal/streamhub"
 	"github.com/holzcloud/holzkube-manager/internal/support"
@@ -379,6 +380,22 @@ func run(args []string) error {
 
 	upgrade.Register(engine, upgradeDeps)
 
+	// The certificate authority rotation (V2-OPS-02, ledger 103). It is wired
+	// from the same connector and inventory as the upgrade, and its pass 3 --
+	// mint a certificate from the new authority, prove it, then keep it -- is
+	// the inventory's own, because that ordering already exists there for the
+	// renewal and must not be written twice.
+	rotateca.Register(engine, rotateca.Deps{
+		Store:    st,
+		Logger:   logger,
+		Connect:  inv.Connect,
+		Machines: inv.MachinesOf,
+		AdoptAuthority: func(ctx context.Context, cluster model.ClusterID, a rotateca.Authority) error {
+			return inv.AdoptAuthority(ctx, cluster, a.Crt, a.Key)
+		},
+		Now: time.Now,
+	})
+
 	// The release list comes from the Image Factory, which is also where the
 	// installer images come from -- so the versions offered and the versions
 	// installable are the same set by construction rather than by agreement.
@@ -681,6 +698,7 @@ func routeTable(deps httpapi.Deps) []httpapi.Route {
 		handlers.TemplateRoutes(deps),
 		handlers.ScaleRoutes(deps),
 		handlers.RotateRoutes(deps),
+		handlers.AuthorityRoutes(deps),
 		handlers.StreamRoutes(deps),
 		handlers.JobRoutes(deps),
 		handlers.ConfigRoutes(deps),
