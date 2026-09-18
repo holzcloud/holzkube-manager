@@ -1,10 +1,10 @@
 ---
 schema_version: 1
-open_count: 56
+open_count: 55
 waived_count: 0
-fixed_count: 87
+fixed_count: 88
 total_count: 143
-last_updated: 2026-09-18T08:30:00.000Z
+last_updated: 2026-09-18T09:20:00.000Z
 ---
 
 # Broken Windows Ledger
@@ -15,7 +15,7 @@ last_updated: 2026-09-18T08:30:00.000Z
 
 | id | phase | kind | file | line | description | status | reason | recorded_at | resolved_at |
 |----|-------|------|------|------|-------------|--------|--------|-------------|-------------|
-| 1 | 02 | stub | internal/talos/dial_direct.go |  | directDialer.Probe leaves Identity.Version empty: the version is not in the TLS certificate and Dialer.Probe carries no Creds to make an authenticated RPC | open |  | 2026-08-28T19:58:41.457Z |  |
+| 1 | 02 | stub | internal/talos/dial_direct.go |  | directDialer.Probe leaves Identity.Version empty: the version is not in the TLS certificate and Dialer.Probe carries no Creds to make an authenticated RPC. GESCHLOSSEN DURCH ENTFERNEN, NICHT DURCH BAUEN, und der Befund war schaerfer als der Eintrag: NIEMAND HAT DAS FELD GELESEN (go build und go vet bleiben nach dem Entfernen sauber), waehrend TALOSSIM ES FUELLTE -- ein Test haette also eine Version behaupten koennen, die die Produktion nie traegt, was genau die Gattung TRANS-06 ist. Ein Probe ist ein TLS-Handshake und sonst nichts, weil er gegen einen Knoten im Maintenance-Modus funktionieren muss; ein Zertifikat traegt Subject, DNS-Namen und Aussteller, keine Version. Wo die Version einer unkonfigurierten Maschine wirklich gebraucht wird, holt der Provisionierungs-Pfad sie mit einem Version-RPC ueber einen Maintenance-Client (internal/provision/plan.go). WAECHTER: TestAProbesIdentityCarriesOnlyWhatAHandshakeShows prueft die Felder von Identity gegen das, was ein Handshake zeigen kann, und dass der Typ selbst weiter begruendet, warum keine Version darin steht; rot gegen das wieder eingebaute Feld. | fixed | Entfernt statt gebaut; Waechter gegen die Rueckkehr, rot gesehen. | 2026-08-28T19:58:41.457Z | 2026-09-18T09:20:00.000Z |
 | 2 | 02 | stub | internal/talossim/machine.go |  | talossim implements 2 of 54 MachineService RPCs; the rest inherit Unimplemented. Scoped to plan 02-08 by the plan's own scope_decision | open |  | 2026-08-28T19:58:41.580Z |  |
 | 3 | 02 | stub | internal/talossim/machine.go |  | ApplyConfiguration counts an applied config but does not parse it: applying a config that sets a hostname does not change what Hostname reports. Server.SetHostname/SetVersion give a scenario the same effect explicitly. | open |  | 2026-08-29T05:01:33.912Z |  |
 | 4 | 02 | stub | internal/talossim/stream.go |  | Events emits an identical MachineStatusEvent{Stage: RUNNING} payload per message; the event stream is not driven by the node's actual state transitions. Correlating events with Bootstrap/Reboot/Reset belongs to plan 02-03's scenario engine. | open |  | 2026-08-29T05:01:34.036Z |  |
@@ -175,11 +175,11 @@ last_updated: 2026-09-18T08:30:00.000Z
     "phase": "02",
     "file": "internal/talos/dial_direct.go",
     "line": null,
-    "description": "directDialer.Probe leaves Identity.Version empty: the version is not in the TLS certificate and Dialer.Probe carries no Creds to make an authenticated RPC",
-    "status": "open",
-    "reason": "",
+    "description": "directDialer.Probe leaves Identity.Version empty: the version is not in the TLS certificate and Dialer.Probe carries no Creds to make an authenticated RPC. GESCHLOSSEN DURCH ENTFERNEN, NICHT DURCH BAUEN, und der Befund war schaerfer als der Eintrag: NIEMAND HAT DAS FELD GELESEN (go build und go vet bleiben nach dem Entfernen sauber), waehrend TALOSSIM ES FUELLTE -- ein Test haette also eine Version behaupten koennen, die die Produktion nie traegt, was genau die Gattung TRANS-06 ist. Ein Probe ist ein TLS-Handshake und sonst nichts, weil er gegen einen Knoten im Maintenance-Modus funktionieren muss; ein Zertifikat traegt Subject, DNS-Namen und Aussteller, keine Version. Wo die Version einer unkonfigurierten Maschine wirklich gebraucht wird, holt der Provisionierungs-Pfad sie mit einem Version-RPC ueber einen Maintenance-Client (internal/provision/plan.go). WAECHTER: TestAProbesIdentityCarriesOnlyWhatAHandshakeShows prueft die Felder von Identity gegen das, was ein Handshake zeigen kann, und dass der Typ selbst weiter begruendet, warum keine Version darin steht; rot gegen das wieder eingebaute Feld.",
+    "status": "fixed",
+    "reason": "Entfernt statt gebaut; Waechter gegen die Rueckkehr, rot gesehen.",
     "recorded_at": "2026-08-28T19:58:41.457Z",
-    "resolved_at": null
+    "resolved_at": "2026-09-18T09:20:00.000Z"
   },
   {
     "id": 2,
