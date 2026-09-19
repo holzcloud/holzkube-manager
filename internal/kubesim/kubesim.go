@@ -41,6 +41,7 @@ import (
 	"encoding/pem"
 	"errors"
 	"fmt"
+	"io"
 	"math/big"
 	"net"
 	"net/http"
@@ -52,6 +53,7 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 )
 
 // Options configure a simulated cluster.
@@ -122,6 +124,24 @@ type Pod struct {
 	Containers int
 	Restarts   int32
 	WaitReason string
+
+	// The four properties a drain has to treat differently, described the way a
+	// test thinks about them rather than as owner references and annotations.
+	//
+	// OwnerKind is the controller that would recreate this pod -- "ReplicaSet",
+	// "DaemonSet", "StatefulSet" -- or empty for a bare pod nothing owns.
+	OwnerKind string
+
+	// Mirror marks a static pod: the control plane's own on Talos, owned by the
+	// kubelet, which the API server cannot evict.
+	Mirror bool
+
+	// LocalData gives the pod an emptyDir volume, whose contents go with it.
+	LocalData bool
+
+	// BudgetRefuses makes an eviction of this pod answer 429, which is what a
+	// PodDisruptionBudget looks like from the client's side.
+	BudgetRefuses bool
 }
 
 // Server is a simulated cluster's API server.
@@ -149,6 +169,10 @@ type Server struct {
 
 	// identities are the common names the peers presented, in arrival order.
 	identities []string
+
+	// evicted is what evictions actually removed, in order, so a test can
+	// assert what a drain moved rather than what it reported moving.
+	evicted []string
 }
 
 // New starts one.
@@ -252,6 +276,7 @@ func (s *Server) routes() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/version", s.record(s.serveVersion))
 	mux.HandleFunc("/api/v1/nodes", s.record(s.serveNodes))
+	mux.HandleFunc("/api/v1/nodes/", s.record(s.serveNode))
 	mux.HandleFunc("/api/v1/namespaces", s.record(s.serveNamespaces))
 	mux.HandleFunc("/api/v1/pods", s.record(s.servePods))
 	// The namespaced list, which is the path client-go uses when a namespace is
@@ -303,35 +328,7 @@ func (s *Server) serveNodes(w http.ResponseWriter, _ *http.Request) {
 		ListMeta: metav1.ListMeta{ResourceVersion: "1"},
 	}
 	for _, n := range nodes {
-		ready := n.Ready
-		if ready == "" {
-			ready = corev1.ConditionTrue
-		}
-		labels := map[string]string{}
-		for _, role := range n.Roles {
-			labels["node-role.kubernetes.io/"+role] = ""
-		}
-
-		list.Items = append(list.Items, corev1.Node{
-			TypeMeta: metav1.TypeMeta{APIVersion: "v1", Kind: "Node"},
-			ObjectMeta: metav1.ObjectMeta{
-				Name:              n.Name,
-				Labels:            labels,
-				CreationTimestamp: metav1.NewTime(time.Now().Add(-time.Hour).UTC()),
-			},
-			Spec: corev1.NodeSpec{Unschedulable: n.Unschedulable},
-			Status: corev1.NodeStatus{
-				Conditions: []corev1.NodeCondition{{Type: corev1.NodeReady, Status: ready}},
-				Addresses: []corev1.NodeAddress{
-					{Type: corev1.NodeInternalIP, Address: n.InternalAddress},
-				},
-				NodeInfo: corev1.NodeSystemInfo{
-					KubeletVersion:          n.KubeletVersion,
-					OSImage:                 n.OSImage,
-					ContainerRuntimeVersion: n.ContainerRuntime,
-				},
-			},
-		})
+		list.Items = append(list.Items, renderNode(n))
 	}
 
 	writeJSON(w, http.StatusOK, list)
@@ -378,18 +375,42 @@ func (s *Server) serveNamespaces(w http.ResponseWriter, _ *http.Request) {
 // serveNamespaced routes /api/v1/namespaces/{ns}/{resource}.
 func (s *Server) serveNamespaced(w http.ResponseWriter, r *http.Request) {
 	rest := strings.TrimPrefix(r.URL.Path, "/api/v1/namespaces/")
-	ns, resource, ok := strings.Cut(rest, "/")
-	if !ok || resource != "pods" {
+	ns, tail, ok := strings.Cut(rest, "/")
+	if !ok {
 		s.serveNotFound(w, r)
 		return
 	}
-	s.writePods(w, ns)
+
+	switch parts := strings.Split(tail, "/"); {
+	case len(parts) == 1 && parts[0] == "pods":
+		s.writePods(w, r, ns)
+	case len(parts) == 3 && parts[0] == "pods" && parts[2] == "eviction":
+		s.evictPod(w, r, ns, parts[1])
+	default:
+		s.serveNotFound(w, r)
+	}
 }
 
-func (s *Server) servePods(w http.ResponseWriter, _ *http.Request) { s.writePods(w, "") }
+func (s *Server) servePods(w http.ResponseWriter, r *http.Request) { s.writePods(w, r, "") }
 
-// writePods answers a pod list, filtered to one namespace when named.
-func (s *Server) writePods(w http.ResponseWriter, namespace string) {
+// writePods answers a pod list, filtered to one namespace when named and to one
+// node when the request carries the field selector a drain sends.
+//
+// The selector is honoured rather than ignored, and that is not politeness: a
+// fake that returned every pod in the cluster would let a drain of one node
+// evict another node's pods and call it a success.
+func (s *Server) writePods(w http.ResponseWriter, r *http.Request, namespace string) {
+	// The field selector a drain sends is honoured rather than ignored, and
+	// that is not politeness: a fake that answered with every pod in the
+	// cluster would let a drain of one node evict another node's pods and
+	// report success.
+	node := ""
+	for _, term := range strings.Split(r.URL.Query().Get("fieldSelector"), ",") {
+		if name, ok := strings.CutPrefix(strings.TrimSpace(term), "spec.nodeName="); ok {
+			node = name
+		}
+	}
+
 	s.mu.Lock()
 	pods := append([]Pod(nil), s.pods...)
 	s.mu.Unlock()
@@ -400,6 +421,9 @@ func (s *Server) writePods(w http.ResponseWriter, namespace string) {
 	}
 	for _, p := range pods {
 		if namespace != "" && p.Namespace != namespace {
+			continue
+		}
+		if node != "" && p.Node != node {
 			continue
 		}
 
@@ -434,18 +458,197 @@ func (s *Server) writePods(w http.ResponseWriter, namespace string) {
 			phase = corev1.PodRunning
 		}
 
+		meta := metav1.ObjectMeta{
+			Name:              p.Name,
+			Namespace:         p.Namespace,
+			CreationTimestamp: metav1.NewTime(time.Now().Add(-time.Minute).UTC()),
+		}
+		if p.OwnerKind != "" {
+			// A controller reference, which is what a drain reads to decide
+			// whether anything would recreate this pod.
+			controller := true
+			meta.OwnerReferences = []metav1.OwnerReference{{
+				APIVersion: "apps/v1",
+				Kind:       p.OwnerKind,
+				Name:       p.Name + "-owner",
+				UID:        types.UID(p.Namespace + "/" + p.Name + "/owner"),
+				Controller: &controller,
+			}}
+		}
+		if p.Mirror {
+			meta.Annotations = map[string]string{corev1.MirrorPodAnnotationKey: "true"}
+		}
+
+		spec := corev1.PodSpec{NodeName: p.Node}
+		if p.LocalData {
+			spec.Volumes = []corev1.Volume{{
+				Name:         "scratch",
+				VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}},
+			}}
+		}
+
 		list.Items = append(list.Items, corev1.Pod{
-			TypeMeta: metav1.TypeMeta{APIVersion: "v1", Kind: "Pod"},
-			ObjectMeta: metav1.ObjectMeta{
-				Name:              p.Name,
-				Namespace:         p.Namespace,
-				CreationTimestamp: metav1.NewTime(time.Now().Add(-time.Minute).UTC()),
-			},
-			Spec:   corev1.PodSpec{NodeName: p.Node},
-			Status: corev1.PodStatus{Phase: phase, ContainerStatuses: statuses},
+			TypeMeta:   metav1.TypeMeta{APIVersion: "v1", Kind: "Pod"},
+			ObjectMeta: meta,
+			Spec:       spec,
+			Status:     corev1.PodStatus{Phase: phase, ContainerStatuses: statuses},
 		})
 	}
 	writeJSON(w, http.StatusOK, list)
+}
+
+// renderNode is a test's node in the shape Kubernetes sends it.
+//
+// One function, because the list and the single-node answer a patch returns
+// must not describe the same node differently -- a client that read the patch's
+// body would otherwise see a node the list never shows.
+func renderNode(n Node) corev1.Node {
+	ready := n.Ready
+	if ready == "" {
+		ready = corev1.ConditionTrue
+	}
+	labels := map[string]string{}
+	for _, role := range n.Roles {
+		labels["node-role.kubernetes.io/"+role] = ""
+	}
+
+	return corev1.Node{
+		TypeMeta: metav1.TypeMeta{APIVersion: "v1", Kind: "Node"},
+		ObjectMeta: metav1.ObjectMeta{
+			Name:              n.Name,
+			Labels:            labels,
+			CreationTimestamp: metav1.NewTime(time.Now().Add(-time.Hour).UTC()),
+		},
+		Spec: corev1.NodeSpec{Unschedulable: n.Unschedulable},
+		Status: corev1.NodeStatus{
+			Conditions: []corev1.NodeCondition{{Type: corev1.NodeReady, Status: ready}},
+			Addresses: []corev1.NodeAddress{
+				{Type: corev1.NodeInternalIP, Address: n.InternalAddress},
+			},
+			NodeInfo: corev1.NodeSystemInfo{
+				KubeletVersion:          n.KubeletVersion,
+				OSImage:                 n.OSImage,
+				ContainerRuntimeVersion: n.ContainerRuntime,
+			},
+		},
+	}
+}
+
+// serveNode is one node: the patch a cordon is, and nothing else.
+//
+// Only spec.unschedulable is applied, deliberately: a fake that applied any
+// patch would accept patches a real API server rejects, and the product sends
+// exactly this one.
+func (s *Server) serveNode(w http.ResponseWriter, r *http.Request) {
+	name := strings.TrimPrefix(r.URL.Path, "/api/v1/nodes/")
+	if name == "" || strings.Contains(name, "/") || r.Method != http.MethodPatch {
+		s.serveNotFound(w, r)
+		return
+	}
+
+	var patch struct {
+		Spec struct {
+			Unschedulable *bool `json:"unschedulable"`
+		} `json:"spec"`
+	}
+	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<16))
+	if err != nil || json.Unmarshal(body, &patch) != nil || patch.Spec.Unschedulable == nil {
+		writeJSON(w, http.StatusBadRequest, metav1.Status{
+			TypeMeta: metav1.TypeMeta{APIVersion: "v1", Kind: "Status"},
+			Status:   "Failure",
+			Message:  "kubesim applies only patches that set spec.unschedulable",
+			Reason:   metav1.StatusReasonBadRequest,
+			Code:     http.StatusBadRequest,
+		})
+		return
+	}
+
+	if err := s.SetUnschedulable(name, *patch.Spec.Unschedulable); err != nil {
+		s.serveNotFound(w, r)
+		return
+	}
+	s.writeNode(w, name)
+}
+
+// writeNode answers one node, which is a patch's response body.
+func (s *Server) writeNode(w http.ResponseWriter, name string) {
+	s.mu.Lock()
+	var found *Node
+	for i := range s.nodes {
+		if s.nodes[i].Name == name {
+			node := s.nodes[i]
+			found = &node
+			break
+		}
+	}
+	s.mu.Unlock()
+
+	if found == nil {
+		writeJSON(w, http.StatusNotFound, metav1.Status{
+			TypeMeta: metav1.TypeMeta{APIVersion: "v1", Kind: "Status"},
+			Status:   "Failure",
+			Reason:   metav1.StatusReasonNotFound,
+			Code:     http.StatusNotFound,
+		})
+		return
+	}
+	writeJSON(w, http.StatusOK, renderNode(*found))
+}
+
+// evictPod is the call a drain makes, and the one place a PodDisruptionBudget's
+// refusal is modelled.
+func (s *Server) evictPod(w http.ResponseWriter, r *http.Request, namespace, name string) {
+	if r.Method != http.MethodPost {
+		s.serveNotFound(w, r)
+		return
+	}
+
+	s.mu.Lock()
+	index := -1
+	for i := range s.pods {
+		if s.pods[i].Namespace == namespace && s.pods[i].Name == name {
+			index = i
+			break
+		}
+	}
+	if index < 0 {
+		s.mu.Unlock()
+		s.serveNotFound(w, r)
+		return
+	}
+	if s.pods[index].BudgetRefuses {
+		s.mu.Unlock()
+		// 429 with a Status body: what a real API server answers when a budget
+		// would be violated, and what client-go turns into IsTooManyRequests.
+		writeJSON(w, http.StatusTooManyRequests, metav1.Status{
+			TypeMeta: metav1.TypeMeta{APIVersion: "v1", Kind: "Status"},
+			Status:   "Failure",
+			Message: "Cannot evict pod as it would violate the pod's disruption budget: " +
+				"the budget allows no further disruption",
+			Reason: metav1.StatusReasonTooManyRequests,
+			Code:   http.StatusTooManyRequests,
+		})
+		return
+	}
+
+	// The pod is really gone, which is what makes a drain measurable: the next
+	// list does not contain it.
+	s.pods = append(s.pods[:index:index], s.pods[index+1:]...)
+	s.evicted = append(s.evicted, namespace+"/"+name)
+	s.mu.Unlock()
+
+	writeJSON(w, http.StatusCreated, metav1.Status{
+		TypeMeta: metav1.TypeMeta{APIVersion: "v1", Kind: "Status"},
+		Status:   "Success",
+		Code:     http.StatusCreated,
+	})
+}
+
+// Evicted is what evictions actually removed, in order.
+func (s *Server) Evicted() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]string(nil), s.evicted...)
 }
 
 func (s *Server) serveNotFound(w http.ResponseWriter, r *http.Request) {

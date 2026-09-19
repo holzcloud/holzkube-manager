@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query'
 import { createRoute } from '@tanstack/react-router'
 import { useState } from 'react'
 import { api } from '@/api'
+import { NodeSchedulingActions } from '@/components/NodeSchedulingActions'
 import { Problem } from '@/components/Problem'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import {
@@ -124,6 +125,7 @@ export function KubernetesView() {
                       <th className="py-1 pr-4 font-medium">Scheduling</th>
                       <th className="py-1 pr-4 font-medium">Roles</th>
                       <th className="py-1 pr-4 font-medium">Kubelet</th>
+                      <th className="py-1 pr-4 font-medium">Scheduling actions</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -140,6 +142,13 @@ export function KubernetesView() {
                         </td>
                         <td className="py-1 pr-4">{node.roles.join(', ') || '—'}</td>
                         <td className="py-1 pr-4">{node.kubelet_version || '—'}</td>
+                        <td className="py-1 pr-4">
+                          <NodeSchedulingActions
+                            clusterID={selected}
+                            node={node.name}
+                            unschedulable={node.unschedulable}
+                          />
+                        </td>
                       </tr>
                     ))}
                   </tbody>

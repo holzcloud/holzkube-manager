@@ -308,6 +308,17 @@ var allowlist = map[string][]string{
 	// at something. The cluster is in the path and on the record already.
 	"cluster.kubernetes-overview": {"namespace"},
 
+	// Cordoning a node, and draining one (milestone v1.17 slice 3). The state
+	// asked for is permitted in clear because "somebody cordoned a node" and
+	// "somebody uncordoned it" are different events and an archive that could
+	// not tell them apart would be recording neither. The drain's two flags are
+	// permitted for the same reason and a sharper one: --force and
+	// --delete-local-data are the decisions that can lose work, and six months
+	// later the archive is the only place it still says whether they were
+	// taken.
+	"cluster.kubernetes-cordon": {"unschedulable"},
+	"node.drain":                {"force", "delete_local_data"},
+
 	// Renewing this installation's own client certificate for a cluster
 	// (V2-OPS-02). No parameters: the cluster is on the record already and the
 	// certificate itself never goes near the archive.

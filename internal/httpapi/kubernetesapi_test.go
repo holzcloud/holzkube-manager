@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"testing"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 
@@ -297,4 +298,164 @@ func TestAClusterWhoseAPIServerIsGoneIsNotAClusterWithNoPods(t *testing.T) {
 
 func hasPrefix(s, prefix string) bool {
 	return len(s) >= len(prefix) && s[:len(prefix)] == prefix
+}
+
+// TestCordonAndDrainReachTheCluster walks the two routes slice 3 adds, through
+// the same two fakes: the cordon synchronously, and the drain as the job it has
+// to be.
+//
+// The cordon's answer is read BACK from the cluster rather than echoed, which
+// this test pins: a cordon that did not take must not be able to look like one
+// that did.
+func TestCordonAndDrainReachTheCluster(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	endpoint := "https://" + ln.Addr().String()
+
+	cl, err := talossim.NewCluster("homelab", endpoint)
+	if err != nil {
+		_ = ln.Close()
+		t.Fatalf("NewCluster: %v", err)
+	}
+	api, err := kubesim.New(kubesim.Options{
+		Listener:     ln,
+		AuthorityCrt: cl.Secrets.Certs.K8s.Crt,
+		AuthorityKey: cl.Secrets.Certs.K8s.Key,
+		Nodes:        []kubesim.Node{{Name: "cp-1", Ready: corev1.ConditionTrue}},
+		Pods: []kubesim.Pod{
+			{Namespace: "default", Name: "api-1", Node: "cp-1", OwnerKind: "ReplicaSet"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("kubesim.New: %v", err)
+	}
+	t.Cleanup(api.Close)
+
+	sim, err := talossim.New(talossim.Options{
+		Hostname: "cp-1", Cluster: cl, ControlPlane: true, Bootstrapped: true,
+	})
+	if err != nil {
+		t.Fatalf("talossim.New: %v", err)
+	}
+	t.Cleanup(func() { _ = sim.Close() })
+
+	h := newHarness(t,
+		withInventory(func(st *fsstore.Store) *inventory.Service {
+			return inventory.New(inventory.Deps{
+				Store:  st,
+				Dialer: talos.NewDirectDialer(sim.Port()),
+				Logger: slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError})),
+			})
+		}),
+		withJobs(),
+	)
+
+	if resp, raw := h.do(t, http.MethodPost, "/api/v1/setup", map[string]string{
+		"username": testUser, "password": testPass,
+	}); resp.StatusCode != http.StatusCreated {
+		t.Fatalf("setup: %d (%s)", resp.StatusCode, raw)
+	}
+	if resp, raw := h.do(t, http.MethodPost, "/api/v1/auth/login", map[string]string{
+		"username": testUser, "password": testPass,
+	}); resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("login: %d (%s)", resp.StatusCode, raw)
+	}
+	// Both routes are destructive, so the window has to be open -- which is
+	// itself part of what this test checks by not skipping it.
+	if resp, raw := h.do(t, http.MethodPost, "/api/v1/auth/sudo",
+		map[string]string{"password": testPass}); resp.StatusCode != http.StatusNoContent &&
+		resp.StatusCode != http.StatusOK {
+		t.Fatalf("sudo: %d (%s)", resp.StatusCode, raw)
+	}
+
+	resp, raw := h.do(t, http.MethodPost, "/api/v1/clusters/fingerprint",
+		map[string]string{"endpoint": sim.Host()})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("fingerprint: %d (%s)", resp.StatusCode, raw)
+	}
+	var fp struct {
+		Fingerprint string `json:"fingerprint"`
+	}
+	if err := json.Unmarshal(raw, &fp); err != nil {
+		t.Fatalf("decode fingerprint: %v", err)
+	}
+	resp, raw = h.do(t, http.MethodPost, "/api/v1/clusters", map[string]string{
+		"name": "homelab", "talosconfig": string(cl.Talosconfig),
+		"endpoint": sim.Host(), "fingerprint": fp.Fingerprint,
+	})
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("import: %d (%s)", resp.StatusCode, raw)
+	}
+	var cluster struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(raw, &cluster); err != nil {
+		t.Fatalf("decode cluster: %v", err)
+	}
+
+	// An imported cluster is read-only, and these two routes are under that
+	// lock: they rewrite what a cluster does with its workloads.
+	base := "/api/v1/clusters/" + cluster.ID + "/kubernetes/nodes/cp-1"
+	resp, raw = h.do(t, http.MethodPost, base+"/cordon", map[string]bool{"unschedulable": true})
+	if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("cordon on a locked cluster: %d (%s), want 403", resp.StatusCode, raw)
+	}
+
+	if resp, raw := h.do(t, http.MethodPost, "/api/v1/clusters/"+cluster.ID+"/lock",
+		map[string]bool{"locked": false}); resp.StatusCode != http.StatusOK {
+		t.Fatalf("unlock: %d (%s)", resp.StatusCode, raw)
+	}
+
+	resp, raw = h.do(t, http.MethodPost, base+"/cordon", map[string]bool{"unschedulable": true})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("cordon: %d (%s)", resp.StatusCode, raw)
+	}
+	var node struct {
+		Name          string `json:"name"`
+		Unschedulable bool   `json:"unschedulable"`
+	}
+	if err := json.Unmarshal(raw, &node); err != nil {
+		t.Fatalf("decode node: %v", err)
+	}
+	if node.Name != "cp-1" || !node.Unschedulable {
+		t.Errorf("the answer is %+v; it is read back from the cluster, so a cordon that did not "+
+			"take must not look like one that did", node)
+	}
+
+	resp, raw = h.do(t, http.MethodPost, base+"/drain",
+		map[string]bool{"force": false, "delete_local_data": false})
+	if resp.StatusCode != http.StatusAccepted {
+		t.Fatalf("drain: %d (%s), want 202 -- a drain is a job", resp.StatusCode, raw)
+	}
+	var accepted struct {
+		Job struct {
+			ID    string `json:"id"`
+			Kind  string `json:"kind"`
+			Steps []struct {
+				Name string `json:"name"`
+			} `json:"steps"`
+		} `json:"job"`
+	}
+	if err := json.Unmarshal(raw, &accepted); err != nil {
+		t.Fatalf("decode job: %v", err)
+	}
+	if accepted.Job.Kind != "node.drain" {
+		t.Errorf("job kind = %q, want node.drain", accepted.Job.Kind)
+	}
+
+	// And the job really runs: the pod is gone from the cluster afterwards,
+	// which is the assertion that separates submitting a job from doing the
+	// work.
+	deadline := time.Now().Add(30 * time.Second)
+	for time.Now().Before(deadline) {
+		if len(api.Evicted()) > 0 {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if got := api.Evicted(); len(got) != 1 || got[0] != "default/api-1" {
+		t.Errorf("the API server evicted %v, want the one pod on that node", got)
+	}
 }
