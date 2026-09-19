@@ -253,7 +253,7 @@ function JobCard({ job, typical }: { job: Job; typical: number | null }) {
         </ol>
 
         {Object.keys(job.params).length > 0 && (
-          <dl className="grid grid-cols-[8rem_1fr] gap-x-3 text-xs text-muted-foreground">
+          <dl className="grid grid-cols-1 md:grid-cols-[8rem_minmax(0,1fr)] gap-x-3 text-xs text-muted-foreground">
             {Object.entries(job.params).map(([k, v]) => (
               <div key={k} className="contents">
                 <dt className="font-mono">{k}</dt>

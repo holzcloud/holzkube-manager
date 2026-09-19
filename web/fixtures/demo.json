@@ -647,5 +647,184 @@
       "One machine is in maintenance mode and has no cluster: maintenance-a4f1 at 192.168.0.77.",
       "The cluster lab-zwei-mit-langem-namen is locked, so provisioning into it is refused."
     ]
+  },
+  "/api/v1/machines/m-cp-1": {
+    "id": "m-cp-1",
+    "cluster": "c-homelab",
+    "role": "controlplane",
+    "stage": "watching",
+    "adopted_at": "2026-09-01T08:00:00Z",
+    "seen_at": "2026-09-19T10:31:00Z",
+    "labels": {
+      "rack": "keller",
+      "disk": "nvme"
+    },
+    "hostname": {
+      "value": "srv-rsp-prod01.holzcloud.ch",
+      "level": "node",
+      "available": true
+    },
+    "addr": {
+      "value": "192.168.0.30",
+      "level": "node",
+      "available": true
+    },
+    "talos_version": {
+      "value": "v1.14.2",
+      "level": "node",
+      "available": true
+    },
+    "kubernetes_version": {
+      "value": "v1.36.4",
+      "level": "k8s",
+      "available": true
+    },
+    "schematic_id": {
+      "value": "376567988ad370138ad8b2698212367b8edcb69b5fd68c80be1f2ec7d603b4ba",
+      "level": "node",
+      "available": true
+    },
+    "manufacturer": {
+      "value": "Raspberry Pi Foundation",
+      "level": "node",
+      "available": true
+    },
+    "product_name": {
+      "value": "Raspberry Pi 5 Model B Rev 1.1",
+      "level": "node",
+      "available": true
+    },
+    "serial_number": {
+      "value": "10000000d4f3a1c2",
+      "level": "node",
+      "available": true
+    },
+    "memory_mib": {
+      "value": 8192,
+      "level": "node",
+      "available": true
+    },
+    "cpus": {
+      "value": [
+        {
+          "socket": "SOC",
+          "manufacturer": "Broadcom",
+          "product_name": "BCM2712 Cortex-A76",
+          "cores": 4,
+          "threads": 4,
+          "max_speed_mhz": 2400
+        }
+      ],
+      "level": "node",
+      "available": true
+    },
+    "disks": {
+      "value": [
+        {
+          "device": "/dev/nvme0n1",
+          "size": 1000204886016,
+          "pretty_size": "1.0 TB",
+          "model": "Samsung SSD 990 EVO Plus 1TB",
+          "serial": "S7U8NJ0XA12345B",
+          "transport": "nvme",
+          "rotational": false,
+          "readonly": false,
+          "cdrom": false
+        },
+        {
+          "device": "/dev/mmcblk0",
+          "size": 31914983424,
+          "pretty_size": "32 GB",
+          "model": "SD32G",
+          "serial": "0x3f8a2c91",
+          "transport": "mmc",
+          "rotational": false,
+          "readonly": false,
+          "cdrom": false
+        }
+      ],
+      "level": "node",
+      "available": true
+    },
+    "interfaces": {
+      "value": [
+        {
+          "name": "end0",
+          "hardware_addr": "2c:cf:67:1a:4b:9e",
+          "mtu": 1500,
+          "up": true,
+          "speed_mbit": 1000,
+          "addresses": [
+            "192.168.0.30/24",
+            "fe80::2ecf:67ff:fe1a:4b9e/64"
+          ],
+          "driver": "bcmgenet",
+          "kind": ""
+        },
+        {
+          "name": "cni0",
+          "hardware_addr": "ba:9f:11:c3:7d:02",
+          "mtu": 1450,
+          "up": true,
+          "speed_mbit": 0,
+          "addresses": [
+            "10.244.0.1/24"
+          ],
+          "driver": "",
+          "kind": "bridge"
+        }
+      ],
+      "level": "node",
+      "available": true
+    },
+    "services": {
+      "value": [
+        {
+          "id": "apid",
+          "running": true,
+          "healthy": true,
+          "state": "Running",
+          "health_unknown": false
+        },
+        {
+          "id": "etcd",
+          "running": true,
+          "healthy": true,
+          "state": "Running",
+          "health_unknown": false
+        },
+        {
+          "id": "kubelet",
+          "running": true,
+          "healthy": false,
+          "state": "Running",
+          "health_unknown": false
+        },
+        {
+          "id": "trustd",
+          "running": true,
+          "healthy": true,
+          "state": "Running",
+          "health_unknown": false
+        }
+      ],
+      "level": "node",
+      "available": true
+    },
+    "etcd_member": {
+      "value": true,
+      "level": "etcd",
+      "available": true
+    },
+    "compatibility": {
+      "value": {
+        "known": true,
+        "supported": true,
+        "headroom_minors": 0,
+        "sentence": "Talos v1.14.2 is inside the range this build is tested against (v1.12 to v1.14)."
+      },
+      "level": "node",
+      "available": true
+    }
   }
 }

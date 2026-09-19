@@ -415,7 +415,7 @@ function PatchLibrary() {
           ))}
         </ul>
 
-        <div className="grid gap-3 sm:grid-cols-[12rem_1fr]">
+        <div className="grid gap-3 sm:grid-cols-[12rem_minmax(0,1fr)]">
           <div className="space-y-1">
             <Label htmlFor="patch-name">Name</Label>
             <Input id="patch-name" value={name} onChange={(e) => setName(e.target.value)} />

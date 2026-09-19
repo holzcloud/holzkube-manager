@@ -113,7 +113,7 @@ export function ClusterCard({ cluster }: { cluster: Cluster }) {
       </CardHeader>
 
       <CardContent className="space-y-3 text-sm">
-        <dl className="grid grid-cols-[10rem_1fr] gap-x-4 gap-y-1">
+        <dl className="grid grid-cols-1 md:grid-cols-[10rem_minmax(0,1fr)] gap-x-4 gap-y-1">
           <dt className="text-muted-foreground">Nodes</dt>
           <dd>
             {cluster.nodes} ({cluster.control_plane} control plane, {cluster.workers} worker)
