@@ -28,11 +28,32 @@
  * two sides of the `md` breakpoint.
  */
 import { spawn } from 'node:child_process'
-import { existsSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { chromium } from 'playwright'
+
+/**
+ * What the screens are rendered with.
+ *
+ * Ledger 149: until this existed the guard started a daemon with an empty data
+ * directory, so every screen that shows rows showed none. /kubernetes measured
+ * "3 controls" for a page carrying a dozen, and the tables the operator
+ * photographed as unusable were never rendered at all. A guard that only ever
+ * sees the empty state passes everything that breaks when there is data --
+ * which is most of what an operator looks at.
+ *
+ * Only GET is answered from here, so setup and login still go to the real
+ * daemon: the shell, the session and the router are the product's own. What is
+ * replaced is the data, and web/src/fixtures.test.ts holds it to the same zod
+ * schemas the product parses real answers with, so a fixture cannot quietly
+ * drift into a shape the app rejects and leave this measuring an error page.
+ */
+const FIXTURES = JSON.parse(
+  readFileSync(fileURLToPath(new URL('../fixtures/demo.json', import.meta.url)), 'utf8'),
+)
 
 const WIDTHS = [390, 1280]
 
@@ -193,6 +214,63 @@ const findSmallTargets = (min) => {
   return out
 }
 
+/**
+ * Finds every table a phone cannot read without losing the row.
+ *
+ * This is the hole the guard had, and it was an explicit decision rather than an
+ * oversight: findClipped forgives anything inside a sideways-scrolling ancestor,
+ * on the argument that a wide table is "ugly and not broken". A photograph from
+ * the operator's phone on 2026-09-19 settled that argument the other way. The
+ * screen showed a "Scale" field and a "Roll pods" button with the deployment's
+ * namespace and name scrolled off the left edge: the buttons were reachable and
+ * it was impossible to say WHICH deployment they would act on.
+ *
+ * That is not ugly, it is dangerous, and it is the reason this pass exists. A
+ * table whose content is wider than the viewport at phone width is a finding.
+ *
+ * Only at phone width: a wide table on a desk is what tables are for.
+ */
+const findWideTables = (vw) => {
+  const out = []
+  for (const el of document.querySelectorAll('table')) {
+    const style = getComputedStyle(el)
+    if (style.visibility === 'hidden' || style.display === 'none') continue
+    const box = el.getBoundingClientRect()
+    if (box.width < 1 && box.height < 1) continue
+
+    // Its own content wider than the screen, whether it is the table that
+    // scrolls or the wrapper around it.
+    const wrapper = el.parentElement
+    const scrolls =
+      el.scrollWidth > el.clientWidth + 1 ||
+      (wrapper !== null && wrapper.scrollWidth > wrapper.clientWidth + 1)
+    if (!scrolls && box.width <= vw + 1) continue
+
+    const heading = el.closest('[data-slot="card"]')?.querySelector('[data-slot="card-title"]')
+    out.push({
+      width: Math.round(Math.max(el.scrollWidth, box.width)),
+      rows: el.querySelectorAll('tbody tr').length,
+      where: (heading?.textContent ?? el.querySelector('caption')?.textContent ?? '')
+        .trim()
+        .slice(0, 40),
+      first: (el.querySelector('tbody tr')?.textContent ?? '').trim().replace(/\s+/g, ' ').slice(0, 40),
+    })
+  }
+  return out
+}
+
+/**
+ * How much the page actually rendered, so an empty screen cannot pass as a
+ * clean one.
+ *
+ * Table rows, phone rows and cards all count: several screens (jobs, clusters)
+ * have never been tables, and reporting "0 rows" for a screen full of cards
+ * would be the same ambiguity the row count exists to remove -- rendered
+ * nothing, or rendered something this selector cannot see?
+ */
+const countItems = () =>
+  document.querySelectorAll('tbody tr, [data-row], [data-slot="card"]').length
+
 /** How many controls the touch pass looked at, so a thin page is visible. */
 const countTargets = () =>
   [...document.querySelectorAll('button,a[href],summary,input,select,textarea,[role="button"]')].filter(
@@ -202,6 +280,46 @@ const countTargets = () =>
       return style.visibility !== 'hidden' && style.display !== 'none' && box.width >= 1 && box.height >= 1
     },
   ).length
+
+/**
+ * A picture of the phone, when asked for. Never part of a verdict: the guard
+ * measures, and a person looking at a screenshot is a weaker check. It exists
+ * because the operator reported this in a photograph, and a photograph is what
+ * answers one.
+ *
+ * The viewport is grown to the content rather than `fullPage`, and that was
+ * measured the hard way: this shell scrolls inside `<main class="flex-1
+ * min-h-0 overflow-auto">`, not the document. `fullPage` expands the DOCUMENT,
+ * the inner container keeps its height, and the result is a tall photograph of
+ * an empty page -- a picture of /settings that looked like the accounts were
+ * missing when they were one swipe away. Setting a height on that element does
+ * not work either: it is a flex child and the layout overrides it. Growing the
+ * window is the one that works, because the shell is built to fill it.
+ *
+ * It runs after both measuring passes, so resizing cannot change a verdict.
+ */
+async function shoot(page, route, width) {
+  if (!process.env.LAYOUT_SHOTS || width !== TOUCH_WIDTH) return
+
+  const content = await page.evaluate(() => {
+    let tallest = document.documentElement.scrollHeight
+    for (const el of document.querySelectorAll('*')) {
+      const style = getComputedStyle(el)
+      if (style.overflowY === 'auto' || style.overflowY === 'scroll') {
+        tallest = Math.max(tallest, el.scrollHeight + el.getBoundingClientRect().top)
+      }
+    }
+    return Math.ceil(tallest)
+  })
+
+  const height = Math.min(Math.max(content, 844), 6000)
+  await page.setViewportSize({ width, height })
+  await page.waitForTimeout(250)
+  const name = route === '/' ? 'home' : route.replace(/\//g, '')
+  await page.screenshot({ path: `${process.env.LAYOUT_SHOTS}/${name}.png` })
+  await page.setViewportSize({ width, height: 844 })
+  await page.waitForTimeout(150)
+}
 
 const dir = await mkdtemp(join(tmpdir(), 'holzkube-layout-'))
 const port = await freePort()
@@ -239,6 +357,20 @@ try {
 
   for (const width of WIDTHS) {
     const context = await browser.newContext({ viewport: { width, height: 844 } })
+
+    // Data, before anything navigates. GET only: setup and login go to the real
+    // daemon, so the session and the shell stay the product's own.
+    await context.route('**/api/v1/**', async (route) => {
+      if (route.request().method() !== 'GET') return route.continue()
+      const body = FIXTURES[new URL(route.request().url()).pathname]
+      if (body === undefined) return route.continue()
+      return route.fulfill({
+        status: 200,
+        contentType: 'application/json; charset=utf-8',
+        body: JSON.stringify(body),
+      })
+    })
+
     const page = await context.newPage()
 
     await page.goto(`${base}/login`)
@@ -259,11 +391,25 @@ try {
       await page.waitForLoadState('networkidle', { timeout: 20_000 }).catch(() => {})
       await page.waitForTimeout(400)
 
+      // A picture of the phone, when asked for. Not part of the verdict: the
+      // guard measures, and a person looking at a screenshot is a different and
+      // weaker check. It exists because the operator reported this in a
+      // photograph, and a photograph is what answers one.
       const clipped = await page.evaluate(findClipped, width)
       let counted = ''
       if (width === TOUCH_WIDTH) {
+        const wide = await page.evaluate(findWideTables, width)
+        if (wide.length > 0) {
+          failures += 1
+          console.error(`  SIDEWAYS  ${String(width).padStart(4)}px  ${route}  (${wide.length})`)
+          for (const t of wide) {
+            console.error(
+              `              ${t.width}px wide, ${t.rows} rows, in "${t.where}" -- first row: "${t.first}"`,
+            )
+          }
+        }
         const small = await page.evaluate(findSmallTargets, TOUCH_MIN)
-        counted = `  (${await page.evaluate(countTargets)} controls)`
+        counted = `  (${await page.evaluate(countTargets)} controls, ${await page.evaluate(countItems)} items)`
         if (small.length > 0) {
           failures += 1
           console.error(`  SMALL     ${String(width).padStart(4)}px  ${route}  (${small.length})`)
@@ -273,6 +419,7 @@ try {
         }
       }
       if (clipped.length === 0) {
+        await shoot(page, route, width)
         // The count is printed because this guard measures what the page
         // happens to show. /images lists one control per Image Factory
         // extension, and a catalog that did not load measures as a clean run:
@@ -287,6 +434,7 @@ try {
         console.error(`              <${c.tag}> right=${c.right} "${c.text}" .${c.cls}`)
       }
     }
+    await shoot(page, route, width)
     await context.close()
   }
 } finally {
@@ -307,7 +455,12 @@ if (failures > 0) {
       'Apple and Material name 44 for a finger, and the operator chose 44 below md ' +
       'with the desk left alone. Raise it at the primitive rather than per screen. ' +
       'What is measured is the box a thumb actually aims at: a checkbox inside a ' +
-      'label is measured as its label.',
+      'label is measured as its label.\n\n' +
+      'A SIDEWAYS table is the third: wider than the phone, so reading it means ' +
+      'swiping the row identity off the left edge. The operator photographed ' +
+      'exactly that on 2026-09-19 -- a Scale field and a Roll pods button with no ' +
+      'way to see which deployment they belonged to. Below md a row becomes a ' +
+      'card, or its secondary columns fold away; it does not become a swipe.',
   )
   process.exit(1)
 }

@@ -165,7 +165,7 @@ export function ClusterCard({ cluster }: { cluster: Cluster }) {
         <div className="flex flex-col gap-1">
           <a
             href={api.clusters.talosconfigPath(cluster.id)}
-            className="inline-block text-sm underline"
+            className="inline-flex items-center text-sm underline max-md:min-h-11"
             title="An admin client configuration for talosctl. The certificate in it is minted on demand and is not the one holzkube-manager dials with, so losing your copy does not affect this instance's access."
           >
             Download a talosconfig
@@ -183,7 +183,7 @@ export function ClusterCard({ cluster }: { cluster: Cluster }) {
           */}
           <a
             href={api.clusters.kubeconfigPath(cluster.id)}
-            className="inline-block text-sm underline"
+            className="inline-flex items-center text-sm underline max-md:min-h-11"
             title="Admin credentials for this cluster's Kubernetes, rendered by a control-plane node. It is system:masters and it is not revocable from here — a Kubernetes CA rotation is what withdraws it. The request is recorded in the audit log."
           >
             Download a kubeconfig
@@ -203,7 +203,7 @@ export function ClusterCard({ cluster }: { cluster: Cluster }) {
           */}
           <a
             href={api.clusters.supportBundlePath(cluster.id)}
-            className="inline-block text-sm underline"
+            className="inline-flex items-center text-sm underline max-md:min-h-11"
             title="One archive with what somebody debugging this cluster would otherwise collect by hand: per node the facts, services, versions, disks, links, extensions, etcd status, recent logs and the machine configuration with every secret removed — plus the audit tail. Nodes that do not answer are listed with the reason rather than left out."
           >
             Download a support bundle

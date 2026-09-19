@@ -12,6 +12,7 @@ import {
   WARNING_INSTALLER_REPO_FALLBACK_UNVERIFIED,
   WARNING_INSTALLER_SECUREBOOT_REPO_FALLBACK_UNVERIFIED,
 } from '@/api'
+import { DataTable } from '@/components/DataTable'
 import {
   LiveSchematicWarnings,
   predictWarnings,
@@ -35,14 +36,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table'
 import {
   CODE_UPSTREAM_FACTORY_REJECTED,
   CODE_UPSTREAM_FACTORY_UNAVAILABLE,
@@ -1248,61 +1241,68 @@ function SavedSchematics({ onOpen }: { onOpen: (id: string) => void }) {
       )}
 
       {saved.isSuccess && saved.data.length > 0 && (
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Name</TableHead>
-              <TableHead>Cluster</TableHead>
-              <TableHead>Talos version</TableHead>
-              <TableHead>Extensions</TableHead>
-              <TableHead>Created</TableHead>
-              <TableHead>Usability</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {saved.data.map((record) => (
-              <TableRow
-                key={record.id}
-                onClick={() => onOpen(record.id)}
-                onKeyDown={(event) => {
-                  if (event.key === 'Enter' || event.key === ' ') {
-                    event.preventDefault()
-                    onOpen(record.id)
-                  }
-                }}
-                tabIndex={0}
-                role="button"
-                // The accessible name is an attribute rather than rendered
-                // text, so no isolate applies to it and none is needed: an
-                // attribute has no surrounding run to reorder.
-                aria-label={`Schematic ${record.name}`}
-                className="cursor-pointer"
-              >
-                <TableCell>
-                  <StoredText>{record.name}</StoredText>
-                </TableCell>
-                <TableCell>
-                  {record.cluster === '' ? (
-                    <span className="text-muted-foreground">—</span>
-                  ) : (
-                    <StoredText>{nameOf(record.cluster)}</StoredText>
-                  )}
-                </TableCell>
-                <TableCell className="tabular-nums">{record.talos_version}</TableCell>
-                <TableCell className="tabular-nums">{record.extensions.length}</TableCell>
-                <TableCell className="tabular-nums">{record.created_at}</TableCell>
-                <TableCell>
-                  <UsabilityBadge
-                    usable={record.usable}
-                    probedAt={record.probed_at}
-                    reason={record.probe_reason}
-                    arch={record.arch}
-                  />
-                </TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
+        <DataTable
+          label="Saved schematics"
+          phone="rows"
+          rows={saved.data}
+          keyOf={(record) => record.id}
+          empty="No schematics yet."
+          onRowClick={(record) => onOpen(record.id)}
+          // The accessible name is an attribute rather than rendered text, so
+          // no isolate applies to it and none is needed: an attribute has no
+          // surrounding run to reorder.
+          rowLabel={(record) => `Schematic ${record.name}`}
+          columns={[
+            {
+              key: 'name',
+              label: 'Name',
+              role: 'identity',
+              render: (record) => <StoredText>{record.name}</StoredText>,
+            },
+            {
+              key: 'cluster',
+              label: 'Cluster',
+              render: (record) =>
+                record.cluster === '' ? (
+                  <span className="text-muted-foreground">—</span>
+                ) : (
+                  <StoredText>{nameOf(record.cluster)}</StoredText>
+                ),
+            },
+            {
+              key: 'talos',
+              label: 'Talos version',
+              className: 'tabular-nums',
+              render: (record) => <span className="tabular-nums">{record.talos_version}</span>,
+            },
+            {
+              key: 'extensions',
+              label: 'Extensions',
+              className: 'tabular-nums',
+              role: 'detail',
+              render: (record) => <span className="tabular-nums">{record.extensions.length}</span>,
+            },
+            {
+              key: 'created',
+              label: 'Created',
+              className: 'tabular-nums',
+              role: 'detail',
+              render: (record) => <span className="tabular-nums">{record.created_at}</span>,
+            },
+            {
+              key: 'usability',
+              label: 'Usability',
+              render: (record) => (
+                <UsabilityBadge
+                  usable={record.usable}
+                  probedAt={record.probed_at}
+                  reason={record.probe_reason}
+                  arch={record.arch}
+                />
+              ),
+            },
+          ]}
+        />
       )}
     </section>
   )
