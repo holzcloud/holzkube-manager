@@ -1,5 +1,23 @@
 [
   {
+    "version": "v1.19.1",
+    "date": "2026-09-19",
+    "changes": [
+      {
+        "icon": "🔧",
+        "text": "The node detail page is usable on a phone. Fifteen of its values ran off the right edge with no way to scroll them back — the processor line, the memory, the disks and the network interfaces — because the label column could not shrink. Labels and values stack on a phone now, and long values wrap."
+      },
+      {
+        "icon": "🔎",
+        "text": "The same pattern was corrected in four more places that had not shown themselves yet: the cluster cards, the job cards, the cluster templates and the configuration screen. They were getting away with it only because their values are shorter."
+      },
+      {
+        "icon": "📐",
+        "text": "The layout guard had been checking eleven screens out of fourteen. It now also drives the node detail page and — in the only order that makes them measurable — the sign-in and first-run screens, which are the first two anybody ever sees."
+      }
+    ]
+  },
+  {
     "version": "v1.19.0",
     "date": "2026-09-19",
     "changes": [
