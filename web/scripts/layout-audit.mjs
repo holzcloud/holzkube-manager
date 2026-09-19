@@ -418,8 +418,12 @@ try {
           }
         }
       }
+      // After both passes and before the verdict, so resizing for a picture
+      // cannot change what was measured, and so a route WITH findings is
+      // photographed too -- that is the one somebody wants to look at.
+      await shoot(page, route, width)
+
       if (clipped.length === 0) {
-        await shoot(page, route, width)
         // The count is printed because this guard measures what the page
         // happens to show. /images lists one control per Image Factory
         // extension, and a catalog that did not load measures as a clean run:
@@ -434,7 +438,6 @@ try {
         console.error(`              <${c.tag}> right=${c.right} "${c.text}" .${c.cls}`)
       }
     }
-    await shoot(page, route, width)
     await context.close()
   }
 } finally {
