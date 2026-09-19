@@ -1,5 +1,35 @@
 [
   {
+    "version": "v1.20.0",
+    "date": "2026-09-19",
+    "changes": [
+      {
+        "icon": "🔬",
+        "text": "The Kubernetes screen now answers why something is broken, not only that it is. Every pod has a \"Why?\" button: which container failed, how it ended, its log, and what the cluster reported about it."
+      },
+      {
+        "icon": "📜",
+        "text": "Logs, and by default the log of the run that ALREADY CRASHED. A pod in CrashLoopBackOff has printed nothing in its current container — everything that explains the crash belongs to the run that ended, and a log view without that answers every crash loop with an empty box."
+      },
+      {
+        "icon": "🧯",
+        "text": "Container detail says how a run ended in words: exit code 137 is a memory limit, ImagePullBackOff never started, and a container that asked for no CPU or memory is named as one the scheduler places blind."
+      },
+      {
+        "icon": "📣",
+        "text": "Events, per pod and for the whole cluster, with warnings first. \"Pending\" is never explained by the pod — it is explained by \"0/2 nodes are available: insufficient cpu\", which exists only here. An empty list always says why it is not a claim that nothing happened: a cluster forgets its events after about an hour."
+      },
+      {
+        "icon": "📄",
+        "text": "Any object can be shown as YAML, for the question the lists do not cover — a toleration, a node selector, somebody's controller annotation. A Secret is refused rather than redacted: its data is base64, not encryption, and a redaction that misses one field puts a credential on a screen that promised it would not."
+      },
+      {
+        "icon": "🤐",
+        "text": "None of a log's content is archived. A log line is whatever the workload printed, the audit archive is kept forever, and a secret written there has no path that removes it. The archive records that somebody read the log of a named pod."
+      }
+    ]
+  },
+  {
     "version": "v1.19.1",
     "date": "2026-09-19",
     "changes": [
