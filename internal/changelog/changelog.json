@@ -1,5 +1,47 @@
 [
   {
+    "version": "v1.18.0",
+    "date": "2026-09-19",
+    "changes": [
+      {
+        "icon": "☸️",
+        "text": "holzkube-manager can now manage Kubernetes and not only watch it. Cordon a node so nothing new is scheduled onto it, drain one so its pods move, restart a pod, scale a deployment, roll its pods, apply a manifest, and read a health or metrics endpoint from a service. Until now two screens told you to cordon and drain by hand first, because there was no Kubernetes client to do it with."
+      },
+      {
+        "icon": "🚚",
+        "text": "A drain evicts rather than deletes, so a PodDisruptionBudget can refuse it — and when one does, the answer names the pod and the budget instead of pushing past it. Two decisions stay yours, the same two kubectl refuses to take: a pod nothing owns is gone rather than moved once it is evicted, and a pod with local storage loses that storage when it moves."
+      },
+      {
+        "icon": "🔁",
+        "text": "\"Restart this pod\" is refused when nothing owns it. Kubernetes has no restart verb — it has \"delete the pod and let the controller make another\" — and those are the same operation only while a controller exists. Deleting a bare pod because somebody clicked a word would destroy something on the strength of that word."
+      },
+      {
+        "icon": "📐",
+        "text": "Scaling and rolling are kept apart, because they are not the same thing. Scaling changes how many pods there are; a rollout restart replaces the pods there are under the deployment's own surge, maxUnavailable and readiness probes, so the workload stays up. Deleting a deployment's pods one at a time would take it down."
+      },
+      {
+        "icon": "📄",
+        "text": "Manifests: paste one, press Plan, read what it would do, then Apply. Whether each object is created or updated comes from asking your cluster — a manifest looks identical either way — and Apply stays disabled until a plan exists for exactly the text in the box. Editing throws the plan away, because a plan for a document you have since changed is worse than none."
+      },
+      {
+        "icon": "✋",
+        "text": "An apply never forces. When another field manager owns a field your manifest sets, the API server says so and this reports it instead of winning: forcing takes the value away from whatever is managing it, and that thing will set it back. Every object is attempted and each failure carries its reason, so an apply where the sixth of ten conflicts tells you which nine went through. Nothing is ever deleted — there is no prune."
+      },
+      {
+        "icon": "🔎",
+        "text": "Reach a service: pick a port, type a path, read the answer as text. It fetches; it does not host. A workload's own content type is deliberately thrown away, because rendering a pod's markup here would put it in the origin holding your session — any pod in the cluster could then script this interface. Only GET is ever sent, and it goes through the API server's own proxy rather than a tunnel this daemon opens."
+      },
+      {
+        "icon": "🐢",
+        "text": "Fixed before you could see it: client-go throttles itself to five requests a second, and a manifest plan asks your cluster about every object. Sixty objects took ten seconds of queueing inside this process — after which the screen would have blamed your cluster for being slow. Measured, raised to kubectl's own limits, and held by a test that fails at exactly the old number."
+      },
+      {
+        "icon": "📓",
+        "text": "Said plainly rather than left out: neither manifests nor the service proxy has ever run against a real cluster. Every part is measured against a simulated API server this repository ships, which serves real Kubernetes JSON over real TLS with a real client certificate — but it has no admission webhooks and no managed-fields bookkeeping. The mechanism and the refusals are proven; your cluster's reaction to your manifest is not."
+      }
+    ]
+  },
+  {
     "version": "v1.17.0",
     "date": "2026-09-19",
     "changes": [
