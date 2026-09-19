@@ -1476,6 +1476,61 @@ sense D-06 means:
 | `POST /api/v1/clusters/{id}/kubernetes/manifest/plan` | says what applying a manifest would do, and writes nothing |
 | `POST /api/v1/clusters/{id}/kubernetes/manifest/apply` | applies it with server-side apply |
 | `POST /api/v1/clusters/{id}/kubernetes/services/{namespace}/{service}/proxy` | takes `{"port": "...", "path": "/healthz"}` and fetches that path from the service |
+| `GET /api/v1/clusters/{id}/kubernetes/pods/{namespace}/{pod}/containers` | which containers the pod has, how each is doing, and a one-line explanation |
+| `GET /api/v1/clusters/{id}/kubernetes/pods/{namespace}/{pod}/log` | `?container=&previous=&tail=` — one container's output |
+| `GET /api/v1/clusters/{id}/kubernetes/events` | `?namespace=` — what the cluster has reported |
+| `GET /api/v1/clusters/{id}/kubernetes/pods/{namespace}/{pod}/events` | the same, filtered by the server to one pod |
+| `POST /api/v1/clusters/{id}/kubernetes/object` | takes `{"api_version","kind","namespace","name"}` and answers that object as YAML |
+
+**The object route is how the thirteenth question gets answered.** The lists show
+chosen fields; a toleration, a node selector or somebody's controller annotation
+is not among them, and a product that cannot show the object sends its operator
+back to `kubectl` for it. The kind is resolved through the cluster's own
+discovery, so a `CustomResourceDefinition` this build has never heard of works.
+
+**A Secret is refused** (`conflict.refused-kind`), not redacted. Its `data` is
+base64 rather than encryption, so rendering it puts the credential on the screen.
+Redaction was the obvious alternative and is worse: it teaches that looking at
+Secrets here is safe, and the first field it misses is a credential on a screen
+that promised it was not.
+
+**`managedFields` and the last-applied annotation are removed, and the answer
+says so** in `notice`. Both are bookkeeping longer than the object itself, and an
+object silently missing fields is how somebody concludes a field is not set when
+it is. It is a POST for the same reason the proxy is: the archive captures bodies,
+and here nothing else names the object.
+
+**Logs answer the question the rest of this screen cannot.** Everything else says
+WHAT is wrong; the log of the container that died says why. `previous=true` is
+therefore the flag that matters: a pod in CrashLoopBackOff has printed nothing in
+its current container, so a log view without it answers every crash loop with an
+empty box. `has_previous` on the container says whether asking would answer.
+
+**A log is cut at the START when it is too long** (1 MiB), because the last lines
+are the ones that explain a failure, and the cut is reported as `truncated`.
+
+**Nothing of a log's content is archived.** A log line is whatever the workload
+printed — tokens, connection strings, personal data — and the audit archive is
+kept forever (D-16), so a log in it is a secret in it with no path that removes
+it. The archive records that somebody read the log of a named pod. That is also
+why this route is a GET with the container in the query while the service proxy
+had to be a POST: there the path being fetched *was* the event; here the event is
+the pod, and the pod is in the route's own path.
+
+**A pod with several containers is refused rather than guessed at.** Picking the
+first would show a sidecar's log and let somebody conclude the application
+printed nothing. The refusal names the containers.
+
+**Events carry a notice, and it is part of the contract.** A cluster forgets its
+events after about an hour, so an empty list means "nothing reported recently",
+never "nothing happened". Both event routes filter on the SERVER — the per-pod
+one on `involvedObject` — so a detail screen cannot show another object's
+failures under this object's name.
+
+**Container detail carries the previous run**, which is where a diagnosis lives:
+exit code 137 is a memory limit, 1 is a throw, `ImagePullBackOff` never started.
+`explanation` is computed on the server so that sentence is written once rather
+than in the screen, the API and whatever reads the API next.
 
 **A drain evicts rather than deletes**, so a PodDisruptionBudget can refuse it —
 and when one does, the answer names the pod and the budget instead of retrying

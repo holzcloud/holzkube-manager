@@ -892,6 +892,89 @@ var routeBudgets = []routeBudget{
 			"endpoint needs to know which of the two it is.",
 	},
 	{
+		route: "GET /api/v1/clusters/{id}/kubernetes/pods/{namespace}/{pod}/containers",
+		calls: []upstreamCall{
+			{name: "NewClusterClient: Version (finding a control-plane node)", class: nodeProbeCall},
+			{name: "COSI Get: the machine configuration, for the API server's address", class: nodeFastReadCall},
+			{name: "Kubernetes: get the pod", class: kubeCall},
+		},
+		routeDeadline:     handlers.KubernetesRouteBudget,
+		verdict:           knownOverBudget,
+		clipping:          clipped,
+		deferredTo:        "as above for the two Talos calls.",
+		clippingRationale: "one get against an API server that answers.",
+		why: "The whole answer is one pod object: the container statuses, the last termination " +
+			"state and the images are all on it. Nothing else has to be asked.",
+	},
+	{
+		route: "GET /api/v1/clusters/{id}/kubernetes/pods/{namespace}/{pod}/log",
+		calls: []upstreamCall{
+			{name: "NewClusterClient: Version (finding a control-plane node)", class: nodeProbeCall},
+			{name: "COSI Get: the machine configuration, for the API server's address", class: nodeFastReadCall},
+			{name: "Kubernetes: get the pod (which containers does it have)", class: kubeCall},
+			{name: "Kubernetes: the log subresource", class: kubeCall},
+		},
+		routeDeadline: handlers.KubernetesRouteBudget,
+		verdict:       knownOverBudget,
+		clipping:      clipped,
+		deferredTo:    "as above.",
+		clippingRationale: "A log read is bounded by kube.MaxLogBytes and by the tail the product " +
+			"asks for, so the far end sends a megabyte at most rather than following the file.",
+		why: "The pod is read first because the container has to be resolved before the log can " +
+			"be asked for, and because naming the wrong container is refused rather than guessed.",
+	},
+	{
+		route: "GET /api/v1/clusters/{id}/kubernetes/events",
+		calls: []upstreamCall{
+			{name: "NewClusterClient: Version (finding a control-plane node)", class: nodeProbeCall},
+			{name: "COSI Get: the machine configuration, for the API server's address", class: nodeFastReadCall},
+			{name: "Kubernetes: list events", class: kubeCall},
+		},
+		routeDeadline:     handlers.KubernetesRouteBudget,
+		verdict:           knownOverBudget,
+		clipping:          clipped,
+		deferredTo:        "as above.",
+		clippingRationale: "one list, bounded to 500 items by the request itself.",
+		why: "The limit is the server's and so is the field selector: a cluster with thousands " +
+			"of events must not send all of them so that four can be shown.",
+	},
+	{
+		route: "GET /api/v1/clusters/{id}/kubernetes/pods/{namespace}/{pod}/events",
+		calls: []upstreamCall{
+			{name: "NewClusterClient: Version (finding a control-plane node)", class: nodeProbeCall},
+			{name: "COSI Get: the machine configuration, for the API server's address", class: nodeFastReadCall},
+			{name: "Kubernetes: list events with a field selector", class: kubeCall},
+		},
+		routeDeadline:     handlers.KubernetesRouteBudget,
+		verdict:           knownOverBudget,
+		clipping:          clipped,
+		deferredTo:        "as above.",
+		clippingRationale: "as above, and narrower: the selector is on the object.",
+		why: "Filtered by the SERVER on involvedObject, so a detail screen cannot show another " +
+			"object's failures under this object's name.",
+	},
+	{
+		route: "POST /api/v1/clusters/{id}/kubernetes/object",
+		calls: []upstreamCall{
+			{name: "NewClusterClient: Version (finding a control-plane node)", class: nodeProbeCall},
+			{name: "COSI Get: the machine configuration, for the API server's address", class: nodeFastReadCall},
+			{name: "Kubernetes: discovery, /api", class: kubeCall},
+			{name: "Kubernetes: discovery, /apis", class: kubeCall},
+			{name: "Kubernetes: discovery, /api/v1", class: kubeCall},
+			{name: "Kubernetes: discovery, /apis/apps/v1", class: kubeCall},
+			{name: "Kubernetes: get the object", class: kubeCall},
+		},
+		routeDeadline: handlers.KubernetesRouteBudget,
+		verdict:       knownOverBudget,
+		clipping:      clipped,
+		deferredTo:    "as above for the two Talos calls.",
+		clippingRationale: "Discovery is fetched once per client and cached in memory, so the " +
+			"four discovery calls are a first-request cost rather than a per-request one. The " +
+			"get is one small read.",
+		why: "The kind is resolved through the cluster's own discovery, the same way a manifest's " +
+			"is, so this works for a CustomResourceDefinition this build has never heard of.",
+	},
+	{
 		route: "GET /api/v1/clusters/{id}/scale",
 		calls: []upstreamCall{
 			{name: "NewClusterClient: Version", class: nodeProbeCall},

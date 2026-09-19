@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -174,7 +175,231 @@ func KubernetesRoutes(d httpapi.Deps) []httpapi.Route {
 			Action:          "cluster.kubernetes-service-proxy",
 			Handler:         handler(kubernetesServiceProxy(d)),
 		},
+		{
+			Method:  http.MethodGet,
+			Pattern: "/api/v1/clusters/{id}/kubernetes/pods/{namespace}/{pod}/containers",
+
+			// Reader, unlike the actions: this is the pod list with one more
+			// level of detail, and somebody who may see that a pod is broken may
+			// see which of its containers is.
+			RequiresSession: true,
+			MinRole:         model.RoleReader,
+			Action:          "cluster.kubernetes-containers",
+			Handler:         handler(kubernetesContainers(d)),
+		},
+		{
+			Method:  http.MethodGet,
+			Pattern: "/api/v1/clusters/{id}/kubernetes/pods/{namespace}/{pod}/log",
+
+			// A GET with the container and the flags in the query, unlike the
+			// service proxy which had to be a POST. The difference is what the
+			// EVENT is: there, the path being fetched was the event, and an
+			// archive that could not name it recorded nothing worth having.
+			// Here the event is "somebody read the log of this pod", and the pod
+			// is in the route's own path, which the archive records. Which
+			// container of it is detail, not the event.
+			//
+			// Reader, and that is a real decision rather than a default: a log
+			// carries whatever the workload printed, which is regularly more
+			// sensitive than anything else on these screens. It is at reader
+			// because somebody who cannot read logs cannot diagnose anything,
+			// and a product whose diagnosis needs an operator role pushes people
+			// to hand out operator roles.
+			RequiresSession: true,
+			MinRole:         model.RoleReader,
+			Action:          "cluster.kubernetes-logs",
+			Handler:         handler(kubernetesLogs(d)),
+		},
+		{
+			Method:          http.MethodGet,
+			Pattern:         "/api/v1/clusters/{id}/kubernetes/events",
+			RequiresSession: true,
+			MinRole:         model.RoleReader,
+			Action:          "cluster.kubernetes-events",
+			Handler:         handler(kubernetesEvents(d)),
+		},
+		{
+			Method:          http.MethodGet,
+			Pattern:         "/api/v1/clusters/{id}/kubernetes/pods/{namespace}/{pod}/events",
+			RequiresSession: true,
+			MinRole:         model.RoleReader,
+			Action:          "cluster.kubernetes-pod-events",
+			Handler:         handler(kubernetesPodEvents(d)),
+		},
+		{
+			// A POST for a read, for the reason ledger 150 records about the
+			// service proxy: the audit middleware captures the BODY and not the
+			// query string, and here nothing else identifies the object -- not
+			// even a path segment. A GET would have archived "somebody read an
+			// object", which is a record that says nothing.
+			Method:  http.MethodPost,
+			Pattern: "/api/v1/clusters/{id}/kubernetes/object",
+
+			// Operator rather than reader, and the difference is the whole
+			// object: the lists show chosen fields, this shows everything on it
+			// -- environment variables, annotations, node selectors. A Secret is
+			// refused outright (kube.ErrRefusedKind), but a ConfigMap is not,
+			// and plenty of people keep things in one that they should not.
+			RequiresSession: true,
+			MinRole:         model.RoleOperator,
+			Action:          "cluster.kubernetes-object",
+			Handler:         handler(kubernetesObject(d)),
+		},
 	}
+}
+
+// kubernetesObject renders one object as YAML.
+func kubernetesObject(d httpapi.Deps) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			APIVersion string `json:"api_version"`
+			Kind       string `json:"kind"`
+			Namespace  string `json:"namespace"`
+			Name       string `json:"name"`
+		}
+		if err := decodeJSON(w, r, &body); err != nil {
+			httpapi.WriteProblem(w, r, decodeProblem(err))
+			return
+		}
+		if body.APIVersion == "" || body.Kind == "" || body.Name == "" {
+			httpapi.WriteProblem(w, r, httpapi.Validation(
+				"Say which object.",
+				httpapi.FieldError{Field: "kind", Reason: "api_version, kind and name are required"}))
+			return
+		}
+
+		client, ctx, cancel, ok := kubeClientFor(d, w, r)
+		if !ok {
+			return
+		}
+		defer cancel()
+
+		described, err := client.Describe(ctx, body.APIVersion, body.Kind, body.Namespace, body.Name)
+		if err != nil {
+			writeKubernetesError(w, r, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, described)
+	}
+}
+
+// kubernetesContainers answers which containers a pod has and how each is doing.
+func kubernetesContainers(d httpapi.Deps) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		client, ctx, cancel, ok := kubeClientFor(d, w, r)
+		if !ok {
+			return
+		}
+		defer cancel()
+
+		containers, err := client.ContainersOf(ctx, r.PathValue("namespace"), r.PathValue("pod"))
+		if err != nil {
+			writeKubernetesError(w, r, err)
+			return
+		}
+
+		// The explanation is computed here rather than in the browser, so the
+		// sentence about an exit code is written once. A screen that built its
+		// own would disagree with this one eventually, and quietly.
+		type row struct {
+			kube.Container
+			Explanation string `json:"explanation"`
+		}
+		out := make([]row, 0, len(containers))
+		for _, c := range containers {
+			out = append(out, row{Container: c, Explanation: kube.ExplainContainer(c)})
+		}
+		writeJSON(w, http.StatusOK, struct {
+			Containers []row `json:"containers"`
+		}{Containers: out})
+	}
+}
+
+// kubernetesLogs reads one container's output.
+func kubernetesLogs(d httpapi.Deps) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		opts := kube.LogOptions{
+			Container: r.URL.Query().Get("container"),
+			Previous:  r.URL.Query().Get("previous") == "true",
+		}
+		if tail := r.URL.Query().Get("tail"); tail != "" {
+			n, err := strconv.ParseInt(tail, 10, 64)
+			if err != nil || n <= 0 {
+				httpapi.WriteProblem(w, r, httpapi.Validation(
+					"Ask for a number of lines.",
+					httpapi.FieldError{Field: "tail", Reason: "must be a positive number"}))
+				return
+			}
+			opts.TailLines = n
+		}
+
+		client, ctx, cancel, ok := kubeClientFor(d, w, r)
+		if !ok {
+			return
+		}
+		defer cancel()
+
+		log, err := client.PodLogs(ctx, r.PathValue("namespace"), r.PathValue("pod"), opts)
+		if err != nil {
+			writeKubernetesError(w, r, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, log)
+	}
+}
+
+// kubernetesEvents answers what the cluster has reported recently.
+func kubernetesEvents(d httpapi.Deps) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		client, ctx, cancel, ok := kubeClientFor(d, w, r)
+		if !ok {
+			return
+		}
+		defer cancel()
+
+		events, err := client.Events(ctx, r.URL.Query().Get("namespace"))
+		if err != nil {
+			writeKubernetesError(w, r, err)
+			return
+		}
+		writeEvents(w, events)
+	}
+}
+
+// kubernetesPodEvents answers what the cluster has reported about one pod.
+func kubernetesPodEvents(d httpapi.Deps) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		client, ctx, cancel, ok := kubeClientFor(d, w, r)
+		if !ok {
+			return
+		}
+		defer cancel()
+
+		events, err := client.EventsAbout(ctx, r.PathValue("namespace"), "Pod", r.PathValue("pod"))
+		if err != nil {
+			writeKubernetesError(w, r, err)
+			return
+		}
+		writeEvents(w, events)
+	}
+}
+
+// writeEvents answers with the window as well as the list.
+//
+// A cluster keeps events for about an hour, so an empty list means "nothing
+// happened recently" OR "it happened before the cluster stopped keeping it".
+// Those are different answers and the screen has to be able to say which it
+// cannot distinguish -- the same distinction INV-08 makes about a node that was
+// not asked.
+func writeEvents(w http.ResponseWriter, events []kube.Event) {
+	writeJSON(w, http.StatusOK, struct {
+		Events []kube.Event `json:"events"`
+		Notice string       `json:"notice"`
+	}{
+		Events: events,
+		Notice: "A cluster forgets its events after about an hour. An empty list means nothing " +
+			"has been reported recently, not that nothing has happened.",
+	})
 }
 
 // kubernetesServiceProxy fetches one path from a service in the cluster.
@@ -643,6 +868,19 @@ func writeKubernetesError(w http.ResponseWriter, r *http.Request, err error) {
 			Detail: err.Error(),
 			Code:   httpapi.CodeNothingWouldRecreateIt,
 		})
+
+	case errors.Is(err, kube.ErrRefusedKind):
+		httpapi.WriteProblem(w, r, &httpapi.Problem{
+			Type:   httpapi.TypeConflict,
+			Title:  "That kind is not shown here",
+			Status: http.StatusConflict,
+			Detail: err.Error(),
+			Code:   httpapi.CodeRefusedKind,
+		})
+
+	case errors.Is(err, kube.ErrNoSuchContainer):
+		httpapi.WriteProblem(w, r, httpapi.Validation(err.Error(),
+			httpapi.FieldError{Field: "container", Reason: "required"}))
 
 	case errors.Is(err, kube.ErrProxyPathRefused):
 		httpapi.WriteProblem(w, r, httpapi.Validation(err.Error(),

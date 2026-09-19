@@ -5,8 +5,10 @@ import { api } from '@/api'
 import { ApplyManifest } from '@/components/ApplyManifest'
 import { DataTable } from '@/components/DataTable'
 import { NodeSchedulingActions } from '@/components/NodeSchedulingActions'
+import { PodDiagnosis } from '@/components/PodDiagnosis'
 import { Problem } from '@/components/Problem'
 import { ReachService } from '@/components/ReachService'
+import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import {
   Select,
@@ -45,6 +47,7 @@ import { authenticatedRoute } from '@/routes/__root'
 export function KubernetesView() {
   const [cluster, setCluster] = useState('')
   const [namespace, setNamespace] = useState('')
+  const [diagnosing, setDiagnosing] = useState<{ namespace: string; pod: string } | null>(null)
 
   const clusters = useQuery({ queryKey: ['clusters'], queryFn: api.clusters.list })
 
@@ -331,15 +334,35 @@ export function KubernetesView() {
                     label: 'Action',
                     role: 'actions',
                     render: (pod) => (
-                      <RestartPodButton
-                        clusterID={selected}
-                        namespace={pod.namespace}
-                        pod={pod.name}
-                      />
+                      <div className="flex flex-wrap gap-2 max-md:flex-col">
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          className="max-md:h-11"
+                          onClick={() => setDiagnosing({ namespace: pod.namespace, pod: pod.name })}
+                        >
+                          Why?
+                        </Button>
+                        <RestartPodButton
+                          clusterID={selected}
+                          namespace={pod.namespace}
+                          pod={pod.name}
+                        />
+                      </div>
                     ),
                   },
                 ]}
               />
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>What the cluster reported</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <ClusterEvents clusterID={selected} namespace={namespace} />
             </CardContent>
           </Card>
 
@@ -360,6 +383,85 @@ export function KubernetesView() {
               <ApplyManifest clusterID={selected} />
             </CardContent>
           </Card>
+        </>
+      )}
+
+      {diagnosing && (
+        <PodDiagnosis
+          clusterID={selected}
+          namespace={diagnosing.namespace}
+          pod={diagnosing.pod}
+          onClose={() => setDiagnosing(null)}
+        />
+      )}
+    </div>
+  )
+}
+
+/**
+ * What the cluster has reported, cluster-wide.
+ *
+ * Warnings first is deliberate and it is the only place this screen reorders
+ * anything: inside one object the sequence is the story, but across a whole
+ * cluster the question is "what is wrong", and a FailedScheduling buried under
+ * forty Pulled events is an answer nobody finds.
+ */
+function ClusterEvents({ clusterID, namespace }: { clusterID: string; namespace: string }) {
+  const events = useQuery({
+    queryKey: ['kubernetes', 'events', clusterID, namespace],
+    queryFn: () => api.kubernetes.events(clusterID, namespace),
+    refetchInterval: 15_000,
+  })
+
+  if (events.error) return <Problem error={events.error} />
+  if (!events.data) return <p className="text-muted-foreground text-sm">Reading…</p>
+
+  const warnings = events.data.events.filter((e) => e.type === 'Warning').reverse()
+
+  return (
+    <div className="space-y-2">
+      {warnings.length === 0 ? (
+        <p className="text-muted-foreground text-sm">{events.data.notice}</p>
+      ) : (
+        <>
+          <DataTable
+            label="Warnings the cluster reported"
+            phone="rows"
+            rows={warnings.slice(0, 20)}
+            keyOf={(e) => `${e.object}-${e.reason}-${e.last_seen}`}
+            empty={events.data.notice}
+            columns={[
+              {
+                key: 'reason',
+                label: 'Reason',
+                role: 'identity',
+                render: (e) => (
+                  <span className="text-amber-700 dark:text-amber-300">
+                    {e.reason}
+                    {e.count > 1 && <span className="text-muted-foreground"> ×{e.count}</span>}
+                  </span>
+                ),
+              },
+              {
+                key: 'object',
+                label: 'Object',
+                render: (e) => <span className="break-all font-mono text-xs">{e.object}</span>,
+              },
+              {
+                key: 'message',
+                label: 'Message',
+                role: 'detail',
+                render: (e) => <span className="break-words">{e.message}</span>,
+              },
+              {
+                key: 'last_seen',
+                label: 'Last seen',
+                role: 'detail',
+                render: (e) => <span className="tabular-nums">{e.last_seen}</span>,
+              },
+            ]}
+          />
+          <p className="text-muted-foreground text-xs">{events.data.notice}</p>
         </>
       )}
     </div>
