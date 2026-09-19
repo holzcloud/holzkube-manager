@@ -857,6 +857,33 @@ apply of ten where the sixth conflicts has changed five things, and a single
 "failed" would leave you guessing which five. At most 256 objects per manifest,
 and at most 1 MiB.
 
+### Whose name your cluster sees
+
+By default every Kubernetes request this product makes arrives as
+`holzkube-manager`, in `system:masters`. Your cluster's audit log records that
+name — so it says *this product* scaled a deployment, for every operator, for
+ever, and cannot answer the one question an audit log exists for. And
+`system:masters` bypasses RBAC entirely, so your cluster cannot express "this
+person may restart pods in `web` and nothing else".
+
+On the Kubernetes screen, **Who this acts as** changes that. Give it the name
+your API server knows you by — for OIDC usually your email, with whatever
+`--oidc-username-prefix` adds — and requests carry it as an impersonation header.
+The API server then records both: this product as the impersonator, you as the
+actor, and RBAC decides what you may do.
+
+**Nothing is stored before the cluster has been asked.** The panel runs an access
+review for every permission this product issues, as that identity, and shows the
+cluster's own verdicts. A name your RBAC has never heard of would otherwise break
+every Kubernetes screen at once, and look like the product is broken rather than
+like a setting is wrong.
+
+**A refusal is never retried as the administrator.** That is what makes this worth
+having rather than decorative: with a fallback, every request would succeed either
+way and your RBAC would decide nothing. A refused screen stays refused and says
+whose refusal it was. You can always go back to this product's own certificate
+with one button.
+
 ### Why a pod is broken
 
 Every pod on the Kubernetes screen has a **Why?** button, and it answers in the

@@ -52,6 +52,7 @@ import (
 	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
+	authv1 "k8s.io/api/authorization/v1"
 	autoscalingv1 "k8s.io/api/autoscaling/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -92,6 +93,20 @@ type Options struct {
 
 	// Events the cluster has to report.
 	Events []Event
+
+	// Impersonation, as a cluster's RBAC looks from the client's side.
+	//
+	// AllowImpersonated lists the users this fake's RBAC permits. A request
+	// that arrives impersonating anybody else is answered 403 -- which is the
+	// case the product's promise turns on: it must NOT then retry as its own
+	// certificate.
+	AllowImpersonated []string
+
+	// DenyVerbs are "verb:resource" pairs the impersonated user may not do,
+	// answered through SelfSubjectAccessReview. It is how a test builds the
+	// realistic case: an identity the cluster knows, with fewer rights than the
+	// product needs.
+	DenyVerbs []string
 
 	// ConflictOn are objects whose apply answers 409, keyed the same way. It is
 	// how a test reaches the case that matters most: another field manager owns
@@ -283,9 +298,17 @@ type Server struct {
 	forced     []string
 	conflictOn []string
 
-	services    []Service
-	events      []Event
-	proxyBodies map[string]string
+	services []Service
+	events   []Event
+
+	allowImpersonated []string
+	denyVerbs         []string
+
+	// impersonated records the identity every request arrived as, in order. It
+	// is what proves the product acted as the operator rather than as itself --
+	// a claim nothing else can check, because both requests succeed.
+	impersonated []string
+	proxyBodies  map[string]string
 
 	// proxied records every path a proxy request asked for, as
 	// "namespace/service:port/path". It is what proves the product built the URL
@@ -306,19 +329,21 @@ func New(opts Options) (*Server, error) {
 	}
 
 	s := &Server{
-		caCrt:       caCrt,
-		caKey:       caKey,
-		version:     opts.Version,
-		nodes:       append([]Node(nil), opts.Nodes...),
-		deployments: append([]Deployment(nil), opts.Deployments...),
-		applied:     map[string]map[string]any{},
-		conflictOn:  append([]string(nil), opts.ConflictOn...),
-		services:    append([]Service(nil), opts.Services...),
-		events:      append([]Event(nil), opts.Events...),
-		proxyBodies: opts.ProxyBodies,
-		pods:        append([]Pod(nil), opts.Pods...),
-		namespaces:  namespacesOf(opts),
-		calls:       map[string]int{},
+		caCrt:             caCrt,
+		caKey:             caKey,
+		version:           opts.Version,
+		nodes:             append([]Node(nil), opts.Nodes...),
+		deployments:       append([]Deployment(nil), opts.Deployments...),
+		applied:           map[string]map[string]any{},
+		conflictOn:        append([]string(nil), opts.ConflictOn...),
+		services:          append([]Service(nil), opts.Services...),
+		events:            append([]Event(nil), opts.Events...),
+		allowImpersonated: append([]string(nil), opts.AllowImpersonated...),
+		denyVerbs:         append([]string(nil), opts.DenyVerbs...),
+		proxyBodies:       opts.ProxyBodies,
+		pods:              append([]Pod(nil), opts.Pods...),
+		namespaces:        namespacesOf(opts),
+		calls:             map[string]int{},
 	}
 
 	for _, key := range opts.Objects {
@@ -425,6 +450,9 @@ func (s *Server) routes() http.Handler {
 	// kinds this binary has never heard of, so the product asks the CLUSTER
 	// which resource a kind lives at. A fake without discovery would make that
 	// path untestable and the product's own mapper unexercised.
+	mux.HandleFunc("/apis/authorization.k8s.io/v1/selfsubjectaccessreviews",
+		s.record(s.serveAccessReview))
+	mux.HandleFunc("/apis/authorization.k8s.io/v1", s.record(s.serveAuthResources))
 	mux.HandleFunc("/api", s.record(s.serveAPIVersions))
 	mux.HandleFunc("/apis", s.record(s.serveAPIGroups))
 	mux.HandleFunc("/api/v1", s.record(s.serveCoreResources))
@@ -459,6 +487,14 @@ func (s *Server) record(next func(http.ResponseWriter, *http.Request)) http.Hand
 			s.identities = append(s.identities, r.TLS.PeerCertificates[0].Subject.CommonName)
 		}
 		s.mu.Unlock()
+
+		// Every recorded request passes the impersonation check, so a 403 for a
+		// user this fake's RBAC does not know reaches the product from wherever
+		// it asked -- which is what makes "it never retries as the admin"
+		// something a test can watch rather than a sentence in a comment.
+		if !s.checkImpersonation(w, r) {
+			return
+		}
 
 		next(w, r)
 	}
@@ -1651,4 +1687,96 @@ func (s *Server) writeEvents(w http.ResponseWriter, r *http.Request, namespace s
 		})
 	}
 	writeJSON(w, http.StatusOK, list)
+}
+
+// Impersonation and RBAC (2026-09-19).
+
+// checkImpersonation records who a request arrived as and answers 403 when this
+// fake's RBAC does not know them.
+//
+// Recording is half the value. Whether the product impersonated or not, the
+// request succeeds against a permissive fake, so a test that only watched the
+// answer could not tell the two apart -- and "acts as the operator" is precisely
+// the claim being made.
+func (s *Server) checkImpersonation(w http.ResponseWriter, r *http.Request) bool {
+	user := r.Header.Get("Impersonate-User")
+
+	s.mu.Lock()
+	s.impersonated = append(s.impersonated, user)
+	allowed := s.allowImpersonated
+	s.mu.Unlock()
+
+	if user == "" {
+		return true
+	}
+	if slices.Contains(allowed, user) {
+		return true
+	}
+
+	s.writeStatus(w, http.StatusForbidden, metav1.StatusReasonForbidden,
+		fmt.Sprintf("User %q cannot do this: no RBAC policy matched", user))
+	return false
+}
+
+// Impersonated returns the identity every request arrived as, in order. An
+// empty string is a request that arrived as the client's own certificate.
+func (s *Server) Impersonated() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]string(nil), s.impersonated...)
+}
+
+// serveAccessReview answers SelfSubjectAccessReview for whoever asked.
+func (s *Server) serveAccessReview(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		s.serveNotFound(w, r)
+		return
+	}
+
+	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
+	if err != nil {
+		s.writeStatus(w, http.StatusBadRequest, metav1.StatusReasonBadRequest, err.Error())
+		return
+	}
+	var review authv1.SelfSubjectAccessReview
+	if err := json.Unmarshal(body, &review); err != nil {
+		s.writeStatus(w, http.StatusBadRequest, metav1.StatusReasonBadRequest, err.Error())
+		return
+	}
+
+	attrs := review.Spec.ResourceAttributes
+	if attrs == nil {
+		attrs = &authv1.ResourceAttributes{}
+	}
+
+	user := r.Header.Get("Impersonate-User")
+	s.mu.Lock()
+	denied := slices.Contains(s.denyVerbs, attrs.Verb+":"+attrs.Resource)
+	s.mu.Unlock()
+
+	// Without impersonation the caller is this product's own certificate, which
+	// is in system:masters and may do everything. Saying otherwise would make
+	// the preview lie about the state the product is in before anybody switches
+	// impersonation on.
+	allowed := user == "" || !denied
+
+	review.Status = authv1.SubjectAccessReviewStatus{Allowed: allowed}
+	if !allowed {
+		review.Status.Reason = fmt.Sprintf("no RBAC policy allows %q to %s %s",
+			user, attrs.Verb, attrs.Resource)
+	}
+	review.TypeMeta = metav1.TypeMeta{APIVersion: "authorization.k8s.io/v1", Kind: "SelfSubjectAccessReview"}
+	writeJSON(w, http.StatusCreated, review)
+}
+
+// serveAuthResources lets discovery find the access-review subresource.
+func (s *Server) serveAuthResources(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, metav1.APIResourceList{
+		TypeMeta:     metav1.TypeMeta{Kind: "APIResourceList", APIVersion: "v1"},
+		GroupVersion: "authorization.k8s.io/v1",
+		APIResources: []metav1.APIResource{{
+			Name: "selfsubjectaccessreviews", Namespaced: false, Kind: "SelfSubjectAccessReview",
+			Verbs: metav1.Verbs{"create"},
+		}},
+	})
 }

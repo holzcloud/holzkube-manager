@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 
 	"github.com/holzcloud/holzkube-manager/internal/model"
 	"github.com/holzcloud/holzkube-manager/internal/store"
@@ -30,6 +31,33 @@ func (s *Service) SetLock(ctx context.Context, id model.ClusterID, locked bool) 
 		return c, nil
 	}
 	c.Locked = locked
+	return s.deps.Store.Clusters().Put(ctx, c)
+}
+
+// SetActAs records whose name this cluster's Kubernetes requests arrive under.
+//
+// It is stored rather than derived because it is the CLUSTER's idea of the user
+// -- what its authenticator produces, prefix and all -- and this product cannot
+// know that. Setting it to the wrong string is a cluster where every screen is
+// refused, which is why the route that calls this offers a preview first.
+func (s *Service) SetActAs(
+	ctx context.Context, id model.ClusterID, user string, groups []string,
+) (model.Cluster, error) {
+	c, err := s.deps.Store.Clusters().Get(ctx, id)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return model.Cluster{}, ErrNotFound
+		}
+		return model.Cluster{}, err
+	}
+	c.ActAs = strings.TrimSpace(user)
+	c.ActAsGroups = groups
+	if c.ActAs == "" {
+		// No user means no groups either: groups without a user would be sent
+		// with nothing to attach them to, which the API server refuses in a way
+		// nobody could read back to this setting.
+		c.ActAsGroups = nil
+	}
 	return s.deps.Store.Clusters().Put(ctx, c)
 }
 

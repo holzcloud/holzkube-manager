@@ -1806,6 +1806,28 @@ export const describedSchema = z.object({
   notice: z.string().default(''),
 })
 
+export const permissionSchema = z.object({
+  verb: z.string(),
+  resource: z.string(),
+  namespace: z.string().default(''),
+  allowed: z.boolean().default(false),
+  /** The authoriser's own sentence. An RBAC denial usually gives none, which is
+   * itself worth showing rather than replacing with a guess. */
+  reason: z.string().default(''),
+})
+
+export const kubeIdentitySchema = z.object({
+  user: z.string().default(''),
+  groups: z.array(z.string()).default([]),
+  /** What to put on the screen, including the case where it is this product's
+   * own certificate. */
+  describes: z.string().default(''),
+  permissions: z.array(permissionSchema).default([]),
+  missing: z.number().default(0),
+  notice: z.string().default(''),
+})
+
+export type KubeIdentity = z.infer<typeof kubeIdentitySchema>
 export type Described = z.infer<typeof describedSchema>
 export type KubeContainer = z.infer<typeof containerSchema>
 export type PodLog = z.infer<typeof podLogSchema>
@@ -2686,6 +2708,35 @@ export const api = {
         proxyResponseSchema,
         { port, path },
       ),
+
+    /**
+     * Who this product acts as against the cluster, and what that identity may
+     * do — asked of the CLUSTER, which is the only honest source: RBAC is its
+     * own arrangement of roles and bindings.
+     *
+     * `as` previews a candidate without storing it, so nobody finds out by
+     * saving it and watching every screen break.
+     */
+    identity: (cluster: string, opts?: { as?: string; namespace?: string }) => {
+      const query = new URLSearchParams()
+      if (opts?.as) query.set('as', opts.as)
+      if (opts?.namespace) query.set('namespace', opts.namespace)
+      const suffix = query.toString() === '' ? '' : `?${query.toString()}`
+      return sendJSON(
+        'GET',
+        `/api/v1/clusters/${encodeURIComponent(cluster)}/kubernetes/identity${suffix}`,
+        kubeIdentitySchema,
+      )
+    },
+
+    /** Store whose name this cluster's requests arrive under. An empty user
+     * goes back to this product's own certificate. */
+    setIdentity: async (cluster: string, user: string, groups: string[] = []): Promise<void> => {
+      await send('POST', `/api/v1/clusters/${encodeURIComponent(cluster)}/kubernetes/identity`, {
+        user,
+        groups,
+      })
+    },
 
     /** Which containers a pod has, and how each of them is doing. */
     containers: async (cluster: string, namespace: string, pod: string) =>
