@@ -60,13 +60,45 @@ die er bedient, beschreibt Felder nicht, die der Betreiber im Cluster sieht.
 ## Die Reihenfolge
 
 ```
-1  Fundament      client-go, Zugangsweg, internal/kube, der Fake
-2  Lesen          Nodes, Namespaces, Pods, Events, Logs + Bildschirm
-3  Node-Aktionen  cordon, uncordon, drain (Eviction + PDB)
-4  Pod-Aktionen   Pod löschen/neu starten, Deployment skalieren
-5  Manifeste      anwenden und synchronisieren, mit Plan vorher
-6  Proxy          einen Service erreichbar machen
+1  Fundament      client-go, Zugangsweg, internal/kube, der Fake        FERTIG
+2  Lesen          Nodes, Namespaces, Pods, Events, Logs + Bildschirm    FERTIG
+3  Node-Aktionen  cordon, uncordon, drain (Eviction + PDB)              FERTIG
+4  Pod-Aktionen   Pod löschen/neu starten, Deployment skalieren         FERTIG
+5  Manifeste      anwenden und synchronisieren, mit Plan vorher         FERTIG
+6  Proxy          einen Service erreichbar machen                       FERTIG
 ```
+
+**Stand 2026-09-19, alle sechs Scheiben gebaut.** Was dabei gefunden und im Ledger
+festgehalten wurde, gehört zur Reihenfolge und nicht in eine Fußnote:
+
+- Der Fake musste dreimal erweitert werden, weil er sonst Tests bestehen ließe,
+  die Hardware fallen lässt: erst echtes mTLS, dann Zustand, der sich ändert
+  (ein cordon verändert die nächste Liste), dann Discovery und Server-Side
+  Apply. Die Regel unten hat das jedes Mal erzwungen.
+- Ledger 147: client-go drosselt sich selbst auf fünf Anfragen pro Sekunde. Der
+  Manifest-Plan fragt pro Objekt, also hätte eine Anfrage ihr ganzes Budget in
+  einer Warteschlange im eigenen Prozess verbracht und danach den Cluster für
+  langsam erklärt. Gemessen: 60 Objekte in 10,0 Sekunden, nach der Korrektur
+  0,02 Sekunden.
+- Daraus entstand `MaxManifestObjects = 256`. Ohne Deckel ist die Zahl der
+  Upstream-Calls das, was jemand eingefügt hat — und die Budgetzeile wäre nicht
+  schreibbar gewesen, was das ehrliche Signal ist, dass die Route dann keinen
+  schlechtesten Fall hat.
+- Ledger 148 bleibt offen: der ganze Manifest-Pfad ist gegen den Fake bewiesen
+  und nie gegen einen echten Cluster gelaufen. Dieselbe Unterscheidung wie 143
+  für die CA-Rotation.
+- Ledger 149: der Layout-Wächter misst nur den leeren Zustand. /kubernetes
+  meldete „3 Bedienelemente", obwohl die Seite inzwischen ein Dutzend trägt —
+  alles hinter Daten wird nie gerendert, weil das Skript einen frischen Daemon
+  ohne Cluster startet.
+- Ledger 150: die Proxy-Route war zuerst ein GET mit `?port=&path=`, und der
+  Allowlist-Eintrag dafür war eine leere Behauptung — die Audit-Middleware liest
+  nur Bodies. Als POST beschreibt er etwas, das wirklich ankommt. Die allgemeine
+  Falle steht im Eintrag: eine Aktion, deren Parameter zum Ereignis gehören,
+  darf sie nicht in der URL tragen.
+- Ledger 151 bleibt offen: der Proxy ist nur gegen den Fake bewiesen. Seine
+  entscheidende Zusage — der Content-Type des Workloads wird nicht
+  weitergetragen — ist auf beiden Seiten rot geprüft.
 
 ### Scheibe 1 — Fundament
 

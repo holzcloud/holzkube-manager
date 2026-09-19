@@ -135,6 +135,15 @@ const (
 	// applies, the number they need is a decision, and a second constant here
 	// is where that decision will be visible.
 	kubeCall callClass = "kube"
+
+	// The second Kubernetes class, added with slice 6, which is what the
+	// paragraph above said would happen when a slice needed a different number.
+	// Behind a proxied call is not the API server answering out of etcd but an
+	// arbitrary workload, and a pod that accepts a connection and never answers
+	// is the ordinary failure of a broken workload rather than an exceptional
+	// one -- so it gets a shorter ceiling of its own, and this row reads it
+	// rather than restating it.
+	kubeProxyCall callClass = "kube-proxy"
 )
 
 // upstreamCall is one call a route makes in series: what it is, and which
@@ -163,10 +172,50 @@ func (u upstreamCall) budget() (time.Duration, bool) {
 		return talos.ClassMutation.Deadline(), true
 	case kubeCall:
 		return kube.CallBudget, true
+	case kubeProxyCall:
+		return kube.ProxyBudget, true
 	default:
 		return 0, false
 	}
 }
+
+// manifestRouteCalls is what a manifest route does at worst: discovery once,
+// then one call per object in the manifest.
+//
+// The multiplier is written out rather than hidden in a sentence, because it is
+// the whole character of these two routes. Every other row in this table has a
+// call count somebody can count in the handler; here it is the number of
+// documents in a file an operator pasted, and the only reason it is a number at
+// all is kube.MaxManifestObjects. Remove that cap and this row becomes
+// unwriteable -- which is the honest signal that the route would then have no
+// worst case.
+func manifestRouteCalls() []upstreamCall {
+	calls := []upstreamCall{
+		{name: "NewClusterClient: Version (finding a control-plane node)", class: nodeProbeCall},
+		{name: "COSI Get: the machine configuration, for the API server's address", class: nodeFastReadCall},
+		{name: "Kubernetes: discovery, /api", class: kubeCall},
+		{name: "Kubernetes: discovery, /apis", class: kubeCall},
+		{name: "Kubernetes: discovery, /api/v1", class: kubeCall},
+		{name: "Kubernetes: discovery, /apis/apps/v1", class: kubeCall},
+	}
+	for i := range kube.MaxManifestObjects {
+		calls = append(calls, upstreamCall{
+			name:  fmt.Sprintf("Kubernetes: object %d of the manifest (a get, or an apply)", i+1),
+			class: kubeCall,
+		})
+	}
+	return calls
+}
+
+// manifestClippingRationale is the argument both manifest rows owe.
+const manifestClippingRationale = "The sum describes a manifest at the 256-object cap where every single call " +
+	"times out, which is a cluster that is not answering at all -- and forty-five " +
+	"seconds establishes that. A manifest somebody actually pasted is tens of " +
+	"objects against an API server that answers in milliseconds: sixty objects " +
+	"planned in 0.02s against the in-process fake, measured. What made that " +
+	"number worth measuring was the opposite finding: with client-go's default " +
+	"rate limit of 5 requests a second the same sixty took 10.0s inside this " +
+	"process, and the route would have blamed the cluster for it."
 
 // routeBudget is one row: what the route is, which upstream calls it makes in
 // series at worst, what ceiling it declares over all of them, and what that is
@@ -692,7 +741,9 @@ var routeBudgets = []routeBudget{
 			{name: "Kubernetes: /version", class: kubeCall},
 			{name: "Kubernetes: list nodes", class: kubeCall},
 			{name: "Kubernetes: list pods", class: kubeCall},
+			{name: "Kubernetes: list deployments", class: kubeCall},
 			{name: "Kubernetes: list namespaces", class: kubeCall},
+			{name: "Kubernetes: list services", class: kubeCall},
 		},
 		routeDeadline: handlers.KubernetesRouteBudget,
 		verdict:       knownOverBudget,
@@ -702,7 +753,7 @@ var routeBudgets = []routeBudget{
 			"or concurrent. Until they are, the sum is larger than the ceiling and this row " +
 			"says so rather than a number being quietly chosen.",
 		clippingRationale: "The ceiling is sized for an API server that answers, which is what a " +
-			"list call against Kubernetes does in milliseconds. Summing six per-call budgets " +
+			"list call against Kubernetes does in milliseconds. Summing eight per-call budgets " +
 			"describes a case that would mean every one of them timed out in turn -- at which " +
 			"point the answer an operator needs is 'this cluster is not answering', and " +
 			"forty-five seconds is long enough to establish that and short enough that the " +
@@ -792,6 +843,53 @@ var routeBudgets = []routeBudget{
 		clippingRationale: "as above: one small call against a cluster that answers.",
 		why: "One patch, and the deployment controller does the rest under its own strategy. " +
 			"That is the whole difference from deleting the pods: this keeps the workload up.",
+	},
+	{
+		route:             "POST /api/v1/clusters/{id}/kubernetes/manifest/plan",
+		calls:             manifestRouteCalls(),
+		routeDeadline:     handlers.KubernetesRouteBudget,
+		verdict:           knownOverBudget,
+		clipping:          clipped,
+		deferredTo:        "as above, plus one of this route's own: the per-object existence check is a get each, and the API server can answer a list per resource instead. That is a real improvement and it changes what the plan means for an object created between the list and the apply, which is a decision rather than a tidy-up.",
+		clippingRationale: manifestClippingRationale,
+		why: "The plan asks the cluster about every object, one at a time, because that is what " +
+			"makes \"create\" and \"update\" true rather than guessed. Discovery is fetched once " +
+			"per client and cached in memory -- measured: four discovery calls for a sixty-object " +
+			"manifest, not two hundred and forty.",
+	},
+	{
+		route:             "POST /api/v1/clusters/{id}/kubernetes/manifest/apply",
+		calls:             manifestRouteCalls(),
+		routeDeadline:     handlers.KubernetesRouteBudget,
+		verdict:           knownOverBudget,
+		clipping:          clipped,
+		deferredTo:        "as above.",
+		clippingRationale: manifestClippingRationale,
+		why: "One server-side apply per object, and every object is attempted even after one " +
+			"fails: an apply that gave up on the sixth of ten would leave five written and say " +
+			"nothing about which. So the worst case is the whole manifest, not the prefix before " +
+			"the first failure.",
+	},
+	{
+		route: "POST /api/v1/clusters/{id}/kubernetes/services/{namespace}/{service}/proxy",
+		calls: []upstreamCall{
+			{name: "NewClusterClient: Version (finding a control-plane node)", class: nodeProbeCall},
+			{name: "COSI Get: the machine configuration, for the API server's address", class: nodeFastReadCall},
+			{name: "Kubernetes: get the service (is it there at all)", class: kubeCall},
+			{name: "Kubernetes: the proxy subresource (an arbitrary workload answers)", class: kubeProxyCall},
+		},
+		routeDeadline: handlers.KubernetesRouteBudget,
+		verdict:       knownOverBudget,
+		clipping:      clipped,
+		deferredTo:    "as above for the two Talos calls.",
+		clippingRationale: "The last call is the only one in this table whose far end is not " +
+			"infrastructure but somebody's workload, which is why it has a ceiling of its own " +
+			"at twenty seconds instead of sixty. A pod that accepts the connection and never " +
+			"answers is an ordinary broken workload, and the operator needs to be told that " +
+			"rather than kept waiting for it.",
+		why: "The service is read before it is proxied so that 'there is no such service' is a " +
+			"different answer from 'that path is not served'. An operator chasing a health " +
+			"endpoint needs to know which of the two it is.",
 	},
 	{
 		route: "GET /api/v1/clusters/{id}/scale",

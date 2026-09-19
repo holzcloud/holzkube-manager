@@ -2,8 +2,10 @@ import { useQuery } from '@tanstack/react-query'
 import { createRoute } from '@tanstack/react-router'
 import { useState } from 'react'
 import { api } from '@/api'
+import { ApplyManifest } from '@/components/ApplyManifest'
 import { NodeSchedulingActions } from '@/components/NodeSchedulingActions'
 import { Problem } from '@/components/Problem'
+import { ReachService } from '@/components/ReachService'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import {
   Select,
@@ -297,6 +299,24 @@ export function KubernetesView() {
                   </table>
                 </div>
               )}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Reach a service</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <ReachService clusterID={selected} services={overview.data.services} />
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Apply a manifest</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <ApplyManifest clusterID={selected} />
             </CardContent>
           </Card>
         </>
