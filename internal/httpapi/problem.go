@@ -133,6 +133,12 @@ const (
 	// again with a talosconfig that carries the authority.
 	CodeNoKubernetesAuthority = "conflict.no-kubernetes-authority"
 
+	// CodeExecRefused: a command this product will not run, or a cluster with
+	// no identity to run it as. A conflict rather than a validation failure:
+	// the request is well formed and the refusal is about what this product
+	// will do, not about what was typed.
+	CodeExecRefused = "conflict.exec-refused"
+
 	// CodeRefusedKind: an object of a kind this product will not render. Today
 	// that is Secret and only Secret: its data is base64 rather than
 	// encryption, so showing it would put the credential on the screen. A

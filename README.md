@@ -884,6 +884,73 @@ way and your RBAC would decide nothing. A refused screen stays refused and says
 whose refusal it was. You can always go back to this product's own certificate
 with one button.
 
+### What runs, and what is beside it
+
+The Kubernetes screen lists **every** workload kind, not only Deployments: your
+storage layer is a DaemonSet, your database a StatefulSet, your backup a CronJob,
+and a list without them shows a cluster nobody runs. The numbers mean different
+things per kind and are not flattened into one — a DaemonSet's size is how many
+nodes match, a CronJob has no pods at all between runs, and "0 of 0 ready" would
+report a schedule as an outage. What a kind cannot do is not offered: a DaemonSet
+gets no replica field, a Job no roll button.
+
+Beside them: **ConfigMaps, Secrets, persistent volume claims, Ingresses,
+autoscalers and disruption budgets**. Each answers a question the workload list
+cannot — where the setting lives, whether a URL reaches the cluster, why a claim
+is Pending, why a replica count goes back after you scale by hand, why a drain
+refuses. The ones that are the *reason* something is stuck come first.
+
+Secrets are listed and never read: their names and key names answer "does this
+namespace have the pull secret", and their values appear nowhere, because base64
+is not encryption.
+
+**Removing an object** asks you to type its name. It is the only thing here that
+doing again does not undo, and the rows look alike. Deleting a Namespace is
+refused outright — it removes everything inside it and nothing stops it once it
+starts.
+
+### Why a node will not take a pod
+
+Every node has a **Why?** button. The pod's own events say `0/2 nodes are
+available`, which names no node; this says which and why.
+
+**Taints**, with what each does in words — `NoSchedule` keeps new pods off,
+`NoExecute` evicts the ones already there, and those are different days. The
+control-plane taint is marked ordinary rather than presented as a finding, because
+every Talos control-plane node has one.
+
+**Conditions**, with the inversion handled: `Ready` is bad when it is False, a
+pressure is bad when it is True.
+
+**Room left**, which is allocatable minus what pods **requested** — what the
+scheduler reserves, not what anything uses. A node at 5% CPU can have no room. The
+screen says that rather than leaving it to be inferred.
+
+### What is being used
+
+Separately, and only if you have installed metrics-server: Talos does not ship
+one. Without it the screen says nobody is collecting this, which is not the same
+as usage being zero. A pod's usage is summed across its containers, the way
+`kubectl top` shows it.
+
+### Running a command in a container
+
+From a pod's **Why?** panel. It is not a terminal and does not pretend to be one:
+a program and its arguments run once and the output comes back.
+
+Four things make this something a management product can offer at all. It is
+**not a shell** — `sh -c "…"` is refused, because an archive holding `sh -lc` and
+one opaque argument cannot say what happened. **The command is the event**: every
+argument is kept in the audit archive, which is only possible because of the
+first. It **runs as you**, and is refused outright unless the cluster has an
+identity set — never falling back to this product's own certificate. And it is
+**bounded**: thirty seconds, 256 KiB, nothing left open.
+
+There is deliberately **no port-forward**. Reading from a service already works
+through the service proxy, and a forward would mean this daemon holding a
+listener whose authentication story is nobody's. If you need one, you have
+`kubectl`.
+
 ### Why a pod is broken
 
 Every pod on the Kubernetes screen has a **Why?** button, and it answers in the

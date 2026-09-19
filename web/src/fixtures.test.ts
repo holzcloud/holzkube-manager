@@ -3,14 +3,18 @@ import { z } from 'zod'
 import {
   auditPageSchema,
   clusterEventsSchema,
+  clusterResourcesSchema,
   clustersSchema,
+  clusterUsageSchema,
   jobsSchema,
   kubernetesOverviewSchema,
   machineSchema,
   machinesSchema,
+  nodeDetailSchema,
   noticesSchema,
   schematicSchema,
   usersSchema,
+  workloadsSchema,
 } from '@/api'
 import demo from '../fixtures/demo.json'
 
@@ -44,6 +48,10 @@ describe('the layout guard’s fixtures', () => {
     ['/api/v1/provision/notices', noticesSchema],
     ['/api/v1/machines/m-cp-1', machineSchema],
     ['/api/v1/clusters/c-homelab/kubernetes/events', clusterEventsSchema],
+    ['/api/v1/clusters/c-homelab/kubernetes/workloads', workloadsSchema],
+    ['/api/v1/clusters/c-homelab/kubernetes/resources', clusterResourcesSchema],
+    ['/api/v1/clusters/c-homelab/kubernetes/nodes/srv-node-01.homelab.example', nodeDetailSchema],
+    ['/api/v1/clusters/c-homelab/kubernetes/usage', clusterUsageSchema],
   ])('%s is something the product would accept', (path, schema) => {
     const parsed = schema.safeParse(fixtures[path])
     // The error is printed in full rather than as "expected true": a fixture

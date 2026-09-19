@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query'
 import { useState } from 'react'
 import { api, type KubeContainer } from '@/api'
 import { Problem } from '@/components/Problem'
+import { RunCommand } from '@/components/RunCommand'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -88,6 +89,15 @@ export function PodDiagnosis({
 
         {container && (
           <LogPanel clusterID={clusterID} namespace={namespace} pod={pod} container={container} />
+        )}
+
+        {container && (
+          <RunCommand
+            clusterID={clusterID}
+            namespace={namespace}
+            pod={pod}
+            container={container.name}
+          />
         )}
 
         <YamlPanel clusterID={clusterID} namespace={namespace} pod={pod} />

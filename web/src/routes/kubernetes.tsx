@@ -4,8 +4,11 @@ import { useState } from 'react'
 import { api } from '@/api'
 import { ActAs } from '@/components/ActAs'
 import { ApplyManifest } from '@/components/ApplyManifest'
+import { ClusterResources } from '@/components/ClusterResources'
+import { ClusterUsage } from '@/components/ClusterUsage'
 import { DataTable } from '@/components/DataTable'
 import { NodeSchedulingActions } from '@/components/NodeSchedulingActions'
+import { NodeWhy } from '@/components/NodeWhy'
 import { PodDiagnosis } from '@/components/PodDiagnosis'
 import { Problem } from '@/components/Problem'
 import { ReachService } from '@/components/ReachService'
@@ -18,7 +21,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { DeploymentActions, RestartPodButton } from '@/components/WorkloadActions'
+import { RestartPodButton } from '@/components/WorkloadActions'
+import { Workloads } from '@/components/Workloads'
 import { authenticatedRoute } from '@/routes/__root'
 
 /**
@@ -49,6 +53,7 @@ export function KubernetesView() {
   const [cluster, setCluster] = useState('')
   const [namespace, setNamespace] = useState('')
   const [diagnosing, setDiagnosing] = useState<{ namespace: string; pod: string } | null>(null)
+  const [inspecting, setInspecting] = useState<string | null>(null)
 
   const clusters = useQuery({ queryKey: ['clusters'], queryFn: api.clusters.list })
 
@@ -158,11 +163,22 @@ export function KubernetesView() {
                     label: 'Scheduling actions',
                     role: 'actions',
                     render: (node) => (
-                      <NodeSchedulingActions
-                        clusterID={selected}
-                        node={node.name}
-                        unschedulable={node.unschedulable}
-                      />
+                      <div className="flex flex-wrap gap-2 max-md:flex-col">
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          className="max-md:h-11"
+                          onClick={() => setInspecting(node.name)}
+                        >
+                          Why?
+                        </Button>
+                        <NodeSchedulingActions
+                          clusterID={selected}
+                          node={node.name}
+                          unschedulable={node.unschedulable}
+                        />
+                      </div>
                     ),
                   },
                 ]}
@@ -172,70 +188,10 @@ export function KubernetesView() {
 
           <Card>
             <CardHeader>
-              <CardTitle>Deployments</CardTitle>
+              <CardTitle>Workloads</CardTitle>
             </CardHeader>
             <CardContent>
-              <DataTable
-                label="Deployments"
-                rows={overview.data.deployments}
-                keyOf={(deployment) => `${deployment.namespace}/${deployment.name}`}
-                empty={
-                  <>
-                    The API server answered, and this cluster has no deployments
-                    {overview.data.namespace === '' ? '' : ` in ${overview.data.namespace}`}.
-                  </>
-                }
-                columns={[
-                  {
-                    key: 'namespace',
-                    label: 'Namespace',
-                    render: (deployment) => <span className="text-xs">{deployment.namespace}</span>,
-                  },
-                  {
-                    key: 'name',
-                    label: 'Deployment',
-                    role: 'identity',
-                    render: (deployment) => (
-                      <span className="font-mono text-xs">{deployment.name}</span>
-                    ),
-                  },
-                  {
-                    key: 'ready',
-                    label: 'Ready',
-                    render: (deployment) => (
-                      <span
-                        className={
-                          deployment.ready === deployment.desired
-                            ? undefined
-                            : 'text-red-700 dark:text-red-300'
-                        }
-                      >
-                        {deployment.ready}/{deployment.desired}
-                      </span>
-                    ),
-                  },
-                  {
-                    key: 'image',
-                    label: 'Image',
-                    render: (deployment) => (
-                      <span className="break-all font-mono text-xs">{deployment.image || '—'}</span>
-                    ),
-                  },
-                  {
-                    key: 'actions',
-                    label: 'Actions',
-                    role: 'actions',
-                    render: (deployment) => (
-                      <DeploymentActions
-                        clusterID={selected}
-                        namespace={deployment.namespace}
-                        deployment={deployment.name}
-                        desired={deployment.desired}
-                      />
-                    ),
-                  },
-                ]}
-              />
+              <Workloads clusterID={selected} namespace={namespace} />
             </CardContent>
           </Card>
 
@@ -360,6 +316,24 @@ export function KubernetesView() {
 
           <Card>
             <CardHeader>
+              <CardTitle>What is being used</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <ClusterUsage clusterID={selected} namespace={namespace} />
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Configuration, storage and routing</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <ClusterResources clusterID={selected} namespace={namespace} />
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
               <CardTitle>Who this acts as</CardTitle>
             </CardHeader>
             <CardContent>
@@ -394,6 +368,10 @@ export function KubernetesView() {
             </CardContent>
           </Card>
         </>
+      )}
+
+      {inspecting && (
+        <NodeWhy clusterID={selected} node={inspecting} onClose={() => setInspecting(null)} />
       )}
 
       {diagnosing && (
