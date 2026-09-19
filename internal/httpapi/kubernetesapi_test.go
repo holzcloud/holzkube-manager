@@ -459,3 +459,262 @@ func TestCordonAndDrainReachTheCluster(t *testing.T) {
 		t.Errorf("the API server evicted %v, want the one pod on that node", got)
 	}
 }
+
+// adoptedClusterWithAPI stands up both fakes, a daemon, a session with the sudo
+// window open, and one adopted, unlocked cluster.
+//
+// A helper rather than a fourth copy of eighty lines. The two tests above were
+// written before there was a third caller; this exists because the manifest and
+// proxy routes need exactly the same ground and a third copy would drift from
+// the other two before it drifted from the product.
+func adoptedClusterWithAPI(t *testing.T, opts kubesim.Options) (*harness, string, *kubesim.Server) {
+	t.Helper()
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	endpoint := "https://" + ln.Addr().String()
+
+	cl, err := talossim.NewCluster("homelab", endpoint)
+	if err != nil {
+		_ = ln.Close()
+		t.Fatalf("NewCluster: %v", err)
+	}
+
+	opts.Listener = ln
+	opts.AuthorityCrt = cl.Secrets.Certs.K8s.Crt
+	opts.AuthorityKey = cl.Secrets.Certs.K8s.Key
+	if opts.Nodes == nil {
+		opts.Nodes = []kubesim.Node{{Name: "cp-1", Ready: corev1.ConditionTrue}}
+	}
+	api, err := kubesim.New(opts)
+	if err != nil {
+		t.Fatalf("kubesim.New: %v", err)
+	}
+	t.Cleanup(api.Close)
+
+	sim, err := talossim.New(talossim.Options{
+		Hostname: "cp-1", Cluster: cl, ControlPlane: true, Bootstrapped: true,
+	})
+	if err != nil {
+		t.Fatalf("talossim.New: %v", err)
+	}
+	t.Cleanup(func() { _ = sim.Close() })
+
+	h := newHarness(t,
+		withInventory(func(st *fsstore.Store) *inventory.Service {
+			return inventory.New(inventory.Deps{
+				Store:  st,
+				Dialer: talos.NewDirectDialer(sim.Port()),
+				Logger: slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError})),
+			})
+		}),
+		withJobs(),
+	)
+
+	if resp, raw := h.do(t, http.MethodPost, "/api/v1/setup", map[string]string{
+		"username": testUser, "password": testPass,
+	}); resp.StatusCode != http.StatusCreated {
+		t.Fatalf("setup: %d (%s)", resp.StatusCode, raw)
+	}
+	if resp, raw := h.do(t, http.MethodPost, "/api/v1/auth/login", map[string]string{
+		"username": testUser, "password": testPass,
+	}); resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("login: %d (%s)", resp.StatusCode, raw)
+	}
+	if resp, raw := h.do(t, http.MethodPost, "/api/v1/auth/sudo",
+		map[string]string{"password": testPass}); resp.StatusCode != http.StatusNoContent &&
+		resp.StatusCode != http.StatusOK {
+		t.Fatalf("sudo: %d (%s)", resp.StatusCode, raw)
+	}
+
+	resp, raw := h.do(t, http.MethodPost, "/api/v1/clusters/fingerprint",
+		map[string]string{"endpoint": sim.Host()})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("fingerprint: %d (%s)", resp.StatusCode, raw)
+	}
+	var fp struct {
+		Fingerprint string `json:"fingerprint"`
+	}
+	if err := json.Unmarshal(raw, &fp); err != nil {
+		t.Fatalf("decode fingerprint: %v", err)
+	}
+
+	resp, raw = h.do(t, http.MethodPost, "/api/v1/clusters", map[string]string{
+		"name": "homelab", "talosconfig": string(cl.Talosconfig),
+		"endpoint": sim.Host(), "fingerprint": fp.Fingerprint,
+	})
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("import: %d (%s)", resp.StatusCode, raw)
+	}
+	var cluster struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(raw, &cluster); err != nil {
+		t.Fatalf("decode cluster: %v", err)
+	}
+
+	// An adoption is read-only until somebody unlocks it (INV-12), and the
+	// routes these tests exercise are under that lock.
+	if resp, raw := h.do(t, http.MethodPost, "/api/v1/clusters/"+cluster.ID+"/lock",
+		map[string]bool{"locked": false}); resp.StatusCode != http.StatusOK {
+		t.Fatalf("unlock: %d (%s)", resp.StatusCode, raw)
+	}
+
+	return h, cluster.ID, api
+}
+
+// TestAManifestIsPlannedThenAppliedThroughTheRoutes, and a conflict comes back
+// as a conflict rather than as a success.
+//
+// The route answers 200 with the per-object result even when something failed,
+// which is the part only an HTTP test can check: an apply of two objects where
+// one conflicts has changed one thing, and `fully_applied` is what says so.
+func TestAManifestIsPlannedThenAppliedThroughTheRoutes(t *testing.T) {
+	h, id, api := adoptedClusterWithAPI(t, kubesim.Options{
+		Objects:    []string{"configmaps/default/already-there"},
+		ConflictOn: []string{"configmaps/default/contested"},
+	})
+
+	base := "/api/v1/clusters/" + id + "/kubernetes/manifest"
+	manifest := "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: already-there\n  " +
+		"namespace: default\ndata:\n  a: \"1\"\n---\napiVersion: v1\nkind: ConfigMap\n" +
+		"metadata:\n  name: fresh\n  namespace: default\ndata:\n  a: \"1\"\n"
+
+	resp, raw := h.do(t, http.MethodPost, base+"/plan", map[string]string{"manifest": manifest})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("plan: %d (%s)", resp.StatusCode, raw)
+	}
+	var plan struct {
+		Objects []struct {
+			Name   string `json:"name"`
+			Action string `json:"action"`
+		} `json:"objects"`
+	}
+	if err := json.Unmarshal(raw, &plan); err != nil {
+		t.Fatalf("decode plan: %v", err)
+	}
+	if len(plan.Objects) != 2 || plan.Objects[0].Action != "update" ||
+		plan.Objects[1].Action != "create" {
+		t.Fatalf("plan = %+v, want update then create as the CLUSTER reports them", plan.Objects)
+	}
+	// A plan writes nothing, and this is the route-level version of that claim.
+	if got := api.FieldManagers(); len(got) != 0 {
+		t.Errorf("the plan route applied something: %v", got)
+	}
+
+	resp, raw = h.do(t, http.MethodPost, base+"/apply", map[string]string{"manifest": manifest})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("apply: %d (%s)", resp.StatusCode, raw)
+	}
+	var result struct {
+		Applied      []struct{ Name string } `json:"applied"`
+		Failed       []struct{ Reason string }
+		FullyApplied bool `json:"fully_applied"`
+	}
+	if err := json.Unmarshal(raw, &result); err != nil {
+		t.Fatalf("decode result: %v", err)
+	}
+	if !result.FullyApplied || len(result.Applied) != 2 {
+		t.Fatalf("result = %+v, want both objects applied", result)
+	}
+	if api.Applied("configmaps", "default", "fresh") == nil {
+		t.Error("the object is not in the cluster")
+	}
+
+	// And the conflicting case: 200 with fully_applied false, because one object
+	// of the two did change and a single status code cannot say which.
+	contested := "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: contested\n  " +
+		"namespace: default\ndata:\n  a: \"1\"\n---\napiVersion: v1\nkind: ConfigMap\n" +
+		"metadata:\n  name: other\n  namespace: default\ndata:\n  a: \"1\"\n"
+
+	resp, raw = h.do(t, http.MethodPost, base+"/apply", map[string]string{"manifest": contested})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("apply with a conflict: %d (%s), want 200 with the per-object truth",
+			resp.StatusCode, raw)
+	}
+	if err := json.Unmarshal(raw, &result); err != nil {
+		t.Fatalf("decode result: %v", err)
+	}
+	if result.FullyApplied {
+		t.Error("fully_applied is true although an object conflicted")
+	}
+	if len(result.Failed) != 1 || len(result.Applied) != 1 {
+		t.Errorf("result = %+v, want one applied and one failed", result)
+	}
+	if got := api.Forced(); len(got) != 0 {
+		t.Errorf("the route forced past another field manager: %v", got)
+	}
+
+	// A manifest that is not one is refused before anything is attempted.
+	resp, raw = h.do(t, http.MethodPost, base+"/apply", map[string]string{"manifest": "   "})
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("an empty manifest: %d (%s), want 400", resp.StatusCode, raw)
+	}
+}
+
+// TestTheProxyRouteNeverServesTheWorkloadsOwnContentType is the security claim of
+// slice 6, at the only boundary where it can be measured.
+//
+// The fake answers `text/html` with a script tag, which is what an ordinary
+// workload serves. If this route passed that through, a pod's markup would be
+// running in the daemon's origin -- the origin holding the operator's session
+// cookie -- and every other test in this repository would still pass.
+func TestTheProxyRouteNeverServesTheWorkloadsOwnContentType(t *testing.T) {
+	h, id, _ := adoptedClusterWithAPI(t, kubesim.Options{
+		Services: []kubesim.Service{{
+			Namespace: "default", Name: "api", Type: "ClusterIP",
+			Ports: []kubesim.ServicePort{{Name: "http", Port: 8080}},
+		}},
+		ProxyBodies: map[string]string{
+			"default/api:8080/healthz": "<script>alert(document.cookie)</script>",
+		},
+	})
+
+	route := "/api/v1/clusters/" + id + "/kubernetes/services/default/api/proxy"
+	resp, raw := h.do(t, http.MethodPost, route,
+		map[string]string{"port": "8080", "path": "/healthz"})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("proxy: %d (%s)", resp.StatusCode, raw)
+	}
+
+	if got := resp.Header.Get("Content-Type"); !hasPrefix(got, "application/json") {
+		t.Fatalf("Content-Type = %q. The workload said text/html, and a route that repeated "+
+			"that would be hosting a pod's markup on this daemon's origin", got)
+	}
+	if got := resp.Header.Get("X-Content-Type-Options"); got != "nosniff" {
+		t.Errorf("X-Content-Type-Options = %q; without it a browser may sniff the body back "+
+			"into HTML", got)
+	}
+
+	var answer struct {
+		Status    int    `json:"status"`
+		Body      string `json:"body"`
+		Truncated bool   `json:"truncated"`
+	}
+	if err := json.Unmarshal(raw, &answer); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	// The body is carried verbatim as a JSON string -- the operator sees what the
+	// workload said -- and it is a string, not a document.
+	if answer.Status != 200 || answer.Body != "<script>alert(document.cookie)</script>" {
+		t.Errorf("answer = %+v, want the workload's own bytes as a string", answer)
+	}
+
+	// A path that would be rewritten is refused rather than quietly sent.
+	resp, raw = h.do(t, http.MethodPost, route,
+		map[string]string{"port": "8080", "path": "/healthz/../../secrets"})
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("a traversal: %d (%s), want 400", resp.StatusCode, raw)
+	}
+
+	// And a service that is not there is a 404, not a 502 about an unreachable
+	// cluster: the cluster answered perfectly well.
+	resp, raw = h.do(t, http.MethodPost,
+		"/api/v1/clusters/"+id+"/kubernetes/services/default/ghost/proxy",
+		map[string]string{"port": "8080", "path": "/healthz"})
+	if resp.StatusCode != http.StatusNotFound {
+		t.Errorf("a missing service: %d (%s), want 404", resp.StatusCode, raw)
+	}
+}

@@ -751,6 +751,140 @@ script never depends on this tool's formatting.
 prints them — an exit code that swallowed the reasons would make it worse than
 silence.
 
+## Kubernetes itself
+
+Until this milestone the product managed machines and left the cluster running on
+them to `kubectl`. It now speaks to the cluster's own API server as well, with
+[client-go], and the screen under **Kubernetes** shows what the cluster says
+about itself: the API server's version, its nodes, its pods, its deployments and
+its namespaces.
+
+**How it authenticates, and what it deliberately does not do.** It mints itself a
+client certificate from the Kubernetes authority in the cluster's stored bundle —
+common name `holzkube-manager`, one hour, never written to disk. It does not reuse
+the admin kubeconfig Talos hands out, and the reason is your cluster's audit log:
+that log records the common name, and a product acting as `admin` would make the
+log say nothing about who acted. A cluster whose bundle carries no Kubernetes
+authority is still fully manageable over the Talos API; the Kubernetes screen
+says so instead of showing an empty list.
+
+**Kubernetes's view and the inventory's are allowed to disagree, and where they
+do, that is the information.** The inventory knows what the machine API says
+about a machine. This knows whether the kubelet registered, what the scheduler
+will do with the node, and whether somebody cordoned it.
+
+**An API server that does not answer is not a cluster with no pods.** Every read
+on this screen distinguishes "the cluster said" from "the cluster could not be
+asked", for the reason the inventory spent two phases learning: an empty screen
+is a claim.
+
+### Node scheduling: cordon and drain
+
+Cordoning stops the scheduler placing anything new on a node; uncordoning undoes
+it completely. Draining cordons and then moves what would move, and it comes back
+as a job, because it waits out each pod's termination grace period and can take
+minutes.
+
+**A drain evicts rather than deletes.** Eviction is the request a
+PodDisruptionBudget can refuse — and when one does, the answer names the pod and
+the budget instead of retrying past it. Deleting the pods directly would ignore
+the budget the cluster's owner wrote down.
+
+**Two decisions the drain refuses to take for you**, the same two `kubectl`
+refuses:
+
+- a pod no controller owns is **gone** once it is evicted, not moved. It needs
+  `force` said out loud.
+- a pod with an `emptyDir` loses that data when it moves. It needs
+  `delete_local_data`.
+
+Pods a DaemonSet owns and mirror pods are reported and not evicted: they come
+straight back on the same node, which is what they are for.
+
+This closes a gap the product had been papering over with a sentence. Removing a
+node from a cluster and upgrading one both used to tell you to cordon and drain
+by hand first, because there was no Kubernetes client to do it with.
+
+### Pods and deployments
+
+**"Restart this pod"** deletes it so its controller makes another. Kubernetes has
+no restart verb, and those two are the same operation only while a controller
+exists — so a pod nothing owns is **refused**, by name, rather than deleted
+because somebody clicked a word.
+
+**Scaling and rolling are different operations** and the screen keeps them apart.
+Scaling changes how many pods there are, through the same scale subresource
+`kubectl scale` uses; zero is a real answer and is how a workload is switched off.
+A rollout restart annotates the pod template, which makes the deployment
+controller replace the pods under its own surge, `maxUnavailable` and readiness
+probes — so the workload stays up. Deleting a deployment's pods one at a time
+would take it down, and that is why both buttons exist.
+
+### Applying a manifest
+
+Paste a manifest, press **Plan**, read what it would do, then **Apply**. Several
+documents separated by `---` are fine.
+
+**The plan is not a courtesy, and Apply stays disabled until there is one for
+exactly the text in the box.** Editing the manifest throws the plan away: a plan
+for a document you have since changed is worse than no plan, because it is a
+reassuring description of something else.
+
+**`create` and `update` come from asking the cluster**, one object at a time. They
+cannot be read off a manifest — it looks identical either way, which is exactly
+why you cannot tell from the text which of your objects already exist.
+
+**A kind's resource and scope come from the cluster's own discovery**, so a
+`CustomResourceDefinition` your cluster has installed works here without this
+product having heard of it. A kind the cluster does not have is named in a
+warning rather than buried in a discovery error. A namespaced object that names no
+namespace is warned about, with the namespace it would land in.
+
+**Server-side apply, under this product's own field manager**
+(`holzkube-manager`), so `kubectl get -o yaml --show-managed-fields` can tell you
+what this product set. When another field manager owns a field your manifest sets,
+the API server answers with a conflict and **this product reports it instead of
+forcing past it**: forcing takes the value away from whatever is managing it —
+usually a controller that will set it back — which is a fight a management product
+must not pick on your behalf. `force` is never sent.
+
+**It does not delete, and there is no `--prune`.** Pruning decides what to remove
+by comparing against a previous apply, and getting that wrong deletes things
+nobody asked about. Removing an object is a separate operation and is not built.
+
+An apply of several objects **attempts all of them** and reports each one: an
+apply of ten where the sixth conflicts has changed five things, and a single
+"failed" would leave you guessing which five. At most 256 objects per manifest,
+and at most 1 MiB.
+
+### Reaching a service
+
+Pick a service, pick one of its ports, type a path, press **Fetch**. The answer
+appears as text.
+
+**It fetches; it does not host.** A workload's own content type is deliberately
+thrown away and the body is shown as text in a code block — never rendered, never
+in an iframe. Rendering it would put that pod's markup in this product's own
+origin, the origin holding your session, so any pod in the cluster could script
+this interface. What this is good for is `/healthz`, `/readyz`, `/metrics` or a
+JSON endpoint; what it is not is a way to use a workload's web interface through
+here.
+
+**Only GET is ever sent.** The identity this product holds inside your cluster is
+powerful, and a proxy that forwarded any method would let anyone with an operator
+session drive any in-cluster API with it — an unauthenticated admin endpoint on
+some pod included — while the audit log recorded "proxy" rather than what was done.
+
+**It goes through the API server's proxy**, not a tunnel this daemon opens. Your
+cluster's own authorisation decides whether this identity may reach that service,
+and no new listener is opened anywhere.
+
+**The archive records the port and the path in clear**, because "somebody read
+`/healthz`" and "somebody read `/admin/users`" are different events. A response is
+cut at 1 MiB, and the cut is reported rather than made quietly.
+
+[client-go]: https://github.com/kubernetes/client-go
+
 ## What this product does not do
 
 Operations it performs half of, said here because a product that does the first
@@ -797,8 +931,7 @@ mechanism and every refusal measurable. It does not make this a claim about your
 hardware, and the dialog says so before you type the cluster's name. Ledger
 entry 103 stays open until a rotation has run on real metal.
 
-**The Kubernetes authority is not rotated.** Talos keeps the two apart, and this
-product speaks the Talos machine API and does not talk to Kubernetes at all.
+**The Kubernetes authority is not rotated.** Talos keeps the two apart.
 Rotating the Kubernetes authority through machine configuration alone would
 leave every kubelet holding a certificate from an authority the API server no
 longer has, so it is refused rather than half done. `talosctl rotate-ca
@@ -859,6 +992,24 @@ affected.
 Every failed verification says so in its own message, because the job screen
 renders a step's detail verbatim and that message is the screen at the moment
 it matters.
+
+### It applies manifests and has never done so against a real cluster
+
+Every part of the manifest path is measured — discovery, both scopes, the
+create-versus-update decision, a conflict reported rather than forced, and four
+deliberately reinstated faults that each turned the tests red. All of it against
+an in-process API server this repository ships (`internal/kubesim`), which serves
+real Kubernetes JSON over real TLS with a real client certificate.
+
+What that fake does not have: the `managedFields` bookkeeping a real API server
+keeps, admission webhooks, and kinds from groups beyond `core/v1` and `apps/v1`.
+The mechanism and the refusals are proven; your cluster's reaction to your
+manifest is not. Ledger entry 148 stays open until a manifest has been applied
+through this product against real hardware.
+
+The worst case is bounded by one decision: `force` is never sent. So an apply that
+meets something it does not own fails and says so, rather than taking a field away
+from the controller that owns it.
 
 ## Metrics
 
