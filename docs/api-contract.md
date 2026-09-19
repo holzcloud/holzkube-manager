@@ -1461,10 +1461,41 @@ filters the pods, and the filter is applied by the API SERVER rather than in the
 browser -- a cluster with ten thousand pods must not send all of them so that
 three can be shown.
 
-It is milestone v1.17's second slice and it is **reads only**. The client is
-proven against a cluster before it is allowed to change anything in one; cordon,
-drain, pod actions and manifests are later slices and each is destructive in the
-sense D-06 means.
+It is milestone v1.17's second slice and it is **reads only**. The client was
+proven against a cluster before it was allowed to change anything in one. The
+routes that change things are the later slices, and each is destructive in the
+sense D-06 means:
+
+| route | what it does |
+|---|---|
+| `POST /api/v1/clusters/{id}/kubernetes/nodes/{node}/cordon` | takes `{"unschedulable": true|false}`: stops or resumes scheduling onto one node |
+| `POST /api/v1/clusters/{id}/kubernetes/nodes/{node}/drain` | answers `202` with a job: cordons, then evicts what would move |
+| `POST /api/v1/clusters/{id}/kubernetes/pods/{namespace}/{pod}/restart` | deletes one pod so its controller replaces it |
+| `POST /api/v1/clusters/{id}/kubernetes/deployments/{namespace}/{deployment}/scale` | takes `{"replicas": n}` through the scale subresource |
+| `POST /api/v1/clusters/{id}/kubernetes/deployments/{namespace}/{deployment}/restart` | rolls the pods out under the deployment's own strategy |
+| `POST /api/v1/clusters/{id}/kubernetes/manifest/plan` | says what applying a manifest would do, and writes nothing |
+| `POST /api/v1/clusters/{id}/kubernetes/manifest/apply` | applies it with server-side apply |
+| `POST /api/v1/clusters/{id}/kubernetes/services/{namespace}/{service}/proxy` | takes `{"port": "...", "path": "/healthz"}` and fetches that path from the service |
+
+**A drain evicts rather than deletes**, so a PodDisruptionBudget can refuse it —
+and when one does, the answer names the pod and the budget instead of retrying
+past it. Pods a DaemonSet owns, mirror pods and pods with `emptyDir` data are
+classified before anything is evicted: the first two come straight back, and the
+third loses data, so the last needs `delete_local_data` said out loud.
+
+**`restart` on a pod is refused when nothing owns it** (`conflict.nothing-would-recreate-it`).
+Kubernetes has no restart verb: it has "delete the pod and let the controller make
+another", and those are the same operation only while a controller exists. A
+product that deleted a bare pod because somebody clicked restart would have
+destroyed something on the strength of a word.
+
+**Scaling and rolling are different operations and the routes say so.** Scaling
+changes how many pods there are, through the scale subresource `kubectl scale`
+uses. A rollout restart annotates the pod template with
+`kubectl.kubernetes.io/restartedAt`, which changes the template hash, which makes
+the deployment controller replace the pods under its own surge, `maxUnavailable`
+and readiness probes — so the workload stays up. Deleting a deployment's pods one
+at a time would take it down, and that is why both exist.
 
 **Kubernetes's view and the inventory's are allowed to disagree, and where they
 do, that is the information.** The inventory knows what the machine API says
@@ -1521,10 +1552,13 @@ It is **Destructive** and it **is** under the cluster lock, unlike the renewal
 above: this one rewrites the configuration of every node, which is precisely
 what an adoption kept read-only (INV-12) says must not happen.
 
-**The Kubernetes authority is not rotated.** Talos keeps the two apart, this
-product speaks the Talos machine API and does not talk to Kubernetes at all, and
+**The Kubernetes authority is not rotated.** Talos keeps the two apart, and
 rotating that authority through machine configuration alone would leave every
-kubelet holding a certificate the API server does not accept.
+kubelet holding a certificate the API server does not accept. (Since milestone
+v1.17 this product does speak to Kubernetes — see the routes above — but it does
+so with a certificate it mints from the stored Kubernetes authority for one hour
+and never writes down. Reading that authority is not the same as being able to
+replace it safely.)
 
 **What the plan's warnings say, and they are part of the contract:** no rotation
 has ever been run against real hardware. Every pass is measured against the
@@ -1538,6 +1572,113 @@ than reading it out of the token, so a confirmation issued for rebooting a node
 | code | HTTP | when |
 |---|---|---|
 | `conflict.no-machines-to-rotate` | 409 | the cluster has no machines recorded, so there is nothing to write |
+
+## Applying a manifest
+
+Two routes, and the split is the point:
+
+| route | what it does |
+|---|---|
+| `POST /api/v1/clusters/{id}/kubernetes/manifest/plan` | takes `{"manifest": "<YAML>"}` and answers `{"objects": [...], "warnings": [...]}`. It writes nothing. |
+| `POST /api/v1/clusters/{id}/kubernetes/manifest/apply` | takes the same body and answers `{"applied": [...], "failed": [...], "fully_applied": bool}` |
+
+**The plan is not a courtesy.** An apply that runs without one is the same genus
+as a reset without a confirmation: the operator finds out what it did afterwards.
+So each object's `action` is `create` or `update`, and it is decided by **asking
+the cluster** whether that object exists — not by reading the manifest, which
+looks identical either way. The screen has to ask for the plan before it can ask
+for the apply.
+
+**A kind's resource and scope come from the cluster's own discovery.** A cluster
+with a `CustomResourceDefinition` has kinds this build has never heard of;
+refusing them would make this useless for the manifests people actually apply. A
+kind the cluster does not have becomes a warning that names the kind rather than
+a stack of discovery words.
+
+**A namespaced object that names no namespace is warned about**, with the
+namespace it would land in (`default`). Kubernetes would do that silently, and
+finding out afterwards is how a manifest meant for one namespace lands in
+another. A cluster-scoped object is sent to the cluster-scoped path — sending it
+to a namespaced one answers 404.
+
+**Server-side apply, under this product's own field manager**
+(`holzkube-manager`). That is what makes `kubectl get -o yaml
+--show-managed-fields` able to say who set a field. When another field manager
+owns a field an apply sets, the API server answers `409` and **this product
+reports it rather than forcing past it**: forcing takes a value away from
+whatever is managing it — usually a controller that will set it back — which is a
+fight a management product must not start on its own. `force` is never sent.
+
+**The apply answers `200` with the per-object result even when objects failed,
+and `fully_applied: false`.** An apply of ten objects where the sixth conflicts
+has changed five things; one status code cannot say which five, and a problem
+document would replace the list with a sentence. Only a manifest that could not
+be parsed at all — nothing attempted — answers a problem.
+
+**It does not delete.** `kubectl apply --prune` decides what to remove by
+comparing against a previous apply, and getting that wrong deletes things nobody
+asked about. Removing an object is a separate operation and is not in this
+milestone.
+
+The body is capped at 1 MiB rather than the 64 KiB every other route gets,
+because one rendered chart passes 64 KiB easily.
+
+| code | HTTP | when |
+|---|---|---|
+| `validation.manifest-invalid` | 400 | the document is empty, is not YAML, or every object in it was unusable |
+| `notfound.kubernetes-workload` | 404 | — shared with the workload routes above |
+
+## Reaching a workload
+
+`POST /api/v1/clusters/{id}/kubernetes/services/{namespace}/{service}/proxy` takes
+`{"port": "8080", "path": "/healthz"}` and answers
+`{"status": 200, "body": "...", "truncated": false}`.
+
+**It fetches; it does not host.** The body comes back as a JSON **string** and the
+workload's own content type is not carried at all. That is the decision the route
+exists to make: handing back `text/html` from a pod would serve that pod's markup
+from this daemon's origin — the origin holding the operator's session cookie — so
+any pod in the cluster could script the interface. The screen shows the body as
+text in a `<pre>`, never in an iframe and never as HTML.
+
+**A GET is the only method that is ever sent to the workload.** The identity this
+product holds is powerful; a proxy that forwarded any method would let anybody
+with an operator session drive any in-cluster API — an unauthenticated admin
+endpoint on some pod included — with this product's credentials, and the archive
+would record "proxy" rather than what was done.
+
+**It goes through the API server's own proxy subresource**, not through a
+port-forward tunnel opened by this daemon. So the cluster's authorisation decides
+whether this identity may reach that service, and no new listener exists anywhere.
+The scheme is `http`: `https` through the proxy would mean deciding what to do
+about the workload's certificate, and deciding that quietly is worse than not
+offering it.
+
+**It is a POST for a read, and the reason is the archive.** The audit middleware
+captures request bodies and not query strings, and on this route the port and the
+path *are* the event: "somebody read `/healthz`" and "somebody read
+`/admin/users`" must not be the same entry. Both are kept in clear in the archive.
+A path in a query string would also sit in the browser's history and the daemon's
+access log for no benefit. It is **not** `Destructive`: it cannot write to a
+workload, so a confirmation window would be theatre.
+
+**The service is read before it is proxied**, so "there is no such service" is a
+different answer from "that path is not served". A non-2xx from the workload comes
+back as `status` rather than as an error: a 503 from a health endpoint is the
+answer somebody came here for.
+
+**Bounded**: a response is cut at 1 MiB and the cut is reported as `truncated`,
+because half a metrics page that looked whole would be read as a complete one. The
+call has its own 20-second ceiling rather than the 60 seconds other Kubernetes
+calls get — behind it is an arbitrary workload, and a pod that accepts a
+connection and never answers is an ordinary broken workload rather than an
+exceptional event.
+
+A path containing `..` is refused with `validation.failed`. Measured, so the
+reason is stated accurately: such a path does **not** escape into the API server's
+own resources — `path.Clean` collapses it and client-go escapes each segment — it
+is silently *rewritten*, and the operator would be shown the answer to a question
+they did not ask.
 
 ## Cluster size
 

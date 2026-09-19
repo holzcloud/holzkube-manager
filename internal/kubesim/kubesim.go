@@ -75,6 +75,27 @@ type Options struct {
 	// Deployments the cluster has, described the way a test thinks of them.
 	Deployments []Deployment
 
+	// Objects the cluster already holds, as "resource/namespace/name" (a
+	// cluster-scoped object leaves the namespace empty: "namespaces//web"). They
+	// are what makes a manifest plan's difference between "create" and "update"
+	// measurable: the product asks the cluster, and this is the cluster's
+	// answer.
+	Objects []string
+
+	// Services the cluster has, and what each answers when it is reached
+	// through the API server's proxy. ProxyBodies is keyed
+	// "namespace/service:port/path"; a body for a key that is not there is a
+	// 404 from the proxy, which is what a real service does for a path it does
+	// not serve.
+	Services    []Service
+	ProxyBodies map[string]string
+
+	// ConflictOn are objects whose apply answers 409, keyed the same way. It is
+	// how a test reaches the case that matters most: another field manager owns
+	// a field this apply sets, and the product must report that rather than
+	// force it.
+	ConflictOn []string
+
 	// Nodes are the cluster's nodes. An empty list is a legitimate cluster --
 	// an API server that is up before any kubelet registered -- and tests use
 	// it, so it is not filled in by default.
@@ -104,6 +125,21 @@ type Options struct {
 	// be set together, or neither.
 	AuthorityCrt []byte
 	AuthorityKey []byte
+}
+
+// Service is a service as a test wants to describe it.
+type Service struct {
+	Namespace string
+	Name      string
+	Type      string
+	ClusterIP string
+	Ports     []ServicePort
+}
+
+// ServicePort is one port of a service.
+type ServicePort struct {
+	Name string
+	Port int32
 }
 
 // Node is a node as a test wants to describe it, rather than the ninety fields
@@ -199,6 +235,27 @@ type Server struct {
 	deleted []string
 
 	deployments []Deployment
+
+	// applied are the objects server-side apply wrote, keyed by
+	// "resource/namespace/name", with the document as it arrived. A test reads
+	// them back, so an apply is proven by what the cluster now holds rather
+	// than by a call having been made.
+	applied map[string]map[string]any
+
+	// managers records the field manager every apply named, and forced the
+	// objects an apply overrode a conflict on.
+	managers   []string
+	forced     []string
+	conflictOn []string
+
+	services    []Service
+	proxyBodies map[string]string
+
+	// proxied records every path a proxy request asked for, as
+	// "namespace/service:port/path". It is what proves the product built the URL
+	// it meant to: a traversal that slipped through would show up here as a path
+	// nobody asked for, and nowhere else.
+	proxied []string
 }
 
 // New starts one.
@@ -218,9 +275,31 @@ func New(opts Options) (*Server, error) {
 		version:     opts.Version,
 		nodes:       append([]Node(nil), opts.Nodes...),
 		deployments: append([]Deployment(nil), opts.Deployments...),
+		applied:     map[string]map[string]any{},
+		conflictOn:  append([]string(nil), opts.ConflictOn...),
+		services:    append([]Service(nil), opts.Services...),
+		proxyBodies: opts.ProxyBodies,
 		pods:        append([]Pod(nil), opts.Pods...),
 		namespaces:  namespacesOf(opts),
 		calls:       map[string]int{},
+	}
+
+	for _, key := range opts.Objects {
+		resource, rest, ok := strings.Cut(key, "/")
+		namespace, name, ok2 := strings.Cut(rest, "/")
+		if !ok || !ok2 || name == "" {
+			return nil, fmt.Errorf(
+				"kubesim: %q is not resource/namespace/name", key)
+		}
+		metadata := map[string]any{"name": name}
+		if namespace != "" {
+			metadata["namespace"] = namespace
+		}
+		object := map[string]any{"kind": "ConfigMap", "apiVersion": "v1", "metadata": metadata}
+		if resource == "namespaces" {
+			object["kind"] = "Namespace"
+		}
+		s.applied[key] = object
 	}
 
 	serverCrt, err := serverCertificate(caCert, caSigner)
@@ -305,8 +384,19 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("/api/v1/nodes", s.record(s.serveNodes))
 	mux.HandleFunc("/api/v1/nodes/", s.record(s.serveNode))
 	mux.HandleFunc("/api/v1/namespaces", s.record(s.serveNamespaces))
+	// Discovery, which the manifest path needs: an arbitrary manifest names
+	// kinds this binary has never heard of, so the product asks the CLUSTER
+	// which resource a kind lives at. A fake without discovery would make that
+	// path untestable and the product's own mapper unexercised.
+	mux.HandleFunc("/api", s.record(s.serveAPIVersions))
+	mux.HandleFunc("/apis", s.record(s.serveAPIGroups))
+	mux.HandleFunc("/api/v1", s.record(s.serveCoreResources))
+	mux.HandleFunc("/apis/apps/v1", s.record(s.serveAppsResources))
 	mux.HandleFunc("/apis/apps/v1/deployments", s.record(s.serveDeployments))
 	mux.HandleFunc("/apis/apps/v1/namespaces/", s.record(s.serveAppsNamespaced))
+	mux.HandleFunc("/api/v1/services", s.record(func(w http.ResponseWriter, _ *http.Request) {
+		s.writeServices(w, "")
+	}))
 	mux.HandleFunc("/api/v1/pods", s.record(s.servePods))
 	// The namespaced list, which is the path client-go uses when a namespace is
 	// named: /api/v1/namespaces/{ns}/pods.
@@ -406,7 +496,11 @@ func (s *Server) serveNamespaced(w http.ResponseWriter, r *http.Request) {
 	rest := strings.TrimPrefix(r.URL.Path, "/api/v1/namespaces/")
 	ns, tail, ok := strings.Cut(rest, "/")
 	if !ok {
-		s.serveNotFound(w, r)
+		// /api/v1/namespaces/{name}: the namespace itself, which is
+		// cluster-scoped. A manifest that creates one comes here, and sending it
+		// to the namespaced path instead is exactly the mistake the scope in
+		// discovery exists to prevent.
+		s.serveObject(w, r, "namespaces", "", rest)
 		return
 	}
 
@@ -417,6 +511,12 @@ func (s *Server) serveNamespaced(w http.ResponseWriter, r *http.Request) {
 		s.servePod(w, r, ns, parts[1])
 	case len(parts) == 3 && parts[0] == "pods" && parts[2] == "eviction":
 		s.evictPod(w, r, ns, parts[1])
+	case len(parts) == 2 && parts[0] == "configmaps":
+		s.serveObject(w, r, "configmaps", ns, parts[1])
+	case len(parts) == 1 && parts[0] == "services":
+		s.writeServices(w, ns)
+	case len(parts) >= 2 && parts[0] == "services":
+		s.serveService(w, r, ns, parts[1], parts[2:])
 	default:
 		s.serveNotFound(w, r)
 	}
@@ -1078,4 +1178,291 @@ func serverCertificate(ca *x509.Certificate, caKey crypto.Signer) (tls.Certifica
 		return tls.Certificate{}, fmt.Errorf("kubesim: parse server certificate: %w", err)
 	}
 	return tls.Certificate{Certificate: [][]byte{der}, PrivateKey: key, Leaf: leaf}, nil
+}
+
+// Discovery and server-side apply (milestone v1.17, slice 5).
+//
+// A manifest names kinds this binary has never heard of, so the product asks the
+// cluster which resource a kind lives at and what scope it has. That makes
+// discovery part of the path under test: a fake without it would leave the
+// product's own mapper unexercised, and the first CustomResourceDefinition in a
+// real manifest would be the first time anybody found out.
+//
+// Two kinds are served, and deliberately two: a ConfigMap, which lives in a
+// namespace, and a Namespace, which does not. The scope is the half that goes
+// wrong -- sending a cluster-scoped object to a namespaced path answers 404 --
+// and one kind could not tell the two apart.
+
+func (s *Server) serveAPIVersions(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, metav1.APIVersions{
+		TypeMeta: metav1.TypeMeta{Kind: "APIVersions"},
+		Versions: []string{"v1"},
+	})
+}
+
+func (s *Server) serveAPIGroups(w http.ResponseWriter, _ *http.Request) {
+	apps := metav1.GroupVersionForDiscovery{GroupVersion: "apps/v1", Version: "v1"}
+	writeJSON(w, http.StatusOK, metav1.APIGroupList{
+		TypeMeta: metav1.TypeMeta{Kind: "APIGroupList", APIVersion: "v1"},
+		Groups: []metav1.APIGroup{{
+			TypeMeta:         metav1.TypeMeta{Kind: "APIGroup", APIVersion: "v1"},
+			Name:             "apps",
+			Versions:         []metav1.GroupVersionForDiscovery{apps},
+			PreferredVersion: apps,
+		}},
+	})
+}
+
+func (s *Server) serveCoreResources(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, metav1.APIResourceList{
+		TypeMeta:     metav1.TypeMeta{Kind: "APIResourceList", APIVersion: "v1"},
+		GroupVersion: "v1",
+		APIResources: []metav1.APIResource{
+			{Name: "nodes", SingularName: "node", Namespaced: false, Kind: "Node",
+				Verbs: metav1.Verbs{"get", "list", "patch", "update"}},
+			{Name: "namespaces", SingularName: "namespace", Namespaced: false, Kind: "Namespace",
+				Verbs: metav1.Verbs{"get", "list", "create", "patch", "update"}},
+			{Name: "pods", SingularName: "pod", Namespaced: true, Kind: "Pod",
+				Verbs: metav1.Verbs{"get", "list", "delete"}},
+			{Name: "pods/eviction", SingularName: "", Namespaced: true, Kind: "Eviction",
+				Verbs: metav1.Verbs{"create"}},
+			{Name: "configmaps", SingularName: "configmap", Namespaced: true, Kind: "ConfigMap",
+				Verbs: metav1.Verbs{"get", "list", "create", "patch", "update"}},
+		},
+	})
+}
+
+func (s *Server) serveAppsResources(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, metav1.APIResourceList{
+		TypeMeta:     metav1.TypeMeta{Kind: "APIResourceList", APIVersion: "v1"},
+		GroupVersion: "apps/v1",
+		APIResources: []metav1.APIResource{
+			{Name: "deployments", SingularName: "deployment", Namespaced: true, Kind: "Deployment",
+				Verbs: metav1.Verbs{"get", "list", "patch", "update"}},
+			{Name: "deployments/scale", Namespaced: true, Kind: "Scale",
+				Verbs: metav1.Verbs{"get", "update"}},
+		},
+	})
+}
+
+// serveObject answers get and apply for one object of a kind this fake stores
+// generically, so an apply is proven by what the server now holds.
+func (s *Server) serveObject(w http.ResponseWriter, r *http.Request, resource, namespace, name string) {
+	key := resource + "/" + namespace + "/" + name
+
+	switch r.Method {
+	case http.MethodGet:
+		s.mu.Lock()
+		object, ok := s.applied[key]
+		s.mu.Unlock()
+		if !ok {
+			s.writeStatus(w, http.StatusNotFound, metav1.StatusReasonNotFound,
+				fmt.Sprintf("%s %q not found", resource, name))
+			return
+		}
+		writeJSON(w, http.StatusOK, object)
+
+	case http.MethodPatch:
+		if got := r.Header.Get("Content-Type"); got != string(types.ApplyPatchType) {
+			// Not politeness: server-side apply is what records a field manager,
+			// and a fake that accepted a merge patch here would let this product
+			// silently take over somebody else's field while the test passed.
+			s.writeStatus(w, http.StatusUnsupportedMediaType, metav1.StatusReasonUnsupportedMediaType,
+				fmt.Sprintf("this fake serves apply, and the request was %q", got))
+			return
+		}
+		manager := r.URL.Query().Get("fieldManager")
+		if manager == "" {
+			s.writeStatus(w, http.StatusUnprocessableEntity, metav1.StatusReasonInvalid,
+				"an apply must name a field manager")
+			return
+		}
+
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			s.writeStatus(w, http.StatusBadRequest, metav1.StatusReasonBadRequest, err.Error())
+			return
+		}
+		object := map[string]any{}
+		if err := json.Unmarshal(body, &object); err != nil {
+			s.writeStatus(w, http.StatusBadRequest, metav1.StatusReasonBadRequest, err.Error())
+			return
+		}
+
+		s.mu.Lock()
+		conflicts := slices.Contains(s.conflictOn, key)
+		forced := r.URL.Query().Get("force") == "true"
+		if !conflicts || forced {
+			s.applied[key] = object
+			s.managers = append(s.managers, manager)
+			if forced {
+				s.forced = append(s.forced, key)
+			}
+		}
+		s.mu.Unlock()
+
+		if conflicts && !forced {
+			// What a real API server says when another manager owns a field this
+			// apply sets, down to the reason, because that reason is what the
+			// product branches on.
+			s.writeStatus(w, http.StatusConflict, metav1.StatusReasonConflict,
+				fmt.Sprintf("Apply failed with 1 conflict: conflict with %q: .data.tuned", "someone-else"))
+			return
+		}
+		writeJSON(w, http.StatusOK, object)
+
+	default:
+		s.serveNotFound(w, r)
+	}
+}
+
+// writeStatus answers with the Status object a real API server sends, so that
+// client-go's own apierrors.IsNotFound and IsConflict decide what this is.
+func (s *Server) writeStatus(
+	w http.ResponseWriter, code int32, reason metav1.StatusReason, message string,
+) {
+	writeJSON(w, int(code), metav1.Status{
+		TypeMeta: metav1.TypeMeta{APIVersion: "v1", Kind: "Status"},
+		Status:   metav1.StatusFailure,
+		Code:     code,
+		Reason:   reason,
+		Message:  message,
+	})
+}
+
+// Applied returns the object server-side apply wrote, or nil.
+func (s *Server) Applied(resource, namespace, name string) map[string]any {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.applied[resource+"/"+namespace+"/"+name]
+}
+
+// FieldManagers returns the field managers every apply named, in order.
+func (s *Server) FieldManagers() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]string(nil), s.managers...)
+}
+
+// Forced returns the objects an apply overrode a conflict on. A product that
+// forced its way past somebody else's field manager would show up here, and
+// nowhere else.
+func (s *Server) Forced() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]string(nil), s.forced...)
+}
+
+// Services and the proxy subresource (milestone v1.17, slice 6).
+
+func (s *Server) writeServices(w http.ResponseWriter, namespace string) {
+	s.mu.Lock()
+	services := append([]Service(nil), s.services...)
+	s.mu.Unlock()
+
+	list := corev1.ServiceList{
+		TypeMeta: metav1.TypeMeta{APIVersion: "v1", Kind: "ServiceList"},
+		ListMeta: metav1.ListMeta{ResourceVersion: "1"},
+	}
+	for _, svc := range services {
+		if namespace != "" && svc.Namespace != namespace {
+			continue
+		}
+		rendered := corev1.Service{
+			TypeMeta:   metav1.TypeMeta{APIVersion: "v1", Kind: "Service"},
+			ObjectMeta: metav1.ObjectMeta{Name: svc.Name, Namespace: svc.Namespace},
+			Spec: corev1.ServiceSpec{
+				Type:      corev1.ServiceType(svc.Type),
+				ClusterIP: svc.ClusterIP,
+			},
+		}
+		if rendered.Spec.Type == "" {
+			rendered.Spec.Type = corev1.ServiceTypeClusterIP
+		}
+		for _, p := range svc.Ports {
+			rendered.Spec.Ports = append(rendered.Spec.Ports, corev1.ServicePort{
+				Name: p.Name, Port: p.Port, Protocol: corev1.ProtocolTCP,
+			})
+		}
+		list.Items = append(list.Items, rendered)
+	}
+	writeJSON(w, http.StatusOK, list)
+}
+
+// serveService answers a get on one service, and its proxy subresource.
+//
+// The name arrives as the proxy addresses it -- "name:port" -- so this splits it
+// the way the API server does. A test can then assert on the port the product
+// sent, which is half of what the proxy has to get right.
+func (s *Server) serveService(w http.ResponseWriter, r *http.Request, namespace, name string, tail []string) {
+	target, _, hasPort := strings.Cut(name, ":")
+
+	s.mu.Lock()
+	var found *Service
+	for i := range s.services {
+		if s.services[i].Namespace == namespace && s.services[i].Name == target {
+			found = &s.services[i]
+			break
+		}
+	}
+	s.mu.Unlock()
+
+	if found == nil {
+		s.writeStatus(w, http.StatusNotFound, metav1.StatusReasonNotFound,
+			fmt.Sprintf("services %q not found", target))
+		return
+	}
+
+	if len(tail) == 0 || tail[0] != "proxy" {
+		// A plain get of the service, which is what the product does before it
+		// proxies.
+		writeJSON(w, http.StatusOK, corev1.Service{
+			TypeMeta:   metav1.TypeMeta{APIVersion: "v1", Kind: "Service"},
+			ObjectMeta: metav1.ObjectMeta{Name: found.Name, Namespace: found.Namespace},
+			Spec:       corev1.ServiceSpec{Type: corev1.ServiceType(found.Type), ClusterIP: found.ClusterIP},
+		})
+		return
+	}
+
+	if !hasPort {
+		s.writeStatus(w, http.StatusBadRequest, metav1.StatusReasonBadRequest,
+			"the proxy subresource needs a port")
+		return
+	}
+	if r.Method != http.MethodGet {
+		// A real API server forwards the method. This one refuses anything else,
+		// because the product is meant never to send one -- and a fake that
+		// forwarded a POST would let that promise rot quietly.
+		s.writeStatus(w, http.StatusMethodNotAllowed, metav1.StatusReasonMethodNotAllowed,
+			fmt.Sprintf("this fake proxies GET only, and the request was %s", r.Method))
+		return
+	}
+
+	path := "/" + strings.Join(tail[1:], "/")
+	key := namespace + "/" + name + path
+
+	s.mu.Lock()
+	s.proxied = append(s.proxied, key)
+	body, ok := s.proxyBodies[key]
+	s.mu.Unlock()
+
+	if !ok {
+		s.writeStatus(w, http.StatusNotFound, metav1.StatusReasonNotFound,
+			fmt.Sprintf("the service answered 404 for %q", path))
+		return
+	}
+
+	// Deliberately a content type the product must NOT honour: if it ever served
+	// a proxied body as the workload described it, this is the header that would
+	// have put a workload's markup in the daemon's own origin.
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+	_, _ = io.WriteString(w, body)
+}
+
+// Proxied returns every path a proxy request asked for, in order.
+func (s *Server) Proxied() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]string(nil), s.proxied...)
 }

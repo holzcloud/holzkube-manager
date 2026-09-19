@@ -51,8 +51,11 @@ import (
 
 	"gopkg.in/yaml.v3"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/discovery/cached/memory"
+	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
+	"k8s.io/client-go/restmapper"
 )
 
 // ErrNoKubernetesAuthority reports a cluster whose stored bundle cannot issue a
@@ -282,6 +285,14 @@ func EndpointFromMachineConfig(configYAML []byte) (string, error) {
 // Client is one cluster's Kubernetes API, as this product uses it.
 type Client struct {
 	cs *kubernetes.Clientset
+
+	// dyn and mapper exist for the manifest path. An arbitrary manifest names
+	// kinds this binary has never heard of -- every cluster with a
+	// CustomResourceDefinition has some -- so the typed clientset cannot reach
+	// them: the dynamic client sends whatever the document is, and the mapper
+	// asks the CLUSTER which resource a kind lives at.
+	dyn    dynamic.Interface
+	mapper *restmapper.DeferredDiscoveryRESTMapper
 }
 
 // New builds a client from credentials.
@@ -330,13 +341,41 @@ func New(creds Creds) (*Client, error) {
 			ContentType:        "application/json",
 			AcceptContentTypes: "application/json",
 		},
+
+		// The client-side rate limit, raised off its default, and this was
+		// MEASURED: client-go throttles itself to 5 requests a second with a
+		// burst of 10, and a manifest plan asks the cluster about every object
+		// in turn. Twenty objects against an in-process fake on localhost took
+		// two seconds -- all of it this limiter -- and a manifest of the size
+		// this route accepts would have spent the route's whole budget waiting
+		// on a queue inside this process, then reported the CLUSTER as slow.
+		//
+		// The numbers are kubectl's own. The limit is not removed, because a
+		// bug in a loop here must not become a denial of service against
+		// somebody's API server.
+		QPS:   50,
+		Burst: 100,
 	}
 
 	cs, err := kubernetes.NewForConfig(cfg)
 	if err != nil {
 		return nil, fmt.Errorf("kube: building the client: %w", err)
 	}
-	return &Client{cs: cs}, nil
+
+	dyn, err := dynamic.NewForConfig(cfg)
+	if err != nil {
+		return nil, fmt.Errorf("kube: building the dynamic client: %w", err)
+	}
+
+	// The discovery cache is per client and therefore per call, which is the
+	// conservative choice: a cached mapping that outlived a
+	// CustomResourceDefinition being installed would refuse a manifest the
+	// cluster accepts, and this product's clients are short-lived anyway
+	// because the certificate is.
+	mapper := restmapper.NewDeferredDiscoveryRESTMapper(
+		memory.NewMemCacheClient(cs.Discovery()))
+
+	return &Client{cs: cs, dyn: dyn, mapper: mapper}, nil
 }
 
 // ServerVersion is the cheapest question that proves the whole path: DNS, TLS,

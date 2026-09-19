@@ -328,6 +328,27 @@ var allowlist = map[string][]string{
 	"cluster.kubernetes-scale":           {"replicas"},
 	"cluster.kubernetes-rollout-restart": {},
 
+	// Applying a manifest (milestone v1.17 slice 5). The manifest itself is
+	// deliberately NOT in clear, and the reason is not its size: a manifest
+	// carries Secrets. A `kind: Secret` in an archive is a credential in an
+	// archive, and the archive is the one thing in this product that is meant
+	// to be readable later by people who were not there.
+	//
+	// What the archive gets instead is the job's own record of which objects
+	// were applied, which is what somebody reading it later actually needs.
+	"cluster.kubernetes-manifest-plan":  {},
+	"cluster.kubernetes-manifest-apply": {},
+
+	// Reaching a workload through the cluster (milestone v1.17 slice 6). The
+	// namespace and the service are in the path; the PORT and the PATH are kept
+	// in clear, because "somebody read /healthz" and "somebody read
+	// /admin/users" are different events and an archive that could not tell
+	// them apart would be recording neither. That is also why the route is a
+	// POST: this middleware captures the body and not the query string, so a
+	// GET would have archived neither. The answer is never archived -- it is a
+	// workload's response and may be anything at all.
+	"cluster.kubernetes-service-proxy": {"port", "path"},
+
 	// Renewing this installation's own client certificate for a cluster
 	// (V2-OPS-02). No parameters: the cluster is on the record already and the
 	// certificate itself never goes near the archive.
