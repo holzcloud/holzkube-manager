@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"time"
@@ -72,7 +73,149 @@ func KubernetesRoutes(d httpapi.Deps) []httpapi.Route {
 			Action:          string(kube.JobKindDrain),
 			Handler:         handler(kubernetesDrain(d)),
 		},
+		{
+			Method:  http.MethodPost,
+			Pattern: "/api/v1/clusters/{id}/kubernetes/pods/{namespace}/{pod}/restart",
+
+			// Destructive, and the word is doing work here: what Kubernetes
+			// offers is "delete the pod", and that is a restart only because a
+			// controller makes another. The route refuses when nothing owns
+			// the pod (kube.ErrNothingWouldRecreateIt), which is the case where
+			// the word would have been a lie.
+			Destructive:     true,
+			ClusterScope:    clusterIDFromPath,
+			RequiresSession: true,
+			MinRole:         model.RoleOperator,
+			Action:          "cluster.kubernetes-restart-pod",
+			Handler:         handler(kubernetesRestartPod(d)),
+		},
+		{
+			Method:  http.MethodPost,
+			Pattern: "/api/v1/clusters/{id}/kubernetes/deployments/{namespace}/{deployment}/scale",
+
+			Destructive:     true,
+			ClusterScope:    clusterIDFromPath,
+			RequiresSession: true,
+			MinRole:         model.RoleOperator,
+			Action:          "cluster.kubernetes-scale",
+			Handler:         handler(kubernetesScale(d)),
+		},
+		{
+			Method:  http.MethodPost,
+			Pattern: "/api/v1/clusters/{id}/kubernetes/deployments/{namespace}/{deployment}/restart",
+
+			Destructive:     true,
+			ClusterScope:    clusterIDFromPath,
+			RequiresSession: true,
+			MinRole:         model.RoleOperator,
+			Action:          "cluster.kubernetes-rollout-restart",
+			Handler:         handler(kubernetesRolloutRestart(d)),
+		},
 	}
+}
+
+// kubernetesRestartPod deletes one pod so its controller replaces it.
+func kubernetesRestartPod(d httpapi.Deps) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		client, ctx, cancel, ok := kubeClientFor(d, w, r)
+		if !ok {
+			return
+		}
+		defer cancel()
+
+		err := client.RestartPod(ctx, r.PathValue("namespace"), r.PathValue("pod"))
+		if err != nil {
+			writeKubernetesError(w, r, err)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}
+}
+
+// kubernetesScale sets a deployment's replica count.
+func kubernetesScale(d httpapi.Deps) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			// A pointer, so that "scale to 0" is distinguishable from "no
+			// number was sent". Scaling to zero is a real operation -- it is
+			// how a workload is switched off -- and a missing field defaulting
+			// to it would switch something off because a client forgot a key.
+			Replicas *int32 `json:"replicas"`
+		}
+		if err := decodeJSON(w, r, &body); err != nil {
+			httpapi.WriteProblem(w, r, decodeProblem(err))
+			return
+		}
+		if body.Replicas == nil {
+			httpapi.WriteProblem(w, r, httpapi.Validation(
+				"Say how many replicas you want.",
+				httpapi.FieldError{Field: "replicas", Reason: "required"}))
+			return
+		}
+		if *body.Replicas < 0 {
+			httpapi.WriteProblem(w, r, httpapi.Validation(
+				"A replica count cannot be negative.",
+				httpapi.FieldError{Field: "replicas", Reason: "must be zero or more"}))
+			return
+		}
+
+		client, ctx, cancel, ok := kubeClientFor(d, w, r)
+		if !ok {
+			return
+		}
+		defer cancel()
+
+		if err := client.Scale(ctx, r.PathValue("namespace"), r.PathValue("deployment"),
+			*body.Replicas); err != nil {
+			writeKubernetesError(w, r, err)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}
+}
+
+// kubernetesRolloutRestart replaces a deployment's pods under the deployment's
+// own strategy, which is what keeps the workload up while it happens.
+func kubernetesRolloutRestart(d httpapi.Deps) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		client, ctx, cancel, ok := kubeClientFor(d, w, r)
+		if !ok {
+			return
+		}
+		defer cancel()
+
+		if err := client.RolloutRestart(ctx, r.PathValue("namespace"),
+			r.PathValue("deployment"), time.Now()); err != nil {
+			writeKubernetesError(w, r, err)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}
+}
+
+// kubeClientFor is the four lines every Kubernetes action route starts with.
+//
+// A helper rather than four copies, because the budget and the two refusals
+// are the same for all of them -- and because a route that forgot the budget
+// would hold a request open against an API server that accepted the connection
+// and never answered.
+func kubeClientFor(
+	d httpapi.Deps, w http.ResponseWriter, r *http.Request,
+) (*kube.Client, context.Context, context.CancelFunc, bool) {
+	if p := inventoryConfigured(d); p != nil {
+		httpapi.WriteProblem(w, r, p)
+		return nil, nil, func() {}, false
+	}
+
+	ctx, cancel := budgetedContext(r, KubernetesRouteBudget)
+
+	client, err := d.Inventory.KubeClient(ctx, model.ClusterID(r.PathValue("id")))
+	if err != nil {
+		cancel()
+		writeKubernetesError(w, r, err)
+		return nil, nil, func() {}, false
+	}
+	return client, ctx, cancel, true
 }
 
 // kubernetesCordon stops or resumes scheduling onto one node.
@@ -206,9 +349,10 @@ type kubernetesOverviewBody struct {
 	// authorisation.
 	ServerVersion string `json:"server_version"`
 
-	Nodes      []kube.Node `json:"nodes"`
-	Pods       []kube.Pod  `json:"pods"`
-	Namespaces []string    `json:"namespaces"`
+	Nodes       []kube.Node       `json:"nodes"`
+	Pods        []kube.Pod        `json:"pods"`
+	Deployments []kube.Deployment `json:"deployments"`
+	Namespaces  []string          `json:"namespaces"`
 
 	// Namespace echoes the filter that was applied, empty meaning every
 	// namespace, so a screen cannot show one namespace's pods under another's
@@ -250,6 +394,11 @@ func kubernetesOverview(d httpapi.Deps) http.HandlerFunc {
 			writeKubernetesError(w, r, err)
 			return
 		}
+		deployments, err := client.Deployments(ctx, namespace)
+		if err != nil {
+			writeKubernetesError(w, r, err)
+			return
+		}
 		namespaces, err := client.Namespaces(ctx)
 		if err != nil {
 			writeKubernetesError(w, r, err)
@@ -261,6 +410,7 @@ func kubernetesOverview(d httpapi.Deps) http.HandlerFunc {
 			ServerVersion: version,
 			Nodes:         nodes,
 			Pods:          pods,
+			Deployments:   deployments,
 			Namespaces:    namespaces,
 			Namespace:     namespace,
 		})
@@ -282,6 +432,18 @@ func writeKubernetesError(w http.ResponseWriter, r *http.Request, err error) {
 			Detail: err.Error(),
 			Code:   httpapi.CodeNoKubernetesAuthority,
 		})
+
+	case errors.Is(err, kube.ErrNothingWouldRecreateIt):
+		httpapi.WriteProblem(w, r, &httpapi.Problem{
+			Type:   httpapi.TypeConflict,
+			Title:  "Nothing would recreate that pod",
+			Status: http.StatusConflict,
+			Detail: err.Error(),
+			Code:   httpapi.CodeNothingWouldRecreateIt,
+		})
+
+	case errors.Is(err, kube.ErrNoSuchWorkload):
+		httpapi.WriteProblem(w, r, httpapi.NotFound("notfound.kubernetes-workload", err.Error()))
 
 	case errors.Is(err, kube.ErrNoEndpoint):
 		httpapi.WriteProblem(w, r, &httpapi.Problem{

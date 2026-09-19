@@ -51,6 +51,8 @@ import (
 	"sync"
 	"time"
 
+	appsv1 "k8s.io/api/apps/v1"
+	autoscalingv1 "k8s.io/api/autoscaling/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -69,6 +71,9 @@ type Options struct {
 
 	// Namespaces the cluster has. Empty means the two every cluster has.
 	Namespaces []string
+
+	// Deployments the cluster has, described the way a test thinks of them.
+	Deployments []Deployment
 
 	// Nodes are the cluster's nodes. An empty list is a legitimate cluster --
 	// an API server that is up before any kubelet registered -- and tests use
@@ -144,6 +149,20 @@ type Pod struct {
 	BudgetRefuses bool
 }
 
+// Deployment is a deployment as a test wants to describe it.
+type Deployment struct {
+	Namespace string
+	Name      string
+	Desired   int32
+	Ready     int32
+	Image     string
+
+	// RestartedAt is the annotation `kubectl rollout restart` writes. A test
+	// reads it back, so a rollout restart is proven by what it wrote rather
+	// than by having been called.
+	RestartedAt string
+}
+
 // Server is a simulated cluster's API server.
 type Server struct {
 	srv *httptest.Server
@@ -173,6 +192,13 @@ type Server struct {
 	// evicted is what evictions actually removed, in order, so a test can
 	// assert what a drain moved rather than what it reported moving.
 	evicted []string
+
+	// deleted is what a DELETE removed, kept apart from evicted because the
+	// two are different operations: a test about restarting a pod must not
+	// pass because something was evicted, and the reverse.
+	deleted []string
+
+	deployments []Deployment
 }
 
 // New starts one.
@@ -187,13 +213,14 @@ func New(opts Options) (*Server, error) {
 	}
 
 	s := &Server{
-		caCrt:      caCrt,
-		caKey:      caKey,
-		version:    opts.Version,
-		nodes:      append([]Node(nil), opts.Nodes...),
-		pods:       append([]Pod(nil), opts.Pods...),
-		namespaces: namespacesOf(opts),
-		calls:      map[string]int{},
+		caCrt:       caCrt,
+		caKey:       caKey,
+		version:     opts.Version,
+		nodes:       append([]Node(nil), opts.Nodes...),
+		deployments: append([]Deployment(nil), opts.Deployments...),
+		pods:        append([]Pod(nil), opts.Pods...),
+		namespaces:  namespacesOf(opts),
+		calls:       map[string]int{},
 	}
 
 	serverCrt, err := serverCertificate(caCert, caSigner)
@@ -278,6 +305,8 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("/api/v1/nodes", s.record(s.serveNodes))
 	mux.HandleFunc("/api/v1/nodes/", s.record(s.serveNode))
 	mux.HandleFunc("/api/v1/namespaces", s.record(s.serveNamespaces))
+	mux.HandleFunc("/apis/apps/v1/deployments", s.record(s.serveDeployments))
+	mux.HandleFunc("/apis/apps/v1/namespaces/", s.record(s.serveAppsNamespaced))
 	mux.HandleFunc("/api/v1/pods", s.record(s.servePods))
 	// The namespaced list, which is the path client-go uses when a namespace is
 	// named: /api/v1/namespaces/{ns}/pods.
@@ -384,6 +413,8 @@ func (s *Server) serveNamespaced(w http.ResponseWriter, r *http.Request) {
 	switch parts := strings.Split(tail, "/"); {
 	case len(parts) == 1 && parts[0] == "pods":
 		s.writePods(w, r, ns)
+	case len(parts) == 2 && parts[0] == "pods":
+		s.servePod(w, r, ns, parts[1])
 	case len(parts) == 3 && parts[0] == "pods" && parts[2] == "eviction":
 		s.evictPod(w, r, ns, parts[1])
 	default:
@@ -427,73 +458,9 @@ func (s *Server) writePods(w http.ResponseWriter, r *http.Request, namespace str
 			continue
 		}
 
-		containers := p.Containers
-		if containers == 0 {
-			containers = 1
-		}
-		statuses := make([]corev1.ContainerStatus, 0, containers)
-		for i := range containers {
-			st := corev1.ContainerStatus{
-				Name:  fmt.Sprintf("container-%d", i),
-				Ready: i < p.Ready,
-			}
-			// The restart count a test gives is the POD's, and Kubernetes
-			// carries it per container -- so it goes on the first one only.
-			// Putting it on each container made a two-container pod report
-			// double, and the client was right to sum them: that is what
-			// kubectl shows.
-			if i == 0 {
-				st.RestartCount = p.Restarts
-			}
-			if p.WaitReason != "" && !st.Ready {
-				st.State = corev1.ContainerState{
-					Waiting: &corev1.ContainerStateWaiting{Reason: p.WaitReason},
-				}
-			}
-			statuses = append(statuses, st)
-		}
-
-		phase := p.Phase
-		if phase == "" {
-			phase = corev1.PodRunning
-		}
-
-		meta := metav1.ObjectMeta{
-			Name:              p.Name,
-			Namespace:         p.Namespace,
-			CreationTimestamp: metav1.NewTime(time.Now().Add(-time.Minute).UTC()),
-		}
-		if p.OwnerKind != "" {
-			// A controller reference, which is what a drain reads to decide
-			// whether anything would recreate this pod.
-			controller := true
-			meta.OwnerReferences = []metav1.OwnerReference{{
-				APIVersion: "apps/v1",
-				Kind:       p.OwnerKind,
-				Name:       p.Name + "-owner",
-				UID:        types.UID(p.Namespace + "/" + p.Name + "/owner"),
-				Controller: &controller,
-			}}
-		}
-		if p.Mirror {
-			meta.Annotations = map[string]string{corev1.MirrorPodAnnotationKey: "true"}
-		}
-
-		spec := corev1.PodSpec{NodeName: p.Node}
-		if p.LocalData {
-			spec.Volumes = []corev1.Volume{{
-				Name:         "scratch",
-				VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}},
-			}}
-		}
-
-		list.Items = append(list.Items, corev1.Pod{
-			TypeMeta:   metav1.TypeMeta{APIVersion: "v1", Kind: "Pod"},
-			ObjectMeta: meta,
-			Spec:       spec,
-			Status:     corev1.PodStatus{Phase: phase, ContainerStatuses: statuses},
-		})
+		list.Items = append(list.Items, renderPod(p))
 	}
+
 	writeJSON(w, http.StatusOK, list)
 }
 
@@ -642,6 +609,341 @@ func (s *Server) evictPod(w http.ResponseWriter, r *http.Request, namespace, nam
 		Status:   "Success",
 		Code:     http.StatusCreated,
 	})
+}
+
+// renderPod is a test's pod in the shape Kubernetes sends it.
+//
+// One function, for the reason renderNode is one: the list and the single-pod
+// read a restart makes must describe the same pod identically, or the product's
+// classification would depend on which call it came from.
+func renderPod(p Pod) corev1.Pod {
+	containers := p.Containers
+	if containers == 0 {
+		containers = 1
+	}
+	statuses := make([]corev1.ContainerStatus, 0, containers)
+	for i := range containers {
+		st := corev1.ContainerStatus{
+			Name:  fmt.Sprintf("container-%d", i),
+			Ready: i < p.Ready,
+		}
+		// The restart count a test gives is the POD's, and Kubernetes carries
+		// it per container -- so it goes on the first one only. Putting it on
+		// each container made a two-container pod report double, and the
+		// client was right to sum them: that is what kubectl shows.
+		if i == 0 {
+			st.RestartCount = p.Restarts
+		}
+		if p.WaitReason != "" && !st.Ready {
+			st.State = corev1.ContainerState{
+				Waiting: &corev1.ContainerStateWaiting{Reason: p.WaitReason},
+			}
+		}
+		statuses = append(statuses, st)
+	}
+
+	phase := p.Phase
+	if phase == "" {
+		phase = corev1.PodRunning
+	}
+
+	meta := metav1.ObjectMeta{
+		Name:              p.Name,
+		Namespace:         p.Namespace,
+		CreationTimestamp: metav1.NewTime(time.Now().Add(-time.Minute).UTC()),
+	}
+	if p.OwnerKind != "" {
+		// A controller reference: what a drain and a restart both read to
+		// decide whether anything would recreate this pod.
+		controller := true
+		meta.OwnerReferences = []metav1.OwnerReference{{
+			APIVersion: "apps/v1",
+			Kind:       p.OwnerKind,
+			Name:       p.Name + "-owner",
+			UID:        types.UID(p.Namespace + "/" + p.Name + "/owner"),
+			Controller: &controller,
+		}}
+	}
+	if p.Mirror {
+		meta.Annotations = map[string]string{corev1.MirrorPodAnnotationKey: "true"}
+	}
+
+	spec := corev1.PodSpec{NodeName: p.Node}
+	if p.LocalData {
+		spec.Volumes = []corev1.Volume{{
+			Name:         "scratch",
+			VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}},
+		}}
+	}
+
+	return corev1.Pod{
+		TypeMeta:   metav1.TypeMeta{APIVersion: "v1", Kind: "Pod"},
+		ObjectMeta: meta,
+		Spec:       spec,
+		Status:     corev1.PodStatus{Phase: phase, ContainerStatuses: statuses},
+	}
+}
+
+// servePod is one pod: the read a restart makes first, and the delete that IS
+// the restart.
+//
+// The read is here because the product refuses to delete a pod no controller
+// owns, and it can only know that by asking. A fake without it would leave that
+// refusal untested.
+func (s *Server) servePod(w http.ResponseWriter, r *http.Request, namespace, name string) {
+	s.mu.Lock()
+	index := -1
+	for i := range s.pods {
+		if s.pods[i].Namespace == namespace && s.pods[i].Name == name {
+			index = i
+			break
+		}
+	}
+	if index < 0 {
+		s.mu.Unlock()
+		s.serveNotFound(w, r)
+		return
+	}
+
+	switch r.Method {
+	case http.MethodGet:
+		pod := s.pods[index]
+		s.mu.Unlock()
+		writeJSON(w, http.StatusOK, renderPod(pod))
+
+	case http.MethodDelete:
+		s.pods = append(s.pods[:index:index], s.pods[index+1:]...)
+		s.deleted = append(s.deleted, namespace+"/"+name)
+		s.mu.Unlock()
+		writeJSON(w, http.StatusOK, metav1.Status{
+			TypeMeta: metav1.TypeMeta{APIVersion: "v1", Kind: "Status"},
+			Status:   "Success",
+			Code:     http.StatusOK,
+		})
+
+	default:
+		s.mu.Unlock()
+		s.serveNotFound(w, r)
+	}
+}
+
+// Deleted is what a DELETE removed, in order.
+func (s *Server) Deleted() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]string(nil), s.deleted...)
+}
+
+// serveDeployments answers the cluster-wide deployment list.
+func (s *Server) serveDeployments(w http.ResponseWriter, _ *http.Request) {
+	s.writeDeployments(w, "")
+}
+
+// serveAppsNamespaced routes the apps/v1 paths this product uses: the
+// namespaced deployment list, the scale subresource, and the patch a rollout
+// restart sends.
+func (s *Server) serveAppsNamespaced(w http.ResponseWriter, r *http.Request) {
+	rest := strings.TrimPrefix(r.URL.Path, "/apis/apps/v1/namespaces/")
+	ns, tail, ok := strings.Cut(rest, "/")
+	if !ok {
+		s.serveNotFound(w, r)
+		return
+	}
+
+	parts := strings.Split(tail, "/")
+	switch {
+	case len(parts) == 1 && parts[0] == "deployments":
+		s.writeDeployments(w, ns)
+	case len(parts) == 3 && parts[0] == "deployments" && parts[2] == "scale":
+		s.serveScale(w, r, ns, parts[1])
+	case len(parts) == 2 && parts[0] == "deployments" && r.Method == http.MethodPatch:
+		s.restartDeployment(w, r, ns, parts[1])
+	default:
+		s.serveNotFound(w, r)
+	}
+}
+
+func (s *Server) writeDeployments(w http.ResponseWriter, namespace string) {
+	s.mu.Lock()
+	deployments := append([]Deployment(nil), s.deployments...)
+	s.mu.Unlock()
+
+	list := appsv1.DeploymentList{
+		TypeMeta: metav1.TypeMeta{APIVersion: "apps/v1", Kind: "DeploymentList"},
+		ListMeta: metav1.ListMeta{ResourceVersion: "1"},
+	}
+	for _, d := range deployments {
+		if namespace != "" && d.Namespace != namespace {
+			continue
+		}
+		list.Items = append(list.Items, renderDeployment(d))
+	}
+	writeJSON(w, http.StatusOK, list)
+}
+
+// serveScale is the subresource `kubectl scale` uses. It exists so a client can
+// change the count without owning the rest of the spec, and the count really
+// changes here: the next read says the new number.
+func (s *Server) serveScale(w http.ResponseWriter, r *http.Request, namespace, name string) {
+	s.mu.Lock()
+	index := -1
+	for i := range s.deployments {
+		if s.deployments[i].Namespace == namespace && s.deployments[i].Name == name {
+			index = i
+			break
+		}
+	}
+	if index < 0 {
+		s.mu.Unlock()
+		s.serveNotFound(w, r)
+		return
+	}
+
+	switch r.Method {
+	case http.MethodGet:
+		current := s.deployments[index]
+		s.mu.Unlock()
+		writeJSON(w, http.StatusOK, renderScale(current))
+
+	case http.MethodPut:
+		var scale autoscalingv1.Scale
+		body, err := io.ReadAll(io.LimitReader(r.Body, 1<<16))
+		if err != nil || json.Unmarshal(body, &scale) != nil {
+			s.mu.Unlock()
+			// The message names the format, because this is exactly where a
+			// client that negotiated protobuf shows up: client-go does that on
+			// its own for this subresource unless the content type is pinned,
+			// and a bare 400 sent the reader looking in the wrong place.
+			writeJSON(w, http.StatusBadRequest, metav1.Status{
+				TypeMeta: metav1.TypeMeta{APIVersion: "v1", Kind: "Status"},
+				Status:   "Failure",
+				Message:  "kubesim reads JSON; this body is not JSON",
+				Reason:   metav1.StatusReasonBadRequest,
+				Code:     http.StatusBadRequest,
+			})
+			return
+		}
+
+		s.deployments[index].Desired = scale.Spec.Replicas
+		current := s.deployments[index]
+		s.mu.Unlock()
+		writeJSON(w, http.StatusOK, renderScale(current))
+
+	default:
+		s.mu.Unlock()
+		s.serveNotFound(w, r)
+	}
+}
+
+// restartDeployment applies the one patch a rollout restart sends: the
+// timestamp annotation on the pod template.
+func (s *Server) restartDeployment(w http.ResponseWriter, r *http.Request, namespace, name string) {
+	var patch struct {
+		Spec struct {
+			Template struct {
+				Metadata struct {
+					Annotations map[string]string `json:"annotations"`
+				} `json:"metadata"`
+			} `json:"template"`
+		} `json:"spec"`
+	}
+	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<16))
+	stamp := ""
+	if err == nil && json.Unmarshal(body, &patch) == nil {
+		stamp = patch.Spec.Template.Metadata.Annotations["kubectl.kubernetes.io/restartedAt"]
+	}
+	if stamp == "" {
+		// Only the patch a rollout restart sends is applied: a fake that took
+		// any patch would accept one a real API server rejects.
+		writeJSON(w, http.StatusBadRequest, metav1.Status{
+			TypeMeta: metav1.TypeMeta{APIVersion: "v1", Kind: "Status"},
+			Status:   "Failure",
+			Message:  "kubesim applies only the restartedAt annotation patch",
+			Reason:   metav1.StatusReasonBadRequest,
+			Code:     http.StatusBadRequest,
+		})
+		return
+	}
+
+	s.mu.Lock()
+	index := -1
+	for i := range s.deployments {
+		if s.deployments[i].Namespace == namespace && s.deployments[i].Name == name {
+			index = i
+			break
+		}
+	}
+	if index < 0 {
+		s.mu.Unlock()
+		s.serveNotFound(w, r)
+		return
+	}
+	s.deployments[index].RestartedAt = stamp
+	current := s.deployments[index]
+	s.mu.Unlock()
+
+	writeJSON(w, http.StatusOK, renderDeployment(current))
+}
+
+// RestartedAt is the annotation a rollout restart wrote.
+func (s *Server) RestartedAt(namespace, name string) string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, d := range s.deployments {
+		if d.Namespace == namespace && d.Name == name {
+			return d.RestartedAt
+		}
+	}
+	return ""
+}
+
+// DesiredReplicas is the count as this server now holds it.
+func (s *Server) DesiredReplicas(namespace, name string) int32 {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, d := range s.deployments {
+		if d.Namespace == namespace && d.Name == name {
+			return d.Desired
+		}
+	}
+	return -1
+}
+
+func renderDeployment(d Deployment) appsv1.Deployment {
+	replicas := d.Desired
+	template := corev1.PodTemplateSpec{
+		Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "app", Image: d.Image}}},
+	}
+	if d.RestartedAt != "" {
+		template.ObjectMeta.Annotations = map[string]string{
+			"kubectl.kubernetes.io/restartedAt": d.RestartedAt,
+		}
+	}
+
+	return appsv1.Deployment{
+		TypeMeta: metav1.TypeMeta{APIVersion: "apps/v1", Kind: "Deployment"},
+		ObjectMeta: metav1.ObjectMeta{
+			Name:              d.Name,
+			Namespace:         d.Namespace,
+			CreationTimestamp: metav1.NewTime(time.Now().Add(-time.Hour).UTC()),
+		},
+		Spec: appsv1.DeploymentSpec{Replicas: &replicas, Template: template},
+		Status: appsv1.DeploymentStatus{
+			Replicas:          d.Desired,
+			ReadyReplicas:     d.Ready,
+			UpdatedReplicas:   d.Ready,
+			AvailableReplicas: d.Ready,
+		},
+	}
+}
+
+func renderScale(d Deployment) autoscalingv1.Scale {
+	return autoscalingv1.Scale{
+		TypeMeta:   metav1.TypeMeta{APIVersion: "autoscaling/v1", Kind: "Scale"},
+		ObjectMeta: metav1.ObjectMeta{Name: d.Name, Namespace: d.Namespace},
+		Spec:       autoscalingv1.ScaleSpec{Replicas: d.Desired},
+		Status:     autoscalingv1.ScaleStatus{Replicas: d.Ready},
+	}
 }
 
 // Evicted is what evictions actually removed, in order.
