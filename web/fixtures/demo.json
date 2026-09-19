@@ -858,5 +858,236 @@
       }
     ],
     "notice": "A cluster forgets its events after about an hour. An empty list means nothing has been reported recently, not that nothing has happened."
+  },
+  "/api/v1/clusters/c-homelab/kubernetes/workloads": {
+    "workloads": [
+      {
+        "kind": "Deployment",
+        "namespace": "default",
+        "name": "holzcloud-website",
+        "desired": 2,
+        "ready": 1,
+        "summary": "1 of 2 ready",
+        "image": "ghcr.io/holzcloud/website:2026.09.17-sha-4f2a1b9",
+        "created_at": "2026-09-17T18:22:00Z",
+        "schedule": "",
+        "suspended": false,
+        "last_run": "",
+        "scalable": true,
+        "rollable": true
+      },
+      {
+        "kind": "StatefulSet",
+        "namespace": "db",
+        "name": "postgres",
+        "desired": 3,
+        "ready": 2,
+        "summary": "2 of 3 ready, 1 updated (it replaces them one at a time)",
+        "image": "ghcr.io/cloudnative-pg/postgresql:16.4",
+        "created_at": "2026-09-02T09:00:00Z",
+        "schedule": "",
+        "suspended": false,
+        "last_run": "",
+        "scalable": true,
+        "rollable": true
+      },
+      {
+        "kind": "DaemonSet",
+        "namespace": "longhorn-system",
+        "name": "longhorn-manager",
+        "desired": 2,
+        "ready": 1,
+        "summary": "1 of 2 nodes ready",
+        "image": "longhornio/longhorn-manager:v1.7.2",
+        "created_at": "2026-09-02T09:40:00Z",
+        "schedule": "",
+        "suspended": false,
+        "last_run": "",
+        "scalable": false,
+        "rollable": true
+      },
+      {
+        "kind": "CronJob",
+        "namespace": "default",
+        "name": "nightly-backup",
+        "desired": 0,
+        "ready": 0,
+        "summary": "last run 2026-09-19T02:00:00Z",
+        "image": "ghcr.io/holzcloud/backup:3",
+        "created_at": "2026-08-01T00:00:00Z",
+        "schedule": "0 2 * * *",
+        "suspended": false,
+        "last_run": "2026-09-19T02:00:00Z",
+        "scalable": false,
+        "rollable": false
+      },
+      {
+        "kind": "Job",
+        "namespace": "default",
+        "name": "schema-migrate-2026-09-17",
+        "desired": 1,
+        "ready": 1,
+        "summary": "finished, 1 succeeded",
+        "image": "ghcr.io/holzcloud/migrate:12",
+        "created_at": "2026-09-17T18:20:00Z",
+        "schedule": "",
+        "suspended": false,
+        "last_run": "",
+        "scalable": false,
+        "rollable": false
+      }
+    ]
+  },
+  "/api/v1/clusters/c-homelab/kubernetes/resources": {
+    "resources": [
+      {
+        "kind": "PersistentVolumeClaim",
+        "namespace": "db",
+        "name": "data-postgres-0",
+        "summary": "Pending, 20Gi requested",
+        "detail": "class longhorn",
+        "healthy": false,
+        "created_at": "2026-09-02T09:00:00Z"
+      },
+      {
+        "kind": "Ingress",
+        "namespace": "default",
+        "name": "holzcloud-website",
+        "summary": "no address yet — no controller has claimed it",
+        "detail": "holzcloud.ch, www.holzcloud.ch",
+        "healthy": false,
+        "created_at": "2026-09-17T18:22:00Z"
+      },
+      {
+        "kind": "ConfigMap",
+        "namespace": "default",
+        "name": "website-settings",
+        "summary": "3 keys",
+        "detail": "analytics, locale, theme",
+        "healthy": true,
+        "created_at": "2026-09-17T18:22:00Z"
+      },
+      {
+        "kind": "Secret",
+        "namespace": "default",
+        "name": "ghcr-pull-secret",
+        "summary": "kubernetes.io/dockerconfigjson, 1 keys",
+        "detail": ".dockerconfigjson",
+        "healthy": true,
+        "created_at": "2026-09-01T08:00:00Z"
+      },
+      {
+        "kind": "HorizontalPodAutoscaler",
+        "namespace": "default",
+        "name": "holzcloud-website",
+        "summary": "2 now, between 2 and 8",
+        "detail": "it sets the replicas of Deployment holzcloud-website",
+        "healthy": true,
+        "created_at": "2026-09-17T18:22:00Z"
+      },
+      {
+        "kind": "PodDisruptionBudget",
+        "namespace": "longhorn-system",
+        "name": "longhorn-manager",
+        "summary": "1 of 2 healthy, 0 may be disrupted",
+        "detail": "a drain of a node carrying these pods will be refused until another becomes healthy",
+        "healthy": false,
+        "created_at": "2026-09-02T09:40:00Z"
+      }
+    ]
+  },
+  "/api/v1/clusters/c-homelab/kubernetes/nodes/srv-rsp-prod01.holzcloud.ch": {
+    "name": "srv-rsp-prod01.holzcloud.ch",
+    "conditions": [
+      {
+        "type": "MemoryPressure",
+        "status": "False",
+        "reason": "KubeletHasSufficientMemory",
+        "message": "kubelet has sufficient memory available",
+        "bad": false
+      },
+      {
+        "type": "DiskPressure",
+        "status": "True",
+        "reason": "KubeletHasDiskPressure",
+        "message": "kubelet has disk pressure",
+        "bad": true
+      },
+      {
+        "type": "PIDPressure",
+        "status": "False",
+        "reason": "KubeletHasSufficientPID",
+        "message": "",
+        "bad": false
+      }
+    ],
+    "taints": [
+      {
+        "key": "node-role.kubernetes.io/control-plane",
+        "value": "",
+        "effect": "NoSchedule",
+        "explanation": "nothing new is scheduled here unless it tolerates node-role.kubernetes.io/control-plane"
+      }
+    ],
+    "explaining_taints": [],
+    "cpu_allocatable": "4",
+    "cpu_requested": "1350m",
+    "memory_allocatable": "7846Mi",
+    "memory_requested": "2304Mi",
+    "pods_running": 14,
+    "pod_capacity": 110,
+    "notice": "Requested is what the pods here asked for, which is what the scheduler reserves. It is not what they use: a node at 5% CPU can still have no room left.",
+    "labels": {
+      "kubernetes.io/arch": "arm64",
+      "node-role.kubernetes.io/control-plane": ""
+    }
+  },
+  "/api/v1/clusters/c-homelab/kubernetes/usage": {
+    "collecting": true,
+    "nodes": [
+      {
+        "namespace": "",
+        "name": "srv-rsp-prod01.holzcloud.ch",
+        "cpu_millis": 1180,
+        "memory_bytes": 3221225472,
+        "cpu": "1180m",
+        "memory": "3Gi"
+      },
+      {
+        "namespace": "",
+        "name": "worker-02.holzcloud.ch",
+        "cpu_millis": 240,
+        "memory_bytes": 1073741824,
+        "cpu": "240m",
+        "memory": "1Gi"
+      }
+    ],
+    "pods": [
+      {
+        "namespace": "longhorn-system",
+        "name": "longhorn-manager-4kqwz",
+        "cpu_millis": 420,
+        "memory_bytes": 536870912,
+        "cpu": "420m",
+        "memory": "512Mi"
+      },
+      {
+        "namespace": "db",
+        "name": "postgres-0",
+        "cpu_millis": 310,
+        "memory_bytes": 1610612736,
+        "cpu": "310m",
+        "memory": "1536Mi"
+      },
+      {
+        "namespace": "kube-system",
+        "name": "coredns-7c65d6cfc9-x4m2p",
+        "cpu_millis": 12,
+        "memory_bytes": 25165824,
+        "cpu": "12m",
+        "memory": "24Mi"
+      }
+    ],
+    "notice": "This is what they are using. What the scheduler reserves is what they REQUESTED, which is on the node detail and is a different number."
   }
 }

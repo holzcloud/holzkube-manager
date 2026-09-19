@@ -1827,6 +1827,119 @@ export const kubeIdentitySchema = z.object({
   notice: z.string().default(''),
 })
 
+export const workloadSchema = z.object({
+  kind: z.string(),
+  namespace: z.string(),
+  name: z.string(),
+  desired: z.number().default(0),
+  ready: z.number().default(0),
+  /** The honest one-line state, written per kind on the server: "3 of 3 ready"
+   * is wrong for a CronJob and misleading for a Job. */
+  summary: z.string().default(''),
+  image: z.string().default(''),
+  created_at: z.string().default(''),
+  schedule: z.string().default(''),
+  suspended: z.boolean().default(false),
+  last_run: z.string().default(''),
+  /** Whether this kind takes a replica count at all — a DaemonSet does not. */
+  scalable: z.boolean().default(false),
+  /** Whether `rollout restart` applies — a Job has no pod template. */
+  rollable: z.boolean().default(false),
+})
+
+export const workloadsSchema = z.object({ workloads: z.array(workloadSchema).default([]) })
+
+export const clusterResourceSchema = z.object({
+  kind: z.string(),
+  namespace: z.string(),
+  name: z.string(),
+  /** The answer this kind exists to give, written per kind on the server. */
+  summary: z.string().default(''),
+  detail: z.string().default(''),
+  /** False when this object is the reason something else is stuck: a Pending
+   * claim, an Ingress no controller claimed, a budget allowing no disruption. */
+  healthy: z.boolean().default(true),
+  created_at: z.string().default(''),
+})
+
+export const clusterResourcesSchema = z.object({
+  resources: z.array(clusterResourceSchema).default([]),
+})
+
+export const nodeConditionSchema = z.object({
+  type: z.string(),
+  status: z.string(),
+  reason: z.string().default(''),
+  message: z.string().default(''),
+  /** True when this condition is the one stopping work. Ready is bad when
+   * False; a pressure is bad when True — the inversion a naive screen gets
+   * backwards. */
+  bad: z.boolean().default(false),
+})
+
+export const nodeTaintSchema = z.object({
+  key: z.string(),
+  value: z.string().default(''),
+  effect: z.string().default(''),
+  /** What the effect does, in words: NoSchedule keeps pods off, NoExecute
+   * removes the ones already there. */
+  explanation: z.string().default(''),
+})
+
+export const nodeDetailSchema = z.object({
+  name: z.string(),
+  conditions: z.array(nodeConditionSchema).default([]),
+  taints: z.array(nodeTaintSchema).default([]),
+  /** The taints worth pointing at — the control-plane one is ordinary and is
+   * left out, so a first visit does not look like a misconfiguration. */
+  explaining_taints: z.array(nodeTaintSchema).default([]),
+  cpu_allocatable: z.string().default(''),
+  cpu_requested: z.string().default(''),
+  memory_allocatable: z.string().default(''),
+  memory_requested: z.string().default(''),
+  pods_running: z.number().default(0),
+  pod_capacity: z.number().default(0),
+  /** Why "requested" is not "used". */
+  notice: z.string().default(''),
+  labels: z.record(z.string(), z.string()).default({}),
+})
+
+export const usageSchema = z.object({
+  namespace: z.string().default(''),
+  name: z.string(),
+  cpu_millis: z.number().default(0),
+  memory_bytes: z.number().default(0),
+  cpu: z.string().default(''),
+  memory: z.string().default(''),
+})
+
+export const clusterUsageSchema = z.object({
+  /** False when no metrics-server is installed — which is most clusters, and is
+   * not the same as usage being zero. */
+  collecting: z.boolean().default(false),
+  nodes: z.array(usageSchema).default([]),
+  pods: z.array(usageSchema).default([]),
+  notice: z.string().default(''),
+})
+
+export const execResultSchema = z.object({
+  namespace: z.string(),
+  pod: z.string(),
+  container: z.string(),
+  command: z.array(z.string()).default([]),
+  stdout: z.string().default(''),
+  stderr: z.string().default(''),
+  truncated: z.boolean().default(false),
+  /** Who the cluster saw run it. Carried so the screen can say it rather than
+   * implying the product ran it. */
+  identity: z.string().default(''),
+})
+
+export type ExecResult = z.infer<typeof execResultSchema>
+export type ClusterUsage = z.infer<typeof clusterUsageSchema>
+export type NodeDetail = z.infer<typeof nodeDetailSchema>
+export type ClusterResource = z.infer<typeof clusterResourceSchema>
+export type Workload = z.infer<typeof workloadSchema>
 export type KubeIdentity = z.infer<typeof kubeIdentitySchema>
 export type Described = z.infer<typeof describedSchema>
 export type KubeContainer = z.infer<typeof containerSchema>
@@ -2737,6 +2850,115 @@ export const api = {
         groups,
       })
     },
+
+    /** Everything that runs, across all five kinds. A cluster is not only its
+     * Deployments: the storage layer is a DaemonSet, the backup a CronJob. */
+    workloads: async (cluster: string, namespace?: string) =>
+      (
+        await sendJSON(
+          'GET',
+          `/api/v1/clusters/${encodeURIComponent(cluster)}/kubernetes/workloads` +
+            (namespace === undefined || namespace === ''
+              ? ''
+              : `?namespace=${encodeURIComponent(namespace)}`),
+          workloadsSchema,
+        )
+      ).workloads,
+
+    scaleWorkload: async (
+      cluster: string,
+      kind: string,
+      namespace: string,
+      name: string,
+      replicas: number,
+    ): Promise<void> => {
+      await send(
+        'POST',
+        `/api/v1/clusters/${encodeURIComponent(cluster)}/kubernetes/workloads/${encodeURIComponent(kind)}/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}/scale`,
+        { replicas },
+      )
+    },
+
+    restartWorkload: async (
+      cluster: string,
+      kind: string,
+      namespace: string,
+      name: string,
+    ): Promise<void> => {
+      await send(
+        'POST',
+        `/api/v1/clusters/${encodeURIComponent(cluster)}/kubernetes/workloads/${encodeURIComponent(kind)}/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}/restart`,
+      )
+    },
+
+    /** The objects beside the workloads: ConfigMaps, Secrets (names only),
+     * claims, Ingresses, autoscalers and disruption budgets. */
+    resources: async (cluster: string, namespace?: string) =>
+      (
+        await sendJSON(
+          'GET',
+          `/api/v1/clusters/${encodeURIComponent(cluster)}/kubernetes/resources` +
+            (namespace === undefined || namespace === ''
+              ? ''
+              : `?namespace=${encodeURIComponent(namespace)}`),
+          clusterResourcesSchema,
+        )
+      ).resources,
+
+    /** Remove one object. A Namespace is refused: deleting one removes
+     * everything inside it and nothing stops it once it starts. */
+    deleteObject: async (
+      cluster: string,
+      object: { api_version: string; kind: string; namespace?: string; name: string },
+    ): Promise<void> => {
+      await send('POST', `/api/v1/clusters/${encodeURIComponent(cluster)}/kubernetes/delete`, {
+        namespace: '',
+        ...object,
+      })
+    },
+
+    /** One node's conditions, taints and how much room the scheduler has left
+     * — the fields that say why nothing will go there. */
+    nodeDetail: (cluster: string, node: string) =>
+      sendJSON(
+        'GET',
+        `/api/v1/clusters/${encodeURIComponent(cluster)}/kubernetes/nodes/${encodeURIComponent(node)}`,
+        nodeDetailSchema,
+      ),
+
+    /** What nodes and pods are USING — a different number from what they
+     * requested, and absent unless a metrics-server is installed. */
+    usage: (cluster: string, namespace?: string) =>
+      sendJSON(
+        'GET',
+        `/api/v1/clusters/${encodeURIComponent(cluster)}/kubernetes/usage` +
+          (namespace === undefined || namespace === ''
+            ? ''
+            : `?namespace=${encodeURIComponent(namespace)}`),
+        clusterUsageSchema,
+      ),
+
+    /**
+     * Run one command in a container.
+     *
+     * A LIST, not a string: a string would have to be split by something, and
+     * whatever split it would be a shell. `sh -c "…"` is refused by the server,
+     * because an archive holding "sh -lc" plus one opaque argument cannot say
+     * what happened. It also refuses unless this cluster acts as a person.
+     */
+    exec: (
+      cluster: string,
+      namespace: string,
+      pod: string,
+      container: string,
+      command: string[],
+    ): Promise<ExecResult> =>
+      sendJSON(
+        'POST',
+        `/api/v1/clusters/${encodeURIComponent(cluster)}/kubernetes/pods/${encodeURIComponent(namespace)}/${encodeURIComponent(pod)}/exec`,
+        execResultSchema,
+        { container, command },
+      ),
 
     /** Which containers a pod has, and how each of them is doing. */
     containers: async (cluster: string, namespace: string, pod: string) =>

@@ -9,7 +9,6 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/apimachinery/pkg/runtime/schema"
 	"sigs.k8s.io/yaml"
 )
 
@@ -84,19 +83,9 @@ func (c *Client) Describe(ctx context.Context, apiVersion, kind, namespace, name
 				"belongs in whatever created it", ErrRefusedKind)
 	}
 
-	gv, err := schema.ParseGroupVersion(apiVersion)
-	if err != nil {
-		return Described{}, fmt.Errorf("%w: %q is not an apiVersion", ErrManifestInvalid, apiVersion)
-	}
-
-	mapper, err := c.restMapper()
+	mapping, err := c.resolveObject(apiVersion, kind)
 	if err != nil {
 		return Described{}, err
-	}
-	mapping, err := mapper.RESTMapping(schema.GroupKind{Group: gv.Group, Kind: kind}, gv.Version)
-	if err != nil {
-		return Described{}, fmt.Errorf("%w: this cluster does not have %s %s: %w",
-			ErrManifestInvalid, apiVersion, kind, err)
 	}
 
 	if mapping.Scope.Name() != "namespace" {

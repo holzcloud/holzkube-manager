@@ -390,6 +390,37 @@ var allowlist = map[string][]string{
 	"cluster.kubernetes-identity":     {},
 	"cluster.kubernetes-set-identity": {"user", "groups"},
 
+	// The other workload kinds. The kind, namespace and name are in the path
+	// and on the record already; the replica count is kept for the reason the
+	// deployment scale's is -- "scaled to zero" and "scaled to ten" are
+	// different events.
+	"cluster.kubernetes-workloads":        {},
+	"cluster.kubernetes-scale-workload":   {"replicas"},
+	"cluster.kubernetes-restart-workload": {},
+
+	// The objects beside the workloads, and removing one. WHAT was removed is
+	// the event and is kept in clear, which is why the delete is a POST: this
+	// middleware reads bodies, and a DELETE with the object in the query would
+	// record that somebody deleted something (ledger 150).
+	"cluster.kubernetes-resources":     {},
+	"cluster.kubernetes-delete-object": {"api_version", "kind", "namespace", "name"},
+
+	// One node's conditions, taints and how much room the scheduler has left.
+	// A read; the node is in the path.
+	"cluster.kubernetes-node-detail": {},
+
+	// What nodes and pods are using. A read, and the answer is the cluster's
+	// own measurement rather than anything this installation holds.
+	"cluster.kubernetes-usage": {},
+
+	// Running a command in a container. THE COMMAND IS THE EVENT and every
+	// argument is archived in clear -- which is only possible because a shell
+	// with a string is refused: "sh -lc" plus one opaque argument would be a
+	// record that cannot say what happened.
+	//
+	// The OUTPUT is never archived: it is whatever the workload printed.
+	"cluster.kubernetes-exec": {"container", "command"},
+
 	// Renewing this installation's own client certificate for a cluster
 	// (V2-OPS-02). No parameters: the cluster is on the record already and the
 	// certificate itself never goes near the archive.
