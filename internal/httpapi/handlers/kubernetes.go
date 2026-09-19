@@ -2,8 +2,10 @@ package handlers
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/holzcloud/holzkube-manager/internal/httpapi"
@@ -111,7 +113,197 @@ func KubernetesRoutes(d httpapi.Deps) []httpapi.Route {
 			Action:          "cluster.kubernetes-rollout-restart",
 			Handler:         handler(kubernetesRolloutRestart(d)),
 		},
+		{
+			Method:  http.MethodPost,
+			Pattern: "/api/v1/clusters/{id}/kubernetes/manifest/plan",
+
+			// Not destructive, and that is the entire reason it is a separate
+			// route: it asks the cluster what exists and writes nothing. A plan
+			// that needed a sudo window would push operators to skip the plan
+			// and apply blind, which is the opposite of what it is for.
+			//
+			// Operator rather than reader, though: a plan asks whether named
+			// objects exist in named namespaces, and that is more than the
+			// overview shows.
+			RequiresSession: true,
+			MinRole:         model.RoleOperator,
+			Action:          "cluster.kubernetes-manifest-plan",
+			Handler:         handler(kubernetesManifestPlan(d)),
+		},
+		{
+			Method:  http.MethodPost,
+			Pattern: "/api/v1/clusters/{id}/kubernetes/manifest/apply",
+
+			// Destructive in the sense D-06 means: it changes objects that are
+			// already there, and an apply of the wrong document into the wrong
+			// cluster is the mistake this product exists to make harder.
+			Destructive:     true,
+			ClusterScope:    clusterIDFromPath,
+			RequiresSession: true,
+			MinRole:         model.RoleOperator,
+			Action:          "cluster.kubernetes-manifest-apply",
+			Handler:         handler(kubernetesManifestApply(d)),
+		},
+		{
+			Method:  http.MethodPost,
+			Pattern: "/api/v1/clusters/{id}/kubernetes/services/{namespace}/{service}/proxy",
+
+			// A POST for a read, deliberately, and REST taste is not what
+			// decided it. Two reasons, both about the record:
+			//
+			// The audit middleware captures the request BODY and not the query
+			// string, so a GET with ?port=&path= would archive "somebody used
+			// the proxy" and never say what they read. "Somebody read /healthz"
+			// and "somebody read /admin/users" are different events, and this
+			// is the one route where the parameters ARE the event.
+			//
+			// And a path in a query string is also in the daemon's access log
+			// and in the browser's history, which is two more places a
+			// workload's internal URLs end up for no benefit.
+			//
+			// What it sends is still only a GET to the workload: see
+			// kube.ProxyGet for why forwarding any method would hand this
+			// product's identity to whoever holds an operator session.
+			//
+			// Not Destructive: it cannot write to a workload, so a sudo window
+			// would be theatre. Operator rather than reader, though -- reaching
+			// an unauthenticated admin endpoint inside the cluster is not a read
+			// of this product's own data.
+			RequiresSession: true,
+			MinRole:         model.RoleOperator,
+			Action:          "cluster.kubernetes-service-proxy",
+			Handler:         handler(kubernetesServiceProxy(d)),
+		},
 	}
+}
+
+// kubernetesServiceProxy fetches one path from a service in the cluster.
+//
+// The answer is JSON with the body as a STRING, never the workload's own bytes
+// under the workload's own content type. That is the security decision this route
+// exists to make: handing back `text/html` from a pod would serve that pod's
+// markup from this daemon's origin, which is the origin holding the operator's
+// session cookie.
+func kubernetesServiceProxy(d httpapi.Deps) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Port string `json:"port"`
+			Path string `json:"path"`
+		}
+		if err := decodeJSON(w, r, &body); err != nil {
+			httpapi.WriteProblem(w, r, decodeProblem(err))
+			return
+		}
+
+		client, ctx, cancel, ok := kubeClientFor(d, w, r)
+		if !ok {
+			return
+		}
+		defer cancel()
+
+		// A shorter budget than the route's: behind this is an arbitrary
+		// workload rather than the API server answering out of etcd.
+		ctx, stop := context.WithTimeout(ctx, kube.ProxyBudget)
+		defer stop()
+
+		response, err := client.ProxyGet(ctx, r.PathValue("namespace"), r.PathValue("service"),
+			body.Port, body.Path)
+		if err != nil {
+			writeKubernetesError(w, r, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, response)
+	}
+}
+
+// maxManifestBytes caps a pasted manifest.
+//
+// Larger than the 64 KiB every other body gets, because a real manifest is
+// larger than every other body: one rendered chart with a CustomResourceDefinition
+// in it passes 64 KiB easily, and a product that refused those would be a
+// product nobody could apply their actual manifests with. Still bounded, because
+// what arrives here is parsed into objects in memory.
+const maxManifestBytes = 1 << 20
+
+// kubernetesManifestPlan says what applying a manifest would do, and writes
+// nothing.
+func kubernetesManifestPlan(d httpapi.Deps) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		manifest, ok := manifestFrom(w, r)
+		if !ok {
+			return
+		}
+
+		client, ctx, cancel, ok := kubeClientFor(d, w, r)
+		if !ok {
+			return
+		}
+		defer cancel()
+
+		plan, err := client.PlanManifest(ctx, manifest)
+		if err != nil {
+			writeKubernetesError(w, r, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, plan)
+	}
+}
+
+// kubernetesManifestApply applies a manifest with server-side apply.
+//
+// The answer is 200 with the per-object result even when some objects failed,
+// and that is deliberate. An apply of ten objects where the sixth conflicts has
+// changed five things; a single status code cannot say which five, and a problem
+// document would replace the list with a sentence. So the list is the answer,
+// FullyApplied says whether anything failed, and the screen shows both.
+func kubernetesManifestApply(d httpapi.Deps) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		manifest, ok := manifestFrom(w, r)
+		if !ok {
+			return
+		}
+
+		client, ctx, cancel, ok := kubeClientFor(d, w, r)
+		if !ok {
+			return
+		}
+		defer cancel()
+
+		result, err := client.ApplyManifest(ctx, manifest)
+		if err != nil && len(result.Applied) == 0 && len(result.Failed) == 0 {
+			// Nothing was even attempted: the document itself is unusable, and
+			// there is no per-object truth to report.
+			writeKubernetesError(w, r, err)
+			return
+		}
+
+		writeJSON(w, http.StatusOK, struct {
+			kube.ApplyResult
+			FullyApplied bool `json:"fully_applied"`
+		}{ApplyResult: result, FullyApplied: len(result.Failed) == 0})
+	}
+}
+
+// manifestFrom reads the pasted document out of the request.
+func manifestFrom(w http.ResponseWriter, r *http.Request) ([]byte, bool) {
+	r.Body = http.MaxBytesReader(w, r.Body, maxManifestBytes)
+
+	var body struct {
+		Manifest string `json:"manifest"`
+	}
+	dec := json.NewDecoder(r.Body)
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&body); err != nil {
+		httpapi.WriteProblem(w, r, decodeProblem(err))
+		return nil, false
+	}
+	if strings.TrimSpace(body.Manifest) == "" {
+		httpapi.WriteProblem(w, r, httpapi.Validation(
+			"Paste the manifest you want applied.",
+			httpapi.FieldError{Field: "manifest", Reason: "required"}))
+		return nil, false
+	}
+	return []byte(body.Manifest), true
 }
 
 // kubernetesRestartPod deletes one pod so its controller replaces it.
@@ -352,6 +544,7 @@ type kubernetesOverviewBody struct {
 	Nodes       []kube.Node       `json:"nodes"`
 	Pods        []kube.Pod        `json:"pods"`
 	Deployments []kube.Deployment `json:"deployments"`
+	Services    []kube.Service    `json:"services"`
 	Namespaces  []string          `json:"namespaces"`
 
 	// Namespace echoes the filter that was applied, empty meaning every
@@ -404,6 +597,14 @@ func kubernetesOverview(d httpapi.Deps) http.HandlerFunc {
 			writeKubernetesError(w, r, err)
 			return
 		}
+		// Services are here because the proxy needs a port, and a screen that
+		// made somebody look one up would send them to kubectl for the one thing
+		// this screen exists to save them.
+		services, err := client.Services(ctx, namespace)
+		if err != nil {
+			writeKubernetesError(w, r, err)
+			return
+		}
 
 		writeJSON(w, http.StatusOK, kubernetesOverviewBody{
 			Cluster:       id,
@@ -411,6 +612,7 @@ func kubernetesOverview(d httpapi.Deps) http.HandlerFunc {
 			Nodes:         nodes,
 			Pods:          pods,
 			Deployments:   deployments,
+			Services:      services,
 			Namespaces:    namespaces,
 			Namespace:     namespace,
 		})
@@ -440,6 +642,19 @@ func writeKubernetesError(w http.ResponseWriter, r *http.Request, err error) {
 			Status: http.StatusConflict,
 			Detail: err.Error(),
 			Code:   httpapi.CodeNothingWouldRecreateIt,
+		})
+
+	case errors.Is(err, kube.ErrProxyPathRefused):
+		httpapi.WriteProblem(w, r, httpapi.Validation(err.Error(),
+			httpapi.FieldError{Field: "path", Reason: "refused"}))
+
+	case errors.Is(err, kube.ErrManifestInvalid):
+		httpapi.WriteProblem(w, r, &httpapi.Problem{
+			Type:   httpapi.TypeValidation,
+			Title:  "That manifest cannot be applied",
+			Status: http.StatusBadRequest,
+			Detail: err.Error(),
+			Code:   httpapi.CodeManifestInvalid,
 		})
 
 	case errors.Is(err, kube.ErrNoSuchWorkload):

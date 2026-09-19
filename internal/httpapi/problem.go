@@ -133,6 +133,12 @@ const (
 	// again with a talosconfig that carries the authority.
 	CodeNoKubernetesAuthority = "conflict.no-kubernetes-authority"
 
+	// CodeManifestInvalid: the pasted manifest is not something this build can
+	// apply -- empty, not YAML, a document with no kind or no name, or a kind
+	// the cluster does not have. Validation rather than upstream: the document
+	// is the problem and the repair is in the operator's hands.
+	CodeManifestInvalid = "validation.manifest-invalid"
+
 	// CodeNoKubernetesEndpoint: no control-plane node could say where the
 	// cluster's Kubernetes API server is. Upstream, because the answer lives on
 	// the nodes and they were asked.

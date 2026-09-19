@@ -47,6 +47,15 @@ const overview: KubernetesOverview = {
   server_version: 'v1.34.1',
   namespace: '',
   namespaces: ['default', 'kube-system'],
+  services: [
+    {
+      namespace: 'default',
+      name: 'api',
+      type: 'ClusterIP',
+      cluster_ip: '10.96.0.12',
+      ports: [{ name: 'http', port: 8080, protocol: 'TCP' }],
+    },
+  ],
   nodes: [
     {
       name: 'holzkube-01',

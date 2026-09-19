@@ -1704,6 +1704,38 @@ export const kubernetesDeploymentSchema = z.object({
   created_at: z.string().default(''),
 })
 
+/** One service, and its ports, because reaching one needs a port. */
+export const kubernetesServiceSchema = z.object({
+  namespace: z.string(),
+  name: z.string(),
+  /** ClusterIP, NodePort, LoadBalancer or ExternalName — it answers "why can I
+   * not reach this from outside", which is the question that brings somebody
+   * here. */
+  type: z.string().default(''),
+  cluster_ip: z.string().default(''),
+  ports: z
+    .array(
+      z.object({
+        name: z.string().default(''),
+        port: z.number(),
+        protocol: z.string().default(''),
+      }),
+    )
+    .default([]),
+})
+
+/** What a workload answered. The body is TEXT and there is no content type:
+ * serving a pod's own markup from this origin is how a pod would script the
+ * interface holding the operator's session. */
+export const proxyResponseSchema = z.object({
+  status: z.number(),
+  body: z.string().default(''),
+  truncated: z.boolean().default(false),
+})
+
+export type KubernetesService = z.infer<typeof kubernetesServiceSchema>
+export type ProxyResponse = z.infer<typeof proxyResponseSchema>
+
 export const kubernetesOverviewSchema = z.object({
   cluster: z.string(),
   /** The API server's own version: the cheapest proof that the whole path
@@ -1712,11 +1744,49 @@ export const kubernetesOverviewSchema = z.object({
   nodes: z.array(kubernetesNodeSchema),
   pods: z.array(kubernetesPodSchema),
   deployments: z.array(kubernetesDeploymentSchema),
+  services: z.array(kubernetesServiceSchema).default([]),
   namespaces: z.array(z.string()).default([]),
   /** Echoed back, so a screen cannot show one namespace's pods under
    * another's heading. */
   namespace: z.string().default(''),
 })
+
+/** One document of a manifest, as the plan describes it. */
+export const manifestObjectSchema = z.object({
+  api_version: z.string().default(''),
+  kind: z.string().default(''),
+  namespace: z.string().default(''),
+  name: z.string().default(''),
+  /** `create` or `update` in a plan, `applied` in a result — and in a plan it
+   * comes from asking the cluster, not from reading the manifest. The manifest
+   * looks identical either way. */
+  action: z.string().default(''),
+  /** Whether the kind lives in a namespace, according to the cluster's own
+   * discovery. */
+  namespaced: z.boolean().default(false),
+})
+
+export const manifestPlanSchema = z.object({
+  objects: z.array(manifestObjectSchema).default([]),
+  /** Things that are true and worth reading before applying: an object that
+   * would land in `default`, a kind this cluster does not have. */
+  warnings: z.array(z.string()).default([]),
+})
+
+export const manifestApplyResultSchema = z.object({
+  applied: z.array(manifestObjectSchema).default([]),
+  failed: z
+    .array(z.object({ object: manifestObjectSchema, reason: z.string().default('') }))
+    .default([]),
+  /** False when anything failed. The server answers 200 with the per-object
+   * truth either way: an apply of ten where the sixth conflicted changed five
+   * things, and one status code cannot say which five. */
+  fully_applied: z.boolean().default(false),
+})
+
+export type ManifestObject = z.infer<typeof manifestObjectSchema>
+export type ManifestPlan = z.infer<typeof manifestPlanSchema>
+export type ManifestApplyResult = z.infer<typeof manifestApplyResultSchema>
 
 export type KubernetesOverview = z.infer<typeof kubernetesOverviewSchema>
 export type KubernetesNode = z.infer<typeof kubernetesNodeSchema>
@@ -2481,6 +2551,66 @@ export const api = {
         `/api/v1/clusters/${encodeURIComponent(cluster)}/kubernetes/deployments/${encodeURIComponent(namespace)}/${encodeURIComponent(deployment)}/restart`,
       )
     },
+
+    /**
+     * What applying a manifest would do. It changes nothing.
+     *
+     * Each object's action is decided by asking the cluster whether that object
+     * exists — `create` and `update` cannot be read off a manifest, which looks
+     * identical either way.
+     */
+    planManifest: (cluster: string, manifest: string): Promise<ManifestPlan> =>
+      sendJSON(
+        'POST',
+        `/api/v1/clusters/${encodeURIComponent(cluster)}/kubernetes/manifest/plan`,
+        manifestPlanSchema,
+        { manifest },
+      ),
+
+    /**
+     * Apply a manifest with server-side apply, under this product's own field
+     * manager.
+     *
+     * A conflict means another field manager — usually a controller — owns a
+     * field this apply sets. It comes back as something to read rather than
+     * being forced: forcing takes the value away from whatever is managing it,
+     * and that thing will set it back.
+     */
+    applyManifest: (cluster: string, manifest: string): Promise<ManifestApplyResult> =>
+      sendJSON(
+        'POST',
+        `/api/v1/clusters/${encodeURIComponent(cluster)}/kubernetes/manifest/apply`,
+        manifestApplyResultSchema,
+        { manifest },
+      ),
+
+    /**
+     * Fetch one path from a service in the cluster.
+     *
+     * A POST for a read, and the reason is the record rather than REST taste:
+     * the audit archive captures request bodies and not query strings, and on
+     * this route the port and the path ARE the event — "somebody read /healthz"
+     * and "somebody read /admin/users" are not the same entry. A path in a query
+     * string would also sit in the browser's history and the daemon's access log
+     * for no benefit.
+     *
+     * What comes back is text, never rendered: the workload's own content type
+     * is deliberately not carried, because serving a pod's markup from this
+     * origin would let any pod script this interface.
+     */
+    proxyService: (
+      cluster: string,
+      namespace: string,
+      service: string,
+      port: string,
+      path: string,
+    ): Promise<ProxyResponse> =>
+      sendJSON(
+        'POST',
+        `/api/v1/clusters/${encodeURIComponent(cluster)}/kubernetes/services/${encodeURIComponent(namespace)}/${encodeURIComponent(service)}/proxy`,
+        proxyResponseSchema,
+        { port, path },
+      ),
 
     overview: (cluster: string, namespace?: string): Promise<KubernetesOverview> =>
       sendJSON(
