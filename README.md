@@ -1011,6 +1011,36 @@ The worst case is bounded by one decision: `force` is never sent. So an apply th
 meets something it does not own fails and says so, rather than taking a field away
 from the controller that owns it.
 
+## On a phone
+
+The whole interface is meant to be used from a phone, and that is a measured
+property rather than a hope: `web/scripts/layout-audit.mjs` drives every screen
+at 390px and at 1280px in a real browser, against real rows, and fails the build
+on three things — an element past the right edge with nothing to scroll, a
+control smaller than 44px, and a table wider than the screen.
+
+**Below 768px a table is not a table.** Rows you act on — nodes, pods,
+deployments, clusters, accounts — become cards: the name on top, the figures as
+labelled values, and the buttons underneath the name they act on. Rows you scan —
+the audit archive, recent activity — become a compact list with the rest folded
+away, and tapping one opens its detail.
+
+The reason is not taste. A wide table on a phone scrolls sideways, and the first
+column is what scrolls away first: you end up looking at a "Scale" field and a
+"Roll pods" button with no way to see which deployment they belong to. An action
+detached from its subject is a different and worse defect than an ugly layout,
+and it is what this is built to prevent.
+
+**44px is the minimum target below 768px.** WCAG 2.5.8 asks for 24; Apple and
+Material name 44 for a finger, and a cluster screen gets read one-handed while
+something is broken.
+
+**The guard renders real rows, and that had to be fixed before any of this could
+be believed.** It used to start a daemon with an empty data directory, so every
+screen showed nothing and passed. The first run with data found seven tables
+between 521 and 1027px wide and ten controls under 44px — all of which had been
+there, passing, for as long as the guard had existed (ledger 149).
+
 ## Metrics
 
 ```

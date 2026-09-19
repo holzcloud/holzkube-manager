@@ -1,18 +1,11 @@
 import { useQuery } from '@tanstack/react-query'
 import { createRoute, Link } from '@tanstack/react-router'
 import { api } from '@/api'
+import { DataTable } from '@/components/DataTable'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table'
 import { useSystemStatus } from '@/hooks/useSession'
 import { authenticatedRoute } from '@/routes/__root'
 
@@ -205,24 +198,32 @@ function Dashboard() {
           )}
 
           {recent.isSuccess && recent.data.items.length > 0 && (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Time</TableHead>
-                  <TableHead>Actor</TableHead>
-                  <TableHead>Action</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {recent.data.items.slice(0, 3).map((record) => (
-                  <TableRow key={record.seq}>
-                    <TableCell className="tabular-nums">{record.ts}</TableCell>
-                    <TableCell>{record.actor === '' ? '—' : record.actor}</TableCell>
-                    <TableCell className="font-mono text-xs">{record.action}</TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
+            <DataTable
+              label="Recent activity"
+              phone="rows"
+              rows={recent.data.items.slice(0, 3)}
+              keyOf={(record) => String(record.seq)}
+              empty="Nothing has been recorded yet."
+              columns={[
+                {
+                  key: 'action',
+                  label: 'Action',
+                  role: 'identity',
+                  render: (record) => <span className="font-mono text-xs">{record.action}</span>,
+                },
+                {
+                  key: 'ts',
+                  label: 'Time',
+                  className: 'tabular-nums',
+                  render: (record) => <span className="tabular-nums">{record.ts}</span>,
+                },
+                {
+                  key: 'actor',
+                  label: 'Actor',
+                  render: (record) => (record.actor === '' ? '—' : record.actor),
+                },
+              ]}
+            />
           )}
 
           <Button asChild variant="secondary">

@@ -3,6 +3,7 @@ import { createRoute } from '@tanstack/react-router'
 import { useState } from 'react'
 import { api } from '@/api'
 import { ApplyManifest } from '@/components/ApplyManifest'
+import { DataTable } from '@/components/DataTable'
 import { NodeSchedulingActions } from '@/components/NodeSchedulingActions'
 import { Problem } from '@/components/Problem'
 import { ReachService } from '@/components/ReachService'
@@ -119,44 +120,49 @@ export function KubernetesView() {
               <CardTitle>Nodes</CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="border-b text-left text-muted-foreground">
-                      <th className="py-1 pr-4 font-medium">Name</th>
-                      <th className="py-1 pr-4 font-medium">Ready</th>
-                      <th className="py-1 pr-4 font-medium">Scheduling</th>
-                      <th className="py-1 pr-4 font-medium">Roles</th>
-                      <th className="py-1 pr-4 font-medium">Kubelet</th>
-                      <th className="py-1 pr-4 font-medium">Scheduling actions</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {overview.data.nodes.map((node) => (
-                      <tr key={node.name} className="border-b max-md:h-11">
-                        <td className="py-1 pr-4 font-mono text-xs">{node.name}</td>
-                        <td className="py-1 pr-4">{node.ready}</td>
-                        <td className="py-1 pr-4">
-                          {node.unschedulable ? (
-                            <span className="text-amber-700 dark:text-amber-300">cordoned</span>
-                          ) : (
-                            'schedulable'
-                          )}
-                        </td>
-                        <td className="py-1 pr-4">{node.roles.join(', ') || '—'}</td>
-                        <td className="py-1 pr-4">{node.kubelet_version || '—'}</td>
-                        <td className="py-1 pr-4">
-                          <NodeSchedulingActions
-                            clusterID={selected}
-                            node={node.name}
-                            unschedulable={node.unschedulable}
-                          />
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+              <DataTable
+                label="Kubernetes nodes"
+                rows={overview.data.nodes}
+                keyOf={(node) => node.name}
+                empty="The API server answered, and it has no nodes registered."
+                columns={[
+                  {
+                    key: 'name',
+                    label: 'Name',
+                    role: 'identity',
+                    render: (node) => <span className="font-mono text-xs">{node.name}</span>,
+                  },
+                  { key: 'ready', label: 'Ready', render: (node) => node.ready },
+                  {
+                    key: 'scheduling',
+                    label: 'Scheduling',
+                    render: (node) =>
+                      node.unschedulable ? (
+                        <span className="text-amber-700 dark:text-amber-300">cordoned</span>
+                      ) : (
+                        'schedulable'
+                      ),
+                  },
+                  { key: 'roles', label: 'Roles', render: (node) => node.roles.join(', ') || '—' },
+                  {
+                    key: 'kubelet',
+                    label: 'Kubelet',
+                    render: (node) => node.kubelet_version || '—',
+                  },
+                  {
+                    key: 'actions',
+                    label: 'Scheduling actions',
+                    role: 'actions',
+                    render: (node) => (
+                      <NodeSchedulingActions
+                        clusterID={selected}
+                        node={node.name}
+                        unschedulable={node.unschedulable}
+                      />
+                    ),
+                  },
+                ]}
+              />
             </CardContent>
           </Card>
 
@@ -165,55 +171,67 @@ export function KubernetesView() {
               <CardTitle>Deployments</CardTitle>
             </CardHeader>
             <CardContent>
-              {overview.data.deployments.length === 0 ? (
-                <p className="text-muted-foreground text-sm">
-                  The API server answered, and this cluster has no deployments
-                  {overview.data.namespace === '' ? '' : ` in ${overview.data.namespace}`}.
-                </p>
-              ) : (
-                <div className="overflow-x-auto">
-                  <table className="w-full text-sm">
-                    <thead>
-                      <tr className="border-b text-left text-muted-foreground">
-                        <th className="py-1 pr-4 font-medium">Namespace</th>
-                        <th className="py-1 pr-4 font-medium">Deployment</th>
-                        <th className="py-1 pr-4 font-medium">Ready</th>
-                        <th className="py-1 pr-4 font-medium">Image</th>
-                        <th className="py-1 pr-4 font-medium">Actions</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {overview.data.deployments.map((deployment) => (
-                        <tr
-                          key={`${deployment.namespace}/${deployment.name}`}
-                          className="border-b max-md:h-11"
-                        >
-                          <td className="py-1 pr-4 text-xs">{deployment.namespace}</td>
-                          <td className="py-1 pr-4 font-mono text-xs">{deployment.name}</td>
-                          <td
-                            className={
-                              deployment.ready === deployment.desired
-                                ? 'py-1 pr-4'
-                                : 'py-1 pr-4 text-red-700 dark:text-red-300'
-                            }
-                          >
-                            {deployment.ready}/{deployment.desired}
-                          </td>
-                          <td className="py-1 pr-4 font-mono text-xs">{deployment.image || '—'}</td>
-                          <td className="py-1 pr-4">
-                            <DeploymentActions
-                              clusterID={selected}
-                              namespace={deployment.namespace}
-                              deployment={deployment.name}
-                              desired={deployment.desired}
-                            />
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
+              <DataTable
+                label="Deployments"
+                rows={overview.data.deployments}
+                keyOf={(deployment) => `${deployment.namespace}/${deployment.name}`}
+                empty={
+                  <>
+                    The API server answered, and this cluster has no deployments
+                    {overview.data.namespace === '' ? '' : ` in ${overview.data.namespace}`}.
+                  </>
+                }
+                columns={[
+                  {
+                    key: 'namespace',
+                    label: 'Namespace',
+                    render: (deployment) => <span className="text-xs">{deployment.namespace}</span>,
+                  },
+                  {
+                    key: 'name',
+                    label: 'Deployment',
+                    role: 'identity',
+                    render: (deployment) => (
+                      <span className="font-mono text-xs">{deployment.name}</span>
+                    ),
+                  },
+                  {
+                    key: 'ready',
+                    label: 'Ready',
+                    render: (deployment) => (
+                      <span
+                        className={
+                          deployment.ready === deployment.desired
+                            ? undefined
+                            : 'text-red-700 dark:text-red-300'
+                        }
+                      >
+                        {deployment.ready}/{deployment.desired}
+                      </span>
+                    ),
+                  },
+                  {
+                    key: 'image',
+                    label: 'Image',
+                    render: (deployment) => (
+                      <span className="break-all font-mono text-xs">{deployment.image || '—'}</span>
+                    ),
+                  },
+                  {
+                    key: 'actions',
+                    label: 'Actions',
+                    role: 'actions',
+                    render: (deployment) => (
+                      <DeploymentActions
+                        clusterID={selected}
+                        namespace={deployment.namespace}
+                        deployment={deployment.name}
+                        desired={deployment.desired}
+                      />
+                    ),
+                  },
+                ]}
+              />
             </CardContent>
           </Card>
 
@@ -242,63 +260,86 @@ export function KubernetesView() {
                 </Select>
               </div>
 
-              {overview.data.pods.length === 0 ? (
-                <p className="text-muted-foreground text-sm">
-                  The API server answered, and there are no pods
-                  {overview.data.namespace === '' ? '' : ` in ${overview.data.namespace}`}.
-                </p>
-              ) : (
-                <div className="overflow-x-auto">
-                  <table className="w-full text-sm">
-                    <thead>
-                      <tr className="border-b text-left text-muted-foreground">
-                        <th className="py-1 pr-4 font-medium">Namespace</th>
-                        <th className="py-1 pr-4 font-medium">Pod</th>
-                        <th className="py-1 pr-4 font-medium">Phase</th>
-                        <th className="py-1 pr-4 font-medium">Ready</th>
-                        <th className="py-1 pr-4 font-medium">Restarts</th>
-                        <th className="py-1 pr-4 font-medium">Node</th>
-                        <th className="py-1 pr-4 font-medium">Action</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {overview.data.pods.map((pod) => {
-                        const healthy = pod.ready === pod.containers && pod.reason === ''
-                        return (
-                          <tr key={`${pod.namespace}/${pod.name}`} className="border-b max-md:h-11">
-                            <td className="py-1 pr-4 text-xs">{pod.namespace}</td>
-                            <td className="py-1 pr-4 font-mono text-xs">{pod.name}</td>
-                            <td className="py-1 pr-4">
-                              {pod.phase}
-                              {pod.reason === '' ? null : (
-                                <span className="ml-1 text-red-700 dark:text-red-300">
-                                  ({pod.reason})
-                                </span>
-                              )}
-                            </td>
-                            <td
-                              className={
-                                healthy ? 'py-1 pr-4' : 'py-1 pr-4 text-red-700 dark:text-red-300'
-                              }
-                            >
-                              {pod.ready}/{pod.containers}
-                            </td>
-                            <td className="py-1 pr-4 tabular-nums">{pod.restarts}</td>
-                            <td className="py-1 pr-4 font-mono text-xs">{pod.node || '—'}</td>
-                            <td className="py-1 pr-4">
-                              <RestartPodButton
-                                clusterID={selected}
-                                namespace={pod.namespace}
-                                pod={pod.name}
-                              />
-                            </td>
-                          </tr>
-                        )
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-              )}
+              <DataTable
+                label="Pods"
+                rows={overview.data.pods}
+                keyOf={(pod) => `${pod.namespace}/${pod.name}`}
+                empty={
+                  <>
+                    The API server answered, and there are no pods
+                    {overview.data.namespace === '' ? '' : ` in ${overview.data.namespace}`}.
+                  </>
+                }
+                columns={[
+                  {
+                    key: 'namespace',
+                    label: 'Namespace',
+                    render: (pod) => <span className="text-xs">{pod.namespace}</span>,
+                  },
+                  {
+                    key: 'name',
+                    label: 'Pod',
+                    role: 'identity',
+                    render: (pod) => (
+                      <span className="break-all font-mono text-xs">{pod.name}</span>
+                    ),
+                  },
+                  {
+                    key: 'phase',
+                    label: 'Phase',
+                    render: (pod) => (
+                      <>
+                        {pod.phase}
+                        {pod.reason === '' ? null : (
+                          <span className="ml-1 text-red-700 dark:text-red-300">
+                            ({pod.reason})
+                          </span>
+                        )}
+                      </>
+                    ),
+                  },
+                  {
+                    key: 'ready',
+                    label: 'Ready',
+                    render: (pod) => (
+                      <span
+                        className={
+                          pod.ready === pod.containers && pod.reason === ''
+                            ? undefined
+                            : 'text-red-700 dark:text-red-300'
+                        }
+                      >
+                        {pod.ready}/{pod.containers}
+                      </span>
+                    ),
+                  },
+                  {
+                    key: 'restarts',
+                    label: 'Restarts',
+                    className: 'tabular-nums',
+                    render: (pod) => pod.restarts,
+                  },
+                  {
+                    key: 'node',
+                    label: 'Node',
+                    render: (pod) => (
+                      <span className="break-all font-mono text-xs">{pod.node || '—'}</span>
+                    ),
+                  },
+                  {
+                    key: 'action',
+                    label: 'Action',
+                    role: 'actions',
+                    render: (pod) => (
+                      <RestartPodButton
+                        clusterID={selected}
+                        namespace={pod.namespace}
+                        pod={pod.name}
+                      />
+                    ),
+                  },
+                ]}
+              />
             </CardContent>
           </Card>
 

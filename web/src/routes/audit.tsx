@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query'
 import { createRoute } from '@tanstack/react-router'
 import { useCallback, useState } from 'react'
 import { type AuditQuery, type AuditRecord, api } from '@/api'
+import { DataTable } from '@/components/DataTable'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
@@ -20,14 +21,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table'
 import { authenticatedRoute } from '@/routes/__root'
 
 /**
@@ -240,27 +233,50 @@ function AuditView() {
       )}
 
       {records.length > 0 && (
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Time</TableHead>
-              <TableHead>Actor</TableHead>
-              <TableHead>Action</TableHead>
-              <TableHead>Outcome</TableHead>
-              <TableHead>Target</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {records.map((record) => (
-              <AuditRow
-                key={record.seq}
-                record={record}
-                orphanedIntent={isOrphanedIntent(record, records)}
-                onOpen={() => setSelected(record)}
-              />
-            ))}
-          </TableBody>
-        </Table>
+        <DataTable
+          label="Audit records"
+          phone="rows"
+          rows={records}
+          keyOf={(record) => String(record.seq)}
+          empty="Nothing has been recorded yet."
+          onRowClick={(record) => setSelected(record)}
+          rowLabel={(record) => `Record ${record.seq}: ${record.action}`}
+          columns={[
+            {
+              key: 'action',
+              label: 'Action',
+              role: 'identity',
+              render: (record) => <span className="font-mono text-xs">{record.action}</span>,
+            },
+            {
+              key: 'ts',
+              label: 'Time',
+              className: 'tabular-nums',
+              render: (record) => <span className="tabular-nums">{record.ts}</span>,
+            },
+            {
+              key: 'actor',
+              label: 'Actor',
+              render: (record) => (record.actor === '' ? '—' : record.actor),
+            },
+            {
+              key: 'outcome',
+              label: 'Outcome',
+              render: (record) => (
+                <OutcomeBadge
+                  outcome={record.outcome}
+                  orphanedIntent={isOrphanedIntent(record, records)}
+                />
+              ),
+            },
+            {
+              key: 'target',
+              label: 'Target',
+              role: 'detail',
+              render: (record) => <span className="font-mono text-xs">{targetOf(record)}</span>,
+            },
+          ]}
+        />
       )}
 
       {hasMore && (
@@ -312,44 +328,6 @@ function targetOf(record: AuditRecord): string {
     return record.job_id
   }
   return '—'
-}
-
-function AuditRow({
-  record,
-  orphanedIntent,
-  onOpen,
-}: {
-  record: AuditRecord
-  orphanedIntent: boolean
-  onOpen: () => void
-}) {
-  return (
-    <TableRow
-      onClick={onOpen}
-      onKeyDown={(event) => {
-        if (event.key === 'Enter' || event.key === ' ') {
-          event.preventDefault()
-          onOpen()
-        }
-      }}
-      tabIndex={0}
-      role="button"
-      aria-label={`Record ${record.seq}: ${record.action}`}
-      // The whole row is the target -- role=button, tabIndex, onClick -- so the
-      // row is what has to be thumb-sized below md. It was 38px, and the six
-      // pixels are the difference between the operator's decision of 44 and a
-      // list that grows for no reason on a desk.
-      className={`max-md:h-11 ${orphanedIntent ? 'cursor-pointer bg-destructive/10' : 'cursor-pointer'}`}
-    >
-      <TableCell className="tabular-nums">{record.ts}</TableCell>
-      <TableCell>{record.actor === '' ? '—' : record.actor}</TableCell>
-      <TableCell className="font-mono text-xs">{record.action}</TableCell>
-      <TableCell>
-        <OutcomeBadge outcome={record.outcome} orphanedIntent={orphanedIntent} />
-      </TableCell>
-      <TableCell className="font-mono text-xs">{targetOf(record)}</TableCell>
-    </TableRow>
-  )
 }
 
 function OutcomeBadge({ outcome, orphanedIntent }: { outcome: string; orphanedIntent: boolean }) {

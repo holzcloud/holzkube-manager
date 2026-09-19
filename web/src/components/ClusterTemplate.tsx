@@ -43,7 +43,7 @@ export function ClusterTemplatePanel({ clusterID }: { clusterID?: string }) {
       {clusterID !== undefined && (
         <a
           href={api.clusterTemplates.exportPath(clusterID)}
-          className="inline-block text-sm underline"
+          className="inline-flex items-center text-sm underline max-md:min-h-11"
           title="Writes this cluster down as a template. The nodes are listed by UUID rather than by class: nothing here can know which of your labels you meant as the reason a machine is in this cluster, and guessing one would produce a file that quietly selects a different set later."
         >
           Export this cluster as a template

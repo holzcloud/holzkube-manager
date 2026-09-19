@@ -1,0 +1,651 @@
+{
+  "_why": [
+    "What the layout guard renders the screens with.",
+    "",
+    "It exists because of ledger 149: the guard started a daemon with an empty",
+    "data directory, so every screen that shows rows showed none, and /kubernetes",
+    "reported '3 controls' for a page that carries a dozen. A guard that measures",
+    "the empty state passes the exact screen the operator photographed as broken.",
+    "",
+    "The values are deliberately LONG. A short hostname fits anywhere; what breaks",
+    "a phone layout is 'srv-rsp-prod01.holzcloud.ch', a pod called",
+    "'coredns-7c65d6cfc9-x4m2p' and an image reference with a registry in front of",
+    "it. Fixtures made of 'foo' and 'bar' would measure a layout nobody has.",
+    "",
+    "web/src/fixtures.test.ts parses every entry below with the SAME zod schema",
+    "the product parses the server's answer with, so these cannot drift into a",
+    "shape the app would reject -- which would leave the guard measuring an error",
+    "page and calling it a clean run."
+  ],
+  "/api/v1/machines": {
+    "machines": [
+      {
+        "id": "m-cp-1",
+        "cluster": "c-homelab",
+        "role": "controlplane",
+        "stage": "watching",
+        "adopted_at": "2026-09-01T08:00:00Z",
+        "seen_at": "2026-09-19T10:31:00Z",
+        "labels": {
+          "rack": "keller",
+          "disk": "nvme"
+        },
+        "hostname": {
+          "value": "srv-rsp-prod01.holzcloud.ch",
+          "level": "node",
+          "available": true
+        },
+        "addr": {
+          "value": "192.168.0.30",
+          "level": "node",
+          "available": true
+        },
+        "talos_version": {
+          "value": "v1.14.2",
+          "level": "node",
+          "available": true
+        },
+        "kubernetes_version": {
+          "value": "v1.36.4",
+          "level": "k8s",
+          "available": true
+        },
+        "schematic_id": {
+          "value": "376567988ad370138ad8b2698212367b8edcb69b5fd68c80be1f2ec7d603b4ba",
+          "level": "node",
+          "available": true
+        },
+        "manufacturer": {
+          "value": "Raspberry Pi Foundation",
+          "level": "node",
+          "available": true
+        },
+        "product_name": {
+          "value": "Raspberry Pi 5 Model B Rev 1.1",
+          "level": "node",
+          "available": true
+        },
+        "serial_number": {
+          "value": "10000000d4f3a1c2",
+          "level": "node",
+          "available": true
+        },
+        "memory_mib": {
+          "value": 8192,
+          "level": "node",
+          "available": true
+        },
+        "cpus": {
+          "value": [],
+          "level": "node",
+          "available": true
+        },
+        "disks": {
+          "value": [],
+          "level": "node",
+          "available": true
+        },
+        "interfaces": {
+          "value": [],
+          "level": "node",
+          "available": true
+        },
+        "services": {
+          "value": [],
+          "level": "node",
+          "available": true
+        },
+        "etcd_member": {
+          "value": true,
+          "level": "etcd",
+          "available": true
+        },
+        "compatibility": {
+          "level": "node",
+          "available": false
+        }
+      },
+      {
+        "id": "m-worker-1",
+        "cluster": "c-homelab",
+        "role": "worker",
+        "stage": "degraded",
+        "lost_addr": true,
+        "version_notice": "This node runs a Talos older than the cluster's control plane.",
+        "adopted_at": "2026-09-02T09:30:00Z",
+        "seen_at": "2026-09-19T09:58:00Z",
+        "labels": {},
+        "hostname": {
+          "value": "worker-02.holzcloud.ch",
+          "level": "node",
+          "available": true
+        },
+        "addr": {
+          "value": "192.168.0.41",
+          "level": "node",
+          "available": true
+        },
+        "talos_version": {
+          "value": "v1.13.9",
+          "level": "node",
+          "available": true
+        },
+        "kubernetes_version": {
+          "value": "v1.36.4",
+          "level": "k8s",
+          "available": true
+        },
+        "schematic_id": {
+          "level": "node",
+          "available": false,
+          "unavailable_reason": "the node did not answer"
+        },
+        "manufacturer": {
+          "level": "node",
+          "available": false
+        },
+        "product_name": {
+          "level": "node",
+          "available": false
+        },
+        "serial_number": {
+          "level": "node",
+          "available": false
+        },
+        "memory_mib": {
+          "level": "node",
+          "available": false
+        },
+        "cpus": {
+          "value": [],
+          "level": "node",
+          "available": false
+        },
+        "disks": {
+          "value": [],
+          "level": "node",
+          "available": false
+        },
+        "interfaces": {
+          "value": [],
+          "level": "node",
+          "available": false
+        },
+        "services": {
+          "value": [],
+          "level": "node",
+          "available": false
+        },
+        "etcd_member": {
+          "value": false,
+          "level": "etcd",
+          "available": true
+        },
+        "compatibility": {
+          "level": "node",
+          "available": false
+        }
+      },
+      {
+        "id": "m-unassigned",
+        "cluster": "",
+        "role": "",
+        "stage": "unknown",
+        "adopted_at": "2026-09-18T14:12:00Z",
+        "labels": {},
+        "hostname": {
+          "value": "maintenance-a4f1",
+          "level": "node",
+          "available": true
+        },
+        "addr": {
+          "value": "192.168.0.77",
+          "level": "node",
+          "available": true
+        },
+        "talos_version": {
+          "value": "v1.14.2",
+          "level": "node",
+          "available": true
+        },
+        "kubernetes_version": {
+          "level": "k8s",
+          "available": false
+        },
+        "schematic_id": {
+          "level": "node",
+          "available": false
+        },
+        "manufacturer": {
+          "level": "node",
+          "available": false
+        },
+        "product_name": {
+          "level": "node",
+          "available": false
+        },
+        "serial_number": {
+          "level": "node",
+          "available": false
+        },
+        "memory_mib": {
+          "level": "node",
+          "available": false
+        },
+        "cpus": {
+          "value": [],
+          "level": "node",
+          "available": false
+        },
+        "disks": {
+          "value": [],
+          "level": "node",
+          "available": false
+        },
+        "interfaces": {
+          "value": [],
+          "level": "node",
+          "available": false
+        },
+        "services": {
+          "value": [],
+          "level": "node",
+          "available": false
+        },
+        "etcd_member": {
+          "value": false,
+          "level": "etcd",
+          "available": false
+        },
+        "compatibility": {
+          "level": "node",
+          "available": false
+        }
+      }
+    ]
+  },
+  "/api/v1/clusters": {
+    "clusters": [
+      {
+        "id": "c-homelab",
+        "name": "homelab",
+        "origin": "imported",
+        "endpoint": "https://192.168.0.30:6443",
+        "locked": false,
+        "created_at": "2026-09-01T08:00:00Z",
+        "client_cert_not_after": "2026-12-01T08:00:00Z",
+        "client_cert_days_left": 73,
+        "certificate_warning": "",
+        "certificate_urgency": "none",
+        "nodes": 3,
+        "control_plane": 1,
+        "workers": 2,
+        "healthy": 2,
+        "degraded": 1,
+        "down": 0,
+        "checking": 0
+      },
+      {
+        "id": "c-lab-zwei",
+        "name": "lab-zwei-mit-langem-namen",
+        "origin": "provisioned",
+        "endpoint": "https://192.168.0.60:6443",
+        "locked": true,
+        "created_at": "2026-08-14T11:20:00Z",
+        "client_cert_not_after": "2026-10-02T11:20:00Z",
+        "client_cert_days_left": 13,
+        "certificate_warning": "This installation's client certificate expires in 13 days.",
+        "certificate_urgency": "banner",
+        "nodes": 1,
+        "control_plane": 1,
+        "workers": 0,
+        "healthy": 0,
+        "degraded": 0,
+        "down": 1,
+        "checking": 0
+      }
+    ]
+  },
+  "/api/v1/users": {
+    "users": [
+      {
+        "id": "u-1",
+        "username": "holz",
+        "role": "admin",
+        "created_at": "2026-08-01T07:00:00Z",
+        "kind": "person",
+        "linked_identity": true,
+        "self": true
+      },
+      {
+        "id": "u-2",
+        "username": "backup-runner",
+        "role": "operator",
+        "created_at": "2026-09-03T12:00:00Z",
+        "kind": "service",
+        "token_issued_at": "2026-09-03T12:00:00Z",
+        "last_used_at": "2026-09-19T06:00:00Z",
+        "self": false
+      },
+      {
+        "id": "u-3",
+        "username": "read-only-dashboard",
+        "role": "reader",
+        "created_at": "2026-09-10T15:45:00Z",
+        "kind": "service",
+        "token_issued_at": "2026-09-10T15:45:00Z",
+        "self": false
+      }
+    ]
+  },
+  "/api/v1/jobs": {
+    "jobs": [
+      {
+        "id": "j-1",
+        "kind": "node.drain",
+        "cluster": "c-homelab",
+        "machine": "m-worker-1",
+        "state": "running",
+        "steps": [
+          {
+            "name": "Cordon the node",
+            "state": "done",
+            "verifiable": true
+          },
+          {
+            "name": "Evict what would move",
+            "state": "running",
+            "verifiable": true
+          },
+          {
+            "name": "Report what stayed",
+            "state": "pending"
+          }
+        ],
+        "current": 1,
+        "params": {},
+        "cancel_requested": false,
+        "actor": "holz",
+        "created_at": "2026-09-19T10:28:00Z",
+        "started_at": "2026-09-19T10:28:02Z",
+        "rev": 3
+      },
+      {
+        "id": "j-2",
+        "kind": "cluster.rotate-authority",
+        "cluster": "c-homelab",
+        "machine": "",
+        "state": "parked",
+        "parked_reason": "Pass 2 finished and one node did not answer; a person decides whether to continue.",
+        "steps": [
+          {
+            "name": "Accept the new authority everywhere",
+            "state": "done"
+          },
+          {
+            "name": "Issue from the new authority",
+            "state": "failed",
+            "detail": "worker-02 did not answer"
+          }
+        ],
+        "current": 1,
+        "params": {},
+        "cancel_requested": false,
+        "actor": "holz",
+        "created_at": "2026-09-18T20:10:00Z",
+        "started_at": "2026-09-18T20:10:01Z",
+        "rev": 7
+      },
+      {
+        "id": "j-3",
+        "kind": "provision",
+        "cluster": "c-lab-zwei",
+        "machine": "m-unassigned",
+        "state": "succeeded",
+        "steps": [
+          {
+            "name": "Apply the machine configuration",
+            "state": "done"
+          }
+        ],
+        "current": 1,
+        "params": {},
+        "cancel_requested": false,
+        "actor": "holz",
+        "created_at": "2026-09-18T09:00:00Z",
+        "started_at": "2026-09-18T09:00:01Z",
+        "finished_at": "2026-09-18T09:04:36Z",
+        "rev": 9
+      }
+    ]
+  },
+  "/api/v1/audit": {
+    "items": [
+      {
+        "seq": 412,
+        "ts": "2026-09-19T10:16:31Z",
+        "actor": "holz",
+        "session": "s-8f21",
+        "src_ip": "192.168.0.14",
+        "cluster_id": "c-homelab",
+        "machine_id": "",
+        "action": "cluster.kubernetes-manifest-apply",
+        "params": {
+          "manifest": "<redacted>"
+        },
+        "job_id": "",
+        "outcome": "ok",
+        "prev_hash": "b1946ac92492d2347c6235b4d2611184",
+        "hash": "591785b794601e212b260e25925636fd"
+      },
+      {
+        "seq": 411,
+        "ts": "2026-09-19T10:15:02Z",
+        "actor": "holz",
+        "session": "s-8f21",
+        "src_ip": "192.168.0.14",
+        "cluster_id": "c-homelab",
+        "machine_id": "m-worker-1",
+        "action": "cluster.kubernetes-cordon",
+        "params": {
+          "unschedulable": "<redacted>"
+        },
+        "job_id": "",
+        "outcome": "ok",
+        "prev_hash": "5d41402abc4b2a76b9719d911017c592",
+        "hash": "b1946ac92492d2347c6235b4d2611184"
+      },
+      {
+        "seq": 410,
+        "ts": "2026-09-19T09:58:44Z",
+        "actor": "backup-runner",
+        "session": "svc-2",
+        "src_ip": "192.168.0.31",
+        "cluster_id": "c-homelab",
+        "machine_id": "m-cp-1",
+        "action": "cluster.kubernetes-service-proxy",
+        "params": {
+          "port": "8080",
+          "path": "/healthz"
+        },
+        "job_id": "",
+        "outcome": "ok",
+        "prev_hash": "aaf4c61ddcc5e8a2dabede0f3b482cd9",
+        "hash": "5d41402abc4b2a76b9719d911017c592"
+      }
+    ],
+    "next_cursor": null
+  },
+  "/api/v1/clusters/c-homelab/kubernetes": {
+    "cluster": "c-homelab",
+    "server_version": "v1.36.4",
+    "namespace": "",
+    "namespaces": [
+      "default",
+      "kube-system",
+      "longhorn-system"
+    ],
+    "nodes": [
+      {
+        "name": "srv-rsp-prod01.holzcloud.ch",
+        "ready": "True",
+        "unschedulable": false,
+        "roles": [
+          "control-plane"
+        ],
+        "kubelet_version": "v1.36.4",
+        "os_image": "Talos (v1.14.2)",
+        "created_at": "2026-09-01T08:04:00Z",
+        "internal_address": "192.168.0.30",
+        "container_runtime": "containerd://2.0.5"
+      },
+      {
+        "name": "worker-02.holzcloud.ch",
+        "ready": "False",
+        "unschedulable": true,
+        "roles": [],
+        "kubelet_version": "v1.36.4",
+        "os_image": "Talos (v1.13.9)",
+        "created_at": "2026-09-02T09:34:00Z",
+        "internal_address": "192.168.0.41",
+        "container_runtime": "containerd://2.0.5"
+      }
+    ],
+    "pods": [
+      {
+        "namespace": "kube-system",
+        "name": "coredns-7c65d6cfc9-x4m2p",
+        "node": "srv-rsp-prod01.holzcloud.ch",
+        "phase": "Running",
+        "ready": 1,
+        "containers": 1,
+        "restarts": 0,
+        "reason": "",
+        "created_at": "2026-09-01T08:05:00Z"
+      },
+      {
+        "namespace": "longhorn-system",
+        "name": "longhorn-manager-4kqwz",
+        "node": "worker-02.holzcloud.ch",
+        "phase": "Running",
+        "ready": 1,
+        "containers": 2,
+        "restarts": 14,
+        "reason": "CrashLoopBackOff",
+        "created_at": "2026-09-02T09:40:00Z"
+      },
+      {
+        "namespace": "default",
+        "name": "holzcloud-website-6d9f7b8c54-qn2vt",
+        "node": "srv-rsp-prod01.holzcloud.ch",
+        "phase": "Running",
+        "ready": 1,
+        "containers": 1,
+        "restarts": 2,
+        "reason": "",
+        "created_at": "2026-09-17T18:22:00Z"
+      }
+    ],
+    "deployments": [
+      {
+        "namespace": "kube-system",
+        "name": "coredns",
+        "desired": 1,
+        "ready": 1,
+        "updated": 1,
+        "available": 1,
+        "image": "registry.k8s.io/coredns/coredns:v1.11.3",
+        "created_at": "2026-09-01T08:05:00Z"
+      },
+      {
+        "namespace": "default",
+        "name": "holzcloud-website",
+        "desired": 2,
+        "ready": 1,
+        "updated": 2,
+        "available": 1,
+        "image": "ghcr.io/holzcloud/website:2026.09.17-sha-4f2a1b9",
+        "created_at": "2026-09-17T18:22:00Z"
+      }
+    ],
+    "services": [
+      {
+        "namespace": "kube-system",
+        "name": "kube-dns",
+        "type": "ClusterIP",
+        "cluster_ip": "10.96.0.10",
+        "ports": [
+          {
+            "name": "dns",
+            "port": 53,
+            "protocol": "UDP"
+          },
+          {
+            "name": "metrics",
+            "port": 9153,
+            "protocol": "TCP"
+          }
+        ]
+      },
+      {
+        "namespace": "default",
+        "name": "holzcloud-website",
+        "type": "LoadBalancer",
+        "cluster_ip": "10.96.14.22",
+        "ports": [
+          {
+            "name": "http",
+            "port": 8080,
+            "protocol": "TCP"
+          }
+        ]
+      }
+    ]
+  },
+  "/api/v1/schematics": [
+    {
+      "id": "376567988ad370138ad8b2698212367b8edcb69b5fd68c80be1f2ec7d603b4ba",
+      "cluster": "c-homelab",
+      "name": "raspberry-pi-5-mit-nvme",
+      "talos_version": "v1.14.2",
+      "canonical": "376567988ad370138ad8b2698212367b8edcb69b5fd68c80be1f2ec7d603b4ba",
+      "extensions": [
+        "siderolabs/iscsi-tools",
+        "siderolabs/util-linux-tools"
+      ],
+      "kernel_args": [
+        "console=ttyAMA0,115200",
+        "talos.dashboard.disabled=1"
+      ],
+      "meta": [],
+      "usable": true,
+      "probed_at": "2026-09-18T12:00:00Z",
+      "probe_reason": "",
+      "arch": "arm64",
+      "created_at": "2026-09-01T08:00:00Z",
+      "rev": 2
+    },
+    {
+      "id": "a91cf1b0d4e2f37c5b8a6d9e0f1a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c",
+      "cluster": "",
+      "name": "amd64-standard",
+      "talos_version": "v1.14.2",
+      "canonical": "a91cf1b0d4e2f37c5b8a6d9e0f1a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c",
+      "extensions": [],
+      "kernel_args": [],
+      "meta": [],
+      "usable": false,
+      "probed_at": "2026-09-15T09:00:00Z",
+      "probe_reason": "The Image Factory did not answer when this was last checked.",
+      "arch": "amd64",
+      "created_at": "2026-09-10T10:00:00Z",
+      "rev": 1
+    }
+  ],
+  "/api/v1/provision/notices": {
+    "notices": [
+      "One machine is in maintenance mode and has no cluster: maintenance-a4f1 at 192.168.0.77.",
+      "The cluster lab-zwei-mit-langem-namen is locked, so provisioning into it is refused."
+    ]
+  }
+}

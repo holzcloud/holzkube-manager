@@ -3,18 +3,11 @@ import { createRoute, Link } from '@tanstack/react-router'
 import { RefreshCw } from 'lucide-react'
 import { useState } from 'react'
 import { api, type Machine } from '@/api'
+import { DataTable } from '@/components/DataTable'
 import { HealthField, StageBadge } from '@/components/HealthField'
 import { MachineClasses } from '@/components/MachineClasses'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table'
 import { authenticatedRoute } from '@/routes/__root'
 
 /**
@@ -73,25 +66,88 @@ export function NodesPage() {
   return (
     <section className="space-y-4">
       <Heading />
-      <Table>
-        <TableHeader>
-          <TableRow>
-            <TableHead>Host</TableHead>
-            <TableHead>State</TableHead>
-            <TableHead>Role</TableHead>
-            <TableHead>Address</TableHead>
-            <TableHead>Talos</TableHead>
-            <TableHead>Kubernetes</TableHead>
-            <TableHead>Cluster</TableHead>
-            <TableHead className="w-10" />
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {machines.map((m) => (
-            <MachineRow key={m.id} machine={m} />
-          ))}
-        </TableBody>
-      </Table>
+      <DataTable
+        label="Machines"
+        rows={machines}
+        keyOf={(m) => m.id}
+        empty="No machines yet."
+        columns={[
+          {
+            key: 'host',
+            label: 'Host',
+            role: 'identity',
+            className: 'font-medium',
+            render: (m) => (
+              <>
+                <Link
+                  to="/nodes/$uuid"
+                  params={{ uuid: m.id }}
+                  // A whole line on a phone: measured 172x19 before, which is
+                  // under the 44px a thumb needs and was invisible to the guard
+                  // until it rendered rows at all (ledger 149).
+                  className="inline-flex items-center hover:underline max-md:min-h-11"
+                >
+                  <HealthField field={m.hostname} render={(v) => v || m.id.slice(0, 8)} />
+                </Link>
+                {m.lost_addr && (
+                  <Badge
+                    variant="outline"
+                    className="ml-2 border-amber-600/40 text-amber-700 dark:text-amber-300"
+                    title="A different machine answered at this one's last known address. This record was kept; the stranger got one of its own."
+                  >
+                    moved
+                  </Badge>
+                )}
+              </>
+            ),
+          },
+          { key: 'state', label: 'State', render: (m) => <MachineState machine={m} /> },
+          { key: 'role', label: 'Role', className: 'text-sm', render: (m) => m.role || '—' },
+          {
+            key: 'addr',
+            label: 'Address',
+            className: 'font-mono text-xs',
+            render: (m) => <HealthField field={m.addr} />,
+          },
+          {
+            key: 'talos',
+            label: 'Talos',
+            className: 'font-mono text-xs',
+            render: (m) => <HealthField field={m.talos_version} />,
+          },
+          {
+            key: 'kubernetes',
+            label: 'Kubernetes',
+            className: 'font-mono text-xs',
+            render: (m) => <HealthField field={m.kubernetes_version} />,
+          },
+          {
+            key: 'cluster',
+            label: 'Cluster',
+            className: 'text-sm',
+            render: (m) =>
+              m.cluster === '' ? (
+                <span className="text-muted-foreground" title="This machine belongs to no cluster.">
+                  —
+                </span>
+              ) : (
+                <Link
+                  to="/clusters"
+                  className="inline-flex items-center hover:underline max-md:min-h-11"
+                  title={`Cluster ${m.cluster}`}
+                >
+                  {m.cluster.slice(0, 8)}
+                </Link>
+              ),
+          },
+          {
+            key: 'refresh',
+            label: 'Ask now',
+            role: 'actions',
+            render: (m) => <RefreshButton machine={m} />,
+          },
+        ]}
+      />
 
       <MachineClasses />
     </section>
@@ -110,7 +166,56 @@ function Heading() {
   )
 }
 
-function MachineRow({ machine }: { machine: Machine }) {
+/** The badges that qualify a machine's stage. Several can be true at once. */
+function MachineState({ machine }: { machine: Machine }) {
+  return (
+    <>
+      <StageBadge stage={machine.stage} />
+      {machine.certificate_expired && (
+        <Badge
+          variant="outline"
+          className="ml-2 border-red-600/40 text-red-700 dark:text-red-300"
+          title="The cluster's client certificate has expired. This is not a problem with the node."
+        >
+          certificate
+        </Badge>
+      )}
+      {/* OPS-03. Red for outside the range and amber for a pre-release,
+          because they mean opposite things about what to do: one is a node
+          to change, the other is a node this instance can accept once
+          somebody says so. */}
+      {machine.unsupported_version && (
+        <Badge
+          variant="outline"
+          className="ml-2 border-red-600/40 text-red-700 dark:text-red-300"
+          title={machine.version_notice}
+        >
+          unsupported
+        </Badge>
+      )}
+      {!machine.unsupported_version && machine.pre_release && (
+        <Badge
+          variant="outline"
+          className="ml-2 border-amber-600/40 text-amber-700 dark:text-amber-300"
+          title={machine.version_notice}
+        >
+          pre-release
+        </Badge>
+      )}
+      {machine.locked && (
+        <Badge
+          variant="outline"
+          className="ml-2"
+          title={machine.lock_reason || 'Rolling operations skip this node.'}
+        >
+          locked
+        </Badge>
+      )}
+    </>
+  )
+}
+
+function RefreshButton({ machine }: { machine: Machine }) {
   const queryClient = useQueryClient()
   const [refreshing, setRefreshing] = useState(false)
 
@@ -123,101 +228,24 @@ function MachineRow({ machine }: { machine: Machine }) {
   })
 
   return (
-    <TableRow>
-      <TableCell className="font-medium">
-        <Link to="/nodes/$uuid" params={{ uuid: machine.id }} className="hover:underline">
-          <HealthField field={machine.hostname} render={(v) => v || machine.id.slice(0, 8)} />
-        </Link>
-        {machine.lost_addr && (
-          <Badge
-            variant="outline"
-            className="ml-2 border-amber-600/40 text-amber-700 dark:text-amber-300"
-            title="A different machine answered at this one's last known address. This record was kept; the stranger got one of its own."
-          >
-            moved
-          </Badge>
-        )}
-      </TableCell>
-      <TableCell>
-        <StageBadge stage={machine.stage} />
-        {machine.certificate_expired && (
-          <Badge
-            variant="outline"
-            className="ml-2 border-red-600/40 text-red-700 dark:text-red-300"
-            title="The cluster's client certificate has expired. This is not a problem with the node."
-          >
-            certificate
-          </Badge>
-        )}
-        {/* OPS-03. Red for outside the range and amber for a pre-release,
-            because they mean opposite things about what to do: one is a node
-            to change, the other is a node this instance can accept once
-            somebody says so. */}
-        {machine.unsupported_version && (
-          <Badge
-            variant="outline"
-            className="ml-2 border-red-600/40 text-red-700 dark:text-red-300"
-            title={machine.version_notice}
-          >
-            unsupported
-          </Badge>
-        )}
-        {!machine.unsupported_version && machine.pre_release && (
-          <Badge
-            variant="outline"
-            className="ml-2 border-amber-600/40 text-amber-700 dark:text-amber-300"
-            title={machine.version_notice}
-          >
-            pre-release
-          </Badge>
-        )}
-        {machine.locked && (
-          <Badge
-            variant="outline"
-            className="ml-2"
-            title={machine.lock_reason || 'Rolling operations skip this node.'}
-          >
-            locked
-          </Badge>
-        )}
-      </TableCell>
-      <TableCell className="text-sm">{machine.role}</TableCell>
-      <TableCell className="font-mono text-xs">
-        <HealthField field={machine.addr} />
-      </TableCell>
-      <TableCell className="font-mono text-xs">
-        <HealthField field={machine.talos_version} />
-      </TableCell>
-      <TableCell className="font-mono text-xs">
-        <HealthField field={machine.kubernetes_version} />
-      </TableCell>
-      <TableCell className="text-sm">
-        {machine.cluster === '' ? (
-          <span className="text-muted-foreground" title="This machine belongs to no cluster.">
-            —
-          </span>
-        ) : (
-          <Link to="/clusters" className="hover:underline" title={`Cluster ${machine.cluster}`}>
-            {machine.cluster.slice(0, 8)}
-          </Link>
-        )}
-      </TableCell>
-      <TableCell>
-        <Button
-          size="icon"
-          variant="ghost"
-          aria-label={`Refresh ${machine.id}`}
-          title="Ask this node now, rather than waiting for the next heartbeat."
-          disabled={refresh.isPending || refreshing}
-          onClick={() => {
-            setRefreshing(true)
-            refresh.mutate()
-          }}
-        >
-          <RefreshCw aria-hidden="true" className="size-4" />
-        </Button>
-      </TableCell>
-    </TableRow>
+    <Button
+      size="icon"
+      variant="ghost"
+      // Full width on a phone, where it sits at the bottom of the card under
+      // the host it refreshes; an icon-sized square there would be a 36px
+      // target floating under a name.
+      className="max-md:h-11 max-md:w-full"
+      aria-label={`Refresh ${machine.id}`}
+      title="Ask this node now, rather than waiting for the next heartbeat."
+      disabled={refresh.isPending || refreshing}
+      onClick={() => {
+        setRefreshing(true)
+        refresh.mutate()
+      }}
+    >
+      <RefreshCw aria-hidden="true" className="size-4" />
+      <span className="md:hidden">Ask this node now</span>
+    </Button>
   )
 }
 
