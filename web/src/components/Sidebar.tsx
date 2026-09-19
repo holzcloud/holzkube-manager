@@ -2,6 +2,7 @@ import { Link } from '@tanstack/react-router'
 import {
   ArrowUpCircle,
   Boxes,
+  Container,
   Disc3,
   FileCog,
   HardDriveDownload,
@@ -67,6 +68,14 @@ export const NAV_AREAS: NavArea[] = [
     phase: null,
     description:
       'Imported clusters, their control planes, their etcd members and the certificate expiry dates that decide whether any of it still works next month.',
+  },
+  {
+    path: '/kubernetes',
+    label: 'Kubernetes',
+    icon: Container,
+    phase: null,
+    description:
+      'What the cluster’s own API server says: its nodes as Kubernetes sees them, its pods, and why a workload is not running. It is allowed to disagree with the Nodes screen — that one reads the machine API.',
   },
   {
     path: '/config',

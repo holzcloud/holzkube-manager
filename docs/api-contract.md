@@ -1453,6 +1453,42 @@ the thing it exists to protect against.
 | `conflict.no-certificate-authority` | 409 | the stored bundle carries an admin certificate and no authority key, so nothing new can be issued from it. The cluster was adopted from a talosconfig that did not carry the authority; the detail says how to get one. |
 | `conflict.certificate-rejected` | 409 | the new certificate reached no node, **so the old one was kept and nothing changed**. Its own code because this is the safe outcome of a renewal rather than a failure of one: either every node is unreachable, or the authority in this store is no longer the one the cluster trusts. |
 
+## What Kubernetes knows about a cluster
+
+`GET /api/v1/clusters/{id}/kubernetes` answers the cluster's own view of itself:
+the API server's version, its nodes, its pods and its namespaces. `?namespace=`
+filters the pods, and the filter is applied by the API SERVER rather than in the
+browser -- a cluster with ten thousand pods must not send all of them so that
+three can be shown.
+
+It is milestone v1.17's second slice and it is **reads only**. The client is
+proven against a cluster before it is allowed to change anything in one; cordon,
+drain, pod actions and manifests are later slices and each is destructive in the
+sense D-06 means.
+
+**Kubernetes's view and the inventory's are allowed to disagree, and where they
+do, that is the information.** The inventory knows what the machine API says
+about a machine. This knows whether the kubelet registered, what the scheduler
+will do with the node, and whether somebody cordoned it.
+
+**A pod carries both its phase and its readiness**, because `Running` with
+`1/2 ready` is the most misread state in Kubernetes: the phase is the pod's own
+claim about its lifecycle, the ready count is whether its containers pass their
+probes, and a screen that showed only the first would call a broken workload
+healthy. Restarts are summed across containers, the way `kubectl` shows them,
+and a container's own waiting reason -- `CrashLoopBackOff`, `ImagePullBackOff` --
+is preferred over the pod's usually-empty one.
+
+**An API server that does not answer is not a cluster with no pods.** The route
+answers `upstream.*` in that case rather than an empty list, for the reason
+INV-08 gives one layer down: an empty screen is a claim.
+
+| code | HTTP | when |
+|---|---|---|
+| `conflict.no-kubernetes-authority` | 409 | the cluster's stored bundle carries no Kubernetes authority, so no certificate can be minted for its API server. The cluster can still be managed over the Talos API; the repair is to adopt it again with a talosconfig that carries the authority. |
+| `upstream.no-kubernetes-endpoint` | 502 | no control-plane node could say where the API server is. The endpoint is read from a node's own machine configuration -- in the `KubeClusterConfig` document since Talos 1.14 -- rather than assembled from the address the cluster was adopted through. |
+| `upstream.kubernetes-unreachable` | 502 | the API server did not answer. |
+
 ## Rotating a cluster's certificate authority
 
 Three routes, and the split is the operation's safety rather than REST taste:

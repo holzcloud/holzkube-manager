@@ -29,6 +29,13 @@ const (
 	// from reaching the binary.
 	simulatorPackage = rootModule + "/internal/talossim"
 
+	// kubeSimulatorPackage is the in-process fake Kubernetes API server, added
+	// with milestone v1.17. Same argument as the Talos one, and it needs saying
+	// twice because the two are separate packages: a fake API server reachable
+	// from a real deployment answers "the cluster is fine" to everything above
+	// it.
+	kubeSimulatorPackage = rootModule + "/internal/kubesim"
+
 	// cosiRuntime is the resource runtime the machinery client's COSI adapter
 	// speaks. It arrives with machinery rather than by choice, so its version is
 	// pinned and asserted rather than left to resolution.
@@ -47,6 +54,27 @@ const (
 	// choice, which is why it is asserted here at all.
 	machineryVersion = "v1.14.0"
 	cosiVersion      = "v1.16.3"
+
+	// clientGoVersion is the second upstream, and it became one on 2026-09-19:
+	// the operator asked for Kubernetes and pod management, which lifted
+	// PROJECT.md's "the Talos machine API and nothing else"
+	// (.planning/MILESTONE-v1.17.md). v0.34 is Kubernetes 1.34, which is what
+	// internal/compat names as the top of the supported range and what the
+	// operator's cluster runs.
+	//
+	// It is pinned here for the reason machinery is: a client older than the
+	// API it serves describes fields the operator can see in their cluster and
+	// this product cannot, and `go get -u` must not be able to make that
+	// decision.
+	//
+	// It was ALREADY worth having on the day it was written. Adding client-go
+	// resolved it to v0.37.0 -- nothing in the graph asks for Kubernetes
+	// modules, so that was simply the newest, arriving because a `go mod tidy`
+	// on code that did not yet import it had dropped the pinned requirement
+	// first. Three minors ahead of the server is outside Kubernetes's own skew
+	// policy; it was downgraded deliberately, and this guard is what noticed.
+	clientGoVersion = "v0.34.1"
+	clientGoModule  = "k8s.io/client-go"
 )
 
 // TestBinaryDependencyWeight fails if the product binary ever depends on the
@@ -226,6 +254,7 @@ func TestPinnedUpstreamVersions(t *testing.T) {
 	want := map[string]string{
 		talosMachinery: machineryVersion,
 		cosiRuntime:    cosiVersion,
+		clientGoModule: clientGoVersion,
 	}
 
 	got := map[string]string{}
@@ -262,6 +291,12 @@ func TestPinnedUpstreamVersions(t *testing.T) {
 // price of that choice.
 func TestSimulatorIsNotInTheProduct(t *testing.T) {
 	for _, pkg := range goList(t, "-deps", "./cmd/holzkube-managerd") {
+		if pkg == kubeSimulatorPackage || strings.HasPrefix(pkg, kubeSimulatorPackage+"/") {
+			t.Fatalf("cmd/holzkube-managerd depends on %s.\n\n"+
+				"The simulated Kubernetes API server must never be reachable from the product "+
+				"binary: it answers every read with a cluster that is fine. It belongs in "+
+				"_test.go files and in packages the binary does not import.", pkg)
+		}
 		if pkg == simulatorPackage || strings.HasPrefix(pkg, simulatorPackage+"/") {
 			t.Fatalf("cmd/holzkube-managerd depends on %s.\n\n"+
 				"The simulated Talos node must never be reachable from the product binary: "+

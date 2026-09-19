@@ -699,6 +699,7 @@ func routeTable(deps httpapi.Deps) []httpapi.Route {
 		handlers.ScaleRoutes(deps),
 		handlers.RotateRoutes(deps),
 		handlers.AuthorityRoutes(deps),
+		handlers.KubernetesRoutes(deps),
 		handlers.StreamRoutes(deps),
 		handlers.JobRoutes(deps),
 		handlers.ConfigRoutes(deps),
