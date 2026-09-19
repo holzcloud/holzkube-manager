@@ -8,6 +8,7 @@ import {
   type User,
   type UserRoleName,
 } from '@/api'
+import { DataTable } from '@/components/DataTable'
 import { Problem } from '@/components/Problem'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -20,14 +21,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table'
 
 /**
  * Accounts and roles (V2-AUTH-02).
@@ -87,25 +80,130 @@ export function AccountTable({ users, onChanged }: { users: User[]; onChanged: (
   const admins = users.filter((u) => u.role === 'admin')
 
   return (
-    <Table>
-      <TableHeader>
-        <TableRow>
-          <TableHead>Account</TableHead>
-          <TableHead>Role</TableHead>
-          <TableHead>Sign-in</TableHead>
-          <TableHead />
-        </TableRow>
-      </TableHeader>
-      <TableBody>
-        {users.map((u) => (
-          <AccountRow key={u.id} user={u} adminCount={admins.length} onChanged={onChanged} />
-        ))}
-      </TableBody>
-    </Table>
+    <DataTable
+      label="Accounts"
+      rows={users}
+      keyOf={(u) => u.id}
+      empty="There are no accounts."
+      columns={[
+        {
+          key: 'account',
+          label: 'Account',
+          role: 'identity',
+          className: 'text-sm',
+          render: (u) => (
+            <>
+              {u.username}
+              {u.self && <span className="ml-2 text-muted-foreground text-xs">(you)</span>}
+            </>
+          ),
+        },
+        {
+          key: 'role',
+          label: 'Role',
+          render: (u) => <RoleCell user={u} adminCount={admins.length} onChanged={onChanged} />,
+        },
+        {
+          key: 'signin',
+          label: 'Sign-in',
+          className: 'text-muted-foreground text-sm',
+          render: (u) => <SignInCell user={u} />,
+        },
+        {
+          key: 'actions',
+          label: 'Actions',
+          role: 'actions',
+          render: (u) => (
+            <AccountActions user={u} adminCount={admins.length} onChanged={onChanged} />
+          ),
+        },
+      ]}
+    />
   )
 }
 
-function AccountRow({
+/**
+ * The two rules the server enforces, stated where the control is so the button
+ * carries the reason instead of the click producing it.
+ *
+ * They are separate because the remedies are: another admin can demote this
+ * one, and nobody can remove the last one.
+ */
+function roleReasonFor(user: User, adminCount: number): string | undefined {
+  if (user.role === 'admin' && adminCount === 1) {
+    return 'This is the only admin. Promote another account first, or nobody can manage this instance.'
+  }
+  if (user.self && user.role === 'admin') {
+    return 'An account cannot take away its own admin role. Another admin can.'
+  }
+  return undefined
+}
+
+function RoleCell({
+  user,
+  adminCount,
+  onChanged,
+}: {
+  user: User
+  adminCount: number
+  onChanged: () => void
+}) {
+  const setRole = useMutation({
+    mutationFn: (role: UserRoleName) => api.users.setRole(user.id, role),
+    onSuccess: onChanged,
+  })
+  const reason = roleReasonFor(user, adminCount)
+
+  return (
+    <>
+      <Select
+        value={user.role}
+        onValueChange={(value) => setRole.mutate(value as UserRoleName)}
+        disabled={reason !== undefined || setRole.isPending}
+      >
+        <SelectTrigger
+          className="h-8 w-32 max-md:h-11 max-md:w-full"
+          aria-label={`Role of ${user.username}`}
+          title={reason}
+        >
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          {USER_ROLES.map((role) => (
+            <SelectItem key={role} value={role} title={USER_ROLE_SENTENCE[role]}>
+              {role}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      {reason && <p className="mt-1 max-w-prose text-muted-foreground text-xs">{reason}</p>}
+      {setRole.error ? <Problem error={setRole.error} /> : null}
+    </>
+  )
+}
+
+function SignInCell({ user }: { user: User }) {
+  if (user.kind !== 'service') {
+    return <>{user.linked_identity ? 'password and single sign-on' : 'password'}</>
+  }
+  return (
+    <span>
+      token
+      <span className="block text-xs">
+        {user.last_used_at === ''
+          ? 'never used'
+          : `last used ${new Date(user.last_used_at).toLocaleString()}`}
+      </span>
+      {user.token_issued_at !== '' && (
+        <span className="block text-xs">
+          issued {new Date(user.token_issued_at).toLocaleDateString()}
+        </span>
+      )}
+    </span>
+  )
+}
+
+function AccountActions({
   user,
   adminCount,
   onChanged,
@@ -119,6 +217,7 @@ function AccountRow({
   const [token, setToken] = useState<ServiceAccountToken | null>(null)
 
   const isService = user.kind === 'service'
+  const lastAdmin = user.role === 'admin' && adminCount === 1
 
   const rotate = useMutation({
     mutationFn: () => api.serviceAccounts.rotate(user.id),
@@ -126,11 +225,6 @@ function AccountRow({
       setToken(result)
       onChanged()
     },
-  })
-
-  const setRole = useMutation({
-    mutationFn: (role: UserRoleName) => api.users.setRole(user.id, role),
-    onSuccess: onChanged,
   })
   const reset = useMutation({
     mutationFn: () => api.users.resetPassword(user.id, password),
@@ -144,147 +238,80 @@ function AccountRow({
     onSuccess: onChanged,
   })
 
-  // The two rules the server enforces, stated here so the button carries the
-  // reason instead of the click producing it. They are separate because the
-  // remedies are: another admin can demote this one, and nobody can remove the
-  // last one.
-  const lastAdmin = user.role === 'admin' && adminCount === 1
-  const selfDemotion = user.self && user.role === 'admin'
-
-  const roleReason = lastAdmin
-    ? 'This is the only admin. Promote another account first, or nobody can manage this instance.'
-    : selfDemotion
-      ? 'An account cannot take away its own admin role. Another admin can.'
-      : undefined
-
   return (
-    <TableRow>
-      <TableCell className="text-sm">
-        {user.username}
-        {user.self && <span className="ml-2 text-xs text-muted-foreground">(you)</span>}
-      </TableCell>
-
-      <TableCell>
-        <Select
-          value={user.role}
-          onValueChange={(value) => setRole.mutate(value as UserRoleName)}
-          disabled={roleReason !== undefined || setRole.isPending}
-        >
-          <SelectTrigger
-            className="h-8 w-32"
-            aria-label={`Role of ${user.username}`}
-            title={roleReason}
-          >
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {USER_ROLES.map((role) => (
-              <SelectItem key={role} value={role} title={USER_ROLE_SENTENCE[role]}>
-                {role}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        {roleReason && (
-          <p className="mt-1 max-w-prose text-xs text-muted-foreground">{roleReason}</p>
-        )}
-      </TableCell>
-
-      <TableCell className="text-sm text-muted-foreground">
+    <div className="flex flex-col gap-1 md:items-end">
+      <div className="flex gap-2 max-md:flex-col">
         {isService ? (
-          <span>
-            token
-            <span className="block text-xs">
-              {user.last_used_at === ''
-                ? 'never used'
-                : `last used ${new Date(user.last_used_at).toLocaleString()}`}
-            </span>
-            {user.token_issued_at !== '' && (
-              <span className="block text-xs">
-                issued {new Date(user.token_issued_at).toLocaleDateString()}
-              </span>
-            )}
-          </span>
-        ) : user.linked_identity ? (
-          'password and single sign-on'
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className="max-md:h-11"
+            disabled={rotate.isPending}
+            title="Mints a new token and stops the old one working. That is the only revocation there is — a token cannot be read back, because only its hash was kept."
+            onClick={() => rotate.mutate()}
+          >
+            Rotate token
+          </Button>
         ) : (
-          'password'
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className="max-md:h-11"
+            onClick={() => setResetting((open) => !open)}
+          >
+            Reset password
+          </Button>
         )}
-      </TableCell>
+        <Button
+          type="button"
+          size="sm"
+          variant="destructive"
+          className="max-md:h-11"
+          disabled={lastAdmin || remove.isPending}
+          title={
+            lastAdmin
+              ? 'This is the only admin. Removing it leaves nobody able to manage this instance.'
+              : undefined
+          }
+          onClick={() => remove.mutate()}
+        >
+          Remove
+        </Button>
+      </div>
 
-      <TableCell>
-        <div className="flex flex-col items-end gap-1">
-          <div className="flex gap-2">
-            {isService ? (
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                disabled={rotate.isPending}
-                title="Mints a new token and stops the old one working. That is the only revocation there is — a token cannot be read back, because only its hash was kept."
-                onClick={() => rotate.mutate()}
-              >
-                Rotate token
-              </Button>
-            ) : (
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                onClick={() => setResetting((open) => !open)}
-              >
-                Reset password
-              </Button>
-            )}
-            <Button
-              type="button"
-              size="sm"
-              variant="destructive"
-              disabled={lastAdmin || remove.isPending}
-              title={
-                lastAdmin
-                  ? 'This is the only admin. Removing it leaves nobody able to manage this instance.'
-                  : undefined
-              }
-              onClick={() => remove.mutate()}
-            >
-              Remove
-            </Button>
-          </div>
-
-          {resetting && (
-            <div className="flex items-center gap-2">
-              <Label htmlFor={`reset-${user.id}`} className="sr-only">
-                New password for {user.username}
-              </Label>
-              <Input
-                id={`reset-${user.id}`}
-                type="password"
-                value={password}
-                className="h-8 w-64"
-                placeholder="at least 12 characters"
-                onChange={(event) => setPassword(event.target.value)}
-              />
-              <Button
-                type="button"
-                size="sm"
-                disabled={password.length < 12 || reset.isPending}
-                onClick={() => reset.mutate()}
-              >
-                Set
-              </Button>
-            </div>
-          )}
-
-          {token && <TokenOnce token={token} onDismiss={() => setToken(null)} />}
-
-          {setRole.error ? <Problem error={setRole.error} /> : null}
-          {reset.error ? <Problem error={reset.error} /> : null}
-          {rotate.error ? <Problem error={rotate.error} /> : null}
-          {remove.error ? <Problem error={remove.error} /> : null}
+      {resetting && (
+        <div className="flex items-center gap-2 max-md:flex-col max-md:items-stretch">
+          <Label htmlFor={`reset-${user.id}`} className="sr-only">
+            New password for {user.username}
+          </Label>
+          <Input
+            id={`reset-${user.id}`}
+            type="password"
+            value={password}
+            className="h-8 w-64 max-md:h-11 max-md:w-full"
+            placeholder="at least 12 characters"
+            onChange={(event) => setPassword(event.target.value)}
+          />
+          <Button
+            type="button"
+            size="sm"
+            className="max-md:h-11"
+            disabled={password.length < 12 || reset.isPending}
+            onClick={() => reset.mutate()}
+          >
+            Set
+          </Button>
         </div>
-      </TableCell>
-    </TableRow>
+      )}
+
+      {token && <TokenOnce token={token} onDismiss={() => setToken(null)} />}
+
+      {reset.error ? <Problem error={reset.error} /> : null}
+      {rotate.error ? <Problem error={rotate.error} /> : null}
+      {remove.error ? <Problem error={remove.error} /> : null}
+    </div>
   )
 }
 
