@@ -90,6 +90,9 @@ type Options struct {
 	Services    []Service
 	ProxyBodies map[string]string
 
+	// Events the cluster has to report.
+	Events []Event
+
 	// ConflictOn are objects whose apply answers 409, keyed the same way. It is
 	// how a test reaches the case that matters most: another field manager owns
 	// a field this apply sets, and the product must report that rather than
@@ -183,6 +186,38 @@ type Pod struct {
 	// BudgetRefuses makes an eviction of this pod answer 429, which is what a
 	// PodDisruptionBudget looks like from the client's side.
 	BudgetRefuses bool
+
+	// ContainerNames gives the pod several containers. Empty means one called
+	// after the pod, which is the ordinary shape and keeps every existing test
+	// unchanged.
+	ContainerNames []string
+
+	// Image, and what the containers are doing. These exist so a test can build
+	// the case the container detail was written for: a container that is
+	// waiting in CrashLoopBackOff whose PREVIOUS run exited with a code.
+	Image        string
+	CrashLoop    bool
+	LastExitCode int32
+	LastReason   string
+
+	// Logs are what each container said, keyed by container name, and
+	// PreviousLogs what the run before this one said. The second is the one
+	// that matters: a pod in CrashLoopBackOff has produced nothing yet in its
+	// current container.
+	Logs         map[string]string
+	PreviousLogs map[string]string
+}
+
+// Event is one thing the cluster reported, as a test describes it.
+type Event struct {
+	Namespace string
+	Type      string
+	Reason    string
+	Message   string
+	Kind      string
+	Name      string
+	Count     int32
+	LastSeen  time.Time
 }
 
 // Deployment is a deployment as a test wants to describe it.
@@ -249,6 +284,7 @@ type Server struct {
 	conflictOn []string
 
 	services    []Service
+	events      []Event
 	proxyBodies map[string]string
 
 	// proxied records every path a proxy request asked for, as
@@ -278,6 +314,7 @@ func New(opts Options) (*Server, error) {
 		applied:     map[string]map[string]any{},
 		conflictOn:  append([]string(nil), opts.ConflictOn...),
 		services:    append([]Service(nil), opts.Services...),
+		events:      append([]Event(nil), opts.Events...),
 		proxyBodies: opts.ProxyBodies,
 		pods:        append([]Pod(nil), opts.Pods...),
 		namespaces:  namespacesOf(opts),
@@ -397,6 +434,9 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("/api/v1/services", s.record(func(w http.ResponseWriter, _ *http.Request) {
 		s.writeServices(w, "")
 	}))
+	mux.HandleFunc("/api/v1/events", s.record(func(w http.ResponseWriter, r *http.Request) {
+		s.writeEvents(w, r, "")
+	}))
 	mux.HandleFunc("/api/v1/pods", s.record(s.servePods))
 	// The namespaced list, which is the path client-go uses when a namespace is
 	// named: /api/v1/namespaces/{ns}/pods.
@@ -509,6 +549,10 @@ func (s *Server) serveNamespaced(w http.ResponseWriter, r *http.Request) {
 		s.writePods(w, r, ns)
 	case len(parts) == 2 && parts[0] == "pods":
 		s.servePod(w, r, ns, parts[1])
+	case len(parts) == 3 && parts[0] == "pods" && parts[2] == "log":
+		s.servePodLog(w, r, ns, parts[1])
+	case len(parts) == 1 && parts[0] == "events":
+		s.writeEvents(w, r, ns)
 	case len(parts) == 3 && parts[0] == "pods" && parts[2] == "eviction":
 		s.evictPod(w, r, ns, parts[1])
 	case len(parts) == 2 && parts[0] == "configmaps":
@@ -721,11 +765,37 @@ func renderPod(p Pod) corev1.Pod {
 	if containers == 0 {
 		containers = 1
 	}
+	// A test may name the containers; otherwise they are numbered as before, so
+	// every test written against the old shape still describes the same pod.
+	names := p.ContainerNames
+	if len(names) == 0 {
+		names = make([]string, containers)
+		for i := range containers {
+			names[i] = fmt.Sprintf("container-%d", i)
+		}
+	}
+	containers = len(names)
+
 	statuses := make([]corev1.ContainerStatus, 0, containers)
 	for i := range containers {
 		st := corev1.ContainerStatus{
-			Name:  fmt.Sprintf("container-%d", i),
+			Name:  names[i],
+			Image: p.Image,
 			Ready: i < p.Ready,
+		}
+		// The case the container detail exists for: waiting to be restarted,
+		// with the diagnosis belonging to the run that already ended.
+		if p.CrashLoop {
+			st.State = corev1.ContainerState{
+				Waiting: &corev1.ContainerStateWaiting{Reason: "CrashLoopBackOff"},
+			}
+			st.LastTerminationState = corev1.ContainerState{
+				Terminated: &corev1.ContainerStateTerminated{
+					ExitCode:   p.LastExitCode,
+					Reason:     p.LastReason,
+					FinishedAt: metav1.NewTime(time.Now().Add(-time.Minute).UTC()),
+				},
+			}
 		}
 		// The restart count a test gives is the POD's, and Kubernetes carries
 		// it per container -- so it goes on the first one only. Putting it on
@@ -769,6 +839,9 @@ func renderPod(p Pod) corev1.Pod {
 	}
 
 	spec := corev1.PodSpec{NodeName: p.Node}
+	for _, name := range names {
+		spec.Containers = append(spec.Containers, corev1.Container{Name: name, Image: p.Image})
+	}
 	if p.LocalData {
 		spec.Volumes = []corev1.Volume{{
 			Name:         "scratch",
@@ -1228,6 +1301,13 @@ func (s *Server) serveCoreResources(w http.ResponseWriter, _ *http.Request) {
 				Verbs: metav1.Verbs{"create"}},
 			{Name: "configmaps", SingularName: "configmap", Namespaced: true, Kind: "ConfigMap",
 				Verbs: metav1.Verbs{"get", "list", "create", "patch", "update"}},
+			// Offered deliberately, so the product's refusal to render a Secret
+			// is proven against a cluster that HAS them. Without this the
+			// refusal could be removed and the test would still pass -- on
+			// "this cluster does not have Secret", which is a different
+			// sentence and no protection at all.
+			{Name: "secrets", SingularName: "secret", Namespaced: true, Kind: "Secret",
+				Verbs: metav1.Verbs{"get", "list"}},
 		},
 	})
 }
@@ -1465,4 +1545,110 @@ func (s *Server) Proxied() []string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return append([]string(nil), s.proxied...)
+}
+
+// Logs and events (2026-09-19).
+
+// servePodLog answers the log subresource.
+//
+// It honours `previous` and `container`, because those two are exactly what the
+// product has to get right: a fake that returned the same text for both would
+// let a screen label the dead container's output as the running one's, and a
+// crash loop is diagnosed entirely from the dead one.
+func (s *Server) servePodLog(w http.ResponseWriter, r *http.Request, namespace, name string) {
+	s.mu.Lock()
+	var found *Pod
+	for i := range s.pods {
+		if s.pods[i].Namespace == namespace && s.pods[i].Name == name {
+			found = &s.pods[i]
+			break
+		}
+	}
+	s.mu.Unlock()
+
+	if found == nil {
+		s.writeStatus(w, http.StatusNotFound, metav1.StatusReasonNotFound,
+			fmt.Sprintf("pods %q not found", name))
+		return
+	}
+
+	container := r.URL.Query().Get("container")
+	previous := r.URL.Query().Get("previous") == "true"
+
+	logs := found.Logs
+	if previous {
+		logs = found.PreviousLogs
+	}
+	body, ok := logs[container]
+	if !ok {
+		// What a real API server says when the container never ran: a 400 with
+		// a sentence, not a 404. The product turns it into something readable
+		// rather than an error, and this is what lets that be tested.
+		s.writeStatus(w, http.StatusBadRequest, metav1.StatusReasonBadRequest,
+			fmt.Sprintf("previous terminated container %q in pod %q not found", container, name))
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+	_, _ = io.WriteString(w, body)
+}
+
+func (s *Server) writeEvents(w http.ResponseWriter, r *http.Request, namespace string) {
+	s.mu.Lock()
+	events := append([]Event(nil), s.events...)
+	s.mu.Unlock()
+
+	// The field selector is honoured rather than ignored, for the reason the
+	// pod list's is: a fake that returned every event would let a detail screen
+	// show another object's failures under this object's name.
+	wantName, wantKind := "", ""
+	for _, term := range strings.Split(r.URL.Query().Get("fieldSelector"), ",") {
+		key, value, ok := strings.Cut(term, "=")
+		if !ok {
+			continue
+		}
+		switch key {
+		case "involvedObject.name":
+			wantName = value
+		case "involvedObject.kind":
+			wantKind = value
+		}
+	}
+
+	list := corev1.EventList{
+		TypeMeta: metav1.TypeMeta{APIVersion: "v1", Kind: "EventList"},
+		ListMeta: metav1.ListMeta{ResourceVersion: "1"},
+	}
+	for _, e := range events {
+		if namespace != "" && e.Namespace != namespace {
+			continue
+		}
+		if wantName != "" && e.Name != wantName {
+			continue
+		}
+		if wantKind != "" && e.Kind != wantKind {
+			continue
+		}
+		seen := e.LastSeen
+		if seen.IsZero() {
+			seen = time.Now().UTC()
+		}
+		count := e.Count
+		if count == 0 {
+			count = 1
+		}
+		list.Items = append(list.Items, corev1.Event{
+			TypeMeta:       metav1.TypeMeta{APIVersion: "v1", Kind: "Event"},
+			ObjectMeta:     metav1.ObjectMeta{Name: e.Reason + "-" + e.Name, Namespace: e.Namespace},
+			Type:           e.Type,
+			Reason:         e.Reason,
+			Message:        e.Message,
+			Count:          count,
+			FirstTimestamp: metav1.NewTime(seen.Add(-time.Minute)),
+			LastTimestamp:  metav1.NewTime(seen),
+			InvolvedObject: corev1.ObjectReference{Kind: e.Kind, Name: e.Name, Namespace: e.Namespace},
+		})
+	}
+	writeJSON(w, http.StatusOK, list)
 }

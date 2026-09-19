@@ -1736,6 +1736,81 @@ export const proxyResponseSchema = z.object({
 export type KubernetesService = z.infer<typeof kubernetesServiceSchema>
 export type ProxyResponse = z.infer<typeof proxyResponseSchema>
 
+/** One container of a pod, and the cluster's own account of how it is doing. */
+export const containerSchema = z.object({
+  name: z.string(),
+  image: z.string().default(''),
+  init: z.boolean().default(false),
+  ready: z.boolean().default(false),
+  started: z.boolean().default(false),
+  restarts: z.number().default(0),
+  state: z.string().default(''),
+  reason: z.string().default(''),
+  message: z.string().default(''),
+  /** How the PREVIOUS run ended — the field a crash loop is diagnosed from. */
+  last_state: z.string().default(''),
+  last_reason: z.string().default(''),
+  last_exit_code: z.number().default(0),
+  last_finished_at: z.string().default(''),
+  /** Whether a previous log can be asked for at all, so the screen offers that
+   * button only when it would answer. */
+  has_previous: z.boolean().default(false),
+  cpu_request: z.string().default(''),
+  memory_request: z.string().default(''),
+  cpu_limit: z.string().default(''),
+  memory_limit: z.string().default(''),
+  /** The server's one-line answer to "what is wrong with it". Computed there so
+   * the sentence about an exit code is written once. */
+  explanation: z.string().default(''),
+})
+
+export const containersSchema = z.object({ containers: z.array(containerSchema).default([]) })
+
+export const podLogSchema = z.object({
+  namespace: z.string(),
+  name: z.string(),
+  container: z.string(),
+  /** Which of the two logs this is, so the screen cannot label the dead
+   * container's output as the running one's. */
+  previous: z.boolean().default(false),
+  lines: z.array(z.string()).default([]),
+  /** Cut at the START: the end of a log is the part that explains the failure. */
+  truncated: z.boolean().default(false),
+})
+
+export const clusterEventSchema = z.object({
+  type: z.string().default(''),
+  reason: z.string().default(''),
+  message: z.string().default(''),
+  object: z.string().default(''),
+  count: z.number().default(0),
+  first_seen: z.string().default(''),
+  last_seen: z.string().default(''),
+})
+
+export const clusterEventsSchema = z.object({
+  events: z.array(clusterEventSchema).default([]),
+  /** Why an empty list is not a claim that nothing happened. */
+  notice: z.string().default(''),
+})
+
+export const describedSchema = z.object({
+  api_version: z.string().default(''),
+  kind: z.string().default(''),
+  namespace: z.string().default(''),
+  name: z.string().default(''),
+  yaml: z.string().default(''),
+  truncated: z.boolean().default(false),
+  /** What was left out and why. An object silently missing fields is how
+   * somebody concludes a field is not set when it is. */
+  notice: z.string().default(''),
+})
+
+export type Described = z.infer<typeof describedSchema>
+export type KubeContainer = z.infer<typeof containerSchema>
+export type PodLog = z.infer<typeof podLogSchema>
+export type ClusterEvent = z.infer<typeof clusterEventSchema>
+
 export const kubernetesOverviewSchema = z.object({
   cluster: z.string(),
   /** The API server's own version: the cheapest proof that the whole path
@@ -2610,6 +2685,77 @@ export const api = {
         `/api/v1/clusters/${encodeURIComponent(cluster)}/kubernetes/services/${encodeURIComponent(namespace)}/${encodeURIComponent(service)}/proxy`,
         proxyResponseSchema,
         { port, path },
+      ),
+
+    /** Which containers a pod has, and how each of them is doing. */
+    containers: async (cluster: string, namespace: string, pod: string) =>
+      (
+        await sendJSON(
+          'GET',
+          `/api/v1/clusters/${encodeURIComponent(cluster)}/kubernetes/pods/${encodeURIComponent(namespace)}/${encodeURIComponent(pod)}/containers`,
+          containersSchema,
+        )
+      ).containers,
+
+    /**
+     * One container's output.
+     *
+     * `previous` is the one that matters: a pod in CrashLoopBackOff has printed
+     * nothing in its current container, and everything that explains the crash
+     * belongs to the run that already ended.
+     */
+    logs: (
+      cluster: string,
+      namespace: string,
+      pod: string,
+      opts: { container: string; previous?: boolean; tail?: number },
+    ): Promise<PodLog> => {
+      const query = new URLSearchParams({ container: opts.container })
+      if (opts.previous) query.set('previous', 'true')
+      if (opts.tail !== undefined) query.set('tail', String(opts.tail))
+      return sendJSON(
+        'GET',
+        `/api/v1/clusters/${encodeURIComponent(cluster)}/kubernetes/pods/${encodeURIComponent(namespace)}/${encodeURIComponent(pod)}/log?${query.toString()}`,
+        podLogSchema,
+      )
+    },
+
+    /**
+     * One object as YAML — the answer to the question the lists do not show.
+     *
+     * A POST for a read, because the audit archive captures bodies and not
+     * query strings, and nothing else here names the object. A Secret is
+     * refused: its data is base64, not encryption.
+     */
+    object: (
+      cluster: string,
+      object: { api_version: string; kind: string; namespace?: string; name: string },
+    ): Promise<Described> =>
+      sendJSON(
+        'POST',
+        `/api/v1/clusters/${encodeURIComponent(cluster)}/kubernetes/object`,
+        describedSchema,
+        { namespace: '', ...object },
+      ),
+
+    /** What the cluster has reported recently, which is where "why is this pod
+     * Pending" is answered and nowhere else. */
+    events: (cluster: string, namespace?: string) =>
+      sendJSON(
+        'GET',
+        `/api/v1/clusters/${encodeURIComponent(cluster)}/kubernetes/events` +
+          (namespace === undefined || namespace === ''
+            ? ''
+            : `?namespace=${encodeURIComponent(namespace)}`),
+        clusterEventsSchema,
+      ),
+
+    /** The same, about one pod, filtered by the server. */
+    podEvents: (cluster: string, namespace: string, pod: string) =>
+      sendJSON(
+        'GET',
+        `/api/v1/clusters/${encodeURIComponent(cluster)}/kubernetes/pods/${encodeURIComponent(namespace)}/${encodeURIComponent(pod)}/events`,
+        clusterEventsSchema,
       ),
 
     overview: (cluster: string, namespace?: string): Promise<KubernetesOverview> =>

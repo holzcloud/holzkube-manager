@@ -826,5 +826,37 @@
       "level": "node",
       "available": true
     }
+  },
+  "/api/v1/clusters/c-homelab/kubernetes/events": {
+    "events": [
+      {
+        "type": "Normal",
+        "reason": "Pulled",
+        "message": "Container image already present on machine",
+        "object": "Pod/coredns-7c65d6cfc9-x4m2p",
+        "count": 1,
+        "first_seen": "2026-09-19T11:00:00Z",
+        "last_seen": "2026-09-19T11:00:00Z"
+      },
+      {
+        "type": "Warning",
+        "reason": "BackOff",
+        "message": "Back-off restarting failed container longhorn-manager in pod longhorn-manager-4kqwz",
+        "object": "Pod/longhorn-manager-4kqwz",
+        "count": 14,
+        "first_seen": "2026-09-19T10:00:00Z",
+        "last_seen": "2026-09-19T12:10:00Z"
+      },
+      {
+        "type": "Warning",
+        "reason": "FailedScheduling",
+        "message": "0/2 nodes are available: 1 node(s) had untolerated taint, 1 Insufficient cpu.",
+        "object": "Pod/holzcloud-website-6d9f7b8c54-qn2vt",
+        "count": 3,
+        "first_seen": "2026-09-19T12:00:00Z",
+        "last_seen": "2026-09-19T12:12:00Z"
+      }
+    ],
+    "notice": "A cluster forgets its events after about an hour. An empty list means nothing has been reported recently, not that nothing has happened."
   }
 }
