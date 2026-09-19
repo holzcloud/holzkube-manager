@@ -5,6 +5,7 @@ import {
   clustersSchema,
   jobsSchema,
   kubernetesOverviewSchema,
+  machineSchema,
   machinesSchema,
   noticesSchema,
   schematicSchema,
@@ -40,6 +41,7 @@ describe('the layout guard’s fixtures', () => {
     ['/api/v1/clusters/c-homelab/kubernetes', kubernetesOverviewSchema],
     ['/api/v1/schematics', z.array(schematicSchema)],
     ['/api/v1/provision/notices', noticesSchema],
+    ['/api/v1/machines/m-cp-1', machineSchema],
   ])('%s is something the product would accept', (path, schema) => {
     const parsed = schema.safeParse(fixtures[path])
     // The error is printed in full rather than as "expected true": a fixture

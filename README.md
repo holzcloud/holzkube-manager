@@ -1037,9 +1037,18 @@ something is broken.
 
 **The guard renders real rows, and that had to be fixed before any of this could
 be believed.** It used to start a daemon with an empty data directory, so every
-screen showed nothing and passed. The first run with data found seven tables
+screen showed nothing and passed. The first run with data found eight tables
 between 521 and 1027px wide and ten controls under 44px — all of which had been
 there, passing, for as long as the guard had existed (ledger 149).
+
+**It also drove eleven screens out of fourteen.** The node detail page was
+missing, and so were `/setup` and `/login` — the first two anybody ever sees. Those
+two were missing for an ordering reason rather than an oversight: the script
+created an account and signed in before measuring anything, and after that
+`/setup` no longer exists. It now runs three passes in the only order that works:
+`/setup` against a fresh daemon, then `/login` with an account but no session,
+then the rest signed in. The first run of the node detail page found fifteen
+elements past the right edge with nothing to scroll (ledger 153).
 
 ## Metrics
 
