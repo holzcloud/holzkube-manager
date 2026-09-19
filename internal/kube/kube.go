@@ -314,6 +314,22 @@ func New(creds Creds) (*Client, error) {
 		// does (D-04). This is here so that a caller who forgot cannot hold a
 		// connection for ever.
 		Timeout: CallBudget,
+
+		// JSON, explicitly, and this was measured rather than assumed:
+		// client-go negotiates PROTOBUF for some paths on its own -- the scale
+		// subresource sends a body starting with the bytes "k8s\x00" -- and a
+		// reader expecting JSON gets a parse error with no useful message.
+		//
+		// Two reasons to pin it. The simulator this product is tested against
+		// serves the API's JSON, marshalled from upstream types, and teaching
+		// it a second wire format would buy nothing. And an operator debugging
+		// this daemon against their own cluster can read JSON off the wire,
+		// which is worth more here than the bytes protobuf saves on a fleet of
+		// five machines.
+		ContentConfig: rest.ContentConfig{
+			ContentType:        "application/json",
+			AcceptContentTypes: "application/json",
+		},
 	}
 
 	cs, err := kubernetes.NewForConfig(cfg)

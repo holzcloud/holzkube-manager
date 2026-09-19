@@ -742,6 +742,58 @@ var routeBudgets = []routeBudget{
 			"is deliberate.",
 	},
 	{
+		route: "POST /api/v1/clusters/{id}/kubernetes/pods/{namespace}/{pod}/restart",
+		calls: []upstreamCall{
+			{name: "NewClusterClient: Version (finding a control-plane node)", class: nodeProbeCall},
+			{name: "COSI Get: the machine configuration, for the API server's address", class: nodeFastReadCall},
+			{name: "Kubernetes: get the pod (is it owned by anything)", class: kubeCall},
+			{name: "Kubernetes: delete the pod", class: kubeCall},
+		},
+		routeDeadline: handlers.KubernetesRouteBudget,
+		verdict:       knownOverBudget,
+		clipping:      clipped,
+		deferredTo: "the same follow-up as the overview row: the two Talos calls that find the " +
+			"API server's address are made per request and could be cached for a short while, " +
+			"which is a decision about staleness rather than a tidy-up.",
+		clippingRationale: "A get and a delete against an API server that answers are " +
+			"milliseconds. The sum describes every call timing out in turn, at which point the " +
+			"answer is that the cluster is unreachable.",
+		why: "The get is not incidental: the route refuses to delete a pod no controller owns, " +
+			"and it can only know that by asking. A restart that skipped the read would be a " +
+			"delete with a friendlier name.",
+	},
+	{
+		route: "POST /api/v1/clusters/{id}/kubernetes/deployments/{namespace}/{deployment}/scale",
+		calls: []upstreamCall{
+			{name: "NewClusterClient: Version (finding a control-plane node)", class: nodeProbeCall},
+			{name: "COSI Get: the machine configuration, for the API server's address", class: nodeFastReadCall},
+			{name: "Kubernetes: get the scale subresource", class: kubeCall},
+			{name: "Kubernetes: put the scale subresource", class: kubeCall},
+		},
+		routeDeadline:     handlers.KubernetesRouteBudget,
+		verdict:           knownOverBudget,
+		clipping:          clipped,
+		deferredTo:        "as above.",
+		clippingRationale: "as above: two small calls against a cluster that answers.",
+		why: "The subresource is read before it is written because that is what the API expects " +
+			"-- a scale carries a resource version -- and it is the same pair kubectl scale makes.",
+	},
+	{
+		route: "POST /api/v1/clusters/{id}/kubernetes/deployments/{namespace}/{deployment}/restart",
+		calls: []upstreamCall{
+			{name: "NewClusterClient: Version (finding a control-plane node)", class: nodeProbeCall},
+			{name: "COSI Get: the machine configuration, for the API server's address", class: nodeFastReadCall},
+			{name: "Kubernetes: patch the deployment's pod template", class: kubeCall},
+		},
+		routeDeadline:     handlers.KubernetesRouteBudget,
+		verdict:           knownOverBudget,
+		clipping:          clipped,
+		deferredTo:        "as above.",
+		clippingRationale: "as above: one small call against a cluster that answers.",
+		why: "One patch, and the deployment controller does the rest under its own strategy. " +
+			"That is the whole difference from deleting the pods: this keeps the workload up.",
+	},
+	{
 		route: "GET /api/v1/clusters/{id}/scale",
 		calls: []upstreamCall{
 			{name: "NewClusterClient: Version", class: nodeProbeCall},

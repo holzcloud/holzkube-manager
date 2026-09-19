@@ -319,6 +319,15 @@ var allowlist = map[string][]string{
 	"cluster.kubernetes-cordon": {"unschedulable"},
 	"node.drain":                {"force", "delete_local_data"},
 
+	// The pod and workload actions (milestone v1.17 slice 4). The namespace and
+	// the name are in the path and on the record already; what is worth keeping
+	// in clear is the NUMBER a scale was set to, because "somebody scaled this
+	// to zero" and "somebody scaled it to ten" are different events and an
+	// archive that could not tell them apart would be recording neither.
+	"cluster.kubernetes-restart-pod":     {},
+	"cluster.kubernetes-scale":           {"replicas"},
+	"cluster.kubernetes-rollout-restart": {},
+
 	// Renewing this installation's own client certificate for a cluster
 	// (V2-OPS-02). No parameters: the cluster is on the record already and the
 	// certificate itself never goes near the archive.

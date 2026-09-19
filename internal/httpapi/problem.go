@@ -144,6 +144,12 @@ const (
 	// forbids one layer down.
 	CodeKubernetesUnreachable = "upstream.kubernetes-unreachable"
 
+	// CodeNothingWouldRecreateIt: a restart was asked for on a pod no
+	// controller owns. Deleting it is not a restart, it is deletion -- and a
+	// product that did it because somebody clicked "restart" would have
+	// destroyed something on the strength of a word.
+	CodeNothingWouldRecreateIt = "conflict.nothing-would-recreate-it"
+
 	// CodeNoMachinesToRotate: a CA rotation was asked for on a cluster with no
 	// machines recorded. A conflict rather than a validation error: the request
 	// is fine and the inventory is empty.
