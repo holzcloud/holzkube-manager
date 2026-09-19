@@ -915,7 +915,7 @@ func renderDeployment(d Deployment) appsv1.Deployment {
 		Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "app", Image: d.Image}}},
 	}
 	if d.RestartedAt != "" {
-		template.ObjectMeta.Annotations = map[string]string{
+		template.Annotations = map[string]string{
 			"kubectl.kubernetes.io/restartedAt": d.RestartedAt,
 		}
 	}
