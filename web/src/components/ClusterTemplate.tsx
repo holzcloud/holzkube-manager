@@ -98,7 +98,7 @@ export function ClusterTemplatePanel({ clusterID }: { clusterID?: string }) {
             </ul>
           )}
 
-          <dl className="grid grid-cols-[8rem_1fr] gap-x-4 gap-y-1 text-xs">
+          <dl className="grid grid-cols-1 md:grid-cols-[8rem_minmax(0,1fr)] gap-x-4 gap-y-1 text-xs">
             <dt className="text-muted-foreground">Control plane</dt>
             <dd className="font-mono break-all">
               {plan.data.plan.control_plane.machines.join(', ') || '—'}
