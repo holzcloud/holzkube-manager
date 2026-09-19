@@ -276,6 +276,350 @@ func KubernetesRoutes(d httpapi.Deps) []httpapi.Route {
 			Action:          "cluster.kubernetes-set-identity",
 			Handler:         handler(kubernetesSetIdentity(d)),
 		},
+		{
+			Method:          http.MethodGet,
+			Pattern:         "/api/v1/clusters/{id}/kubernetes/workloads",
+			RequiresSession: true,
+			MinRole:         model.RoleReader,
+			Action:          "cluster.kubernetes-workloads",
+			Handler:         handler(kubernetesWorkloads(d)),
+		},
+		{
+			Method:  http.MethodPost,
+			Pattern: "/api/v1/clusters/{id}/kubernetes/workloads/{kind}/{namespace}/{name}/scale",
+
+			Destructive:     true,
+			ClusterScope:    clusterIDFromPath,
+			RequiresSession: true,
+			MinRole:         model.RoleOperator,
+			Action:          "cluster.kubernetes-scale-workload",
+			Handler:         handler(kubernetesScaleWorkload(d)),
+		},
+		{
+			Method:  http.MethodPost,
+			Pattern: "/api/v1/clusters/{id}/kubernetes/workloads/{kind}/{namespace}/{name}/restart",
+
+			Destructive:     true,
+			ClusterScope:    clusterIDFromPath,
+			RequiresSession: true,
+			MinRole:         model.RoleOperator,
+			Action:          "cluster.kubernetes-restart-workload",
+			Handler:         handler(kubernetesRestartWorkload(d)),
+		},
+		{
+			Method:          http.MethodGet,
+			Pattern:         "/api/v1/clusters/{id}/kubernetes/resources",
+			RequiresSession: true,
+			MinRole:         model.RoleReader,
+			Action:          "cluster.kubernetes-resources",
+			Handler:         handler(kubernetesResources(d)),
+		},
+		{
+			Method:  http.MethodPost,
+			Pattern: "/api/v1/clusters/{id}/kubernetes/delete",
+
+			// A POST rather than a DELETE, for the reason the object read is a
+			// POST: the archive captures bodies, and WHAT was deleted is the
+			// event. A DELETE with the object in the query would record that
+			// somebody deleted something.
+			Destructive:     true,
+			ClusterScope:    clusterIDFromPath,
+			RequiresSession: true,
+			MinRole:         model.RoleOperator,
+			Action:          "cluster.kubernetes-delete-object",
+			Handler:         handler(kubernetesDeleteObject(d)),
+		},
+		{
+			Method:          http.MethodGet,
+			Pattern:         "/api/v1/clusters/{id}/kubernetes/nodes/{node}",
+			RequiresSession: true,
+			MinRole:         model.RoleReader,
+			Action:          "cluster.kubernetes-node-detail",
+			Handler:         handler(kubernetesNodeDetail(d)),
+		},
+		{
+			Method:          http.MethodGet,
+			Pattern:         "/api/v1/clusters/{id}/kubernetes/usage",
+			RequiresSession: true,
+			MinRole:         model.RoleReader,
+			Action:          "cluster.kubernetes-usage",
+			Handler:         handler(kubernetesUsage(d)),
+		},
+		{
+			Method:  http.MethodPost,
+			Pattern: "/api/v1/clusters/{id}/kubernetes/pods/{namespace}/{pod}/exec",
+
+			// Admin, not operator, and Destructive although it may only read:
+			// this runs a program inside somebody's workload, and what it does
+			// there is the workload's business rather than this product's. The
+			// sudo window and the cluster lock both apply.
+			//
+			// There is deliberately no port-forward beside it. The service
+			// proxy already reaches a workload for reading, and a forward means
+			// this daemon holding a listener whose authentication story is
+			// nobody's -- a second network path into the cluster, owned by this
+			// process. Somebody who needs one has kubectl.
+			Destructive:     true,
+			ClusterScope:    clusterIDFromPath,
+			RequiresSession: true,
+			MinRole:         model.RoleAdmin,
+			Action:          "cluster.kubernetes-exec",
+			Handler:         handler(kubernetesExec(d)),
+		},
+	}
+}
+
+// kubernetesExec runs one command in a container.
+func kubernetesExec(d httpapi.Deps) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Container string `json:"container"`
+			// A list rather than a string, and that is the whole design: a
+			// string would have to be split by something, and whatever split it
+			// would be a shell. See kube.Exec.
+			Command []string `json:"command"`
+		}
+		if err := decodeJSON(w, r, &body); err != nil {
+			httpapi.WriteProblem(w, r, decodeProblem(err))
+			return
+		}
+		if len(body.Command) == 0 {
+			httpapi.WriteProblem(w, r, httpapi.Validation(
+				"Give the program and its arguments.",
+				httpapi.FieldError{Field: "command", Reason: "required"}))
+			return
+		}
+
+		client, ctx, cancel, ok := kubeClientFor(d, w, r)
+		if !ok {
+			return
+		}
+		defer cancel()
+
+		ctx, stop := context.WithTimeout(ctx, kube.ExecBudget)
+		defer stop()
+
+		result, err := client.Exec(ctx, r.PathValue("namespace"), r.PathValue("pod"),
+			body.Container, body.Command)
+		if err != nil {
+			writeKubernetesError(w, r, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, result)
+	}
+}
+
+// kubernetesUsage answers what nodes and pods are using now.
+//
+// A cluster without metrics-server is the ordinary case -- Talos does not ship
+// one -- so that answers 200 with `collecting: false` rather than an error. It
+// is not a failure of anything, and a screen that got a 502 would say the
+// cluster is unreachable when it is answering perfectly well.
+func kubernetesUsage(d httpapi.Deps) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		client, ctx, cancel, ok := kubeClientFor(d, w, r)
+		if !ok {
+			return
+		}
+		defer cancel()
+
+		namespace := r.URL.Query().Get("namespace")
+
+		nodes, err := client.NodeUsage(ctx)
+		if errors.Is(err, kube.ErrNoMetrics) {
+			writeJSON(w, http.StatusOK, struct {
+				Collecting bool   `json:"collecting"`
+				Notice     string `json:"notice"`
+			}{
+				Collecting: false,
+				Notice: "No metrics-server is installed, so nothing is collecting usage. That is " +
+					"not the same as usage being zero, and Talos does not ship one: it is " +
+					"something to install if you want these numbers.",
+			})
+			return
+		}
+		if err != nil {
+			writeKubernetesError(w, r, err)
+			return
+		}
+
+		pods, err := client.PodUsage(ctx, namespace)
+		if err != nil && !errors.Is(err, kube.ErrNoMetrics) {
+			writeKubernetesError(w, r, err)
+			return
+		}
+
+		writeJSON(w, http.StatusOK, struct {
+			Collecting bool         `json:"collecting"`
+			Nodes      []kube.Usage `json:"nodes"`
+			Pods       []kube.Usage `json:"pods"`
+			Notice     string       `json:"notice"`
+		}{
+			Collecting: true,
+			Nodes:      nodes,
+			Pods:       pods,
+			Notice: "This is what they are using. What the scheduler reserves is what they " +
+				"REQUESTED, which is on the node detail and is a different number.",
+		})
+	}
+}
+
+// kubernetesNodeDetail answers why nothing will schedule on a node.
+func kubernetesNodeDetail(d httpapi.Deps) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		client, ctx, cancel, ok := kubeClientFor(d, w, r)
+		if !ok {
+			return
+		}
+		defer cancel()
+
+		detail, err := client.NodeDetail(ctx, r.PathValue("node"))
+		if err != nil {
+			writeKubernetesError(w, r, err)
+			return
+		}
+
+		// The taints worth pointing at, separated from the ordinary ones here
+		// rather than in the browser: every Talos control-plane node carries the
+		// control-plane taint, and a screen that presented it as a finding would
+		// tell somebody their cluster is misconfigured on their first visit.
+		writeJSON(w, http.StatusOK, struct {
+			kube.NodeDetail
+			Explaining []kube.NodeTaint `json:"explaining_taints"`
+		}{
+			NodeDetail: detail,
+			Explaining: kube.TaintsThatExplainPending(detail.Taints),
+		})
+	}
+}
+
+// kubernetesResources lists the objects beside the workloads.
+func kubernetesResources(d httpapi.Deps) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		client, ctx, cancel, ok := kubeClientFor(d, w, r)
+		if !ok {
+			return
+		}
+		defer cancel()
+
+		resources, err := client.Resources(ctx, r.URL.Query().Get("namespace"))
+		if err != nil {
+			writeKubernetesError(w, r, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, struct {
+			Resources []kube.Resource `json:"resources"`
+		}{Resources: resources})
+	}
+}
+
+// kubernetesDeleteObject removes one object.
+func kubernetesDeleteObject(d httpapi.Deps) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			APIVersion string `json:"api_version"`
+			Kind       string `json:"kind"`
+			Namespace  string `json:"namespace"`
+			Name       string `json:"name"`
+		}
+		if err := decodeJSON(w, r, &body); err != nil {
+			httpapi.WriteProblem(w, r, decodeProblem(err))
+			return
+		}
+		if body.APIVersion == "" || body.Kind == "" || body.Name == "" {
+			httpapi.WriteProblem(w, r, httpapi.Validation(
+				"Say which object to remove.",
+				httpapi.FieldError{Field: "kind", Reason: "api_version, kind and name are required"}))
+			return
+		}
+
+		client, ctx, cancel, ok := kubeClientFor(d, w, r)
+		if !ok {
+			return
+		}
+		defer cancel()
+
+		if err := client.DeleteObject(ctx, body.APIVersion, body.Kind,
+			body.Namespace, body.Name); err != nil {
+			writeKubernetesError(w, r, err)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}
+}
+
+// kubernetesWorkloads lists everything that runs, across the kinds.
+func kubernetesWorkloads(d httpapi.Deps) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		client, ctx, cancel, ok := kubeClientFor(d, w, r)
+		if !ok {
+			return
+		}
+		defer cancel()
+
+		workloads, err := client.Workloads(ctx, r.URL.Query().Get("namespace"))
+		if err != nil {
+			writeKubernetesError(w, r, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, struct {
+			Workloads []kube.Workload `json:"workloads"`
+		}{Workloads: workloads})
+	}
+}
+
+// kubernetesScaleWorkload sets the replica count of a kind that has one.
+func kubernetesScaleWorkload(d httpapi.Deps) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			// A pointer, so that "scale to 0" is distinguishable from "no
+			// number was sent" -- switching a workload off must not happen
+			// because a client forgot a key.
+			Replicas *int32 `json:"replicas"`
+		}
+		if err := decodeJSON(w, r, &body); err != nil {
+			httpapi.WriteProblem(w, r, decodeProblem(err))
+			return
+		}
+		if body.Replicas == nil {
+			httpapi.WriteProblem(w, r, httpapi.Validation(
+				"Say how many replicas you want.",
+				httpapi.FieldError{Field: "replicas", Reason: "required"}))
+			return
+		}
+
+		client, ctx, cancel, ok := kubeClientFor(d, w, r)
+		if !ok {
+			return
+		}
+		defer cancel()
+
+		err := client.ScaleWorkload(ctx, kube.WorkloadKind(r.PathValue("kind")),
+			r.PathValue("namespace"), r.PathValue("name"), *body.Replicas)
+		if err != nil {
+			writeKubernetesError(w, r, err)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}
+}
+
+// kubernetesRestartWorkload rolls a workload's pods under its own strategy.
+func kubernetesRestartWorkload(d httpapi.Deps) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		client, ctx, cancel, ok := kubeClientFor(d, w, r)
+		if !ok {
+			return
+		}
+		defer cancel()
+
+		err := client.RolloutRestartWorkload(ctx, kube.WorkloadKind(r.PathValue("kind")),
+			r.PathValue("namespace"), r.PathValue("name"), time.Now())
+		if err != nil {
+			writeKubernetesError(w, r, err)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
 	}
 }
 
@@ -998,6 +1342,15 @@ func writeKubernetesError(w http.ResponseWriter, r *http.Request, err error) {
 			Status: http.StatusConflict,
 			Detail: err.Error(),
 			Code:   httpapi.CodeNothingWouldRecreateIt,
+		})
+
+	case errors.Is(err, kube.ErrExecRefused), errors.Is(err, kube.ErrNoIdentityForExec):
+		httpapi.WriteProblem(w, r, &httpapi.Problem{
+			Type:   httpapi.TypeConflict,
+			Title:  "That command will not be run",
+			Status: http.StatusConflict,
+			Detail: err.Error(),
+			Code:   httpapi.CodeExecRefused,
 		})
 
 	case errors.Is(err, kube.ErrRefusedKind):

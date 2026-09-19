@@ -1,5 +1,39 @@
 [
   {
+    "version": "v1.22.0",
+    "date": "2026-09-19",
+    "changes": [
+      {
+        "icon": "📦",
+        "text": "Every workload kind is listed now, not only Deployments — StatefulSets, DaemonSets, Jobs and CronJobs too. Your storage layer is a DaemonSet and your backup is a CronJob, and a list without them showed a cluster nobody runs. What each kind cannot do is not offered: a DaemonSet has no replica field, because its size is how many nodes match."
+      },
+      {
+        "icon": "🗂️",
+        "text": "Beside them: ConfigMaps, Secrets, persistent volume claims, Ingresses, autoscalers and disruption budgets. Each answers something the workload list cannot — where the setting lives, whether a URL reaches the cluster, why a claim is Pending, why a replica count goes back after you scale by hand, why a drain refuses. Whatever is the reason something is stuck comes first."
+      },
+      {
+        "icon": "🔑",
+        "text": "Secrets are listed and never read: the names and key names answer \"does this namespace have the pull secret\", and no value appears anywhere. Base64 is not encryption."
+      },
+      {
+        "icon": "🗑️",
+        "text": "Objects can be removed, one at a time, by typing the name back. There is no delete-all and no label selector, and deleting a Namespace is refused: it removes everything inside it and nothing stops it once it starts."
+      },
+      {
+        "icon": "🧭",
+        "text": "Every node has a \"Why?\" button for the question a pod cannot answer. Taints in words — NoExecute evicts what is already there, NoSchedule only keeps new pods off. Conditions with the inversion handled. And how much room the scheduler has left, which is what pods REQUESTED rather than what they use: a node at 5% CPU can still be full."
+      },
+      {
+        "icon": "📈",
+        "text": "If you install metrics-server, usage appears beside it. Without one the screen says nobody is collecting this, which is not the same as zero — Talos does not ship one."
+      },
+      {
+        "icon": "⌨️",
+        "text": "A command can be run in a container, and it is deliberately not a terminal: a program and its arguments run once and the output comes back. A shell with a string is refused, because an archive that recorded \"sh -lc\" could not say what happened. It runs under your identity or not at all. There is no port-forward: that would mean this daemon holding a listener with nobody's authentication behind it."
+      }
+    ]
+  },
+  {
     "version": "v1.21.0",
     "date": "2026-09-19",
     "changes": [

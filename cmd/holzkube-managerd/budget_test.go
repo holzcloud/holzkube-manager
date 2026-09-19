@@ -144,6 +144,13 @@ const (
 	// one -- so it gets a shorter ceiling of its own, and this row reads it
 	// rather than restating it.
 	kubeProxyCall callClass = "kube-proxy"
+
+	// The third Kubernetes class, added with exec. Behind it is not the API
+	// server and not a workload answering an HTTP request, but a program
+	// somebody wrote running to completion -- and this product bounds that
+	// tighter than either, because a management screen is not where long work
+	// belongs.
+	kubeExecCall callClass = "kube-exec"
 )
 
 // upstreamCall is one call a route makes in series: what it is, and which
@@ -174,6 +181,8 @@ func (u upstreamCall) budget() (time.Duration, bool) {
 		return kube.CallBudget, true
 	case kubeProxyCall:
 		return kube.ProxyBudget, true
+	case kubeExecCall:
+		return kube.ExecBudget, true
 	default:
 		return 0, false
 	}
@@ -1025,6 +1034,156 @@ var routeBudgets = []routeBudget{
 		why: "Storing whose name requests arrive under touches nothing upstream. What it changes " +
 			"is what every later request looks like to the cluster, which is why it is " +
 			"Destructive and under the cluster lock.",
+	},
+	{
+		route: "GET /api/v1/clusters/{id}/kubernetes/workloads",
+		calls: []upstreamCall{
+			{name: "NewClusterClient: Version (finding a control-plane node)", class: nodeProbeCall},
+			{name: "COSI Get: the machine configuration, for the API server's address", class: nodeFastReadCall},
+			{name: "Kubernetes: list deployments", class: kubeCall},
+			{name: "Kubernetes: list statefulsets", class: kubeCall},
+			{name: "Kubernetes: list daemonsets", class: kubeCall},
+			{name: "Kubernetes: list jobs", class: kubeCall},
+			{name: "Kubernetes: list cronjobs", class: kubeCall},
+		},
+		routeDeadline: handlers.KubernetesRouteBudget,
+		verdict:       knownOverBudget,
+		clipping:      clipped,
+		deferredTo: "the five lists are issued in series and could be concurrent. That is a " +
+			"real improvement and it changes nothing about correctness, so it is deferred " +
+			"rather than a number being quietly chosen now.",
+		clippingRationale: "Five small list calls against an API server that answers are " +
+			"milliseconds. The sum describes every one of them timing out in turn, which is a " +
+			"cluster that is not answering.",
+		why: "A cluster is not only its Deployments: the storage layer is a DaemonSet, the " +
+			"database a StatefulSet, the backup a CronJob. One call per kind is what listing " +
+			"them costs, and the alternative -- showing only Deployments -- was the defect.",
+	},
+	{
+		route: "POST /api/v1/clusters/{id}/kubernetes/workloads/{kind}/{namespace}/{name}/scale",
+		calls: []upstreamCall{
+			{name: "NewClusterClient: Version (finding a control-plane node)", class: nodeProbeCall},
+			{name: "COSI Get: the machine configuration, for the API server's address", class: nodeFastReadCall},
+			{name: "Kubernetes: get the scale subresource", class: kubeCall},
+			{name: "Kubernetes: put the scale subresource", class: kubeCall},
+		},
+		routeDeadline:     handlers.KubernetesRouteBudget,
+		verdict:           knownOverBudget,
+		clipping:          clipped,
+		deferredTo:        "as above for the two Talos calls.",
+		clippingRationale: "two small calls against a cluster that answers.",
+		why: "Through the kind's own scale subresource, the same pair kubectl scale makes. A " +
+			"DaemonSet is refused before any call: its size is how many nodes match.",
+	},
+	{
+		route: "POST /api/v1/clusters/{id}/kubernetes/workloads/{kind}/{namespace}/{name}/restart",
+		calls: []upstreamCall{
+			{name: "NewClusterClient: Version (finding a control-plane node)", class: nodeProbeCall},
+			{name: "COSI Get: the machine configuration, for the API server's address", class: nodeFastReadCall},
+			{name: "Kubernetes: patch the pod template", class: kubeCall},
+		},
+		routeDeadline:     handlers.KubernetesRouteBudget,
+		verdict:           knownOverBudget,
+		clipping:          clipped,
+		deferredTo:        "as above.",
+		clippingRationale: "one small patch against a cluster that answers.",
+		why: "One patch, and the controller does the replacing under its own strategy. A Job is " +
+			"refused before any call: it runs to completion rather than being kept running.",
+	},
+	{
+		route: "GET /api/v1/clusters/{id}/kubernetes/resources",
+		calls: []upstreamCall{
+			{name: "NewClusterClient: Version (finding a control-plane node)", class: nodeProbeCall},
+			{name: "COSI Get: the machine configuration, for the API server's address", class: nodeFastReadCall},
+			{name: "Kubernetes: list configmaps", class: kubeCall},
+			{name: "Kubernetes: list secrets (names and keys only)", class: kubeCall},
+			{name: "Kubernetes: list persistentvolumeclaims", class: kubeCall},
+			{name: "Kubernetes: list ingresses", class: kubeCall},
+			{name: "Kubernetes: list horizontalpodautoscalers", class: kubeCall},
+			{name: "Kubernetes: list poddisruptionbudgets", class: kubeCall},
+		},
+		routeDeadline:     handlers.KubernetesRouteBudget,
+		verdict:           knownOverBudget,
+		clipping:          clipped,
+		deferredTo:        "the same follow-up as the workloads row: six lists in series that could be concurrent.",
+		clippingRationale: "Six small list calls against an API server that answers are milliseconds.",
+		why: "Each of the six answers a question the workload list cannot -- where the setting " +
+			"lives, why a URL does not reach the cluster, why a claim is Pending, why a replica " +
+			"count goes back, why a drain refuses.",
+	},
+	{
+		route: "POST /api/v1/clusters/{id}/kubernetes/delete",
+		calls: []upstreamCall{
+			{name: "NewClusterClient: Version (finding a control-plane node)", class: nodeProbeCall},
+			{name: "COSI Get: the machine configuration, for the API server's address", class: nodeFastReadCall},
+			{name: "Kubernetes: discovery, /api", class: kubeCall},
+			{name: "Kubernetes: discovery, /apis", class: kubeCall},
+			{name: "Kubernetes: discovery, the group's resources", class: kubeCall},
+			{name: "Kubernetes: delete the object", class: kubeCall},
+		},
+		routeDeadline:     handlers.KubernetesRouteBudget,
+		verdict:           knownOverBudget,
+		clipping:          clipped,
+		deferredTo:        "as above for the two Talos calls.",
+		clippingRationale: "Discovery is cached per client; the delete is one small call.",
+		why: "The kind is resolved through the cluster's own discovery, so this reaches a " +
+			"CustomResourceDefinition too. There is no label selector and no delete-all: the " +
+			"operations that remove many things at once are the ones where a mistake is " +
+			"unbounded.",
+	},
+	{
+		route: "GET /api/v1/clusters/{id}/kubernetes/nodes/{node}",
+		calls: []upstreamCall{
+			{name: "NewClusterClient: Version (finding a control-plane node)", class: nodeProbeCall},
+			{name: "COSI Get: the machine configuration, for the API server's address", class: nodeFastReadCall},
+			{name: "Kubernetes: get the node", class: kubeCall},
+			{name: "Kubernetes: list the pods on it, by field selector", class: kubeCall},
+		},
+		routeDeadline:     handlers.KubernetesRouteBudget,
+		verdict:           knownOverBudget,
+		clipping:          clipped,
+		deferredTo:        "as above for the two Talos calls.",
+		clippingRationale: "two small reads against a cluster that answers.",
+		why: "The pods are needed to add up what the scheduler has already reserved, and the " +
+			"selector is the SERVER's: a cluster with ten thousand pods must not send all of " +
+			"them so that one node's can be counted.",
+	},
+	{
+		route: "GET /api/v1/clusters/{id}/kubernetes/usage",
+		calls: []upstreamCall{
+			{name: "NewClusterClient: Version (finding a control-plane node)", class: nodeProbeCall},
+			{name: "COSI Get: the machine configuration, for the API server's address", class: nodeFastReadCall},
+			{name: "Kubernetes: node metrics", class: kubeCall},
+			{name: "Kubernetes: pod metrics", class: kubeCall},
+		},
+		routeDeadline: handlers.KubernetesRouteBudget,
+		verdict:       knownOverBudget,
+		clipping:      clipped,
+		deferredTo:    "as above for the two Talos calls.",
+		clippingRationale: "Two reads against metrics-server, which answers from memory. On a " +
+			"cluster without one the first answers 404 immediately and the second is never made.",
+		why: "Through the aggregation layer, so a cluster with no metrics-server answers 404 on " +
+			"the whole group -- which this route reports as 'nobody is collecting this' rather " +
+			"than as zeroes or as the cluster being unreachable.",
+	},
+	{
+		route: "POST /api/v1/clusters/{id}/kubernetes/pods/{namespace}/{pod}/exec",
+		calls: []upstreamCall{
+			{name: "NewClusterClient: Version (finding a control-plane node)", class: nodeProbeCall},
+			{name: "COSI Get: the machine configuration, for the API server's address", class: nodeFastReadCall},
+			{name: "Kubernetes: get the pod (which container)", class: kubeCall},
+			{name: "Kubernetes: the exec subresource (somebody's program runs)", class: kubeExecCall},
+		},
+		routeDeadline: handlers.KubernetesRouteBudget,
+		verdict:       knownOverBudget,
+		clipping:      clipped,
+		deferredTo:    "as above for the two Talos calls.",
+		clippingRationale: "The last call runs a program somebody else wrote, so it gets a " +
+			"ceiling of its own at thirty seconds rather than sixty. Anything slower than that " +
+			"is a thing to run as a Job rather than from a management screen, and the route " +
+			"says so by stopping.",
+		why: "The pod is read first because the container has to be resolved before a command " +
+			"can be sent, and because naming the wrong one is refused rather than guessed.",
 	},
 	{
 		route: "GET /api/v1/clusters/{id}/scale",

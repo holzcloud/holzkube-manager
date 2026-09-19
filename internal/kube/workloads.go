@@ -146,11 +146,32 @@ func (c *Client) Scale(ctx context.Context, namespace, name string, replicas int
 // included. That is the difference from deleting the pods: deleting them takes
 // the workload down, and this replaces it while keeping it up.
 func (c *Client) RolloutRestart(ctx context.Context, namespace, name string, now time.Time) error {
-	// Marshalled rather than assembled with fmt.Sprintf, and the reason is not
-	// only taste: internal/talos's seam guard reads a format string with a verb,
-	// a colon and a verb as an address being built by hand, and it was right to
-	// look -- a product that builds JSON by concatenation will eventually build
-	// one that is not valid. So the shape is a value and the encoder writes it.
+	patch, err := restartPatch(now)
+	if err != nil {
+		return err
+	}
+
+	_, err = c.cs.AppsV1().Deployments(namespace).Patch(
+		ctx, name, types.StrategicMergePatchType, patch, metav1.PatchOptions{})
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			return fmt.Errorf("%w: deployment %s/%s", ErrNoSuchWorkload, namespace, name)
+		}
+		return fmt.Errorf("kube: restarting the rollout of %s/%s: %w", namespace, name, err)
+	}
+	return nil
+}
+
+// restartPatch is the annotation that makes a controller replace its pods.
+//
+// Marshalled rather than assembled with fmt.Sprintf, and written ONCE for every
+// kind that has a pod template. The reason is not only taste: internal/talos's
+// seam guard reads a format string with a verb, a colon and a verb as an address
+// being built by hand, and it was right to look -- a product that builds JSON by
+// concatenation will eventually build one that is not valid. The second copy of
+// this, added with the other workload kinds, tripped the same guard the same
+// day, which is why there is now one.
+func restartPatch(now time.Time) ([]byte, error) {
 	patch, err := json.Marshal(map[string]any{
 		"spec": map[string]any{
 			"template": map[string]any{
@@ -163,16 +184,7 @@ func (c *Client) RolloutRestart(ctx context.Context, namespace, name string, now
 		},
 	})
 	if err != nil {
-		return fmt.Errorf("kube: building the restart patch: %w", err)
+		return nil, fmt.Errorf("kube: building the restart patch: %w", err)
 	}
-
-	_, err = c.cs.AppsV1().Deployments(namespace).Patch(
-		ctx, name, types.StrategicMergePatchType, patch, metav1.PatchOptions{})
-	if err != nil {
-		if apierrors.IsNotFound(err) {
-			return fmt.Errorf("%w: deployment %s/%s", ErrNoSuchWorkload, namespace, name)
-		}
-		return fmt.Errorf("kube: restarting the rollout of %s/%s: %w", namespace, name, err)
-	}
-	return nil
+	return patch, nil
 }

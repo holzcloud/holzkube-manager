@@ -54,7 +54,12 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	authv1 "k8s.io/api/authorization/v1"
 	autoscalingv1 "k8s.io/api/autoscaling/v1"
+	autoscalingv2 "k8s.io/api/autoscaling/v2"
+	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
+	networkingv1 "k8s.io/api/networking/v1"
+	policyv1 "k8s.io/api/policy/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 )
@@ -90,6 +95,24 @@ type Options struct {
 	// not serve.
 	Services    []Service
 	ProxyBodies map[string]string
+
+	// The other workload kinds, described the way a test thinks of them.
+	StatefulSets []StatefulSet
+	DaemonSets   []DaemonSet
+	Jobs         []Job
+	CronJobs     []CronJob
+
+	// The non-workload resources, described the way a test thinks of them.
+	Resources []Resource
+
+	// Usage is what metrics-server would report, keyed "node/<name>" or
+	// "pod/<namespace>/<name>", as "cpu,memory" -- e.g. "250m,512Mi".
+	//
+	// A nil map is a cluster with NO metrics-server, which is most clusters:
+	// Talos does not ship one. That case is the default here deliberately, so a
+	// product that assumed the numbers exist fails in the ordinary test rather
+	// than on somebody's cluster.
+	Usage map[string]string
 
 	// Events the cluster has to report.
 	Events []Event
@@ -163,14 +186,26 @@ type ServicePort struct {
 // Node is a node as a test wants to describe it, rather than the ninety fields
 // Kubernetes uses to say it.
 type Node struct {
-	Name             string
-	Ready            corev1.ConditionStatus
-	Unschedulable    bool
-	Roles            []string
-	KubeletVersion   string
-	OSImage          string
-	InternalAddress  string
-	ContainerRuntime string
+	Name          string
+	Ready         corev1.ConditionStatus
+	Unschedulable bool
+	Roles         []string
+
+	// Taints and Conditions as a test describes them: "key=value:Effect" and
+	// "Type=Status,Reason". They exist so the detail screen's two hardest
+	// claims can be measured -- that a pressure condition is bad when TRUE, and
+	// that NoExecute is a different day from NoSchedule.
+	Taints     []string
+	Conditions []string
+
+	// Allocatable, as Kubernetes quantities: "4", "8Gi", pods "110".
+	CPUAllocatable    string
+	MemoryAllocatable string
+	PodCapacity       string
+	KubeletVersion    string
+	OSImage           string
+	InternalAddress   string
+	ContainerRuntime  string
 }
 
 // Pod is a pod as a test wants to describe it.
@@ -221,6 +256,89 @@ type Pod struct {
 	// current container.
 	Logs         map[string]string
 	PreviousLogs map[string]string
+}
+
+// StatefulSet is one as a test describes it.
+//
+// Separate types for the four kinds rather than one with a kind field, because
+// the numbers mean different things: a DaemonSet's count is how many nodes
+// match, a Job's is how many pods finished, and a CronJob has none at all
+// between runs. A single struct would invite a test to set "ready" on a
+// CronJob, which is the confusion the product is being built not to have.
+type StatefulSet struct {
+	Namespace string
+	Name      string
+	Desired   int32
+	Ready     int32
+	Updated   int32
+	Image     string
+}
+
+// DaemonSet is one as a test describes it: how many nodes match, how many are ready.
+type DaemonSet struct {
+	Namespace string
+	Name      string
+	// Scheduled is how many nodes match; Ready how many of those are up.
+	Scheduled int32
+	Ready     int32
+	Image     string
+}
+
+// Job is one as a test describes it: its numbers are succeeded and failed.
+type Job struct {
+	Namespace string
+	Name      string
+	Succeeded int32
+	Failed    int32
+	Active    int32
+	Suspended bool
+	Image     string
+}
+
+// CronJob is one as a test describes it: it has no pods between runs.
+type CronJob struct {
+	Namespace string
+	Name      string
+	Schedule  string
+	Suspended bool
+	LastRun   time.Time
+	Image     string
+}
+
+// Resource is one non-workload object, as a test describes it.
+//
+// One struct with a Kind field here, unlike the workload kinds: these are
+// LISTED rather than acted on, and the fields a test sets are the same shape for
+// all of them -- a phase, a size, a couple of keys.
+type Resource struct {
+	Kind      string
+	Namespace string
+	Name      string
+
+	// Keys for a ConfigMap or a Secret.
+	Keys []string
+
+	// Phase and Size for a PersistentVolumeClaim.
+	Phase string
+	Size  string
+
+	// Host and Address for an Ingress. An empty address is an Ingress no
+	// controller has claimed, which is the "why does this URL not work" case.
+	Host    string
+	Address string
+
+	// Current, Min and Max for a HorizontalPodAutoscaler, plus what it targets.
+	Current    int32
+	Min        int32
+	Max        int32
+	TargetKind string
+	TargetName string
+
+	// Healthy, Desired and Allowed for a PodDisruptionBudget. Allowed zero is
+	// why a drain refuses.
+	Healthy int32
+	Desired int32
+	Allowed int32
 }
 
 // Event is one thing the cluster reported, as a test describes it.
@@ -298,8 +416,15 @@ type Server struct {
 	forced     []string
 	conflictOn []string
 
-	services []Service
-	events   []Event
+	services     []Service
+	statefulSets []StatefulSet
+	daemonSets   []DaemonSet
+	jobs         []Job
+	cronJobs     []CronJob
+	resources    []Resource
+	usage        map[string]string
+	restarted    map[string]string
+	events       []Event
 
 	allowImpersonated []string
 	denyVerbs         []string
@@ -338,6 +463,12 @@ func New(opts Options) (*Server, error) {
 		conflictOn:        append([]string(nil), opts.ConflictOn...),
 		services:          append([]Service(nil), opts.Services...),
 		events:            append([]Event(nil), opts.Events...),
+		statefulSets:      append([]StatefulSet(nil), opts.StatefulSets...),
+		daemonSets:        append([]DaemonSet(nil), opts.DaemonSets...),
+		jobs:              append([]Job(nil), opts.Jobs...),
+		cronJobs:          append([]CronJob(nil), opts.CronJobs...),
+		resources:         append([]Resource(nil), opts.Resources...),
+		usage:             opts.Usage,
 		allowImpersonated: append([]string(nil), opts.AllowImpersonated...),
 		denyVerbs:         append([]string(nil), opts.DenyVerbs...),
 		proxyBodies:       opts.ProxyBodies,
@@ -458,12 +589,70 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("/api/v1", s.record(s.serveCoreResources))
 	mux.HandleFunc("/apis/apps/v1", s.record(s.serveAppsResources))
 	mux.HandleFunc("/apis/apps/v1/deployments", s.record(s.serveDeployments))
+	mux.HandleFunc("/apis/apps/v1/statefulsets", s.record(func(w http.ResponseWriter, _ *http.Request) {
+		s.writeStatefulSets(w, "")
+	}))
+	mux.HandleFunc("/apis/apps/v1/daemonsets", s.record(func(w http.ResponseWriter, _ *http.Request) {
+		s.writeDaemonSets(w, "")
+	}))
+	mux.HandleFunc("/apis/metrics.k8s.io/v1beta1/nodes", s.record(func(w http.ResponseWriter, _ *http.Request) {
+		s.writeUsage(w, "node", "")
+	}))
+	mux.HandleFunc("/apis/metrics.k8s.io/v1beta1/pods", s.record(func(w http.ResponseWriter, _ *http.Request) {
+		s.writeUsage(w, "pod", "")
+	}))
+	mux.HandleFunc("/apis/metrics.k8s.io/v1beta1/namespaces/", s.record(func(w http.ResponseWriter, r *http.Request) {
+		rest := strings.TrimPrefix(r.URL.Path, "/apis/metrics.k8s.io/v1beta1/namespaces/")
+		ns, tail, ok := strings.Cut(rest, "/")
+		if !ok || tail != "pods" {
+			s.serveNotFound(w, r)
+			return
+		}
+		s.writeUsage(w, "pod", ns)
+	}))
+	mux.HandleFunc("/apis/batch/v1", s.record(s.serveBatchResources))
+	mux.HandleFunc("/apis/networking.k8s.io/v1", s.record(func(w http.ResponseWriter, _ *http.Request) {
+		s.writeGroupResources(w, "networking.k8s.io/v1",
+			metav1.APIResource{Name: "ingresses", SingularName: "ingress", Namespaced: true,
+				Kind: "Ingress", Verbs: metav1.Verbs{"get", "list", "delete"}})
+	}))
+	mux.HandleFunc("/apis/autoscaling/v2", s.record(func(w http.ResponseWriter, _ *http.Request) {
+		s.writeGroupResources(w, "autoscaling/v2",
+			metav1.APIResource{Name: "horizontalpodautoscalers", SingularName: "horizontalpodautoscaler",
+				Namespaced: true, Kind: "HorizontalPodAutoscaler",
+				Verbs: metav1.Verbs{"get", "list", "delete"}})
+	}))
+	mux.HandleFunc("/apis/policy/v1", s.record(func(w http.ResponseWriter, _ *http.Request) {
+		s.writeGroupResources(w, "policy/v1",
+			metav1.APIResource{Name: "poddisruptionbudgets", SingularName: "poddisruptionbudget",
+				Namespaced: true, Kind: "PodDisruptionBudget",
+				Verbs: metav1.Verbs{"get", "list", "delete"}})
+	}))
+	mux.HandleFunc("/apis/networking.k8s.io/v1/", s.record(s.serveGroupNamespaced))
+	mux.HandleFunc("/apis/autoscaling/v2/", s.record(s.serveGroupNamespaced))
+	mux.HandleFunc("/apis/policy/v1/", s.record(s.serveGroupNamespaced))
+	mux.HandleFunc("/apis/batch/v1/jobs", s.record(func(w http.ResponseWriter, _ *http.Request) {
+		s.writeJobs(w, "")
+	}))
+	mux.HandleFunc("/apis/batch/v1/cronjobs", s.record(func(w http.ResponseWriter, _ *http.Request) {
+		s.writeCronJobs(w, "")
+	}))
+	mux.HandleFunc("/apis/batch/v1/namespaces/", s.record(s.serveBatchNamespaced))
 	mux.HandleFunc("/apis/apps/v1/namespaces/", s.record(s.serveAppsNamespaced))
 	mux.HandleFunc("/api/v1/services", s.record(func(w http.ResponseWriter, _ *http.Request) {
 		s.writeServices(w, "")
 	}))
 	mux.HandleFunc("/api/v1/events", s.record(func(w http.ResponseWriter, r *http.Request) {
 		s.writeEvents(w, r, "")
+	}))
+	mux.HandleFunc("/api/v1/configmaps", s.record(func(w http.ResponseWriter, _ *http.Request) {
+		s.writeResources(w, "ConfigMap", "")
+	}))
+	mux.HandleFunc("/api/v1/secrets", s.record(func(w http.ResponseWriter, _ *http.Request) {
+		s.writeResources(w, "Secret", "")
+	}))
+	mux.HandleFunc("/api/v1/persistentvolumeclaims", s.record(func(w http.ResponseWriter, _ *http.Request) {
+		s.writeResources(w, "PersistentVolumeClaim", "")
 	}))
 	mux.HandleFunc("/api/v1/pods", s.record(s.servePods))
 	// The namespaced list, which is the path client-go uses when a namespace is
@@ -591,6 +780,12 @@ func (s *Server) serveNamespaced(w http.ResponseWriter, r *http.Request) {
 		s.writeEvents(w, r, ns)
 	case len(parts) == 3 && parts[0] == "pods" && parts[2] == "eviction":
 		s.evictPod(w, r, ns, parts[1])
+	case len(parts) == 1 && parts[0] == "configmaps":
+		s.writeResources(w, "ConfigMap", ns)
+	case len(parts) == 1 && parts[0] == "secrets":
+		s.writeResources(w, "Secret", ns)
+	case len(parts) == 1 && parts[0] == "persistentvolumeclaims":
+		s.writeResources(w, "PersistentVolumeClaim", ns)
 	case len(parts) == 2 && parts[0] == "configmaps":
 		s.serveObject(w, r, "configmaps", ns, parts[1])
 	case len(parts) == 1 && parts[0] == "services":
@@ -666,9 +861,10 @@ func renderNode(n Node) corev1.Node {
 			Labels:            labels,
 			CreationTimestamp: metav1.NewTime(time.Now().Add(-time.Hour).UTC()),
 		},
-		Spec: corev1.NodeSpec{Unschedulable: n.Unschedulable},
+		Spec: corev1.NodeSpec{Unschedulable: n.Unschedulable, Taints: taintsOf(n.Taints)},
 		Status: corev1.NodeStatus{
-			Conditions: []corev1.NodeCondition{{Type: corev1.NodeReady, Status: ready}},
+			Allocatable: allocatableOf(n),
+			Conditions:  append([]corev1.NodeCondition{{Type: corev1.NodeReady, Status: ready}}, conditionsOf(n.Conditions)...),
 			Addresses: []corev1.NodeAddress{
 				{Type: corev1.NodeInternalIP, Address: n.InternalAddress},
 			},
@@ -688,7 +884,17 @@ func renderNode(n Node) corev1.Node {
 // exactly this one.
 func (s *Server) serveNode(w http.ResponseWriter, r *http.Request) {
 	name := strings.TrimPrefix(r.URL.Path, "/api/v1/nodes/")
-	if name == "" || strings.Contains(name, "/") || r.Method != http.MethodPatch {
+	if name == "" || strings.Contains(name, "/") {
+		s.serveNotFound(w, r)
+		return
+	}
+	// A plain get, which the node detail reads. It was not served before,
+	// because until then nothing asked for one node.
+	if r.Method == http.MethodGet {
+		s.writeNode(w, name)
+		return
+	}
+	if r.Method != http.MethodPatch {
 		s.serveNotFound(w, r)
 		return
 	}
@@ -963,6 +1169,16 @@ func (s *Server) serveAppsNamespaced(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case len(parts) == 1 && parts[0] == "deployments":
 		s.writeDeployments(w, ns)
+	case len(parts) == 1 && parts[0] == "statefulsets":
+		s.writeStatefulSets(w, ns)
+	case len(parts) == 3 && parts[0] == "statefulsets" && parts[2] == "scale":
+		s.serveStatefulSetScale(w, r, ns, parts[1])
+	case len(parts) == 2 && parts[0] == "statefulsets" && r.Method == http.MethodPatch:
+		s.restartTemplate(w, r, "statefulset", ns, parts[1])
+	case len(parts) == 2 && parts[0] == "daemonsets" && r.Method == http.MethodPatch:
+		s.restartTemplate(w, r, "daemonset", ns, parts[1])
+	case len(parts) == 1 && parts[0] == "daemonsets":
+		s.writeDaemonSets(w, ns)
 	case len(parts) == 3 && parts[0] == "deployments" && parts[2] == "scale":
 		s.serveScale(w, r, ns, parts[1])
 	case len(parts) == 2 && parts[0] == "deployments" && r.Method == http.MethodPatch:
@@ -1311,14 +1527,26 @@ func (s *Server) serveAPIVersions(w http.ResponseWriter, _ *http.Request) {
 
 func (s *Server) serveAPIGroups(w http.ResponseWriter, _ *http.Request) {
 	apps := metav1.GroupVersionForDiscovery{GroupVersion: "apps/v1", Version: "v1"}
+	batch := metav1.GroupVersionForDiscovery{GroupVersion: "batch/v1", Version: "v1"}
 	writeJSON(w, http.StatusOK, metav1.APIGroupList{
 		TypeMeta: metav1.TypeMeta{Kind: "APIGroupList", APIVersion: "v1"},
-		Groups: []metav1.APIGroup{{
-			TypeMeta:         metav1.TypeMeta{Kind: "APIGroup", APIVersion: "v1"},
-			Name:             "apps",
-			Versions:         []metav1.GroupVersionForDiscovery{apps},
-			PreferredVersion: apps,
-		}},
+		Groups: []metav1.APIGroup{
+			{
+				TypeMeta:         metav1.TypeMeta{Kind: "APIGroup", APIVersion: "v1"},
+				Name:             "apps",
+				Versions:         []metav1.GroupVersionForDiscovery{apps},
+				PreferredVersion: apps,
+			},
+			{
+				TypeMeta:         metav1.TypeMeta{Kind: "APIGroup", APIVersion: "v1"},
+				Name:             "batch",
+				Versions:         []metav1.GroupVersionForDiscovery{batch},
+				PreferredVersion: batch,
+			},
+			group("networking.k8s.io", "networking.k8s.io/v1"),
+			group("autoscaling", "autoscaling/v2"),
+			group("policy", "policy/v1"),
+		},
 	})
 }
 
@@ -1779,4 +2007,608 @@ func (s *Server) serveAuthResources(w http.ResponseWriter, _ *http.Request) {
 			Verbs: metav1.Verbs{"create"},
 		}},
 	})
+}
+
+// The other workload kinds (2026-09-19).
+
+func (s *Server) writeStatefulSets(w http.ResponseWriter, namespace string) {
+	s.mu.Lock()
+	rows := append([]StatefulSet(nil), s.statefulSets...)
+	s.mu.Unlock()
+
+	list := appsv1.StatefulSetList{
+		TypeMeta: metav1.TypeMeta{APIVersion: "apps/v1", Kind: "StatefulSetList"},
+		ListMeta: metav1.ListMeta{ResourceVersion: "1"},
+	}
+	for _, r := range rows {
+		if namespace != "" && r.Namespace != namespace {
+			continue
+		}
+		desired := r.Desired
+		list.Items = append(list.Items, appsv1.StatefulSet{
+			TypeMeta:   metav1.TypeMeta{APIVersion: "apps/v1", Kind: "StatefulSet"},
+			ObjectMeta: metav1.ObjectMeta{Name: r.Name, Namespace: r.Namespace},
+			Spec: appsv1.StatefulSetSpec{
+				Replicas: &desired,
+				Template: podTemplate(r.Name, r.Image),
+			},
+			Status: appsv1.StatefulSetStatus{
+				ReadyReplicas:   r.Ready,
+				UpdatedReplicas: r.Updated,
+				Replicas:        r.Ready,
+			},
+		})
+	}
+	writeJSON(w, http.StatusOK, list)
+}
+
+func (s *Server) writeDaemonSets(w http.ResponseWriter, namespace string) {
+	s.mu.Lock()
+	rows := append([]DaemonSet(nil), s.daemonSets...)
+	s.mu.Unlock()
+
+	list := appsv1.DaemonSetList{
+		TypeMeta: metav1.TypeMeta{APIVersion: "apps/v1", Kind: "DaemonSetList"},
+		ListMeta: metav1.ListMeta{ResourceVersion: "1"},
+	}
+	for _, r := range rows {
+		if namespace != "" && r.Namespace != namespace {
+			continue
+		}
+		list.Items = append(list.Items, appsv1.DaemonSet{
+			TypeMeta:   metav1.TypeMeta{APIVersion: "apps/v1", Kind: "DaemonSet"},
+			ObjectMeta: metav1.ObjectMeta{Name: r.Name, Namespace: r.Namespace},
+			Spec:       appsv1.DaemonSetSpec{Template: podTemplate(r.Name, r.Image)},
+			Status: appsv1.DaemonSetStatus{
+				DesiredNumberScheduled: r.Scheduled,
+				NumberReady:            r.Ready,
+			},
+		})
+	}
+	writeJSON(w, http.StatusOK, list)
+}
+
+func (s *Server) writeJobs(w http.ResponseWriter, namespace string) {
+	s.mu.Lock()
+	rows := append([]Job(nil), s.jobs...)
+	s.mu.Unlock()
+
+	list := batchv1.JobList{
+		TypeMeta: metav1.TypeMeta{APIVersion: "batch/v1", Kind: "JobList"},
+		ListMeta: metav1.ListMeta{ResourceVersion: "1"},
+	}
+	for _, r := range rows {
+		if namespace != "" && r.Namespace != namespace {
+			continue
+		}
+		suspend := r.Suspended
+		list.Items = append(list.Items, batchv1.Job{
+			TypeMeta:   metav1.TypeMeta{APIVersion: "batch/v1", Kind: "Job"},
+			ObjectMeta: metav1.ObjectMeta{Name: r.Name, Namespace: r.Namespace},
+			Spec:       batchv1.JobSpec{Suspend: &suspend, Template: podTemplate(r.Name, r.Image)},
+			Status: batchv1.JobStatus{
+				Succeeded: r.Succeeded, Failed: r.Failed, Active: r.Active,
+			},
+		})
+	}
+	writeJSON(w, http.StatusOK, list)
+}
+
+func (s *Server) writeCronJobs(w http.ResponseWriter, namespace string) {
+	s.mu.Lock()
+	rows := append([]CronJob(nil), s.cronJobs...)
+	s.mu.Unlock()
+
+	list := batchv1.CronJobList{
+		TypeMeta: metav1.TypeMeta{APIVersion: "batch/v1", Kind: "CronJobList"},
+		ListMeta: metav1.ListMeta{ResourceVersion: "1"},
+	}
+	for _, r := range rows {
+		if namespace != "" && r.Namespace != namespace {
+			continue
+		}
+		suspend := r.Suspended
+		item := batchv1.CronJob{
+			TypeMeta:   metav1.TypeMeta{APIVersion: "batch/v1", Kind: "CronJob"},
+			ObjectMeta: metav1.ObjectMeta{Name: r.Name, Namespace: r.Namespace},
+			Spec: batchv1.CronJobSpec{
+				Schedule: r.Schedule,
+				Suspend:  &suspend,
+				JobTemplate: batchv1.JobTemplateSpec{
+					Spec: batchv1.JobSpec{Template: podTemplate(r.Name, r.Image)},
+				},
+			},
+		}
+		if !r.LastRun.IsZero() {
+			last := metav1.NewTime(r.LastRun)
+			item.Status.LastScheduleTime = &last
+		}
+		list.Items = append(list.Items, item)
+	}
+	writeJSON(w, http.StatusOK, list)
+}
+
+// serveBatchNamespaced routes /apis/batch/v1/namespaces/{ns}/{resource}.
+func (s *Server) serveBatchNamespaced(w http.ResponseWriter, r *http.Request) {
+	rest := strings.TrimPrefix(r.URL.Path, "/apis/batch/v1/namespaces/")
+	ns, tail, ok := strings.Cut(rest, "/")
+	if !ok {
+		s.serveNotFound(w, r)
+		return
+	}
+	switch tail {
+	case "jobs":
+		s.writeJobs(w, ns)
+	case "cronjobs":
+		s.writeCronJobs(w, ns)
+	default:
+		s.serveNotFound(w, r)
+	}
+}
+
+func (s *Server) serveBatchResources(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, metav1.APIResourceList{
+		TypeMeta:     metav1.TypeMeta{Kind: "APIResourceList", APIVersion: "v1"},
+		GroupVersion: "batch/v1",
+		APIResources: []metav1.APIResource{
+			{Name: "jobs", SingularName: "job", Namespaced: true, Kind: "Job",
+				Verbs: metav1.Verbs{"get", "list", "delete"}},
+			{Name: "cronjobs", SingularName: "cronjob", Namespaced: true, Kind: "CronJob",
+				Verbs: metav1.Verbs{"get", "list", "patch"}},
+		},
+	})
+}
+
+// podTemplate is the one field every kind's template shares that this product
+// reads: the first container's image.
+func podTemplate(name, image string) corev1.PodTemplateSpec {
+	return corev1.PodTemplateSpec{
+		ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"app": name}},
+		Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: name, Image: image}}},
+	}
+}
+
+// serveStatefulSetScale answers the scale subresource, and CHANGES the state.
+//
+// A fake that recorded the call and dropped its effect would let a test pass
+// that hardware fails -- the rule talossim had to be taught (ledger 3).
+func (s *Server) serveStatefulSetScale(w http.ResponseWriter, r *http.Request, namespace, name string) {
+	s.mu.Lock()
+	var found *StatefulSet
+	for i := range s.statefulSets {
+		if s.statefulSets[i].Namespace == namespace && s.statefulSets[i].Name == name {
+			found = &s.statefulSets[i]
+			break
+		}
+	}
+	s.mu.Unlock()
+
+	if found == nil {
+		s.writeStatus(w, http.StatusNotFound, metav1.StatusReasonNotFound,
+			fmt.Sprintf("statefulsets %q not found", name))
+		return
+	}
+
+	switch r.Method {
+	case http.MethodGet:
+		writeJSON(w, http.StatusOK, scaleOf(namespace, name, found.Desired))
+	case http.MethodPut:
+		body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
+		if err != nil {
+			s.writeStatus(w, http.StatusBadRequest, metav1.StatusReasonBadRequest, err.Error())
+			return
+		}
+		var scale autoscalingv1.Scale
+		if err := json.Unmarshal(body, &scale); err != nil {
+			s.writeStatus(w, http.StatusBadRequest, metav1.StatusReasonBadRequest, err.Error())
+			return
+		}
+		s.mu.Lock()
+		found.Desired = scale.Spec.Replicas
+		s.mu.Unlock()
+		writeJSON(w, http.StatusOK, scaleOf(namespace, name, scale.Spec.Replicas))
+	default:
+		s.serveNotFound(w, r)
+	}
+}
+
+// restartTemplate records a rollout restart of a kind that has a pod template.
+func (s *Server) restartTemplate(w http.ResponseWriter, r *http.Request, kind, namespace, name string) {
+	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
+	if err != nil {
+		s.writeStatus(w, http.StatusBadRequest, metav1.StatusReasonBadRequest, err.Error())
+		return
+	}
+	var patch struct {
+		Spec struct {
+			Template struct {
+				Metadata struct {
+					Annotations map[string]string `json:"annotations"`
+				} `json:"metadata"`
+			} `json:"template"`
+		} `json:"spec"`
+	}
+	if err := json.Unmarshal(body, &patch); err != nil {
+		s.writeStatus(w, http.StatusBadRequest, metav1.StatusReasonBadRequest, err.Error())
+		return
+	}
+
+	s.mu.Lock()
+	if s.restarted == nil {
+		s.restarted = map[string]string{}
+	}
+	s.restarted[kind+"/"+namespace+"/"+name] =
+		patch.Spec.Template.Metadata.Annotations["kubectl.kubernetes.io/restartedAt"]
+	s.mu.Unlock()
+
+	writeJSON(w, http.StatusOK, metav1.ObjectMeta{Name: name, Namespace: namespace})
+}
+
+// RestartedTemplate returns the timestamp a rollout restart wrote for a kind
+// other than a Deployment, or "".
+func (s *Server) RestartedTemplate(kind, namespace, name string) string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.restarted[kind+"/"+namespace+"/"+name]
+}
+
+func scaleOf(namespace, name string, replicas int32) autoscalingv1.Scale {
+	return autoscalingv1.Scale{
+		TypeMeta:   metav1.TypeMeta{APIVersion: "autoscaling/v1", Kind: "Scale"},
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace},
+		Spec:       autoscalingv1.ScaleSpec{Replicas: replicas},
+		Status:     autoscalingv1.ScaleStatus{Replicas: replicas},
+	}
+}
+
+// The non-workload resources (2026-09-19).
+
+// writeResources answers one of the five list endpoints, filtered by kind and
+// namespace.
+//
+// One function rather than five, because the fake's job here is to return the
+// handful of fields the product reads -- and five near-identical renderers
+// would drift from each other before they drifted from Kubernetes.
+func (s *Server) writeResources(w http.ResponseWriter, kind, namespace string) {
+	s.mu.Lock()
+	rows := append([]Resource(nil), s.resources...)
+	s.mu.Unlock()
+
+	keep := make([]Resource, 0, len(rows))
+	for _, r := range rows {
+		if r.Kind != kind {
+			continue
+		}
+		if namespace != "" && r.Namespace != namespace {
+			continue
+		}
+		keep = append(keep, r)
+	}
+
+	switch kind {
+	case "ConfigMap":
+		list := corev1.ConfigMapList{
+			TypeMeta: metav1.TypeMeta{APIVersion: "v1", Kind: "ConfigMapList"},
+		}
+		for _, r := range keep {
+			data := map[string]string{}
+			for _, k := range r.Keys {
+				data[k] = "…"
+			}
+			list.Items = append(list.Items, corev1.ConfigMap{
+				TypeMeta:   metav1.TypeMeta{APIVersion: "v1", Kind: "ConfigMap"},
+				ObjectMeta: metav1.ObjectMeta{Name: r.Name, Namespace: r.Namespace},
+				Data:       data,
+			})
+		}
+		writeJSON(w, http.StatusOK, list)
+
+	case "Secret":
+		list := corev1.SecretList{
+			TypeMeta: metav1.TypeMeta{APIVersion: "v1", Kind: "SecretList"},
+		}
+		for _, r := range keep {
+			data := map[string][]byte{}
+			for _, k := range r.Keys {
+				// A value the product must never carry out of here. It is set
+				// so that a test can watch it NOT appear.
+				data[k] = []byte("super-secret-value")
+			}
+			list.Items = append(list.Items, corev1.Secret{
+				TypeMeta:   metav1.TypeMeta{APIVersion: "v1", Kind: "Secret"},
+				ObjectMeta: metav1.ObjectMeta{Name: r.Name, Namespace: r.Namespace},
+				Type:       corev1.SecretTypeOpaque,
+				Data:       data,
+			})
+		}
+		writeJSON(w, http.StatusOK, list)
+
+	case "PersistentVolumeClaim":
+		list := corev1.PersistentVolumeClaimList{
+			TypeMeta: metav1.TypeMeta{APIVersion: "v1", Kind: "PersistentVolumeClaimList"},
+		}
+		for _, r := range keep {
+			claim := corev1.PersistentVolumeClaim{
+				TypeMeta:   metav1.TypeMeta{APIVersion: "v1", Kind: "PersistentVolumeClaim"},
+				ObjectMeta: metav1.ObjectMeta{Name: r.Name, Namespace: r.Namespace},
+				Status:     corev1.PersistentVolumeClaimStatus{Phase: corev1.PersistentVolumeClaimPhase(r.Phase)},
+			}
+			if r.Size != "" && r.Phase == string(corev1.ClaimBound) {
+				claim.Status.Capacity = corev1.ResourceList{
+					corev1.ResourceStorage: resource.MustParse(r.Size),
+				}
+			} else if r.Size != "" {
+				claim.Spec.Resources.Requests = corev1.ResourceList{
+					corev1.ResourceStorage: resource.MustParse(r.Size),
+				}
+			}
+			list.Items = append(list.Items, claim)
+		}
+		writeJSON(w, http.StatusOK, list)
+
+	case "Ingress":
+		list := networkingv1.IngressList{
+			TypeMeta: metav1.TypeMeta{APIVersion: "networking.k8s.io/v1", Kind: "IngressList"},
+		}
+		for _, r := range keep {
+			ing := networkingv1.Ingress{
+				TypeMeta:   metav1.TypeMeta{APIVersion: "networking.k8s.io/v1", Kind: "Ingress"},
+				ObjectMeta: metav1.ObjectMeta{Name: r.Name, Namespace: r.Namespace},
+				Spec:       networkingv1.IngressSpec{Rules: []networkingv1.IngressRule{{Host: r.Host}}},
+			}
+			if r.Address != "" {
+				ing.Status.LoadBalancer.Ingress = []networkingv1.IngressLoadBalancerIngress{
+					{IP: r.Address},
+				}
+			}
+			list.Items = append(list.Items, ing)
+		}
+		writeJSON(w, http.StatusOK, list)
+
+	case "HorizontalPodAutoscaler":
+		list := autoscalingv2.HorizontalPodAutoscalerList{
+			TypeMeta: metav1.TypeMeta{APIVersion: "autoscaling/v2", Kind: "HorizontalPodAutoscalerList"},
+		}
+		for _, r := range keep {
+			minimum := r.Min
+			list.Items = append(list.Items, autoscalingv2.HorizontalPodAutoscaler{
+				TypeMeta:   metav1.TypeMeta{APIVersion: "autoscaling/v2", Kind: "HorizontalPodAutoscaler"},
+				ObjectMeta: metav1.ObjectMeta{Name: r.Name, Namespace: r.Namespace},
+				Spec: autoscalingv2.HorizontalPodAutoscalerSpec{
+					MinReplicas: &minimum,
+					MaxReplicas: r.Max,
+					ScaleTargetRef: autoscalingv2.CrossVersionObjectReference{
+						Kind: r.TargetKind, Name: r.TargetName,
+					},
+				},
+				Status: autoscalingv2.HorizontalPodAutoscalerStatus{CurrentReplicas: r.Current},
+			})
+		}
+		writeJSON(w, http.StatusOK, list)
+
+	case "PodDisruptionBudget":
+		list := policyv1.PodDisruptionBudgetList{
+			TypeMeta: metav1.TypeMeta{APIVersion: "policy/v1", Kind: "PodDisruptionBudgetList"},
+		}
+		for _, r := range keep {
+			list.Items = append(list.Items, policyv1.PodDisruptionBudget{
+				TypeMeta:   metav1.TypeMeta{APIVersion: "policy/v1", Kind: "PodDisruptionBudget"},
+				ObjectMeta: metav1.ObjectMeta{Name: r.Name, Namespace: r.Namespace},
+				Status: policyv1.PodDisruptionBudgetStatus{
+					CurrentHealthy:     r.Healthy,
+					DesiredHealthy:     r.Desired,
+					DisruptionsAllowed: r.Allowed,
+				},
+			})
+		}
+		writeJSON(w, http.StatusOK, list)
+
+	default:
+		s.serveNotFound(w, nil)
+	}
+}
+
+// group is one entry in the discovery group list.
+func group(name, groupVersion string) metav1.APIGroup {
+	gv := metav1.GroupVersionForDiscovery{GroupVersion: groupVersion, Version: "v1"}
+	if strings.HasSuffix(groupVersion, "/v2") {
+		gv.Version = "v2"
+	}
+	return metav1.APIGroup{
+		TypeMeta:         metav1.TypeMeta{Kind: "APIGroup", APIVersion: "v1"},
+		Name:             name,
+		Versions:         []metav1.GroupVersionForDiscovery{gv},
+		PreferredVersion: gv,
+	}
+}
+
+func (s *Server) writeGroupResources(w http.ResponseWriter, groupVersion string, rs ...metav1.APIResource) {
+	writeJSON(w, http.StatusOK, metav1.APIResourceList{
+		TypeMeta:     metav1.TypeMeta{Kind: "APIResourceList", APIVersion: "v1"},
+		GroupVersion: groupVersion,
+		APIResources: rs,
+	})
+}
+
+// serveGroupNamespaced routes /apis/{group}/{version}/namespaces/{ns}/{resource}
+// and the cluster-wide /apis/{group}/{version}/{resource}.
+func (s *Server) serveGroupNamespaced(w http.ResponseWriter, r *http.Request) {
+	kindOf := map[string]string{
+		"ingresses":                "Ingress",
+		"horizontalpodautoscalers": "HorizontalPodAutoscaler",
+		"poddisruptionbudgets":     "PodDisruptionBudget",
+	}
+
+	parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
+	// apis/{group}/{version}/... -- three segments of prefix.
+	if len(parts) < 4 {
+		s.serveNotFound(w, r)
+		return
+	}
+	rest := parts[3:]
+
+	switch {
+	case len(rest) == 1:
+		if kind, ok := kindOf[rest[0]]; ok {
+			s.writeResources(w, kind, "")
+			return
+		}
+	case len(rest) == 3 && rest[0] == "namespaces":
+		if kind, ok := kindOf[rest[2]]; ok {
+			s.writeResources(w, kind, rest[1])
+			return
+		}
+	case len(rest) == 4 && rest[0] == "namespaces" && r.Method == http.MethodDelete:
+		if _, ok := kindOf[rest[2]]; ok {
+			s.mu.Lock()
+			s.deleted = append(s.deleted, rest[2]+"/"+rest[1]+"/"+rest[3])
+			s.mu.Unlock()
+			writeJSON(w, http.StatusOK, metav1.Status{Status: metav1.StatusSuccess})
+			return
+		}
+	}
+	s.serveNotFound(w, r)
+}
+
+// taintsOf parses "key=value:Effect", or "key:Effect" when there is no value.
+func taintsOf(specs []string) []corev1.Taint {
+	out := make([]corev1.Taint, 0, len(specs))
+	for _, spec := range specs {
+		head, effect, ok := strings.Cut(spec, ":")
+		if !ok {
+			continue
+		}
+		key, value, _ := strings.Cut(head, "=")
+		out = append(out, corev1.Taint{
+			Key: key, Value: value, Effect: corev1.TaintEffect(effect),
+		})
+	}
+	return out
+}
+
+// conditionsOf parses "Type=Status,Reason".
+func conditionsOf(specs []string) []corev1.NodeCondition {
+	out := make([]corev1.NodeCondition, 0, len(specs))
+	for _, spec := range specs {
+		head, reason, _ := strings.Cut(spec, ",")
+		name, status, ok := strings.Cut(head, "=")
+		if !ok {
+			continue
+		}
+		out = append(out, corev1.NodeCondition{
+			Type:    corev1.NodeConditionType(name),
+			Status:  corev1.ConditionStatus(status),
+			Reason:  reason,
+			Message: reason,
+		})
+	}
+	return out
+}
+
+func allocatableOf(n Node) corev1.ResourceList {
+	out := corev1.ResourceList{}
+	if n.CPUAllocatable != "" {
+		out[corev1.ResourceCPU] = resource.MustParse(n.CPUAllocatable)
+	}
+	if n.MemoryAllocatable != "" {
+		out[corev1.ResourceMemory] = resource.MustParse(n.MemoryAllocatable)
+	}
+	if n.PodCapacity != "" {
+		out[corev1.ResourcePods] = resource.MustParse(n.PodCapacity)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+// writeUsage answers the metrics API, or says it is not installed.
+//
+// A nil Usage map answers 404 for the whole group, which is what a cluster
+// without metrics-server does -- and that is the default, because most clusters
+// are that cluster. A product that assumed the numbers exist therefore fails in
+// the ordinary test rather than on somebody's hardware.
+func (s *Server) writeUsage(w http.ResponseWriter, kind, namespace string) {
+	s.mu.Lock()
+	usage := s.usage
+	s.mu.Unlock()
+
+	if usage == nil {
+		s.writeStatus(w, http.StatusNotFound, metav1.StatusReasonNotFound,
+			"the server could not find the requested resource")
+		return
+	}
+
+	type container struct {
+		Name  string            `json:"name"`
+		Usage map[string]string `json:"usage"`
+	}
+	type item struct {
+		Metadata   metav1.ObjectMeta `json:"metadata"`
+		Usage      map[string]string `json:"usage,omitempty"`
+		Containers []container       `json:"containers,omitempty"`
+	}
+	out := struct {
+		Kind  string `json:"kind"`
+		Items []item `json:"items"`
+	}{Kind: "NodeMetricsList"}
+	if kind == "pod" {
+		out.Kind = "PodMetricsList"
+	}
+
+	for key, value := range usage {
+		parts := strings.Split(key, "/")
+		if parts[0] != kind {
+			continue
+		}
+		cpu, memory, _ := strings.Cut(value, ",")
+
+		switch kind {
+		case "node":
+			if len(parts) != 2 {
+				continue
+			}
+			out.Items = append(out.Items, item{
+				Metadata: metav1.ObjectMeta{Name: parts[1]},
+				Usage:    map[string]string{"cpu": cpu, "memory": memory},
+			})
+		case "pod":
+			if len(parts) != 3 {
+				continue
+			}
+			if namespace != "" && parts[1] != namespace {
+				continue
+			}
+			// Two containers, each with half, so a product that reads only the
+			// first understates the pod -- which is the mistake worth catching.
+			out.Items = append(out.Items, item{
+				Metadata: metav1.ObjectMeta{Namespace: parts[1], Name: parts[2]},
+				Containers: []container{
+					{Name: "a", Usage: map[string]string{"cpu": halve(cpu), "memory": halve(memory)}},
+					{Name: "b", Usage: map[string]string{"cpu": halve(cpu), "memory": halve(memory)}},
+				},
+			})
+		}
+	}
+
+	// Sorted, because map iteration is random and a list that reordered itself
+	// between two reads would look like the cluster changed.
+	slices.SortFunc(out.Items, func(a, b item) int {
+		return strings.Compare(a.Metadata.Namespace+"/"+a.Metadata.Name,
+			b.Metadata.Namespace+"/"+b.Metadata.Name)
+	})
+	writeJSON(w, http.StatusOK, out)
+}
+
+// halve splits a quantity in two, so a pod's two containers add back up to what
+// a test asked for.
+func halve(value string) string {
+	q, err := resource.ParseQuantity(value)
+	if err != nil {
+		return value
+	}
+	if q.Format == resource.BinarySI {
+		return resource.NewQuantity(q.Value()/2, resource.BinarySI).String()
+	}
+	return resource.NewMilliQuantity(q.MilliValue()/2, resource.DecimalSI).String()
 }
