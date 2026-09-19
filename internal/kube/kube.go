@@ -293,6 +293,35 @@ type Client struct {
 	// asks the CLUSTER which resource a kind lives at.
 	dyn    dynamic.Interface
 	mapper *restmapper.DeferredDiscoveryRESTMapper
+
+	// cfg is kept so a client can be rebuilt for another identity, and
+	// identity is who this one acts as. A zero identity means this product's
+	// own certificate, which is what every call was before impersonation
+	// existed.
+	cfg      *rest.Config
+	identity Identity
+}
+
+// dynamicFor builds the two clients the manifest path needs.
+//
+// A function because impersonation rebuilds them: a client that impersonated
+// only its typed calls would produce an audit log that is right about the reads
+// and wrong about the writes.
+func dynamicFor(cfg *rest.Config) (dynamic.Interface, *restmapper.DeferredDiscoveryRESTMapper, error) {
+	dyn, err := dynamic.NewForConfig(cfg)
+	if err != nil {
+		return nil, nil, fmt.Errorf("kube: building the dynamic client: %w", err)
+	}
+	cs, err := kubernetes.NewForConfig(cfg)
+	if err != nil {
+		return nil, nil, fmt.Errorf("kube: building the discovery client: %w", err)
+	}
+	// The discovery cache is per client and therefore per call, which is the
+	// conservative choice: a cached mapping that outlived a
+	// CustomResourceDefinition being installed would refuse a manifest the
+	// cluster accepts, and this product's clients are short-lived anyway
+	// because the certificate is.
+	return dyn, restmapper.NewDeferredDiscoveryRESTMapper(memory.NewMemCacheClient(cs.Discovery())), nil
 }
 
 // New builds a client from credentials.
@@ -362,20 +391,12 @@ func New(creds Creds) (*Client, error) {
 		return nil, fmt.Errorf("kube: building the client: %w", err)
 	}
 
-	dyn, err := dynamic.NewForConfig(cfg)
+	dyn, mapper, err := dynamicFor(cfg)
 	if err != nil {
-		return nil, fmt.Errorf("kube: building the dynamic client: %w", err)
+		return nil, err
 	}
 
-	// The discovery cache is per client and therefore per call, which is the
-	// conservative choice: a cached mapping that outlived a
-	// CustomResourceDefinition being installed would refuse a manifest the
-	// cluster accepts, and this product's clients are short-lived anyway
-	// because the certificate is.
-	mapper := restmapper.NewDeferredDiscoveryRESTMapper(
-		memory.NewMemCacheClient(cs.Discovery()))
-
-	return &Client{cs: cs, dyn: dyn, mapper: mapper}, nil
+	return &Client{cs: cs, dyn: dyn, mapper: mapper, cfg: cfg}, nil
 }
 
 // ServerVersion is the cheapest question that proves the whole path: DNS, TLS,

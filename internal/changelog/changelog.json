@@ -1,5 +1,31 @@
 [
   {
+    "version": "v1.21.0",
+    "date": "2026-09-19",
+    "changes": [
+      {
+        "icon": "🪪",
+        "text": "Your cluster's own audit log can now name the person instead of this product. Tell holzkube-manager the name your API server knows you by, and every Kubernetes request carries it: the API server records both — this product as the impersonator, you as the actor — and your cluster's RBAC decides what you may do."
+      },
+      {
+        "icon": "🧪",
+        "text": "Nothing is stored before your cluster has been asked. The panel runs an access review for every permission this product issues, as that identity, and shows your cluster's own verdicts and reasons. A name your RBAC has never heard of would otherwise break every Kubernetes screen at once and look like the product is broken rather than a setting being wrong."
+      },
+      {
+        "icon": "🚫",
+        "text": "A refusal is never retried as the administrator. That rule is what makes this worth having: with a fallback every request would succeed either way, your RBAC would decide nothing, and your audit log would show an administrator action whenever somebody lacked a role."
+      },
+      {
+        "icon": "↩️",
+        "text": "One button goes back to this product's own certificate, so a wrong name is a minute rather than an afternoon."
+      },
+      {
+        "icon": "📝",
+        "text": "Until you set it, nothing changes: requests keep arriving as holzkube-manager in system:masters, and the screen says plainly what that costs you."
+      }
+    ]
+  },
+  {
     "version": "v1.20.0",
     "date": "2026-09-19",
     "changes": [

@@ -379,6 +379,17 @@ var allowlist = map[string][]string{
 	// configuration and the archive is kept forever.
 	"cluster.kubernetes-object": {"api_version", "kind", "namespace", "name"},
 
+	// Acting as somebody (2026-09-19). WHO this product will act as is the
+	// event and is kept in clear: it decides what every later Kubernetes entry
+	// in this archive means, and an archive that recorded the change without
+	// the name would leave every entry after it ambiguous.
+	//
+	// The preview is a read and carries nothing: the candidate is in the query
+	// string, and the answer is the cluster's RBAC rather than this
+	// installation's.
+	"cluster.kubernetes-identity":     {},
+	"cluster.kubernetes-set-identity": {"user", "groups"},
+
 	// Renewing this installation's own client certificate for a cluster
 	// (V2-OPS-02). No parameters: the cluster is on the record already and the
 	// certificate itself never goes near the archive.

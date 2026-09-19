@@ -217,6 +217,25 @@ const manifestClippingRationale = "The sum describes a manifest at the 256-objec
 	"rate limit of 5 requests a second the same sixty took 10.0s inside this " +
 	"process, and the route would have blamed the cluster for it."
 
+// accessReviewCalls is one SelfSubjectAccessReview per permission the identity
+// preview checks, plus the discovery the first one triggers.
+//
+// Derived from the product's own list rather than a number typed here, so a
+// permission added to EveryPermissionThisProductUses changes this row instead
+// of silently making it wrong.
+func accessReviewCalls() []upstreamCall {
+	calls := []upstreamCall{
+		{name: "Kubernetes: discovery for the authorization group", class: kubeCall},
+	}
+	for _, p := range kube.EveryPermissionThisProductUses("default") {
+		calls = append(calls, upstreamCall{
+			name:  fmt.Sprintf("Kubernetes: SelfSubjectAccessReview %s %s", p.Verb, p.Resource),
+			class: kubeCall,
+		})
+	}
+	return calls
+}
+
 // routeBudget is one row: what the route is, which upstream calls it makes in
 // series at worst, what ceiling it declares over all of them, and what that is
 // declared to compose to.
@@ -973,6 +992,39 @@ var routeBudgets = []routeBudget{
 			"get is one small read.",
 		why: "The kind is resolved through the cluster's own discovery, the same way a manifest's " +
 			"is, so this works for a CustomResourceDefinition this build has never heard of.",
+	},
+	{
+		route: "GET /api/v1/clusters/{id}/kubernetes/identity",
+		calls: append([]upstreamCall{
+			{name: "NewClusterClient: Version (finding a control-plane node)", class: nodeProbeCall},
+			{name: "COSI Get: the machine configuration, for the API server's address", class: nodeFastReadCall},
+		}, accessReviewCalls()...),
+		routeDeadline: handlers.KubernetesRouteBudget,
+		verdict:       knownOverBudget,
+		clipping:      clipped,
+		deferredTo: "one of this route's own: the twelve checks are twelve " +
+			"SelfSubjectAccessReviews because that is the API -- there is no batch form. A " +
+			"SubjectAccessReview per namespace would be the same count. Concurrency would " +
+			"help and changes nothing about correctness, so it is deferred rather than " +
+			"guessed at now.",
+		clippingRationale: "An access review is an in-memory RBAC evaluation on the API server " +
+			"and answers in single-digit milliseconds. The sum describes every one of them " +
+			"timing out in turn, which is a cluster that is not answering.",
+		why: "One review per permission this product actually uses, asked as the identity in " +
+			"question -- the only honest answer, because RBAC is the cluster's own arrangement " +
+			"and anything computed here would be a guess about somebody else's configuration.",
+	},
+	{
+		route: "POST /api/v1/clusters/{id}/kubernetes/identity",
+		calls: []upstreamCall{},
+		// It writes one field on a local record. The Kubernetes API is not
+		// asked at all, which is why the preview above exists as its own route.
+		routeDeadline: 0,
+		verdict:       withinBudget,
+		clipping:      uncut,
+		why: "Storing whose name requests arrive under touches nothing upstream. What it changes " +
+			"is what every later request looks like to the cluster, which is why it is " +
+			"Destructive and under the cluster lock.",
 	},
 	{
 		route: "GET /api/v1/clusters/{id}/scale",

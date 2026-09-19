@@ -1481,6 +1481,43 @@ sense D-06 means:
 | `GET /api/v1/clusters/{id}/kubernetes/events` | `?namespace=` — what the cluster has reported |
 | `GET /api/v1/clusters/{id}/kubernetes/pods/{namespace}/{pod}/events` | the same, filtered by the server to one pod |
 | `POST /api/v1/clusters/{id}/kubernetes/object` | takes `{"api_version","kind","namespace","name"}` and answers that object as YAML |
+| `GET /api/v1/clusters/{id}/kubernetes/identity` | who this product acts as, and what the cluster says that identity may do. `?as=` previews a candidate without storing it |
+| `POST /api/v1/clusters/{id}/kubernetes/identity` | takes `{"user": "...", "groups": [...]}`; an empty user goes back to this product's own certificate |
+
+**Acting as the operator is what makes a cluster's own audit log useful.** By
+default every Kubernetes request arrives as `holzkube-manager` in
+`system:masters`. A cluster that logs faithfully therefore records that *this
+product* scaled a deployment — for every operator, for ever — and cannot answer
+the one question an audit log exists for. `system:masters` also bypasses RBAC, so
+a cluster cannot express "this person may restart pods in `web` and nothing
+else".
+
+When `act_as` is set, requests carry `Impersonate-User` (and optionally
+`Impersonate-Group`), and the API server records **both** identities: the
+impersonator and the impersonated.
+
+**A refusal is never retried as the administrator.** That rule is what keeps this
+from being decorative: with a fallback every request would succeed either way,
+the cluster's RBAC would decide nothing, and its audit log would show an
+administrator action whenever somebody lacked a role. A `403` comes back as a
+`403` and names whose it was.
+
+**Every client carries the identity, including the manifest path.** Impersonating
+only the typed calls would attribute reads to the person and writes to the
+product, which is the wrong half to get right.
+
+**The preview asks the cluster, and it is the reason this is safe to switch on.**
+`?as=` runs a `SelfSubjectAccessReview` for each permission the product actually
+issues, as that identity, and answers the cluster's own verdicts and reasons.
+Nothing is computed here: RBAC is the cluster's arrangement of roles and
+bindings, and any answer derived in this process would be a guess about somebody
+else's configuration.
+
+**The value is the cluster's idea of the user** — for OIDC usually the email or
+subject, carrying whatever `--oidc-username-prefix` prepends. This product cannot
+derive it, so it is written down rather than guessed. Setting it is `Destructive`
+and under the cluster lock: nothing in the cluster changes, but a wrong string is
+a cluster whose every Kubernetes screen is refused.
 
 **The object route is how the thirteenth question gets answered.** The lists show
 chosen fields; a toleration, a node selector or somebody's controller annotation

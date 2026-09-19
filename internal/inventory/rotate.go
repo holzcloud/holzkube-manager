@@ -260,7 +260,22 @@ func (s *Service) KubeClient(ctx context.Context, id model.ClusterID) (*kube.Cli
 	if err != nil {
 		return nil, err
 	}
-	return kube.New(creds)
+	client, err := kube.New(creds)
+	if err != nil {
+		return nil, err
+	}
+
+	// Whose name the requests arrive under. Read from the cluster record rather
+	// than passed in, so every caller gets it without having to remember --
+	// which is the difference between a setting and a suggestion.
+	cluster, err := s.deps.Store.Clusters().Get(ctx, id)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+	return client.As(kube.Identity{User: cluster.ActAs, Groups: cluster.ActAsGroups})
 }
 
 // kubernetesEndpoint asks the cluster where its own API server is.
