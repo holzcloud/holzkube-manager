@@ -1,5 +1,31 @@
 [
   {
+    "version": "v1.19.0",
+    "date": "2026-09-19",
+    "changes": [
+      {
+        "icon": "📱",
+        "text": "The whole interface now works on a phone. Below a tablet's width a table is no longer a table: rows you act on — nodes, pods, deployments, clusters, accounts — become cards with the name on top, the figures labelled, and the buttons underneath the name they act on. Rows you scan — the audit archive, recent activity, saved schematics — become a compact list, and tapping one opens its detail."
+      },
+      {
+        "icon": "🎯",
+        "text": "The reason is not appearance. A wide table on a phone scrolls sideways, and the first column is what disappears first: you end up looking at a \"Scale\" field and a \"Roll pods\" button with no way to tell which deployment they would act on. An action detached from its subject is a different and worse problem than an ugly screen, and that is what this removes."
+      },
+      {
+        "icon": "👍",
+        "text": "Every control you tap is at least 44px on a phone. Ten were smaller — the node links, the cluster links, and the \"Download a talosconfig\" line and its neighbours, which were 20px tall."
+      },
+      {
+        "icon": "📏",
+        "text": "This is measured rather than hoped for. The layout guard drives every screen at phone and desk width in a real browser and fails the build on three things: an element past the right edge with nothing to scroll, a control under 44px, and a table wider than the screen. The third is new."
+      },
+      {
+        "icon": "🔍",
+        "text": "The guard itself had been passing for the wrong reason: it started with an empty data directory, so every screen that shows rows showed none. It renders real rows now — with deliberately long names, because short ones measure a layout nobody has. The first run with data found eight tables between 521 and 1027 pixels wide and ten controls too small to hit, all of which had been passing for as long as the guard existed."
+      }
+    ]
+  },
+  {
     "version": "v1.18.0",
     "date": "2026-09-19",
     "changes": [
