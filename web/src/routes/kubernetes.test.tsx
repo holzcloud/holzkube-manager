@@ -60,6 +60,18 @@ const overview: KubernetesOverview = {
       container_runtime: 'containerd://2.1.4',
     },
   ],
+  deployments: [
+    {
+      namespace: 'default',
+      name: 'api',
+      desired: 3,
+      ready: 1,
+      updated: 1,
+      available: 1,
+      image: 'example/api:1.4',
+      created_at: '2026-09-18T00:00:00Z',
+    },
+  ],
   pods: [
     {
       namespace: 'default',
