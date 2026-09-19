@@ -26,6 +26,7 @@ import (
 	"github.com/holzcloud/holzkube-manager/internal/imagefactory"
 	"github.com/holzcloud/holzkube-manager/internal/inventory"
 	"github.com/holzcloud/holzkube-manager/internal/jobs"
+	"github.com/holzcloud/holzkube-manager/internal/kube"
 	"github.com/holzcloud/holzkube-manager/internal/machineconfig"
 	"github.com/holzcloud/holzkube-manager/internal/metrics"
 	"github.com/holzcloud/holzkube-manager/internal/model"
@@ -379,6 +380,16 @@ func run(args []string) error {
 	upgradeDeps.Gate = upgrade.NewGate(upgradeDeps.Connect, inv.ControlPlanesOf)
 
 	upgrade.Register(engine, upgradeDeps)
+	// Draining a node (milestone v1.17 slice 3). The client is a function
+	// rather than a value because a job outlives the request that submitted it
+	// and the certificate this product mints lasts an hour: a resumed drain
+	// gets a fresh one.
+	kube.RegisterDrain(engine, kube.DrainDeps{
+		Logger: logger,
+		Client: func(ctx context.Context, cluster model.ClusterID) (*kube.Client, error) {
+			return inv.KubeClient(ctx, cluster)
+		},
+	})
 
 	// The certificate authority rotation (V2-OPS-02, ledger 103). It is wired
 	// from the same connector and inventory as the upgrade, and its pass 3 --
