@@ -366,6 +366,7 @@ func newHarness(t *testing.T, opts ...harnessOpt) *harness {
 		handlers.ProvisionRoutes(deps),
 		handlers.UpgradeRoutes(deps),
 		handlers.AuthorityRoutes(deps),
+		handlers.KubernetesRoutes(deps),
 	)
 
 	srv := httptest.NewTLSServer(httpapi.New(deps))

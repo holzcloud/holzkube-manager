@@ -9,6 +9,7 @@ import (
 	"github.com/holzcloud/holzkube-manager/internal/httpapi"
 	"github.com/holzcloud/holzkube-manager/internal/httpapi/handlers"
 	"github.com/holzcloud/holzkube-manager/internal/imagefactory"
+	"github.com/holzcloud/holzkube-manager/internal/kube"
 	"github.com/holzcloud/holzkube-manager/internal/talos"
 )
 
@@ -122,6 +123,18 @@ const (
 	nodeProbeCall    callClass = "node-probe"
 	nodeFastReadCall callClass = "node-fast-read"
 	nodeMutationCall callClass = "node-mutation"
+
+	// The Kubernetes API's class, added with milestone v1.17. A fourth family:
+	// the three above are the Image Factory's and the Talos node's, and this is
+	// a cluster's own API server, reached with client-go.
+	//
+	// It is one number rather than a table of verbs, and that is the honest
+	// description of what the client does today: internal/kube sets a single
+	// ceiling on its rest configuration, and every call this product makes to
+	// Kubernetes is a list or a get. When the later slices add evictions and
+	// applies, the number they need is a decision, and a second constant here
+	// is where that decision will be visible.
+	kubeCall callClass = "kube"
 )
 
 // upstreamCall is one call a route makes in series: what it is, and which
@@ -148,6 +161,8 @@ func (u upstreamCall) budget() (time.Duration, bool) {
 		return talos.ClassFastRead.Deadline(), true
 	case nodeMutationCall:
 		return talos.ClassMutation.Deadline(), true
+	case kubeCall:
+		return kube.CallBudget, true
 	default:
 		return 0, false
 	}
@@ -668,6 +683,41 @@ var routeBudgets = []routeBudget{
 			"has answered through it. Every machine in the cluster is tried in turn, which is " +
 			"why the ceiling has room for more than one attempt -- a cluster where the first " +
 			"node happens to be switched off must not conclude that its certificate is bad.",
+	},
+	{
+		route: "GET /api/v1/clusters/{id}/kubernetes",
+		calls: []upstreamCall{
+			{name: "NewClusterClient: Version (finding a control-plane node)", class: nodeProbeCall},
+			{name: "COSI Get: the machine configuration, for the API server's address", class: nodeFastReadCall},
+			{name: "Kubernetes: /version", class: kubeCall},
+			{name: "Kubernetes: list nodes", class: kubeCall},
+			{name: "Kubernetes: list pods", class: kubeCall},
+			{name: "Kubernetes: list namespaces", class: kubeCall},
+		},
+		routeDeadline: handlers.KubernetesRouteBudget,
+		verdict:       knownOverBudget,
+		clipping:      clipped,
+		deferredTo: "milestone v1.17 slice 2's own follow-up: the four Kubernetes reads are " +
+			"issued one after another and could be one call each against a paginated list, " +
+			"or concurrent. Until they are, the sum is larger than the ceiling and this row " +
+			"says so rather than a number being quietly chosen.",
+		clippingRationale: "The ceiling is sized for an API server that answers, which is what a " +
+			"list call against Kubernetes does in milliseconds. Summing six per-call budgets " +
+			"describes a case that would mean every one of them timed out in turn -- at which " +
+			"point the answer an operator needs is 'this cluster is not answering', and " +
+			"forty-five seconds is long enough to establish that and short enough that the " +
+			"screen says it rather than hanging.",
+		why: "The first route in this product that speaks to two upstreams in series, and the " +
+			"one row in this table whose worst case is deliberately larger than its ceiling. " +
+			"Two Talos calls find the API server's address -- the endpoint is read from the " +
+			"node's own configuration rather than assembled, because a cluster behind a " +
+			"virtual address is where assembling is wrong -- and then four reads go to the " +
+			"cluster. Summing every per-call budget gives a number no answer ever takes: " +
+			"these are list calls against an API server that either answers in milliseconds " +
+			"or is not answering at all, which is what the ceiling is sized for. The clipping " +
+			"is the point rather than an oversight: a screen that waited out the full sum " +
+			"would be a screen nobody keeps open, and a cluster that needs longer than " +
+			"forty-five seconds to list its pods has a finding of its own.",
 	},
 	{
 		route: "GET /api/v1/clusters/{id}/scale",

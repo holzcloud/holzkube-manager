@@ -45,7 +45,7 @@ const WIDTHS = [390, 1280]
 const TOUCH_WIDTH = 390
 const TOUCH_MIN = 44
 const ROUTES = [
-  '/', '/nodes', '/clusters', '/config', '/jobs',
+  '/', '/nodes', '/clusters', '/kubernetes', '/config', '/jobs',
   '/provision', '/upgrades', '/images', '/audit', '/settings',
 ]
 

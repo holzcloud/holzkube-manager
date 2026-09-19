@@ -9,6 +9,7 @@ import (
 	cryptox509 "github.com/siderolabs/crypto/x509"
 	"github.com/siderolabs/talos/pkg/machinery/config/generate/secrets"
 
+	"github.com/holzcloud/holzkube-manager/internal/kube"
 	"github.com/holzcloud/holzkube-manager/internal/model"
 	"github.com/holzcloud/holzkube-manager/internal/store"
 	"github.com/holzcloud/holzkube-manager/internal/talos"
@@ -210,4 +211,107 @@ func (s *Service) AdoptAuthority(ctx context.Context, id model.ClusterID, caCrt,
 	cluster.ClientCertNotAfter = notAfter
 	_, err = s.deps.Store.Clusters().Put(ctx, cluster)
 	return err
+}
+
+// KubeClient reaches one cluster's Kubernetes API.
+//
+// Three things happen here and none of them belongs in internal/kube: the
+// authority comes out of this cluster's stored bundle, the endpoint comes out
+// of a control-plane node's own machine configuration, and the certificate is
+// minted for this call. internal/kube holds no store and no connector on
+// purpose -- it is the client, not the wiring.
+//
+// The endpoint is read from the node rather than assembled from the address
+// this product was adopted through. Gluing :6443 onto that is right until a
+// cluster puts its API server behind a virtual address or a load balancer,
+// which is the cluster where being wrong is worst: the product would talk to
+// one control-plane node while the cluster's own clients talk to the endpoint,
+// and the difference only shows up when that node is the one that is down.
+//
+// Nothing is cached. A client carries a certificate that expires within the
+// hour and a connection to an API server that may have moved, and this product
+// already learned what a cached connection costs when a node's address changed
+// under it (D-10).
+func (s *Service) KubeClient(ctx context.Context, id model.ClusterID) (*kube.Client, error) {
+	sec, err := s.deps.Store.ClusterSecrets().Get(ctx, id)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+
+	// The authority is checked before the cluster is asked anything, because
+	// the two refusals are different repairs and the operator should get the
+	// one that applies: a bundle with no Kubernetes authority cannot be fixed
+	// by making the API server reachable.
+	if len(sec.K8sCACrt) == 0 || len(sec.K8sCAKey) == 0 {
+		return nil, fmt.Errorf("%w. It was adopted from a talosconfig that carried no "+
+			"Kubernetes authority, which is enough to manage its nodes over the Talos API and "+
+			"not enough to reach its Kubernetes API", kube.ErrNoKubernetesAuthority)
+	}
+
+	endpoint, err := s.kubernetesEndpoint(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+
+	creds, err := kube.MintCreds(endpoint, sec.K8sCACrt, sec.K8sCAKey, s.deps.Now())
+	if err != nil {
+		return nil, err
+	}
+	return kube.New(creds)
+}
+
+// kubernetesEndpoint asks the cluster where its own API server is.
+//
+// Every control-plane node carries the answer, so the first one that responds
+// is enough -- and a cluster whose control-plane nodes are all unreachable is
+// one whose Kubernetes API this product could not have reached anyway.
+func (s *Service) kubernetesEndpoint(ctx context.Context, id model.ClusterID) (string, error) {
+	machines, err := s.MachinesOf(ctx, id)
+	if err != nil {
+		return "", err
+	}
+
+	var last error
+	for _, m := range machines {
+		if m.Role != model.RoleControlPlane {
+			continue
+		}
+
+		endpoint, err := s.endpointFromNode(ctx, m.ID)
+		if err != nil {
+			last = err
+			continue
+		}
+		return endpoint, nil
+	}
+
+	if last == nil {
+		return "", fmt.Errorf("%w: this cluster has no control-plane node in the inventory, so "+
+			"there is nobody to ask where its Kubernetes API server is", kube.ErrNoEndpoint)
+	}
+	return "", fmt.Errorf("%w: no control-plane node answered. The last attempt said: %w",
+		kube.ErrNoEndpoint, last)
+}
+
+func (s *Service) endpointFromNode(ctx context.Context, id model.MachineID) (string, error) {
+	cc, err := s.Connect(ctx, id)
+	if err != nil {
+		return "", err
+	}
+	defer cc.Close() //nolint:errcheck // a close error is not this read's verdict
+
+	readCtx, cancel, err := talos.WithClassDeadline(ctx, talos.MethodCOSIGet)
+	if err != nil {
+		return "", err
+	}
+	defer cancel()
+
+	cfg, err := cc.MachineConfigYAML(readCtx)
+	if err != nil {
+		return "", err
+	}
+	return kube.EndpointFromMachineConfig(cfg)
 }

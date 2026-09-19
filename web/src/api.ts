@@ -1647,6 +1647,65 @@ export const authorityConfirmationSchema = z.object({
   cluster: z.string(),
 })
 
+/**
+ * What Kubernetes says about a cluster (milestone v1.17).
+ *
+ * The cluster's own view, which is allowed to disagree with the inventory's —
+ * and where it does, that disagreement is the information. The inventory knows
+ * what the machine API says about a machine; this knows whether the kubelet
+ * registered, what the scheduler will do with the node, and whether somebody
+ * cordoned it.
+ */
+export const kubernetesNodeSchema = z.object({
+  name: z.string(),
+  /** True, False or Unknown. Unknown is a real answer: a kubelet that stopped
+   * reporting is unheard from, not NotReady. */
+  ready: z.string(),
+  /** Somebody cordoned it. A decision, not a state it fell into. */
+  unschedulable: z.boolean(),
+  roles: z.array(z.string()).default([]),
+  kubelet_version: z.string().default(''),
+  os_image: z.string().default(''),
+  created_at: z.string().default(''),
+  internal_address: z.string().default(''),
+  container_runtime: z.string().default(''),
+})
+
+export const kubernetesPodSchema = z.object({
+  namespace: z.string(),
+  name: z.string(),
+  node: z.string().default(''),
+  /** The pod's own claim about its lifecycle. */
+  phase: z.string(),
+  /** Whether its containers pass their probes. `Running` with 1 of 2 ready is
+   * the most misread state in Kubernetes, so both numbers are shown. */
+  ready: z.number(),
+  containers: z.number(),
+  /** Summed across containers, the way kubectl shows it. */
+  restarts: z.number(),
+  /** CrashLoopBackOff, ImagePullBackOff, Evicted — empty when nothing is
+   * wrong. */
+  reason: z.string().default(''),
+  created_at: z.string().default(''),
+})
+
+export const kubernetesOverviewSchema = z.object({
+  cluster: z.string(),
+  /** The API server's own version: the cheapest proof that the whole path
+   * works — address, TLS, certificate, authorisation. */
+  server_version: z.string(),
+  nodes: z.array(kubernetesNodeSchema),
+  pods: z.array(kubernetesPodSchema),
+  namespaces: z.array(z.string()).default([]),
+  /** Echoed back, so a screen cannot show one namespace's pods under
+   * another's heading. */
+  namespace: z.string().default(''),
+})
+
+export type KubernetesOverview = z.infer<typeof kubernetesOverviewSchema>
+export type KubernetesNode = z.infer<typeof kubernetesNodeSchema>
+export type KubernetesPod = z.infer<typeof kubernetesPodSchema>
+
 export const confirmationSchema = z.object({
   token: z.string(),
   expires: z.string(),
@@ -2307,6 +2366,28 @@ export const api = {
         'POST',
         `/api/v1/service-accounts/${encodeURIComponent(id)}/token`,
         serviceAccountTokenSchema,
+      ),
+  },
+
+  kubernetes: {
+    /**
+     * What one cluster's own API server says about it.
+     *
+     * A namespace filters the pods, and the filter goes to the API SERVER: a
+     * cluster with ten thousand pods must not send all of them so that three
+     * can be shown.
+     *
+     * An API server that does not answer comes back as `upstream.*` and not as
+     * an empty list, because an empty list is a claim that nothing is running.
+     */
+    overview: (cluster: string, namespace?: string): Promise<KubernetesOverview> =>
+      sendJSON(
+        'GET',
+        `/api/v1/clusters/${encodeURIComponent(cluster)}/kubernetes` +
+          (namespace === undefined || namespace === ''
+            ? ''
+            : `?namespace=${encodeURIComponent(namespace)}`),
+        kubernetesOverviewSchema,
       ),
   },
 

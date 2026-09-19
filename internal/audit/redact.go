@@ -301,6 +301,13 @@ var allowlist = map[string][]string{
 	// the table shows it.
 	"etcd.remove-member": {},
 
+	// Reading what Kubernetes says about a cluster (milestone v1.17). The
+	// namespace is permitted in clear because it is the one thing that says
+	// what was looked at, and a namespace name is not a secret -- while
+	// "<redacted>" here would leave an archive recording that somebody looked
+	// at something. The cluster is in the path and on the record already.
+	"cluster.kubernetes-overview": {"namespace"},
+
 	// Renewing this installation's own client certificate for a cluster
 	// (V2-OPS-02). No parameters: the cluster is on the record already and the
 	// certificate itself never goes near the archive.
