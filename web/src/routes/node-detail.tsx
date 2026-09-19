@@ -172,7 +172,7 @@ export function NodeDetailPage() {
             <CardTitle className="text-base">Identity</CardTitle>
           </CardHeader>
           <CardContent>
-            <dl className="grid grid-cols-[10rem_1fr] gap-x-4 gap-y-2 text-sm">
+            <dl className="grid grid-cols-1 md:grid-cols-[10rem_minmax(0,1fr)] gap-x-4 gap-y-2 text-sm">
               <Row label="Address" field={m.addr} mono />
               <Row label="Talos" field={m.talos_version} mono />
               <Row label="Kubernetes" field={m.kubernetes_version} mono />
@@ -237,7 +237,7 @@ export function NodeDetailPage() {
             <CardTitle className="text-base">Hardware</CardTitle>
           </CardHeader>
           <CardContent>
-            <dl className="grid grid-cols-[10rem_1fr] gap-x-4 gap-y-2 text-sm">
+            <dl className="grid grid-cols-1 md:grid-cols-[10rem_minmax(0,1fr)] gap-x-4 gap-y-2 text-sm">
               <Row
                 label="Memory"
                 field={m.memory_mib}
@@ -260,7 +260,7 @@ export function NodeDetailPage() {
                 label="Disks"
                 field={m.disks}
                 render={(disks) => (
-                  <ul className="font-mono text-xs">
+                  <ul className="break-words font-mono text-xs">
                     {disks.map((d) => (
                       <li key={d.device}>
                         {d.device} — {d.pretty_size || d.size} {d.model && `(${d.model})`}
@@ -273,7 +273,7 @@ export function NodeDetailPage() {
                 label="Interfaces"
                 field={m.interfaces}
                 render={(ifaces) => (
-                  <ul className="font-mono text-xs">
+                  <ul className="break-words font-mono text-xs">
                     {ifaces.map((i) => (
                       <li key={i.name}>
                         {i.name} — {i.up ? 'up' : 'down'}
@@ -441,7 +441,11 @@ function Row<T>({
   return (
     <>
       <dt className="text-muted-foreground">{label}</dt>
-      <dd className={mono ? 'font-mono text-xs' : undefined}>
+      {/* break-words, because the values here are the ones that do not break on
+          their own: a schematic id is 64 hex characters and a CPU model is a
+          sentence with no spaces the browser likes. Measured at 390px: this row
+          reached 397px and was gone, not narrow. */}
+      <dd className={mono ? 'break-words font-mono text-xs' : 'break-words'}>
         <HealthField field={field} render={render} />
       </dd>
     </>

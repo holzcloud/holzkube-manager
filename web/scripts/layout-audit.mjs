@@ -66,9 +66,10 @@ const WIDTHS = [390, 1280]
 const TOUCH_WIDTH = 390
 const TOUCH_MIN = 44
 const ROUTES = [
-  '/', '/nodes', '/clusters', '/kubernetes', '/config', '/jobs',
+  '/', '/nodes', '/nodes/m-cp-1', '/clusters', '/kubernetes', '/config', '/jobs',
   '/provision', '/upgrades', '/images', '/audit', '/settings',
 ]
+
 
 const BINARY = process.env.HOLZKUBE_BINARY ?? '../bin/holzkube-managerd'
 
@@ -344,22 +345,16 @@ let failures = 0
 try {
   await waitForDaemon(base)
 
-  const setup = await fetch(`${base}/api/v1/setup`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'X-Holzkube-Manager-CSRF': '1' },
-    body: JSON.stringify({ username: USER, password: PASSWORD }),
-  })
-  if (!setup.ok) {
-    throw new Error(`could not create the audit account: ${setup.status} ${await setup.text()}`)
-  }
-
   browser = await chromium.launch(BROWSER ? { executablePath: BROWSER } : {})
 
-  for (const width of WIDTHS) {
+  /**
+   * One context, with the data already stubbed.
+   *
+   * GET only: setup and login go to the real daemon, so the session and the
+   * shell stay the product's own.
+   */
+  async function open(width) {
     const context = await browser.newContext({ viewport: { width, height: 844 } })
-
-    // Data, before anything navigates. GET only: setup and login go to the real
-    // daemon, so the session and the shell stay the product's own.
     await context.route('**/api/v1/**', async (route) => {
       if (route.request().method() !== 'GET') return route.continue()
       const body = FIXTURES[new URL(route.request().url()).pathname]
@@ -370,7 +365,100 @@ try {
         body: JSON.stringify(body),
       })
     })
+    return context
+  }
 
+  /** Measures one route at one width, and returns how many ways it failed. */
+  async function measure(page, route, width) {
+    await page.goto(base + route)
+    // The shell renders, then the queries land and the page grows. Measuring
+    // before that is measuring an empty screen, which passes everything --
+    // and a fixed wait is the flake one builds oneself: 700ms was enough on
+    // a CI runner and not on the operator's Pi, where /images measured 15
+    // controls instead of 32 because the Image Factory catalog had not
+    // arrived. Network idle first, then a short settle for the render the
+    // last response triggers.
+    await page.waitForLoadState('networkidle', { timeout: 20_000 }).catch(() => {})
+    await page.waitForTimeout(400)
+
+    let found = 0
+    const clipped = await page.evaluate(findClipped, width)
+    let counted = ''
+    if (width === TOUCH_WIDTH) {
+      const wide = await page.evaluate(findWideTables, width)
+      if (wide.length > 0) {
+        found += 1
+        console.error(`  SIDEWAYS  ${String(width).padStart(4)}px  ${route}  (${wide.length})`)
+        for (const t of wide) {
+          console.error(
+            `              ${t.width}px wide, ${t.rows} rows, in "${t.where}" -- first row: "${t.first}"`,
+          )
+        }
+      }
+      const small = await page.evaluate(findSmallTargets, TOUCH_MIN)
+      counted = `  (${await page.evaluate(countTargets)} controls, ${await page.evaluate(countItems)} items)`
+      if (small.length > 0) {
+        found += 1
+        console.error(`  SMALL     ${String(width).padStart(4)}px  ${route}  (${small.length})`)
+        for (const c of small) {
+          console.error(`              <${c.tag}>${c.via} ${c.w}x${c.h} "${c.label}" .${c.cls}`)
+        }
+      }
+    }
+    // After both passes and before the verdict, so resizing for a picture
+    // cannot change what was measured, and so a route WITH findings is
+    // photographed too -- that is the one somebody wants to look at.
+    await shoot(page, route, width)
+
+    if (clipped.length > 0) {
+      found += 1
+      console.error(`  CLIPPED   ${String(width).padStart(4)}px  ${route}  (${clipped.length})`)
+      for (const c of clipped.slice(0, 5)) {
+        console.error(`              <${c.tag}> right=${c.right} "${c.text}" .${c.cls}`)
+      }
+    }
+    if (found === 0) {
+      // The count is printed because this guard measures what the page
+      // happens to show. /images lists one control per Image Factory
+      // extension, and a catalog that did not load measures as a clean run:
+      // that is how 17 undersized rows passed here and failed in CI.
+      console.log(`  ok        ${String(width).padStart(4)}px  ${route}${counted}`)
+    }
+    return found
+  }
+
+  // THE TWO SCREENS BEFORE A SESSION, and they were missing for as long as this
+  // guard has existed -- while being the first two anybody ever sees, usually on
+  // a phone while standing somewhere. They cannot be one list with the rest,
+  // because WHEN they are measured is what makes them measurable at all: /setup
+  // exists only while no account does, so it goes first of all, against the
+  // daemon as an operator meets it on the very first day.
+  for (const width of WIDTHS) {
+    const context = await open(width)
+    const page = await context.newPage()
+    failures += await measure(page, '/setup', width)
+    await context.close()
+  }
+
+  const setup = await fetch(`${base}/api/v1/setup`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-Holzkube-Manager-CSRF': '1' },
+    body: JSON.stringify({ username: USER, password: PASSWORD }),
+  })
+  if (!setup.ok) {
+    throw new Error(`could not create the audit account: ${setup.status} ${await setup.text()}`)
+  }
+
+  // /login next, with an account but no session.
+  for (const width of WIDTHS) {
+    const context = await open(width)
+    const page = await context.newPage()
+    failures += await measure(page, '/login', width)
+    await context.close()
+  }
+
+  for (const width of WIDTHS) {
+    const context = await open(width)
     const page = await context.newPage()
 
     await page.goto(`${base}/login`)
@@ -380,63 +468,7 @@ try {
     await page.waitForURL((u) => !u.pathname.startsWith('/login'), { timeout: 20_000 })
 
     for (const route of ROUTES) {
-      await page.goto(base + route)
-      // The shell renders, then the queries land and the page grows. Measuring
-      // before that is measuring an empty screen, which passes everything --
-      // and a fixed wait is the flake one builds oneself: 700ms was enough on
-      // a CI runner and not on the operator's Pi, where /images measured 15
-      // controls instead of 32 because the Image Factory catalog had not
-      // arrived. Network idle first, then a short settle for the render the
-      // last response triggers.
-      await page.waitForLoadState('networkidle', { timeout: 20_000 }).catch(() => {})
-      await page.waitForTimeout(400)
-
-      // A picture of the phone, when asked for. Not part of the verdict: the
-      // guard measures, and a person looking at a screenshot is a different and
-      // weaker check. It exists because the operator reported this in a
-      // photograph, and a photograph is what answers one.
-      const clipped = await page.evaluate(findClipped, width)
-      let counted = ''
-      if (width === TOUCH_WIDTH) {
-        const wide = await page.evaluate(findWideTables, width)
-        if (wide.length > 0) {
-          failures += 1
-          console.error(`  SIDEWAYS  ${String(width).padStart(4)}px  ${route}  (${wide.length})`)
-          for (const t of wide) {
-            console.error(
-              `              ${t.width}px wide, ${t.rows} rows, in "${t.where}" -- first row: "${t.first}"`,
-            )
-          }
-        }
-        const small = await page.evaluate(findSmallTargets, TOUCH_MIN)
-        counted = `  (${await page.evaluate(countTargets)} controls, ${await page.evaluate(countItems)} items)`
-        if (small.length > 0) {
-          failures += 1
-          console.error(`  SMALL     ${String(width).padStart(4)}px  ${route}  (${small.length})`)
-          for (const c of small) {
-            console.error(`              <${c.tag}>${c.via} ${c.w}x${c.h} "${c.label}" .${c.cls}`)
-          }
-        }
-      }
-      // After both passes and before the verdict, so resizing for a picture
-      // cannot change what was measured, and so a route WITH findings is
-      // photographed too -- that is the one somebody wants to look at.
-      await shoot(page, route, width)
-
-      if (clipped.length === 0) {
-        // The count is printed because this guard measures what the page
-        // happens to show. /images lists one control per Image Factory
-        // extension, and a catalog that did not load measures as a clean run:
-        // that is how 17 undersized rows passed here and failed in CI.
-        console.log(`  ok        ${String(width).padStart(4)}px  ${route}${counted}`)
-        continue
-      }
-
-      failures += 1
-      console.error(`  CLIPPED   ${String(width).padStart(4)}px  ${route}  (${clipped.length})`)
-      for (const c of clipped.slice(0, 5)) {
-        console.error(`              <${c.tag}> right=${c.right} "${c.text}" .${c.cls}`)
-      }
+      failures += await measure(page, route, width)
     }
     await context.close()
   }
