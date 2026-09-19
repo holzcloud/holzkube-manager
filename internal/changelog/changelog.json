@@ -1,5 +1,31 @@
 [
   {
+    "version": "v1.17.0",
+    "date": "2026-09-19",
+    "changes": [
+      {
+        "icon": "☸️",
+        "text": "holzkube-manager now talks to Kubernetes itself. A new screen shows what the cluster's own API server says: its nodes as Kubernetes sees them — registered, ready, cordoned — and its pods, filtered by namespace. This is allowed to disagree with the Nodes screen, which reads the machine API, and where the two differ that difference is the answer you came for."
+      },
+      {
+        "icon": "🚦",
+        "text": "A pod shows its phase and its readiness, not one of the two. \"Running\" with 1 of 2 containers ready is a workload that does not work, and a screen that showed only the phase would call it healthy. Restart counts and the container's own reason — CrashLoopBackOff, ImagePullBackOff — are there for the same purpose."
+      },
+      {
+        "icon": "🔐",
+        "text": "It uses a certificate it issues itself, from the Kubernetes authority it already holds for each adopted cluster, valid for an hour and never written to disk. It introduces itself as holzkube-manager rather than as admin, so your cluster's own audit log records who acted."
+      },
+      {
+        "icon": "📭",
+        "text": "An API server that does not answer is not a cluster with nothing running. The screen says it was asked and did not answer instead of showing an empty list — the same rule the node list already follows."
+      },
+      {
+        "icon": "🧭",
+        "text": "Where the API server is comes from the cluster, not from arithmetic: it is read out of a control-plane node's own configuration. Since Talos 1.14 that address lives in a document of its own, and a version of this that read only the documented place would never have reached this cluster at all."
+      }
+    ]
+  },
+  {
     "version": "v1.16.18",
     "date": "2026-09-18",
     "changes": [
