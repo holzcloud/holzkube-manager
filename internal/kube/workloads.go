@@ -2,6 +2,7 @@ package kube
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -145,12 +146,28 @@ func (c *Client) Scale(ctx context.Context, namespace, name string, replicas int
 // included. That is the difference from deleting the pods: deleting them takes
 // the workload down, and this replaces it while keeping it up.
 func (c *Client) RolloutRestart(ctx context.Context, namespace, name string, now time.Time) error {
-	patch := fmt.Sprintf(
-		`{"spec":{"template":{"metadata":{"annotations":{%q:%q}}}}}`,
-		"kubectl.kubernetes.io/restartedAt", now.UTC().Format(time.RFC3339))
+	// Marshalled rather than assembled with fmt.Sprintf, and the reason is not
+	// only taste: internal/talos's seam guard reads a format string with a verb,
+	// a colon and a verb as an address being built by hand, and it was right to
+	// look -- a product that builds JSON by concatenation will eventually build
+	// one that is not valid. So the shape is a value and the encoder writes it.
+	patch, err := json.Marshal(map[string]any{
+		"spec": map[string]any{
+			"template": map[string]any{
+				"metadata": map[string]any{
+					"annotations": map[string]string{
+						"kubectl.kubernetes.io/restartedAt": now.UTC().Format(time.RFC3339),
+					},
+				},
+			},
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("kube: building the restart patch: %w", err)
+	}
 
-	_, err := c.cs.AppsV1().Deployments(namespace).Patch(
-		ctx, name, types.StrategicMergePatchType, []byte(patch), metav1.PatchOptions{})
+	_, err = c.cs.AppsV1().Deployments(namespace).Patch(
+		ctx, name, types.StrategicMergePatchType, patch, metav1.PatchOptions{})
 	if err != nil {
 		if apierrors.IsNotFound(err) {
 			return fmt.Errorf("%w: deployment %s/%s", ErrNoSuchWorkload, namespace, name)
