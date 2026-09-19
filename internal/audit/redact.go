@@ -349,6 +349,36 @@ var allowlist = map[string][]string{
 	// workload's response and may be anything at all.
 	"cluster.kubernetes-service-proxy": {"port", "path"},
 
+	// Reading what is wrong (Stufe 1, 2026-09-19). All four are reads and all
+	// four are empty, and the emptiness is the decision rather than the absence
+	// of one.
+	//
+	// NOTHING of a log's CONTENT may be archived. A log line is whatever the
+	// workload printed -- tokens, connection strings, somebody's name -- and
+	// D-16 keeps the archive forever, so a log in it is a secret in it with no
+	// path that removes it. The archive records that somebody read the log of a
+	// named pod, which is the event; the pod is in the route's path and is on
+	// the record already.
+	//
+	// The container name is not archived either, and that is why the log route
+	// is a GET with the container in the query while the service proxy had to
+	// be a POST: there the path being fetched WAS the event, here the event is
+	// the pod.
+	"cluster.kubernetes-containers": {},
+	"cluster.kubernetes-logs":       {},
+	"cluster.kubernetes-events":     {},
+	"cluster.kubernetes-pod-events": {},
+
+	// Reading one object as YAML. WHICH object is the event -- "somebody read
+	// the whole of this Deployment" -- so the four fields that name it are kept
+	// in clear, and that is why the route is a POST: nothing else identifies
+	// the object, not even a path segment, and this middleware reads bodies
+	// rather than query strings (ledger 150).
+	//
+	// The rendered object itself is never archived: it is arbitrary cluster
+	// configuration and the archive is kept forever.
+	"cluster.kubernetes-object": {"api_version", "kind", "namespace", "name"},
+
 	// Renewing this installation's own client certificate for a cluster
 	// (V2-OPS-02). No parameters: the cluster is on the record already and the
 	// certificate itself never goes near the archive.

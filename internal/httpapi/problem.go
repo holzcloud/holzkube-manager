@@ -133,6 +133,13 @@ const (
 	// again with a talosconfig that carries the authority.
 	CodeNoKubernetesAuthority = "conflict.no-kubernetes-authority"
 
+	// CodeRefusedKind: an object of a kind this product will not render. Today
+	// that is Secret and only Secret: its data is base64 rather than
+	// encryption, so showing it would put the credential on the screen. A
+	// conflict rather than a permission problem -- the cluster would have
+	// answered; this product does not ask.
+	CodeRefusedKind = "conflict.refused-kind"
+
 	// CodeManifestInvalid: the pasted manifest is not something this build can
 	// apply -- empty, not YAML, a document with no kind or no name, or a kind
 	// the cluster does not have. Validation rather than upstream: the document

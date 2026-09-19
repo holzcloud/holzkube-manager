@@ -857,6 +857,45 @@ apply of ten where the sixth conflicts has changed five things, and a single
 "failed" would leave you guessing which five. At most 256 objects per manifest,
 and at most 1 MiB.
 
+### Why a pod is broken
+
+Every pod on the Kubernetes screen has a **Why?** button, and it answers in the
+order the question is actually asked: which container failed and how it ended,
+its log, and what the cluster reported about it.
+
+**The log opens on the run that already crashed.** A pod in `CrashLoopBackOff`
+is, at the moment you look at it, waiting to start again — its current container
+has printed nothing. Everything that explains the crash belongs to the run that
+ended, and Kubernetes keeps exactly one of those. A log view without that answers
+every crash loop with an empty box.
+
+**A container's ending is put in words.** Exit code 137 is a memory limit, 1 is a
+throw, `ImagePullBackOff` never started; those are different days of work and the
+pod's own summary cannot tell them apart. A container that asked for no CPU or
+memory is named as one the scheduler places blind and the kubelet evicts first.
+
+**Events are where "Pending" is explained**, and nowhere else: the pod says
+nothing, and `0/2 nodes are available: insufficient cpu` says everything. They
+are shown per pod and for the cluster, warnings first. An empty list always
+carries the reason it is not a claim — a cluster forgets its events after about
+an hour.
+
+**Any object can be shown as YAML**, for the question the lists do not cover.
+`managedFields` and the last-applied annotation are removed and the answer says
+so, because an object silently missing fields is how somebody concludes a field
+is not set when it is.
+
+**A Secret is refused, not redacted.** Its `data` is base64 rather than
+encryption, so rendering it would put the credential on the screen. Redacting was
+the obvious alternative and is worse: it teaches that looking at Secrets here is
+safe, and the first field it misses is a credential on a screen that promised it
+was not.
+
+**None of a log's content reaches the audit archive.** A log line is whatever the
+workload printed — tokens, connection strings, personal data — and the archive is
+kept forever, so a secret written there has no path that removes it. The archive
+records that somebody read the log of a named pod, and nothing of what they read.
+
 ### Reaching a service
 
 Pick a service, pick one of its ports, type a path, press **Fetch**. The answer
