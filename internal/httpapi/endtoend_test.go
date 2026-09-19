@@ -27,6 +27,7 @@ import (
 	"github.com/holzcloud/holzkube-manager/internal/imagefactory"
 	"github.com/holzcloud/holzkube-manager/internal/inventory"
 	"github.com/holzcloud/holzkube-manager/internal/jobs"
+	"github.com/holzcloud/holzkube-manager/internal/kube"
 	"github.com/holzcloud/holzkube-manager/internal/machineconfig"
 	"github.com/holzcloud/holzkube-manager/internal/metrics"
 	"github.com/holzcloud/holzkube-manager/internal/model"
@@ -301,6 +302,19 @@ func newHarness(t *testing.T, opts ...harnessOpt) *harness {
 					return inv.AdoptAuthority(ctx, cluster, a.Crt, a.Key)
 				},
 				Now: time.Now,
+			})
+		}
+
+		if inv != nil {
+			// Draining a node (milestone v1.17 slice 3). The client is a function
+			// rather than a value because a job outlives the request that submitted it
+			// and the certificate this product mints lasts an hour: a resumed drain
+			// gets a fresh one.
+			kube.RegisterDrain(engine, kube.DrainDeps{
+				Logger: deps.Logger,
+				Client: func(ctx context.Context, cluster model.ClusterID) (*kube.Client, error) {
+					return inv.KubeClient(ctx, cluster)
+				},
 			})
 		}
 

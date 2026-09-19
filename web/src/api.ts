@@ -2380,6 +2380,45 @@ export const api = {
      * An API server that does not answer comes back as `upstream.*` and not as
      * an empty list, because an empty list is a claim that nothing is running.
      */
+    /**
+     * Stop or resume scheduling onto one node.
+     *
+     * The state is sent rather than a verb, so a retry is the same request: a
+     * client that lost the response can send it again without wondering
+     * whether it toggled.
+     */
+    cordon: (cluster: string, node: string, unschedulable: boolean): Promise<KubernetesNode> =>
+      sendJSON(
+        'POST',
+        `/api/v1/clusters/${encodeURIComponent(cluster)}/kubernetes/nodes/${encodeURIComponent(node)}/cordon`,
+        kubernetesNodeSchema,
+        { unschedulable },
+      ),
+
+    /**
+     * Drain a node: cordon it, then evict what it carries.
+     *
+     * It comes back as a job, because a drain waits out each pod's termination
+     * grace period and can outlast any response the server holds open — and
+     * because an interrupted drain leaves a cordoned node with some pods
+     * moved, which is a state somebody has to finish rather than guess about.
+     *
+     * The two flags are the decisions the drain refuses to take on its own: a
+     * pod nothing owns is gone for good if it is evicted, and a pod with local
+     * storage loses that storage when it moves.
+     */
+    drain: (
+      cluster: string,
+      node: string,
+      opts: { force: boolean; delete_local_data: boolean },
+    ): Promise<AcceptedJob> =>
+      sendJSON(
+        'POST',
+        `/api/v1/clusters/${encodeURIComponent(cluster)}/kubernetes/nodes/${encodeURIComponent(node)}/drain`,
+        acceptedJobSchema,
+        opts,
+      ),
+
     overview: (cluster: string, namespace?: string): Promise<KubernetesOverview> =>
       sendJSON(
         'GET',
