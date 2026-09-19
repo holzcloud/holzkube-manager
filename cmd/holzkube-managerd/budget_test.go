@@ -720,6 +720,28 @@ var routeBudgets = []routeBudget{
 			"forty-five seconds to list its pods has a finding of its own.",
 	},
 	{
+		route: "POST /api/v1/clusters/{id}/kubernetes/nodes/{node}/cordon",
+		calls: []upstreamCall{
+			{name: "NewClusterClient: Version (finding a control-plane node)", class: nodeProbeCall},
+			{name: "COSI Get: the machine configuration, for the API server's address", class: nodeFastReadCall},
+			{name: "Kubernetes: patch the node", class: kubeCall},
+			{name: "Kubernetes: list nodes (reading the result back)", class: kubeCall},
+		},
+		routeDeadline: handlers.KubernetesRouteBudget,
+		verdict:       knownOverBudget,
+		clipping:      clipped,
+		deferredTo: "the same follow-up as the overview row: the two Talos calls that find the " +
+			"API server's address are repeated per request and could be a short-lived cache, " +
+			"which is a decision about staleness rather than a tidy-up.",
+		clippingRationale: "A patch and a list against an API server that answers are " +
+			"milliseconds. The sum describes every call timing out in turn, and at that point " +
+			"the answer is that the cluster is not reachable -- which forty-five seconds " +
+			"establishes.",
+		why: "The node is read back after the patch rather than echoed, so a cordon that did " +
+			"not take cannot look like one that did. That is the second Kubernetes call and it " +
+			"is deliberate.",
+	},
+	{
 		route: "GET /api/v1/clusters/{id}/scale",
 		calls: []upstreamCall{
 			{name: "NewClusterClient: Version", class: nodeProbeCall},
@@ -976,6 +998,12 @@ func TestEveryRouteThatReachesUpstreamHasABudgetRow(t *testing.T) {
 		"GET /api/v1/machines/{id}/reset-preview", "POST /api/v1/machines/{id}/confirm",
 		"POST /api/v1/machines/{id}/reboot", "POST /api/v1/machines/{id}/shutdown",
 		"POST /api/v1/machines/{id}/reset",
+		// Draining a node submits a job and answers 202. Nothing upstream is
+		// called while the request is open, which is the whole reason a drain
+		// is a job: it waits out each pod's termination grace period and would
+		// outlast any response this server is willing to hold open. Its
+		// ceiling is kube.DrainBudget and belongs to the job.
+		"POST /api/v1/clusters/{id}/kubernetes/nodes/{node}/drain",
 		"GET /api/v1/patches", "POST /api/v1/patches", "GET /api/v1/patches/{id}",
 		"GET /api/v1/provision/notices", "POST /api/v1/provision/scan",
 		"POST /api/v1/provision/inspect", "POST /api/v1/provision/plan",
