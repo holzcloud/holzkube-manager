@@ -126,6 +126,24 @@ const (
 	// would have changed something (INV-12, D-22).
 	CodeClusterLocked = "forbidden.cluster-locked"
 
+	// CodeNoKubernetesAuthority: the cluster's stored bundle carries no
+	// Kubernetes authority, so this product cannot mint itself a certificate
+	// for that cluster's API server. A conflict rather than an upstream
+	// failure: nothing is wrong with the cluster, and the repair is to adopt it
+	// again with a talosconfig that carries the authority.
+	CodeNoKubernetesAuthority = "conflict.no-kubernetes-authority"
+
+	// CodeNoKubernetesEndpoint: no control-plane node could say where the
+	// cluster's Kubernetes API server is. Upstream, because the answer lives on
+	// the nodes and they were asked.
+	CodeNoKubernetesEndpoint = "upstream.no-kubernetes-endpoint"
+
+	// CodeKubernetesUnreachable: the cluster's Kubernetes API server did not
+	// answer. Its own code so that a screen can say "the cluster was not
+	// asked" rather than rendering an empty list, which is the claim INV-08
+	// forbids one layer down.
+	CodeKubernetesUnreachable = "upstream.kubernetes-unreachable"
+
 	// CodeNoMachinesToRotate: a CA rotation was asked for on a cluster with no
 	// machines recorded. A conflict rather than a validation error: the request
 	// is fine and the inventory is empty.
