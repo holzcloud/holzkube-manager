@@ -57,6 +57,25 @@ type Cluster struct {
 
 	CreatedAt time.Time `json:"created_at"`
 
+	// ActAs is whose name this product's Kubernetes requests arrive under
+	// (2026-09-19).
+	//
+	// Empty means this product's own certificate, in `system:masters`, which is
+	// what every request did before this field existed. A cluster whose RBAC
+	// has never heard of the operator breaks entirely when this is set, so it
+	// stays empty until somebody has previewed what the identity may do.
+	//
+	// The VALUE is the API server's own idea of the user: for a cluster with
+	// OIDC that is the email or subject, carrying whatever
+	// `--oidc-username-prefix` puts in front of it. This product cannot derive
+	// that -- it is the cluster's authentication configuration, not this
+	// product's -- so it is written down rather than guessed.
+	ActAs string `json:"act_as"`
+
+	// ActAsGroups are optional groups to carry with it. Empty means the API
+	// server uses whatever the user maps to on its own.
+	ActAsGroups []string `json:"act_as_groups,omitempty"`
+
 	Rev uint64 `json:"rev"`
 }
 

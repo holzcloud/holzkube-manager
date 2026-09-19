@@ -245,6 +245,137 @@ func KubernetesRoutes(d httpapi.Deps) []httpapi.Route {
 			Action:          "cluster.kubernetes-object",
 			Handler:         handler(kubernetesObject(d)),
 		},
+		{
+			Method:  http.MethodGet,
+			Pattern: "/api/v1/clusters/{id}/kubernetes/identity",
+
+			// The preview, and it changes nothing. It asks the CLUSTER what the
+			// identity may do, which is the only honest answer: RBAC is the
+			// cluster's own arrangement of roles and bindings, and anything
+			// computed here would be this product's guess about somebody else's
+			// configuration.
+			RequiresSession: true,
+			MinRole:         model.RoleOperator,
+			Action:          "cluster.kubernetes-identity",
+			Handler:         handler(kubernetesIdentity(d)),
+		},
+		{
+			Method:  http.MethodPost,
+			Pattern: "/api/v1/clusters/{id}/kubernetes/identity",
+
+			// Destructive, and the word is right even though nothing in the
+			// cluster changes: setting the wrong string is a cluster where every
+			// Kubernetes screen is refused until somebody works out why. The
+			// sudo window costs nothing here because the operator is at the
+			// screen, and the cluster lock applies for the same reason it
+			// applies to a cordon.
+			Destructive:     true,
+			ClusterScope:    clusterIDFromPath,
+			RequiresSession: true,
+			MinRole:         model.RoleAdmin,
+			Action:          "cluster.kubernetes-set-identity",
+			Handler:         handler(kubernetesSetIdentity(d)),
+		},
+	}
+}
+
+// kubernetesIdentity answers who this product acts as, and what that identity
+// may do.
+func kubernetesIdentity(d httpapi.Deps) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		client, ctx, cancel, ok := kubeClientFor(d, w, r)
+		if !ok {
+			return
+		}
+		defer cancel()
+
+		// A candidate lets the screen ask "what WOULD this identity be able to
+		// do" before anybody stores it. Without that the only way to find out
+		// is to save it and watch the product break.
+		identity := client.Identity()
+		candidate := r.URL.Query().Get("as")
+		if candidate != "" {
+			asked, err := client.As(kube.Identity{User: candidate})
+			if err != nil {
+				writeKubernetesError(w, r, err)
+				return
+			}
+			client, identity = asked, asked.Identity()
+		}
+
+		permissions, err := client.WhatMayI(ctx,
+			kube.EveryPermissionThisProductUses(r.URL.Query().Get("namespace")))
+		if err != nil {
+			writeKubernetesError(w, r, err)
+			return
+		}
+
+		missing := 0
+		for _, p := range permissions {
+			if !p.Allowed {
+				missing++
+			}
+		}
+
+		writeJSON(w, http.StatusOK, struct {
+			User        string            `json:"user"`
+			Groups      []string          `json:"groups"`
+			Describes   string            `json:"describes"`
+			Permissions []kube.Permission `json:"permissions"`
+			Missing     int               `json:"missing"`
+			Notice      string            `json:"notice"`
+		}{
+			User:        identity.User,
+			Groups:      identity.Groups,
+			Describes:   identity.String(),
+			Permissions: permissions,
+			Missing:     missing,
+			Notice: "This is what the cluster says, asked as that identity. A refusal here is a " +
+				"refusal you would meet on the screens, and this product will not retry it as " +
+				"its own certificate.",
+		})
+	}
+}
+
+// kubernetesSetIdentity records whose name this cluster's requests arrive under.
+func kubernetesSetIdentity(d httpapi.Deps) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if p := inventoryConfigured(d); p != nil {
+			httpapi.WriteProblem(w, r, p)
+			return
+		}
+
+		var body struct {
+			// A pointer so that clearing it is distinguishable from not saying.
+			// Clearing is how somebody gets back to the product's own
+			// certificate after locking themselves out of their own cluster.
+			User   *string  `json:"user"`
+			Groups []string `json:"groups"`
+		}
+		if err := decodeJSON(w, r, &body); err != nil {
+			httpapi.WriteProblem(w, r, decodeProblem(err))
+			return
+		}
+		if body.User == nil {
+			httpapi.WriteProblem(w, r, httpapi.Validation(
+				"Say who to act as, or an empty name to go back to this product's own certificate.",
+				httpapi.FieldError{Field: "user", Reason: "required"}))
+			return
+		}
+
+		ctx, cancel := budgetedContext(r, KubernetesRouteBudget)
+		defer cancel()
+
+		cluster, err := d.Inventory.SetActAs(ctx, model.ClusterID(r.PathValue("id")),
+			*body.User, body.Groups)
+		if err != nil {
+			writeKubernetesError(w, r, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, struct {
+			User   string   `json:"user"`
+			Groups []string `json:"groups"`
+		}{User: cluster.ActAs, Groups: cluster.ActAsGroups})
 	}
 }
 

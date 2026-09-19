@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query'
 import { createRoute } from '@tanstack/react-router'
 import { useState } from 'react'
 import { api } from '@/api'
+import { ActAs } from '@/components/ActAs'
 import { ApplyManifest } from '@/components/ApplyManifest'
 import { DataTable } from '@/components/DataTable'
 import { NodeSchedulingActions } from '@/components/NodeSchedulingActions'
@@ -354,6 +355,15 @@ export function KubernetesView() {
                   },
                 ]}
               />
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Who this acts as</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <ActAs clusterID={selected} />
             </CardContent>
           </Card>
 
