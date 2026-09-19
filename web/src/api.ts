@@ -1689,6 +1689,21 @@ export const kubernetesPodSchema = z.object({
   created_at: z.string().default(''),
 })
 
+export const kubernetesDeploymentSchema = z.object({
+  namespace: z.string(),
+  name: z.string(),
+  /** What somebody asked for. */
+  desired: z.number(),
+  /** What is actually running and passing its probes. Both are here for the
+   * reason a pod carries phase and readiness: three asked for and one ready is
+   * the state somebody is on this screen about. */
+  ready: z.number(),
+  updated: z.number(),
+  available: z.number(),
+  image: z.string().default(''),
+  created_at: z.string().default(''),
+})
+
 export const kubernetesOverviewSchema = z.object({
   cluster: z.string(),
   /** The API server's own version: the cheapest proof that the whole path
@@ -1696,6 +1711,7 @@ export const kubernetesOverviewSchema = z.object({
   server_version: z.string(),
   nodes: z.array(kubernetesNodeSchema),
   pods: z.array(kubernetesPodSchema),
+  deployments: z.array(kubernetesDeploymentSchema),
   namespaces: z.array(z.string()).default([]),
   /** Echoed back, so a screen cannot show one namespace's pods under
    * another's heading. */
@@ -1705,6 +1721,7 @@ export const kubernetesOverviewSchema = z.object({
 export type KubernetesOverview = z.infer<typeof kubernetesOverviewSchema>
 export type KubernetesNode = z.infer<typeof kubernetesNodeSchema>
 export type KubernetesPod = z.infer<typeof kubernetesPodSchema>
+export type KubernetesDeployment = z.infer<typeof kubernetesDeploymentSchema>
 
 export const confirmationSchema = z.object({
   token: z.string(),
@@ -2418,6 +2435,52 @@ export const api = {
         acceptedJobSchema,
         opts,
       ),
+
+    /**
+     * Restart one pod: delete it and let its controller make another.
+     *
+     * Refused when nothing owns the pod, because then deleting it is not a
+     * restart — it is deletion, and the word would have been a lie.
+     */
+    restartPod: async (cluster: string, namespace: string, pod: string): Promise<void> => {
+      await send(
+        'POST',
+        `/api/v1/clusters/${encodeURIComponent(cluster)}/kubernetes/pods/${encodeURIComponent(namespace)}/${encodeURIComponent(pod)}/restart`,
+      )
+    },
+
+    /** Set a deployment's replica count. Zero is a real answer: it is how a
+     * workload is switched off. */
+    scale: async (
+      cluster: string,
+      namespace: string,
+      deployment: string,
+      replicas: number,
+    ): Promise<void> => {
+      await send(
+        'POST',
+        `/api/v1/clusters/${encodeURIComponent(cluster)}/kubernetes/deployments/${encodeURIComponent(namespace)}/${encodeURIComponent(deployment)}/scale`,
+        { replicas },
+      )
+    },
+
+    /**
+     * Replace a deployment's pods under the deployment's own strategy.
+     *
+     * The difference from restarting the pods one by one: the deployment
+     * controller does the replacing, with its surge, its maxUnavailable and its
+     * readiness probes — so the workload stays up while it happens.
+     */
+    rolloutRestart: async (
+      cluster: string,
+      namespace: string,
+      deployment: string,
+    ): Promise<void> => {
+      await send(
+        'POST',
+        `/api/v1/clusters/${encodeURIComponent(cluster)}/kubernetes/deployments/${encodeURIComponent(namespace)}/${encodeURIComponent(deployment)}/restart`,
+      )
+    },
 
     overview: (cluster: string, namespace?: string): Promise<KubernetesOverview> =>
       sendJSON(

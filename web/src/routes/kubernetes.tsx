@@ -12,6 +12,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import { DeploymentActions, RestartPodButton } from '@/components/WorkloadActions'
 import { authenticatedRoute } from '@/routes/__root'
 
 /**
@@ -159,6 +160,63 @@ export function KubernetesView() {
 
           <Card>
             <CardHeader>
+              <CardTitle>Deployments</CardTitle>
+            </CardHeader>
+            <CardContent>
+              {overview.data.deployments.length === 0 ? (
+                <p className="text-muted-foreground text-sm">
+                  The API server answered, and this cluster has no deployments
+                  {overview.data.namespace === '' ? '' : ` in ${overview.data.namespace}`}.
+                </p>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b text-left text-muted-foreground">
+                        <th className="py-1 pr-4 font-medium">Namespace</th>
+                        <th className="py-1 pr-4 font-medium">Deployment</th>
+                        <th className="py-1 pr-4 font-medium">Ready</th>
+                        <th className="py-1 pr-4 font-medium">Image</th>
+                        <th className="py-1 pr-4 font-medium">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {overview.data.deployments.map((deployment) => (
+                        <tr
+                          key={`${deployment.namespace}/${deployment.name}`}
+                          className="border-b max-md:h-11"
+                        >
+                          <td className="py-1 pr-4 text-xs">{deployment.namespace}</td>
+                          <td className="py-1 pr-4 font-mono text-xs">{deployment.name}</td>
+                          <td
+                            className={
+                              deployment.ready === deployment.desired
+                                ? 'py-1 pr-4'
+                                : 'py-1 pr-4 text-red-700 dark:text-red-300'
+                            }
+                          >
+                            {deployment.ready}/{deployment.desired}
+                          </td>
+                          <td className="py-1 pr-4 font-mono text-xs">{deployment.image || '—'}</td>
+                          <td className="py-1 pr-4">
+                            <DeploymentActions
+                              clusterID={selected}
+                              namespace={deployment.namespace}
+                              deployment={deployment.name}
+                              desired={deployment.desired}
+                            />
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
               <CardTitle>Pods</CardTitle>
             </CardHeader>
             <CardContent className="space-y-2">
@@ -198,6 +256,7 @@ export function KubernetesView() {
                         <th className="py-1 pr-4 font-medium">Ready</th>
                         <th className="py-1 pr-4 font-medium">Restarts</th>
                         <th className="py-1 pr-4 font-medium">Node</th>
+                        <th className="py-1 pr-4 font-medium">Action</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -224,6 +283,13 @@ export function KubernetesView() {
                             </td>
                             <td className="py-1 pr-4 tabular-nums">{pod.restarts}</td>
                             <td className="py-1 pr-4 font-mono text-xs">{pod.node || '—'}</td>
+                            <td className="py-1 pr-4">
+                              <RestartPodButton
+                                clusterID={selected}
+                                namespace={pod.namespace}
+                                pod={pod.name}
+                              />
+                            </td>
                           </tr>
                         )
                       })}
