@@ -1483,6 +1483,122 @@ sense D-06 means:
 | `POST /api/v1/clusters/{id}/kubernetes/object` | takes `{"api_version","kind","namespace","name"}` and answers that object as YAML |
 | `GET /api/v1/clusters/{id}/kubernetes/identity` | who this product acts as, and what the cluster says that identity may do. `?as=` previews a candidate without storing it |
 | `POST /api/v1/clusters/{id}/kubernetes/identity` | takes `{"user": "...", "groups": [...]}`; an empty user goes back to this product's own certificate |
+| `GET /api/v1/clusters/{id}/kubernetes/workloads` | everything that runs: Deployments, StatefulSets, DaemonSets, Jobs and CronJobs |
+| `POST /api/v1/clusters/{id}/kubernetes/workloads/{kind}/{namespace}/{name}/scale` | takes `{"replicas": n}`, for the kinds that have one |
+| `POST /api/v1/clusters/{id}/kubernetes/workloads/{kind}/{namespace}/{name}/restart` | rolls the pods, for the kinds that have a pod template |
+| `GET /api/v1/clusters/{id}/kubernetes/resources` | ConfigMaps, Secrets, claims, Ingresses, autoscalers and disruption budgets |
+| `POST /api/v1/clusters/{id}/kubernetes/delete` | takes `{"api_version","kind","namespace","name"}` and removes that one object |
+| `GET /api/v1/clusters/{id}/kubernetes/nodes/{node}` | one node's conditions, taints, and how much room the scheduler has left |
+| `GET /api/v1/clusters/{id}/kubernetes/usage` | what nodes and pods are USING, from metrics-server |
+| `POST /api/v1/clusters/{id}/kubernetes/pods/{namespace}/{pod}/exec` | takes `{"container": "...", "command": ["prog","arg"]}` and runs it once |
+
+**Running a command in a container is the most dangerous thing here, and four
+decisions make it something this product can offer.**
+
+*It is not a shell.* A command and its arguments go, it runs, the output comes
+back. No terminal, no stdin, no session that stays open. `sh -c "..."` is refused
+by name (`conflict.exec-refused`) — passing a shell a string is what makes an
+archive useless, because it would record `sh -lc` and the interesting half would
+sit in an argument nobody reads. `command` is therefore a LIST: a string would
+have to be split by something, and whatever split it would be a shell.
+
+*The command is the event.* Every argument is archived in clear, which is only
+possible because of the first decision.
+
+*It runs as the operator.* A cluster with no `act_as` set refuses
+(`conflict.exec-refused`) rather than quietly using `system:masters` — a fallback
+here would be the worst one in the product. Your cluster's audit log therefore
+names the person who ran it.
+
+*It is bounded.* One command, a 30-second ceiling, an output cap at 256 KiB. The
+output is never archived: it is whatever the workload printed.
+
+A non-zero exit is not an error — `test -f /etc/passwd` returning 1 is
+information — so it comes back with whatever was written and the exit reported
+alongside.
+
+**There is deliberately no port-forward.** The service proxy already reaches a
+workload for reading. A forward means this daemon holding a listener whose
+authentication story is nobody's — a second network path into the cluster, owned
+by this process. Somebody who needs one has `kubectl` and their own credentials.
+
+| code | HTTP | when |
+|---|---|---|
+| `conflict.exec-refused` | 409 | a shell with a string, an argument with a line break, or a cluster with no identity to run it as |
+
+**Used and requested are different numbers and both are needed.** A node with no
+room left and 5% usage is over-reserved; a node with room left and 95% usage is
+about to fall over. Those are opposite repairs, so neither figure substitutes for
+the other and this route never mixes them.
+
+**A cluster with no metrics-server answers `200` with `collecting: false`**, not
+an error. Talos does not ship one, so that is the ordinary case rather than a
+failure — and a `502` would say the cluster is unreachable when it is answering
+perfectly well. It is also not zero: "nobody is measuring" and "nothing is being
+used" are different facts, the same distinction INV-08 makes about a node that
+was not asked.
+
+**A pod's usage is summed across its containers**, the way `kubectl top pod`
+shows it. Reading only the first would report a sidecar-heavy pod as idle.
+
+**This is where "why is my pod Pending" is answered from the node's side.** The
+pod's own events say `0/2 nodes are available`, which names no node. A taint, a
+kubelet condition, or a node with nothing left to reserve does.
+
+**A pressure condition is bad when it is TRUE**, which is the inversion of
+`Ready`. `bad` carries that per condition so a client does not have to know
+which way each one reads — a screen that treated them alike would paint a
+healthy node red and a full disk green. `Ready` itself is left out: it is on the
+node list, and one fact in two places can disagree.
+
+**`NoSchedule` and `NoExecute` are different days of work** — one keeps new pods
+off, the other evicts the ones already there — so each taint carries that in
+words. `explaining_taints` leaves out the ordinary ones: every Talos
+control-plane node carries the control-plane taint, and presenting it as a
+finding would tell somebody their cluster is misconfigured on their first visit.
+
+**Requested is not used, and the answer says so.** `cpu_requested` is what the
+pods on the node ASKED for, which is what the scheduler reserves; a node at 5%
+CPU can still have no room. Pods that have finished hold no reservation and are
+not counted — otherwise a CronJob that ran a hundred times would report a node as
+full. The pod list behind it is filtered by the SERVER on `spec.nodeName`.
+
+**Each of the six answers a question the workload list cannot**: where the
+setting lives, whether a URL reaches the cluster, why a claim is Pending, why a
+replica count goes back after somebody scales by hand, why a drain refuses.
+`healthy: false` marks the ones that are the REASON something else is stuck, so a
+client can put them first rather than burying the finding among forty ConfigMaps.
+
+**Secrets are listed and never read.** Their names and key names are the answer
+to "does this namespace have the pull secret"; their values appear nowhere, here
+or in the object route, because base64 is not encryption.
+
+**Deleting takes one object and nothing else.** There is no label selector and no
+delete-all-in-namespace: the operations that remove many things at once are the
+ones where a mistake is unbounded, which is the same reason `--prune` was refused
+on the manifest path. Deleting a **Namespace** is refused outright
+(`conflict.refused-kind`) — it removes everything inside it, asynchronously, and
+nothing stops it once it starts. It is a POST rather than a DELETE because the
+archive captures bodies, and *what* was removed is the event.
+
+**A cluster is not only its Deployments.** The storage layer is a DaemonSet, the
+database a StatefulSet, the backup a CronJob. Listing only Deployments showed a
+workload list with the broken thing absent from it — worse than an empty list,
+because an empty list does not imply the thing is not there.
+
+**The numbers mean different things per kind, so they are not flattened.** A
+DaemonSet's `desired` is how many nodes match — the cluster's shape, not
+somebody's intention. A StatefulSet mid-update is normal, not broken. A Job's
+numbers are succeeded and failed. A CronJob has no pods at all between runs, and
+`0 of 0 ready` would report a schedule as an outage. Each row therefore carries a
+`summary` written for its kind, and clients should show that rather than compute
+one.
+
+**`scalable` and `rollable` say what the kind supports**, so a screen offers only
+what exists: a DaemonSet gets no replica field, a Job no roll button. Asking
+anyway is refused here by name rather than by the API server's own message —
+"the server rejected the request" does not tell somebody that the count they
+wanted is the number of nodes.
 
 **Acting as the operator is what makes a cluster's own audit log useful.** By
 default every Kubernetes request arrives as `holzkube-manager` in
