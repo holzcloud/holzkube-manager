@@ -138,27 +138,124 @@ describe('the wall', () => {
     wrap(<WallView />)
 
     expect(await screen.findByText('website')).toBeInTheDocument()
-    expect(screen.getByText('0 of 3 ready')).toBeInTheDocument()
+    // The namespace rides with the detail: on a wall "website" alone is not an
+    // address, and two namespaces with a website each is the ordinary case.
+    expect(screen.getByText('default · 0 of 3 ready')).toBeInTheDocument()
   })
 
-  it('shows the worst ones by name when there are more than a screenful', async () => {
-    const many = Array.from({ length: 70 }, (_, i) => ({
-      kind: 'Deployment',
-      namespace: 'default',
-      name: `app-${i}`,
-      state: i === 0 ? 'down' : 'ok',
-      detail: '',
-    }))
-    vi.spyOn(api.kubernetes, 'wall').mockResolvedValue(wallAt(new Date(), { workloads: many }))
+  it('says on the screen what a square is and what the colours mean', async () => {
+    vi.spyOn(api.kubernetes, 'wall').mockResolvedValue(
+      wallAt(new Date(), {
+        workloads: [
+          { kind: 'Deployment', namespace: 'web', name: 'a', state: 'ok', detail: '' },
+          { kind: 'Deployment', namespace: 'web', name: 'b', state: 'stopped', detail: '' },
+        ],
+      }),
+    )
 
     wrap(<WallView />)
 
-    // A grid that silently stops at the bottom edge is a wall that hides the
-    // broken one. Seventy tiles cannot be read from a room away anyway, so the
-    // screen says how many it is showing and shows the ones that matter.
-    expect(await screen.findByText(/showing 1 of 70/)).toBeInTheDocument()
-    expect(screen.getByText('app-0')).toBeInTheDocument()
-    expect(screen.queryByText('app-5')).toBeNull()
+    // The operator asked what the green squares meant. Having to ask is the
+    // defect: a wall is read by people nobody told anything, and an answer given
+    // once in a conversation is an answer nobody walking past ever gets.
+    expect(await screen.findByText(/one square each/)).toBeInTheDocument()
+    expect(screen.getByText(/running 1/)).toBeInTheDocument()
+    expect(screen.getByText(/stopped on purpose 1/)).toBeInTheDocument()
+  })
+
+  it('does not key a colour that is not on the screen', async () => {
+    vi.spyOn(api.kubernetes, 'wall').mockResolvedValue(wallAt(new Date()))
+
+    wrap(<WallView />)
+
+    await screen.findByText(/one square each/)
+    // A key to something that is not there is one more thing to read past.
+    expect(screen.queryByText(/stopped on purpose/)).toBeNull()
+  })
+
+  it('hides nothing on a cluster where everything is fine', async () => {
+    // The operator's own screen: 132 workloads, all healthy. The first version
+    // of this page drew only the ones that were NOT fine past sixty, so it
+    // showed "SHOWING 0 OF 132" and a screen of black -- an empty screen
+    // claiming nothing was running, about a cluster running everything.
+    const many = Array.from({ length: 132 }, (_, i) => ({
+      kind: 'Deployment',
+      namespace: i % 3 === 0 ? 'cloud' : 'kube-system',
+      name: `app-${i}`,
+      state: 'ok',
+      detail: '1 of 1 ready',
+    }))
+    vi.spyOn(api.kubernetes, 'wall').mockResolvedValue(wallAt(new Date(), { workloads: many }))
+
+    const { container } = wrap(<WallView />)
+
+    expect(await screen.findByText(/132 workloads/)).toBeInTheDocument()
+    // Every one of them is drawn. A count instead of the tiles is the failure.
+    expect(container.querySelectorAll('[data-row]')).toHaveLength(133) // + the node
+    expect(screen.queryByText(/showing/i)).toBeNull()
+  })
+
+  it('names what needs attention and leaves the rest as a field', async () => {
+    const tiles = [
+      {
+        kind: 'Deployment',
+        namespace: 'db',
+        name: 'postgres',
+        state: 'down',
+        detail: '0 of 3 ready',
+      },
+      ...Array.from({ length: 40 }, (_, i) => ({
+        kind: 'Deployment',
+        namespace: 'cloud',
+        name: `fine-${i}`,
+        state: 'ok',
+        detail: '1 of 1 ready',
+      })),
+    ]
+    vi.spyOn(api.kubernetes, 'wall').mockResolvedValue(wallAt(new Date(), { workloads: tiles }))
+
+    wrap(<WallView />)
+
+    // The broken one is named and readable; forty healthy names cannot be read
+    // from four metres and nobody is trying to. What a wall is read for is the
+    // shape: a field of green with one red in it.
+    expect(await screen.findByText('Needs attention')).toBeInTheDocument()
+    expect(screen.getByText('postgres')).toBeInTheDocument()
+    expect(screen.queryByText('fine-0')).toBeNull()
+    // And the field has landmarks rather than being anonymous squares.
+    expect(screen.getByText('cloud')).toBeInTheDocument()
+  })
+
+  it('says nothing about attention when there is none to pay', async () => {
+    vi.spyOn(api.kubernetes, 'wall').mockResolvedValue(wallAt(new Date()))
+
+    wrap(<WallView />)
+
+    await screen.findByText('Everything is running')
+    expect(screen.queryByText('Needs attention')).toBeNull()
+  })
+
+  it('leaves something deliberately stopped out of the attention list', async () => {
+    vi.spyOn(api.kubernetes, 'wall').mockResolvedValue(
+      wallAt(new Date(), {
+        workloads: [
+          {
+            kind: 'Deployment',
+            namespace: 'default',
+            name: 'paused',
+            state: 'stopped',
+            detail: '0 of 0 ready',
+          },
+        ],
+      }),
+    )
+
+    wrap(<WallView />)
+
+    // A wall that put every deliberately stopped workload in the attention list
+    // is a wall asking to be ignored.
+    await screen.findByText('Everything is running')
+    expect(screen.queryByText('Needs attention')).toBeNull()
   })
 
   it('keeps the last answer up when a refresh fails, rather than blanking', async () => {
