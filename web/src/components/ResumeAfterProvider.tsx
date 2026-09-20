@@ -4,6 +4,14 @@ import { useEffect, useState } from 'react'
 import { replaySudoAction, type SudoReplay } from '@/api'
 import { notify } from '@/components/Toaster'
 import { Button } from '@/components/ui/button'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
 import { messageFor, ProblemError } from '@/lib/problem'
 
 /**
@@ -250,60 +258,61 @@ export function ResumeAfterProvider({ className }: { className?: string }) {
   }
 
   return (
-    <div
-      className={`rounded-md border border-amber-600/40 bg-amber-500/10 p-3 text-sm ${className ?? ''}`}
+    <Dialog
+      open
+      onOpenChange={(next) => {
+        // Closing it IS dismissing it: an operator who presses escape or clicks
+        // away has decided not to do this now, and a dialog that came back on
+        // the next render would be a dialog they cannot leave.
+        if (!next) dismiss()
+      }}
     >
-      <p className="text-foreground">
-        You were re-authenticated, and{' '}
-        <strong className="font-medium">{intent.action} has not run yet</strong> — it could not be
-        carried across the trip to your identity provider.{' '}
-        {replay === undefined
-          ? 'Go back and run it again; it will not ask a second time.'
-          : 'It will not ask a second time.'}
-      </p>
-      {failure !== '' && <p className="mt-1 text-destructive">{failure}</p>}
-      <div className="mt-2 flex flex-wrap gap-2">
-        {replay !== undefined && (
+      <DialogContent className={className}>
+        <DialogHeader>
+          {/* The action is the TITLE rather than a phrase inside a sentence.
+              Written inline it produced "and Delete this schematic has not run
+              yet" -- the labels are imperative sentences of their own, and no
+              sentence around them reads correctly for all of them. */}
+          <DialogTitle>{intent.action}</DialogTitle>
+          <DialogDescription>
+            You were re-authenticated, and this has not run yet — it could not be carried across the
+            trip to your identity provider.{' '}
+            {replay === undefined
+              ? 'Go back and run it again; it will not ask a second time.'
+              : 'It will not ask a second time.'}
+          </DialogDescription>
+        </DialogHeader>
+
+        {failure !== '' && <p className="text-destructive text-sm">{failure}</p>}
+
+        <DialogFooter>
           <Button
-            size="sm"
+            variant="ghost"
             className="max-md:h-11"
-            disabled={running}
             onClick={() => {
-              void run()
+              const to = intent.path
+              dismiss()
+              void navigate({ to })
             }}
           >
-            {running ? 'Running…' : `Run ${lowerFirst(intent.action)} now`}
+            Back to where you were
           </Button>
-        )}
-        <Button
-          size="sm"
-          variant="outline"
-          className="max-md:h-11"
-          onClick={() => {
-            const to = intent.path
-            dismiss()
-            void navigate({ to })
-          }}
-        >
-          Back to where you were
-        </Button>
-        <Button size="sm" variant="ghost" className="max-md:h-11" onClick={dismiss}>
-          Dismiss
-        </Button>
-      </div>
-    </div>
+          <Button variant="ghost" className="max-md:h-11" onClick={dismiss}>
+            Not now
+          </Button>
+          {replay !== undefined && (
+            <Button
+              className="max-md:h-11"
+              disabled={running}
+              onClick={() => {
+                void run()
+              }}
+            >
+              {running ? 'Running…' : 'Run it now'}
+            </Button>
+          )}
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   )
-}
-
-/**
- * lowerFirst makes "Forgetting this machine" fit inside "Run … now".
- *
- * Only the first letter, and only when the second is not also upper case: an
- * action named after something like "CA rotation" must not become "cA rotation".
- */
-function lowerFirst(sentence: string): string {
-  if (sentence.length < 2 || sentence[1] !== sentence[1]?.toLowerCase()) {
-    return sentence
-  }
-  return sentence[0]?.toLowerCase() + sentence.slice(1)
 }

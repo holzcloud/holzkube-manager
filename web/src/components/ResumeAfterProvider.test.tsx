@@ -47,10 +47,13 @@ describe('ResumeAfterProvider', () => {
     // The whole sentence, not the emphasised half: getByText matches the
     // innermost element, and asserting on that would pass over a banner whose
     // surrounding words had been changed to say something else entirely.
-    const sentence = screen.getByText(/has not run yet/i).closest('p')
-    expect(sentence?.textContent).toContain('Forgetting this cluster')
-    expect(sentence?.textContent).toContain('re-authenticated')
-    expect(sentence?.textContent).toContain('not be carried across')
+    // The action is the dialog's TITLE, not a phrase inside the sentence: the
+    // labels are imperative sentences of their own ("Forget this machine"), and
+    // inlining one produced "and Forget this machine has not run yet".
+    expect(screen.getByRole('heading', { name: 'Forgetting this cluster' })).toBeInTheDocument()
+    const sentence = screen.getByText(/has not run yet/i)
+    expect(sentence.textContent).toContain('re-authenticated')
+    expect(sentence.textContent).toContain('not be carried across')
   })
 
   it('shows nothing when no action was interrupted', () => {
@@ -107,7 +110,7 @@ describe('ResumeAfterProvider', () => {
     })
 
     render_(<ResumeAfterProvider />)
-    await userEvent.click(screen.getByRole('button', { name: /run forgetting this machine now/i }))
+    await userEvent.click(screen.getByRole('button', { name: /run it now/i }))
 
     await waitFor(() =>
       expect(ran).toHaveBeenCalledWith({
@@ -124,7 +127,7 @@ describe('ResumeAfterProvider', () => {
 
     render_(<ResumeAfterProvider />)
 
-    expect(screen.queryByRole('button', { name: /run .* now/i })).toBeNull()
+    expect(screen.queryByRole('button', { name: /run it now/i })).toBeNull()
     // And says what to do instead, rather than leaving a dead end.
     expect(screen.getByText(/Go back and run it again/i)).toBeInTheDocument()
   })
@@ -139,7 +142,7 @@ describe('ResumeAfterProvider', () => {
     })
 
     render_(<ResumeAfterProvider />)
-    await userEvent.click(screen.getByRole('button', { name: /run .* now/i }))
+    await userEvent.click(screen.getByRole('button', { name: /run it now/i }))
 
     // The banner is the only place this attempt exists: an error that escaped
     // it would vanish, and the operator would be back to guessing.
@@ -161,7 +164,7 @@ describe('ResumeAfterProvider', () => {
 
     render_(<ResumeAfterProvider />)
 
-    expect(screen.queryByRole('button', { name: /run .* now/i })).toBeNull()
+    expect(screen.queryByRole('button', { name: /run it now/i })).toBeNull()
     expect(screen.getByText(/has not run yet/i)).toBeInTheDocument()
   })
 })
@@ -227,5 +230,19 @@ describe('SudoFailureNotice', () => {
   it('shows nothing when the operator did not come back from a refusal', () => {
     render_(<SudoFailureNotice />)
     expect(screen.queryByText(/identity provider/i)).toBeNull()
+  })
+
+  it('is a window over the page, not a strip above it', async () => {
+    rememberSudoIntent('Forget this machine', '/nodes/holzkube-01', {
+      method: 'DELETE',
+      path: '/api/v1/machines/holzkube-01',
+    })
+
+    render_(<ResumeAfterProvider />)
+
+    // A banner at the top of a long page scrolls away, and the operator read
+    // one as "it failed" and stopped. A dialog over a blurred page cannot be
+    // scrolled past and says by its shape that something is still to be done.
+    expect(await screen.findByRole('dialog')).toBeInTheDocument()
   })
 })
