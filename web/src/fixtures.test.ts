@@ -20,6 +20,7 @@ import {
   schematicSchema,
   sweepPlanSchema,
   usersSchema,
+  wallSchema,
   workloadsSchema,
 } from '@/api'
 import demo from '../fixtures/demo.json'
@@ -64,6 +65,7 @@ describe('the layout guard’s fixtures', () => {
     ['/api/v1/clusters/c-homelab/kubernetes/network', clusterNetworkSchema],
     ['/api/v1/clusters/c-homelab/kubernetes/access', accessControlSchema],
     ['/api/v1/clusters/c-homelab/kubernetes/inventory', inventorySchema],
+    ['/api/v1/clusters/c-homelab/wall', wallSchema],
   ])('%s is something the product would accept', (path, schema) => {
     const parsed = schema.safeParse(fixtures[path])
     // The error is printed in full rather than as "expected true": a fixture

@@ -367,6 +367,19 @@ func KubernetesRoutes(d httpapi.Deps) []httpapi.Route {
 			Handler:         handler(kubernetesExec(d)),
 		},
 		{
+			Method:  http.MethodGet,
+			Pattern: "/api/v1/clusters/{id}/wall",
+
+			RequiresSession: true,
+			// The lowest role there is. A screen in a corridor is exactly what
+			// RoleReader's own comment describes, and this answer carries less
+			// than any other route behind that role: names and states, no
+			// addresses, no versions, no key names.
+			MinRole: model.RoleReader,
+			Action:  "cluster.wall",
+			Handler: handler(clusterWall(d)),
+		},
+		{
 			Method:          http.MethodGet,
 			Pattern:         "/api/v1/clusters/{id}/kubernetes/inventory",
 			RequiresSession: true,
@@ -457,6 +470,29 @@ func KubernetesRoutes(d httpapi.Deps) []httpapi.Route {
 }
 
 // kubernetesCapacity answers how full the cluster and each node is.
+// clusterWall answers everything one screen in the IT office shows.
+//
+// ONE route for the whole screen, which is the decision worth writing down: a
+// wall makes the same call every few seconds for weeks, and five routes would be
+// five chances for one to fail while the other four painted a confident picture
+// -- with nothing on the screen to say which quarter of it was stale.
+func clusterWall(d httpapi.Deps) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		client, ctx, cancel, ok := kubeClientFor(d, w, r)
+		if !ok {
+			return
+		}
+		defer cancel()
+
+		wall, err := client.ForTheWall(ctx, r.URL.Query().Get("namespace"), time.Now())
+		if err != nil {
+			writeKubernetesError(w, r, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, wall)
+	}
+}
+
 // kubernetesInventory answers every namespace, its quotas, and the cluster's own
 // kinds.
 //
