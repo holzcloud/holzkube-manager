@@ -900,6 +900,12 @@ cannot — where the setting lives, whether a URL reaches the cluster, why a cla
 is Pending, why a replica count goes back after you scale by hand, why a drain
 refuses. The ones that are the *reason* something is stuck come first.
 
+**A disruption budget allowing nothing is not a fault.** With one copy, taking it
+down *is* the outage, so the budget allows nothing — that is every single-replica
+database in every cluster, and marking them all would be a warning nobody reads.
+The screen says what a drain will do instead, and marks only a budget that is not
+met: a pod is already missing, and a drain will be refused on top of that.
+
 Secrets are listed and never read: their names and key names answer "does this
 namespace have the pull secret", and their values appear nowhere, because base64
 is not encryption.

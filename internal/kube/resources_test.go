@@ -192,3 +192,106 @@ func TestDeletingOneObjectDeletesThatObject(t *testing.T) {
 		t.Errorf("an unknown kind = %v, want ErrManifestInvalid", err)
 	}
 }
+
+// A single copy is not a finding (2026-09-20).
+//
+// The operator photographed /kubernetes/config: six PodDisruptionBudgets, every
+// one of them amber, every one saying "1 of 1 healthy, 0 may be disrupted", and
+// the ConfigMaps and Ingresses the page exists for pushed below them by the
+// unhealthy-first sort.
+//
+// The numbers were right and the verdict was wrong. `DisruptionsAllowed == 0` on
+// a workload with ONE copy is the ordinary, correct state of every
+// single-replica database in every cluster -- it says a drain cannot move it
+// without downtime, which the drain path already says at the moment it matters.
+// Flagging it permanently is the failure this codebase names elsewhere in its own
+// words: a warning everybody sees is a warning nobody reads. It had already been
+// reasoned through correctly for RBAC (wildcards across separate rules are
+// ordinary) and got wrong here.
+//
+// The actual finding is the budget NOT BEING MET: fewer healthy pods than it
+// wants, which means one is already missing.
+
+func budgetsNamed(t *testing.T, resources []kube.Resource) map[string]kube.Resource {
+	t.Helper()
+
+	out := map[string]kube.Resource{}
+	for _, r := range resources {
+		if r.Kind == "PodDisruptionBudget" {
+			out[r.Name] = r
+		}
+	}
+	return out
+}
+
+// TestASingleCopyIsNotAFinding.
+func TestASingleCopyIsNotAFinding(t *testing.T) {
+	t.Parallel()
+
+	ctx := testContext(t)
+	_, client := newCluster(t, kubesim.Options{Resources: []kubesim.Resource{
+		// The operator's case: one replica, budget met, nothing may be disrupted.
+		{Kind: "PodDisruptionBudget", Namespace: "cloud", Name: "nextcloud-db-primary",
+			Healthy: 1, Desired: 1, Allowed: 0},
+		// Met, with room to spare.
+		{Kind: "PodDisruptionBudget", Namespace: "web", Name: "website",
+			Healthy: 3, Desired: 2, Allowed: 1},
+		// NOT met: a pod is already missing. This is the finding.
+		{Kind: "PodDisruptionBudget", Namespace: "db", Name: "postgres",
+			Healthy: 1, Desired: 2, Allowed: 0},
+	}})
+
+	resources, err := client.Resources(ctx, "")
+	if err != nil {
+		t.Fatalf("Resources: %v", err)
+	}
+	found := budgetsNamed(t, resources)
+
+	if !found["nextcloud-db-primary"].Healthy {
+		t.Errorf("a single-replica budget that is MET is reported as a problem: %q / %q",
+			found["nextcloud-db-primary"].Summary, found["nextcloud-db-primary"].Detail)
+	}
+	if !found["website"].Healthy {
+		t.Error("a budget with room to spare is reported as a problem")
+	}
+	if found["postgres"].Healthy {
+		t.Error("a budget that is not met is reported as healthy")
+	}
+	if !strings.Contains(found["postgres"].Detail, "already missing") {
+		t.Errorf("detail = %q, want it to say a pod is missing", found["postgres"].Detail)
+	}
+}
+
+// TestASingleCopyStillSaysWhatADrainWillDo.
+//
+// Not a finding is not the same as not worth saying: somebody about to drain a
+// node needs to know that this one cannot be moved without downtime. The
+// difference is that it is stated rather than flagged.
+func TestASingleCopyStillSaysWhatADrainWillDo(t *testing.T) {
+	t.Parallel()
+
+	ctx := testContext(t)
+	_, client := newCluster(t, kubesim.Options{Resources: []kubesim.Resource{
+		{Kind: "PodDisruptionBudget", Namespace: "cloud", Name: "nextcloud-db-primary",
+			Healthy: 1, Desired: 1, Allowed: 0},
+		{Kind: "PodDisruptionBudget", Namespace: "web", Name: "website",
+			Healthy: 3, Desired: 2, Allowed: 1},
+	}})
+
+	resources, err := client.Resources(ctx, "")
+	if err != nil {
+		t.Fatalf("Resources: %v", err)
+	}
+	found := budgetsNamed(t, resources)
+
+	if !strings.Contains(found["nextcloud-db-primary"].Detail, "drain") {
+		t.Errorf("detail = %q, want it to say what a drain would do",
+			found["nextcloud-db-primary"].Detail)
+	}
+	// And nothing said about the one that can be disrupted: there is nothing to
+	// warn about, and a line on every row is a line nobody reads.
+	if found["website"].Detail != "" {
+		t.Errorf("detail = %q, want nothing said about a budget with room",
+			found["website"].Detail)
+	}
+}
