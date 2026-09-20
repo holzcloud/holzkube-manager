@@ -480,19 +480,13 @@
     "cluster": "c-homelab",
     "server_version": "v1.36.4",
     "namespace": "",
-    "namespaces": [
-      "default",
-      "kube-system",
-      "longhorn-system"
-    ],
+    "namespaces": ["default", "kube-system", "longhorn-system"],
     "nodes": [
       {
         "name": "srv-node-01.homelab.example",
         "ready": "True",
         "unschedulable": false,
-        "roles": [
-          "control-plane"
-        ],
+        "roles": ["control-plane"],
         "kubelet_version": "v1.36.4",
         "os_image": "Talos (v1.14.2)",
         "created_at": "2026-09-01T08:04:00Z",
@@ -521,7 +515,11 @@
         "containers": 1,
         "restarts": 0,
         "reason": "",
-        "created_at": "2026-09-01T08:05:00Z"
+        "created_at": "2026-09-01T08:05:00Z",
+        "cpu_request": "250m",
+        "memory_request": "256Mi",
+        "cpu_limit": "",
+        "memory_limit": "512Mi"
       },
       {
         "namespace": "longhorn-system",
@@ -532,7 +530,11 @@
         "containers": 2,
         "restarts": 14,
         "reason": "CrashLoopBackOff",
-        "created_at": "2026-09-02T09:40:00Z"
+        "created_at": "2026-09-02T09:40:00Z",
+        "cpu_request": "1",
+        "memory_request": "2Gi",
+        "cpu_limit": "2",
+        "memory_limit": "4Gi"
       },
       {
         "namespace": "default",
@@ -543,7 +545,11 @@
         "containers": 1,
         "restarts": 2,
         "reason": "",
-        "created_at": "2026-09-17T18:22:00Z"
+        "created_at": "2026-09-17T18:22:00Z",
+        "cpu_request": "",
+        "memory_request": "",
+        "cpu_limit": "",
+        "memory_limit": ""
       }
     ],
     "deployments": [
@@ -609,14 +615,8 @@
       "name": "raspberry-pi-5-mit-nvme",
       "talos_version": "v1.14.2",
       "canonical": "376567988ad370138ad8b2698212367b8edcb69b5fd68c80be1f2ec7d603b4ba",
-      "extensions": [
-        "siderolabs/iscsi-tools",
-        "siderolabs/util-linux-tools"
-      ],
-      "kernel_args": [
-        "console=ttyAMA0,115200",
-        "talos.dashboard.disabled=1"
-      ],
+      "extensions": ["siderolabs/iscsi-tools", "siderolabs/util-linux-tools"],
+      "kernel_args": ["console=ttyAMA0,115200", "talos.dashboard.disabled=1"],
       "meta": [],
       "usable": true,
       "probed_at": "2026-09-18T12:00:00Z",
@@ -754,10 +754,7 @@
           "mtu": 1500,
           "up": true,
           "speed_mbit": 1000,
-          "addresses": [
-            "192.168.1.30/24",
-            "fe80::2ecf:67ff:fe1a:4b9e/64"
-          ],
+          "addresses": ["192.168.1.30/24", "fe80::2ecf:67ff:fe1a:4b9e/64"],
           "driver": "bcmgenet",
           "kind": ""
         },
@@ -767,9 +764,7 @@
           "mtu": 1450,
           "up": true,
           "speed_mbit": 0,
-          "addresses": [
-            "10.244.0.1/24"
-          ],
+          "addresses": ["10.244.0.1/24"],
           "driver": "",
           "kind": "bridge"
         }
@@ -874,7 +869,10 @@
         "suspended": false,
         "last_run": "",
         "scalable": true,
-        "rollable": true
+        "rollable": true,
+        "stoppable": true,
+        "stopped": false,
+        "would_start_with": 0
       },
       {
         "kind": "StatefulSet",
@@ -889,7 +887,10 @@
         "suspended": false,
         "last_run": "",
         "scalable": true,
-        "rollable": true
+        "rollable": true,
+        "stoppable": true,
+        "stopped": false,
+        "would_start_with": 0
       },
       {
         "kind": "DaemonSet",
@@ -904,7 +905,10 @@
         "suspended": false,
         "last_run": "",
         "scalable": false,
-        "rollable": true
+        "rollable": true,
+        "stoppable": false,
+        "stopped": false,
+        "would_start_with": 0
       },
       {
         "kind": "CronJob",
@@ -919,7 +923,10 @@
         "suspended": false,
         "last_run": "2026-09-19T02:00:00Z",
         "scalable": false,
-        "rollable": false
+        "rollable": false,
+        "stoppable": true,
+        "stopped": false,
+        "would_start_with": 0
       },
       {
         "kind": "Job",
@@ -934,7 +941,28 @@
         "suspended": false,
         "last_run": "",
         "scalable": false,
-        "rollable": false
+        "rollable": false,
+        "stoppable": true,
+        "stopped": false,
+        "would_start_with": 0
+      },
+      {
+        "kind": "Deployment",
+        "namespace": "default",
+        "name": "holzcloud-staging-preview-environment",
+        "desired": 0,
+        "ready": 0,
+        "summary": "0 of 0 ready",
+        "image": "ghcr.io/holzcloud/website:2026.09.17-sha-4f2a1b9",
+        "created_at": "2026-09-17T18:22:00Z",
+        "schedule": "",
+        "suspended": false,
+        "last_run": "",
+        "scalable": true,
+        "rollable": true,
+        "stoppable": true,
+        "stopped": true,
+        "would_start_with": 4
       }
     ]
   },
@@ -953,7 +981,7 @@
         "kind": "Ingress",
         "namespace": "default",
         "name": "holzcloud-website",
-        "summary": "no address yet — no controller has claimed it",
+        "summary": "no address yet \u2014 no controller has claimed it",
         "detail": "example.com, www.example.com",
         "healthy": false,
         "created_at": "2026-09-17T18:22:00Z"
@@ -1089,5 +1117,121 @@
       }
     ],
     "notice": "This is what they are using. What the scheduler reserves is what they REQUESTED, which is on the node detail and is a different number."
+  },
+  "/api/v1/clusters/c-homelab/kubernetes/capacity": {
+    "cpu": {
+      "allocatable": "12",
+      "requested": "4200m",
+      "percent": 35
+    },
+    "memory": {
+      "allocatable": "46Gi",
+      "requested": "41Gi",
+      "percent": 91
+    },
+    "pods": {
+      "allocatable": "330",
+      "requested": "74",
+      "percent": 22
+    },
+    "nodes": [
+      {
+        "name": "srv-node-01.homelab.example",
+        "ready": true,
+        "cordoned": false,
+        "cpu": {
+          "allocatable": "4",
+          "requested": "1400m",
+          "percent": 35
+        },
+        "memory": {
+          "allocatable": "15452Mi",
+          "requested": "14Gi",
+          "percent": 93
+        },
+        "pods": {
+          "allocatable": "110",
+          "requested": "31",
+          "percent": 28
+        },
+        "pods_running": 31
+      },
+      {
+        "name": "srv-node-02.homelab.example",
+        "ready": true,
+        "cordoned": true,
+        "cpu": {
+          "allocatable": "4",
+          "requested": "2800m",
+          "percent": 70
+        },
+        "memory": {
+          "allocatable": "15452Mi",
+          "requested": "9Gi",
+          "percent": 60
+        },
+        "pods": {
+          "allocatable": "110",
+          "requested": "43",
+          "percent": 39
+        },
+        "pods_running": 43
+      },
+      {
+        "name": "srv-node-03.homelab.example",
+        "ready": false,
+        "cordoned": false,
+        "cpu": {
+          "allocatable": "",
+          "requested": "0",
+          "percent": -1
+        },
+        "memory": {
+          "allocatable": "",
+          "requested": "0",
+          "percent": -1
+        },
+        "pods": {
+          "allocatable": "",
+          "requested": "0",
+          "percent": -1
+        },
+        "pods_running": 0
+      }
+    ],
+    "notice": "Requested is what the pods asked for, which is what the scheduler reserves and what decides whether the next pod starts. It is not what anything is using: for that a metrics-server has to be installed."
+  },
+  "/api/v1/clusters/c-homelab/kubernetes/sweep": {
+    "items": [
+      {
+        "kind": "ReplicaSet",
+        "namespace": "default",
+        "name": "holzcloud-website-7c65d6cfc9",
+        "reason": "an older rollout of holzcloud-website, running nothing",
+        "age": "6 days"
+      },
+      {
+        "kind": "Pod",
+        "namespace": "backup",
+        "name": "nightly-backup-29271-fk4wz",
+        "reason": "finished",
+        "age": "3 days"
+      },
+      {
+        "kind": "Pod",
+        "namespace": "backup",
+        "name": "nightly-backup-29244-2xq8m",
+        "reason": "failed, and its log goes with it",
+        "age": "11 days"
+      },
+      {
+        "kind": "Job",
+        "namespace": "default",
+        "name": "one-off-schema-migration-2026-09-04",
+        "reason": "finished, and nothing owns it",
+        "age": "16 days"
+      }
+    ],
+    "notice": "Only things that have finished and are not the way back from a rollout. Running, pending and unknown pods are left alone -- unknown especially, because that means a node stopped reporting rather than that the pod stopped. Images on the nodes are not here: Talos cannot delete one, and the kubelet removes them itself when its disk fills."
   }
 }

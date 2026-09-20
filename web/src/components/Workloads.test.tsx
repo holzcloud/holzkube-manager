@@ -36,6 +36,9 @@ const base: Workload = {
   last_run: '',
   scalable: true,
   rollable: true,
+  stoppable: true,
+  stopped: false,
+  would_start_with: 0,
 }
 
 const daemon: Workload = {
@@ -48,6 +51,8 @@ const daemon: Workload = {
   summary: '1 of 2 nodes ready',
   scalable: false,
   rollable: true,
+  // The server says a DaemonSet has no stop: its size is how many nodes match.
+  stoppable: false,
 }
 
 const cron: Workload = {
@@ -60,6 +65,9 @@ const cron: Workload = {
   schedule: '0 2 * * *',
   scalable: false,
   rollable: false,
+  // Suspending IS stopping for a CronJob, so it is stoppable although it
+  // neither scales nor rolls.
+  stoppable: true,
 }
 
 afterEach(() => {
@@ -131,5 +139,76 @@ describe('what runs in a cluster', () => {
     await waitFor(() =>
       expect(scale).toHaveBeenCalledWith('c-1', 'StatefulSet', 'db', 'postgres', 5),
     )
+  })
+})
+
+/**
+ * Stopping and starting (2026-09-20).
+ *
+ * The claim worth the most is the one about the count: scaling to zero throws it
+ * away, so a screen that offered "Start" without saying what would come back
+ * would silently run a four-replica service at one.
+ */
+describe('stopping and starting', () => {
+  it('says what a start would bring back, before anybody presses it', async () => {
+    const stopped: Workload = {
+      ...base,
+      desired: 0,
+      ready: 0,
+      summary: '0 of 0 ready',
+      stopped: true,
+      would_start_with: 4,
+    }
+    vi.spyOn(api.kubernetes, 'workloads').mockResolvedValue([stopped])
+
+    wrap(<Workloads clusterID="c-1" namespace="" />)
+
+    expect(await screen.findByRole('button', { name: 'Start' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Stop' })).not.toBeInTheDocument()
+    // The number itself, not "it was running some": for a four-replica service
+    // the difference between restoring it and running a quarter of it.
+    expect(await screen.findByText(/brings back the 4 it was running/)).toBeInTheDocument()
+  })
+
+  it('says so when nothing recorded what it was running', async () => {
+    const stopped: Workload = {
+      ...base,
+      desired: 0,
+      ready: 0,
+      stopped: true,
+      would_start_with: 0,
+    }
+    vi.spyOn(api.kubernetes, 'workloads').mockResolvedValue([stopped])
+
+    wrap(<Workloads clusterID="c-1" namespace="" />)
+
+    // A start uses one, and an operator finds that out here rather than from a
+    // service that came back at a third of its size.
+    expect(await screen.findByText(/nothing recorded what it was running/)).toBeInTheDocument()
+  })
+
+  it('offers no stop for a DaemonSet, and says why instead', async () => {
+    vi.spyOn(api.kubernetes, 'workloads').mockResolvedValue([daemon])
+
+    wrap(<Workloads clusterID="c-1" namespace="" />)
+
+    expect(await screen.findByRole('button', { name: 'Roll pods' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Stop' })).not.toBeInTheDocument()
+    // A phone has no hover, so the reason is text rather than a tooltip.
+    expect(screen.getByText(/Cordon or drain the nodes instead/)).toBeInTheDocument()
+  })
+
+  it('offers a stop for a CronJob, which neither scales nor rolls', async () => {
+    vi.spyOn(api.kubernetes, 'workloads').mockResolvedValue([cron])
+    const stop = vi
+      .spyOn(api.kubernetes, 'stopWorkload')
+      .mockResolvedValue({ stopped: true, would_start_with: 0 })
+
+    wrap(<Workloads clusterID="c-1" namespace="" />)
+
+    await userEvent.click(await screen.findByRole('button', { name: 'Stop' }))
+    await waitFor(() => {
+      expect(stop).toHaveBeenCalledWith('c-1', 'CronJob', 'default', 'backup')
+    })
   })
 })

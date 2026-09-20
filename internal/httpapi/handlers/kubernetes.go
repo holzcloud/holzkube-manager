@@ -366,6 +366,171 @@ func KubernetesRoutes(d httpapi.Deps) []httpapi.Route {
 			Action:          "cluster.kubernetes-exec",
 			Handler:         handler(kubernetesExec(d)),
 		},
+		{
+			Method:          http.MethodGet,
+			Pattern:         "/api/v1/clusters/{id}/kubernetes/capacity",
+			RequiresSession: true,
+			MinRole:         model.RoleReader,
+			Action:          "cluster.kubernetes-capacity",
+			Handler:         handler(kubernetesCapacity(d)),
+		},
+		{
+			Method:  http.MethodPost,
+			Pattern: "/api/v1/clusters/{id}/kubernetes/workloads/{kind}/{namespace}/{name}/stop",
+
+			Destructive:     true,
+			ClusterScope:    clusterIDFromPath,
+			RequiresSession: true,
+			MinRole:         model.RoleOperator,
+			Action:          "cluster.kubernetes-stop",
+			Handler:         handler(kubernetesStartStop(d, false)),
+		},
+		{
+			Method:  http.MethodPost,
+			Pattern: "/api/v1/clusters/{id}/kubernetes/workloads/{kind}/{namespace}/{name}/start",
+
+			// Destructive too, and that is not symmetry for its own sake:
+			// starting something somebody stopped deliberately is as much a
+			// change to what the cluster runs as stopping it was.
+			Destructive:     true,
+			ClusterScope:    clusterIDFromPath,
+			RequiresSession: true,
+			MinRole:         model.RoleOperator,
+			Action:          "cluster.kubernetes-start",
+			Handler:         handler(kubernetesStartStop(d, true)),
+		},
+		{
+			Method:          http.MethodGet,
+			Pattern:         "/api/v1/clusters/{id}/kubernetes/sweep",
+			RequiresSession: true,
+			MinRole:         model.RoleOperator,
+			Action:          "cluster.kubernetes-sweep-plan",
+			Handler:         handler(kubernetesSweepPlan(d)),
+		},
+		{
+			Method:  http.MethodPost,
+			Pattern: "/api/v1/clusters/{id}/kubernetes/sweep",
+
+			Destructive:     true,
+			ClusterScope:    clusterIDFromPath,
+			RequiresSession: true,
+			MinRole:         model.RoleOperator,
+			Action:          "cluster.kubernetes-sweep",
+			Handler:         handler(kubernetesSweep(d)),
+		},
+	}
+}
+
+// kubernetesCapacity answers how full the cluster and each node is.
+func kubernetesCapacity(d httpapi.Deps) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		client, ctx, cancel, ok := kubeClientFor(d, w, r)
+		if !ok {
+			return
+		}
+		defer cancel()
+
+		capacity, err := client.Capacity(ctx)
+		if err != nil {
+			writeKubernetesError(w, r, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, capacity)
+	}
+}
+
+// kubernetesStartStop stops or starts a workload.
+//
+// One handler for both, because the pair is one decision: a stop that could not
+// be undone by the button beside it would be a trap, and writing them apart is
+// how the two drift.
+func kubernetesStartStop(d httpapi.Deps, start bool) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		client, ctx, cancel, ok := kubeClientFor(d, w, r)
+		if !ok {
+			return
+		}
+		defer cancel()
+
+		kind := kube.WorkloadKind(r.PathValue("kind"))
+		namespace, name := r.PathValue("namespace"), r.PathValue("name")
+
+		var err error
+		if start {
+			err = client.Start(ctx, kind, namespace, name)
+		} else {
+			err = client.Stop(ctx, kind, namespace, name)
+		}
+		if err != nil {
+			writeKubernetesError(w, r, err)
+			return
+		}
+
+		state, err := client.StoppedStateOf(ctx, kind, namespace, name)
+		if err != nil {
+			writeKubernetesError(w, r, err)
+			return
+		}
+		// Read back rather than echoed: a stop that did not take must not look
+		// like one that did.
+		writeJSON(w, http.StatusOK, state)
+	}
+}
+
+// kubernetesSweepPlan says what clearing out would remove, and removes nothing.
+func kubernetesSweepPlan(d httpapi.Deps) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		client, ctx, cancel, ok := kubeClientFor(d, w, r)
+		if !ok {
+			return
+		}
+		defer cancel()
+
+		plan, err := client.PlanSweep(ctx, r.URL.Query().Get("namespace"), time.Now())
+		if err != nil {
+			writeKubernetesError(w, r, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, plan)
+	}
+}
+
+// kubernetesSweep removes exactly what a plan listed.
+func kubernetesSweep(d httpapi.Deps) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			// The plan comes back rather than being recomputed: between a plan
+			// and an apply somebody's CronJob can run, and a sweep that
+			// recomputed would remove things nobody saw in the list they
+			// approved.
+			Items []kube.Sweepable `json:"items"`
+		}
+		if err := decodeJSON(w, r, &body); err != nil {
+			httpapi.WriteProblem(w, r, decodeProblem(err))
+			return
+		}
+		if len(body.Items) == 0 {
+			httpapi.WriteProblem(w, r, httpapi.Validation(
+				"Say what to remove.",
+				httpapi.FieldError{Field: "items", Reason: "required"}))
+			return
+		}
+
+		client, ctx, cancel, ok := kubeClientFor(d, w, r)
+		if !ok {
+			return
+		}
+		defer cancel()
+
+		removed, failed, err := client.Sweep(ctx, body.Items)
+		if err != nil {
+			writeKubernetesError(w, r, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, struct {
+			Removed int                 `json:"removed"`
+			Failed  []kube.FailedObject `json:"failed"`
+		}{Removed: removed, Failed: failed})
 	}
 }
 
@@ -1342,6 +1507,15 @@ func writeKubernetesError(w http.ResponseWriter, r *http.Request, err error) {
 			Status: http.StatusConflict,
 			Detail: err.Error(),
 			Code:   httpapi.CodeNothingWouldRecreateIt,
+		})
+
+	case errors.Is(err, kube.ErrCannotStop):
+		httpapi.WriteProblem(w, r, &httpapi.Problem{
+			Type:   httpapi.TypeConflict,
+			Title:  "That cannot be stopped",
+			Status: http.StatusConflict,
+			Detail: err.Error(),
+			Code:   httpapi.CodeCannotStop,
 		})
 
 	case errors.Is(err, kube.ErrExecRefused), errors.Is(err, kube.ErrNoIdentityForExec):

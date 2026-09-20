@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { z } from 'zod'
 import {
   auditPageSchema,
+  clusterCapacitySchema,
   clusterEventsSchema,
   clusterResourcesSchema,
   clustersSchema,
@@ -13,6 +14,7 @@ import {
   nodeDetailSchema,
   noticesSchema,
   schematicSchema,
+  sweepPlanSchema,
   usersSchema,
   workloadsSchema,
 } from '@/api'
@@ -52,6 +54,8 @@ describe('the layout guard’s fixtures', () => {
     ['/api/v1/clusters/c-homelab/kubernetes/resources', clusterResourcesSchema],
     ['/api/v1/clusters/c-homelab/kubernetes/nodes/srv-node-01.homelab.example', nodeDetailSchema],
     ['/api/v1/clusters/c-homelab/kubernetes/usage', clusterUsageSchema],
+    ['/api/v1/clusters/c-homelab/kubernetes/capacity', clusterCapacitySchema],
+    ['/api/v1/clusters/c-homelab/kubernetes/sweep', sweepPlanSchema],
   ])('%s is something the product would accept', (path, schema) => {
     const parsed = schema.safeParse(fixtures[path])
     // The error is printed in full rather than as "expected true": a fixture

@@ -421,6 +421,19 @@ var allowlist = map[string][]string{
 	// The OUTPUT is never archived: it is whatever the workload printed.
 	"cluster.kubernetes-exec": {"container", "command"},
 
+	// How full the cluster is; stopping and starting; clearing out (2026-09-20).
+	//
+	// The kind, namespace and name of a stop or start are in the path and on
+	// the record already. The sweep's LIST is kept in clear: what was removed
+	// is the event, and an archive that recorded "swept 41 things" would be a
+	// record nobody could check afterwards -- these deletions are the ones
+	// nothing puts back.
+	"cluster.kubernetes-capacity":   {},
+	"cluster.kubernetes-stop":       {},
+	"cluster.kubernetes-start":      {},
+	"cluster.kubernetes-sweep-plan": {},
+	"cluster.kubernetes-sweep":      {"items"},
+
 	// Renewing this installation's own client certificate for a cluster
 	// (V2-OPS-02). No parameters: the cluster is on the record already and the
 	// certificate itself never goes near the archive.

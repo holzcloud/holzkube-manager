@@ -81,6 +81,10 @@ type Options struct {
 	// Deployments the cluster has, described the way a test thinks of them.
 	Deployments []Deployment
 
+	// ReplicaSets, for the sweep. Owner names the Deployment behind it; a newer
+	// one of the same owner is what a rollback would return to and is kept.
+	ReplicaSets []ReplicaSet
+
 	// Objects the cluster already holds, as "resource/namespace/name" (a
 	// cluster-scoped object leaves the namespace empty: "namespaces//web"). They
 	// are what makes a manifest plan's difference between "create" and "update"
@@ -341,6 +345,16 @@ type Resource struct {
 	Allowed int32
 }
 
+// ReplicaSet is one as a test describes it: which Deployment owns it, how many
+// it runs, and how old it is relative to its siblings.
+type ReplicaSet struct {
+	Namespace string
+	Name      string
+	Owner     string
+	Replicas  int32
+	Age       time.Duration
+}
+
 // Event is one thing the cluster reported, as a test describes it.
 type Event struct {
 	Namespace string
@@ -422,6 +436,8 @@ type Server struct {
 	jobs         []Job
 	cronJobs     []CronJob
 	resources    []Resource
+	replicaSets  []ReplicaSet
+	annotations  map[string]map[string]string
 	usage        map[string]string
 	restarted    map[string]string
 	events       []Event
@@ -468,6 +484,8 @@ func New(opts Options) (*Server, error) {
 		jobs:              append([]Job(nil), opts.Jobs...),
 		cronJobs:          append([]CronJob(nil), opts.CronJobs...),
 		resources:         append([]Resource(nil), opts.Resources...),
+		replicaSets:       append([]ReplicaSet(nil), opts.ReplicaSets...),
+		annotations:       map[string]map[string]string{},
 		usage:             opts.Usage,
 		allowImpersonated: append([]string(nil), opts.AllowImpersonated...),
 		denyVerbs:         append([]string(nil), opts.DenyVerbs...),
@@ -589,6 +607,9 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("/api/v1", s.record(s.serveCoreResources))
 	mux.HandleFunc("/apis/apps/v1", s.record(s.serveAppsResources))
 	mux.HandleFunc("/apis/apps/v1/deployments", s.record(s.serveDeployments))
+	mux.HandleFunc("/apis/apps/v1/replicasets", s.record(func(w http.ResponseWriter, _ *http.Request) {
+		s.writeReplicaSets(w, "")
+	}))
 	mux.HandleFunc("/apis/apps/v1/statefulsets", s.record(func(w http.ResponseWriter, _ *http.Request) {
 		s.writeStatefulSets(w, "")
 	}))
@@ -1169,6 +1190,14 @@ func (s *Server) serveAppsNamespaced(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case len(parts) == 1 && parts[0] == "deployments":
 		s.writeDeployments(w, ns)
+	case len(parts) == 2 && parts[0] == "deployments" && r.Method == http.MethodGet:
+		s.writeDeployment(w, ns, parts[1])
+	case len(parts) == 2 && parts[0] == "statefulsets" && r.Method == http.MethodGet:
+		s.writeStatefulSet(w, ns, parts[1])
+	case len(parts) == 1 && parts[0] == "replicasets":
+		s.writeReplicaSets(w, ns)
+	case len(parts) == 2 && parts[0] == "replicasets" && r.Method == http.MethodDelete:
+		s.recordDelete(w, "replicasets", ns, parts[1])
 	case len(parts) == 1 && parts[0] == "statefulsets":
 		s.writeStatefulSets(w, ns)
 	case len(parts) == 3 && parts[0] == "statefulsets" && parts[2] == "scale":
@@ -1264,6 +1293,9 @@ func (s *Server) serveScale(w http.ResponseWriter, r *http.Request, namespace, n
 // timestamp annotation on the pod template.
 func (s *Server) restartDeployment(w http.ResponseWriter, r *http.Request, namespace, name string) {
 	var patch struct {
+		Metadata struct {
+			Annotations map[string]string `json:"annotations"`
+		} `json:"metadata"`
 		Spec struct {
 			Template struct {
 				Metadata struct {
@@ -1277,6 +1309,17 @@ func (s *Server) restartDeployment(w http.ResponseWriter, r *http.Request, names
 	if err == nil && json.Unmarshal(body, &patch) == nil {
 		stamp = patch.Spec.Template.Metadata.Annotations["kubectl.kubernetes.io/restartedAt"]
 	}
+
+	// A patch that writes annotations on the OBJECT is what a stop sends to
+	// remember the replica count. It is applied and kept, because the start
+	// reads it back -- a fake that dropped it would let "starting restores what
+	// was running" pass while restoring nothing.
+	if len(patch.Metadata.Annotations) > 0 {
+		s.storeAnnotations("deployment", namespace, name, patch.Metadata.Annotations)
+		writeJSON(w, http.StatusOK, metav1.ObjectMeta{Name: name, Namespace: namespace})
+		return
+	}
+
 	if stamp == "" {
 		// Only the patch a rollout restart sends is applied: a fake that took
 		// any patch would accept one a real API server rejects.
@@ -2142,7 +2185,19 @@ func (s *Server) serveBatchNamespaced(w http.ResponseWriter, r *http.Request) {
 	case "cronjobs":
 		s.writeCronJobs(w, ns)
 	default:
-		s.serveNotFound(w, r)
+		parts := strings.Split(tail, "/")
+		switch {
+		case len(parts) == 2 && parts[0] == "cronjobs" && r.Method == http.MethodPatch:
+			s.patchSuspend(w, r, "cronjob", ns, parts[1])
+		case len(parts) == 2 && parts[0] == "jobs" && r.Method == http.MethodPatch:
+			s.patchSuspend(w, r, "job", ns, parts[1])
+		case len(parts) == 2 && parts[0] == "cronjobs" && r.Method == http.MethodGet:
+			s.writeCronJob(w, ns, parts[1])
+		case len(parts) == 2 && parts[0] == "jobs" && r.Method == http.MethodDelete:
+			s.recordDelete(w, "jobs", ns, parts[1])
+		default:
+			s.serveNotFound(w, r)
+		}
 	}
 }
 
@@ -2212,6 +2267,26 @@ func (s *Server) serveStatefulSetScale(w http.ResponseWriter, r *http.Request, n
 	}
 }
 
+// storeAnnotations keeps what a patch wrote on an object's metadata.
+//
+// A fake that dropped them would let "starting restores what was running" pass
+// while restoring nothing: the count is written as an annotation precisely so
+// it outlives the scale to zero.
+func (s *Server) storeAnnotations(kind, namespace, name string, annotations map[string]string) {
+	if len(annotations) == 0 {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	key := kind + "/" + namespace + "/" + name
+	if s.annotations[key] == nil {
+		s.annotations[key] = map[string]string{}
+	}
+	for k, v := range annotations {
+		s.annotations[key][k] = v
+	}
+}
+
 // restartTemplate records a rollout restart of a kind that has a pod template.
 func (s *Server) restartTemplate(w http.ResponseWriter, r *http.Request, kind, namespace, name string) {
 	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
@@ -2220,6 +2295,9 @@ func (s *Server) restartTemplate(w http.ResponseWriter, r *http.Request, kind, n
 		return
 	}
 	var patch struct {
+		Metadata struct {
+			Annotations map[string]string `json:"annotations"`
+		} `json:"metadata"`
 		Spec struct {
 			Template struct {
 				Metadata struct {
@@ -2230,6 +2308,12 @@ func (s *Server) restartTemplate(w http.ResponseWriter, r *http.Request, kind, n
 	}
 	if err := json.Unmarshal(body, &patch); err != nil {
 		s.writeStatus(w, http.StatusBadRequest, metav1.StatusReasonBadRequest, err.Error())
+		return
+	}
+
+	if len(patch.Metadata.Annotations) > 0 {
+		s.storeAnnotations(kind, namespace, name, patch.Metadata.Annotations)
+		writeJSON(w, http.StatusOK, metav1.ObjectMeta{Name: name, Namespace: namespace})
 		return
 	}
 
@@ -2611,4 +2695,167 @@ func halve(value string) string {
 		return resource.NewQuantity(q.Value()/2, resource.BinarySI).String()
 	}
 	return resource.NewMilliQuantity(q.MilliValue()/2, resource.DecimalSI).String()
+}
+
+// Stopping, starting and sweeping (2026-09-20).
+
+// annotationsFor returns the annotations a test's object carries, including the
+// ones the product wrote. They are stored per object so a stop that wrote a
+// count can be read back by the start -- a fake that dropped them would let
+// "start restores what was running" pass while doing nothing.
+func (s *Server) annotationsFor(kind, namespace, name string) map[string]string {
+	return s.annotations[kind+"/"+namespace+"/"+name]
+}
+
+func (s *Server) writeDeployment(w http.ResponseWriter, namespace, name string) {
+	s.mu.Lock()
+	var found *Deployment
+	for i := range s.deployments {
+		if s.deployments[i].Namespace == namespace && s.deployments[i].Name == name {
+			found = &s.deployments[i]
+			break
+		}
+	}
+	annotations := s.annotationsFor("deployment", namespace, name)
+	s.mu.Unlock()
+
+	if found == nil {
+		s.writeStatus(w, http.StatusNotFound, metav1.StatusReasonNotFound,
+			fmt.Sprintf("deployments %q not found", name))
+		return
+	}
+	object := renderDeployment(*found)
+	object.Annotations = annotations
+	writeJSON(w, http.StatusOK, object)
+}
+
+func (s *Server) writeStatefulSet(w http.ResponseWriter, namespace, name string) {
+	s.mu.Lock()
+	var found *StatefulSet
+	for i := range s.statefulSets {
+		if s.statefulSets[i].Namespace == namespace && s.statefulSets[i].Name == name {
+			found = &s.statefulSets[i]
+			break
+		}
+	}
+	annotations := s.annotationsFor("statefulset", namespace, name)
+	s.mu.Unlock()
+
+	if found == nil {
+		s.writeStatus(w, http.StatusNotFound, metav1.StatusReasonNotFound,
+			fmt.Sprintf("statefulsets %q not found", name))
+		return
+	}
+	desired := found.Desired
+	writeJSON(w, http.StatusOK, appsv1.StatefulSet{
+		TypeMeta: metav1.TypeMeta{APIVersion: "apps/v1", Kind: "StatefulSet"},
+		ObjectMeta: metav1.ObjectMeta{
+			Name: found.Name, Namespace: found.Namespace, Annotations: annotations,
+		},
+		Spec:   appsv1.StatefulSetSpec{Replicas: &desired, Template: podTemplate(found.Name, found.Image)},
+		Status: appsv1.StatefulSetStatus{ReadyReplicas: found.Ready, UpdatedReplicas: found.Updated},
+	})
+}
+
+func (s *Server) writeCronJob(w http.ResponseWriter, namespace, name string) {
+	s.mu.Lock()
+	var found *CronJob
+	for i := range s.cronJobs {
+		if s.cronJobs[i].Namespace == namespace && s.cronJobs[i].Name == name {
+			found = &s.cronJobs[i]
+			break
+		}
+	}
+	s.mu.Unlock()
+
+	if found == nil {
+		s.writeStatus(w, http.StatusNotFound, metav1.StatusReasonNotFound,
+			fmt.Sprintf("cronjobs %q not found", name))
+		return
+	}
+	suspend := found.Suspended
+	writeJSON(w, http.StatusOK, batchv1.CronJob{
+		TypeMeta:   metav1.TypeMeta{APIVersion: "batch/v1", Kind: "CronJob"},
+		ObjectMeta: metav1.ObjectMeta{Name: found.Name, Namespace: found.Namespace},
+		Spec:       batchv1.CronJobSpec{Schedule: found.Schedule, Suspend: &suspend},
+	})
+}
+
+func (s *Server) writeReplicaSets(w http.ResponseWriter, namespace string) {
+	s.mu.Lock()
+	rows := append([]ReplicaSet(nil), s.replicaSets...)
+	s.mu.Unlock()
+
+	list := appsv1.ReplicaSetList{
+		TypeMeta: metav1.TypeMeta{APIVersion: "apps/v1", Kind: "ReplicaSetList"},
+	}
+	controller := true
+	for _, r := range rows {
+		if namespace != "" && r.Namespace != namespace {
+			continue
+		}
+		replicas := r.Replicas
+		list.Items = append(list.Items, appsv1.ReplicaSet{
+			TypeMeta: metav1.TypeMeta{APIVersion: "apps/v1", Kind: "ReplicaSet"},
+			ObjectMeta: metav1.ObjectMeta{
+				Name: r.Name, Namespace: r.Namespace,
+				CreationTimestamp: metav1.NewTime(time.Now().Add(-r.Age).UTC()),
+				OwnerReferences: []metav1.OwnerReference{{
+					APIVersion: "apps/v1", Kind: "Deployment", Name: r.Owner,
+					Controller: &controller,
+				}},
+			},
+			Spec:   appsv1.ReplicaSetSpec{Replicas: &replicas},
+			Status: appsv1.ReplicaSetStatus{Replicas: replicas},
+		})
+	}
+	writeJSON(w, http.StatusOK, list)
+}
+
+// recordDelete removes nothing from the fake's own state and records that the
+// call was made, which is what a sweep test checks.
+func (s *Server) recordDelete(w http.ResponseWriter, resource, namespace, name string) {
+	s.mu.Lock()
+	s.deleted = append(s.deleted, resource+"/"+namespace+"/"+name)
+	s.mu.Unlock()
+	writeJSON(w, http.StatusOK, metav1.Status{Status: metav1.StatusSuccess})
+}
+
+// patchSuspend applies the suspend patch a stop sends to a CronJob or Job, and
+// CHANGES the state -- so a test reads back what a stop did rather than that a
+// call happened.
+func (s *Server) patchSuspend(w http.ResponseWriter, r *http.Request, kind, namespace, name string) {
+	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<16))
+	if err != nil {
+		s.writeStatus(w, http.StatusBadRequest, metav1.StatusReasonBadRequest, err.Error())
+		return
+	}
+	var patch struct {
+		Spec struct {
+			Suspend *bool `json:"suspend"`
+		} `json:"spec"`
+	}
+	if err := json.Unmarshal(body, &patch); err != nil || patch.Spec.Suspend == nil {
+		s.writeStatus(w, http.StatusBadRequest, metav1.StatusReasonBadRequest,
+			"kubesim applies only patches that set spec.suspend here")
+		return
+	}
+
+	s.mu.Lock()
+	if kind == "cronjob" {
+		for i := range s.cronJobs {
+			if s.cronJobs[i].Namespace == namespace && s.cronJobs[i].Name == name {
+				s.cronJobs[i].Suspended = *patch.Spec.Suspend
+			}
+		}
+	} else {
+		for i := range s.jobs {
+			if s.jobs[i].Namespace == namespace && s.jobs[i].Name == name {
+				s.jobs[i].Suspended = *patch.Spec.Suspend
+			}
+		}
+	}
+	s.mu.Unlock()
+
+	writeJSON(w, http.StatusOK, metav1.ObjectMeta{Name: name, Namespace: namespace})
 }

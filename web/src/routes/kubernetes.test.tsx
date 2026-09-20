@@ -92,6 +92,10 @@ const overview: KubernetesOverview = {
       restarts: 14,
       reason: 'CrashLoopBackOff',
       created_at: '2026-09-18T00:00:00Z',
+      cpu_request: '250m',
+      memory_request: '256Mi',
+      cpu_limit: '',
+      memory_limit: '512Mi',
     },
   ],
 }

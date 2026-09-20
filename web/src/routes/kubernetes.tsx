@@ -4,6 +4,7 @@ import { useState } from 'react'
 import { api } from '@/api'
 import { ActAs } from '@/components/ActAs'
 import { ApplyManifest } from '@/components/ApplyManifest'
+import { ClusterCapacityPanel } from '@/components/ClusterCapacityPanel'
 import { ClusterResources } from '@/components/ClusterResources'
 import { ClusterUsage } from '@/components/ClusterUsage'
 import { DataTable } from '@/components/DataTable'
@@ -12,6 +13,7 @@ import { NodeWhy } from '@/components/NodeWhy'
 import { PodDiagnosis } from '@/components/PodDiagnosis'
 import { Problem } from '@/components/Problem'
 import { ReachService } from '@/components/ReachService'
+import { TidyUp } from '@/components/TidyUp'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import {
@@ -188,6 +190,15 @@ export function KubernetesView() {
 
           <Card>
             <CardHeader>
+              <CardTitle>How full it is</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <ClusterCapacityPanel clusterID={selected} />
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
               <CardTitle>Workloads</CardTitle>
             </CardHeader>
             <CardContent>
@@ -280,6 +291,35 @@ export function KubernetesView() {
                     render: (pod) => pod.restarts,
                   },
                   {
+                    key: 'reserved',
+                    label: 'Reserved',
+                    // What this pod took out of its node's room. Requests are
+                    // what the scheduler holds, so this is why a node is full.
+                    render: (pod) =>
+                      pod.cpu_request === '' && pod.memory_request === '' ? (
+                        <span className="text-muted-foreground text-xs">nothing asked for</span>
+                      ) : (
+                        <span className="text-xs tabular-nums">
+                          {pod.cpu_request || '—'} · {pod.memory_request || '—'}
+                        </span>
+                      ),
+                  },
+                  {
+                    key: 'limit',
+                    label: 'Limit',
+                    // A detail on a phone: the limit matters when something is
+                    // being throttled or killed, which is not the common read.
+                    role: 'detail',
+                    render: (pod) =>
+                      pod.cpu_limit === '' && pod.memory_limit === '' ? (
+                        <span className="text-muted-foreground text-xs">none</span>
+                      ) : (
+                        <span className="text-xs tabular-nums">
+                          {pod.cpu_limit || '—'} · {pod.memory_limit || '—'}
+                        </span>
+                      ),
+                  },
+                  {
                     key: 'node',
                     label: 'Node',
                     render: (pod) => (
@@ -329,6 +369,15 @@ export function KubernetesView() {
             </CardHeader>
             <CardContent>
               <ClusterResources clusterID={selected} namespace={namespace} />
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Clear out what is finished</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <TidyUp clusterID={selected} namespace={namespace} />
             </CardContent>
           </Card>
 

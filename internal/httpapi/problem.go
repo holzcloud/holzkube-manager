@@ -133,6 +133,12 @@ const (
 	// again with a talosconfig that carries the authority.
 	CodeNoKubernetesAuthority = "conflict.no-kubernetes-authority"
 
+	// CodeCannotStop: a workload with no stop. A DaemonSet runs on every
+	// matching node and has no count to set to zero; a pod nothing owns has no
+	// controller to tell, and removing it would be a deletion rather than a
+	// stop.
+	CodeCannotStop = "conflict.cannot-stop"
+
 	// CodeExecRefused: a command this product will not run, or a cluster with
 	// no identity to run it as. A conflict rather than a validation failure:
 	// the request is well formed and the refusal is about what this product
