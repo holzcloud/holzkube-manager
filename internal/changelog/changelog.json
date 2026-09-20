@@ -1,5 +1,23 @@
 [
   {
+    "version": "v1.28.0",
+    "date": "2026-09-20",
+    "changes": [
+      {
+        "icon": "🟩",
+        "text": "The wall hid everything that was working. Past sixty tiles it drew only the ones that were NOT fine — so on a cluster where everything runs it said \"showing 0 of 132\" and showed a black screen. It is two zones now: whatever needs attention is named and large at the top, and everything healthy is a dense field of colour grouped by namespace. Nothing is hidden, ever."
+      },
+      {
+        "icon": "🔤",
+        "text": "The screen says what a square is — \"130 workloads, one square each\" — with a key to the colours actually on it. You should not have to ask a wall what it means, and an answer given anywhere but on the wall is one nobody walking past ever gets."
+      },
+      {
+        "icon": "📐",
+        "text": "It fills the screen now: three nodes are three wide tiles whose names fit rather than three narrow ones beside empty space, and the squares are as large as the room allows. On a phone the page scrolls instead of silently cutting off what does not fit."
+      }
+    ]
+  },
+  {
     "version": "v1.27.0",
     "date": "2026-09-20",
     "changes": [

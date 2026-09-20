@@ -125,7 +125,12 @@ export function WallView() {
   const stale = ageMs === null || ageMs > STALE_AFTER_MS
 
   return (
-    <div className="fixed inset-0 overflow-hidden bg-zinc-950 p-[2vmin] text-zinc-100">
+    /* Fixed and never scrolling on the screen it is for: nobody touches a wall,
+        so anything below the fold is gone rather than one swipe away. On a phone
+        -- where the operator looked at it first -- that same rule silently CUTS
+        it, which is the claim this product refuses everywhere else. So below md
+        it scrolls, and the television keeps its one screenful. */
+    <div className="fixed inset-0 overflow-auto bg-zinc-950 p-[2vmin] text-zinc-100 md:overflow-hidden">
       {data === undefined ? (
         <p className="grid h-full place-items-center text-[4vmin] text-zinc-500">
           {wall.error
@@ -143,8 +148,11 @@ export function WallView() {
       ) : (
         <div className={`flex h-full flex-col gap-[1.5vmin] ${stale ? 'opacity-40' : ''}`}>
           <Header wall={data} stale={stale} ageMs={ageMs} />
-          <Tiles title="Nodes" tiles={data.nodes} />
-          <Tiles title="Workloads" tiles={data.workloads} grow />
+          <Named title="Nodes" tiles={data.nodes} />
+          {/* Named and first, because these are what somebody is looking for.
+              A healthy cluster has none and the section simply is not there. */}
+          <Named title="Needs attention" tiles={data.workloads.filter(needsAttention)} />
+          <Field tiles={data.workloads.filter((tile) => !needsAttention(tile))} />
           <Footer wall={data} />
         </div>
       )}
@@ -182,37 +190,44 @@ function Header({ wall, stale, ageMs }: { wall: Wall; stale: boolean; ageMs: num
   )
 }
 
-function Tiles({ title, tiles, grow }: { title: string; tiles: WallTile[]; grow?: boolean }) {
+/**
+ * NODES and everything that needs attention, named and large.
+ *
+ * Always ALL of them. The first version of this hid healthy tiles past sixty and
+ * drew only the ones that were not fine -- which on a cluster where everything
+ * works showed "SHOWING 0 OF 132" and a screen of black. That is the claim this
+ * product refuses everywhere else (INV-08): an empty screen reads as "nothing is
+ * running", and here it said so about a cluster running a hundred and thirty-two
+ * things.
+ */
+function Named({ title, tiles }: { title: string; tiles: WallTile[] }) {
   if (tiles.length === 0) return null
 
-  // The tile size follows the count, so the grid fills the screen instead of
-  // overflowing it. Past about sixty the names stop being readable from across
-  // a room, and the screen falls back to counts plus the worst ones by name --
-  // a true answer at any size, unlike a grid that stops at the bottom edge.
-  const tooMany = tiles.length > 60
-  const shown = tooMany ? tiles.filter((t) => t.state !== 'ok' && t.state !== 'stopped') : tiles
+  // Size follows the count so a long list still fits, and the floor is the point
+  // at which a name is still readable from across a room. Below that the tile
+  // belongs in the field instead.
   const size =
-    shown.length > 24 ? 'text-[1.6vmin]' : shown.length > 12 ? 'text-[2vmin]' : 'text-[2.6vmin]'
+    tiles.length > 12 ? 'text-[1.8vmin]' : tiles.length > 6 ? 'text-[2.4vmin]' : 'text-[3.2vmin]'
 
   return (
-    <div className={`flex min-h-0 flex-col gap-[0.8vmin] ${grow ? 'flex-1' : ''}`}>
-      <p className="text-[1.8vmin] text-zinc-500 uppercase tracking-widest">
-        {title}
-        {tooMany && ` — showing ${shown.length} of ${tiles.length}`}
-      </p>
+    <div className="flex flex-col gap-[0.8vmin]">
+      <p className="text-[1.6vmin] text-zinc-500 uppercase tracking-widest">{title}</p>
       <div
-        className="grid min-h-0 flex-1 content-start gap-[0.8vmin]"
+        className="grid content-start gap-[0.8vmin]"
         style={{
-          gridTemplateColumns: `repeat(auto-fill, minmax(${shown.length > 24 ? 16 : 24}vmin, 1fr))`,
+          // auto-FIT, not auto-fill: three nodes on a television should be three
+          // WIDE tiles whose names fit, not three narrow ones beside four empty
+          // tracks. The first photograph of this screen showed
+          // "srv-node-02…" truncated with two thirds of the row unused.
+          gridTemplateColumns: `repeat(auto-fit, minmax(${tiles.length > 12 ? 24 : 34}vmin, 1fr))`,
         }}
       >
-        {shown.map((tile) => (
+        {tiles.map((tile) => (
           <div
             key={`${tile.kind}/${tile.namespace}/${tile.name}`}
-            // Marked as a row so the layout audit can count tiles. Without it
-            // the audit reported "0 items" for a full wall, which is exactly
-            // the ambiguity that count exists to remove: rendered nothing, or
-            // rendered something the selector cannot see?
+            // Marked as a row so the layout audit can count tiles: without it
+            // the audit reported "0 items" for a full wall, which is exactly the
+            // ambiguity that count exists to remove.
             data-row=""
             data-state={tile.state}
             className={`overflow-hidden rounded-[1vmin] px-[1.2vmin] py-[1vmin] ring-1 ${size} ${
@@ -220,7 +235,100 @@ function Tiles({ title, tiles, grow }: { title: string; tiles: WallTile[]; grow?
             }`}
           >
             <p className="truncate font-medium">{tile.name}</p>
-            <p className="truncate opacity-70">{tile.detail}</p>
+            <p className="truncate opacity-70">
+              {tile.namespace === '' ? tile.detail : `${tile.namespace} · ${tile.detail}`}
+            </p>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+/**
+ * Everything that is fine, as a field of colour grouped by namespace.
+ *
+ * # Why a field and not a list
+ *
+ * A hundred and thirty-two names cannot be read from four metres and nobody is
+ * trying to. What a wall is read for is the SHAPE: a field of green with one red
+ * square in it is understood before anybody has focused on anything. So the
+ * healthy ones keep their colour and lose their names, and the ones that are not
+ * healthy are named above in full.
+ *
+ * # Why grouped by namespace
+ *
+ * Without it this is a hundred and thirty-two anonymous squares. With it the
+ * field has landmarks -- somebody who knows the cluster sees "db" and "monitoring"
+ * as places, and a gap or a wrong colour has an address.
+ */
+function Field({ tiles }: { tiles: WallTile[] }) {
+  if (tiles.length === 0) return null
+
+  const groups = new Map<string, WallTile[]>()
+  for (const tile of tiles) {
+    const key = tile.namespace === '' ? '—' : tile.namespace
+    groups.set(key, [...(groups.get(key) ?? []), tile])
+  }
+  // By name, so a namespace does not move between refreshes. Something jumping
+  // about on a wall is read as something changing.
+  const ordered = [...groups.entries()].sort((a, b) => a[0].localeCompare(b[0]))
+  const running = tiles.filter((tile) => tile.state === 'ok').length
+  const stopped = tiles.length - running
+
+  return (
+    <div className="flex min-h-0 flex-1 flex-col gap-[0.8vmin]">
+      <div className="flex flex-wrap items-baseline gap-x-[2vmin] gap-y-[0.4vmin]">
+        <p className="text-[1.6vmin] text-zinc-500 uppercase tracking-widest">
+          {tiles.length} workloads — one square each
+        </p>
+        {/* A legend, once, in small type. The operator asked what the green
+            squares meant, and having to ask is the defect: a wall is read by
+            people who were never told anything about it, and an answer given in
+            a chat is an answer nobody walking past ever gets. Only the colours
+            actually on the screen are listed -- a key to something that is not
+            there is one more thing to read past. */}
+        <span className="flex items-center gap-[1.2vmin] text-[1.5vmin] text-zinc-600">
+          {running > 0 && (
+            <span className="flex items-center gap-[0.5vmin]">
+              <span
+                className={`h-[1.4vmin] w-[1.4vmin] rounded-[0.3vmin] ring-1 ${TILE_COLOURS.ok}`}
+              />
+              running {running}
+            </span>
+          )}
+          {stopped > 0 && (
+            <span className="flex items-center gap-[0.5vmin]">
+              <span
+                className={`h-[1.4vmin] w-[1.4vmin] rounded-[0.3vmin] ring-1 ${TILE_COLOURS.stopped}`}
+              />
+              stopped on purpose {stopped}
+            </span>
+          )}
+        </span>
+      </div>
+      <div className="flex min-h-0 flex-1 flex-wrap content-start gap-x-[3vmin] gap-y-[1.6vmin]">
+        {ordered.map(([namespace, group]) => (
+          <div key={namespace} className="flex flex-col gap-[0.4vmin]">
+            <p className="text-[1.7vmin] text-zinc-500">
+              {namespace} <span className="tabular-nums">{group.length}</span>
+            </p>
+            <div className="flex max-w-[46vmin] flex-wrap gap-[0.6vmin]">
+              {group.map((tile) => (
+                <div
+                  key={`${tile.kind}/${tile.namespace}/${tile.name}`}
+                  data-row=""
+                  data-state={tile.state}
+                  // The name is a title rather than text: it is there for
+                  // anybody who walks up to the screen, and takes no room from
+                  // the four-metre reading it would otherwise crowd out.
+                  title={`${tile.name} — ${tile.detail}`}
+                  className={`h-[3.4vmin] w-[3.4vmin] rounded-[0.5vmin] ring-1 ${
+                    TILE_COLOURS[tile.state] ?? TILE_COLOURS.unknown
+                  }`}
+                />
+              ))}
+            </div>
           </div>
         ))}
       </div>
@@ -280,6 +388,17 @@ function Meter({ label, capacity }: { label: string; capacity: Capacity }) {
       </div>
     </div>
   )
+}
+
+/**
+ * needsAttention splits the two zones.
+ *
+ * `stopped` is NOT here: it is a decision somebody made, and a wall that put
+ * every deliberately stopped workload in the attention list would be a wall
+ * asking to be ignored. It keeps its own colour in the field instead.
+ */
+function needsAttention(tile: WallTile): boolean {
+  return tile.state === 'down' || tile.state === 'unknown' || tile.state === 'warn'
 }
 
 /** readableAge is what somebody four metres away can read at a glance. */

@@ -364,6 +364,19 @@ const countTargets = () =>
 async function shoot(page, route, width) {
   if (!process.env.LAYOUT_SHOTS || width !== TOUCH_WIDTH) return
 
+  // The wall is the one screen whose target is a television, so a phone-width
+  // photograph of it shows nobody anything. It gets a shot at the size it is
+  // actually read at. The MEASURING passes are unchanged and still run at both
+  // ordinary widths -- this is a picture, and a picture is never a verdict.
+  if (route === '/wall') {
+    await page.setViewportSize({ width: 1920, height: 1080 })
+    await page.waitForTimeout(400)
+    await page.screenshot({ path: `${process.env.LAYOUT_SHOTS}/wall.png` })
+    await page.setViewportSize({ width, height: 844 })
+    await page.waitForTimeout(150)
+    return
+  }
+
   const content = await page.evaluate(() => {
     let tallest = document.documentElement.scrollHeight
     for (const el of document.querySelectorAll('*')) {
@@ -444,8 +457,19 @@ try {
     const context = await browser.newContext({ viewport: { width, height: 844 } })
     await context.route('**/api/v1/**', async (route) => {
       if (route.request().method() !== 'GET') return route.continue()
-      const body = FIXTURES[new URL(route.request().url()).pathname]
+      const path = new URL(route.request().url()).pathname
+      let body = FIXTURES[path]
       if (body === undefined) return route.continue()
+
+      // The wall dims itself when its answer is older than a few refreshes,
+      // which is the whole of its honesty -- and a fixture carries a fixed
+      // timestamp, so every run photographed a permanently stale screen. The
+      // staleness is still measured by the component's own tests; what this
+      // gives back is a picture of the ordinary state, which is the one the
+      // layout has to be judged in.
+      if (path.endsWith('/wall')) {
+        body = { ...body, generated_at: new Date().toISOString() }
+      }
       return route.fulfill({
         status: 200,
         contentType: 'application/json; charset=utf-8',
