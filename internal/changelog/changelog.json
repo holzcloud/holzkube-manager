@@ -1,5 +1,15 @@
 [
   {
+    "version": "v1.25.0",
+    "date": "2026-09-20",
+    "changes": [
+      {
+        "icon": "↩️",
+        "text": "After signing in again at your identity provider to confirm something destructive, the banner now RUNS it. One press, named after what you asked for. Before, it told you the action had not run and offered you a way back to the page, which reads as failure — and the journal shows exactly that: the window opened correctly, and nobody ever tried a second time. An action whose request carries a body still asks you to repeat it yourself, because carrying that across would mean storing it in the browser, and for the password change that body is the password."
+      }
+    ]
+  },
+  {
     "version": "v1.24.1",
     "date": "2026-09-20",
     "changes": [
