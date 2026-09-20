@@ -181,10 +181,11 @@ func (c *Client) Resources(ctx context.Context, namespace string) ([]Resource, e
 			Kind: "PodDisruptionBudget", Namespace: b.Namespace, Name: b.Name,
 			Summary: fmt.Sprintf("%d of %d healthy, %d may be disrupted",
 				b.Status.CurrentHealthy, b.Status.DesiredHealthy, b.Status.DisruptionsAllowed),
-			// Zero allowed is why a drain refuses, and knowing that before
-			// starting one is the other half of the drain's own refusal.
-			Detail:    disruptionDetail(b),
-			Healthy:   b.Status.DisruptionsAllowed > 0,
+			Detail: disruptionDetail(b),
+			// The budget being MET is the question, not whether anything may be
+			// disrupted. See disruptionDetail for why that distinction is the
+			// whole of this row.
+			Healthy:   b.Status.CurrentHealthy >= b.Status.DesiredHealthy,
 			CreatedAt: stamp(b.CreationTimestamp),
 		})
 	}
@@ -192,11 +193,37 @@ func (c *Client) Resources(ctx context.Context, namespace string) ([]Resource, e
 	return out, nil
 }
 
+// disruptionDetail says what a budget means, and marks only what is wrong.
+//
+// # Zero disruptions allowed is not a fault
+//
+// It is the ordinary, correct state of every single-replica workload in every
+// cluster: with one copy, taking it down IS the outage, so the budget allows
+// nothing. An operator's six databases each showed amber permanently for it
+// (2026-09-20, ledger 164), and the ConfigMaps and Ingresses this screen exists
+// for were pushed below them by the unhealthy-first sort. A warning everybody
+// sees is a warning nobody reads -- the same reasoning that keeps
+// rulesAreAdministrative from flagging half the built-in roles.
+//
+// It is still worth SAYING, because somebody about to drain a node needs to know
+// this one cannot be moved without downtime. Said, not flagged.
+//
+// # The budget not being met is the fault
+//
+// Fewer healthy pods than it wants means one is already missing: the service is
+// degraded now, and a drain will be refused on top of that. That is a finding,
+// and it is a different sentence.
 func disruptionDetail(b policyv1.PodDisruptionBudget) string {
-	if b.Status.DisruptionsAllowed > 0 {
-		return ""
+	if b.Status.CurrentHealthy < b.Status.DesiredHealthy {
+		return fmt.Sprintf("the budget is not met -- %d healthy where it wants %d -- so a pod is "+
+			"already missing, and a drain will be refused until it comes back",
+			b.Status.CurrentHealthy, b.Status.DesiredHealthy)
 	}
-	return "a drain of a node carrying these pods will be refused until another becomes healthy"
+	if b.Status.DisruptionsAllowed == 0 {
+		return "nothing may be disrupted, which is ordinary for a single copy: a drain of its " +
+			"node will be refused until you scale it up or accept the downtime"
+	}
+	return ""
 }
 
 func addressOf(i networkingv1.Ingress) string {

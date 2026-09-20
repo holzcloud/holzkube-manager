@@ -1035,9 +1035,18 @@
         "namespace": "longhorn-system",
         "name": "longhorn-manager",
         "summary": "1 of 2 healthy, 0 may be disrupted",
-        "detail": "a drain of a node carrying these pods will be refused until another becomes healthy",
+        "detail": "the budget is not met -- 1 healthy where it wants 2 -- so a pod is already missing, and a drain will be refused until it comes back",
         "healthy": false,
         "created_at": "2026-09-02T09:40:00Z"
+      },
+      {
+        "kind": "PodDisruptionBudget",
+        "namespace": "cloud",
+        "name": "nextcloud-db-primary",
+        "summary": "1 of 1 healthy, 0 may be disrupted",
+        "detail": "nothing may be disrupted, which is ordinary for a single copy: a drain of its node will be refused until you scale it up or accept the downtime",
+        "healthy": true,
+        "created_at": "2026-06-14T21:10:00Z"
       }
     ]
   },
