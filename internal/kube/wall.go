@@ -90,8 +90,44 @@ type Warning struct {
 
 	// Count, because a FailedScheduling seen 340 times is a different situation
 	// from one seen once, and on a wall that difference is the whole message.
-	Count int32  `json:"count"`
-	Age   string `json:"age"`
+	Count int32 `json:"count"`
+
+	// LastSeen is WHEN, as an instant, not as an age.
+	//
+	// It used to be called Age and carried the instant anyway, so a wall put
+	// "2026-09-20T09:58:00Z" on a television. An age is what somebody four
+	// metres away can read -- and it has to be worked out in the browser, not
+	// here: this screen keeps the last answer up when a refresh fails, and an
+	// age baked in at the server would then freeze at the moment the daemon
+	// stopped answering, which is the one moment it must not.
+	LastSeen string `json:"last_seen"`
+}
+
+// NamespaceTile is a namespace as one tile, coloured by the WORST thing in it.
+//
+// The roll-up is decided here and not in the browser, for the same reason a
+// tile's own state is: it is arithmetic over several things, and arithmetic that
+// happens in two places eventually disagrees in one of them -- on a screen
+// nobody is standing in front of to notice.
+//
+// It is the composite pattern Grafana's polystat and its own Kubernetes
+// dashboard use: a group of things collapses to one block carrying the worst
+// state inside it, and the block names the offender rather than making somebody
+// go and look.
+type NamespaceTile struct {
+	Name  string `json:"name"`
+	Total int    `json:"total"`
+	State State  `json:"state"`
+
+	// Worst names the thing that decided the colour, as "postgres · 2 of 3
+	// ready". Empty when nothing is wrong, because a tile that always carries a
+	// sentence is a tile whose sentence nobody reads.
+	Worst string `json:"worst"`
+
+	// Stopped is counted separately and never colours the tile: something
+	// switched off on purpose is a decision, and a namespace that went amber
+	// because somebody paused a job would teach an operator to ignore amber.
+	Stopped int `json:"stopped"`
 }
 
 // Wall is everything one screen shows, in one answer.
@@ -104,6 +140,9 @@ type Wall struct {
 
 	Nodes     []Tile `json:"nodes"`
 	Workloads []Tile `json:"workloads"`
+
+	// Namespaces is the same workloads rolled up, worst-first.
+	Namespaces []NamespaceTile `json:"namespaces"`
 
 	// Capacity is the cluster's room: allocatable against requested.
 	CPU    Capacity `json:"cpu"`
@@ -181,6 +220,7 @@ func (c *Client) ForTheWall(ctx context.Context, namespace string, now time.Time
 	for _, tile := range out.Workloads {
 		out.Summary[tile.State]++
 	}
+	out.Namespaces = rollUp(out.Workloads)
 	return out, nil
 }
 
@@ -280,11 +320,11 @@ func warningsFrom(events []Event) []Warning {
 			continue
 		}
 		out = append(out, Warning{
-			Object:  event.Object,
-			Reason:  event.Reason,
-			Message: event.Message,
-			Count:   event.Count,
-			Age:     event.LastSeen,
+			Object:   event.Object,
+			Reason:   event.Reason,
+			Message:  event.Message,
+			Count:    event.Count,
+			LastSeen: event.LastSeen,
 		})
 		if len(out) == MaxWallWarnings {
 			break
@@ -327,4 +367,58 @@ func (w Wall) Describe() string {
 		return fmt.Sprintf("%d need attention", warn)
 	}
 	return "everything is running"
+}
+
+// rollUp collapses the workloads into one tile per namespace.
+func rollUp(tiles []Tile) []NamespaceTile {
+	order := make([]string, 0, 16)
+	byName := map[string]*NamespaceTile{}
+
+	for _, tile := range tiles {
+		name := tile.Namespace
+		if name == "" {
+			name = "—"
+		}
+		into, ok := byName[name]
+		if !ok {
+			into = &NamespaceTile{Name: name, State: StateOK}
+			byName[name] = into
+			order = append(order, name)
+		}
+		into.Total++
+
+		if tile.State == StateStopped {
+			into.Stopped++
+			continue
+		}
+		// Worse wins, and the tile keeps the sentence of whatever decided it.
+		if stateOrder[tile.State] < stateOrder[into.State] {
+			into.State = tile.State
+			into.Worst = tile.Name + " · " + tile.Detail
+		}
+	}
+
+	out := make([]NamespaceTile, 0, len(order))
+	for _, name := range order {
+		tile := *byName[name]
+		// A namespace where everything is switched off is not green. Green would
+		// say "running", and nothing in it is.
+		if tile.Stopped == tile.Total && tile.State == StateOK {
+			tile.State = StateStopped
+		}
+		out = append(out, tile)
+	}
+	// Worst first, then the biggest: on a wall the eye goes to the top left, and
+	// what belongs there is whatever is wrong -- then whatever is largest, which
+	// is the closest thing to "most important" this can know without being told.
+	sort.SliceStable(out, func(i, j int) bool {
+		if stateOrder[out[i].State] != stateOrder[out[j].State] {
+			return stateOrder[out[i].State] < stateOrder[out[j].State]
+		}
+		if out[i].Total != out[j].Total {
+			return out[i].Total > out[j].Total
+		}
+		return out[i].Name < out[j].Name
+	})
+	return out
 }
