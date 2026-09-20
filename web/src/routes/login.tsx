@@ -37,7 +37,9 @@ import { rootRoute } from '@/routes/__root'
  * so this page renders what `system/status` reports for the address it was
  * loaded from, rather than assuming one shape and failing on the other.
  */
-function LoginPage() {
+// LoginPage is exported so its own test can render it inside a router of its
+// own, which is the split the other screens here use.
+export function LoginPage() {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const { reason, sso_error: ssoError } = loginRoute.useSearch()
@@ -47,6 +49,8 @@ function LoginPage() {
   // deployment has, and a page that renders nothing while it waits looks broken
   // on the slowest connections, which are the ones least able to afford it.
   const ssoAvailable = status.data?.oidc_enabled === true
+  // Offered by the server only on an address that refuses the local account.
+  const localSignIn = status.data?.local_sign_in_url ?? ''
   const passwordAvailable = status.data?.password_login !== false
 
   const [username, setUsername] = useState('')
@@ -131,8 +135,26 @@ function LoginPage() {
               </Button>
               {!passwordAvailable && (
                 <p className="text-sm text-muted-foreground">
-                  This address accepts single sign-on only. The local account works on the local
-                  network.
+                  This address accepts single sign-on only.{' '}
+                  {localSignIn === '' ? (
+                    // No link rather than a guessed one: an address this
+                    // process does not answer on would land on a connection
+                    // refused, which reads as the product being broken.
+                    <>The local account works on the local network.</>
+                  ) : (
+                    <>
+                      The local account works at{' '}
+                      {/* A full navigation to another origin, so a plain anchor
+                          rather than a router link. */}
+                      <a
+                        className="font-mono underline underline-offset-2 hover:text-foreground"
+                        href={localSignIn}
+                      >
+                        {localSignIn}
+                      </a>
+                      , on the local network.
+                    </>
+                  )}
                 </p>
               )}
             </div>

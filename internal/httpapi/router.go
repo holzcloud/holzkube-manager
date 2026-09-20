@@ -234,6 +234,15 @@ type Deps struct {
 	// decides membership in AllowedHosts and here (config.NormalizeHost).
 	IsSSOOnly func(host string) bool
 
+	// LocalSignInURL is the address the local account still works on, when the
+	// one a request arrived at refuses it. Empty when there is no honest
+	// answer, and a nil function is the same as empty.
+	//
+	// Derived at the composition root from the hosts this instance answers to,
+	// because that is where the configuration is. See localSignInURL there for
+	// what is left out and why.
+	LocalSignInURL func() string
+
 	Routes []Route
 }
 
@@ -241,6 +250,14 @@ type Deps struct {
 // IsSSOOnly means no host is SSO-only.
 func (d Deps) SSOOnly(r *http.Request) bool {
 	return d.IsSSOOnly != nil && d.IsSSOOnly(r.Host)
+}
+
+// LocalSignIn is the address to offer when this one refuses the local account.
+func (d Deps) LocalSignIn() string {
+	if d.LocalSignInURL == nil {
+		return ""
+	}
+	return d.LocalSignInURL()
 }
 
 // New builds the handler: the outer chain, the route table and the SPA fallback.
