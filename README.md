@@ -751,6 +751,34 @@ script never depends on this tool's formatting.
 prints them — an exit code that swallowed the reasons would make it worse than
 silence.
 
+## One screen for the IT office
+
+`/wall` is a single page meant for a large screen: every node and every workload
+as a tile, how full the cluster is, and the most recent warnings. No navigation,
+no sidebar, nothing to click — it answers one question, and it has to answer it in
+the second somebody glances up.
+
+**It never scrolls.** A screen nobody touches cannot show what is below the fold,
+so the tiles shrink to fit. Past the point where the names would be unreadable
+from across a room it shows how many there are and draws the ones that are not
+fine, which is a true answer at any size — unlike a grid that stops silently at
+the bottom edge.
+
+**It says how old its answer is, always**, and dims when that answer is more than
+a few refreshes old. A wall that cannot go stale lies during exactly the incident
+it exists for: a daemon that died at two leaves a confident green screen up all
+night. A failed refresh keeps the last answer on screen with its age visible,
+rather than blanking — the state a moment ago, labelled, beats nothing.
+
+**Five colours, not two.** A CronJob between runs is not an outage; something you
+stopped on purpose is not broken; and a node nobody is hearing from is never
+green. Those three are what a green-and-red wall gets wrong, and the third one is
+the case the screen exists for.
+
+**Still to come:** the screen currently needs somebody to sign in on it once, and
+a session expires — so it is not yet something to leave up for weeks. A kiosk
+link, long-lived and read-only and revocable, is the other half.
+
 ## Kubernetes itself
 
 Until this milestone the product managed machines and left the cluster running on

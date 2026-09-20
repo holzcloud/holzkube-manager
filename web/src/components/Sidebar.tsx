@@ -9,6 +9,7 @@ import {
   LayoutDashboard,
   ListChecks,
   type LucideIcon,
+  MonitorDot,
   ScrollText,
   Server,
   Settings,
@@ -46,6 +47,14 @@ export interface NavArea {
 }
 
 export const NAV_AREAS: NavArea[] = [
+  {
+    path: '/wall',
+    label: 'Wall',
+    icon: MonitorDot,
+    phase: null,
+    description:
+      'One screen for the IT office: every node and every workload as a tile, how full the cluster is, and the most recent warnings. It says how old its answer is and goes visibly stale rather than leaving a confident green screen up during an outage.',
+  },
   {
     path: '/',
     label: 'Dashboard',

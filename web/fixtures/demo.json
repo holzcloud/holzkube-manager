@@ -1717,5 +1717,113 @@
       }
     ],
     "notice": "A quota’s used figure is what the namespace has reserved, and a full quota is why the next pod is refused -- the pod’s own event says \"exceeded quota\" and nothing else shows the quota. Objects of the cluster’s own kinds are not counted here: that would be one list call per kind, and a cluster can have two hundred."
+  },
+  "/api/v1/clusters/c-homelab/wall": {
+    "generated_at": "2026-09-20T09:59:55Z",
+    "nodes": [
+      {
+        "kind": "Node",
+        "namespace": "",
+        "name": "srv-rsp-prod02.holzcloud.ch",
+        "state": "unknown",
+        "detail": "not reporting"
+      },
+      {
+        "kind": "Node",
+        "namespace": "",
+        "name": "srv-rsp-prod03.holzcloud.ch",
+        "state": "warn",
+        "detail": "cordoned"
+      },
+      {
+        "kind": "Node",
+        "namespace": "",
+        "name": "srv-rsp-prod01.holzcloud.ch",
+        "state": "ok",
+        "detail": "ready"
+      }
+    ],
+    "workloads": [
+      {
+        "kind": "Deployment",
+        "namespace": "default",
+        "name": "holzcloud-website-internal-api",
+        "state": "down",
+        "detail": "0 of 2 ready"
+      },
+      {
+        "kind": "StatefulSet",
+        "namespace": "db",
+        "name": "postgres",
+        "state": "warn",
+        "detail": "2 of 3 ready, 1 updated"
+      },
+      {
+        "kind": "Deployment",
+        "namespace": "default",
+        "name": "holzcloud-website",
+        "state": "ok",
+        "detail": "2 of 2 ready"
+      },
+      {
+        "kind": "DaemonSet",
+        "namespace": "longhorn-system",
+        "name": "longhorn-manager",
+        "state": "ok",
+        "detail": "3 of 3 nodes ready"
+      },
+      {
+        "kind": "CronJob",
+        "namespace": "backup",
+        "name": "nightly-backup",
+        "state": "ok",
+        "detail": "last run 2026-09-20T03:00:00Z"
+      },
+      {
+        "kind": "Deployment",
+        "namespace": "default",
+        "name": "holzcloud-staging-preview-environment",
+        "state": "stopped",
+        "detail": "0 of 0 ready"
+      }
+    ],
+    "cpu": {
+      "allocatable": "12",
+      "requested": "4200m",
+      "percent": 35
+    },
+    "memory": {
+      "allocatable": "46Gi",
+      "requested": "41Gi",
+      "percent": 91
+    },
+    "pods": {
+      "allocatable": "330",
+      "requested": "74",
+      "percent": 22
+    },
+    "warnings": [
+      {
+        "object": "Pod/holzcloud-website-internal-api-7c9",
+        "reason": "FailedScheduling",
+        "message": "0/3 nodes are available: insufficient memory",
+        "count": 340,
+        "age": "2026-09-20T09:58:00Z"
+      },
+      {
+        "object": "Pod/postgres-2",
+        "reason": "Unhealthy",
+        "message": "readiness probe failed",
+        "count": 7,
+        "age": "2026-09-20T09:55:00Z"
+      }
+    ],
+    "summary": {
+      "ok": 4,
+      "warn": 2,
+      "down": 1,
+      "stopped": 1,
+      "unknown": 1
+    }
   }
 }
