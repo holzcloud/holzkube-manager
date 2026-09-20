@@ -428,7 +428,15 @@ var allowlist = map[string][]string{
 	// is the event, and an archive that recorded "swept 41 things" would be a
 	// record nobody could check afterwards -- these deletions are the ones
 	// nothing puts back.
-	"cluster.kubernetes-capacity":   {},
+	"cluster.kubernetes-capacity": {},
+
+	// Storage and networking (2026-09-20). Both read and neither writes, and
+	// the namespace they are narrowed to is in the query rather than the body --
+	// so there is nothing here for the archive to carry. Written as an empty
+	// entry deliberately, which is this table saying so rather than nobody
+	// having looked.
+	"cluster.kubernetes-storage":    {},
+	"cluster.kubernetes-network":    {},
 	"cluster.kubernetes-stop":       {},
 	"cluster.kubernetes-start":      {},
 	"cluster.kubernetes-sweep-plan": {},

@@ -981,7 +981,7 @@
         "kind": "Ingress",
         "namespace": "default",
         "name": "holzcloud-website",
-        "summary": "no address yet \u2014 no controller has claimed it",
+        "summary": "no address yet — no controller has claimed it",
         "detail": "holzcloud.ch, www.holzcloud.ch",
         "healthy": false,
         "created_at": "2026-09-17T18:22:00Z"
@@ -1233,5 +1233,158 @@
       }
     ],
     "notice": "Only things that have finished and are not the way back from a rollout. Running, pending and unknown pods are left alone -- unknown especially, because that means a node stopped reporting rather than that the pod stopped. Images on the nodes are not here: Talos cannot delete one, and the kubelet removes them itself when its disk fills."
+  },
+  "/api/v1/clusters/c-homelab/kubernetes/storage": {
+    "volumes": [
+      {
+        "name": "pvc-8f3a1c92-longhorn-db-postgres-data",
+        "capacity": "20Gi",
+        "phase": "Bound",
+        "claim": "db/postgres-data",
+        "storage_class": "longhorn",
+        "reclaim_policy": "Delete",
+        "access_modes": ["RWO"],
+        "driver": "driver.longhorn.io",
+        "notice": "",
+        "created_at": "2026-09-02T09:00:00Z"
+      },
+      {
+        "name": "pvc-11b7e004-longhorn-old-grafana-storage",
+        "capacity": "100Gi",
+        "phase": "Released",
+        "claim": "",
+        "storage_class": "longhorn",
+        "reclaim_policy": "Retain",
+        "access_modes": ["RWO"],
+        "driver": "driver.longhorn.io",
+        "notice": "Its claim is gone and the data is still on the disk, kept because the reclaim policy is Retain. Nothing counts it and nothing will use it until somebody either makes a claim for it or deletes it.",
+        "created_at": "2026-06-14T21:10:00Z"
+      }
+    ],
+    "claims": [
+      {
+        "namespace": "db",
+        "name": "postgres-data",
+        "phase": "Bound",
+        "requested": "20Gi",
+        "capacity": "20Gi",
+        "storage_class": "longhorn",
+        "volume": "pvc-8f3a1c92-longhorn-db-postgres-data",
+        "access_modes": ["RWO"],
+        "used_by": ["db/postgres-0"],
+        "expandable": true,
+        "notice": "",
+        "created_at": "2026-09-02T09:00:00Z"
+      },
+      {
+        "namespace": "monitoring",
+        "name": "prometheus-server-storage",
+        "phase": "Pending",
+        "requested": "50Gi",
+        "capacity": "",
+        "storage_class": "local-path",
+        "volume": "",
+        "access_modes": ["RWO"],
+        "used_by": [],
+        "expandable": false,
+        "notice": "Its class waits for a consumer, so it stays Pending until a pod that uses it is scheduled. That is the class working as configured, not a fault.",
+        "created_at": "2026-09-19T22:05:00Z"
+      }
+    ],
+    "classes": [
+      {
+        "name": "longhorn",
+        "provisioner": "driver.longhorn.io",
+        "default": true,
+        "reclaim_policy": "Delete",
+        "binding_mode": "Immediate",
+        "allows_expansion": true,
+        "created_at": "2026-05-01T12:00:00Z"
+      },
+      {
+        "name": "local-path",
+        "provisioner": "rancher.io/local-path",
+        "default": false,
+        "reclaim_policy": "Delete",
+        "binding_mode": "WaitForFirstConsumer",
+        "allows_expansion": false,
+        "created_at": "2026-05-01T12:00:00Z"
+      }
+    ],
+    "notice": "A capacity here is what was provisioned, not how full the filesystem on it is: nothing in the Kubernetes API reports that, and only something running inside the pod can. A volume’s reclaim policy is what decides whether deleting its claim destroys the data."
+  },
+  "/api/v1/clusters/c-homelab/kubernetes/network": {
+    "services": [
+      {
+        "namespace": "default",
+        "name": "holzcloud-website-internal-api",
+        "type": "ClusterIP",
+        "cluster_ip": "10.96.184.203",
+        "external": "",
+        "ports": ["http 80/TCP → 8080"],
+        "selector": "app.kubernetes.io/name=internal-api",
+        "endpoints": 0,
+        "ready_endpoints": 0,
+        "healthy": false,
+        "notice": "Nothing is behind it: no pod matches app.kubernetes.io/name=internal-api. Every connection to it is refused instantly, and the workload that calls it reports a connection error that looks like its own fault.",
+        "created_at": "2026-09-17T18:22:00Z"
+      },
+      {
+        "namespace": "default",
+        "name": "holzcloud-website",
+        "type": "ClusterIP",
+        "cluster_ip": "10.96.0.42",
+        "external": "",
+        "ports": ["http 80/TCP → 8080"],
+        "selector": "app=website",
+        "endpoints": 2,
+        "ready_endpoints": 1,
+        "healthy": true,
+        "notice": "1 of 2 endpoints are ready; the rest are not receiving traffic.",
+        "created_at": "2026-09-17T18:22:00Z"
+      },
+      {
+        "namespace": "ingress-nginx",
+        "name": "ingress-nginx-controller",
+        "type": "LoadBalancer",
+        "cluster_ip": "10.96.0.77",
+        "external": "waiting for an address",
+        "ports": ["http 80/TCP → 80 (node 30080)", "https 443/TCP → 443 (node 30443)"],
+        "selector": "app.kubernetes.io/name=ingress-nginx",
+        "endpoints": 1,
+        "ready_endpoints": 1,
+        "healthy": true,
+        "notice": "",
+        "created_at": "2026-05-01T12:00:00Z"
+      }
+    ],
+    "policies": [
+      {
+        "namespace": "db",
+        "name": "postgres-inbound-only",
+        "applies": "app=postgres",
+        "types": ["Ingress"],
+        "selects": 1,
+        "isolating": true,
+        "summary": "Restricts inbound traffic to 1 pods. Outbound traffic from them is not restricted at all.",
+        "healthy": true,
+        "created_at": "2026-09-02T09:00:00Z"
+      },
+      {
+        "namespace": "default",
+        "name": "internal-api-lockdown",
+        "applies": "app.kubernetes.io/name=internal-api",
+        "types": ["Ingress", "Egress"],
+        "selects": 0,
+        "isolating": false,
+        "summary": "It matches no pod in default, so it protects nothing. A policy that selects nothing is worse than none: somebody believes this is in force.",
+        "healthy": false,
+        "created_at": "2026-09-18T07:30:00Z"
+      }
+    ],
+    "unprotected": ["kube-system", "monitoring"],
+    "ingress_classes": ["nginx"],
+    "default_ingress_class": "nginx",
+    "notice": "Endpoints are counted from EndpointSlices, which is what the kube-proxy on each node actually load-balances to. A Service with none refuses every connection instantly, and nothing else about it looks wrong."
   }
 }

@@ -1204,6 +1204,47 @@ var routeBudgets = []routeBudget{
 			"can be sent, and because naming the wrong one is refused rather than guessed.",
 	},
 	{
+		route: "GET /api/v1/clusters/{id}/kubernetes/storage",
+		calls: []upstreamCall{
+			{name: "NewClusterClient: Version (finding a control-plane node)", class: nodeProbeCall},
+			{name: "COSI Get: the machine configuration, for the API server's address", class: nodeFastReadCall},
+			{name: "Kubernetes: list storage classes", class: kubeCall},
+			{name: "Kubernetes: list persistent volumes", class: kubeCall},
+			{name: "Kubernetes: list claims", class: kubeCall},
+			{name: "Kubernetes: list pods (who mounts which claim)", class: kubeCall},
+		},
+		routeDeadline:     handlers.KubernetesRouteBudget,
+		verdict:           knownOverBudget,
+		clipping:          clipped,
+		deferredTo:        "as above for the two Talos calls.",
+		clippingRationale: "four list calls against a cluster that answers.",
+		why: "The pods are listed because nothing else knows who mounts a claim, and the classes " +
+			"because a Pending claim's reason is a fact about its class rather than about itself. " +
+			"One pod list for the whole answer rather than one question per claim: a cluster has " +
+			"more claims than pods.",
+	},
+	{
+		route: "GET /api/v1/clusters/{id}/kubernetes/network",
+		calls: []upstreamCall{
+			{name: "NewClusterClient: Version (finding a control-plane node)", class: nodeProbeCall},
+			{name: "COSI Get: the machine configuration, for the API server's address", class: nodeFastReadCall},
+			{name: "Kubernetes: list services", class: kubeCall},
+			{name: "Kubernetes: list endpoint slices (what is actually behind each)", class: kubeCall},
+			{name: "Kubernetes: list pods (what a selector matches)", class: kubeCall},
+			{name: "Kubernetes: list network policies", class: kubeCall},
+			{name: "Kubernetes: list ingress classes", class: kubeCall},
+		},
+		routeDeadline:     handlers.KubernetesRouteBudget,
+		verdict:           knownOverBudget,
+		clipping:          clipped,
+		deferredTo:        "as above for the two Talos calls.",
+		clippingRationale: "five list calls against a cluster that answers.",
+		why: "The slices are what makes this worth more than a service list: a Service with no " +
+			"endpoints refuses every connection and looks completely healthy. One slice list for " +
+			"the whole set rather than one per service, which would turn a screen into a hundred " +
+			"round trips.",
+	},
+	{
 		route: "GET /api/v1/clusters/{id}/kubernetes/capacity",
 		calls: []upstreamCall{
 			{name: "NewClusterClient: Version (finding a control-plane node)", class: nodeProbeCall},

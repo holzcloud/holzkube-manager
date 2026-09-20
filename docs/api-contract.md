@@ -1728,6 +1728,139 @@ INV-08 gives one layer down: an empty screen is a claim.
 | `upstream.no-kubernetes-endpoint` | 502 | no control-plane node could say where the API server is. The endpoint is read from a node's own machine configuration -- in the `KubeClusterConfig` document since Talos 1.14 -- rather than assembled from the address the cluster was adopted through. |
 | `upstream.kubernetes-unreachable` | 502 | the API server did not answer. |
 
+## The cluster's storage
+
+    GET /api/v1/clusters/{id}/kubernetes/storage[?namespace=]
+
+    {"volumes":[{"name":"pvc-8f3a…","capacity":"20Gi","phase":"Released","claim":"",
+                 "reclaim_policy":"Retain","access_modes":["RWO"],
+                 "driver":"driver.longhorn.io","notice":"Its claim is gone and…"}],
+     "claims":[{"namespace":"db","name":"postgres-data","phase":"Bound",
+                "used_by":["db/postgres-0"],"expandable":true,"notice":""}],
+     "classes":[{"name":"longhorn","default":true,"binding_mode":"Immediate",
+                 "allows_expansion":true}],
+     "notice":"A capacity here is what was provisioned…"}
+
+**The claim list on its own cannot answer the questions storage raises.** It is
+one half of a two-sided arrangement, and every field added here is one no claim
+carries:
+
+- **Whether deleting it destroys the data.** That is the *volume's*
+  `reclaim_policy`: `Delete` destroys, `Retain` keeps. A client should render what
+  happens rather than the API's word — it is the most consequential field in the
+  answer and the least readable.
+- **Who is using it.** `used_by` is every running pod that mounts the claim.
+  Nothing but the pods knows this. A `Succeeded` or `Failed` pod is excluded: it
+  mounts nothing any more, and counting it is how somebody decides a claim is in
+  use when it is not. An empty list on a `Bound` claim is a real and interesting
+  answer — storage being paid for and not used.
+- **Whether it can be grown.** `expandable` comes from the class's
+  `allowVolumeExpansion`, so a screen does not offer an edit the provisioner
+  refuses.
+- **Why it is Pending.** The claim's own events say "unbound immediate
+  PersistentVolumeClaim", which states the thing somebody already knows. `notice`
+  names the actual cause, and two of the three are not faults: a class whose
+  binding mode is `WaitForFirstConsumer` is *working as configured*, a claim with
+  no class is waiting for the default one, and a claim naming a class that does
+  not exist will never be provisioned at all.
+
+**`Released` is the row this route exists for.** A volume whose claim is gone and
+whose data is still on the disk, held because the reclaim policy said `Retain`. It
+is invisible in every namespace view — a PersistentVolume is cluster-scoped — it
+counts against nothing, and it is the commonest way a cluster quietly fills its
+storage backend. It is also, occasionally, exactly the data somebody needs back,
+so `notice` says both.
+
+**The namespace narrows the claims only.** Volumes and classes are cluster-scoped;
+hiding them in a namespace view is how a `Released` volume holding somebody's
+database stays invisible.
+
+**Two default storage classes, or none, are reported in the notice.** With two the
+API server picks one arbitrarily, which is not a choice anybody made; with none a
+claim naming no class stays Pending for ever rather than failing, and nothing else
+in a cluster will say so.
+
+**A capacity is what was provisioned, never how full the filesystem is.** Nothing
+in the Kubernetes API reports the second — only something running inside the pod
+can — and a column headed `20Gi` invites exactly that reading, so the notice
+refuses it in words.
+
+**Nothing here writes.** Deleting a `Retain` volume is how data goes for good. The
+object-delete route already does it for anybody who means it, with the name typed
+out; a "clean up volumes" button would be the one in this product whose mistake
+cannot be undone at all.
+
+## The cluster's networking
+
+    GET /api/v1/clusters/{id}/kubernetes/network[?namespace=]
+
+    {"services":[{"namespace":"default","name":"api","type":"ClusterIP",
+                  "cluster_ip":"10.96.0.11","external":"","ports":["80/TCP → 8080"],
+                  "selector":"app=api","endpoints":0,"ready_endpoints":0,
+                  "healthy":false,"notice":"Nothing is behind it: no pod matches app=api…"}],
+     "policies":[{"namespace":"default","name":"api-lockdown","applies":"app=api",
+                  "types":["Ingress"],"selects":0,"healthy":false,"summary":"…protects nothing"}],
+     "unprotected":["monitoring","open"],
+     "ingress_classes":["nginx"],"default_ingress_class":"nginx",
+     "notice":"Endpoints are counted from EndpointSlices…"}
+
+**A Service with no endpoints is the commonest broken thing in Kubernetes, and it
+looks completely healthy in every list.** Name, type, ClusterIP, ports — all
+present, and every connection to it refused instantly while the workload that
+calls it reports a connection error pointing at itself. Counting the endpoints is
+the single fact that makes this route worth more than `kubectl get svc`, and
+`notice` names the selector that matches nothing: "nothing matches" without saying
+*what* does not match leaves somebody where they were.
+
+**`ready_endpoints` is reported beside `endpoints` because an unready endpoint is
+excluded from load balancing entirely.** A Service with three endpoints of which
+none are ready serves nothing, and it looks better than one with none. `healthy`
+is false for both.
+
+**Endpoints come from EndpointSlices**, which is what the kube-proxy on each node
+actually load-balances to, in one list for the whole set rather than one call per
+Service — the latter turns a screen into a hundred round trips.
+
+**No endpoints is correct for an `ExternalName` Service**, which is a DNS alias and
+forwards nothing. A screen that flagged it would be wrong on every cluster that has
+one.
+
+**`external` is what reaches it from outside**, and empty for a plain ClusterIP —
+which is the answer to "why can I not reach this from my laptop", and one a list of
+ports cannot give. A `LoadBalancer` with no address answers "waiting for an
+address": Talos ships no load-balancer controller, so that is the ordinary state on
+this product's own target.
+
+**The dangerous default in network policies is having none.** A namespace with no
+NetworkPolicy accepts traffic from every pod in the cluster. That is Kubernetes's
+default and plenty of clusters run that way on purpose, but it is invisible, and
+"we have policies" is usually believed about a cluster where two namespaces have
+them and eleven do not. `unprotected` lists the namespaces that have pods and no
+policy — listed rather than counted, because "eleven namespaces are open" is not
+actionable and a list is.
+
+**A policy whose selector matches no pod is worse than no policy**, because
+somebody believes it is in force. `selects` is how many pods it currently matches
+and `healthy` is false at zero.
+
+**An empty pod selector means every pod in the namespace**, which is the opposite
+of how an empty filter reads everywhere else, so `applies` says it in words rather
+than as a blank.
+
+**`types` is derived when the policy does not name them** — Ingress, plus Egress
+if there are egress rules — because a policy without the field is ordinary and an
+empty column would read as a policy that does nothing. A policy with Ingress rules
+only leaves outbound traffic entirely alone, which is not what "we have a policy
+for that" usually means, and the summary says so.
+
+**An Ingress naming no class in a cluster with no default is one no controller
+will ever pick up**, and it looks exactly like a working Ingress. So the classes
+and the default are in the answer.
+
+**Nothing here writes.** A NetworkPolicy applied wrongly cuts a cluster off from
+itself, including from whatever this daemon needs to reach it. The manifest path
+exists for anybody who means to change one, with a plan shown first.
+
 ## How full a cluster is
 
     GET /api/v1/clusters/{id}/kubernetes/capacity

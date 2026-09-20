@@ -1997,6 +1997,114 @@ export const sweepPlanSchema = z.object({
   notice: z.string().default(''),
 })
 
+export const volumeSummarySchema = z.object({
+  name: z.string(),
+  capacity: z.string().default(''),
+  /** Bound, Available, Released or Failed. */
+  phase: z.string().default(''),
+  /** "namespace/name", or empty when nothing holds it. */
+  claim: z.string().default(''),
+  storage_class: z.string().default(''),
+  /** What happens to the data when the claim goes: Delete destroys it, Retain
+   * keeps it. The field somebody needs before deleting and the one no claim
+   * carries. */
+  reclaim_policy: z.string().default(''),
+  access_modes: z.array(z.string()).default([]),
+  driver: z.string().default(''),
+  notice: z.string().default(''),
+  created_at: z.string().default(''),
+})
+
+export const claimSummarySchema = z.object({
+  namespace: z.string(),
+  name: z.string(),
+  phase: z.string().default(''),
+  requested: z.string().default(''),
+  capacity: z.string().default(''),
+  storage_class: z.string().default(''),
+  volume: z.string().default(''),
+  access_modes: z.array(z.string()).default([]),
+  /** Every running pod that mounts it. Empty is a real answer: storage being
+   * paid for and not used. */
+  used_by: z.array(z.string()).default([]),
+  expandable: z.boolean().default(false),
+  notice: z.string().default(''),
+  created_at: z.string().default(''),
+})
+
+export const storageClassSummarySchema = z.object({
+  name: z.string(),
+  provisioner: z.string().default(''),
+  default: z.boolean().default(false),
+  reclaim_policy: z.string().default(''),
+  /** Immediate or WaitForFirstConsumer. The second makes a claim sit Pending
+   * until a pod schedules, which is correct and looks like a fault. */
+  binding_mode: z.string().default(''),
+  allows_expansion: z.boolean().default(false),
+  created_at: z.string().default(''),
+})
+
+export const clusterStorageSchema = z.object({
+  volumes: z.array(volumeSummarySchema).default([]),
+  claims: z.array(claimSummarySchema).default([]),
+  classes: z.array(storageClassSummarySchema).default([]),
+  notice: z.string().default(''),
+})
+
+export const serviceSummarySchema = z.object({
+  namespace: z.string(),
+  name: z.string(),
+  type: z.string().default(''),
+  cluster_ip: z.string().default(''),
+  /** What reaches it from outside. Empty for a plain ClusterIP, which is the
+   * answer to "why can I not reach this from my laptop". */
+  external: z.string().default(''),
+  ports: z.array(z.string()).default([]),
+  selector: z.string().default(''),
+  /** How many addresses are behind it, and how many of those are READY. An
+   * unready endpoint is excluded from load balancing entirely. */
+  endpoints: z.number().default(0),
+  ready_endpoints: z.number().default(0),
+  healthy: z.boolean().default(true),
+  notice: z.string().default(''),
+  created_at: z.string().default(''),
+})
+
+export const policySummarySchema = z.object({
+  namespace: z.string(),
+  name: z.string(),
+  /** The pod selector in words: "every pod in the namespace" for an empty one,
+   * which is the case that surprises people. */
+  applies: z.string().default(''),
+  types: z.array(z.string()).default([]),
+  /** How many pods it currently matches. Zero means somebody believes something
+   * is protected and nothing is. */
+  selects: z.number().default(0),
+  isolating: z.boolean().default(false),
+  summary: z.string().default(''),
+  healthy: z.boolean().default(true),
+  created_at: z.string().default(''),
+})
+
+export const clusterNetworkSchema = z.object({
+  services: z.array(serviceSummarySchema).default([]),
+  policies: z.array(policySummarySchema).default([]),
+  /** Namespaces with pods and no NetworkPolicy: they accept traffic from every
+   * pod in the cluster. */
+  unprotected: z.array(z.string()).default([]),
+  ingress_classes: z.array(z.string()).default([]),
+  default_ingress_class: z.string().default(''),
+  notice: z.string().default(''),
+})
+
+export type ClusterStorage = z.infer<typeof clusterStorageSchema>
+export type VolumeSummary = z.infer<typeof volumeSummarySchema>
+export type ClaimSummary = z.infer<typeof claimSummarySchema>
+export type StorageClassSummary = z.infer<typeof storageClassSummarySchema>
+export type ClusterNetwork = z.infer<typeof clusterNetworkSchema>
+export type ServiceSummary = z.infer<typeof serviceSummarySchema>
+export type PolicySummary = z.infer<typeof policySummarySchema>
+
 export type Capacity = z.infer<typeof capacitySchema>
 export type ClusterCapacity = z.infer<typeof clusterCapacitySchema>
 export type NodeCapacity = z.infer<typeof nodeCapacitySchema>
@@ -3023,6 +3131,31 @@ export const api = {
         `/api/v1/clusters/${encodeURIComponent(cluster)}/kubernetes/pods/${encodeURIComponent(namespace)}/${encodeURIComponent(pod)}/exec`,
         execResultSchema,
         { container, command },
+      ),
+
+    /** The cluster's volumes, claims and classes. The namespace narrows the
+     * CLAIMS only: volumes and classes are cluster-scoped, and hiding them in a
+     * namespace view is how a Released volume holding a database stays
+     * invisible. */
+    storage: (cluster: string, namespace?: string) =>
+      sendJSON(
+        'GET',
+        `/api/v1/clusters/${encodeURIComponent(cluster)}/kubernetes/storage` +
+          (namespace === undefined || namespace === ''
+            ? ''
+            : `?namespace=${encodeURIComponent(namespace)}`),
+        clusterStorageSchema,
+      ),
+
+    /** The services, what is actually behind them, and what may reach them. */
+    network: (cluster: string, namespace?: string) =>
+      sendJSON(
+        'GET',
+        `/api/v1/clusters/${encodeURIComponent(cluster)}/kubernetes/network` +
+          (namespace === undefined || namespace === ''
+            ? ''
+            : `?namespace=${encodeURIComponent(namespace)}`),
+        clusterNetworkSchema,
       ),
 
     /** How full the cluster and each node is — allocatable against what pods
