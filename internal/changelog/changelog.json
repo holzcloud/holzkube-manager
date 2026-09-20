@@ -1,5 +1,47 @@
 [
   {
+    "version": "v1.23.0",
+    "date": "2026-09-20",
+    "changes": [
+      {
+        "icon": "📊",
+        "text": "How full the cluster is, on all three levels: the totals, each node, and what each pod reserved. This is the figure every cluster has — allocatable against what the pods REQUESTED — which is the scheduler's own arithmetic and therefore what decides whether the next pod starts. It sits beside the usage panel and neither is called the other: 90% requested at 5% used is over-reserved and will refuse work it could do, 20% requested at 95% used is about to fall over while looking empty."
+      },
+      {
+        "icon": "⏹️",
+        "text": "Stop and start a service. \"Stop this pod\" is not something Kubernetes has — delete one and its controller makes another within seconds — so the controller is what stops. The replica count is written onto the workload before it goes to zero, and the screen tells you what a start will bring back before you press it: a three-replica service comes back as three, not silently as one."
+      },
+      {
+        "icon": "🧹",
+        "text": "A button for clearing out what is finished. It does not delete: it shows the list first, with a reason on every row, and only a second press removes exactly that list. Left alone are anything still running, the newest rollout of a deployment (the way back), a Job its CronJob still owns, and anything under an hour old. Images are not in the list and cannot be — Talos has no delete for them, the kubelet removes them itself when its disk fills, and the screen says so instead of offering a button that would do nothing."
+      },
+      {
+        "icon": "💾",
+        "text": "A storage screen that answers what a claim list cannot: whether deleting destroys the data or keeps it, which pods mount a claim, whether it can be grown, and why a Pending claim is pending — two of the three causes are not faults at all. And volumes whose claim is gone while the data is still on the disk, which are invisible everywhere else and are either wasted space or exactly what you want back."
+      },
+      {
+        "icon": "🌐",
+        "text": "A networking screen built around the commonest broken thing in Kubernetes: a Service with nothing behind it, which looks completely healthy in every list while refusing every connection. Both endpoint counts are shown, because an unready endpoint is not in the load balancer at all. The namespaces with no NetworkPolicy are listed by name — they accept traffic from every pod in the cluster, which is Kubernetes's default rather than a setting anybody chose."
+      },
+      {
+        "icon": "🔐",
+        "text": "Who may do what. Who is an administrator is not a field in Kubernetes: it is worked out from the rules, so a hand-written role with wildcard verbs on wildcard resources counts whatever it is called. Bindings that grant nothing are marked — one naming a role that does not exist, or a service account that was never created, looks exactly like one that works, because RBAC checks neither."
+      },
+      {
+        "icon": "🗃️",
+        "text": "Namespaces with what constrains them. A namespace stuck Terminating now says what is holding it, not just that it is stuck. A full quota is named as the reason the next pod is refused — that refusal lands on the pod as \"exceeded quota\" and nothing showed you the quota. And a compute quota with no LimitRange, which refuses every pod that sets no requests while the error blames the pod."
+      },
+      {
+        "icon": "🧩",
+        "text": "The kinds your cluster defines itself, since that is where its operators keep their state. One the API server is not serving is marked: every manifest naming it is refused, and nothing else in a cluster tells you."
+      },
+      {
+        "icon": "🔍",
+        "text": "A guard of our own turned out to be measuring a seventeen-hour-old build and passing every time — four new panels, unchanged numbers, exit 0. It builds what it measures now, and a failed build stops it rather than falling back."
+      }
+    ]
+  },
+  {
     "version": "v1.22.0",
     "date": "2026-09-19",
     "changes": [
