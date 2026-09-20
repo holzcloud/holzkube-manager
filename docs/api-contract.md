@@ -1594,6 +1594,16 @@ numbers are succeeded and failed. A CronJob has no pods at all between runs, and
 `summary` written for its kind, and clients should show that rather than compute
 one.
 
+**A PodDisruptionBudget is judged on whether it is MET, not on whether anything
+may be disrupted.** `disruptionsAllowed: 0` is the ordinary, correct state of
+every single-replica workload: with one copy, taking it down *is* the outage, so
+the budget allows nothing. Flagging that marks every single-replica database in a
+cluster permanently, and a warning everybody sees is a warning nobody reads. It is
+still said in `detail`, because somebody about to drain a node needs to know this
+one cannot be moved without downtime — said, not flagged. `healthy` is false when
+`currentHealthy < desiredHealthy`: a pod is already missing, the service is
+degraded now, and a drain will be refused on top of that.
+
 **`scalable` and `rollable` say what the kind supports**, so a screen offers only
 what exists: a DaemonSet gets no replica field, a Job no roll button. Asking
 anyway is refused here by name rather than by the API server's own message —

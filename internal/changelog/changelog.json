@@ -1,5 +1,15 @@
 [
   {
+    "version": "v1.24.1",
+    "date": "2026-09-20",
+    "changes": [
+      {
+        "icon": "🟡",
+        "text": "Every single-replica database was marked as a problem for allowing no disruption — which is simply what a budget says when there is one copy of something. Six of them filled the Config page and pushed the ConfigMaps and Ingresses it exists for below them. A budget is now judged on whether it is MET; a pod already missing is the finding. What a drain would do to a single copy is still said on the row, because somebody about to drain a node needs to know it — said, not flagged."
+      }
+    ]
+  },
+  {
     "version": "v1.24.0",
     "date": "2026-09-20",
     "changes": [
