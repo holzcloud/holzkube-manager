@@ -1,5 +1,23 @@
 [
   {
+    "version": "v1.25.1",
+    "date": "2026-09-20",
+    "changes": [
+      {
+        "icon": "🪟",
+        "text": "The notice after signing in again at your identity provider is a window in the middle of the screen now, over a blurred page, so it cannot be scrolled past — and it is named after the action it is about. It used to read \"and This destructive action has not run yet\", because the action names are sentences of their own and no sentence around them reads correctly for all of them."
+      },
+      {
+        "icon": "🏷️",
+        "text": "Forgetting, rebooting, shutting down or resetting a machine, and forgetting a cluster, are now named in the confirmation instead of all being \"this destructive action\"."
+      },
+      {
+        "icon": "🔗",
+        "text": "On an address that only accepts single sign-on, the sign-in page now links to the address where the local account still works. It is derived from the addresses this instance answers to rather than configured, and if there is no honest answer it says the sentence without a link rather than guessing one."
+      }
+    ]
+  },
+  {
     "version": "v1.25.0",
     "date": "2026-09-20",
     "changes": [

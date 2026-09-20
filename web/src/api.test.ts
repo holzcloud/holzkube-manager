@@ -324,9 +324,24 @@ describe('the sudo prompt names the action it is asking about', () => {
 
   it('does not call deleting a cluster a certificate renewal', async () => {
     const challenge = await challengeRaisedBy(() => api.clusters.forget('c1'))
+
+    // The lesson this pins is the anchored pattern: the first draft matched the
+    // prefix /api/v1/clusters/ and so claimed every route under it, which would
+    // have asked an operator to confirm a CERTIFICATE RENEWAL while forgetting
+    // their cluster. Both routes have a label of their own now, and the
+    // distinction is the whole point of the entry above.
     expect(challenge.action).not.toContain('certificate')
-    expect(challenge.action).toBe('This destructive action')
+    expect(challenge.action).toBe('Forget this cluster')
     expect(challenge.because).toBeUndefined()
+  })
+
+  it('names forgetting a machine, which is where the operator met this', async () => {
+    const challenge = await challengeRaisedBy(() => api.machines.forget('holzkube-01'))
+
+    // It used to fall through to "This destructive action" -- true, and it tells
+    // somebody nothing about the thing they are being asked to confirm. That is
+    // what they saw, twice, on the machine they were trying to remove.
+    expect(challenge.action).toBe('Forget this machine')
   })
 })
 

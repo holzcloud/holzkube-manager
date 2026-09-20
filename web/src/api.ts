@@ -76,6 +76,10 @@ export const systemStatusSchema = z.object({
   // form it has always shown instead of offering nothing at all.
   oidc_enabled: z.boolean().default(false),
   password_login: z.boolean().default(true),
+  /** Where the local account still works, when THIS address refuses it. Empty
+   * when there is no honest answer, and the sign-in page then says the sentence
+   * without a link rather than guessing an address. */
+  local_sign_in_url: z.string().default(''),
 
   /** The Talos version window this build was tested against, and whether this
    * instance accepts a pre-release inside it (OPS-03). Served rather than
@@ -642,6 +646,18 @@ const ACTION_LABELS: ReadonlyArray<{
 }> = [
   { match: /^\/api\/v1\/account\/password$/, action: 'Change the operator password' },
   { match: /^\/api\/v1\/schematics\/[^/]+$/, action: 'Delete this schematic' },
+  // The routes an operator actually meets this prompt on. Without a label the
+  // dialog and the banner both say "This destructive action", which is true and
+  // tells somebody nothing about the thing they are being asked to confirm --
+  // and it was what the operator saw when they tried to forget a machine.
+  //
+  // Anchored, for the reason the entry below records: an id sits in the middle
+  // of these paths, so a prefix would claim every route under it.
+  { match: /^\/api\/v1\/machines\/[^/]+$/, action: 'Forget this machine' },
+  { match: /^\/api\/v1\/machines\/[^/]+\/reboot$/, action: 'Reboot this machine' },
+  { match: /^\/api\/v1\/machines\/[^/]+\/shutdown$/, action: 'Shut this machine down' },
+  { match: /^\/api\/v1\/machines\/[^/]+\/reset$/, action: 'Reset this machine' },
+  { match: /^\/api\/v1\/clusters\/[^/]+$/, action: 'Forget this cluster' },
   {
     match: /^\/api\/v1\/clusters\/[^/]+\/client-certificate$/,
     action: 'Renew this cluster’s certificate',
