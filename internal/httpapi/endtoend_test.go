@@ -222,6 +222,12 @@ func newHarness(t *testing.T, opts ...harnessOpt) *harness {
 		SudoWindow:   5 * time.Minute,
 		AuditChain:   httpapi.ChainStatus{OK: chainOK, BrokenAtLine: brokenLine, File: chainFile},
 		AllowedHosts: cfg.allowedHosts,
+		// Wired exactly as the composition root wires it, so the end-to-end
+		// tests exercise the real gate rather than a stand-in.
+		WallLinkValid: func(ctx context.Context, token string) bool {
+			_, err := au.AuthenticateWallLink(ctx, token)
+			return err == nil
+		},
 	}
 	if cfg.factoryBase != "" {
 		fc, err := imagefactory.New(cfg.factoryBase)
@@ -372,6 +378,7 @@ func newHarness(t *testing.T, opts ...harnessOpt) *harness {
 		handlers.AuthRoutes(deps),
 		handlers.AccountRoutes(deps),
 		handlers.UserRoutes(deps),
+		handlers.WallLinkRoutes(deps),
 		handlers.AuditRoutes(deps),
 		handlers.InventoryRoutes(deps),
 		handlers.StreamRoutes(deps),

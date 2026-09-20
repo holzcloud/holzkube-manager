@@ -209,7 +209,12 @@ func (h *harness) asUser(t *testing.T, username, password string) *asClient {
 	return c
 }
 
-func (c *asClient) status(t *testing.T, method, path string, body any) (int, []byte) {
+// status makes a request as this signed-in account.
+//
+// The options exist for one test: TestASessionCannotBorrowAWallLinkToSkipItsRole
+// has to send a session AND an Authorization header together, which is the one
+// combination that can reach the role gate with a bearer present.
+func (c *asClient) status(t *testing.T, method, path string, body any, opts ...reqOpt) (int, []byte) {
 	t.Helper()
 
 	var rdr io.Reader
@@ -236,6 +241,9 @@ func (c *asClient) status(t *testing.T, method, path string, body any) (int, []b
 		// demanding the header from a machine would be a ritual that protects
 		// nothing. If that stops being true, this call starts failing.
 		req.Header.Set("Authorization", "Bearer "+c.bearer)
+	}
+	for _, o := range opts {
+		o(req)
 	}
 
 	resp, err := c.client.Do(req)

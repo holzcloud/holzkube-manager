@@ -216,7 +216,57 @@ type Settings struct {
 	SetupCompleted bool      `json:"setup_completed"`
 	CreatedAt      time.Time `json:"created_at"`
 
+	// WallLinks are the long-lived read-only links a screen in a corridor is
+	// left open on.
+	//
+	// Kept on the settings record rather than in a store of their own, and that
+	// is a judgement worth stating: they are instance-wide, there are a handful,
+	// and nothing queries them except "is this token one of these". A store of
+	// their own would be an interface, an implementation and a migration for a
+	// list that fits on one line. The cost is that creating one contends with
+	// any other settings write through Rev, which is the right trade for
+	// something done twice a year.
+	WallLinks []WallLink `json:"wall_links,omitempty"`
+
 	Rev uint64 `json:"rev"`
+}
+
+// WallLink is a credential that opens exactly one route.
+//
+// # Why it is not a service account with RoleReader
+//
+// A reader may read everything: the audit archive, the names of every Secret,
+// every cluster's configuration. This URL lives on a television, gets
+// bookmarked, photographed and mailed around an office -- so it authorises ONE
+// route, the wall, and nothing else. That is a property somebody can check by
+// reading the route table, which is worth more than a role they would have to
+// reason about.
+//
+// # Why it is not a fourth role either
+//
+// UserRole's own comment says three and not more, because every role beyond
+// them is a policy that has to be kept in step with a surface that grows every
+// phase. A credential that opens one named route needs no place in that ladder.
+type WallLink struct {
+	ID    string `json:"id"`
+	Label string `json:"label"`
+
+	// TokenHash is the SHA-256 of the link's token, hex encoded. The token
+	// itself is shown once, at creation, and never stored -- a lost link is
+	// replaced rather than recovered.
+	TokenHash string `json:"token_hash,omitempty"`
+
+	CreatedAt time.Time `json:"created_at"`
+
+	// CreatedBy is the account that made it, so the archive and the list agree
+	// about who put a screen in a corridor.
+	CreatedBy string `json:"created_by"`
+
+	// LastUsedAt answers the question this list exists for: is this link still
+	// in use, and roughly since when. Written at most once a minute, because a
+	// screen polls every ten seconds and a store write per poll would be a
+	// write amplifier.
+	LastUsedAt time.Time `json:"last_used_at,omitempty"`
 }
 
 // Session is a server-side session record. The session payload is opaque to
