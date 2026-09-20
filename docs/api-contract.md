@@ -1728,6 +1728,83 @@ INV-08 gives one layer down: an empty screen is a claim.
 | `upstream.no-kubernetes-endpoint` | 502 | no control-plane node could say where the API server is. The endpoint is read from a node's own machine configuration -- in the `KubeClusterConfig` document since Talos 1.14 -- rather than assembled from the address the cluster was adopted through. |
 | `upstream.kubernetes-unreachable` | 502 | the API server did not answer. |
 
+## Who may do what
+
+    GET /api/v1/clusters/{id}/kubernetes/access[?namespace=]
+
+    {"administrators":["ServiceAccount ci/deployer","User admin@example.com"],
+     "bindings":[{"kind":"RoleBinding","namespace":"web","name":"web-readers",
+                  "role_kind":"Role","role_name":"pod-readr","role_exists":false,
+                  "subjects":[{"kind":"ServiceAccount","namespace":"web","name":"reader",
+                               "checkable":true,"exists":true}],
+                  "administrative":false,"healthy":false,
+                  "summary":"It names Role pod-readr, which does not exist…"}],
+     "roles":[{"kind":"ClusterRole","name":"platform-operator",
+               "rules":["everything on every resource"],"administrative":true,
+               "bound":1,"built_in":false}],
+     "accounts":[{"namespace":"default","name":"default","used_by":["default/bare"],
+                  "bindings":1,"administrative":true,"notice":"…can do anything to the cluster"}],
+     "notice":"A binding that names a role or a service account which does not exist…"}
+
+**A list of roles is not the answer.** Every question somebody has about RBAC is
+about whether an arrangement *works*, and each is answered by two objects
+disagreeing — which nothing in the cluster will report, because RBAC has **no
+referential integrity, deliberately**, so that a binding may be written before its
+role.
+
+**`role_exists: false` is the finding.** A binding naming a role that is not there
+grants nothing at all, and looks exactly like one that grants everything it was
+written for. `summary` says why RBAC allows it, so the finding does not read as a
+bug in the cluster.
+
+**A subject is checked only when it can be.** `checkable` is true for a
+ServiceAccount and false for a User or a Group: those live in the identity
+provider and no cluster has a list of them. A client must not mark an unchecked
+subject as missing — a column saying "does not exist" beside every OIDC user would
+teach that the marking is noise, and the real finding would then be invisible.
+
+**`administrators` is not a field anywhere in Kubernetes.** It is every subject
+that reaches wildcard verbs on wildcard resources through some binding, and it is
+the first thing anybody wants to know. An empty list is a real answer and needs its
+caveat: the cluster's own certificate holders are outside RBAC entirely and are not
+in it.
+
+**Administrative is decided from the rules, never from the name.** Looking for
+`cluster-admin` would miss every hand-written role with `verbs: ["*"]` on
+`resources: ["*"]` — the same power under a name nobody recognises, and the usual
+way somebody grants it by accident.
+
+**One rule has to carry all three wildcards**, rather than a set of rules carrying
+them between them. "`*` verbs on configmaps" and "get on `*`" are both ordinary, and
+a check that ORed them would report half the cluster's built-in roles as
+administrative — a warning everybody sees is a warning nobody reads. A rule granting
+only `nonResourceURLs` is not counted: that is `/healthz` and `/metrics`, not
+administration of anything in the cluster.
+
+**`used_by` on a service account is every running pod that runs as it**, and the
+`default` account of a namespace is what every pod naming none runs as. A
+permission granted there reaches things nobody intended: anything able to run a pod
+in the namespace then has it, which is why that combination gets its own sentence.
+
+**`built_in` marks the roles Kubernetes ships.** About seventy, identical on every
+cluster, and never what somebody is looking for — so a client can fold them away.
+It should fold rather than filter: hiding them for good makes a screen that cannot
+answer "does this cluster still have the standard roles".
+
+**`bound: 0` on a role somebody wrote means it permits nothing**, because nothing
+grants it. On a built-in role it is ordinary.
+
+**The namespace narrows the namespaced objects only.** ClusterRoles and
+ClusterRoleBindings are always in the answer: a cluster-wide grant is not something
+a namespace filter should hide, and it is the grant that matters most.
+
+**`RoleOperator`, not `RoleReader`.** This answer names who administers the
+cluster, which is a different kind of fact from how many pods are running.
+
+**Nothing here writes.** A wrong RBAC change locks the operator, and this daemon,
+out of the cluster. The manifest path exists for anybody who means to change a
+binding, with a plan shown first.
+
 ## The cluster's storage
 
     GET /api/v1/clusters/{id}/kubernetes/storage[?namespace=]

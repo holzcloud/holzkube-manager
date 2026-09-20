@@ -2097,6 +2097,75 @@ export const clusterNetworkSchema = z.object({
   notice: z.string().default(''),
 })
 
+export const rbacSubjectSchema = z.object({
+  /** User, Group or ServiceAccount. */
+  kind: z.string().default(''),
+  namespace: z.string().default(''),
+  name: z.string().default(''),
+  /** Whether `exists` means anything: only a ServiceAccount can be checked, and
+   * a column saying "does not exist" for every OIDC user would teach that the
+   * column is noise. */
+  checkable: z.boolean().default(false),
+  exists: z.boolean().default(false),
+})
+
+export const bindingSummarySchema = z.object({
+  kind: z.string().default(''),
+  namespace: z.string().default(''),
+  name: z.string().default(''),
+  role_kind: z.string().default(''),
+  role_name: z.string().default(''),
+  /** False for a binding that grants nothing because the role it names is not
+   * there. RBAC has no referential integrity, so nothing else says this. */
+  role_exists: z.boolean().default(false),
+  subjects: z.array(rbacSubjectSchema).default([]),
+  /** Wildcard verbs on wildcard resources, whatever the role is called. */
+  administrative: z.boolean().default(false),
+  summary: z.string().default(''),
+  healthy: z.boolean().default(true),
+  created_at: z.string().default(''),
+})
+
+export const roleSummarySchema = z.object({
+  kind: z.string().default(''),
+  namespace: z.string().default(''),
+  name: z.string().default(''),
+  rules: z.array(z.string()).default([]),
+  administrative: z.boolean().default(false),
+  bound: z.number().default(0),
+  /** A role Kubernetes ships. There are about seventy and they are the same on
+   * every cluster, so a screen can fold them away. */
+  built_in: z.boolean().default(false),
+  created_at: z.string().default(''),
+})
+
+export const serviceAccountSummarySchema = z.object({
+  namespace: z.string().default(''),
+  name: z.string().default(''),
+  /** Every running pod that runs as it. The "default" account is what every pod
+   * naming none runs as. */
+  used_by: z.array(z.string()).default([]),
+  bindings: z.number().default(0),
+  administrative: z.boolean().default(false),
+  notice: z.string().default(''),
+  created_at: z.string().default(''),
+})
+
+export const accessControlSchema = z.object({
+  bindings: z.array(bindingSummarySchema).default([]),
+  roles: z.array(roleSummarySchema).default([]),
+  accounts: z.array(serviceAccountSummarySchema).default([]),
+  /** Every subject reaching wildcard-on-wildcard through some binding. Not a
+   * field anywhere in Kubernetes, and the first thing anybody wants to know. */
+  administrators: z.array(z.string()).default([]),
+  notice: z.string().default(''),
+})
+
+export type AccessControl = z.infer<typeof accessControlSchema>
+export type BindingSummary = z.infer<typeof bindingSummarySchema>
+export type RoleSummary = z.infer<typeof roleSummarySchema>
+export type ServiceAccountSummary = z.infer<typeof serviceAccountSummarySchema>
+
 export type ClusterStorage = z.infer<typeof clusterStorageSchema>
 export type VolumeSummary = z.infer<typeof volumeSummarySchema>
 export type ClaimSummary = z.infer<typeof claimSummarySchema>
@@ -3131,6 +3200,17 @@ export const api = {
         `/api/v1/clusters/${encodeURIComponent(cluster)}/kubernetes/pods/${encodeURIComponent(namespace)}/${encodeURIComponent(pod)}/exec`,
         execResultSchema,
         { container, command },
+      ),
+
+    /** Who may do what, and every binding that grants nothing. */
+    access: (cluster: string, namespace?: string) =>
+      sendJSON(
+        'GET',
+        `/api/v1/clusters/${encodeURIComponent(cluster)}/kubernetes/access` +
+          (namespace === undefined || namespace === ''
+            ? ''
+            : `?namespace=${encodeURIComponent(namespace)}`),
+        accessControlSchema,
       ),
 
     /** The cluster's volumes, claims and classes. The namespace narrows the
