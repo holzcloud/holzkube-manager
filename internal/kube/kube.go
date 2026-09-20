@@ -523,6 +523,17 @@ type Pod struct {
 	// CrashLoopBackOff, ImagePullBackOff, Evicted. Empty is normal.
 	Reason string `json:"reason"`
 
+	// What this pod asked for, summed across its containers. These are the
+	// numbers the SCHEDULER works with, and they exist on every cluster --
+	// unlike usage, which needs a metrics-server somebody installed.
+	//
+	// Empty means the pod asked for nothing, which is itself worth seeing: the
+	// scheduler places it blind and the kubelet evicts it first.
+	CPURequest    string `json:"cpu_request"`
+	MemoryRequest string `json:"memory_request"`
+	CPULimit      string `json:"cpu_limit"`
+	MemoryLimit   string `json:"memory_limit"`
+
 	CreatedAt string `json:"created_at"`
 }
 
@@ -566,6 +577,13 @@ func (c *Client) Pods(ctx context.Context, namespace string) ([]Pod, error) {
 		if pod.Containers == 0 {
 			pod.Containers = len(p.Spec.Containers)
 		}
+
+		// Summed across containers, including the init ones' maximum: that is
+		// how the scheduler computes a pod's request, and reporting only the
+		// ordinary containers would understate a pod with a heavy init step.
+		cpuReq, memReq, cpuLim, memLim := podResources(p)
+		pod.CPURequest, pod.MemoryRequest = cpuReq, memReq
+		pod.CPULimit, pod.MemoryLimit = cpuLim, memLim
 		out = append(out, pod)
 	}
 	return out, nil

@@ -1728,6 +1728,146 @@ INV-08 gives one layer down: an empty screen is a claim.
 | `upstream.no-kubernetes-endpoint` | 502 | no control-plane node could say where the API server is. The endpoint is read from a node's own machine configuration -- in the `KubeClusterConfig` document since Talos 1.14 -- rather than assembled from the address the cluster was adopted through. |
 | `upstream.kubernetes-unreachable` | 502 | the API server did not answer. |
 
+## How full a cluster is
+
+    GET /api/v1/clusters/{id}/kubernetes/capacity
+
+    {"cpu":{"allocatable":"12","requested":"4200m","percent":35},
+     "memory":{"allocatable":"46Gi","requested":"18Gi","percent":39},
+     "pods":{"allocatable":"330","requested":"74","percent":22},
+     "nodes":[{"name":"cp-1","ready":true,"cordoned":false,
+               "cpu":{"allocatable":"4","requested":"1400m","percent":35},
+               "memory":{...},"pods":{...},"pods_running":24}],
+     "notice":"Requested is what the pods asked for…"}
+
+**This is not the usage route and neither substitutes for the other.** Usage needs
+a metrics-server and Talos ships none, so on most clusters the usage answer is
+correctly "nobody is collecting this" — an honest sentence that reads exactly like
+nothing, which is what an operator reported: no resource information anywhere.
+
+This is the figure every cluster has: **allocatable against what the pods
+requested**. It is the scheduler's own arithmetic, so it is also what decides
+whether the next pod starts, which is the question behind "how full is it" more
+often than consumption is. A cluster at 90% requested and 5% used is
+over-reserved and will refuse work it could do; one at 20% requested and 95% used
+is about to fall over while looking empty. Those are opposite repairs, and a
+single number would send somebody the wrong way half the time.
+
+**`allocatable` is not the machine's size.** It is what the kubelet offers the
+scheduler: the machine minus what Talos and the system reserve.
+
+**`percent` is `-1`, never 0, when there is nothing to divide by.** A node that
+has not reported its allocatable is not a node at 0% full, and a client must show
+those differently.
+
+**A cordoned or unready node is left out of the cluster totals, and its pods are
+not.** Nothing new will be placed there, so counting its room would report space
+that does not exist; the pods already on it are still using it. Both flags are on
+every node row so a client can say which nodes were excluded and why.
+
+**Reservations are reproduced here because nothing reports them.** A node does not
+publish what has been reserved on it — that is the scheduler's arithmetic — so
+this sums the pods. `Succeeded` and `Failed` pods hold no reservation and are
+skipped, or a node would read as full because a CronJob ran a hundred times. An
+unscheduled pod is attributed to no node, which is usually *because* there is no
+room for it.
+
+**A pod's own requests and limits are on the pod row** in the overview, for the
+third level of the same question: which pod took the space. Init containers
+contribute their **maximum** rather than their sum, because they run one at a
+time — summing them overstates every pod that has more than one.
+
+## Stopping and starting a workload
+
+    POST /api/v1/clusters/{id}/kubernetes/workloads/{kind}/{ns}/{name}/stop
+    POST /api/v1/clusters/{id}/kubernetes/workloads/{kind}/{ns}/{name}/start
+
+    {"stopped":true,"would_start_with":3}
+
+**"Stop this pod" is not a thing Kubernetes has.** Deleting a pod does not stop
+it: its controller makes another within seconds — that is the whole point of a
+controller and it is why the restart button works. Stopping means telling the
+*controller* to want none, and what an operator means by "stop this service" is
+always the controller. A pod that nothing owns therefore has no stop, and that is
+said (`conflict.cannot-stop`) rather than the pod being deleted and the deletion
+called a stop.
+
+**Starting again needs a number nobody wrote down.** Scaling to zero throws the
+replica count away, and "start it again" then has no answer but 1 — which
+silently runs a three-replica service at a third at the moment somebody is
+restoring it. So the count is written onto the workload as the annotation
+`holzkube.holzcloud.ch/replicas-before-stop` **before** it goes to zero: an
+annotation that outlives a stop that did not happen is harmless, a stop whose
+count went missing is not.
+
+It lives on the object rather than in this product's store, deliberately: the
+cluster is the thing that knows, this installation can be reinstalled, and
+somebody using `kubectl` can see why their deployment has a strange annotation.
+Nothing written down means a start uses 1, and `would_start_with: 0` on the
+workload row is how a client says so before anybody presses.
+
+**A CronJob and a Job stop by being suspended**, which for them *is* stopping:
+they have no replicas, and a suspended CronJob keeps its schedule and runs
+nothing. One verb, the two ways Kubernetes expresses it.
+
+**A DaemonSet has no stop** (`conflict.cannot-stop`), and the refusal says what
+to do instead — cordon or drain the nodes. Its size is how many nodes match, so
+there is no count to set to zero. `stoppable` on the workload row says this per
+kind, for the same reason `scalable` does: a button the API server would refuse
+teaches that the buttons are suggestions.
+
+**Starting is `Destructive` too**, and that is not symmetry for its own sake:
+starting something somebody stopped deliberately is as much a change to what the
+cluster runs as stopping it was.
+
+## Clearing out what is finished
+
+    GET  /api/v1/clusters/{id}/kubernetes/sweep[?namespace=]
+    POST /api/v1/clusters/{id}/kubernetes/sweep   {"items":[…]}
+
+    {"items":[{"kind":"ReplicaSet","namespace":"default","name":"web-7c9",
+               "reason":"an older rollout of web, running nothing","age":"6 days"}],
+     "notice":"Only things that have finished…"}
+
+**The plan comes first and the plan is the feature.** Nothing here is
+recoverable, so the GET says what would be removed and removes nothing; the POST
+is a separate request. "It removed more than I expected" is the failure being
+prevented.
+
+**The POST removes exactly the list it is given**, rather than recomputing one.
+Between a plan and an apply somebody's CronJob can run, and a sweep that
+recomputed would remove things nobody saw in the list they approved.
+
+**Every row carries a reason**, because a list of names with no reasons is a list
+nobody can check before pressing the button.
+
+**What is deliberately not swept:** a pod that is `Pending`, `Running` or
+`Unknown` — `Unknown` especially, since it means a node stopped reporting rather
+than that the pod stopped; the **newest** ReplicaSet of a Deployment, which is
+what a rollback returns to; a Job a CronJob still owns, because that is the
+CronJob's own history and its `successfulJobsHistoryLimit` decides when it goes.
+Anything younger than an hour is left alone: a Job that finished a minute ago is
+one whose logs somebody may be reading right now, and those logs go with the pod.
+
+**At most 200 objects in one sweep** (`conflict.refused-kind`). The route issues
+one delete per item, so without a cap its cost is whatever a plan happened to
+contain — and a cluster with four hundred leftover pods is exactly the cluster
+somebody presses this on. The refusal means "do it in parts and look at each".
+
+**Something already gone counts as removed.** That was the outcome being asked
+for, and reporting it as a failure would make an ordinary race look like a fault.
+
+**Images are not in the list, and that is a fact about Talos rather than a
+decision.** The machine API can *list* the images on a node and has no delete.
+Image removal is the kubelet's own garbage collection, which runs when the disk
+crosses a threshold — so `notice` says who removes them. A button that claimed to
+delete images would do nothing at all.
+
+| code | HTTP | when |
+|---|---|---|
+| `conflict.cannot-stop` | 409 | the thing has no stop: a DaemonSet, whose size is how many nodes match, or a pod nothing owns, where removing it would be a deletion rather than a stop. The detail says what to do instead. |
+
+
 ## Rotating a cluster's certificate authority
 
 Three routes, and the split is the operation's safety rather than REST taste:

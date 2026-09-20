@@ -1016,6 +1016,71 @@ and no new listener is opened anywhere.
 `/healthz`" and "somebody read `/admin/users`" are different events. A response is
 cut at 1 MiB, and the cut is reported rather than made quietly.
 
+### How full the cluster is
+
+Three levels of the same question, on one screen: the cluster's totals, each
+node's, and each pod's own reservation.
+
+**This is not the same number as usage, and neither replaces the other.** Usage
+needs a metrics-server and Talos ships none, so the usage panel usually says —
+correctly — that nobody is collecting it. That is a true answer that reads exactly
+like nothing, which is how an operator came to report seeing no resource
+information at all.
+
+So the figure every cluster has is here too: **allocatable against what the pods
+requested**. It is the scheduler's own arithmetic, so it is also what decides
+whether the next pod starts. A cluster at 90% requested and 5% used is
+over-reserved and will refuse work it could do; one at 20% requested and 95% used
+is about to fall over while looking empty. Those are opposite repairs.
+
+**A node that has reported nothing says so**, rather than appearing as a node with
+all its room free. **A cordoned or unready node is left out of the cluster
+totals** — nothing new will be placed there — **and its pods are not**, because
+they are still on it. The screen says which nodes those were.
+
+### Stopping and starting a service
+
+**Stopping a pod is not something Kubernetes has.** Delete one and its controller
+makes another within seconds; that is the whole point of a controller, and it is
+why the restart button works at all. So **Stop** tells the controller to want
+none, and a pod nothing owns is refused with that said rather than deleted and
+the deletion called a stop.
+
+**Starting again restores the count it was running.** Scaling to zero throws that
+number away, so it is written onto the workload as an annotation before the scale
+— and the screen shows what a start would bring back *before* anybody presses it.
+A three-replica service therefore comes back as three, instead of silently as one.
+Where nothing recorded the count — something else scaled it down — the screen says
+that too, and a start runs one.
+
+A **CronJob** or **Job** stops by being suspended, which for them is exactly what
+stopping means: the schedule is kept and nothing runs. A **DaemonSet** has no
+stop, and the refusal says what to do instead — cordon or drain the nodes.
+
+### Clearing out what is finished
+
+A nightly CronJob leaves a finished Job and its pod behind every night. Each
+rollout leaves the previous ReplicaSet at zero replicas so it can be rolled back
+to, and the one before that. None of it runs, none of it reserves anything, and
+all of it makes every list harder to read.
+
+**The button does not delete.** It asks what *would* be removed and shows the list
+with a reason on every row; a second press on that list removes it. The list is
+sent back as it was shown rather than recomputed, because between the two a
+CronJob can run, and nobody should lose something they never saw in what they
+approved.
+
+**What is deliberately left alone:** a pod that is Pending, Running or Unknown —
+Unknown especially, since it means a node stopped reporting rather than that the
+pod stopped; the newest ReplicaSet of a Deployment, which is the way back; a Job
+a CronJob still owns, which is that CronJob's own history; and anything younger
+than an hour, because its logs go with it and somebody may be reading them.
+
+**Images are not in that list, and cannot be.** The Talos machine API can list the
+images on a node and has no delete — image removal is the kubelet's own garbage
+collection, which runs when the disk fills. The screen says so instead of
+offering a button that would do nothing.
+
 [client-go]: https://github.com/kubernetes/client-go
 
 ## What this product does not do
