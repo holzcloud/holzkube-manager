@@ -602,3 +602,21 @@ func (c *Client) Namespaces(ctx context.Context) ([]string, error) {
 	}
 	return out, nil
 }
+
+// listOrEmpty turns a nil slice into an empty one.
+//
+// A nil slice marshals to `null`, and the browser's schemas default a MISSING
+// field rather than an explicit null -- so a null where a list belongs is not a
+// missing value, it is a screen that shows a parse error instead of a page. That
+// is how ledger 162 shipped: every list in every Kubernetes answer that happened
+// to be empty came back as null.
+//
+// Used where a lookup into a map is the value: `m[k]` on a missing key is exactly
+// the nil this exists to stop. Where a slice is built in one place, it is made
+// with make() at its declaration instead, which is clearer at the point of use.
+func listOrEmpty[T any](values []T) []T {
+	if values == nil {
+		return []T{}
+	}
+	return values
+}

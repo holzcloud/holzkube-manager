@@ -117,6 +117,10 @@ func (c *Client) Capacity(ctx context.Context) (ClusterCapacity, error) {
 	}
 
 	out := ClusterCapacity{
+		// Built empty rather than left nil: a nil slice marshals to null, and a
+		// cluster with no nodes is a cluster with no nodes rather than an answer
+		// the client cannot read at all.
+		Nodes: make([]NodeCapacity, 0, len(nodes.Items)),
 		Notice: "Requested is what the pods asked for, which is what the scheduler reserves and " +
 			"what decides whether the next pod starts. It is not what anything is using: for " +
 			"that a metrics-server has to be installed.",
