@@ -60,6 +60,7 @@ import (
 	discoveryv1 "k8s.io/api/discovery/v1"
 	networkingv1 "k8s.io/api/networking/v1"
 	policyv1 "k8s.io/api/policy/v1"
+	rbacv1 "k8s.io/api/rbac/v1"
 	storagev1 "k8s.io/api/storage/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -114,6 +115,11 @@ type Options struct {
 	// Storage: the cluster-scoped half the claim list cannot show.
 	Volumes        []Volume
 	StorageClasses []StorageClass
+
+	// Access control: who may do what, and the bindings that grant nothing.
+	Roles           []Role
+	RoleBindings    []RoleBinding
+	ServiceAccounts []ServiceAccount
 
 	// Networking: what is behind a Service, and what is allowed to reach it.
 	EndpointSlices  []EndpointSlice
@@ -264,6 +270,11 @@ type Pod struct {
 	// case those screens exist for: a selector that matches nothing.
 	Labels map[string]string
 
+	// ServiceAccount the pod runs as. Empty means "default", which is what
+	// every pod that names none runs as -- and the reason a permission granted
+	// to that account reaches things nobody intended.
+	ServiceAccount string
+
 	// Claims are the PersistentVolumeClaims this pod mounts, by name in its own
 	// namespace. What makes "who is using this claim" measurable: nothing but
 	// the pods knows it.
@@ -401,6 +412,53 @@ type IngressClass struct {
 	Default    bool
 }
 
+// Role is a Role or a ClusterRole as a test describes it.
+//
+// Rules as three lists, because the claim worth measuring is that wildcard verbs
+// AND wildcard groups AND wildcard resources in ONE rule is administrative, while
+// wildcards spread across several rules are not -- "* verbs on configmaps" and
+// "get on *" are both ordinary, and a check that ORed them would report half the
+// cluster's built-in roles as administrative and therefore report nothing.
+type Role struct {
+	// Namespace empty makes it a ClusterRole.
+	Namespace string
+	Name      string
+	Verbs     []string
+	APIGroups []string
+	Resources []string
+	// NonResourceURLs for a rule about /healthz rather than about anything in
+	// the cluster, which is not administration of it.
+	NonResourceURLs []string
+	// BuiltIn marks it the way Kubernetes marks its own seventy.
+	BuiltIn bool
+}
+
+// RoleBinding is a RoleBinding or a ClusterRoleBinding as a test describes it.
+type RoleBinding struct {
+	// Namespace empty makes it a ClusterRoleBinding.
+	Namespace string
+	Name      string
+	// RoleKind is "Role" or "ClusterRole"; RoleName may deliberately name one
+	// that does not exist, which is the case this exists for.
+	RoleKind string
+	RoleName string
+	Subjects []BindingSubject
+}
+
+// BindingSubject is one subject of a binding.
+type BindingSubject struct {
+	// Kind is User, Group or ServiceAccount.
+	Kind      string
+	Namespace string
+	Name      string
+}
+
+// ServiceAccount is one as a test describes it.
+type ServiceAccount struct {
+	Namespace string
+	Name      string
+}
+
 // Resource is one non-volume, non-workload object, as a test describes it.
 //
 // One struct with a Kind field here, unlike the workload kinds: these are
@@ -533,6 +591,9 @@ type Server struct {
 	slices       []EndpointSlice
 	policies     []NetworkPolicy
 	ingclasses   []IngressClass
+	roles        []Role
+	bindings     []RoleBinding
+	accounts     []ServiceAccount
 	statefulSets []StatefulSet
 	daemonSets   []DaemonSet
 	jobs         []Job
@@ -585,6 +646,9 @@ func New(opts Options) (*Server, error) {
 		slices:            append([]EndpointSlice(nil), opts.EndpointSlices...),
 		policies:          append([]NetworkPolicy(nil), opts.NetworkPolicies...),
 		ingclasses:        append([]IngressClass(nil), opts.IngressClasses...),
+		roles:             append([]Role(nil), opts.Roles...),
+		bindings:          append([]RoleBinding(nil), opts.RoleBindings...),
+		accounts:          append([]ServiceAccount(nil), opts.ServiceAccounts...),
 		events:            append([]Event(nil), opts.Events...),
 		statefulSets:      append([]StatefulSet(nil), opts.StatefulSets...),
 		daemonSets:        append([]DaemonSet(nil), opts.DaemonSets...),
@@ -767,6 +831,22 @@ func (s *Server) routes() http.Handler {
 	}))
 	mux.HandleFunc("/apis/batch/v1/namespaces/", s.record(s.serveBatchNamespaced))
 	mux.HandleFunc("/apis/apps/v1/namespaces/", s.record(s.serveAppsNamespaced))
+	mux.HandleFunc("/apis/rbac.authorization.k8s.io/v1/roles", s.record(func(w http.ResponseWriter, _ *http.Request) {
+		s.writeRoles(w, "", false)
+	}))
+	mux.HandleFunc("/apis/rbac.authorization.k8s.io/v1/clusterroles", s.record(func(w http.ResponseWriter, _ *http.Request) {
+		s.writeRoles(w, "", true)
+	}))
+	mux.HandleFunc("/apis/rbac.authorization.k8s.io/v1/rolebindings", s.record(func(w http.ResponseWriter, _ *http.Request) {
+		s.writeBindings(w, "", false)
+	}))
+	mux.HandleFunc("/apis/rbac.authorization.k8s.io/v1/clusterrolebindings", s.record(func(w http.ResponseWriter, _ *http.Request) {
+		s.writeBindings(w, "", true)
+	}))
+	mux.HandleFunc("/apis/rbac.authorization.k8s.io/v1/namespaces/", s.record(s.serveRBACNamespaced))
+	mux.HandleFunc("/api/v1/serviceaccounts", s.record(func(w http.ResponseWriter, _ *http.Request) {
+		s.writeServiceAccounts(w, "")
+	}))
 	mux.HandleFunc("/api/v1/persistentvolumes", s.record(func(w http.ResponseWriter, _ *http.Request) {
 		s.writeVolumes(w)
 	}))
@@ -934,6 +1014,8 @@ func (s *Server) serveNamespaced(w http.ResponseWriter, r *http.Request) {
 		s.serveObject(w, r, "configmaps", ns, parts[1])
 	case len(parts) == 1 && parts[0] == "services":
 		s.writeServices(w, ns)
+	case len(parts) == 1 && parts[0] == "serviceaccounts":
+		s.writeServiceAccounts(w, ns)
 	case len(parts) >= 2 && parts[0] == "services":
 		s.serveService(w, r, ns, parts[1], parts[2:])
 	default:
@@ -1225,7 +1307,7 @@ func renderPod(p Pod) corev1.Pod {
 		meta.Annotations = map[string]string{corev1.MirrorPodAnnotationKey: "true"}
 	}
 
-	spec := corev1.PodSpec{NodeName: p.Node}
+	spec := corev1.PodSpec{NodeName: p.Node, ServiceAccountName: p.ServiceAccount}
 	for _, name := range names {
 		spec.Containers = append(spec.Containers, corev1.Container{Name: name, Image: p.Image})
 	}
@@ -3181,6 +3263,159 @@ func (s *Server) serveDiscoveryNamespaced(w http.ResponseWriter, r *http.Request
 	if len(parts) == 2 && parts[1] == "endpointslices" {
 		s.writeEndpointSlices(w, parts[0])
 		return
+	}
+	s.writeStatus(w, http.StatusNotFound, metav1.StatusReasonNotFound, "not found: "+r.URL.Path)
+}
+
+// Access control (2026-09-20).
+//
+// The cases worth rendering are the ones where two objects disagree: a binding
+// naming a role that is not there, a binding naming a service account that was
+// never created. Both grant nothing and look exactly like ones that work, because
+// RBAC has no referential integrity -- so a fake that refused to store them could
+// not measure the finding at all.
+
+func (s *Server) writeRoles(w http.ResponseWriter, namespace string, cluster bool) {
+	s.mu.Lock()
+	roles := append([]Role(nil), s.roles...)
+	s.mu.Unlock()
+
+	rule := func(r Role) rbacv1.PolicyRule {
+		return rbacv1.PolicyRule{
+			Verbs:           r.Verbs,
+			APIGroups:       r.APIGroups,
+			Resources:       r.Resources,
+			NonResourceURLs: r.NonResourceURLs,
+		}
+	}
+	labelsFor := func(r Role) map[string]string {
+		if !r.BuiltIn {
+			return nil
+		}
+		return map[string]string{"kubernetes.io/bootstrapping": "rbac-defaults"}
+	}
+
+	if cluster {
+		list := rbacv1.ClusterRoleList{
+			TypeMeta: metav1.TypeMeta{APIVersion: "rbac.authorization.k8s.io/v1", Kind: "ClusterRoleList"},
+		}
+		for _, r := range roles {
+			if r.Namespace != "" {
+				continue
+			}
+			list.Items = append(list.Items, rbacv1.ClusterRole{
+				TypeMeta:   metav1.TypeMeta{APIVersion: "rbac.authorization.k8s.io/v1", Kind: "ClusterRole"},
+				ObjectMeta: metav1.ObjectMeta{Name: r.Name, Labels: labelsFor(r)},
+				Rules:      []rbacv1.PolicyRule{rule(r)},
+			})
+		}
+		writeJSON(w, http.StatusOK, list)
+		return
+	}
+
+	list := rbacv1.RoleList{
+		TypeMeta: metav1.TypeMeta{APIVersion: "rbac.authorization.k8s.io/v1", Kind: "RoleList"},
+	}
+	for _, r := range roles {
+		if r.Namespace == "" || (namespace != "" && r.Namespace != namespace) {
+			continue
+		}
+		list.Items = append(list.Items, rbacv1.Role{
+			TypeMeta:   metav1.TypeMeta{APIVersion: "rbac.authorization.k8s.io/v1", Kind: "Role"},
+			ObjectMeta: metav1.ObjectMeta{Name: r.Name, Namespace: r.Namespace, Labels: labelsFor(r)},
+			Rules:      []rbacv1.PolicyRule{rule(r)},
+		})
+	}
+	writeJSON(w, http.StatusOK, list)
+}
+
+func (s *Server) writeBindings(w http.ResponseWriter, namespace string, cluster bool) {
+	s.mu.Lock()
+	bindings := append([]RoleBinding(nil), s.bindings...)
+	s.mu.Unlock()
+
+	subjectsOf := func(b RoleBinding) []rbacv1.Subject {
+		out := make([]rbacv1.Subject, 0, len(b.Subjects))
+		for _, subject := range b.Subjects {
+			out = append(out, rbacv1.Subject{
+				Kind: subject.Kind, Namespace: subject.Namespace, Name: subject.Name,
+			})
+		}
+		return out
+	}
+	refOf := func(b RoleBinding) rbacv1.RoleRef {
+		return rbacv1.RoleRef{
+			APIGroup: rbacv1.GroupName, Kind: b.RoleKind, Name: b.RoleName,
+		}
+	}
+
+	if cluster {
+		list := rbacv1.ClusterRoleBindingList{
+			TypeMeta: metav1.TypeMeta{APIVersion: "rbac.authorization.k8s.io/v1", Kind: "ClusterRoleBindingList"},
+		}
+		for _, b := range bindings {
+			if b.Namespace != "" {
+				continue
+			}
+			list.Items = append(list.Items, rbacv1.ClusterRoleBinding{
+				TypeMeta:   metav1.TypeMeta{APIVersion: "rbac.authorization.k8s.io/v1", Kind: "ClusterRoleBinding"},
+				ObjectMeta: metav1.ObjectMeta{Name: b.Name},
+				RoleRef:    refOf(b), Subjects: subjectsOf(b),
+			})
+		}
+		writeJSON(w, http.StatusOK, list)
+		return
+	}
+
+	list := rbacv1.RoleBindingList{
+		TypeMeta: metav1.TypeMeta{APIVersion: "rbac.authorization.k8s.io/v1", Kind: "RoleBindingList"},
+	}
+	for _, b := range bindings {
+		if b.Namespace == "" || (namespace != "" && b.Namespace != namespace) {
+			continue
+		}
+		list.Items = append(list.Items, rbacv1.RoleBinding{
+			TypeMeta:   metav1.TypeMeta{APIVersion: "rbac.authorization.k8s.io/v1", Kind: "RoleBinding"},
+			ObjectMeta: metav1.ObjectMeta{Name: b.Name, Namespace: b.Namespace},
+			RoleRef:    refOf(b), Subjects: subjectsOf(b),
+		})
+	}
+	writeJSON(w, http.StatusOK, list)
+}
+
+func (s *Server) writeServiceAccounts(w http.ResponseWriter, namespace string) {
+	s.mu.Lock()
+	accounts := append([]ServiceAccount(nil), s.accounts...)
+	s.mu.Unlock()
+
+	list := corev1.ServiceAccountList{
+		TypeMeta: metav1.TypeMeta{APIVersion: "v1", Kind: "ServiceAccountList"},
+	}
+	for _, a := range accounts {
+		if namespace != "" && a.Namespace != namespace {
+			continue
+		}
+		list.Items = append(list.Items, corev1.ServiceAccount{
+			TypeMeta:   metav1.TypeMeta{APIVersion: "v1", Kind: "ServiceAccount"},
+			ObjectMeta: metav1.ObjectMeta{Name: a.Name, Namespace: a.Namespace},
+		})
+	}
+	writeJSON(w, http.StatusOK, list)
+}
+
+// serveRBACNamespaced answers the namespaced role and binding lists.
+func (s *Server) serveRBACNamespaced(w http.ResponseWriter, r *http.Request) {
+	trimmed := strings.TrimPrefix(r.URL.Path, "/apis/rbac.authorization.k8s.io/v1/namespaces/")
+	parts := strings.Split(strings.Trim(trimmed, "/"), "/")
+	if len(parts) == 2 {
+		switch parts[1] {
+		case "roles":
+			s.writeRoles(w, parts[0], false)
+			return
+		case "rolebindings":
+			s.writeBindings(w, parts[0], false)
+			return
+		}
 	}
 	s.writeStatus(w, http.StatusNotFound, metav1.StatusReasonNotFound, "not found: "+r.URL.Path)
 }

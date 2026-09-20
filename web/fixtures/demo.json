@@ -480,13 +480,19 @@
     "cluster": "c-homelab",
     "server_version": "v1.36.4",
     "namespace": "",
-    "namespaces": ["default", "kube-system", "longhorn-system"],
+    "namespaces": [
+      "default",
+      "kube-system",
+      "longhorn-system"
+    ],
     "nodes": [
       {
         "name": "srv-rsp-prod01.holzcloud.ch",
         "ready": "True",
         "unschedulable": false,
-        "roles": ["control-plane"],
+        "roles": [
+          "control-plane"
+        ],
         "kubelet_version": "v1.36.4",
         "os_image": "Talos (v1.14.2)",
         "created_at": "2026-09-01T08:04:00Z",
@@ -615,8 +621,14 @@
       "name": "raspberry-pi-5-mit-nvme",
       "talos_version": "v1.14.2",
       "canonical": "376567988ad370138ad8b2698212367b8edcb69b5fd68c80be1f2ec7d603b4ba",
-      "extensions": ["siderolabs/iscsi-tools", "siderolabs/util-linux-tools"],
-      "kernel_args": ["console=ttyAMA0,115200", "talos.dashboard.disabled=1"],
+      "extensions": [
+        "siderolabs/iscsi-tools",
+        "siderolabs/util-linux-tools"
+      ],
+      "kernel_args": [
+        "console=ttyAMA0,115200",
+        "talos.dashboard.disabled=1"
+      ],
       "meta": [],
       "usable": true,
       "probed_at": "2026-09-18T12:00:00Z",
@@ -754,7 +766,10 @@
           "mtu": 1500,
           "up": true,
           "speed_mbit": 1000,
-          "addresses": ["192.168.0.30/24", "fe80::2ecf:67ff:fe1a:4b9e/64"],
+          "addresses": [
+            "192.168.0.30/24",
+            "fe80::2ecf:67ff:fe1a:4b9e/64"
+          ],
           "driver": "bcmgenet",
           "kind": ""
         },
@@ -764,7 +779,9 @@
           "mtu": 1450,
           "up": true,
           "speed_mbit": 0,
-          "addresses": ["10.244.0.1/24"],
+          "addresses": [
+            "10.244.0.1/24"
+          ],
           "driver": "",
           "kind": "bridge"
         }
@@ -1243,7 +1260,9 @@
         "claim": "db/postgres-data",
         "storage_class": "longhorn",
         "reclaim_policy": "Delete",
-        "access_modes": ["RWO"],
+        "access_modes": [
+          "RWO"
+        ],
         "driver": "driver.longhorn.io",
         "notice": "",
         "created_at": "2026-09-02T09:00:00Z"
@@ -1255,7 +1274,9 @@
         "claim": "",
         "storage_class": "longhorn",
         "reclaim_policy": "Retain",
-        "access_modes": ["RWO"],
+        "access_modes": [
+          "RWO"
+        ],
         "driver": "driver.longhorn.io",
         "notice": "Its claim is gone and the data is still on the disk, kept because the reclaim policy is Retain. Nothing counts it and nothing will use it until somebody either makes a claim for it or deletes it.",
         "created_at": "2026-06-14T21:10:00Z"
@@ -1270,8 +1291,12 @@
         "capacity": "20Gi",
         "storage_class": "longhorn",
         "volume": "pvc-8f3a1c92-longhorn-db-postgres-data",
-        "access_modes": ["RWO"],
-        "used_by": ["db/postgres-0"],
+        "access_modes": [
+          "RWO"
+        ],
+        "used_by": [
+          "db/postgres-0"
+        ],
         "expandable": true,
         "notice": "",
         "created_at": "2026-09-02T09:00:00Z"
@@ -1284,7 +1309,9 @@
         "capacity": "",
         "storage_class": "local-path",
         "volume": "",
-        "access_modes": ["RWO"],
+        "access_modes": [
+          "RWO"
+        ],
         "used_by": [],
         "expandable": false,
         "notice": "Its class waits for a consumer, so it stays Pending until a pod that uses it is scheduled. That is the class working as configured, not a fault.",
@@ -1321,7 +1348,9 @@
         "type": "ClusterIP",
         "cluster_ip": "10.96.184.203",
         "external": "",
-        "ports": ["http 80/TCP → 8080"],
+        "ports": [
+          "http 80/TCP → 8080"
+        ],
         "selector": "app.kubernetes.io/name=internal-api",
         "endpoints": 0,
         "ready_endpoints": 0,
@@ -1335,7 +1364,9 @@
         "type": "ClusterIP",
         "cluster_ip": "10.96.0.42",
         "external": "",
-        "ports": ["http 80/TCP → 8080"],
+        "ports": [
+          "http 80/TCP → 8080"
+        ],
         "selector": "app=website",
         "endpoints": 2,
         "ready_endpoints": 1,
@@ -1349,7 +1380,10 @@
         "type": "LoadBalancer",
         "cluster_ip": "10.96.0.77",
         "external": "waiting for an address",
-        "ports": ["http 80/TCP → 80 (node 30080)", "https 443/TCP → 443 (node 30443)"],
+        "ports": [
+          "http 80/TCP → 80 (node 30080)",
+          "https 443/TCP → 443 (node 30443)"
+        ],
         "selector": "app.kubernetes.io/name=ingress-nginx",
         "endpoints": 1,
         "ready_endpoints": 1,
@@ -1363,7 +1397,9 @@
         "namespace": "db",
         "name": "postgres-inbound-only",
         "applies": "app=postgres",
-        "types": ["Ingress"],
+        "types": [
+          "Ingress"
+        ],
         "selects": 1,
         "isolating": true,
         "summary": "Restricts inbound traffic to 1 pods. Outbound traffic from them is not restricted at all.",
@@ -1374,7 +1410,10 @@
         "namespace": "default",
         "name": "internal-api-lockdown",
         "applies": "app.kubernetes.io/name=internal-api",
-        "types": ["Ingress", "Egress"],
+        "types": [
+          "Ingress",
+          "Egress"
+        ],
         "selects": 0,
         "isolating": false,
         "summary": "It matches no pod in default, so it protects nothing. A policy that selects nothing is worse than none: somebody believes this is in force.",
@@ -1382,9 +1421,176 @@
         "created_at": "2026-09-18T07:30:00Z"
       }
     ],
-    "unprotected": ["kube-system", "monitoring"],
-    "ingress_classes": ["nginx"],
+    "unprotected": [
+      "kube-system",
+      "monitoring"
+    ],
+    "ingress_classes": [
+      "nginx"
+    ],
     "default_ingress_class": "nginx",
     "notice": "Endpoints are counted from EndpointSlices, which is what the kube-proxy on each node actually load-balances to. A Service with none refuses every connection instantly, and nothing else about it looks wrong."
+  },
+  "/api/v1/clusters/c-homelab/kubernetes/access": {
+    "bindings": [
+      {
+        "kind": "ClusterRoleBinding",
+        "namespace": "",
+        "name": "holzcloud-platform-operators",
+        "role_kind": "ClusterRole",
+        "role_name": "platform-operator",
+        "role_exists": true,
+        "subjects": [
+          {
+            "kind": "ServiceAccount",
+            "namespace": "ci",
+            "name": "github-actions-deployer",
+            "checkable": true,
+            "exists": true
+          },
+          {
+            "kind": "User",
+            "namespace": "",
+            "name": "holz@holzcloud.ch",
+            "checkable": false,
+            "exists": false
+          }
+        ],
+        "administrative": true,
+        "summary": "Grants platform-operator, which permits every verb on every resource.",
+        "healthy": true,
+        "created_at": "2026-05-01T12:00:00Z"
+      },
+      {
+        "kind": "RoleBinding",
+        "namespace": "monitoring",
+        "name": "prometheus-metrics-reader",
+        "role_kind": "Role",
+        "role_name": "metrics-readr",
+        "role_exists": false,
+        "subjects": [
+          {
+            "kind": "ServiceAccount",
+            "namespace": "monitoring",
+            "name": "prometheus",
+            "checkable": true,
+            "exists": true
+          }
+        ],
+        "administrative": false,
+        "summary": "It names Role metrics-readr, which does not exist, so it grants nothing at all. RBAC does not check this: a binding may be written before its role, and one written after its role was removed looks the same.",
+        "healthy": false,
+        "created_at": "2026-09-18T07:30:00Z"
+      },
+      {
+        "kind": "RoleBinding",
+        "namespace": "web",
+        "name": "website-config-reader",
+        "role_kind": "Role",
+        "role_name": "config-reader",
+        "role_exists": true,
+        "subjects": [
+          {
+            "kind": "ServiceAccount",
+            "namespace": "web",
+            "name": "deleted-long-ago",
+            "checkable": true,
+            "exists": false
+          }
+        ],
+        "administrative": false,
+        "summary": "Every service account it names is missing, so it grants nothing.",
+        "healthy": false,
+        "created_at": "2026-07-02T10:00:00Z"
+      }
+    ],
+    "roles": [
+      {
+        "kind": "ClusterRole",
+        "namespace": "",
+        "name": "platform-operator",
+        "rules": [
+          "everything on every resource"
+        ],
+        "administrative": true,
+        "bound": 1,
+        "built_in": false,
+        "created_at": "2026-05-01T12:00:00Z"
+      },
+      {
+        "kind": "Role",
+        "namespace": "web",
+        "name": "config-reader",
+        "rules": [
+          "get, list, watch on configmaps"
+        ],
+        "administrative": false,
+        "bound": 1,
+        "built_in": false,
+        "created_at": "2026-07-02T10:00:00Z"
+      },
+      {
+        "kind": "ClusterRole",
+        "namespace": "",
+        "name": "cluster-admin",
+        "rules": [
+          "everything on every resource"
+        ],
+        "administrative": true,
+        "bound": 0,
+        "built_in": true,
+        "created_at": "2026-05-01T12:00:00Z"
+      },
+      {
+        "kind": "ClusterRole",
+        "namespace": "",
+        "name": "system:node",
+        "rules": [
+          "get, list, watch on nodes, pods, services"
+        ],
+        "administrative": false,
+        "bound": 0,
+        "built_in": true,
+        "created_at": "2026-05-01T12:00:00Z"
+      }
+    ],
+    "accounts": [
+      {
+        "namespace": "ci",
+        "name": "github-actions-deployer",
+        "used_by": [],
+        "bindings": 1,
+        "administrative": true,
+        "notice": "Bound to a role permitting every verb on every resource.",
+        "created_at": "2026-05-01T12:00:00Z"
+      },
+      {
+        "namespace": "default",
+        "name": "default",
+        "used_by": [
+          "default/holzcloud-website-7c65d6cfc9-x4m2p"
+        ],
+        "bindings": 0,
+        "administrative": false,
+        "notice": "The account pods in default run as when they name none.",
+        "created_at": "2026-05-01T12:00:00Z"
+      },
+      {
+        "namespace": "monitoring",
+        "name": "prometheus",
+        "used_by": [
+          "monitoring/prometheus-server-0"
+        ],
+        "bindings": 1,
+        "administrative": false,
+        "notice": "",
+        "created_at": "2026-06-14T21:10:00Z"
+      }
+    ],
+    "administrators": [
+      "ServiceAccount ci/github-actions-deployer",
+      "User holz@holzcloud.ch"
+    ],
+    "notice": "A binding that names a role or a service account which does not exist grants nothing, and looks exactly like one that works: RBAC has no referential integrity, deliberately, so that a binding may be written before its role. Administrative means wildcard verbs on wildcard resources, whatever the role is called -- looking for the name cluster-admin would miss every hand-written role with the same power."
   }
 }
