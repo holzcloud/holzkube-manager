@@ -368,6 +368,14 @@ func KubernetesRoutes(d httpapi.Deps) []httpapi.Route {
 		},
 		{
 			Method:          http.MethodGet,
+			Pattern:         "/api/v1/clusters/{id}/kubernetes/inventory",
+			RequiresSession: true,
+			MinRole:         model.RoleReader,
+			Action:          "cluster.kubernetes-inventory",
+			Handler:         handler(kubernetesInventory(d)),
+		},
+		{
+			Method:          http.MethodGet,
 			Pattern:         "/api/v1/clusters/{id}/kubernetes/access",
 			RequiresSession: true,
 			// An operator rather than a reader: this answer names who is an
@@ -449,6 +457,28 @@ func KubernetesRoutes(d httpapi.Deps) []httpapi.Route {
 }
 
 // kubernetesCapacity answers how full the cluster and each node is.
+// kubernetesInventory answers every namespace, its quotas, and the cluster's own
+// kinds.
+//
+// No namespace parameter: the answer IS the namespaces, and narrowing it to one
+// would be a screen that cannot show the namespace somebody is looking for.
+func kubernetesInventory(d httpapi.Deps) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		client, ctx, cancel, ok := kubeClientFor(d, w, r)
+		if !ok {
+			return
+		}
+		defer cancel()
+
+		inventory, err := client.Inventory(ctx)
+		if err != nil {
+			writeKubernetesError(w, r, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, inventory)
+	}
+}
+
 // kubernetesAccess answers who may do what in the cluster.
 //
 // The namespace narrows the namespaced objects only: a ClusterRoleBinding is not

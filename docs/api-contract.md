@@ -1728,6 +1728,81 @@ INV-08 gives one layer down: an empty screen is a claim.
 | `upstream.no-kubernetes-endpoint` | 502 | no control-plane node could say where the API server is. The endpoint is read from a node's own machine configuration -- in the `KubeClusterConfig` document since Talos 1.14 -- rather than assembled from the address the cluster was adopted through. |
 | `upstream.kubernetes-unreachable` | 502 | the API server did not answer. |
 
+## Namespaces, quotas and the cluster's own kinds
+
+    GET /api/v1/clusters/{id}/kubernetes/inventory
+
+    {"namespaces":[{"name":"old-staging","phase":"Terminating","pods_running":0,
+                    "quotas":[],"has_limit_range":false,"healthy":false,
+                    "notice":"It has been deleted and something in it will not go…"},
+                   {"name":"ci","phase":"Active","pods_running":2,
+                    "quotas":[{"quota":"build-quota","resource":"cpu",
+                               "used":"4","hard":"4","percent":100}],
+                    "has_limit_range":true,"healthy":false,
+                    "notice":"Its quota is full on cpu…"}],
+     "custom_kinds":[{"group":"longhorn.io","kind":"Volume","versions":["v1beta2"],
+                      "stored":"v1beta2","scope":"Namespaced","established":true}],
+     "notice":"A quota's used figure is what the namespace has reserved…"}
+
+**No namespace parameter.** The answer *is* the namespaces, and narrowing it to one
+would be a screen that cannot show the namespace somebody is looking for.
+
+**A namespace stuck `Terminating` is the first finding.** Something in it has a
+finalizer nothing will clear, so it hangs — for weeks, in practice — the name cannot
+be reused, and every attempt to recreate it fails with "already exists" while every
+attempt to use it fails too. `kubectl get ns` shows the word and nothing about what
+is holding it. The API server's own condition message does, and `notice` carries
+that; where no condition has been written yet, it says so rather than leaving a
+blank, because the first seconds of a deletion are not the same as nothing holding
+it.
+
+**A full ResourceQuota is the second, and the refusal lands somewhere else.** It is
+why the next pod is refused, and the pod's own event says "exceeded quota" in a
+namespace whose quota nothing on any screen showed — the most confusing refusal in
+Kubernetes after an unbound claim. Only the resources that are actually full are
+named; a quota at 6Gi of 8Gi is ordinary and naming it would bury the one that
+matters.
+
+**A compute quota with no LimitRange is the combination nobody expects.** Every pod
+that does not set requests is refused — not for being too big, but because the quota
+cannot account for a pod that asked for nothing. The error says "must specify
+limits", which reads as the pod being wrong; it is the namespace that is
+half-configured. Only `cpu` and `memory` quotas do this: a quota on
+`count/pods` or `persistentvolumeclaims` does not, and warning about it would warn
+on most namespaces that have a quota at all.
+
+**Quotas are read from `status`, not `spec`.** Status is where the API server
+reports what is in force and what is used; a client reading spec would report a
+quota as empty the moment somebody edited it.
+
+**The quota lines come back sorted.** They are built from a map, whose order Go
+randomises, and an unsorted answer makes the screen shuffle on every refresh so
+nothing is findable twice.
+
+**`pods_running` excludes finished pods**, so an empty namespace reads as empty
+rather than as a name — and a namespace whose CronJob has run two hundred times
+does not read as busy.
+
+**The cluster's own kinds are listed because the object route can already read
+them.** A CustomResourceDefinition this build has never heard of works through the
+cluster's own discovery; what was missing was finding out which ones exist, and a
+cluster's operators keep their state in them.
+
+**`established: false` is a kind every manifest naming it is refused for**, and
+nothing else in a cluster says so. A definition waits like this while its
+conversion webhook is unreachable.
+
+**A version the API server does not serve is left out.** Listing it would send
+somebody to a version every request for which is refused.
+
+**Objects are not counted per kind.** That would be one list call per definition on
+a cluster that can have two hundred, and a screen's worth of numbers nobody asked
+for is not worth a request storm.
+
+**A cluster that does not let this identity read apiextensions answers no kinds
+rather than failing.** That is not a failure of the namespace screen, and the
+client says both readings of an empty list.
+
 ## Who may do what
 
     GET /api/v1/clusters/{id}/kubernetes/access[?namespace=]
