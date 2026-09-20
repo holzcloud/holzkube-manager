@@ -7,6 +7,16 @@ import { imagesRoute } from '@/routes/images'
 import { indexRoute } from '@/routes/index'
 import { jobsRoute } from '@/routes/jobs'
 import { kubernetesRoute } from '@/routes/kubernetes'
+import { kubernetesAccessRoute } from '@/routes/kubernetes/access'
+import { kubernetesConfigRoute } from '@/routes/kubernetes/config'
+import { kubernetesEventsRoute } from '@/routes/kubernetes/events'
+import { kubernetesMaintenanceRoute } from '@/routes/kubernetes/maintenance'
+import { kubernetesNamespacesRoute } from '@/routes/kubernetes/namespaces'
+import { kubernetesNetworkRoute } from '@/routes/kubernetes/network'
+import { kubernetesOverviewRoute } from '@/routes/kubernetes/overview'
+import { kubernetesPodsRoute } from '@/routes/kubernetes/pods'
+import { kubernetesStorageRoute } from '@/routes/kubernetes/storage'
+import { kubernetesWorkloadsRoute } from '@/routes/kubernetes/workloads'
 import { loginRoute } from '@/routes/login'
 import { nodeDetailRoute } from '@/routes/node-detail'
 import { nodesRoute } from '@/routes/nodes'
@@ -35,7 +45,18 @@ const routeTree = rootRoute.addChildren([
     nodesRoute,
     nodeDetailRoute,
     clustersRoute,
-    kubernetesRoute,
+    kubernetesRoute.addChildren([
+      kubernetesOverviewRoute,
+      kubernetesWorkloadsRoute,
+      kubernetesPodsRoute,
+      kubernetesStorageRoute,
+      kubernetesNetworkRoute,
+      kubernetesConfigRoute,
+      kubernetesNamespacesRoute,
+      kubernetesAccessRoute,
+      kubernetesEventsRoute,
+      kubernetesMaintenanceRoute,
+    ]),
     jobsRoute,
     configRoute,
     provisionRoute,
