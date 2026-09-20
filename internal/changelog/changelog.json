@@ -1,5 +1,23 @@
 [
   {
+    "version": "v1.28.1",
+    "date": "2026-09-20",
+    "changes": [
+      {
+        "icon": "💬",
+        "text": "A warning on the wall said \"Failed Pod/dupl-test\" and nothing about WHY. The cluster's own sentence — the only part of a warning with any content in it — was being fetched, carried through the API and then not drawn. It is on the screen now."
+      },
+      {
+        "icon": "📱",
+        "text": "On a phone the wall had a black gap between the tiles and the footer, so scrolling down landed in nothing. The layout fills a fixed screen only where it cannot scroll."
+      },
+      {
+        "icon": "🟩",
+        "text": "The wall spells out what a square is: one workload — a deployment, statefulset, daemonset, job or cronjob — and not a single pod."
+      }
+    ]
+  },
+  {
     "version": "v1.28.0",
     "date": "2026-09-20",
     "changes": [

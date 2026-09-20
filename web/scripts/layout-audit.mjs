@@ -372,7 +372,12 @@ async function shoot(page, route, width) {
     await page.setViewportSize({ width: 1920, height: 1080 })
     await page.waitForTimeout(400)
     await page.screenshot({ path: `${process.env.LAYOUT_SHOTS}/wall.png` })
+    // And one at phone width, because that is where the operator looked at it
+    // first and where a layout built for a television has to degrade rather
+    // than fall apart.
     await page.setViewportSize({ width, height: 844 })
+    await page.waitForTimeout(400)
+    await page.screenshot({ path: `${process.env.LAYOUT_SHOTS}/wall-phone.png`, fullPage: true })
     await page.waitForTimeout(150)
     return
   }

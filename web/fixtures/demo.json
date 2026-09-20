@@ -2698,6 +2698,13 @@
         "message": "readiness probe failed",
         "count": 7,
         "age": "2026-09-20T09:55:00Z"
+      },
+      {
+        "object": "Pod/dupl-test",
+        "reason": "Failed",
+        "message": "Error: ImagePullBackOff — ghcr.io/holzcloud/dupl:latest not found",
+        "count": 3,
+        "age": "2026-09-20T09:57:00Z"
       }
     ],
     "summary": {
