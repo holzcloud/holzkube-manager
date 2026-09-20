@@ -219,3 +219,57 @@ func TaintsThatExplainPending(taints []NodeTaint) []NodeTaint {
 	}
 	return out
 }
+
+// podResources sums what a pod asked for, the way the scheduler does it.
+//
+// Ordinary containers ADD UP; init containers run one at a time before them, so
+// the pod needs whichever init container is largest, not their sum. The pod's
+// request is the larger of those two figures. Getting this wrong understates a
+// pod with a heavy init step, and that pod is exactly the one that will not
+// schedule.
+func podResources(pod corev1.Pod) (cpuRequest, memoryRequest, cpuLimit, memoryLimit string) {
+	cpuReq := resource.NewQuantity(0, resource.DecimalSI)
+	memReq := resource.NewQuantity(0, resource.BinarySI)
+	cpuLim := resource.NewQuantity(0, resource.DecimalSI)
+	memLim := resource.NewQuantity(0, resource.BinarySI)
+
+	for _, container := range pod.Spec.Containers {
+		addQuantity(cpuReq, container.Resources.Requests, corev1.ResourceCPU)
+		addQuantity(memReq, container.Resources.Requests, corev1.ResourceMemory)
+		addQuantity(cpuLim, container.Resources.Limits, corev1.ResourceCPU)
+		addQuantity(memLim, container.Resources.Limits, corev1.ResourceMemory)
+	}
+
+	for _, container := range pod.Spec.InitContainers {
+		maxQuantity(cpuReq, container.Resources.Requests, corev1.ResourceCPU)
+		maxQuantity(memReq, container.Resources.Requests, corev1.ResourceMemory)
+		maxQuantity(cpuLim, container.Resources.Limits, corev1.ResourceCPU)
+		maxQuantity(memLim, container.Resources.Limits, corev1.ResourceMemory)
+	}
+
+	return showQuantity(cpuReq), showQuantity(memReq), showQuantity(cpuLim), showQuantity(memLim)
+}
+
+func addQuantity(into *resource.Quantity, list corev1.ResourceList, name corev1.ResourceName) {
+	if q, ok := list[name]; ok {
+		into.Add(q)
+	}
+}
+
+// maxQuantity raises the total to an init container's figure when that is
+// larger, which is what "runs before, one at a time" means for a reservation.
+func maxQuantity(into *resource.Quantity, list corev1.ResourceList, name corev1.ResourceName) {
+	q, ok := list[name]
+	if ok && q.Cmp(*into) > 0 {
+		*into = q.DeepCopy()
+	}
+}
+
+// showQuantity prints a total, or empty when nothing was asked for -- because
+// "0" and "did not ask" read the same on a screen and are different facts.
+func showQuantity(q *resource.Quantity) string {
+	if q.IsZero() {
+		return ""
+	}
+	return q.String()
+}

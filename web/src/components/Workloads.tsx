@@ -108,6 +108,17 @@ function WorkloadActionsFor({ clusterID, workload }: { clusterID: string; worklo
 
   const invalidate = () => void queryClient.invalidateQueries({ queryKey: ['kubernetes'] })
 
+  const stop = useMutation({
+    mutationFn: () =>
+      api.kubernetes.stopWorkload(clusterID, workload.kind, workload.namespace, workload.name),
+    onSuccess: invalidate,
+  })
+  const start = useMutation({
+    mutationFn: () =>
+      api.kubernetes.startWorkload(clusterID, workload.kind, workload.namespace, workload.name),
+    onSuccess: invalidate,
+  })
+
   const scale = useMutation({
     mutationFn: (next: number) =>
       api.kubernetes.scaleWorkload(
@@ -129,15 +140,52 @@ function WorkloadActionsFor({ clusterID, workload }: { clusterID: string; worklo
   const valid = Number.isInteger(parsed) && parsed >= 0
   const changed = valid && parsed !== workload.desired
 
-  // Nothing at all for a CronJob or a Job: neither has a replica count or a pod
-  // template, and a row of disabled buttons is a worse answer than no buttons.
+  // Whether there is a stop, and whether it is already stopped, both come from
+  // the server -- the same reason `scalable` does. A DaemonSet's size is how
+  // many nodes match, so it has no count to set to zero, and offering the button
+  // and letting the API server refuse would teach that the buttons here are
+  // suggestions.
+  const { stoppable, stopped } = workload
+
+  const pair = stoppable ? (
+    <Button
+      type="button"
+      size="sm"
+      variant={stopped ? 'outline' : 'destructive'}
+      className="max-md:h-11"
+      disabled={stop.isPending || start.isPending}
+      onClick={() => (stopped ? start.mutate() : stop.mutate())}
+    >
+      {stop.isPending || start.isPending
+        ? stopped
+          ? 'Starting…'
+          : 'Stopping…'
+        : stopped
+          ? 'Start'
+          : 'Stop'}
+    </Button>
+  ) : null
+
+  const pairProblem = (
+    <>
+      {stop.error ? <Problem error={stop.error} /> : null}
+      {start.error ? <Problem error={start.error} /> : null}
+    </>
+  )
+
   if (!workload.scalable && !workload.rollable) {
     return (
-      <p className="text-muted-foreground text-xs">
-        {workload.kind === 'CronJob'
-          ? 'A CronJob runs on its schedule; there is nothing here to scale or roll.'
-          : 'A Job runs to completion; there is nothing here to scale or roll.'}
-      </p>
+      <div className="space-y-1">
+        {pair}
+        <p className="text-muted-foreground text-xs">
+          {workload.kind === 'CronJob'
+            ? stopped
+              ? 'Suspended: it keeps its schedule and runs nothing. Starting it lets the schedule run again.'
+              : 'A CronJob runs on its schedule, so there is nothing to scale or roll. Stopping one suspends it — it keeps its schedule and runs nothing.'
+            : 'A Job runs to completion, so there is nothing to scale or roll. Stopping one suspends it.'}
+        </p>
+        {pairProblem}
+      </div>
     )
   }
 
@@ -177,7 +225,28 @@ function WorkloadActionsFor({ clusterID, workload }: { clusterID: string; worklo
             {roll.isPending ? 'Rolling…' : 'Roll pods'}
           </Button>
         )}
+        {pair}
       </div>
+
+      {/* What a start would bring back, BEFORE anybody presses it. Scaling to
+          zero throws the count away, so the number was written onto the object
+          when it was stopped; saying it here is how nobody is surprised by it. */}
+      {stopped && workload.scalable && (
+        <p className="text-muted-foreground text-xs">
+          {workload.would_start_with > 0
+            ? `Stopped. Starting brings back the ${workload.would_start_with} it was running.`
+            : 'At zero, and nothing recorded what it was running — something else scaled it down — so starting it runs one.'}
+        </p>
+      )}
+
+      {/* A DaemonSet has no stop, and the reason is not a tooltip: a phone has
+          no hover. */}
+      {!stoppable && (
+        <p className="text-muted-foreground text-xs">
+          A DaemonSet runs on every matching node, so there is no count to set to zero. Cordon or
+          drain the nodes instead.
+        </p>
+      )}
 
       {/* Why a DaemonSet has no field, rather than a disabled one with a
           tooltip: a phone has no hover, so a title attribute is not a reason. */}
@@ -195,6 +264,7 @@ function WorkloadActionsFor({ clusterID, workload }: { clusterID: string; worklo
 
       {scale.error ? <Problem error={scale.error} /> : null}
       {roll.error ? <Problem error={roll.error} /> : null}
+      {pairProblem}
     </div>
   )
 }
