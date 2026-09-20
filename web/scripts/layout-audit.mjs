@@ -27,7 +27,7 @@
  * The widths are the operator's decision of 2026-09-17: a phone and a desk, the
  * two sides of the `md` breakpoint.
  */
-import { spawn } from 'node:child_process'
+import { spawn, spawnSync } from 'node:child_process'
 import { existsSync, readFileSync } from 'node:fs'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -71,7 +71,28 @@ const ROUTES = [
 ]
 
 
+/**
+ * The daemon this measures, and why it is built here rather than found here.
+ *
+ * It used to be `../bin/holzkube-managerd`, whatever that happened to be. On
+ * 2026-09-20 that turned out to be seventeen hours old: three panels had been
+ * added to /kubernetes, the audit reported the same 25 controls and 12 items as
+ * before them, and exit 0. Nothing was wrong with the page. The guard was
+ * photographing yesterday.
+ *
+ * That is the worst shape a guard can have -- it passes, and its passing is
+ * about a build nobody is shipping -- and it is the same genus as the empty
+ * fixtures (ledger 140) and the three missing screens (ledger 153): the
+ * instrument, not the code.
+ *
+ * So this builds it. The binary EMBEDS web/dist, so the build is the only thing
+ * that ties this measurement to the sources on disk, and `go build` on an
+ * unchanged tree is a cache hit rather than a cost. `HOLZKUBE_BINARY` still
+ * overrides, for a caller who has one and means it -- CI passes the artifact it
+ * just built -- and the override is a deliberate act rather than a default.
+ */
 const BINARY = process.env.HOLZKUBE_BINARY ?? '../bin/holzkube-managerd'
+const BUILD_IT = process.env.HOLZKUBE_BINARY === undefined
 
 /**
  * Where the Chromium is.
@@ -320,6 +341,23 @@ async function shoot(page, route, width) {
   await page.screenshot({ path: `${process.env.LAYOUT_SHOTS}/${name}.png` })
   await page.setViewportSize({ width, height: 844 })
   await page.waitForTimeout(150)
+}
+
+if (BUILD_IT) {
+  // Built from here, so what is measured is what is on disk. A failure is fatal
+  // rather than a fall back to whatever was there: measuring the old one is
+  // exactly the outcome this exists to prevent.
+  const built = spawnSync('go', ['build', '-o', 'bin/holzkube-managerd', './cmd/holzkube-managerd'], {
+    cwd: '..',
+    stdio: 'inherit',
+  })
+  if (built.status !== 0) {
+    throw new Error(
+      `could not build the daemon (go build exited ${built.status ?? 'without running'}). ` +
+        'This audit measures the binary it builds, because a stale one reports the page as it was ' +
+        'yesterday and exits 0.',
+    )
+  }
 }
 
 const dir = await mkdtemp(join(tmpdir(), 'holzkube-layout-'))
