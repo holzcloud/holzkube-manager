@@ -1016,6 +1016,46 @@ and no new listener is opened anywhere.
 `/healthz`" and "somebody read `/admin/users`" are different events. A response is
 cut at 1 MiB, and the cut is reported rather than made quietly.
 
+### Who may do what
+
+`kubectl get rolebindings` gives a list of names. Every question somebody has
+about RBAC is whether an arrangement *works*, and RBAC has **no referential
+integrity** — deliberately, so that a binding can be written before its role. So
+nothing in a cluster will tell them:
+
+**A binding naming a role that is not there grants nothing at all**, and looks
+exactly like one that grants everything it was written for. Same for a binding
+naming a service account that was never created, or was deleted with the binding
+left behind. Both are marked, and the screen says why RBAC permits it — otherwise
+the finding reads like a bug in the cluster.
+
+**Who is an administrator is not a field.** It is worked out from the rules: every
+subject that reaches wildcard verbs on wildcard resources through some binding.
+Looking for the name `cluster-admin` would miss every hand-written role with the
+same power under a name nobody recognises, which is the usual way somebody grants
+it by accident.
+
+**One rule has to carry all three wildcards.** "`*` verbs on configmaps" and "get
+on `*`" are both ordinary, and a check that added them together would report half
+the cluster's built-in roles as administrative — a warning everybody sees is a
+warning nobody reads.
+
+**A subject is only marked missing when it can be checked.** A User or a Group
+lives in the identity provider and no cluster has a list of them; marking those
+would teach that the marking is noise.
+
+**What runs as which service account**, because a pod runs as one and finding out
+otherwise means reading every binding in the cluster. The `default` account
+matters most: every pod naming none runs as it, so a permission granted there
+reaches things nobody intended.
+
+**The seventy roles Kubernetes ships fold away** behind a button rather than being
+filtered out, so the screen can still answer "does this cluster have the standard
+roles".
+
+Nothing on this screen writes. A wrong RBAC change locks the operator, and this
+daemon, out of the cluster.
+
 ### Storage
 
 The claim list was one half of a two-sided arrangement, and the half that cannot

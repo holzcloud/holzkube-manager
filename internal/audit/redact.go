@@ -435,8 +435,15 @@ var allowlist = map[string][]string{
 	// so there is nothing here for the archive to carry. Written as an empty
 	// entry deliberately, which is this table saying so rather than nobody
 	// having looked.
-	"cluster.kubernetes-storage":    {},
-	"cluster.kubernetes-network":    {},
+	"cluster.kubernetes-storage": {},
+	"cluster.kubernetes-network": {},
+
+	// Who may do what (2026-09-20). A read, with the namespace in the query
+	// rather than the body, so there is nothing for the archive to carry. That it
+	// was READ is the record worth having: somebody enumerated the cluster's
+	// administrators, which is a reasonable thing to do and a reasonable thing to
+	// be able to see afterwards.
+	"cluster.kubernetes-access":     {},
 	"cluster.kubernetes-stop":       {},
 	"cluster.kubernetes-start":      {},
 	"cluster.kubernetes-sweep-plan": {},
