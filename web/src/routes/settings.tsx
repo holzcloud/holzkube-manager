@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { WallLinks } from '@/components/WallLinks'
 import { authenticatedRoute } from '@/routes/__root'
 import { AccountsCard } from '@/routes/accounts'
 
@@ -60,10 +61,37 @@ export function SettingsPage() {
       <AdminOnly>
         <AccountsCard />
       </AdminOnly>
+      <AdminOnly>
+        <WallLinksCard />
+      </AdminOnly>
       <SupportCard />
       <MetricsCard />
       <BackupCard />
     </section>
+  )
+}
+
+/* ---------------------------------------------------------------------- */
+
+/**
+ * The links a screen in a corridor is left open on.
+ *
+ * The cluster is pinned into the link because a kiosk link opens the wall route
+ * and nothing else -- a screen showing one cannot list the clusters to pick the
+ * first, so the address has to name it.
+ */
+export function WallLinksCard() {
+  const clusters = useQuery({ queryKey: ['clusters'], queryFn: api.clusters.list })
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-base">Wall links</CardTitle>
+      </CardHeader>
+      <CardContent>
+        <WallLinks clusterID={clusters.data?.[0]?.id ?? ''} />
+      </CardContent>
+    </Card>
   )
 }
 

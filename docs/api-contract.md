@@ -1034,6 +1034,64 @@ may be logged by a proxy, and outlives the form that produced it. A reason reads
 `entry 2 contains the control character U+0007`, one-based, matching the row an
 operator counts in the form.
 
+### Wall links
+
+    GET    /api/v1/wall-links
+    POST   /api/v1/wall-links      {"label":"The screen in the IT office"}
+    DELETE /api/v1/wall-links/{id}
+
+A wall link is what a screen in a corridor is left open on. A session expires,
+and a television showing a sign-in page at three in the morning is worse than no
+wall at all: it stopped answering the one question it was put up for, and nobody
+notices until somebody needs it.
+
+**It opens ONE route.** Not a role, not a session, not a service account. A
+reader may read the audit archive, every Secret's key names and every cluster's
+configuration; this URL lives on a television and gets bookmarked, photographed
+and forwarded. The wall route carries `WallLink: true` and nothing else in the
+table does, which makes "what can that credential reach" a question somebody
+answers by reading the route table rather than by reasoning about a ladder.
+
+**It is not a fourth role**, because `UserRole`'s own definition says three and
+not more: every role beyond them is a policy that has to be kept in step with a
+surface that grows every phase. A credential that opens one named route needs no
+place in that ladder.
+
+**It satisfies that route's session and role gates and nothing else.** It never
+becomes a session and never becomes a user, so it cannot be escalated into
+either — and a caller who already has a session cannot present one to skip a role
+check on some other route.
+
+**A separate prefix, `hkw_`.** A secret scanner keys on a fixed prefix, and a
+token of the wrong kind is refused by shape before anything is hashed or
+compared.
+
+    Authorization: Bearer hkw_<43 characters>
+
+**The token is shown once.** Only its hash is stored, and no route returns it
+again — a lost link is revoked and replaced. The screen says so before the button
+is pressed as well as after, because a warning that arrives once the link is on
+screen came too late to act on.
+
+**A label is required.** The whole question a revocation asks is *which screen
+was this*, and a list of unnamed credentials is one nobody can act on safely.
+
+**`last_used_at` is what the list exists for**: is this still on a wall? It is
+written at most once a minute — a screen polls every ten seconds, and a store
+write per poll would be a write amplifier rather than an answer.
+
+**At most eight.** Every request carrying a token is compared against all of
+them, and a list nobody prunes is a list of credentials nobody has looked at.
+
+**Both writes are `Destructive` and administrator-only.** Creating one hands out
+a credential that will live on a screen for months; revoking one turns a screen
+off from across the building, and that is only noticed by whoever walks past it.
+
+**The archive keeps the label in clear and never a token.** "Which screen was
+this" is the question a revocation asks afterwards, and an archive that recorded
+only that a link was created could not answer it. The token is in no request
+body: it is minted on the server and returned once.
+
 ### Audit
 
 The two mutating routes carry the action tokens `schematic.create` and

@@ -50,6 +50,19 @@ type Route struct {
 	// RequiresSession bool declares that the route needs a live session.
 	RequiresSession bool
 
+	// WallLink declares that this route ALSO accepts a wall link: the
+	// long-lived read-only credential a screen in a corridor is left open on.
+	//
+	// It is a flag on the route and not a role, so that "what can this
+	// credential reach" is answered by reading the route table rather than by
+	// reasoning about a ladder. TestOnlyTheWallAcceptsAWallLink holds it to one
+	// route: a second one would be a widening nobody proposed.
+	//
+	// A wall link satisfies this route's session and role gates and NOTHING
+	// else. It never becomes a session, never becomes a user, and cannot be
+	// escalated into either.
+	WallLink bool
+
 	// MinRole is the least privileged account that may use this route.
 	//
 	// The zero value is the empty string, which model.UserRole.AtLeast refuses
@@ -243,6 +256,10 @@ type Deps struct {
 	// what is left out and why.
 	LocalSignInURL func() string
 
+	// WallLinkValid reports whether a bearer token is a live wall link. Nil
+	// means no request is ever opened by one.
+	WallLinkValid func(ctx context.Context, token string) bool
+
 	Routes []Route
 }
 
@@ -250,6 +267,23 @@ type Deps struct {
 // IsSSOOnly means no host is SSO-only.
 func (d Deps) SSOOnly(r *http.Request) bool {
 	return d.IsSSOOnly != nil && d.IsSSOOnly(r.Host)
+}
+
+// wallLinkOpens reports whether this request carries a valid wall link for a
+// route that accepts one.
+//
+// Both halves, in this order, and the order is the point: a route that does not
+// accept wall links never reaches the token check at all, so a wall token
+// presented anywhere else is simply not a credential there.
+func (d Deps) wallLinkOpens(rt Route, r *http.Request) bool {
+	if !rt.WallLink || d.WallLinkValid == nil {
+		return false
+	}
+	token := middleware.BearerOf(r)
+	if token == "" {
+		return false
+	}
+	return d.WallLinkValid(r.Context(), token)
 }
 
 // LocalSignIn is the address to offer when this one refuses the local account.
@@ -368,7 +402,9 @@ func (d Deps) wrapRoute(rt Route) http.Handler {
 				WriteProblem(w, r, CSRFFailed(err.Error()))
 			}),
 		middleware.Authn(rt.RequiresSession,
-			func(r *http.Request) bool { return d.Auth.IsAuthenticated(r.Context()) },
+			func(r *http.Request) bool {
+				return d.Auth.IsAuthenticated(r.Context()) || d.wallLinkOpens(rt, r)
+			},
 			func(w http.ResponseWriter, r *http.Request) {
 				WriteProblem(w, r, Unauthenticated())
 			}),
@@ -384,6 +420,13 @@ func (d Deps) wrapRoute(rt Route) http.Handler {
 		// one; a 403 here needs a session first.
 		middleware.Authz(rt.RequiresSession,
 			func(r *http.Request) bool {
+				if d.wallLinkOpens(rt, r) {
+					// A wall link has no account and therefore no role. It
+					// carries its own authority for this ONE route and gets no
+					// place in the ladder, which is why the check is here and
+					// not a role comparison that would have to be invented.
+					return true
+				}
 				u, ok := d.Auth.CurrentUser(r.Context())
 				return ok && u.Role.AtLeast(rt.MinRole)
 			},
