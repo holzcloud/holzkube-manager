@@ -732,6 +732,13 @@ func kubernetesUsage(d httpapi.Deps) http.HandlerFunc {
 			writeKubernetesError(w, r, err)
 			return
 		}
+		if pods == nil {
+			// The ErrNoMetrics branch above leaves this nil, and a nil slice
+			// marshals to null -- which the browser reads as a parse failure
+			// rather than as an empty list, and the screen shows an error
+			// instead of a page (ledger 162).
+			pods = []kube.Usage{}
+		}
 
 		writeJSON(w, http.StatusOK, struct {
 			Collecting bool         `json:"collecting"`

@@ -157,6 +157,10 @@ type AccessControl struct {
 // a namespace filter should hide, and it is the grant that matters most.
 func (c *Client) AccessControl(ctx context.Context, namespace string) (AccessControl, error) {
 	out := AccessControl{
+		Bindings:       make([]BindingSummary, 0, 16),
+		Roles:          make([]RoleSummary, 0, 32),
+		Accounts:       make([]ServiceAccountSummary, 0, 8),
+		Administrators: make([]string, 0, 2),
 		Notice: "A binding that names a role or a service account which does not exist grants " +
 			"nothing, and looks exactly like one that works: RBAC has no referential integrity, " +
 			"deliberately, so that a binding may be written before its role. Administrative means " +
@@ -240,6 +244,7 @@ func (c *Client) AccessControl(ctx context.Context, namespace string) (AccessCon
 			Kind: kind, Namespace: bindingNamespace, Name: name,
 			RoleKind: ref.Kind, RoleName: ref.Name,
 			RoleExists: known.exists, Administrative: known.administrative,
+			Subjects:  make([]Subject, 0, len(subjects)),
 			Healthy:   true,
 			CreatedAt: stamp(created),
 		}
@@ -331,7 +336,7 @@ func (c *Client) AccessControl(ctx context.Context, namespace string) (AccessCon
 		key := account.Namespace + "/" + account.Name
 		row := ServiceAccountSummary{
 			Namespace: account.Namespace, Name: account.Name,
-			UsedBy:         runningAs[key],
+			UsedBy:         listOrEmpty(runningAs[key]),
 			Bindings:       accountBindings[key],
 			Administrative: accountAdmin[key],
 			CreatedAt:      stamp(account.CreationTimestamp),

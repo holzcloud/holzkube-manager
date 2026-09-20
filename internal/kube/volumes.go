@@ -145,6 +145,9 @@ type Storage struct {
 // database stays invisible.
 func (c *Client) Storage(ctx context.Context, namespace string) (Storage, error) {
 	out := Storage{
+		Volumes: make([]VolumeSummary, 0, 8),
+		Claims:  make([]ClaimSummary, 0, 8),
+		Classes: make([]StorageClassSummary, 0, 4),
 		Notice: "A capacity here is what was provisioned, not how full the filesystem on it is: " +
 			"nothing in the Kubernetes API reports that, and only something running inside the pod " +
 			"can. A volume's reclaim policy is what decides whether deleting its claim destroys the " +
@@ -257,7 +260,7 @@ func (c *Client) Storage(ctx context.Context, namespace string) (Storage, error)
 			Capacity:    quantityOf(claim.Status.Capacity, corev1.ResourceStorage),
 			Volume:      claim.Spec.VolumeName,
 			AccessModes: shortAccessModes(claim.Spec.AccessModes),
-			UsedBy:      mounters[claim.Namespace+"/"+claim.Name],
+			UsedBy:      listOrEmpty(mounters[claim.Namespace+"/"+claim.Name]),
 			CreatedAt:   stamp(claim.CreationTimestamp),
 		}
 		if claim.Spec.StorageClassName != nil {

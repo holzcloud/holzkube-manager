@@ -139,6 +139,10 @@ type Network struct {
 // Network reads services, endpoints, policies and ingress classes.
 func (c *Client) Network(ctx context.Context, namespace string) (Network, error) {
 	out := Network{
+		Services:       make([]ServiceSummary, 0, 8),
+		Policies:       make([]PolicySummary, 0, 4),
+		Unprotected:    make([]string, 0, 4),
+		IngressClasses: make([]string, 0, 2),
 		Notice: "Endpoints are counted from EndpointSlices, which is what the kube-proxy on each " +
 			"node actually load-balances to. A Service with none refuses every connection " +
 			"instantly, and nothing else about it looks wrong.",

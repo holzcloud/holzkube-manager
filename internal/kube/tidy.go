@@ -85,6 +85,7 @@ const SweepOlderThan = time.Hour
 // PlanSweep says what clearing out would remove, and removes nothing.
 func (c *Client) PlanSweep(ctx context.Context, namespace string, now time.Time) (SweepPlan, error) {
 	plan := SweepPlan{
+		Items: make([]Sweepable, 0, 16),
 		Notice: "Only things that have finished and are not the way back from a rollout. " +
 			"Running, pending and unknown pods are left alone -- unknown especially, because " +
 			"that means a node stopped reporting rather than that the pod stopped. Images on " +
