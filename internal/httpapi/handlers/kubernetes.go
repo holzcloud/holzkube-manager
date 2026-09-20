@@ -376,6 +376,12 @@ func KubernetesRoutes(d httpapi.Deps) []httpapi.Route {
 			// than any other route behind that role: names and states, no
 			// addresses, no versions, no key names.
 			MinRole: model.RoleReader,
+
+			// The one route a wall link opens. See Route.WallLink: it is a flag
+			// here and not a role, so that "what can that credential reach" is
+			// answered by reading this table.
+			WallLink: true,
+
 			Action:  "cluster.wall",
 			Handler: handler(clusterWall(d)),
 		},

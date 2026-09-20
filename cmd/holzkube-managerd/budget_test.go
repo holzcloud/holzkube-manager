@@ -1673,6 +1673,12 @@ func TestEveryRouteThatReachesUpstreamHasABudgetRow(t *testing.T) {
 		// every fifteen seconds against machines that may be the reason
 		// somebody is looking.
 		"GET /metrics",
+		// The wall links are three settings writes and a settings read. They
+		// reach no node, which is what makes a credential for a screen cheap to
+		// hand out and cheap to revoke: turning a wall off from across the
+		// building must not depend on the fleet answering.
+		"GET /api/v1/wall-links", "POST /api/v1/wall-links",
+		"DELETE /api/v1/wall-links/{id}",
 	} {
 		noUpstream[r] = true
 	}

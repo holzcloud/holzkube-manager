@@ -704,6 +704,19 @@ interface RequestOptions {
   interceptSudo?: boolean
 
   /**
+   * A bearer token to send instead of relying on the session cookie.
+   *
+   * One caller: the wall, when it was opened with a kiosk link. The token is a
+   * credential, so it goes in a header and never in a URL -- a URL is written
+   * to the server's log, the browser's history and whatever proxy sits between.
+   *
+   * A request carrying one is exempt from the session-expiry interception too:
+   * there is no session to expire, and a redirect to the sign-in page is the
+   * one thing a wall must never do.
+   */
+  bearer?: string
+
+  /**
    * Whether this request is exempt from REQUEST_CEILING_MS.
    *
    * One route is: the etcd restore, whose body is a database. The ceiling
@@ -742,8 +755,11 @@ interface RequestOptions {
  */
 const REQUEST_CEILING_MS = 150_000
 
-function buildInit(method: string, body: unknown): RequestInit {
+function buildInit(method: string, body: unknown, bearer?: string): RequestInit {
   const headers: Record<string, string> = { Accept: 'application/json' }
+  if (bearer !== undefined && bearer !== '') {
+    headers.Authorization = `Bearer ${bearer}`
+  }
 
   if (!READ_METHODS.has(method)) {
     // All three CSRF preconditions, together, on every mutating request.
@@ -827,7 +843,7 @@ async function send(
   // Built once and reused for the replay, so the retried request is byte for
   // byte the request that was refused -- same body, same headers, same
   // credentials mode. Rebuilding it would be the bug this design avoids.
-  return sendPrebuilt(path, buildInit(method, body), options)
+  return sendPrebuilt(path, buildInit(method, body, options.bearer), options)
 }
 
 /**
@@ -844,7 +860,12 @@ async function sendPrebuilt(
   init: RequestInit,
   options: RequestOptions = {},
 ): Promise<Response> {
-  const { interceptUnauthenticated = true, interceptSudo = true, unbounded = false } = options
+  const { interceptSudo = true, unbounded = false, bearer } = options
+  // A request carrying a bearer token has no session to expire, so its 401 is
+  // an answer rather than an expiry -- and a wall redirected to a sign-in page
+  // is the one failure this credential exists to prevent.
+  const interceptUnauthenticated =
+    bearer !== undefined && bearer !== '' ? false : (options.interceptUnauthenticated ?? true)
 
   let response: Response
   try {
@@ -2334,6 +2355,29 @@ export const wallSchema = z.object({
     .transform((v) => v ?? {}),
 })
 
+export const wallLinkSchema = z.object({
+  id: z.string(),
+  label: z.string().default(''),
+  created_at: z.string().default(''),
+  created_by: z.string().default(''),
+  /** Empty for a link no screen has ever used. That is the question the list
+   * exists for: is this still on a wall somewhere? */
+  last_used_at: z.string().default(''),
+})
+
+export const wallLinksSchema = z.object({
+  links: z.array(wallLinkSchema).nullish().transform(orEmpty),
+})
+
+export const createdWallLinkSchema = z.object({
+  link: wallLinkSchema,
+  /** Shown once and never again: only the hash is stored. */
+  token: z.string(),
+  notice: z.string().default(''),
+})
+
+export type WallLink = z.infer<typeof wallLinkSchema>
+
 export type Wall = z.infer<typeof wallSchema>
 export type WallTile = z.infer<typeof wallTileSchema>
 
@@ -3072,6 +3116,21 @@ export const api = {
       ),
   },
 
+  /**
+   * The links a screen in a corridor is left open on.
+   *
+   * Administrator only in both directions: creating one hands out a credential
+   * that will sit on a television for months, and revoking one turns a screen
+   * off from across the building.
+   */
+  wallLinks: {
+    list: () => sendJSON('GET', '/api/v1/wall-links', wallLinksSchema),
+    create: (label: string) =>
+      sendJSON('POST', '/api/v1/wall-links', createdWallLinkSchema, { label }),
+    revoke: (id: string) =>
+      send('DELETE', `/api/v1/wall-links/${encodeURIComponent(id)}`).then(() => undefined),
+  },
+
   kubernetes: {
     /**
      * What one cluster's own API server says about it.
@@ -3366,8 +3425,17 @@ export const api = {
         { container, command },
       ),
 
-    /** Everything one screen in the IT office shows, in one answer. */
-    wall: (cluster: string, namespace?: string) =>
+    /**
+     * Everything one screen in the IT office shows, in one answer.
+     *
+     * `link` is the kiosk credential, sent as a bearer token. It goes in a
+     * HEADER and never in the query: a URL is written to the server's log, to
+     * the browser's history and to whatever proxy sits between, and a
+     * credential in all three places is a credential that outlives its screen.
+     * It lives in the page's own address, which is the bookmark, and travels
+     * from there to this header and nowhere else.
+     */
+    wall: (cluster: string, namespace?: string, link?: string) =>
       sendJSON(
         'GET',
         `/api/v1/clusters/${encodeURIComponent(cluster)}/wall` +
@@ -3375,6 +3443,8 @@ export const api = {
             ? ''
             : `?namespace=${encodeURIComponent(namespace)}`),
         wallSchema,
+        undefined,
+        link === undefined || link === '' ? undefined : { bearer: link },
       ),
 
     /** Every namespace, its quotas, and the cluster's own kinds. No namespace
