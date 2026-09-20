@@ -5,7 +5,9 @@ import { api } from '@/api'
 import { ActAs } from '@/components/ActAs'
 import { ApplyManifest } from '@/components/ApplyManifest'
 import { ClusterCapacityPanel } from '@/components/ClusterCapacityPanel'
+import { ClusterNetwork } from '@/components/ClusterNetwork'
 import { ClusterResources } from '@/components/ClusterResources'
+import { ClusterStorage } from '@/components/ClusterStorage'
 import { ClusterUsage } from '@/components/ClusterUsage'
 import { DataTable } from '@/components/DataTable'
 import { NodeSchedulingActions } from '@/components/NodeSchedulingActions'
@@ -365,7 +367,25 @@ export function KubernetesView() {
 
           <Card>
             <CardHeader>
-              <CardTitle>Configuration, storage and routing</CardTitle>
+              <CardTitle>Storage</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <ClusterStorage clusterID={selected} namespace={namespace} />
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Networking</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <ClusterNetwork clusterID={selected} namespace={namespace} />
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Configuration and routing</CardTitle>
             </CardHeader>
             <CardContent>
               <ClusterResources clusterID={selected} namespace={namespace} />

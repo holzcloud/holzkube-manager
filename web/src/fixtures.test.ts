@@ -4,7 +4,9 @@ import {
   auditPageSchema,
   clusterCapacitySchema,
   clusterEventsSchema,
+  clusterNetworkSchema,
   clusterResourcesSchema,
+  clusterStorageSchema,
   clustersSchema,
   clusterUsageSchema,
   jobsSchema,
@@ -56,6 +58,8 @@ describe('the layout guard’s fixtures', () => {
     ['/api/v1/clusters/c-homelab/kubernetes/usage', clusterUsageSchema],
     ['/api/v1/clusters/c-homelab/kubernetes/capacity', clusterCapacitySchema],
     ['/api/v1/clusters/c-homelab/kubernetes/sweep', sweepPlanSchema],
+    ['/api/v1/clusters/c-homelab/kubernetes/storage', clusterStorageSchema],
+    ['/api/v1/clusters/c-homelab/kubernetes/network', clusterNetworkSchema],
   ])('%s is something the product would accept', (path, schema) => {
     const parsed = schema.safeParse(fixtures[path])
     // The error is printed in full rather than as "expected true": a fixture

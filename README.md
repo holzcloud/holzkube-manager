@@ -1016,6 +1016,73 @@ and no new listener is opened anywhere.
 `/healthz`" and "somebody read `/admin/users`" are different events. A response is
 cut at 1 MiB, and the cut is reported rather than made quietly.
 
+### Storage
+
+The claim list was one half of a two-sided arrangement, and the half that cannot
+answer the questions storage raises. Each row here carries something no claim
+knows.
+
+**Whether deleting it destroys the data.** That is the *volume's* reclaim policy,
+and the screen says what happens — "data kept" or "data destroyed" — rather than
+printing `Retain` and `Delete` under a heading nobody reads.
+
+**Who is using it.** Every running pod that mounts the claim. A finished pod is
+left out: it mounts nothing any more, and counting it is how somebody decides a
+claim is in use when it is not. A bound claim nothing mounts says so, because that
+is storage being paid for and not used.
+
+**Why a claim is Pending.** The claim's own events say "unbound immediate
+PersistentVolumeClaim", which states what somebody already knows. Two of the three
+real causes are not faults at all: a class that waits for a consumer is working as
+configured, and a claim with no class is waiting for the default one. The third —
+a class name that does not exist in the cluster — will never be provisioned, and
+no amount of waiting changes that.
+
+**A volume whose claim is gone and whose data is not.** `Released` is invisible in
+every namespace view, counts against nothing, and is the commonest way a cluster
+quietly fills its storage backend. It is also, sometimes, exactly the data
+somebody needs back, so both readings are on the row.
+
+**A capacity is what was provisioned, never how full the filesystem is.** Nothing
+in the Kubernetes API reports the second; only something running inside the pod
+can.
+
+Nothing on this screen deletes. Deleting a `Retain` volume is how data goes for
+good, and the object-delete route already does it for anybody who means it, with
+the name typed out.
+
+### Networking
+
+**A Service with nothing behind it is the commonest broken thing in Kubernetes,
+and it looks completely healthy in every list** — name, type, ClusterIP, ports all
+present, every connection to it refused instantly, and the workload that calls it
+reporting a connection error that looks like its own fault. This screen counts
+what is actually behind each Service and puts the broken ones first, naming the
+selector that matches nothing.
+
+**Both endpoint numbers are shown**, because an unready endpoint is not in the
+load balancer at all: three endpoints of which none are ready serves nothing while
+looking better than having none.
+
+**A plain ClusterIP says "inside only"**, which is the answer to "why can I not
+reach this from my laptop". A LoadBalancer with no address says it is waiting for
+one — Talos ships no load-balancer controller, so that is the ordinary state here
+rather than a fault.
+
+**The namespaces with no NetworkPolicy are listed by name.** A namespace without
+one accepts traffic from every pod in the cluster. That is Kubernetes's default
+and plenty of clusters run that way on purpose, but it is invisible, and "we have
+policies" is usually believed about a cluster where two namespaces have them and
+eleven do not.
+
+**A policy that matches no pod is marked broken**, because somebody believes it is
+protecting something. And an empty pod selector means *every* pod in the
+namespace, which is the opposite of how an empty filter reads everywhere else, so
+it is written out in words.
+
+Nothing on this screen writes. A NetworkPolicy applied wrongly cuts a cluster off
+from itself, including from whatever this daemon needs to reach it.
+
 ### How full the cluster is
 
 Three levels of the same question, on one screen: the cluster's totals, each
