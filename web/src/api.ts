@@ -1687,6 +1687,13 @@ export const kubernetesPodSchema = z.object({
    * wrong. */
   reason: z.string().default(''),
   created_at: z.string().default(''),
+  /** What this pod reserved out of its node — requests, because that is what
+   * the scheduler holds and therefore why a node is full. Empty means the pod
+   * asked for nothing, which is a fact about the pod rather than a zero. */
+  cpu_request: z.string().default(''),
+  memory_request: z.string().default(''),
+  cpu_limit: z.string().default(''),
+  memory_limit: z.string().default(''),
 })
 
 export const kubernetesDeploymentSchema = z.object({
@@ -1845,6 +1852,13 @@ export const workloadSchema = z.object({
   scalable: z.boolean().default(false),
   /** Whether `rollout restart` applies — a Job has no pod template. */
   rollable: z.boolean().default(false),
+  /** Whether this kind has a stop at all — a DaemonSet does not, because its
+   * size is how many nodes match rather than a count somebody set. */
+  stoppable: z.boolean().default(false),
+  stopped: z.boolean().default(false),
+  /** What a start would bring back, read from the annotation the stop wrote.
+   * Zero means nothing was written down and a start would run one. */
+  would_start_with: z.number().default(0),
 })
 
 export const workloadsSchema = z.object({ workloads: z.array(workloadSchema).default([]) })
@@ -1936,6 +1950,57 @@ export const execResultSchema = z.object({
 })
 
 export type ExecResult = z.infer<typeof execResultSchema>
+export const capacitySchema = z.object({
+  allocatable: z.string().default(''),
+  requested: z.string().default(''),
+  /** -1 when allocatable is unknown: a node that has not reported is not a node
+   * at 0%. */
+  percent: z.number().default(-1),
+})
+
+export const nodeCapacitySchema = z.object({
+  name: z.string(),
+  ready: z.boolean().default(false),
+  cordoned: z.boolean().default(false),
+  cpu: capacitySchema,
+  memory: capacitySchema,
+  pods: capacitySchema,
+  pods_running: z.number().default(0),
+})
+
+export const clusterCapacitySchema = z.object({
+  cpu: capacitySchema,
+  memory: capacitySchema,
+  pods: capacitySchema,
+  nodes: z.array(nodeCapacitySchema).default([]),
+  notice: z.string().default(''),
+})
+
+export const stoppedStateSchema = z.object({
+  stopped: z.boolean().default(false),
+  /** What a start would restore. Zero means nothing was written down. */
+  would_start_with: z.number().default(0),
+})
+
+export const sweepableSchema = z.object({
+  kind: z.string(),
+  namespace: z.string().default(''),
+  name: z.string(),
+  /** Why this one qualifies. A list of names with no reasons is a list nobody
+   * can check before pressing the button. */
+  reason: z.string().default(''),
+  age: z.string().default(''),
+})
+
+export const sweepPlanSchema = z.object({
+  items: z.array(sweepableSchema).default([]),
+  notice: z.string().default(''),
+})
+
+export type Capacity = z.infer<typeof capacitySchema>
+export type ClusterCapacity = z.infer<typeof clusterCapacitySchema>
+export type NodeCapacity = z.infer<typeof nodeCapacitySchema>
+export type Sweepable = z.infer<typeof sweepableSchema>
 export type ClusterUsage = z.infer<typeof clusterUsageSchema>
 export type NodeDetail = z.infer<typeof nodeDetailSchema>
 export type ClusterResource = z.infer<typeof clusterResourceSchema>
@@ -2958,6 +3023,55 @@ export const api = {
         `/api/v1/clusters/${encodeURIComponent(cluster)}/kubernetes/pods/${encodeURIComponent(namespace)}/${encodeURIComponent(pod)}/exec`,
         execResultSchema,
         { container, command },
+      ),
+
+    /** How full the cluster and each node is — allocatable against what pods
+     * REQUESTED. This exists on every cluster, unlike usage. */
+    capacity: (cluster: string) =>
+      sendJSON(
+        'GET',
+        `/api/v1/clusters/${encodeURIComponent(cluster)}/kubernetes/capacity`,
+        clusterCapacitySchema,
+      ),
+
+    /** Stop a workload: scale it to zero, remembering the count. */
+    stopWorkload: (cluster: string, kind: string, namespace: string, name: string) =>
+      sendJSON(
+        'POST',
+        `/api/v1/clusters/${encodeURIComponent(cluster)}/kubernetes/workloads/${encodeURIComponent(kind)}/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}/stop`,
+        stoppedStateSchema,
+      ),
+
+    /** Start it again, at the count it was running. */
+    startWorkload: (cluster: string, kind: string, namespace: string, name: string) =>
+      sendJSON(
+        'POST',
+        `/api/v1/clusters/${encodeURIComponent(cluster)}/kubernetes/workloads/${encodeURIComponent(kind)}/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}/start`,
+        stoppedStateSchema,
+      ),
+
+    /** What clearing out would remove. It changes nothing. */
+    sweepPlan: (cluster: string, namespace?: string) =>
+      sendJSON(
+        'GET',
+        `/api/v1/clusters/${encodeURIComponent(cluster)}/kubernetes/sweep` +
+          (namespace === undefined || namespace === ''
+            ? ''
+            : `?namespace=${encodeURIComponent(namespace)}`),
+        sweepPlanSchema,
+      ),
+
+    /** Remove exactly what the plan listed — passed back rather than
+     * recomputed, so nothing is removed that was not in the list shown. */
+    sweep: (cluster: string, items: Sweepable[]) =>
+      sendJSON(
+        'POST',
+        `/api/v1/clusters/${encodeURIComponent(cluster)}/kubernetes/sweep`,
+        z.object({
+          removed: z.number(),
+          failed: z.array(z.object({ reason: z.string() })).default([]),
+        }),
+        { items },
       ),
 
     /** Which containers a pod has, and how each of them is doing. */

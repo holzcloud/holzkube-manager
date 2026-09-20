@@ -86,6 +86,23 @@ type Workload struct {
 	// Rollable says whether `rollout restart` applies. Deployments,
 	// StatefulSets and DaemonSets have a pod template; Jobs do not.
 	Rollable bool `json:"rollable"`
+
+	// Stoppable says whether this kind has a stop at all. A DaemonSet does not:
+	// its size is how many nodes match, so there is no count to set to zero.
+	// The screen shows only what this says, for the same reason Scalable exists
+	// -- a button the API server would refuse teaches that the buttons here are
+	// suggestions.
+	Stoppable bool `json:"stoppable"`
+
+	// Stopped, and what a start would bring back.
+	//
+	// Read from the annotation the stop wrote, on the object this listing has
+	// already fetched -- so the number is on the screen BEFORE anybody presses
+	// start, without a second route to ask for it. Zero means nothing was
+	// written down and a start would use one, which for a three-replica service
+	// is the difference between restoring it and silently running a third of it.
+	Stopped        bool  `json:"stopped"`
+	WouldStartWith int32 `json:"would_start_with"`
 }
 
 // Workloads lists everything that runs, across the kinds this product knows.
@@ -112,6 +129,8 @@ func (c *Client) Workloads(ctx context.Context, namespace string) ([]Workload, e
 			Image:     firstImage(d.Spec.Template.Spec.Containers),
 			CreatedAt: stamp(d.CreationTimestamp),
 			Scalable:  true, Rollable: true,
+			Stoppable: true, Stopped: desired == 0,
+			WouldStartWith: rememberedIn(d.Annotations),
 		})
 	}
 
@@ -137,6 +156,8 @@ func (c *Client) Workloads(ctx context.Context, namespace string) ([]Workload, e
 			Image:     firstImage(s.Spec.Template.Spec.Containers),
 			CreatedAt: stamp(s.CreationTimestamp),
 			Scalable:  true, Rollable: true,
+			Stoppable: true, Stopped: desired == 0,
+			WouldStartWith: rememberedIn(s.Annotations),
 		})
 	}
 
@@ -172,6 +193,8 @@ func (c *Client) Workloads(ctx context.Context, namespace string) ([]Workload, e
 			CreatedAt: stamp(j.CreationTimestamp),
 			Suspended: j.Spec.Suspend != nil && *j.Spec.Suspend,
 			Scalable:  false, Rollable: false,
+			Stoppable: true,
+			Stopped:   j.Spec.Suspend != nil && *j.Spec.Suspend,
 		})
 	}
 
@@ -187,7 +210,9 @@ func (c *Client) Workloads(ctx context.Context, namespace string) ([]Workload, e
 			Schedule:  c.Spec.Schedule,
 			Suspended: c.Spec.Suspend != nil && *c.Spec.Suspend,
 			Scalable:  false, Rollable: false,
+			Stoppable: true,
 		}
+		row.Stopped = row.Suspended
 		if c.Status.LastScheduleTime != nil {
 			row.LastRun = stamp(*c.Status.LastScheduleTime)
 		}

@@ -245,6 +245,24 @@ func accessReviewCalls() []upstreamCall {
 	return calls
 }
 
+// sweepCalls is one delete per item a sweep may carry.
+//
+// Derived from the cap rather than typed here, so raising the cap changes this
+// row instead of silently making it wrong.
+func sweepCalls() []upstreamCall {
+	calls := []upstreamCall{
+		{name: "NewClusterClient: Version (finding a control-plane node)", class: nodeProbeCall},
+		{name: "COSI Get: the machine configuration, for the API server's address", class: nodeFastReadCall},
+	}
+	for i := range kube.MaxSweepItems {
+		calls = append(calls, upstreamCall{
+			name:  fmt.Sprintf("Kubernetes: delete item %d of the approved plan", i+1),
+			class: kubeCall,
+		})
+	}
+	return calls
+}
+
 // routeBudget is one row: what the route is, which upstream calls it makes in
 // series at worst, what ceiling it declares over all of them, and what that is
 // declared to compose to.
@@ -1184,6 +1202,93 @@ var routeBudgets = []routeBudget{
 			"says so by stopping.",
 		why: "The pod is read first because the container has to be resolved before a command " +
 			"can be sent, and because naming the wrong one is refused rather than guessed.",
+	},
+	{
+		route: "GET /api/v1/clusters/{id}/kubernetes/capacity",
+		calls: []upstreamCall{
+			{name: "NewClusterClient: Version (finding a control-plane node)", class: nodeProbeCall},
+			{name: "COSI Get: the machine configuration, for the API server's address", class: nodeFastReadCall},
+			{name: "Kubernetes: list nodes", class: kubeCall},
+			{name: "Kubernetes: list pods (to add up what is reserved)", class: kubeCall},
+		},
+		routeDeadline:     handlers.KubernetesRouteBudget,
+		verdict:           knownOverBudget,
+		clipping:          clipped,
+		deferredTo:        "as above for the two Talos calls.",
+		clippingRationale: "two list calls against a cluster that answers.",
+		why: "A node does not report what has been reserved on it -- that is the scheduler's own " +
+			"arithmetic, and reproducing it from the pods is the only way to have the number at " +
+			"all. It is the figure that exists without a metrics-server, which most clusters are.",
+	},
+	{
+		route: "POST /api/v1/clusters/{id}/kubernetes/workloads/{kind}/{namespace}/{name}/stop",
+		calls: []upstreamCall{
+			{name: "NewClusterClient: Version (finding a control-plane node)", class: nodeProbeCall},
+			{name: "COSI Get: the machine configuration, for the API server's address", class: nodeFastReadCall},
+			{name: "Kubernetes: get the scale (how many is it running)", class: kubeCall},
+			{name: "Kubernetes: patch the annotation (remember the count)", class: kubeCall},
+			{name: "Kubernetes: get the scale subresource", class: kubeCall},
+			{name: "Kubernetes: put the scale subresource to zero", class: kubeCall},
+			{name: "Kubernetes: read the state back", class: kubeCall},
+		},
+		routeDeadline:     handlers.KubernetesRouteBudget,
+		verdict:           knownOverBudget,
+		clipping:          clipped,
+		deferredTo:        "as above for the two Talos calls.",
+		clippingRationale: "five small calls against a cluster that answers.",
+		why: "The count is read and written down BEFORE the scale, so an interrupted stop leaves " +
+			"it recoverable rather than lost. The state is read back afterwards, so a stop that " +
+			"did not take cannot look like one that did.",
+	},
+	{
+		route: "POST /api/v1/clusters/{id}/kubernetes/workloads/{kind}/{namespace}/{name}/start",
+		calls: []upstreamCall{
+			{name: "NewClusterClient: Version (finding a control-plane node)", class: nodeProbeCall},
+			{name: "COSI Get: the machine configuration, for the API server's address", class: nodeFastReadCall},
+			{name: "Kubernetes: get the object (what was written down)", class: kubeCall},
+			{name: "Kubernetes: get the scale subresource", class: kubeCall},
+			{name: "Kubernetes: put the scale subresource", class: kubeCall},
+			{name: "Kubernetes: read the state back", class: kubeCall},
+		},
+		routeDeadline:     handlers.KubernetesRouteBudget,
+		verdict:           knownOverBudget,
+		clipping:          clipped,
+		deferredTo:        "as above.",
+		clippingRationale: "four small calls against a cluster that answers.",
+		why: "The remembered count is read from the object rather than from this installation's " +
+			"store: the cluster is the thing that knows, and this installation can be reinstalled.",
+	},
+	{
+		route: "GET /api/v1/clusters/{id}/kubernetes/sweep",
+		calls: []upstreamCall{
+			{name: "NewClusterClient: Version (finding a control-plane node)", class: nodeProbeCall},
+			{name: "COSI Get: the machine configuration, for the API server's address", class: nodeFastReadCall},
+			{name: "Kubernetes: list pods", class: kubeCall},
+			{name: "Kubernetes: list jobs", class: kubeCall},
+			{name: "Kubernetes: list replicasets", class: kubeCall},
+		},
+		routeDeadline:     handlers.KubernetesRouteBudget,
+		verdict:           knownOverBudget,
+		clipping:          clipped,
+		deferredTo:        "as above.",
+		clippingRationale: "three list calls against a cluster that answers.",
+		why: "The plan changes nothing. It is a separate route from the sweep for the reason the " +
+			"manifest plan is: this deletion is not recoverable.",
+	},
+	{
+		route:         "POST /api/v1/clusters/{id}/kubernetes/sweep",
+		calls:         sweepCalls(),
+		routeDeadline: handlers.KubernetesRouteBudget,
+		verdict:       knownOverBudget,
+		clipping:      clipped,
+		deferredTo: "the same follow-up as the manifest apply: the deletions are issued " +
+			"one after another and could be concurrent.",
+		clippingRationale: "A delete against an API server that answers is milliseconds. The sum " +
+			"describes a full plan where every call times out, which is a cluster that is not " +
+			"answering.",
+		why: "One delete per approved item, and the count is bounded by kube.MaxSweepItems for " +
+			"the reason a manifest's objects are: without a cap the route's cost is whatever a " +
+			"plan happened to contain.",
 	},
 	{
 		route: "GET /api/v1/clusters/{id}/scale",
