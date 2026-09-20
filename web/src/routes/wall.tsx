@@ -146,7 +146,7 @@ export function WallView() {
               : 'Asking the cluster…'}
         </p>
       ) : (
-        <div className={`flex h-full flex-col gap-[1.5vmin] ${stale ? 'opacity-40' : ''}`}>
+        <div className={`flex flex-col gap-[1.5vmin] md:h-full ${stale ? 'opacity-40' : ''}`}>
           <Header wall={data} stale={stale} ageMs={ageMs} />
           <Named title="Nodes" tiles={data.nodes} />
           {/* Named and first, because these are what somebody is looking for.
@@ -276,12 +276,23 @@ function Field({ tiles }: { tiles: WallTile[] }) {
   const running = tiles.filter((tile) => tile.state === 'ok').length
   const stopped = tiles.length - running
 
+  // flex-1 only where the page cannot scroll. On a television the field takes
+  // the slack and the footer sits at the bottom; on a phone the same rule opens
+  // a black gap between the tiles and the footer, and scrolling down lands in
+  // it -- which is what the operator photographed.
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-[0.8vmin]">
+    <div className="flex min-h-0 flex-col gap-[0.8vmin] md:flex-1">
       <div className="flex flex-wrap items-baseline gap-x-[2vmin] gap-y-[0.4vmin]">
         <p className="text-[1.6vmin] text-zinc-500 uppercase tracking-widest">
           {tiles.length} workloads — one square each
         </p>
+        {/* Spelled out, because the operator asked twice what the squares were
+            and then asked whether they were pods. "Workload" is this product's
+            word and not theirs, and a wall that needs explaining has not been
+            explained until the explanation is ON it. */}
+        <span className="text-[1.5vmin] text-zinc-600">
+          a deployment, statefulset, daemonset, job or cronjob — not a single pod
+        </span>
         {/* A legend, once, in small type. The operator asked what the green
             squares meant, and having to ask is the defect: a wall is read by
             people who were never told anything about it, and an answer given in
@@ -355,6 +366,11 @@ function Footer({ wall }: { wall: Wall }) {
               {/* Seen 340 times is a different situation from seen once, and
                   from four metres that count is the whole message. */}
               {warning.count > 1 ? ` ×${warning.count}` : ''}
+              {/* And WHY. "Failed Pod/dupl-test" names a pod and says nothing
+                  at all about what happened to it; the cluster's own sentence
+                  is the only part of a warning with any content, and it was
+                  fetched, carried through the API and then not drawn. */}
+              {warning.message === '' ? '' : ` — ${warning.message}`}
             </p>
           ))}
         </div>
