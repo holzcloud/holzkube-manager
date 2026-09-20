@@ -1,6 +1,10 @@
+import { useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from '@tanstack/react-router'
 import { useEffect, useState } from 'react'
+import { replaySudoAction, type SudoReplay } from '@/api'
+import { notify } from '@/components/Toaster'
 import { Button } from '@/components/ui/button'
+import { messageFor, ProblemError } from '@/lib/problem'
 
 /**
  * What an operator was doing before the identity provider took the page away.
@@ -12,13 +16,25 @@ import { Button } from '@/components/ui/button'
  * undone -- which reads exactly like the action having failed. That happened to
  * the operator this was built for, on the first cluster they tried to remove.
  *
- * WHAT IS REMEMBERED IS THE INTENT AND NEVER THE REQUEST. The 428 flow replays
- * the original request unchanged, and carrying that across a navigation would
- * mean putting its body in sessionStorage -- where, for the password change that
- * is also gated this way, it would be the password. So this carries the
- * sentence the dialog showed and the screen it was shown on, and offers the way
- * back. The operator presses the action again; the window is open by then, so
- * it runs without asking.
+ * WHAT IS REMEMBERED IS NEVER A REQUEST BODY. The 428 flow replays the original
+ * request unchanged, and carrying that across a navigation would mean putting
+ * its body in sessionStorage -- where, for the password change that is also
+ * gated this way, it would be the password.
+ *
+ * A METHOD AND A PATH CARRY NOTHING SECRET, so since 2026-09-20 those are
+ * remembered too, for requests that have no body. The banner then offers the
+ * ACTION rather than a way back to the page it started on.
+ *
+ * That changed because of what the operator reported: they pressed a button to
+ * forget a machine, were taken to their provider and back, and met a banner
+ * whose first words were "did not run" and whose only button took them to a
+ * list. They read it as the deletion having failed and stopped -- the journal
+ * shows the sudo window opened correctly and no second attempt was ever made.
+ * The product knew what was wanted, had the window open, and asked them to go
+ * and find the button again (ledger 165).
+ *
+ * An action WITH a body still asks them to repeat it, and the banner says so
+ * rather than offering a button that would send an empty one.
  */
 
 const KEY = 'holzkube.sudo-intent'
@@ -36,13 +52,15 @@ export interface SudoIntent {
   action: string
   /** Where it was started, so the way back is one click rather than a hunt. */
   path: string
+  /** The request to re-issue, when it has no body. See the file comment. */
+  replay?: SudoReplay
   at: number
 }
 
 /** Remembers what was being attempted, just before the page is handed over. */
-export function rememberSudoIntent(action: string, path: string): void {
+export function rememberSudoIntent(action: string, path: string, replay?: SudoReplay): void {
   try {
-    const intent: SudoIntent = { action, path, at: Date.now() }
+    const intent: SudoIntent = { action, path, replay, at: Date.now() }
     sessionStorage.setItem(KEY, JSON.stringify(intent))
   } catch {
     // A browser with storage refused is a browser where this banner does not
@@ -67,6 +85,19 @@ function readSudoIntent(): SudoIntent | null {
     ) {
       sessionStorage.removeItem(KEY)
       return null
+    }
+    // A replay is checked rather than trusted: this comes out of storage the
+    // page itself wrote, but a malformed one would send a request built from
+    // whatever was there. Anything that is not a method and a path is dropped,
+    // and the banner falls back to offering the way back.
+    const replay = intent.replay
+    if (
+      replay !== undefined &&
+      (typeof replay.method !== 'string' ||
+        typeof replay.path !== 'string' ||
+        !replay.path.startsWith('/api/v1/'))
+    ) {
+      return { ...(intent as SudoIntent), replay: undefined }
     }
     return intent as SudoIntent
   } catch {
@@ -172,7 +203,10 @@ export function SudoFailureNotice({ className }: { className?: string }) {
 
 export function ResumeAfterProvider({ className }: { className?: string }) {
   const navigate = useNavigate()
+  const queryClient = useQueryClient()
   const [intent, setIntent] = useState<SudoIntent | null>(null)
+  const [running, setRunning] = useState(false)
+  const [failure, setFailure] = useState('')
 
   useEffect(() => {
     setIntent(readSudoIntent())
@@ -187,20 +221,64 @@ export function ResumeAfterProvider({ className }: { className?: string }) {
     setIntent(null)
   }
 
+  const replay = intent.replay
+  const run = async () => {
+    if (replay === undefined) return
+    setRunning(true)
+    setFailure('')
+    try {
+      await replaySudoAction(replay)
+      // Everything, rather than a guessed key: the banner cannot know which
+      // screens the action changed, and a stale list after a deletion is how
+      // somebody concludes it did not work -- which is the whole complaint
+      // this change answers.
+      await queryClient.invalidateQueries()
+      notify.success(`${intent.action} ran.`)
+      dismiss()
+    } catch (cause) {
+      // Shown here rather than thrown: the banner is the only place this
+      // attempt exists, so an error that escaped it would vanish.
+      setFailure(
+        cause instanceof ProblemError
+          ? messageFor(cause.problem)
+          : cause instanceof Error
+            ? cause.message
+            : 'It did not run, and the reason did not survive.',
+      )
+      setRunning(false)
+    }
+  }
+
   return (
     <div
       className={`rounded-md border border-amber-600/40 bg-amber-500/10 p-3 text-sm ${className ?? ''}`}
     >
       <p className="text-foreground">
-        You were re-authenticated.{' '}
-        <strong className="font-medium">{intent.action} did not run</strong> — the action was not
-        carried across the trip to your identity provider. Run it again and it will not ask a second
-        time.
+        You were re-authenticated, and{' '}
+        <strong className="font-medium">{intent.action} has not run yet</strong> — it could not be
+        carried across the trip to your identity provider.{' '}
+        {replay === undefined
+          ? 'Go back and run it again; it will not ask a second time.'
+          : 'It will not ask a second time.'}
       </p>
-      <div className="mt-2 flex gap-2">
+      {failure !== '' && <p className="mt-1 text-destructive">{failure}</p>}
+      <div className="mt-2 flex flex-wrap gap-2">
+        {replay !== undefined && (
+          <Button
+            size="sm"
+            className="max-md:h-11"
+            disabled={running}
+            onClick={() => {
+              void run()
+            }}
+          >
+            {running ? 'Running…' : `Run ${lowerFirst(intent.action)} now`}
+          </Button>
+        )}
         <Button
           size="sm"
           variant="outline"
+          className="max-md:h-11"
           onClick={() => {
             const to = intent.path
             dismiss()
@@ -209,10 +287,23 @@ export function ResumeAfterProvider({ className }: { className?: string }) {
         >
           Back to where you were
         </Button>
-        <Button size="sm" variant="ghost" onClick={dismiss}>
+        <Button size="sm" variant="ghost" className="max-md:h-11" onClick={dismiss}>
           Dismiss
         </Button>
       </div>
     </div>
   )
+}
+
+/**
+ * lowerFirst makes "Forgetting this machine" fit inside "Run … now".
+ *
+ * Only the first letter, and only when the second is not also upper case: an
+ * action named after something like "CA rotation" must not become "cA rotation".
+ */
+function lowerFirst(sentence: string): string {
+  if (sentence.length < 2 || sentence[1] !== sentence[1]?.toLowerCase()) {
+    return sentence
+  }
+  return sentence[0]?.toLowerCase() + sentence.slice(1)
 }

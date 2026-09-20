@@ -329,3 +329,55 @@ describe('the sudo prompt names the action it is asking about', () => {
     expect(challenge.because).toBeUndefined()
   })
 })
+
+/**
+ * What may be carried across the identity-provider round trip (2026-09-20).
+ *
+ * The sign-in trip unloads the page, so the request waiting behind the sudo
+ * dialog cannot survive it. Since ledger 165 the challenge carries a method and
+ * a path so the banner afterwards can run the action with one press, instead of
+ * sending the operator to find the button again.
+ *
+ * THE LINE THAT MATTERS is that a request with a BODY is never offered that way.
+ * The password change is gated by the same sudo window, and its body is the
+ * password -- carrying it would mean putting a password into sessionStorage.
+ * This decision is made here, in the pipeline, and nowhere else.
+ */
+describe('what the sudo challenge may carry', () => {
+  function challengeFrom(run: () => Promise<unknown>): Promise<SudoChallenge> {
+    return new Promise<SudoChallenge>((resolve) => {
+      onSudoRequired((challenge) => {
+        resolve(challenge)
+        // Refused, so the pipeline stops here: this test is about what the
+        // dialog was told, not about the replay.
+        challenge.settle(false)
+      })
+      void run().catch(() => {})
+    })
+  }
+
+  it('offers a replay for a request with no body', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() => Promise.resolve(sudoRequired())),
+    )
+
+    const challenge = await challengeFrom(() => api.machines.forget('holzkube-01'))
+
+    expect(challenge.replay).toEqual({
+      method: 'DELETE',
+      path: '/api/v1/machines/holzkube-01',
+    })
+  })
+
+  it('offers none for a request that has one, because that body may be a password', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() => Promise.resolve(sudoRequired())),
+    )
+
+    const challenge = await challengeFrom(() => api.changePassword('the-old-one', 'the-new-one'))
+
+    expect(challenge.replay).toBeUndefined()
+  })
+})
