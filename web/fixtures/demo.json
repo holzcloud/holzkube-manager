@@ -1785,6 +1785,888 @@
         "name": "holzcloud-staging-preview-environment",
         "state": "stopped",
         "detail": "0 of 0 ready"
+      },
+      {
+        "kind": "Deployment",
+        "namespace": "kube-system",
+        "name": "kube-system-workload-000",
+        "state": "ok",
+        "detail": "1 of 1 ready"
+      },
+      {
+        "kind": "Deployment",
+        "namespace": "cloud",
+        "name": "cloud-workload-001",
+        "state": "ok",
+        "detail": "1 of 1 ready"
+      },
+      {
+        "kind": "Deployment",
+        "namespace": "longhorn-system",
+        "name": "longhorn-system-workload-002",
+        "state": "ok",
+        "detail": "1 of 1 ready"
+      },
+      {
+        "kind": "Deployment",
+        "namespace": "monitoring",
+        "name": "monitoring-workload-003",
+        "state": "ok",
+        "detail": "1 of 1 ready"
+      },
+      {
+        "kind": "Deployment",
+        "namespace": "db",
+        "name": "db-workload-004",
+        "state": "ok",
+        "detail": "1 of 1 ready"
+      },
+      {
+        "kind": "Deployment",
+        "namespace": "backup",
+        "name": "backup-workload-005",
+        "state": "ok",
+        "detail": "1 of 1 ready"
+      },
+      {
+        "kind": "Deployment",
+        "namespace": "ingress-nginx",
+        "name": "ingress-nginx-workload-006",
+        "state": "ok",
+        "detail": "1 of 1 ready"
+      },
+      {
+        "kind": "Deployment",
+        "namespace": "kube-system",
+        "name": "kube-system-workload-007",
+        "state": "ok",
+        "detail": "1 of 1 ready"
+      },
+      {
+        "kind": "Deployment",
+        "namespace": "cloud",
+        "name": "cloud-workload-008",
+        "state": "ok",
+        "detail": "1 of 1 ready"
+      },
+      {
+        "kind": "Deployment",
+        "namespace": "longhorn-system",
+        "name": "longhorn-system-workload-009",
+        "state": "ok",
+        "detail": "1 of 1 ready"
+      },
+      {
+        "kind": "Deployment",
+        "namespace": "monitoring",
+        "name": "monitoring-workload-010",
+        "state": "ok",
+        "detail": "1 of 1 ready"
+      },
+      {
+        "kind": "Deployment",
+        "namespace": "db",
+        "name": "db-workload-011",
+        "state": "ok",
+        "detail": "1 of 1 ready"
+      },
+      {
+        "kind": "Deployment",
+        "namespace": "backup",
+        "name": "backup-workload-012",
+        "state": "ok",
+        "detail": "1 of 1 ready"
+      },
+      {
+        "kind": "Deployment",
+        "namespace": "ingress-nginx",
+        "name": "ingress-nginx-workload-013",
+        "state": "ok",
+        "detail": "1 of 1 ready"
+      },
+      {
+        "kind": "Deployment",
+        "namespace": "kube-system",
+        "name": "kube-system-workload-014",
+        "state": "ok",
+        "detail": "1 of 1 ready"
+      },
+      {
+        "kind": "Deployment",
+        "namespace": "cloud",
+        "name": "cloud-workload-015",
+        "state": "ok",
+        "detail": "1 of 1 ready"
+      },
+      {
+        "kind": "Deployment",
+        "namespace": "longhorn-system",
+        "name": "longhorn-system-workload-016",
+        "state": "ok",
+        "detail": "1 of 1 ready"
+      },
+      {
+        "kind": "Deployment",
+        "namespace": "monitoring",
+        "name": "monitoring-workload-017",
+        "state": "ok",
+        "detail": "1 of 1 ready"
+      },
+      {
+        "kind": "Deployment",
+        "namespace": "db",
+        "name": "db-workload-018",
+        "state": "ok",
+        "detail": "1 of 1 ready"
+      },
+      {
+        "kind": "Deployment",
+        "namespace": "backup",
+        "name": "backup-workload-019",
+        "state": "ok",
+        "detail": "1 of 1 ready"
+      },
+      {
+        "kind": "Deployment",
+        "namespace": "ingress-nginx",
+        "name": "ingress-nginx-workload-020",
+        "state": "ok",
+        "detail": "1 of 1 ready"
+      },
+      {
+        "kind": "Deployment",
+        "namespace": "kube-system",
+        "name": "kube-system-workload-021",
+        "state": "ok",
+        "detail": "1 of 1 ready"
+      },
+      {
+        "kind": "Deployment",
+        "namespace": "cloud",
+        "name": "cloud-workload-022",
+        "state": "ok",
+        "detail": "1 of 1 ready"
+      },
+      {
+        "kind": "Deployment",
+        "namespace": "longhorn-system",
+        "name": "longhorn-system-workload-023",
+        "state": "ok",
+        "detail": "1 of 1 ready"
+      },
+      {
+        "kind": "Deployment",
+        "namespace": "monitoring",
+        "name": "monitoring-workload-024",
+        "state": "ok",
+        "detail": "1 of 1 ready"
+      },
+      {
+        "kind": "Deployment",
+        "namespace": "db",
+        "name": "db-workload-025",
+        "state": "ok",
+        "detail": "1 of 1 ready"
+      },
+      {
+        "kind": "Deployment",
+        "namespace": "backup",
+        "name": "backup-workload-026",
+        "state": "ok",
+        "detail": "1 of 1 ready"
+      },
+      {
+        "kind": "Deployment",
+        "namespace": "ingress-nginx",
+        "name": "ingress-nginx-workload-027",
+        "state": "ok",
+        "detail": "1 of 1 ready"
+      },
+      {
+        "kind": "Deployment",
+        "namespace": "kube-system",
+        "name": "kube-system-workload-028",
+        "state": "ok",
+        "detail": "1 of 1 ready"
+      },
+      {
+        "kind": "Deployment",
+        "namespace": "cloud",
+        "name": "cloud-workload-029",
+        "state": "ok",
+        "detail": "1 of 1 ready"
+      },
+      {
+        "kind": "Deployment",
+        "namespace": "longhorn-system",
+        "name": "longhorn-system-workload-030",
+        "state": "ok",
+        "detail": "1 of 1 ready"
+      },
+      {
+        "kind": "Deployment",
+        "namespace": "monitoring",
+        "name": "monitoring-workload-031",
+        "state": "ok",
+        "detail": "1 of 1 ready"
+      },
+      {
+        "kind": "Deployment",
+        "namespace": "db",
+        "name": "db-workload-032",
+        "state": "ok",
+        "detail": "1 of 1 ready"
+      },
+      {
+        "kind": "Deployment",
+        "namespace": "backup",
+        "name": "backup-workload-033",
+        "state": "ok",
+        "detail": "1 of 1 ready"
+      },
+      {
+        "kind": "Deployment",
+        "namespace": "ingress-nginx",
+        "name": "ingress-nginx-workload-034",
+        "state": "ok",
+        "detail": "1 of 1 ready"
+      },
+      {
+        "kind": "Deployment",
+        "namespace": "kube-system",
+        "name": "kube-system-workload-035",
+        "state": "ok",
+        "detail": "1 of 1 ready"
+      },
+      {
+        "kind": "Deployment",
+        "namespace": "cloud",
+        "name": "cloud-workload-036",
+        "state": "ok",
+        "detail": "1 of 1 ready"
+      },
+      {
+        "kind": "Deployment",
+        "namespace": "longhorn-system",
+        "name": "longhorn-system-workload-037",
+        "state": "ok",
+        "detail": "1 of 1 ready"
+      },
+      {
+        "kind": "Deployment",
+        "namespace": "monitoring",
+        "name": "monitoring-workload-038",
+        "state": "ok",
+        "detail": "1 of 1 ready"
+      },
+      {
+        "kind": "Deployment",
+        "namespace": "db",
+        "name": "db-workload-039",
+        "state": "ok",
+        "detail": "1 of 1 ready"
+      },
+      {
+        "kind": "Deployment",
+        "namespace": "backup",
+        "name": "backup-workload-040",
+        "state": "ok",
+        "detail": "1 of 1 ready"
+      },
+      {
+        "kind": "Deployment",
+        "namespace": "ingress-nginx",
+        "name": "ingress-nginx-workload-041",
+        "state": "ok",
+        "detail": "1 of 1 ready"
+      },
+      {
+        "kind": "Deployment",
+        "namespace": "kube-system",
+        "name": "kube-system-workload-042",
+        "state": "ok",
+        "detail": "1 of 1 ready"
+      },
+      {
+        "kind": "Deployment",
+        "namespace": "cloud",
+        "name": "cloud-workload-043",
+        "state": "ok",
+        "detail": "1 of 1 ready"
+      },
+      {
+        "kind": "Deployment",
+        "namespace": "longhorn-system",
+        "name": "longhorn-system-workload-044",
+        "state": "ok",
+        "detail": "1 of 1 ready"
+      },
+      {
+        "kind": "Deployment",
+        "namespace": "monitoring",
+        "name": "monitoring-workload-045",
+        "state": "ok",
+        "detail": "1 of 1 ready"
+      },
+      {
+        "kind": "Deployment",
+        "namespace": "db",
+        "name": "db-workload-046",
+        "state": "ok",
+        "detail": "1 of 1 ready"
+      },
+      {
+        "kind": "Deployment",
+        "namespace": "backup",
+        "name": "backup-workload-047",
+        "state": "ok",
+        "detail": "1 of 1 ready"
+      },
+      {
+        "kind": "Deployment",
+        "namespace": "ingress-nginx",
+        "name": "ingress-nginx-workload-048",
+        "state": "ok",
+        "detail": "1 of 1 ready"
+      },
+      {
+        "kind": "Deployment",
+        "namespace": "kube-system",
+        "name": "kube-system-workload-049",
+        "state": "ok",
+        "detail": "1 of 1 ready"
+      },
+      {
+        "kind": "Deployment",
+        "namespace": "cloud",
+        "name": "cloud-workload-050",
+        "state": "ok",
+        "detail": "1 of 1 ready"
+      },
+      {
+        "kind": "Deployment",
+        "namespace": "longhorn-system",
+        "name": "longhorn-system-workload-051",
+        "state": "ok",
+        "detail": "1 of 1 ready"
+      },
+      {
+        "kind": "Deployment",
+        "namespace": "monitoring",
+        "name": "monitoring-workload-052",
+        "state": "ok",
+        "detail": "1 of 1 ready"
+      },
+      {
+        "kind": "Deployment",
+        "namespace": "db",
+        "name": "db-workload-053",
+        "state": "ok",
+        "detail": "1 of 1 ready"
+      },
+      {
+        "kind": "Deployment",
+        "namespace": "backup",
+        "name": "backup-workload-054",
+        "state": "ok",
+        "detail": "1 of 1 ready"
+      },
+      {
+        "kind": "Deployment",
+        "namespace": "ingress-nginx",
+        "name": "ingress-nginx-workload-055",
+        "state": "ok",
+        "detail": "1 of 1 ready"
+      },
+      {
+        "kind": "Deployment",
+        "namespace": "kube-system",
+        "name": "kube-system-workload-056",
+        "state": "ok",
+        "detail": "1 of 1 ready"
+      },
+      {
+        "kind": "Deployment",
+        "namespace": "cloud",
+        "name": "cloud-workload-057",
+        "state": "ok",
+        "detail": "1 of 1 ready"
+      },
+      {
+        "kind": "Deployment",
+        "namespace": "longhorn-system",
+        "name": "longhorn-system-workload-058",
+        "state": "ok",
+        "detail": "1 of 1 ready"
+      },
+      {
+        "kind": "Deployment",
+        "namespace": "monitoring",
+        "name": "monitoring-workload-059",
+        "state": "ok",
+        "detail": "1 of 1 ready"
+      },
+      {
+        "kind": "Deployment",
+        "namespace": "db",
+        "name": "db-workload-060",
+        "state": "ok",
+        "detail": "1 of 1 ready"
+      },
+      {
+        "kind": "Deployment",
+        "namespace": "backup",
+        "name": "backup-workload-061",
+        "state": "ok",
+        "detail": "1 of 1 ready"
+      },
+      {
+        "kind": "Deployment",
+        "namespace": "ingress-nginx",
+        "name": "ingress-nginx-workload-062",
+        "state": "ok",
+        "detail": "1 of 1 ready"
+      },
+      {
+        "kind": "Deployment",
+        "namespace": "kube-system",
+        "name": "kube-system-workload-063",
+        "state": "ok",
+        "detail": "1 of 1 ready"
+      },
+      {
+        "kind": "Deployment",
+        "namespace": "cloud",
+        "name": "cloud-workload-064",
+        "state": "ok",
+        "detail": "1 of 1 ready"
+      },
+      {
+        "kind": "Deployment",
+        "namespace": "longhorn-system",
+        "name": "longhorn-system-workload-065",
+        "state": "ok",
+        "detail": "1 of 1 ready"
+      },
+      {
+        "kind": "Deployment",
+        "namespace": "monitoring",
+        "name": "monitoring-workload-066",
+        "state": "ok",
+        "detail": "1 of 1 ready"
+      },
+      {
+        "kind": "Deployment",
+        "namespace": "db",
+        "name": "db-workload-067",
+        "state": "ok",
+        "detail": "1 of 1 ready"
+      },
+      {
+        "kind": "Deployment",
+        "namespace": "backup",
+        "name": "backup-workload-068",
+        "state": "ok",
+        "detail": "1 of 1 ready"
+      },
+      {
+        "kind": "Deployment",
+        "namespace": "ingress-nginx",
+        "name": "ingress-nginx-workload-069",
+        "state": "ok",
+        "detail": "1 of 1 ready"
+      },
+      {
+        "kind": "Deployment",
+        "namespace": "kube-system",
+        "name": "kube-system-workload-070",
+        "state": "ok",
+        "detail": "1 of 1 ready"
+      },
+      {
+        "kind": "Deployment",
+        "namespace": "cloud",
+        "name": "cloud-workload-071",
+        "state": "ok",
+        "detail": "1 of 1 ready"
+      },
+      {
+        "kind": "Deployment",
+        "namespace": "longhorn-system",
+        "name": "longhorn-system-workload-072",
+        "state": "ok",
+        "detail": "1 of 1 ready"
+      },
+      {
+        "kind": "Deployment",
+        "namespace": "monitoring",
+        "name": "monitoring-workload-073",
+        "state": "ok",
+        "detail": "1 of 1 ready"
+      },
+      {
+        "kind": "Deployment",
+        "namespace": "db",
+        "name": "db-workload-074",
+        "state": "ok",
+        "detail": "1 of 1 ready"
+      },
+      {
+        "kind": "Deployment",
+        "namespace": "backup",
+        "name": "backup-workload-075",
+        "state": "ok",
+        "detail": "1 of 1 ready"
+      },
+      {
+        "kind": "Deployment",
+        "namespace": "ingress-nginx",
+        "name": "ingress-nginx-workload-076",
+        "state": "ok",
+        "detail": "1 of 1 ready"
+      },
+      {
+        "kind": "Deployment",
+        "namespace": "kube-system",
+        "name": "kube-system-workload-077",
+        "state": "ok",
+        "detail": "1 of 1 ready"
+      },
+      {
+        "kind": "Deployment",
+        "namespace": "cloud",
+        "name": "cloud-workload-078",
+        "state": "ok",
+        "detail": "1 of 1 ready"
+      },
+      {
+        "kind": "Deployment",
+        "namespace": "longhorn-system",
+        "name": "longhorn-system-workload-079",
+        "state": "ok",
+        "detail": "1 of 1 ready"
+      },
+      {
+        "kind": "Deployment",
+        "namespace": "monitoring",
+        "name": "monitoring-workload-080",
+        "state": "ok",
+        "detail": "1 of 1 ready"
+      },
+      {
+        "kind": "Deployment",
+        "namespace": "db",
+        "name": "db-workload-081",
+        "state": "ok",
+        "detail": "1 of 1 ready"
+      },
+      {
+        "kind": "Deployment",
+        "namespace": "backup",
+        "name": "backup-workload-082",
+        "state": "ok",
+        "detail": "1 of 1 ready"
+      },
+      {
+        "kind": "Deployment",
+        "namespace": "ingress-nginx",
+        "name": "ingress-nginx-workload-083",
+        "state": "ok",
+        "detail": "1 of 1 ready"
+      },
+      {
+        "kind": "Deployment",
+        "namespace": "kube-system",
+        "name": "kube-system-workload-084",
+        "state": "ok",
+        "detail": "1 of 1 ready"
+      },
+      {
+        "kind": "Deployment",
+        "namespace": "cloud",
+        "name": "cloud-workload-085",
+        "state": "ok",
+        "detail": "1 of 1 ready"
+      },
+      {
+        "kind": "Deployment",
+        "namespace": "longhorn-system",
+        "name": "longhorn-system-workload-086",
+        "state": "ok",
+        "detail": "1 of 1 ready"
+      },
+      {
+        "kind": "Deployment",
+        "namespace": "monitoring",
+        "name": "monitoring-workload-087",
+        "state": "ok",
+        "detail": "1 of 1 ready"
+      },
+      {
+        "kind": "Deployment",
+        "namespace": "db",
+        "name": "db-workload-088",
+        "state": "ok",
+        "detail": "1 of 1 ready"
+      },
+      {
+        "kind": "Deployment",
+        "namespace": "backup",
+        "name": "backup-workload-089",
+        "state": "ok",
+        "detail": "1 of 1 ready"
+      },
+      {
+        "kind": "Deployment",
+        "namespace": "ingress-nginx",
+        "name": "ingress-nginx-workload-090",
+        "state": "ok",
+        "detail": "1 of 1 ready"
+      },
+      {
+        "kind": "Deployment",
+        "namespace": "kube-system",
+        "name": "kube-system-workload-091",
+        "state": "ok",
+        "detail": "1 of 1 ready"
+      },
+      {
+        "kind": "Deployment",
+        "namespace": "cloud",
+        "name": "cloud-workload-092",
+        "state": "ok",
+        "detail": "1 of 1 ready"
+      },
+      {
+        "kind": "Deployment",
+        "namespace": "longhorn-system",
+        "name": "longhorn-system-workload-093",
+        "state": "ok",
+        "detail": "1 of 1 ready"
+      },
+      {
+        "kind": "Deployment",
+        "namespace": "monitoring",
+        "name": "monitoring-workload-094",
+        "state": "ok",
+        "detail": "1 of 1 ready"
+      },
+      {
+        "kind": "Deployment",
+        "namespace": "db",
+        "name": "db-workload-095",
+        "state": "ok",
+        "detail": "1 of 1 ready"
+      },
+      {
+        "kind": "Deployment",
+        "namespace": "backup",
+        "name": "backup-workload-096",
+        "state": "ok",
+        "detail": "1 of 1 ready"
+      },
+      {
+        "kind": "Deployment",
+        "namespace": "ingress-nginx",
+        "name": "ingress-nginx-workload-097",
+        "state": "ok",
+        "detail": "1 of 1 ready"
+      },
+      {
+        "kind": "Deployment",
+        "namespace": "kube-system",
+        "name": "kube-system-workload-098",
+        "state": "ok",
+        "detail": "1 of 1 ready"
+      },
+      {
+        "kind": "Deployment",
+        "namespace": "cloud",
+        "name": "cloud-workload-099",
+        "state": "ok",
+        "detail": "1 of 1 ready"
+      },
+      {
+        "kind": "Deployment",
+        "namespace": "longhorn-system",
+        "name": "longhorn-system-workload-100",
+        "state": "ok",
+        "detail": "1 of 1 ready"
+      },
+      {
+        "kind": "Deployment",
+        "namespace": "monitoring",
+        "name": "monitoring-workload-101",
+        "state": "ok",
+        "detail": "1 of 1 ready"
+      },
+      {
+        "kind": "Deployment",
+        "namespace": "db",
+        "name": "db-workload-102",
+        "state": "ok",
+        "detail": "1 of 1 ready"
+      },
+      {
+        "kind": "Deployment",
+        "namespace": "backup",
+        "name": "backup-workload-103",
+        "state": "ok",
+        "detail": "1 of 1 ready"
+      },
+      {
+        "kind": "Deployment",
+        "namespace": "ingress-nginx",
+        "name": "ingress-nginx-workload-104",
+        "state": "ok",
+        "detail": "1 of 1 ready"
+      },
+      {
+        "kind": "Deployment",
+        "namespace": "kube-system",
+        "name": "kube-system-workload-105",
+        "state": "ok",
+        "detail": "1 of 1 ready"
+      },
+      {
+        "kind": "Deployment",
+        "namespace": "cloud",
+        "name": "cloud-workload-106",
+        "state": "ok",
+        "detail": "1 of 1 ready"
+      },
+      {
+        "kind": "Deployment",
+        "namespace": "longhorn-system",
+        "name": "longhorn-system-workload-107",
+        "state": "ok",
+        "detail": "1 of 1 ready"
+      },
+      {
+        "kind": "Deployment",
+        "namespace": "monitoring",
+        "name": "monitoring-workload-108",
+        "state": "ok",
+        "detail": "1 of 1 ready"
+      },
+      {
+        "kind": "Deployment",
+        "namespace": "db",
+        "name": "db-workload-109",
+        "state": "ok",
+        "detail": "1 of 1 ready"
+      },
+      {
+        "kind": "Deployment",
+        "namespace": "backup",
+        "name": "backup-workload-110",
+        "state": "ok",
+        "detail": "1 of 1 ready"
+      },
+      {
+        "kind": "Deployment",
+        "namespace": "ingress-nginx",
+        "name": "ingress-nginx-workload-111",
+        "state": "ok",
+        "detail": "1 of 1 ready"
+      },
+      {
+        "kind": "Deployment",
+        "namespace": "kube-system",
+        "name": "kube-system-workload-112",
+        "state": "ok",
+        "detail": "1 of 1 ready"
+      },
+      {
+        "kind": "Deployment",
+        "namespace": "cloud",
+        "name": "cloud-workload-113",
+        "state": "ok",
+        "detail": "1 of 1 ready"
+      },
+      {
+        "kind": "Deployment",
+        "namespace": "longhorn-system",
+        "name": "longhorn-system-workload-114",
+        "state": "ok",
+        "detail": "1 of 1 ready"
+      },
+      {
+        "kind": "Deployment",
+        "namespace": "monitoring",
+        "name": "monitoring-workload-115",
+        "state": "ok",
+        "detail": "1 of 1 ready"
+      },
+      {
+        "kind": "Deployment",
+        "namespace": "db",
+        "name": "db-workload-116",
+        "state": "ok",
+        "detail": "1 of 1 ready"
+      },
+      {
+        "kind": "Deployment",
+        "namespace": "backup",
+        "name": "backup-workload-117",
+        "state": "ok",
+        "detail": "1 of 1 ready"
+      },
+      {
+        "kind": "Deployment",
+        "namespace": "ingress-nginx",
+        "name": "ingress-nginx-workload-118",
+        "state": "ok",
+        "detail": "1 of 1 ready"
+      },
+      {
+        "kind": "Deployment",
+        "namespace": "kube-system",
+        "name": "kube-system-workload-119",
+        "state": "ok",
+        "detail": "1 of 1 ready"
+      },
+      {
+        "kind": "Deployment",
+        "namespace": "cloud",
+        "name": "cloud-workload-120",
+        "state": "ok",
+        "detail": "1 of 1 ready"
+      },
+      {
+        "kind": "Deployment",
+        "namespace": "longhorn-system",
+        "name": "longhorn-system-workload-121",
+        "state": "ok",
+        "detail": "1 of 1 ready"
+      },
+      {
+        "kind": "Deployment",
+        "namespace": "monitoring",
+        "name": "monitoring-workload-122",
+        "state": "ok",
+        "detail": "1 of 1 ready"
+      },
+      {
+        "kind": "Deployment",
+        "namespace": "db",
+        "name": "db-workload-123",
+        "state": "ok",
+        "detail": "1 of 1 ready"
+      },
+      {
+        "kind": "Deployment",
+        "namespace": "backup",
+        "name": "backup-workload-124",
+        "state": "ok",
+        "detail": "1 of 1 ready"
+      },
+      {
+        "kind": "Deployment",
+        "namespace": "ingress-nginx",
+        "name": "ingress-nginx-workload-125",
+        "state": "ok",
+        "detail": "1 of 1 ready"
       }
     ],
     "cpu": {
@@ -1819,11 +2701,11 @@
       }
     ],
     "summary": {
-      "ok": 4,
-      "warn": 2,
       "down": 1,
+      "ok": 130,
       "stopped": 1,
-      "unknown": 1
+      "unknown": 1,
+      "warn": 2
     }
   }
 }
