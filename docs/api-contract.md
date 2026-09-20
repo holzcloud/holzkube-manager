@@ -3494,10 +3494,48 @@ quiet exactly when something is added.
 | `holzkube-managerd backups` | lists what is there, newest first |
 | `holzkube-managerd restore FILE` | backs up what is there, then unpacks |
 | `holzkube-managerd verify-audit` | checks the audit hash chain; exits non-zero on a break |
+| `holzkube-managerd break-glass [--ttl=15m]` | mints a short-lived admin token on this machine |
 
 They are subcommands of the same binary rather than a separate tool because the
 backup format, the permission rules and the chain's hashing all live in this
 build. A backup written by one version and refused by another is not a backup.
+
+### break-glass, and why it is allowed to exist
+
+`break-glass` prints an admin bearer token without anybody signing in. Stated
+that plainly it sounds like a back door, so the reasoning has to be stated too.
+
+**It grants nothing new.** Whoever can open the data directory can already read
+every cluster secret in it, every session record and every password hash: the
+directory IS the authority. What this adds is not access -- it is a supported
+and AUDITED way to use access somebody already has, in place of the unsupported
+one, which is hand-editing the store and leaves no record at all.
+
+**That reasoning is also its limit.** It holds only because this is a subcommand
+operating on a path. Over the network, or from an account that could not already
+read the directory, the same act would be a back door -- so no route carries it,
+and `TestBreakGlassIsNotAThingTheServerServes` is what keeps one from appearing.
+
+Four things make it defensible in practice:
+
+- **It expires.** Fifteen minutes by default, a day at the very most. A
+  credential handed out with no decision behind it must not outlive the errand;
+  this is the only reason `token_expires_at` exists on an account at all, and an
+  ordinary service account still never expires, because an expiry nobody is
+  awake to renew is an outage rather than a safeguard.
+- **It is one account, reused.** Minting again rotates the same identity and
+  invalidates the previous token, rather than leaving a trail of admin accounts
+  nobody remembers creating.
+- **It is named `break-glass`**, deliberately obviously, in every list and in
+  the archive. A credential of this kind hiding under an innocuous name would be
+  the difference between a tool and a back door.
+- **The act is recorded before it happens**, with the local user's name, and the
+  outcome afterwards -- so a failed attempt is visible too, which is the one an
+  operator would most want to see.
+
+The token goes to stdout alone and the explanation to stderr, so
+`TOKEN=$(holzkube-managerd break-glass)` picks up a credential and not a
+sentence about expiry. Revoke it early by deleting the account.
 
 All of them take the same `--data-dir` and `HOLZKUBE_MANAGER_DATA_DIR` the
 server takes, through the same loader.
