@@ -1,5 +1,15 @@
 [
   {
+    "version": "v1.23.1",
+    "date": "2026-09-20",
+    "changes": [
+      {
+        "icon": "🐛",
+        "text": "The Kubernetes page showed a screenful of errors instead of a page on a cluster whose namespaces have no resource quota. An empty list was being answered as null, and the browser reads null and \"missing\" differently — so a page that had been tested, fixtured and released showed nothing at all. Every list in every Kubernetes answer is now an empty list when it is empty, a check walks all of them against a cluster with nothing in it, and the browser treats a null list as an empty one so this can never blank a page again."
+      }
+    ]
+  },
+  {
     "version": "v1.23.0",
     "date": "2026-09-20",
     "changes": [
