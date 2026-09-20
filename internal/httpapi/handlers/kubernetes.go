@@ -368,6 +368,22 @@ func KubernetesRoutes(d httpapi.Deps) []httpapi.Route {
 		},
 		{
 			Method:          http.MethodGet,
+			Pattern:         "/api/v1/clusters/{id}/kubernetes/storage",
+			RequiresSession: true,
+			MinRole:         model.RoleReader,
+			Action:          "cluster.kubernetes-storage",
+			Handler:         handler(kubernetesStorage(d)),
+		},
+		{
+			Method:          http.MethodGet,
+			Pattern:         "/api/v1/clusters/{id}/kubernetes/network",
+			RequiresSession: true,
+			MinRole:         model.RoleReader,
+			Action:          "cluster.kubernetes-network",
+			Handler:         handler(kubernetesNetwork(d)),
+		},
+		{
+			Method:          http.MethodGet,
 			Pattern:         "/api/v1/clusters/{id}/kubernetes/capacity",
 			RequiresSession: true,
 			MinRole:         model.RoleReader,
@@ -422,6 +438,47 @@ func KubernetesRoutes(d httpapi.Deps) []httpapi.Route {
 }
 
 // kubernetesCapacity answers how full the cluster and each node is.
+// kubernetesStorage answers the cluster's volumes, claims and classes.
+//
+// The namespace narrows the claims only: volumes and classes are cluster-scoped,
+// and hiding them in a namespace view is how a Released volume holding somebody's
+// database stays invisible.
+func kubernetesStorage(d httpapi.Deps) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		client, ctx, cancel, ok := kubeClientFor(d, w, r)
+		if !ok {
+			return
+		}
+		defer cancel()
+
+		storage, err := client.Storage(ctx, r.URL.Query().Get("namespace"))
+		if err != nil {
+			writeKubernetesError(w, r, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, storage)
+	}
+}
+
+// kubernetesNetwork answers the services, what is behind them, and what may
+// reach them.
+func kubernetesNetwork(d httpapi.Deps) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		client, ctx, cancel, ok := kubeClientFor(d, w, r)
+		if !ok {
+			return
+		}
+		defer cancel()
+
+		network, err := client.Network(ctx, r.URL.Query().Get("namespace"))
+		if err != nil {
+			writeKubernetesError(w, r, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, network)
+	}
+}
+
 func kubernetesCapacity(d httpapi.Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		client, ctx, cancel, ok := kubeClientFor(d, w, r)

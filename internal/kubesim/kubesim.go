@@ -57,8 +57,10 @@ import (
 	autoscalingv2 "k8s.io/api/autoscaling/v2"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
+	discoveryv1 "k8s.io/api/discovery/v1"
 	networkingv1 "k8s.io/api/networking/v1"
 	policyv1 "k8s.io/api/policy/v1"
+	storagev1 "k8s.io/api/storage/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -108,6 +110,15 @@ type Options struct {
 
 	// The non-workload resources, described the way a test thinks of them.
 	Resources []Resource
+
+	// Storage: the cluster-scoped half the claim list cannot show.
+	Volumes        []Volume
+	StorageClasses []StorageClass
+
+	// Networking: what is behind a Service, and what is allowed to reach it.
+	EndpointSlices  []EndpointSlice
+	NetworkPolicies []NetworkPolicy
+	IngressClasses  []IngressClass
 
 	// Usage is what metrics-server would report, keyed "node/<name>" or
 	// "pod/<namespace>/<name>", as "cpu,memory" -- e.g. "250m,512Mi".
@@ -179,6 +190,17 @@ type Service struct {
 	Type      string
 	ClusterIP string
 	Ports     []ServicePort
+
+	// Selector as written. Empty is a Service whose endpoints are managed by
+	// hand, which is a real kind and looks broken to a screen that assumes
+	// every Service selects pods.
+	Selector map[string]string
+
+	// ExternalName for that type; LoadBalancerIP for an address a controller
+	// assigned. An empty one on a LoadBalancer is a Service waiting for a
+	// controller Talos does not ship.
+	ExternalName   string
+	LoadBalancerIP string
 }
 
 // ServicePort is one port of a service.
@@ -236,6 +258,16 @@ type Pod struct {
 
 	// LocalData gives the pod an emptyDir volume, whose contents go with it.
 	LocalData bool
+
+	// Labels the pod carries, which is what a Service selector and a
+	// NetworkPolicy selector both match on. Without them a test cannot build the
+	// case those screens exist for: a selector that matches nothing.
+	Labels map[string]string
+
+	// Claims are the PersistentVolumeClaims this pod mounts, by name in its own
+	// namespace. What makes "who is using this claim" measurable: nothing but
+	// the pods knows it.
+	Claims []string
 
 	// BudgetRefuses makes an eviction of this pod answer 429, which is what a
 	// PodDisruptionBudget looks like from the client's side.
@@ -309,7 +341,67 @@ type CronJob struct {
 	Image     string
 }
 
-// Resource is one non-workload object, as a test describes it.
+// Volume is one PersistentVolume as a test describes it.
+//
+// Separate from Resource because the fields that matter are the ones no claim
+// carries: the reclaim policy, which decides whether the data survives, and the
+// phase Released, which is a volume holding data nothing claims.
+type Volume struct {
+	Name          string
+	Capacity      string
+	Phase         corev1.PersistentVolumePhase
+	Claim         string // "namespace/name", empty when nothing holds it
+	StorageClass  string
+	ReclaimPolicy corev1.PersistentVolumeReclaimPolicy
+	AccessModes   []corev1.PersistentVolumeAccessMode
+	CSIDriver     string
+	LocalPath     string
+}
+
+// StorageClass is one as a test describes it.
+type StorageClass struct {
+	Name            string
+	Provisioner     string
+	Default         bool
+	ReclaimPolicy   corev1.PersistentVolumeReclaimPolicy
+	WaitForConsumer bool
+	AllowsExpansion bool
+}
+
+// EndpointSlice is what is actually behind a Service.
+//
+// A test says how many addresses and how many of them are ready, because the
+// claim worth measuring is that a Service with three endpoints of which none are
+// ready is reported as broken -- it is excluded from load balancing entirely and
+// it looks healthier than having none.
+type EndpointSlice struct {
+	Namespace string
+	Service   string
+	Addresses int
+	NotReady  int
+}
+
+// NetworkPolicy is one as a test describes it.
+type NetworkPolicy struct {
+	Namespace string
+	Name      string
+	// Selector as written. Empty means every pod in the namespace, which is the
+	// case that surprises people.
+	Selector map[string]string
+	// HasEgress adds an egress rule, so the derived policy types are both.
+	HasEgress bool
+	// Types overrides the derived list, for a policy that names them.
+	Types []networkingv1.PolicyType
+}
+
+// IngressClass is one as a test describes it.
+type IngressClass struct {
+	Name       string
+	Controller string
+	Default    bool
+}
+
+// Resource is one non-volume, non-workload object, as a test describes it.
 //
 // One struct with a Kind field here, unlike the workload kinds: these are
 // LISTED rather than acted on, and the fields a test sets are the same shape for
@@ -325,6 +417,11 @@ type Resource struct {
 	// Phase and Size for a PersistentVolumeClaim.
 	Phase string
 	Size  string
+
+	// StorageClass and VolumeName for a claim, so the storage screen can say
+	// what it is bound to and whether its class allows growing it.
+	StorageClass string
+	VolumeName   string
 
 	// Host and Address for an Ingress. An empty address is an Ingress no
 	// controller has claimed, which is the "why does this URL not work" case.
@@ -431,6 +528,11 @@ type Server struct {
 	conflictOn []string
 
 	services     []Service
+	volumes      []Volume
+	classes      []StorageClass
+	slices       []EndpointSlice
+	policies     []NetworkPolicy
+	ingclasses   []IngressClass
 	statefulSets []StatefulSet
 	daemonSets   []DaemonSet
 	jobs         []Job
@@ -478,6 +580,11 @@ func New(opts Options) (*Server, error) {
 		applied:           map[string]map[string]any{},
 		conflictOn:        append([]string(nil), opts.ConflictOn...),
 		services:          append([]Service(nil), opts.Services...),
+		volumes:           append([]Volume(nil), opts.Volumes...),
+		classes:           append([]StorageClass(nil), opts.StorageClasses...),
+		slices:            append([]EndpointSlice(nil), opts.EndpointSlices...),
+		policies:          append([]NetworkPolicy(nil), opts.NetworkPolicies...),
+		ingclasses:        append([]IngressClass(nil), opts.IngressClasses...),
 		events:            append([]Event(nil), opts.Events...),
 		statefulSets:      append([]StatefulSet(nil), opts.StatefulSets...),
 		daemonSets:        append([]DaemonSet(nil), opts.DaemonSets...),
@@ -660,6 +767,22 @@ func (s *Server) routes() http.Handler {
 	}))
 	mux.HandleFunc("/apis/batch/v1/namespaces/", s.record(s.serveBatchNamespaced))
 	mux.HandleFunc("/apis/apps/v1/namespaces/", s.record(s.serveAppsNamespaced))
+	mux.HandleFunc("/api/v1/persistentvolumes", s.record(func(w http.ResponseWriter, _ *http.Request) {
+		s.writeVolumes(w)
+	}))
+	mux.HandleFunc("/apis/storage.k8s.io/v1/storageclasses", s.record(func(w http.ResponseWriter, _ *http.Request) {
+		s.writeStorageClasses(w)
+	}))
+	mux.HandleFunc("/apis/discovery.k8s.io/v1/endpointslices", s.record(func(w http.ResponseWriter, _ *http.Request) {
+		s.writeEndpointSlices(w, "")
+	}))
+	mux.HandleFunc("/apis/discovery.k8s.io/v1/namespaces/", s.record(s.serveDiscoveryNamespaced))
+	mux.HandleFunc("/apis/networking.k8s.io/v1/networkpolicies", s.record(func(w http.ResponseWriter, _ *http.Request) {
+		s.writeNetworkPolicies(w, "")
+	}))
+	mux.HandleFunc("/apis/networking.k8s.io/v1/ingressclasses", s.record(func(w http.ResponseWriter, _ *http.Request) {
+		s.writeIngressClasses(w)
+	}))
 	mux.HandleFunc("/api/v1/services", s.record(func(w http.ResponseWriter, _ *http.Request) {
 		s.writeServices(w, "")
 	}))
@@ -1084,6 +1207,7 @@ func renderPod(p Pod) corev1.Pod {
 		Name:              p.Name,
 		Namespace:         p.Namespace,
 		CreationTimestamp: metav1.NewTime(time.Now().Add(-time.Minute).UTC()),
+		Labels:            p.Labels,
 	}
 	if p.OwnerKind != "" {
 		// A controller reference: what a drain and a restart both read to
@@ -1106,10 +1230,18 @@ func renderPod(p Pod) corev1.Pod {
 		spec.Containers = append(spec.Containers, corev1.Container{Name: name, Image: p.Image})
 	}
 	if p.LocalData {
-		spec.Volumes = []corev1.Volume{{
+		spec.Volumes = append(spec.Volumes, corev1.Volume{
 			Name:         "scratch",
 			VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}},
-		}}
+		})
+	}
+	for _, claim := range p.Claims {
+		spec.Volumes = append(spec.Volumes, corev1.Volume{
+			Name: claim,
+			VolumeSource: corev1.VolumeSource{
+				PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{ClaimName: claim},
+			},
+		})
 	}
 
 	return corev1.Pod{
@@ -1759,9 +1891,16 @@ func (s *Server) writeServices(w http.ResponseWriter, namespace string) {
 			TypeMeta:   metav1.TypeMeta{APIVersion: "v1", Kind: "Service"},
 			ObjectMeta: metav1.ObjectMeta{Name: svc.Name, Namespace: svc.Namespace},
 			Spec: corev1.ServiceSpec{
-				Type:      corev1.ServiceType(svc.Type),
-				ClusterIP: svc.ClusterIP,
+				Type:         corev1.ServiceType(svc.Type),
+				ClusterIP:    svc.ClusterIP,
+				Selector:     svc.Selector,
+				ExternalName: svc.ExternalName,
 			},
+		}
+		if svc.LoadBalancerIP != "" {
+			rendered.Status.LoadBalancer.Ingress = []corev1.LoadBalancerIngress{
+				{IP: svc.LoadBalancerIP},
+			}
 		}
 		if rendered.Spec.Type == "" {
 			rendered.Spec.Type = corev1.ServiceTypeClusterIP
@@ -2417,6 +2556,12 @@ func (s *Server) writeResources(w http.ResponseWriter, kind, namespace string) {
 				ObjectMeta: metav1.ObjectMeta{Name: r.Name, Namespace: r.Namespace},
 				Status:     corev1.PersistentVolumeClaimStatus{Phase: corev1.PersistentVolumeClaimPhase(r.Phase)},
 			}
+			if r.StorageClass != "" {
+				class := r.StorageClass
+				claim.Spec.StorageClassName = &class
+			}
+			claim.Spec.VolumeName = r.VolumeName
+			claim.Spec.AccessModes = []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce}
 			if r.Size != "" && r.Phase == string(corev1.ClaimBound) {
 				claim.Status.Capacity = corev1.ResourceList{
 					corev1.ResourceStorage: resource.MustParse(r.Size),
@@ -2858,4 +3003,184 @@ func (s *Server) patchSuspend(w http.ResponseWriter, r *http.Request, kind, name
 	s.mu.Unlock()
 
 	writeJSON(w, http.StatusOK, metav1.ObjectMeta{Name: name, Namespace: namespace})
+}
+
+// Storage and networking (2026-09-20).
+//
+// The claim worth building a fake for is the derived one: a Service with
+// endpoints none of which are ready, a volume in Released holding data nothing
+// claims, a policy whose selector matches no pod. None of those can be measured
+// against a fake that only stores what it is told -- they are computed from two
+// lists disagreeing, which is exactly what this renders.
+
+func (s *Server) writeVolumes(w http.ResponseWriter) {
+	s.mu.Lock()
+	volumes := append([]Volume(nil), s.volumes...)
+	s.mu.Unlock()
+
+	list := corev1.PersistentVolumeList{
+		TypeMeta: metav1.TypeMeta{APIVersion: "v1", Kind: "PersistentVolumeList"},
+	}
+	for _, v := range volumes {
+		rendered := corev1.PersistentVolume{
+			TypeMeta:   metav1.TypeMeta{APIVersion: "v1", Kind: "PersistentVolume"},
+			ObjectMeta: metav1.ObjectMeta{Name: v.Name},
+			Spec: corev1.PersistentVolumeSpec{
+				StorageClassName:              v.StorageClass,
+				PersistentVolumeReclaimPolicy: v.ReclaimPolicy,
+				AccessModes:                   v.AccessModes,
+			},
+			Status: corev1.PersistentVolumeStatus{Phase: v.Phase},
+		}
+		if v.Capacity != "" {
+			rendered.Spec.Capacity = corev1.ResourceList{
+				corev1.ResourceStorage: resource.MustParse(v.Capacity),
+			}
+		}
+		if namespace, name, ok := strings.Cut(v.Claim, "/"); ok {
+			rendered.Spec.ClaimRef = &corev1.ObjectReference{Namespace: namespace, Name: name}
+		}
+		switch {
+		case v.CSIDriver != "":
+			rendered.Spec.CSI = &corev1.CSIPersistentVolumeSource{Driver: v.CSIDriver}
+		case v.LocalPath != "":
+			rendered.Spec.Local = &corev1.LocalVolumeSource{Path: v.LocalPath}
+		}
+		list.Items = append(list.Items, rendered)
+	}
+	writeJSON(w, http.StatusOK, list)
+}
+
+func (s *Server) writeStorageClasses(w http.ResponseWriter) {
+	s.mu.Lock()
+	classes := append([]StorageClass(nil), s.classes...)
+	s.mu.Unlock()
+
+	list := storagev1.StorageClassList{
+		TypeMeta: metav1.TypeMeta{APIVersion: "storage.k8s.io/v1", Kind: "StorageClassList"},
+	}
+	for _, c := range classes {
+		rendered := storagev1.StorageClass{
+			TypeMeta:    metav1.TypeMeta{APIVersion: "storage.k8s.io/v1", Kind: "StorageClass"},
+			ObjectMeta:  metav1.ObjectMeta{Name: c.Name},
+			Provisioner: c.Provisioner,
+		}
+		if c.Default {
+			rendered.Annotations = map[string]string{
+				"storageclass.kubernetes.io/is-default-class": "true",
+			}
+		}
+		if c.ReclaimPolicy != "" {
+			policy := c.ReclaimPolicy
+			rendered.ReclaimPolicy = &policy
+		}
+		mode := storagev1.VolumeBindingImmediate
+		if c.WaitForConsumer {
+			mode = storagev1.VolumeBindingWaitForFirstConsumer
+		}
+		rendered.VolumeBindingMode = &mode
+		expansion := c.AllowsExpansion
+		rendered.AllowVolumeExpansion = &expansion
+		list.Items = append(list.Items, rendered)
+	}
+	writeJSON(w, http.StatusOK, list)
+}
+
+func (s *Server) writeEndpointSlices(w http.ResponseWriter, namespace string) {
+	s.mu.Lock()
+	slices := append([]EndpointSlice(nil), s.slices...)
+	s.mu.Unlock()
+
+	list := discoveryv1.EndpointSliceList{
+		TypeMeta: metav1.TypeMeta{APIVersion: "discovery.k8s.io/v1", Kind: "EndpointSliceList"},
+	}
+	for _, slice := range slices {
+		if namespace != "" && slice.Namespace != namespace {
+			continue
+		}
+		rendered := discoveryv1.EndpointSlice{
+			TypeMeta: metav1.TypeMeta{APIVersion: "discovery.k8s.io/v1", Kind: "EndpointSlice"},
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      slice.Service + "-abc",
+				Namespace: slice.Namespace,
+				Labels:    map[string]string{discoveryv1.LabelServiceName: slice.Service},
+			},
+			AddressType: discoveryv1.AddressTypeIPv4,
+		}
+		for i := range slice.Addresses {
+			// Ready is a POINTER in the API and absent means ready, so the fake
+			// sets it explicitly both ways: a test about "none are ready" must
+			// not pass because the field was left nil.
+			ready := i >= slice.NotReady
+			rendered.Endpoints = append(rendered.Endpoints, discoveryv1.Endpoint{
+				Addresses:  []string{fmt.Sprintf("10.244.1.%d", i+10)},
+				Conditions: discoveryv1.EndpointConditions{Ready: &ready},
+			})
+		}
+		list.Items = append(list.Items, rendered)
+	}
+	writeJSON(w, http.StatusOK, list)
+}
+
+func (s *Server) writeNetworkPolicies(w http.ResponseWriter, namespace string) {
+	s.mu.Lock()
+	policies := append([]NetworkPolicy(nil), s.policies...)
+	s.mu.Unlock()
+
+	list := networkingv1.NetworkPolicyList{
+		TypeMeta: metav1.TypeMeta{APIVersion: "networking.k8s.io/v1", Kind: "NetworkPolicyList"},
+	}
+	for _, p := range policies {
+		if namespace != "" && p.Namespace != namespace {
+			continue
+		}
+		rendered := networkingv1.NetworkPolicy{
+			TypeMeta:   metav1.TypeMeta{APIVersion: "networking.k8s.io/v1", Kind: "NetworkPolicy"},
+			ObjectMeta: metav1.ObjectMeta{Name: p.Name, Namespace: p.Namespace},
+			Spec: networkingv1.NetworkPolicySpec{
+				PodSelector: metav1.LabelSelector{MatchLabels: p.Selector},
+				PolicyTypes: p.Types,
+			},
+		}
+		if p.HasEgress {
+			rendered.Spec.Egress = []networkingv1.NetworkPolicyEgressRule{{}}
+		}
+		list.Items = append(list.Items, rendered)
+	}
+	writeJSON(w, http.StatusOK, list)
+}
+
+func (s *Server) writeIngressClasses(w http.ResponseWriter) {
+	s.mu.Lock()
+	classes := append([]IngressClass(nil), s.ingclasses...)
+	s.mu.Unlock()
+
+	list := networkingv1.IngressClassList{
+		TypeMeta: metav1.TypeMeta{APIVersion: "networking.k8s.io/v1", Kind: "IngressClassList"},
+	}
+	for _, c := range classes {
+		rendered := networkingv1.IngressClass{
+			TypeMeta:   metav1.TypeMeta{APIVersion: "networking.k8s.io/v1", Kind: "IngressClass"},
+			ObjectMeta: metav1.ObjectMeta{Name: c.Name},
+			Spec:       networkingv1.IngressClassSpec{Controller: c.Controller},
+		}
+		if c.Default {
+			rendered.Annotations = map[string]string{
+				"ingressclass.kubernetes.io/is-default-class": "true",
+			}
+		}
+		list.Items = append(list.Items, rendered)
+	}
+	writeJSON(w, http.StatusOK, list)
+}
+
+// serveDiscoveryNamespaced answers the namespaced endpointslice list.
+func (s *Server) serveDiscoveryNamespaced(w http.ResponseWriter, r *http.Request) {
+	trimmed := strings.TrimPrefix(r.URL.Path, "/apis/discovery.k8s.io/v1/namespaces/")
+	parts := strings.Split(strings.Trim(trimmed, "/"), "/")
+	if len(parts) == 2 && parts[1] == "endpointslices" {
+		s.writeEndpointSlices(w, parts[0])
+		return
+	}
+	s.writeStatus(w, http.StatusNotFound, metav1.StatusReasonNotFound, "not found: "+r.URL.Path)
 }
