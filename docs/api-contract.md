@@ -1804,9 +1804,12 @@ INV-08 gives one layer down: an empty screen is a claim.
      "nodes":[{"kind":"Node","name":"cp-2","state":"unknown","detail":"not reporting"}],
      "workloads":[{"kind":"Deployment","namespace":"default","name":"api",
                    "state":"down","detail":"0 of 2 ready"}],
+     "namespaces":[{"name":"default","total":3,"state":"down",
+                    "worst":"api · 0 of 2 ready","stopped":1}],
      "cpu":{…},"memory":{…},"pods":{…},
      "warnings":[{"object":"Pod/api-7c9","reason":"FailedScheduling",
-                  "message":"0/3 nodes are available…","count":340,"age":"…"}],
+                  "message":"0/3 nodes are available…","count":340,
+                  "last_seen":"2026-09-20T09:58:00Z"}],
      "summary":{"ok":4,"warn":2,"down":1,"stopped":1,"unknown":1}}
 
 **One route for the whole screen**, and it is the most expensive read in this
@@ -1839,6 +1842,25 @@ only when it is bad, because a number that appears only during trouble is one
 nobody has learned to read by then — and stops looking confident past a few
 refresh intervals.
 
+**`namespaces` is the same workloads rolled up, and the roll-up is arithmetic,
+so it happens here too.** One entry per namespace, carrying the WORST state
+inside it and naming whatever decided that — "postgres · 2 of 3 ready" — because
+a coloured block with no name sends somebody to go and look, which is the whole
+thing a wall exists to save. `worst` is empty when nothing is wrong: an entry
+that always carries a sentence is one whose sentence nobody reads.
+
+`stopped` is counted separately and never colours the entry. Something switched
+off on purpose is a decision, and a namespace that went amber because somebody
+paused a job is a namespace that teaches an operator to ignore amber. But a
+namespace where EVERYTHING is stopped is `stopped` and not `ok`, because `ok`
+claims it is running and nothing in it is.
+
+**The roll-up is an additional view, never a replacement.** The totals sum to the
+length of `workloads`, and every workload that is not running is still in
+`workloads` under its own name. A client is free to draw either or both; what it
+must not do is show only the entries that are not green, which is how this screen
+once came to report "showing 0 of 132" about a cluster running all 132.
+
 **The namespace narrows the workloads and the warnings, and never the nodes.** A
 wall that hid a dead node because somebody had left a namespace selected would be
 the worst possible failure of this screen.
@@ -1849,6 +1871,13 @@ they have to be the six most recent, so the order is turned round here rather th
 in the thing every other screen shares. `count` is carried because a
 FailedScheduling seen 340 times is a different situation from one seen once, and
 from four metres that count is the whole message.
+
+**`last_seen` is an instant, not an age**, and the client works the age out. This
+field was called `age` and carried an instant anyway, so a wall put
+"2026-09-20T09:58:00Z" on a television. The arithmetic belongs in the browser for
+once: this screen keeps the last answer up when a refresh fails, and an age baked
+in here would freeze at the moment the daemon stopped answering — the one moment
+it must not.
 
 **It carries names and states and nothing else.** No addresses, no versions, no
 key names. This is the answer most likely to end up on a screen a visitor can

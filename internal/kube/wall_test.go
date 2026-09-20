@@ -286,3 +286,100 @@ func TestTheCornerSentenceLeadsWithTheWorst(t *testing.T) {
 		})
 	}
 }
+
+// TestANamespaceTakesTheWorstThingInIt.
+//
+// The honeycomb on the right of the wall is one tile per namespace, and its
+// colour is the worst thing inside. Named so alphabetical order is the opposite
+// of what is wanted, so this cannot pass against no sorting.
+func TestANamespaceTakesTheWorstThingInIt(t *testing.T) {
+	t.Parallel()
+
+	ctx := testContext(t)
+	_, client := newCluster(t, kubesim.Options{Deployments: []kubesim.Deployment{
+		{Namespace: "aaa-fine", Name: "one", Desired: 2, Ready: 2},
+		{Namespace: "aaa-fine", Name: "two", Desired: 1, Ready: 1},
+		{Namespace: "mmm-limping", Name: "postgres", Desired: 3, Ready: 2},
+		{Namespace: "zzz-broken", Name: "api", Desired: 2, Ready: 0},
+		{Namespace: "zzz-broken", Name: "web", Desired: 1, Ready: 1},
+	}})
+
+	wall, err := client.ForTheWall(ctx, "", time.Now())
+	if err != nil {
+		t.Fatalf("ForTheWall: %v", err)
+	}
+	if len(wall.Namespaces) != 3 {
+		t.Fatalf("namespaces = %+v, want three", wall.Namespaces)
+	}
+
+	want := []kube.NamespaceTile{
+		{Name: "zzz-broken", Total: 2, State: kube.StateDown, Worst: "api · 0 of 2 ready"},
+		{Name: "mmm-limping", Total: 1, State: kube.StateWarn, Worst: "postgres · 2 of 3 ready"},
+		{Name: "aaa-fine", Total: 2, State: kube.StateOK},
+	}
+	for i, expect := range want {
+		got := wall.Namespaces[i]
+		if got.Name != expect.Name {
+			t.Errorf("position %d is %q, want %q -- worst first", i, got.Name, expect.Name)
+			continue
+		}
+		if got.State != expect.State {
+			t.Errorf("%s is %q, want %q", got.Name, got.State, expect.State)
+		}
+		if got.Total != expect.Total {
+			t.Errorf("%s counts %d, want %d", got.Name, got.Total, expect.Total)
+		}
+		// The tile has to name the offender: a colour with no name sends
+		// somebody looking, which is the whole thing the wall is meant to save.
+		if got.Worst != expect.Worst {
+			t.Errorf("%s blames %q, want %q", got.Name, got.Worst, expect.Worst)
+		}
+	}
+}
+
+// TestSomethingStoppedDoesNotColourItsNamespace.
+//
+// Deliberately stopped is a decision, not a fault. A namespace that went amber
+// because an operator paused a job is a namespace that teaches them to ignore
+// amber -- but a namespace where EVERYTHING is off is not green either, because
+// green claims it is running.
+func TestSomethingStoppedDoesNotColourItsNamespace(t *testing.T) {
+	t.Parallel()
+
+	ctx := testContext(t)
+	_, client := newCluster(t, kubesim.Options{Deployments: []kubesim.Deployment{
+		{Namespace: "mixed", Name: "running", Desired: 2, Ready: 2},
+		{Namespace: "mixed", Name: "paused", Desired: 0},
+		{Namespace: "all-off", Name: "paused", Desired: 0},
+	}})
+
+	wall, err := client.ForTheWall(ctx, "", time.Now())
+	if err != nil {
+		t.Fatalf("ForTheWall: %v", err)
+	}
+	byName := map[string]kube.NamespaceTile{}
+	for _, tile := range wall.Namespaces {
+		byName[tile.Name] = tile
+	}
+
+	mixed, ok := byName["mixed"]
+	if !ok {
+		t.Fatalf("namespaces = %+v, want one called mixed", wall.Namespaces)
+	}
+	if mixed.State != kube.StateOK {
+		t.Errorf("mixed is %q, want %q -- a paused workload is not a fault",
+			mixed.State, kube.StateOK)
+	}
+	if mixed.Stopped != 1 {
+		t.Errorf("mixed counts %d stopped, want 1", mixed.Stopped)
+	}
+
+	off, ok := byName["all-off"]
+	if !ok {
+		t.Fatalf("namespaces = %+v, want one called all-off", wall.Namespaces)
+	}
+	if off.State != kube.StateStopped {
+		t.Errorf("all-off is %q, want %q -- nothing in it is running",
+			off.State, kube.StateStopped)
+	}
+}

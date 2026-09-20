@@ -214,6 +214,58 @@ const findClipped = (vw) => {
  * link inside a sentence, which WCAG 2.5.8 exempts by name because growing it
  * to 44px wrecks the line it sits in. Anything else counts.
  */
+/**
+ * Finds a fixed pane that scrolls SIDEWAYS.
+ *
+ * findClipped forgives anything inside a sideways-scrolling ancestor, on the
+ * reasoning that a table one can swipe is reachable. The wall's root IS such an
+ * ancestor -- it scrolls below `md`, because on a phone "never scroll" would
+ * mean "silently cut off". So on a phone the wall ran a third of its width off
+ * the right edge, the node names and the warnings with it, and this guard
+ * reported "nothing out of reach" for it five runs in a row.
+ *
+ * Vertical scrolling on a phone is how a phone works. Sideways scrolling is the
+ * thing this guard already refuses for tables, and a full-screen pane doing it
+ * is worse: there is no edge to tell somebody there is more.
+ */
+const findSidewaysPanes = () => {
+  const out = []
+  for (const el of document.querySelectorAll('body *')) {
+    const style = getComputedStyle(el)
+    if (style.position !== 'fixed' && style.position !== 'absolute') continue
+    if (el.scrollWidth <= el.clientWidth + 1) continue
+    // A pane, not a sliver: `sr-only` and the hidden labels Radix ships are a
+    // deliberate 1px with their text clipped, and reporting those would drown
+    // the finding that matters in artefacts of the accessibility layer.
+    if (el.clientWidth < 100) continue
+
+    // WHICH descendant sticks out, not only that something does. A guard that
+    // says "this pane scrolls sideways" sends somebody hunting; the widest
+    // thing past the edge is usually the answer itself.
+    const edge = el.getBoundingClientRect().right
+    const culprits = []
+    for (const kid of el.querySelectorAll('*')) {
+      const box = kid.getBoundingClientRect()
+      if (box.width < 2 || box.right <= edge + 1) continue
+      if (kid.querySelector('*') !== null) continue // the innermost one only
+      culprits.push({
+        tag: kid.tagName.toLowerCase(),
+        right: Math.round(box.right),
+        cls: (kid.getAttribute('class') ?? '').slice(0, 70),
+        text: (kid.textContent ?? '').trim().replace(/\s+/g, ' ').slice(0, 40),
+      })
+    }
+    out.push({
+      tag: el.tagName.toLowerCase(),
+      scroll: el.scrollWidth,
+      client: el.clientWidth,
+      cls: (el.getAttribute('class') ?? '').slice(0, 70),
+      culprits: culprits.slice(0, 4),
+    })
+  }
+  return out
+}
+
 const findSmallTargets = (min) => {
   const SELECTOR = [
     'button',
@@ -403,6 +455,24 @@ async function shoot(page, route, width) {
 }
 
 if (BUILD_IT) {
+  // The BUNDLE first, and for the same reason as the binary below.
+  //
+  // The daemon serves web assets that were embedded at compile time from
+  // internal/httpapi/dist, and `go build` does not put them there -- vite does.
+  // So building only the binary measures whatever bundle somebody happened to
+  // build last, and on 2026-09-20 that is exactly what happened: this audit
+  // photographed a wall that had been replaced an hour earlier, and exited 0.
+  // It is the third time this instrument has reported on something other than
+  // the code in front of it (ledger 159, 170, and this).
+  const bundled = spawnSync('npm', ['run', 'build'], { cwd: '.', stdio: 'inherit' })
+  if (bundled.status !== 0) {
+    throw new Error(
+      `could not build the web bundle (npm run build exited ${bundled.status ?? 'without running'}). ` +
+        'This audit measures the bundle it builds, because a stale one photographs the page as it ' +
+        'was yesterday and exits 0.',
+    )
+  }
+
   // Built from here, so what is measured is what is on disk. A failure is fatal
   // rather than a fall back to whatever was there: measuring the old one is
   // exactly the outcome this exists to prevent.
@@ -509,6 +579,21 @@ try {
           console.error(
             `              ${t.width}px wide, ${t.rows} rows, in "${t.where}" -- first row: "${t.first}"`,
           )
+        }
+      }
+      const sideways = await page.evaluate(findSidewaysPanes)
+      if (sideways.length > 0) {
+        found += 1
+        console.error(`  OFFSCREEN ${String(width).padStart(4)}px  ${route}  (${sideways.length})`)
+        for (const p of sideways) {
+          console.error(
+            `              <${p.tag}> ${p.scroll}px of content in ${p.client}px .${p.cls}`,
+          )
+          for (const c of p.culprits) {
+            console.error(
+              `                past the edge: <${c.tag}> right=${c.right} "${c.text}" .${c.cls}`,
+            )
+          }
         }
       }
       const small = await page.evaluate(findSmallTargets, TOUCH_MIN)

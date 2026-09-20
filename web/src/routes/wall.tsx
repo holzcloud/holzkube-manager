@@ -1,7 +1,14 @@
 import { useQuery } from '@tanstack/react-query'
 import { createRoute } from '@tanstack/react-router'
 import { useEffect, useState } from 'react'
-import { api, type Capacity, type Wall, type WallTile } from '@/api'
+import {
+  api,
+  type Capacity,
+  type Wall,
+  type WallNamespace,
+  type WallTile,
+  type WallWarning,
+} from '@/api'
 import { rootRoute } from '@/routes/__root'
 
 /**
@@ -21,9 +28,9 @@ import { rootRoute } from '@/routes/__root'
  * # It never scrolls
  *
  * A wall nobody touches cannot show what is below the fold, so the tiles shrink
- * to fit instead. Past the point where they would be unreadable the screen shows
- * the counts and the worst ones by name, which is a true answer at any size —
- * unlike a grid that silently stops at the bottom edge.
+ * to fit instead. Nothing is ever cut off the bottom: the right-hand column
+ * ROLLS UP rather than truncating, so a cluster twice this size still fits and
+ * still tells the truth about its own size.
  *
  * # It goes visibly stale
  *
@@ -35,11 +42,32 @@ import { rootRoute } from '@/routes/__root'
  * And a failed refresh keeps the last answer on screen rather than blanking it —
  * with the age visible. The state a moment ago, labelled, beats nothing.
  *
- * # The colours mean five things, not two
+ * # Two halves, because there are two readers
  *
- * ok, warn, down, stopped, unknown. The server decides which; see internal/kube/
- * wall.go for why a CronJob between runs is not an outage and why a node nobody
- * is hearing from is never green.
+ * The same screen is read from ten metres ("is anything wrong") and from one
+ * ("what, and why"). One layout cannot be optimised for both, so it is split:
+ *
+ *   LEFT   the answer in words at nine per cent of the screen's height, the
+ *          nodes, and every workload that is not running — named, large, legible
+ *          from across the room.
+ *   RIGHT  the detail somebody walks up to read: how much room is left, one tile
+ *          per namespace, and the cluster's latest warnings in its own words.
+ *
+ * This is the shape Grafana's own Kubernetes dashboards and the kube-mixin
+ * boards use — a headline that needs no explanation, then labelled sections —
+ * and the namespace tiles are its polystat: a group collapsed to one block
+ * carrying the worst state inside it, naming the offender rather than making
+ * somebody go and look.
+ *
+ * # The colours are solid, and mean five things
+ *
+ * ok, warn, down, stopped, unknown. The first version tinted them at fifteen per
+ * cent opacity, which is legible on a laptop at arm's length and gone at four
+ * metres on a television with the lights on. They are flat saturated fills now,
+ * which is what every wall board that works actually does.
+ *
+ * The server decides which; see internal/kube/wall.go for why a CronJob between
+ * runs is not an outage and why a node nobody is hearing from is never green.
  */
 
 /** How often the screen asks. Ten seconds is what the Kubernetes screens use. */
@@ -54,12 +82,45 @@ const REFRESH_MS = 10_000
  */
 const STALE_AFTER_MS = 3 * REFRESH_MS
 
+/** How many warnings the right-hand column has room for at a readable size. */
+const WARNINGS_SHOWN = 4
+
+/**
+ * Flat, saturated fills — not tints.
+ *
+ * A wall is read at four metres, off-axis, in a lit room, on a television whose
+ * contrast nobody has calibrated. `bg-emerald-600/15` survives none of that: it
+ * is a hint of colour on black, and the first photograph of this screen from
+ * across the room showed a field of dark grey squares. Every wall board that
+ * works — Grafana's Kubernetes dashboards, the kube-mixin boards, polystat —
+ * uses solid colour for exactly this reason.
+ *
+ * `stopped` is the one that recedes on purpose: something switched off is not
+ * news, and drawing it as loudly as a failure is how a wall teaches people to
+ * stop looking at it.
+ */
 const TILE_COLOURS: Record<string, string> = {
-  ok: 'bg-emerald-600/15 text-emerald-200 ring-emerald-500/40',
-  warn: 'bg-amber-500/20 text-amber-100 ring-amber-400/50',
-  down: 'bg-red-600/25 text-red-100 ring-red-500/60',
-  unknown: 'bg-slate-500/20 text-slate-200 ring-slate-400/40',
-  stopped: 'bg-slate-700/40 text-slate-400 ring-slate-600/40',
+  ok: 'bg-green-700 text-white ring-green-600',
+  warn: 'bg-amber-700 text-white ring-amber-600',
+  down: 'bg-red-700 text-white ring-red-500',
+  unknown: 'bg-zinc-600 text-white ring-zinc-500',
+  stopped: 'bg-zinc-900 text-zinc-500 ring-zinc-800',
+}
+
+/**
+ * What each colour means, in words, on the screen.
+ *
+ * The operator asked what the green squares meant and then asked whether they
+ * were pods. Having to ask is the defect: a wall is read by people nobody told
+ * anything, and an answer given once in a conversation is an answer nobody
+ * walking past ever gets.
+ */
+const STATE_WORDS: Record<string, string> = {
+  ok: 'running',
+  warn: 'partly running',
+  down: 'not running',
+  unknown: 'not reporting',
+  stopped: 'switched off on purpose',
 }
 
 export function WallView() {
@@ -129,10 +190,10 @@ export function WallView() {
         so anything below the fold is gone rather than one swipe away. On a phone
         -- where the operator looked at it first -- that same rule silently CUTS
         it, which is the claim this product refuses everywhere else. So below md
-        it scrolls, and the television keeps its one screenful. */
-    <div className="fixed inset-0 overflow-auto bg-zinc-950 p-[2vmin] text-zinc-100 md:overflow-hidden">
+        it scrolls and stacks, and the television keeps its one screenful. */
+    <div className="fixed inset-0 overflow-auto bg-zinc-950 p-4 text-zinc-100 md:p-[2vmin] md:overflow-hidden">
       {data === undefined ? (
-        <p className="grid h-full place-items-center text-[4vmin] text-zinc-500">
+        <p className="grid h-full place-items-center p-6 text-center text-lg text-zinc-500 md:p-0 md:text-[4vmin]">
           {wall.error
             ? // Never a green screen: an unanswered question is not an answer.
               // A revoked or mistyped link lands here too, and saying which is
@@ -146,28 +207,81 @@ export function WallView() {
               : 'Asking the cluster…'}
         </p>
       ) : (
-        <div className={`flex flex-col gap-[1.5vmin] md:h-full ${stale ? 'opacity-40' : ''}`}>
-          <Header wall={data} stale={stale} ageMs={ageMs} />
-          <Named title="Nodes" tiles={data.nodes} />
-          {/* Named and first, because these are what somebody is looking for.
-              A healthy cluster has none and the section simply is not there. */}
-          <Named title="Needs attention" tiles={data.workloads.filter(needsAttention)} />
-          <Field tiles={data.workloads.filter((tile) => !needsAttention(tile))} />
-          <Footer wall={data} />
+        /* The split. Slightly wider on the left, because what is on the left is
+            what gets read from ten metres and the names there have to fit. */
+        <div
+          className={`grid min-h-0 gap-6 md:h-full md:grid-cols-[minmax(0,1.15fr)_minmax(0,1fr)] md:gap-[2.5vmin] ${
+            stale ? 'opacity-40' : ''
+          }`}
+        >
+          <LeftHalf wall={data} stale={stale} ageMs={ageMs} />
+          <RightHalf wall={data} now={now} />
         </div>
       )}
     </div>
   )
 }
 
-function Header({ wall, stale, ageMs }: { wall: Wall; stale: boolean; ageMs: number | null }) {
+/**
+ * The ten-metre half: the answer, the nodes, and whatever is wrong.
+ *
+ * Nothing here is ever collapsed or counted-instead-of-drawn. The first version
+ * of this page hid healthy tiles past sixty and showed "SHOWING 0 OF 132" and a
+ * screen of black — an empty screen claiming nothing was running, about a
+ * cluster running everything (INV-08). The roll-up lives on the right instead,
+ * where it is labelled with its own totals.
+ */
+function LeftHalf({ wall, stale, ageMs }: { wall: Wall; stale: boolean; ageMs: number | null }) {
+  const attention = wall.workloads.filter(needsAttention)
+
+  return (
+    <div className="flex min-h-0 min-w-0 flex-col gap-4 md:gap-[1.8vmin]">
+      <Headline wall={wall} stale={stale} ageMs={ageMs} />
+      {/* The nodes are always here, all of them and named, whether or not
+          anything is wrong with them. There are three of them on the operator's
+          cluster and each one is a machine they can walk over to; a wall that
+          only mentioned a node once it had already failed would be a wall that
+          never showed the thing it is most often consulted about. */}
+      <Named title="Nodes" tiles={wall.nodes} />
+      {/* And everything that is not running, named, large. Absent — not empty,
+          not a zero — when there is nothing to name.
+          It GROWS into whatever the column has left: a wall wants the biggest
+          tiles that still fit, not the smallest that technically do. The first
+          photograph of this layout had two outage tiles at the top and 55 per
+          cent of the screen black underneath. */}
+      {attention.length > 0 && <Named title="Needs attention" tiles={attention} grow />}
+    </div>
+  )
+}
+
+/** The one-metre half: how much room is left, where things are, and why. */
+function RightHalf({ wall, now }: { wall: Wall; now: number }) {
+  return (
+    <div className="flex min-h-0 min-w-0 flex-col gap-5 md:gap-[2vmin]">
+      <Section title="Room left">
+        <div className="flex flex-col gap-3 md:gap-[1.2vmin]">
+          <Meter label="CPU" capacity={wall.cpu} />
+          <Meter label="Memory" capacity={wall.memory} />
+          <Meter label="Pods" capacity={wall.pods} />
+        </div>
+      </Section>
+      <Namespaces tiles={wall.namespaces} workloads={wall.workloads.length} />
+      <Warnings warnings={wall.warnings} now={now} />
+    </div>
+  )
+}
+
+function Headline({ wall, stale, ageMs }: { wall: Wall; stale: boolean; ageMs: number | null }) {
   const down = (wall.summary.down ?? 0) + (wall.summary.unknown ?? 0)
   const warn = wall.summary.warn ?? 0
 
   return (
-    <div className="flex items-baseline justify-between gap-[2vmin]">
+    <div>
+      {/* Nine per cent of the screen's height. On a television across an office
+          that is the difference between a wall somebody reads while walking past
+          and a wall somebody has to stop and squint at. */}
       <p
-        className={`font-semibold text-[5vmin] leading-none ${
+        className={`font-semibold text-[2.6rem] leading-[0.95] md:text-[8.5vmin] tracking-tight ${
           down > 0 ? 'text-red-400' : warn > 0 ? 'text-amber-300' : 'text-emerald-400'
         }`}
       >
@@ -177,49 +291,101 @@ function Header({ wall, stale, ageMs }: { wall: Wall; stale: boolean; ageMs: num
             ? `${warn} need attention`
             : 'Everything is running'}
       </p>
-      {/* The age, always — not only when it is bad. A number that appears only
-          during trouble is a number nobody has learned to read by then. */}
-      <p className={`text-[2.2vmin] ${stale ? 'text-red-300' : 'text-zinc-500'}`}>
+      {/* The age, always -- not only when it is bad. A number that appears only
+          during trouble is a number nobody has learned to read by then. And the
+          size of the cluster beside it, so the headline has a denominator:
+          "everything is running" says much more when everything is 132 things. */}
+      <p
+        className={`mt-1 text-xs md:mt-[0.8vmin] md:text-[2.1vmin] ${stale ? 'text-red-300' : 'text-zinc-500'}`}
+      >
         {ageMs === null
           ? 'never answered'
           : stale
             ? `last answer ${readableAge(ageMs)} ago — this may be out of date`
             : `as of ${readableAge(ageMs)} ago`}
+        {' · '}
+        {plural(wall.workloads.length, 'workload')}, {plural(wall.nodes.length, 'node')}
       </p>
     </div>
   )
 }
 
+/** Section is a labelled block. Every section on this screen says what it is. */
+function Section({
+  title,
+  aside,
+  children,
+  grow,
+}: {
+  title: string
+  aside?: string
+  children: React.ReactNode
+  grow?: boolean
+}) {
+  return (
+    <div className={`flex min-h-0 flex-col gap-2 md:gap-[0.9vmin] ${grow ? 'md:flex-1' : ''}`}>
+      <div className="flex flex-wrap items-baseline gap-x-[1.5vmin]">
+        <p className="text-[0.7rem] text-zinc-500 uppercase tracking-[0.2em] md:text-[1.5vmin]">
+          {title}
+        </p>
+        {aside !== undefined && (
+          <span className="text-[0.7rem] text-zinc-600 md:text-[1.4vmin]">{aside}</span>
+        )}
+      </div>
+      {children}
+    </div>
+  )
+}
+
 /**
- * NODES and everything that needs attention, named and large.
- *
- * Always ALL of them. The first version of this hid healthy tiles past sixty and
- * drew only the ones that were not fine -- which on a cluster where everything
- * works showed "SHOWING 0 OF 132" and a screen of black. That is the claim this
- * product refuses everywhere else (INV-08): an empty screen reads as "nothing is
- * running", and here it said so about a cluster running a hundred and thirty-two
- * things.
+ * Nodes and everything that needs attention: named, large, all of them.
  */
-function Named({ title, tiles }: { title: string; tiles: WallTile[] }) {
+function Named({ title, tiles, grow }: { title: string; tiles: WallTile[]; grow?: boolean }) {
   if (tiles.length === 0) return null
 
-  // Size follows the count so a long list still fits, and the floor is the point
-  // at which a name is still readable from across a room. Below that the tile
-  // belongs in the field instead.
+  // Size follows the count AND the longest name, and the floor is the point at
+  // which a name is still readable from across a room.
+  //
+  // The count alone is not enough: three nodes got the largest size and then
+  // "srv-rsp-prod02.holzcloud.ch" broke mid-word across three lines -- "srv-rsp-
+  // prod02.holzcloud.c / h". A hostname is one word, so wrapping cannot help it;
+  // only the type size can. Third time this screen has mangled a node's name
+  // (ledger 170, then again on first sight of this layout).
+  const longest = Math.max(...tiles.map((tile) => tile.name.length))
   const size =
-    tiles.length > 12 ? 'text-[1.8vmin]' : tiles.length > 6 ? 'text-[2.4vmin]' : 'text-[3.2vmin]'
+    tiles.length > 12 || longest > 34
+      ? 'text-sm md:text-[1.7vmin]'
+      : tiles.length > 6 || longest > 22
+        ? 'text-base md:text-[2.2vmin]'
+        : 'text-lg md:text-[2.9vmin]'
 
   return (
-    <div className="flex flex-col gap-[0.8vmin]">
-      <p className="text-[1.6vmin] text-zinc-500 uppercase tracking-widest">{title}</p>
+    <Section title={title} grow={grow}>
       <div
-        className="grid content-start gap-[0.8vmin]"
+        // auto-FIT, not auto-fill: three nodes on a television should be three
+        // WIDE tiles whose names fit, not three narrow ones beside four empty
+        // tracks. The first photograph of this screen showed "srv-rsp-prod02…"
+        // truncated with two thirds of the row unused.
+        className={`grid gap-[0.9vmin] ${
+          grow ? 'min-h-0 md:h-full md:content-stretch' : 'content-start'
+        } ${
+          // The FLOOR follows the longest name too, not only the count. On a
+          // 390px phone two 9rem tracks leave 147px of text, and
+          // "srv-rsp-prod02.holzcloud.ch" does not fit in that at any size a
+          // wall should use -- so it broke mid-word into "holzcloud.c / h".
+          // A long name takes the whole width there and reads in one line.
+          longest > 22
+            ? 'grid-cols-[repeat(auto-fit,minmax(16rem,1fr))]'
+            : 'grid-cols-[repeat(auto-fit,minmax(9rem,1fr))]'
+        } ${
+          tiles.length > 12
+            ? 'md:grid-cols-[repeat(auto-fit,minmax(20vmin,1fr))]'
+            : 'md:grid-cols-[repeat(auto-fit,minmax(28vmin,1fr))]'
+        }`}
         style={{
-          // auto-FIT, not auto-fill: three nodes on a television should be three
-          // WIDE tiles whose names fit, not three narrow ones beside four empty
-          // tracks. The first photograph of this screen showed
-          // "srv-rsp-prod02…" truncated with two thirds of the row unused.
-          gridTemplateColumns: `repeat(auto-fit, minmax(${tiles.length > 12 ? 24 : 34}vmin, 1fr))`,
+          // Rows share the height evenly when the section is growing, so two
+          // outages are two large blocks rather than two small ones and a void.
+          gridAutoRows: grow ? 'minmax(0, 1fr)' : undefined,
         }}
       >
         {tiles.map((tile) => (
@@ -230,173 +396,198 @@ function Named({ title, tiles }: { title: string; tiles: WallTile[] }) {
             // ambiguity that count exists to remove.
             data-row=""
             data-state={tile.state}
-            className={`overflow-hidden rounded-[1vmin] px-[1.2vmin] py-[1vmin] ring-1 ${size} ${
-              TILE_COLOURS[tile.state] ?? TILE_COLOURS.unknown
-            }`}
+            className={`min-w-0 overflow-hidden rounded-[1vmin] px-3 py-2 ring-1 md:px-[1.3vmin] md:py-[1.1vmin] ${size} ${
+              grow ? 'flex flex-col justify-center' : ''
+            } ${TILE_COLOURS[tile.state] ?? TILE_COLOURS.unknown}`}
           >
-            <p className="truncate font-medium">{tile.name}</p>
-            <p className="truncate opacity-70">
+            {/* Wrapped, not truncated: "srv-rsp-prod02.ho…" is not an address
+                anybody can act on, and this is the second time this screen has
+                cut a node's name in half (ledger 170). */}
+            <p className="break-words font-semibold leading-tight">{tile.name}</p>
+            <p className="truncate opacity-80">
               {tile.namespace === '' ? tile.detail : `${tile.namespace} · ${tile.detail}`}
             </p>
           </div>
         ))}
       </div>
-    </div>
+    </Section>
   )
 }
 
 /**
- * Everything that is fine, as a field of colour grouped by namespace.
+ * One tile per namespace, coloured by the worst thing in it.
  *
- * # Why a field and not a list
+ * # Why not one square per workload
  *
- * A hundred and thirty-two names cannot be read from four metres and nobody is
- * trying to. What a wall is read for is the SHAPE: a field of green with one red
- * square in it is understood before anybody has focused on anything. So the
- * healthy ones keep their colour and lose their names, and the ones that are not
- * healthy are named above in full.
+ * That is what this page did first, and the operator asked twice what the green
+ * squares were and then asked whether they were pods. A hundred and thirty-two
+ * anonymous squares are not read as a hundred and thirty-two things; they are
+ * read as texture. Eight tiles with names and counts are read as eight places.
  *
- * # Why grouped by namespace
+ * Nothing is hidden by the roll-up: every workload is inside exactly one tile,
+ * each tile carries its own count, the total is printed above, and anything that
+ * is not running is ALSO named in full on the left. The aggregate is a second
+ * view of the same set, never a substitute for it.
  *
- * Without it this is a hundred and thirty-two anonymous squares. With it the
- * field has landmarks -- somebody who knows the cluster sees "db" and "monitoring"
- * as places, and a gap or a wrong colour has an address.
+ * # Why the tile names the offender
+ *
+ * A red block with no name sends somebody to go and look, which is the whole
+ * thing this screen exists to save. So a tile that is not green says which
+ * workload decided that, in the cluster's own words — "postgres · 2 of 3 ready".
  */
-function Field({ tiles }: { tiles: WallTile[] }) {
+function Namespaces({ tiles, workloads }: { tiles: WallNamespace[]; workloads: number }) {
   if (tiles.length === 0) return null
 
-  const groups = new Map<string, WallTile[]>()
+  // Only the colours actually on the screen are keyed. A key to something that
+  // is not there is one more thing to read past.
+  const present: string[] = []
   for (const tile of tiles) {
-    const key = tile.namespace === '' ? '—' : tile.namespace
-    groups.set(key, [...(groups.get(key) ?? []), tile])
+    if (!present.includes(tile.state)) present.push(tile.state)
   }
-  // By name, so a namespace does not move between refreshes. Something jumping
-  // about on a wall is read as something changing.
-  const ordered = [...groups.entries()].sort((a, b) => a[0].localeCompare(b[0]))
-  const running = tiles.filter((tile) => tile.state === 'ok').length
-  const stopped = tiles.length - running
+  if (tiles.some((tile) => tile.stopped > 0) && !present.includes('stopped')) {
+    present.push('stopped')
+  }
+  present.sort((a, b) => Object.keys(STATE_WORDS).indexOf(a) - Object.keys(STATE_WORDS).indexOf(b))
 
-  // flex-1 only where the page cannot scroll. On a television the field takes
-  // the slack and the footer sits at the bottom; on a phone the same rule opens
-  // a black gap between the tiles and the footer, and scrolling down lands in
-  // it -- which is what the operator photographed.
   return (
-    <div className="flex min-h-0 flex-col gap-[0.8vmin] md:flex-1">
-      <div className="flex flex-wrap items-baseline gap-x-[2vmin] gap-y-[0.4vmin]">
-        <p className="text-[1.6vmin] text-zinc-500 uppercase tracking-widest">
-          {tiles.length} workloads — one square each
-        </p>
-        {/* Spelled out, because the operator asked twice what the squares were
-            and then asked whether they were pods. "Workload" is this product's
-            word and not theirs, and a wall that needs explaining has not been
-            explained until the explanation is ON it. */}
-        <span className="text-[1.5vmin] text-zinc-600">
-          a deployment, statefulset, daemonset, job or cronjob — not a single pod
-        </span>
-        {/* A legend, once, in small type. The operator asked what the green
-            squares meant, and having to ask is the defect: a wall is read by
-            people who were never told anything about it, and an answer given in
-            a chat is an answer nobody walking past ever gets. Only the colours
-            actually on the screen are listed -- a key to something that is not
-            there is one more thing to read past. */}
-        <span className="flex items-center gap-[1.2vmin] text-[1.5vmin] text-zinc-600">
-          {running > 0 && (
-            <span className="flex items-center gap-[0.5vmin]">
-              <span
-                className={`h-[1.4vmin] w-[1.4vmin] rounded-[0.3vmin] ring-1 ${TILE_COLOURS.ok}`}
-              />
-              running {running}
-            </span>
-          )}
-          {stopped > 0 && (
-            <span className="flex items-center gap-[0.5vmin]">
-              <span
-                className={`h-[1.4vmin] w-[1.4vmin] rounded-[0.3vmin] ring-1 ${TILE_COLOURS.stopped}`}
-              />
-              stopped on purpose {stopped}
-            </span>
-          )}
-        </span>
-      </div>
-      <div className="flex min-h-0 flex-1 flex-wrap content-start gap-x-[3vmin] gap-y-[1.6vmin]">
-        {ordered.map(([namespace, group]) => (
-          <div key={namespace} className="flex flex-col gap-[0.4vmin]">
-            <p className="text-[1.7vmin] text-zinc-500">
-              {namespace} <span className="tabular-nums">{group.length}</span>
+    <Section
+      title={`${plural(tiles.length, 'namespace')} — ${plural(workloads, 'workload')}`}
+      // Spelled out, because the operator asked twice what the squares were and
+      // then asked whether they were pods. "Workload" is this product's word and
+      // not theirs, and a wall that needs explaining has not been explained
+      // until the explanation is ON it.
+      aside="each tile takes the colour of the worst workload in it — a deployment, statefulset, daemonset, job or cronjob, not a single pod"
+      grow
+    >
+      {/* Stretched, like the left half: the first photograph of this column had
+          its eight tiles in a band at the top and a third of the screen black
+          underneath. A wall wants the biggest tiles that still fit. */}
+      <div
+        className="grid min-h-0 grid-cols-[repeat(auto-fit,minmax(6.5rem,1fr))] gap-[0.8vmin] md:flex-1 md:grid-cols-[repeat(auto-fit,minmax(16vmin,1fr))] md:content-stretch"
+        style={{ gridAutoRows: 'minmax(0, 1fr)' }}
+      >
+        {tiles.map((tile) => (
+          <div
+            key={tile.name}
+            data-row=""
+            data-state={tile.state}
+            title={tile.worst === '' ? tile.name : `${tile.name} — ${tile.worst}`}
+            className={`min-w-0 overflow-hidden rounded-[0.8vmin] px-2.5 py-2 ring-1 md:px-[1vmin] md:py-[0.8vmin] ${
+              TILE_COLOURS[tile.state] ?? TILE_COLOURS.unknown
+            }`}
+          >
+            <p className="flex items-baseline justify-between gap-[0.6vmin] text-sm md:text-[1.8vmin]">
+              <span className="truncate font-semibold">{tile.name}</span>
+              <span className="tabular-nums opacity-80">{tile.total}</span>
             </p>
-            <div className="flex max-w-[46vmin] flex-wrap gap-[0.6vmin]">
-              {group.map((tile) => (
-                <div
-                  key={`${tile.kind}/${tile.namespace}/${tile.name}`}
-                  data-row=""
-                  data-state={tile.state}
-                  // The name is a title rather than text: it is there for
-                  // anybody who walks up to the screen, and takes no room from
-                  // the four-metre reading it would otherwise crowd out.
-                  title={`${tile.name} — ${tile.detail}`}
-                  className={`h-[3.4vmin] w-[3.4vmin] rounded-[0.5vmin] ring-1 ${
-                    TILE_COLOURS[tile.state] ?? TILE_COLOURS.unknown
-                  }`}
-                />
-              ))}
-            </div>
+            {/* Only when there is something to say. A tile that always carries a
+                sentence is a tile whose sentence nobody reads. */}
+            {tile.worst !== '' && (
+              <p className="line-clamp-2 break-words text-[0.7rem] leading-tight opacity-90 md:text-[1.4vmin]">
+                {tile.worst}
+              </p>
+            )}
+            {tile.worst === '' && tile.stopped > 0 && (
+              <p className="truncate text-[0.7rem] opacity-70 md:text-[1.4vmin]">
+                {tile.stopped} switched off
+              </p>
+            )}
           </div>
         ))}
       </div>
-    </div>
+      <div className="flex flex-wrap items-center gap-x-[1.6vmin] gap-y-[0.4vmin]">
+        {present.map((state) => (
+          <span
+            key={state}
+            className="flex items-center gap-[0.6vmin] text-[0.7rem] text-zinc-500 md:text-[1.4vmin]"
+          >
+            <span
+              className={`h-3 w-3 rounded-[0.3vmin] ring-1 md:h-[1.3vmin] md:w-[1.3vmin] ${
+                TILE_COLOURS[state] ?? TILE_COLOURS.unknown
+              }`}
+            />
+            {STATE_WORDS[state] ?? state}
+          </span>
+        ))}
+      </div>
+    </Section>
   )
 }
 
-function Footer({ wall }: { wall: Wall }) {
+/**
+ * The cluster's latest warnings, in the cluster's own words.
+ *
+ * "Failed Pod/dupl-test" names a pod and says nothing at all about what happened
+ * to it — the operator asked what it meant, which is the right question to ask of
+ * a line with no content in it. The message is the only part of a warning that
+ * carries any, so it gets a line of its own here rather than being truncated
+ * into the end of another one.
+ */
+function Warnings({ warnings, now }: { warnings: WallWarning[]; now: number }) {
+  if (warnings.length === 0) return null
+
   return (
-    <div className="flex items-end justify-between gap-[2vmin]">
-      <div className="flex gap-[2vmin]">
-        <Meter label="CPU" capacity={wall.cpu} />
-        <Meter label="Memory" capacity={wall.memory} />
-        <Meter label="Pods" capacity={wall.pods} />
-      </div>
-      {wall.warnings.length > 0 && (
-        <div className="min-w-0 flex-1 text-right">
-          {wall.warnings.slice(0, 3).map((warning) => (
-            <p
-              key={`${warning.object}/${warning.reason}/${warning.age}`}
-              className="truncate text-[1.8vmin] text-amber-200/80"
-            >
-              <span className="font-medium">{warning.reason}</span> {warning.object}
+    <Section title="Latest warnings">
+      <div className="flex flex-col gap-3 md:gap-[0.8vmin]">
+        {warnings.slice(0, WARNINGS_SHOWN).map((warning) => (
+          <div
+            key={`${warning.object}/${warning.reason}/${warning.last_seen}`}
+            data-row=""
+            className="min-w-0 overflow-hidden border-amber-600 border-l-4 pl-2 md:border-l-[0.4vmin] md:pl-[1vmin]"
+          >
+            <p className="flex items-baseline gap-[0.8vmin] text-sm md:text-[1.7vmin]">
+              <span className="font-semibold text-amber-300">{warning.reason}</span>
+              <span className="min-w-0 truncate text-zinc-400">{warning.object}</span>
               {/* Seen 340 times is a different situation from seen once, and
                   from four metres that count is the whole message. */}
-              {warning.count > 1 ? ` ×${warning.count}` : ''}
-              {/* And WHY. "Failed Pod/dupl-test" names a pod and says nothing
-                  at all about what happened to it; the cluster's own sentence
-                  is the only part of a warning with any content, and it was
-                  fetched, carried through the API and then not drawn. */}
-              {warning.message === '' ? '' : ` — ${warning.message}`}
+              {warning.count > 1 && (
+                <span className="tabular-nums text-zinc-500">×{warning.count}</span>
+              )}
+              {/* An AGE, not the instant the server sent: the first photograph
+                  of this column read "2026-09-20T09:58:00Z" across a
+                  television, which is four metres of nothing. */}
+              {warning.last_seen !== '' && (
+                <span className="ml-auto whitespace-nowrap text-zinc-600">
+                  {sinceText(warning.last_seen, now)}
+                </span>
+              )}
             </p>
-          ))}
-        </div>
-      )}
-    </div>
+            {warning.message !== '' && (
+              <p className="line-clamp-2 text-xs text-zinc-400 md:text-[1.5vmin]">
+                {warning.message}
+              </p>
+            )}
+          </div>
+        ))}
+      </div>
+    </Section>
   )
 }
 
+/** Meter is a capacity bar with the number beside it, not inside it. */
 function Meter({ label, capacity }: { label: string; capacity: Capacity }) {
   return (
-    <div className="w-[18vmin]">
-      <div className="flex items-baseline justify-between text-[1.8vmin]">
-        <span className="text-zinc-500">{label}</span>
-        <span className="tabular-nums text-zinc-300">
+    <div>
+      <div className="flex items-baseline justify-between gap-[1vmin] text-sm md:text-[1.8vmin]">
+        <span className="text-zinc-400">{label}</span>
+        <span className="truncate text-xs text-zinc-600 md:text-[1.5vmin]">
+          {capacity.requested === '' || capacity.allocatable === ''
+            ? ''
+            : `${capacity.requested} of ${capacity.allocatable}`}
+        </span>
+        <span className="ml-auto tabular-nums font-semibold text-zinc-200">
           {capacity.percent < 0 ? '—' : `${capacity.percent}%`}
         </span>
       </div>
-      <div className="mt-[0.4vmin] h-[1vmin] overflow-hidden rounded-full bg-zinc-800">
+      <div className="mt-1 h-2 overflow-hidden rounded-[0.2vmin] bg-zinc-800 md:mt-[0.5vmin] md:h-[1.2vmin]">
         {capacity.percent >= 0 && (
           <div
             className={
               capacity.percent >= 90
-                ? 'h-full bg-red-500'
+                ? 'h-full bg-red-600'
                 : capacity.percent >= 75
-                  ? 'h-full bg-amber-400'
-                  : 'h-full bg-emerald-500'
+                  ? 'h-full bg-amber-600'
+                  : 'h-full bg-green-700'
             }
             style={{ width: `${Math.min(100, Math.max(0, capacity.percent))}%` }}
           />
@@ -407,14 +598,27 @@ function Meter({ label, capacity }: { label: string; capacity: Capacity }) {
 }
 
 /**
- * needsAttention splits the two zones.
+ * needsAttention decides what gets named on the left.
  *
  * `stopped` is NOT here: it is a decision somebody made, and a wall that put
  * every deliberately stopped workload in the attention list would be a wall
- * asking to be ignored. It keeps its own colour in the field instead.
+ * asking to be ignored. It is counted in its namespace's tile instead.
  */
 function needsAttention(tile: WallTile): boolean {
   return tile.state === 'down' || tile.state === 'unknown' || tile.state === 'warn'
+}
+
+/**
+ * sinceText turns the instant a warning was last seen into an age.
+ *
+ * Unparseable instants are shown as they came rather than swallowed: a wall that
+ * silently drops a field it did not understand is a wall that cannot be debugged
+ * from across the room.
+ */
+function sinceText(instant: string, now: number): string {
+  const at = new Date(instant)
+  if (Number.isNaN(at.getTime())) return instant
+  return `${readableAge(now - at.getTime())} ago`
 }
 
 /** readableAge is what somebody four metres away can read at a glance. */
@@ -426,6 +630,10 @@ function readableAge(ms: number): string {
   return `${Math.round(minutes / 60)} h`
 }
 
+function plural(count: number, word: string): string {
+  return `${count} ${word}${count === 1 ? '' : 's'}`
+}
+
 /**
  * Hung off the ROOT and not the authenticated layout, deliberately.
  *
@@ -434,11 +642,10 @@ function readableAge(ms: number): string {
  * nobody is going anywhere and every pixel of navigation is a pixel that could
  * have been a tile.
  *
- * What it gives up is the session gate that layout carries. For now that means
- * the screen needs somebody to sign in on it once — and a session expires, so
- * this is not yet a screen that can be left up for weeks. The kiosk link is the
- * other half and is the next thing built; until it exists, this page says what
- * it is rather than pretending.
+ * What it gives up is the session gate that layout carries — which is why the
+ * kiosk link exists: a credential of its own, readable and nothing else, so the
+ * screen can be left up for weeks without a session expiring behind it. See
+ * internal/auth/walllink.go.
  */
 export const wallRoute = createRoute({
   getParentRoute: () => rootRoute,

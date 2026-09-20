@@ -480,19 +480,13 @@
     "cluster": "c-homelab",
     "server_version": "v1.36.4",
     "namespace": "",
-    "namespaces": [
-      "default",
-      "kube-system",
-      "longhorn-system"
-    ],
+    "namespaces": ["default", "kube-system", "longhorn-system"],
     "nodes": [
       {
         "name": "srv-rsp-prod01.holzcloud.ch",
         "ready": "True",
         "unschedulable": false,
-        "roles": [
-          "control-plane"
-        ],
+        "roles": ["control-plane"],
         "kubelet_version": "v1.36.4",
         "os_image": "Talos (v1.14.2)",
         "created_at": "2026-09-01T08:04:00Z",
@@ -621,14 +615,8 @@
       "name": "raspberry-pi-5-mit-nvme",
       "talos_version": "v1.14.2",
       "canonical": "376567988ad370138ad8b2698212367b8edcb69b5fd68c80be1f2ec7d603b4ba",
-      "extensions": [
-        "siderolabs/iscsi-tools",
-        "siderolabs/util-linux-tools"
-      ],
-      "kernel_args": [
-        "console=ttyAMA0,115200",
-        "talos.dashboard.disabled=1"
-      ],
+      "extensions": ["siderolabs/iscsi-tools", "siderolabs/util-linux-tools"],
+      "kernel_args": ["console=ttyAMA0,115200", "talos.dashboard.disabled=1"],
       "meta": [],
       "usable": true,
       "probed_at": "2026-09-18T12:00:00Z",
@@ -766,10 +754,7 @@
           "mtu": 1500,
           "up": true,
           "speed_mbit": 1000,
-          "addresses": [
-            "192.168.0.30/24",
-            "fe80::2ecf:67ff:fe1a:4b9e/64"
-          ],
+          "addresses": ["192.168.0.30/24", "fe80::2ecf:67ff:fe1a:4b9e/64"],
           "driver": "bcmgenet",
           "kind": ""
         },
@@ -779,9 +764,7 @@
           "mtu": 1450,
           "up": true,
           "speed_mbit": 0,
-          "addresses": [
-            "10.244.0.1/24"
-          ],
+          "addresses": ["10.244.0.1/24"],
           "driver": "",
           "kind": "bridge"
         }
@@ -1269,9 +1252,7 @@
         "claim": "db/postgres-data",
         "storage_class": "longhorn",
         "reclaim_policy": "Delete",
-        "access_modes": [
-          "RWO"
-        ],
+        "access_modes": ["RWO"],
         "driver": "driver.longhorn.io",
         "notice": "",
         "created_at": "2026-09-02T09:00:00Z"
@@ -1283,9 +1264,7 @@
         "claim": "",
         "storage_class": "longhorn",
         "reclaim_policy": "Retain",
-        "access_modes": [
-          "RWO"
-        ],
+        "access_modes": ["RWO"],
         "driver": "driver.longhorn.io",
         "notice": "Its claim is gone and the data is still on the disk, kept because the reclaim policy is Retain. Nothing counts it and nothing will use it until somebody either makes a claim for it or deletes it.",
         "created_at": "2026-06-14T21:10:00Z"
@@ -1300,12 +1279,8 @@
         "capacity": "20Gi",
         "storage_class": "longhorn",
         "volume": "pvc-8f3a1c92-longhorn-db-postgres-data",
-        "access_modes": [
-          "RWO"
-        ],
-        "used_by": [
-          "db/postgres-0"
-        ],
+        "access_modes": ["RWO"],
+        "used_by": ["db/postgres-0"],
         "expandable": true,
         "notice": "",
         "created_at": "2026-09-02T09:00:00Z"
@@ -1318,9 +1293,7 @@
         "capacity": "",
         "storage_class": "local-path",
         "volume": "",
-        "access_modes": [
-          "RWO"
-        ],
+        "access_modes": ["RWO"],
         "used_by": [],
         "expandable": false,
         "notice": "Its class waits for a consumer, so it stays Pending until a pod that uses it is scheduled. That is the class working as configured, not a fault.",
@@ -1357,9 +1330,7 @@
         "type": "ClusterIP",
         "cluster_ip": "10.96.184.203",
         "external": "",
-        "ports": [
-          "http 80/TCP → 8080"
-        ],
+        "ports": ["http 80/TCP → 8080"],
         "selector": "app.kubernetes.io/name=internal-api",
         "endpoints": 0,
         "ready_endpoints": 0,
@@ -1373,9 +1344,7 @@
         "type": "ClusterIP",
         "cluster_ip": "10.96.0.42",
         "external": "",
-        "ports": [
-          "http 80/TCP → 8080"
-        ],
+        "ports": ["http 80/TCP → 8080"],
         "selector": "app=website",
         "endpoints": 2,
         "ready_endpoints": 1,
@@ -1389,10 +1358,7 @@
         "type": "LoadBalancer",
         "cluster_ip": "10.96.0.77",
         "external": "waiting for an address",
-        "ports": [
-          "http 80/TCP → 80 (node 30080)",
-          "https 443/TCP → 443 (node 30443)"
-        ],
+        "ports": ["http 80/TCP → 80 (node 30080)", "https 443/TCP → 443 (node 30443)"],
         "selector": "app.kubernetes.io/name=ingress-nginx",
         "endpoints": 1,
         "ready_endpoints": 1,
@@ -1406,9 +1372,7 @@
         "namespace": "db",
         "name": "postgres-inbound-only",
         "applies": "app=postgres",
-        "types": [
-          "Ingress"
-        ],
+        "types": ["Ingress"],
         "selects": 1,
         "isolating": true,
         "summary": "Restricts inbound traffic to 1 pods. Outbound traffic from them is not restricted at all.",
@@ -1419,10 +1383,7 @@
         "namespace": "default",
         "name": "internal-api-lockdown",
         "applies": "app.kubernetes.io/name=internal-api",
-        "types": [
-          "Ingress",
-          "Egress"
-        ],
+        "types": ["Ingress", "Egress"],
         "selects": 0,
         "isolating": false,
         "summary": "It matches no pod in default, so it protects nothing. A policy that selects nothing is worse than none: somebody believes this is in force.",
@@ -1430,13 +1391,8 @@
         "created_at": "2026-09-18T07:30:00Z"
       }
     ],
-    "unprotected": [
-      "kube-system",
-      "monitoring"
-    ],
-    "ingress_classes": [
-      "nginx"
-    ],
+    "unprotected": ["kube-system", "monitoring"],
+    "ingress_classes": ["nginx"],
     "default_ingress_class": "nginx",
     "notice": "Endpoints are counted from EndpointSlices, which is what the kube-proxy on each node actually load-balances to. A Service with none refuses every connection instantly, and nothing else about it looks wrong."
   },
@@ -1518,9 +1474,7 @@
         "kind": "ClusterRole",
         "namespace": "",
         "name": "platform-operator",
-        "rules": [
-          "everything on every resource"
-        ],
+        "rules": ["everything on every resource"],
         "administrative": true,
         "bound": 1,
         "built_in": false,
@@ -1530,9 +1484,7 @@
         "kind": "Role",
         "namespace": "web",
         "name": "config-reader",
-        "rules": [
-          "get, list, watch on configmaps"
-        ],
+        "rules": ["get, list, watch on configmaps"],
         "administrative": false,
         "bound": 1,
         "built_in": false,
@@ -1542,9 +1494,7 @@
         "kind": "ClusterRole",
         "namespace": "",
         "name": "cluster-admin",
-        "rules": [
-          "everything on every resource"
-        ],
+        "rules": ["everything on every resource"],
         "administrative": true,
         "bound": 0,
         "built_in": true,
@@ -1554,9 +1504,7 @@
         "kind": "ClusterRole",
         "namespace": "",
         "name": "system:node",
-        "rules": [
-          "get, list, watch on nodes, pods, services"
-        ],
+        "rules": ["get, list, watch on nodes, pods, services"],
         "administrative": false,
         "bound": 0,
         "built_in": true,
@@ -1576,9 +1524,7 @@
       {
         "namespace": "default",
         "name": "default",
-        "used_by": [
-          "default/holzcloud-website-7c65d6cfc9-x4m2p"
-        ],
+        "used_by": ["default/holzcloud-website-7c65d6cfc9-x4m2p"],
         "bindings": 0,
         "administrative": false,
         "notice": "The account pods in default run as when they name none.",
@@ -1587,19 +1533,14 @@
       {
         "namespace": "monitoring",
         "name": "prometheus",
-        "used_by": [
-          "monitoring/prometheus-server-0"
-        ],
+        "used_by": ["monitoring/prometheus-server-0"],
         "bindings": 1,
         "administrative": false,
         "notice": "",
         "created_at": "2026-06-14T21:10:00Z"
       }
     ],
-    "administrators": [
-      "ServiceAccount ci/github-actions-deployer",
-      "User holz@holzcloud.ch"
-    ],
+    "administrators": ["ServiceAccount ci/github-actions-deployer", "User holz@holzcloud.ch"],
     "notice": "A binding that names a role or a service account which does not exist grants nothing, and looks exactly like one that works: RBAC has no referential integrity, deliberately, so that a binding may be written before its role. Administrative means wildcard verbs on wildcard resources, whatever the role is called -- looking for the name cluster-admin would miss every hand-written role with the same power."
   },
   "/api/v1/clusters/c-homelab/kubernetes/inventory": {
@@ -1682,9 +1623,7 @@
       {
         "group": "longhorn.io",
         "kind": "Volume",
-        "versions": [
-          "v1beta2"
-        ],
+        "versions": ["v1beta2"],
         "stored": "v1beta2",
         "scope": "Namespaced",
         "established": true,
@@ -1694,9 +1633,7 @@
       {
         "group": "monitoring.coreos.com",
         "kind": "ServiceMonitor",
-        "versions": [
-          "v1"
-        ],
+        "versions": ["v1"],
         "stored": "v1",
         "scope": "Namespaced",
         "established": true,
@@ -1706,9 +1643,7 @@
       {
         "group": "cert-manager.io",
         "kind": "Certificate",
-        "versions": [
-          "v1"
-        ],
+        "versions": ["v1"],
         "stored": "v1",
         "scope": "Namespaced",
         "established": false,
@@ -2669,6 +2604,64 @@
         "detail": "1 of 1 ready"
       }
     ],
+    "namespaces": [
+      {
+        "name": "default",
+        "total": 3,
+        "state": "down",
+        "worst": "holzcloud-website-internal-api · 0 of 2 ready",
+        "stopped": 1
+      },
+      {
+        "name": "db",
+        "total": 19,
+        "state": "warn",
+        "worst": "postgres · 2 of 3 ready, 1 updated",
+        "stopped": 0
+      },
+      {
+        "name": "backup",
+        "total": 19,
+        "state": "ok",
+        "worst": "",
+        "stopped": 0
+      },
+      {
+        "name": "longhorn-system",
+        "total": 19,
+        "state": "ok",
+        "worst": "",
+        "stopped": 0
+      },
+      {
+        "name": "cloud",
+        "total": 18,
+        "state": "ok",
+        "worst": "",
+        "stopped": 0
+      },
+      {
+        "name": "ingress-nginx",
+        "total": 18,
+        "state": "ok",
+        "worst": "",
+        "stopped": 0
+      },
+      {
+        "name": "kube-system",
+        "total": 18,
+        "state": "ok",
+        "worst": "",
+        "stopped": 0
+      },
+      {
+        "name": "monitoring",
+        "total": 18,
+        "state": "ok",
+        "worst": "",
+        "stopped": 0
+      }
+    ],
     "cpu": {
       "allocatable": "12",
       "requested": "4200m",
@@ -2690,21 +2683,21 @@
         "reason": "FailedScheduling",
         "message": "0/3 nodes are available: insufficient memory",
         "count": 340,
-        "age": "2026-09-20T09:58:00Z"
+        "last_seen": "2026-09-20T09:58:00Z"
       },
       {
         "object": "Pod/postgres-2",
         "reason": "Unhealthy",
         "message": "readiness probe failed",
         "count": 7,
-        "age": "2026-09-20T09:55:00Z"
+        "last_seen": "2026-09-20T09:55:00Z"
       },
       {
         "object": "Pod/dupl-test",
         "reason": "Failed",
         "message": "Error: ImagePullBackOff — ghcr.io/holzcloud/dupl:latest not found",
         "count": 3,
-        "age": "2026-09-20T09:57:00Z"
+        "last_seen": "2026-09-20T09:57:00Z"
       }
     ],
     "summary": {
