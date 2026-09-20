@@ -521,6 +521,10 @@ func run(args []string) error {
 		OIDC:           provider,
 		IsSSOOnly:      ssoOnly(cfg),
 		LocalSignInURL: localSignInURL(cfg),
+		WallLinkValid: func(ctx context.Context, token string) bool {
+			_, err := authSvc.AuthenticateWallLink(ctx, token)
+			return err == nil
+		},
 	}
 
 	// The route table is assembled by routeTable, which is the one place it is
@@ -704,6 +708,7 @@ func routeTable(deps httpapi.Deps) []httpapi.Route {
 		handlers.OIDCRoutes(deps),
 		handlers.AccountRoutes(deps),
 		handlers.UserRoutes(deps),
+		handlers.WallLinkRoutes(deps),
 		handlers.AuditRoutes(deps),
 		handlers.SchematicRoutes(deps),
 		handlers.InventoryRoutes(deps),

@@ -1,5 +1,23 @@
 [
   {
+    "version": "v1.27.0",
+    "date": "2026-09-20",
+    "changes": [
+      {
+        "icon": "🔑",
+        "text": "The wall can be left up now. Make a link under Settings, open it on the screen once and bookmark it: it does not expire, so the screen keeps answering long after a session would have run out — and it is revoked from the same place when the screen comes down."
+      },
+      {
+        "icon": "🚪",
+        "text": "The link opens the wall and nothing else. Not a role and not a session: one named route accepts it, which you can check by reading the route table. It reads, it can never change anything, and it cannot see the audit archive, a Secret’s key names or a cluster’s configuration."
+      },
+      {
+        "icon": "🏷️",
+        "text": "It is shown once — only its hash is kept — and it needs a label, because the question a revocation asks is which screen this was. The list says when each link was last used, which answers the other one: is it still on a wall?"
+      }
+    ]
+  },
+  {
     "version": "v1.26.0",
     "date": "2026-09-20",
     "changes": [

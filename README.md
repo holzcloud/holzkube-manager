@@ -775,9 +775,20 @@ stopped on purpose is not broken; and a node nobody is hearing from is never
 green. Those three are what a green-and-red wall gets wrong, and the third one is
 the case the screen exists for.
 
-**Still to come:** the screen currently needs somebody to sign in on it once, and
-a session expires — so it is not yet something to leave up for weeks. A kiosk
-link, long-lived and read-only and revocable, is the other half.
+**A wall link is what you leave it open on.** Make one under Settings, open it on
+the screen once and bookmark it. It is long-lived, so the screen keeps answering
+after a session would have expired, and it is revocable, so the screen is turned
+off from across the building when it comes down.
+
+The link opens the wall and nothing else. Not a role, not a session: one named
+route in the route table accepts it, which is a property you can check by reading
+that table rather than one you have to reason about. It reads, it can never
+change anything, and it cannot see the audit archive, a Secret's key names or a
+cluster's configuration.
+
+It is shown once — only its hash is kept — and it needs a label, because the
+question a revocation asks is *which screen was this*. The list says when each
+was last used, which answers the other one: is it still on a wall?
 
 ## Kubernetes itself
 

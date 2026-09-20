@@ -456,7 +456,17 @@ var allowlist = map[string][]string{
 	// weeks, so the archive would fill with one action and nothing else. The
 	// middleware records a request per call regardless; this table's job is only
 	// to say what may appear in clear, and the answer is nothing.
-	"cluster.wall":                  {},
+	"cluster.wall": {},
+
+	// The links a screen in a corridor is left open on (2026-09-20). The LABEL
+	// is kept in clear and the token never is: "which screen was this" is the
+	// whole question a revocation asks afterwards, and an archive that recorded
+	// only that a link was created could not answer it. The token is not in the
+	// body of any of the three -- it is minted on the server and returned once --
+	// so there is nothing here for the archive to leak.
+	"wall-link.list":                {},
+	"wall-link.create":              {"label"},
+	"wall-link.revoke":              {},
 	"cluster.kubernetes-stop":       {},
 	"cluster.kubernetes-start":      {},
 	"cluster.kubernetes-sweep-plan": {},

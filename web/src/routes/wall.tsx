@@ -65,6 +65,19 @@ const TILE_COLOURS: Record<string, string> = {
 export function WallView() {
   const [now, setNow] = useState(() => Date.now())
 
+  // The kiosk link, read from the page's own address once. It stays in the
+  // address because the address IS the bookmark on the screen; from here it
+  // travels into a header and nowhere else. It is never put in an API URL: a
+  // URL is written to the server's log, the browser's history and whatever
+  // proxy sits between, and a credential in all three outlives its screen.
+  const [link] = useState(() => {
+    try {
+      return new URLSearchParams(window.location.search).get('k') ?? ''
+    } catch {
+      return ''
+    }
+  })
+
   // A clock of its own, so the age on screen keeps counting up between
   // refreshes. Without it a screen whose requests had stopped would show an age
   // frozen at the moment of the last success, which is the opposite of the
@@ -74,12 +87,29 @@ export function WallView() {
     return () => clearInterval(timer)
   }, [])
 
-  const clusters = useQuery({ queryKey: ['clusters'], queryFn: api.clusters.list })
-  const cluster = clusters.data?.[0]?.id ?? ''
+  // A kiosk link opens the wall route and nothing else, so a screen showing one
+  // cannot list the clusters. The cluster then comes from the address too, and
+  // the link somebody copies out of the settings screen already carries it.
+  const [pinned] = useState(() => {
+    try {
+      return new URLSearchParams(window.location.search).get('cluster') ?? ''
+    } catch {
+      return ''
+    }
+  })
+
+  const clusters = useQuery({
+    queryKey: ['clusters'],
+    queryFn: api.clusters.list,
+    // Not asked for at all when the address names one: the request would be
+    // refused, and a refusal nobody reads is a request nobody should make.
+    enabled: pinned === '',
+  })
+  const cluster = pinned === '' ? (clusters.data?.[0]?.id ?? '') : pinned
 
   const wall = useQuery({
-    queryKey: ['wall', cluster],
-    queryFn: () => api.kubernetes.wall(cluster),
+    queryKey: ['wall', cluster, link],
+    queryFn: () => api.kubernetes.wall(cluster, undefined, link),
     enabled: cluster !== '',
     refetchInterval: REFRESH_MS,
     // The last answer stays on screen while a new one is fetched or fails. A
@@ -100,7 +130,12 @@ export function WallView() {
         <p className="grid h-full place-items-center text-[4vmin] text-zinc-500">
           {wall.error
             ? // Never a green screen: an unanswered question is not an answer.
-              'The cluster could not be asked.'
+              // A revoked or mistyped link lands here too, and saying which is
+              // worth the sentence: one is a cluster problem and the other is a
+              // link somebody has to replace.
+              link !== '' && isRefusal(wall.error)
+              ? 'This screen’s link is no longer valid. Make a new one in Settings.'
+              : 'The cluster could not be asked.'
             : clusters.data !== undefined && cluster === ''
               ? 'No cluster has been imported yet.'
               : 'Asking the cluster…'}
@@ -275,3 +310,15 @@ export const wallRoute = createRoute({
   path: '/wall',
   component: WallView,
 })
+
+/**
+ * isRefusal tells a rejected credential from an unreachable cluster.
+ *
+ * On a wall the difference is the whole of what somebody walking past can do
+ * about it: a revoked link is replaced in Settings, an unreachable cluster is
+ * not.
+ */
+function isRefusal(error: unknown): boolean {
+  const status = (error as { problem?: { status?: number } })?.problem?.status
+  return status === 401 || status === 403
+}
