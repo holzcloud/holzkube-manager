@@ -38,6 +38,23 @@ const CSRF_HEADER_VALUE = '1'
 
 const READ_METHODS = new Set(['GET', 'HEAD', 'OPTIONS', 'TRACE'])
 
+/**
+ * An absent list and a null list are both an empty list (2026-09-20).
+ *
+ * `.nullish().transform(orEmpty)` fills in a MISSING field and does nothing for an explicit
+ * `null` -- so a server answering `"quotas": null` failed the parse, and the
+ * operator got a screenful of zod errors where the Kubernetes page should have
+ * been. A nil slice in Go marshals to null, which makes that the default
+ * behaviour of any list nobody remembered to initialise.
+ *
+ * The server is fixed and guarded (internal/kube/emptylists_test.go walks every
+ * answer on an empty cluster and fails on a null anywhere). This is the second
+ * half: the guard keeps the server honest, and this keeps a null from ever again
+ * turning a page into an error message. A missing list and a null list mean the
+ * same thing to every screen in this product, so they are read the same way.
+ */
+const orEmpty = <T>(value: T[] | null | undefined): T[] => value ?? []
+
 export const auditChainSchema = z.object({
   ok: z.boolean(),
   broken_at_line: z.number(),
@@ -91,12 +108,12 @@ export const releaseSchema = z.object({
    *  to disagree about a version with a suffix. */
   series: z.string(),
   date: z.string().default(''),
-  changes: z.array(releaseChangeSchema).default([]),
+  changes: z.array(releaseChangeSchema).nullish().transform(orEmpty),
 })
 
 export const versionSchema = z.object({
   version: z.string().default(''),
-  releases: z.array(releaseSchema).default([]),
+  releases: z.array(releaseSchema).nullish().transform(orEmpty),
 })
 
 export type ReleaseChange = z.infer<typeof releaseChangeSchema>
@@ -218,7 +235,7 @@ export const userSchema = z.object({
   self: z.boolean().default(false),
 })
 
-export const usersSchema = z.object({ users: z.array(userSchema).default([]) })
+export const usersSchema = z.object({ users: z.array(userSchema).nullish().transform(orEmpty) })
 
 export type User = z.infer<typeof userSchema>
 
@@ -1014,7 +1031,7 @@ export const interfaceSchema = z.object({
   mtu: z.number().default(0),
   up: z.boolean().default(false),
   speed_mbit: z.number().default(0),
-  addresses: z.array(z.string()).default([]),
+  addresses: z.array(z.string()).nullish().transform(orEmpty),
   driver: z.string().default(''),
   kind: z.string().default(''),
 })
@@ -1153,8 +1170,8 @@ export const machinesSchema = z.object({ machines: z.array(machineSchema) })
 
 export const labelSelectorSchema = z.object({
   equals: z.record(z.string(), z.string()).default({}),
-  present: z.array(z.string()).default([]),
-  absent: z.array(z.string()).default([]),
+  present: z.array(z.string()).nullish().transform(orEmpty),
+  absent: z.array(z.string()).nullish().transform(orEmpty),
 })
 
 export const machineClassSchema = z.object({
@@ -1166,12 +1183,12 @@ export const machineClassSchema = z.object({
   sentence: z.string().default(''),
   /** Which machines this class names right now. A class is a question
    * re-answered on every read, not a group somebody is added to. */
-  machines: z.array(z.string()).default([]),
+  machines: z.array(z.string()).nullish().transform(orEmpty),
   count: z.number().default(0),
 })
 
 export const machineClassesSchema = z.object({
-  classes: z.array(machineClassSchema).default([]),
+  classes: z.array(machineClassSchema).nullish().transform(orEmpty),
 })
 
 export type LabelSelector = z.infer<typeof labelSelectorSchema>
@@ -1184,7 +1201,7 @@ export type MachineClass = z.infer<typeof machineClassSchema>
 export const nodeSetPlanSchema = z.object({
   /** A machine class id, or "named" when the template listed machines. */
   source: z.string().default(''),
-  machines: z.array(z.string()).default([]),
+  machines: z.array(z.string()).nullish().transform(orEmpty),
   /** What the template asked for; 0 means all of them. */
   wanted: z.number().default(0),
 })
@@ -1195,9 +1212,9 @@ export const templatePlanSchema = z.object({
   control_plane: nodeSetPlanSchema,
   workers: nodeSetPlanSchema,
   /** Why it cannot be applied as written. Empty means it can. */
-  problems: z.array(z.string()).default([]),
+  problems: z.array(z.string()).nullish().transform(orEmpty),
   /** Worth knowing and not a problem. */
-  notes: z.array(z.string()).default([]),
+  notes: z.array(z.string()).nullish().transform(orEmpty),
   sentence: z.string().default(''),
 })
 
@@ -1243,10 +1260,10 @@ export const scalePlanSchema = z.object({
   voting: z.number().default(0),
   tolerates: z.number().default(0),
   members_problem: z.string().default(''),
-  removals: z.array(scaleRemovalSchema).default([]),
-  additions: z.array(scaleCandidateSchema).default([]),
+  removals: z.array(scaleRemovalSchema).nullish().transform(orEmpty),
+  additions: z.array(scaleCandidateSchema).nullish().transform(orEmpty),
   /** The arithmetic in words. It is why the screen exists. */
-  advice: z.array(z.string()).default([]),
+  advice: z.array(z.string()).nullish().transform(orEmpty),
   sentence: z.string().default(''),
 })
 
@@ -1297,8 +1314,8 @@ export const foundSchema = z.object({
 export type Found = z.infer<typeof foundSchema>
 
 export const scanSchema = z.object({
-  found: z.array(foundSchema).default([]),
-  notices: z.array(z.string()).default([]),
+  found: z.array(foundSchema).nullish().transform(orEmpty),
+  notices: z.array(z.string()).nullish().transform(orEmpty),
 })
 
 export const candidateDiskSchema = z.object({
@@ -1320,16 +1337,16 @@ export const candidateSchema = z.object({
   fingerprint: z.string().default(''),
   /** The identifier printed on a label, for telling two identical machines
    * apart when the UUID cannot be read off either of them. */
-  macs: z.array(z.string()).default([]),
-  disks: z.array(candidateDiskSchema).default([]),
-  warnings: z.array(z.string()).default([]),
+  macs: z.array(z.string()).nullish().transform(orEmpty),
+  disks: z.array(candidateDiskSchema).nullish().transform(orEmpty),
+  warnings: z.array(z.string()).nullish().transform(orEmpty),
 })
 
 export type Candidate = z.infer<typeof candidateSchema>
 export type CandidateDisk = z.infer<typeof candidateDiskSchema>
 
 export const previewProvisionSchema = z.object({
-  warnings: z.array(z.string()).default([]),
+  warnings: z.array(z.string()).nullish().transform(orEmpty),
   /** The exact `.machine.install.image` this plan writes. Shown because its
    * failure is silent: the install succeeds, the node joins, and the system
    * extensions are simply gone. */
@@ -1395,11 +1412,11 @@ export const bootstrapIntentSchema = z.object({
 export type BootstrapIntent = z.infer<typeof bootstrapIntentSchema>
 
 export const bootstrapRecoverySchema = z.object({
-  pending: z.array(bootstrapIntentSchema).default([]),
+  pending: z.array(bootstrapIntentSchema).nullish().transform(orEmpty),
   guidance: z.string().default(''),
 })
 
-export const noticesSchema = z.object({ notices: z.array(z.string()).default([]) })
+export const noticesSchema = z.object({ notices: z.array(z.string()).nullish().transform(orEmpty) })
 
 /* ---------------------------------------------------------------------- */
 /* Upgrades and etcd                                                       */
@@ -1489,7 +1506,7 @@ export const upgradePlanSchema = z.object({
   chain: z.array(upgradeStepSchema).nullish(),
   strand: strandCheckSchema,
   gate_preview: gateVerdictSchema,
-  nodes: z.array(nodePlanSchema).default([]),
+  nodes: z.array(nodePlanSchema).nullish().transform(orEmpty),
   blocked: z.boolean().default(false),
   block_reason: z.string().default(''),
 })
@@ -1511,7 +1528,7 @@ export const etcdMemberSchema = z.object({
 })
 
 export const etcdMemberListSchema = z.object({
-  members: z.array(etcdMemberSchema).default([]),
+  members: z.array(etcdMemberSchema).nullish().transform(orEmpty),
   voting_count: z.number().default(0),
   /** How many members may be lost before the cluster stops accepting writes. */
   tolerates: z.number().default(0),
@@ -1536,7 +1553,7 @@ export const etcdRestoredSchema = z.object({
 export type EtcdRestored = z.infer<typeof etcdRestoredSchema>
 
 export const releasesSchema = z.object({
-  releases: z.array(z.string()).default([]),
+  releases: z.array(z.string()).nullish().transform(orEmpty),
   notice: z.string().default(''),
 })
 
@@ -1580,7 +1597,7 @@ export const jobSchema = z.object({
   cluster: z.string().default(''),
   machine: z.string().default(''),
   state: jobStateSchema,
-  steps: z.array(jobStepSchema).default([]),
+  steps: z.array(jobStepSchema).nullish().transform(orEmpty),
   current: z.number().default(0),
   params: z.record(z.string(), z.string()).default({}),
   cancel_requested: z.boolean().default(false),
@@ -1663,7 +1680,7 @@ export const kubernetesNodeSchema = z.object({
   ready: z.string(),
   /** Somebody cordoned it. A decision, not a state it fell into. */
   unschedulable: z.boolean(),
-  roles: z.array(z.string()).default([]),
+  roles: z.array(z.string()).nullish().transform(orEmpty),
   kubelet_version: z.string().default(''),
   os_image: z.string().default(''),
   created_at: z.string().default(''),
@@ -1728,7 +1745,8 @@ export const kubernetesServiceSchema = z.object({
         protocol: z.string().default(''),
       }),
     )
-    .default([]),
+    .nullish()
+    .transform(orEmpty),
 })
 
 /** What a workload answered. The body is TEXT and there is no content type:
@@ -1771,7 +1789,9 @@ export const containerSchema = z.object({
   explanation: z.string().default(''),
 })
 
-export const containersSchema = z.object({ containers: z.array(containerSchema).default([]) })
+export const containersSchema = z.object({
+  containers: z.array(containerSchema).nullish().transform(orEmpty),
+})
 
 export const podLogSchema = z.object({
   namespace: z.string(),
@@ -1780,7 +1800,7 @@ export const podLogSchema = z.object({
   /** Which of the two logs this is, so the screen cannot label the dead
    * container's output as the running one's. */
   previous: z.boolean().default(false),
-  lines: z.array(z.string()).default([]),
+  lines: z.array(z.string()).nullish().transform(orEmpty),
   /** Cut at the START: the end of a log is the part that explains the failure. */
   truncated: z.boolean().default(false),
 })
@@ -1796,7 +1816,7 @@ export const clusterEventSchema = z.object({
 })
 
 export const clusterEventsSchema = z.object({
-  events: z.array(clusterEventSchema).default([]),
+  events: z.array(clusterEventSchema).nullish().transform(orEmpty),
   /** Why an empty list is not a claim that nothing happened. */
   notice: z.string().default(''),
 })
@@ -1825,11 +1845,11 @@ export const permissionSchema = z.object({
 
 export const kubeIdentitySchema = z.object({
   user: z.string().default(''),
-  groups: z.array(z.string()).default([]),
+  groups: z.array(z.string()).nullish().transform(orEmpty),
   /** What to put on the screen, including the case where it is this product's
    * own certificate. */
   describes: z.string().default(''),
-  permissions: z.array(permissionSchema).default([]),
+  permissions: z.array(permissionSchema).nullish().transform(orEmpty),
   missing: z.number().default(0),
   notice: z.string().default(''),
 })
@@ -1861,7 +1881,9 @@ export const workloadSchema = z.object({
   would_start_with: z.number().default(0),
 })
 
-export const workloadsSchema = z.object({ workloads: z.array(workloadSchema).default([]) })
+export const workloadsSchema = z.object({
+  workloads: z.array(workloadSchema).nullish().transform(orEmpty),
+})
 
 export const clusterResourceSchema = z.object({
   kind: z.string(),
@@ -1877,7 +1899,7 @@ export const clusterResourceSchema = z.object({
 })
 
 export const clusterResourcesSchema = z.object({
-  resources: z.array(clusterResourceSchema).default([]),
+  resources: z.array(clusterResourceSchema).nullish().transform(orEmpty),
 })
 
 export const nodeConditionSchema = z.object({
@@ -1902,11 +1924,11 @@ export const nodeTaintSchema = z.object({
 
 export const nodeDetailSchema = z.object({
   name: z.string(),
-  conditions: z.array(nodeConditionSchema).default([]),
-  taints: z.array(nodeTaintSchema).default([]),
+  conditions: z.array(nodeConditionSchema).nullish().transform(orEmpty),
+  taints: z.array(nodeTaintSchema).nullish().transform(orEmpty),
   /** The taints worth pointing at — the control-plane one is ordinary and is
    * left out, so a first visit does not look like a misconfiguration. */
-  explaining_taints: z.array(nodeTaintSchema).default([]),
+  explaining_taints: z.array(nodeTaintSchema).nullish().transform(orEmpty),
   cpu_allocatable: z.string().default(''),
   cpu_requested: z.string().default(''),
   memory_allocatable: z.string().default(''),
@@ -1931,8 +1953,8 @@ export const clusterUsageSchema = z.object({
   /** False when no metrics-server is installed — which is most clusters, and is
    * not the same as usage being zero. */
   collecting: z.boolean().default(false),
-  nodes: z.array(usageSchema).default([]),
-  pods: z.array(usageSchema).default([]),
+  nodes: z.array(usageSchema).nullish().transform(orEmpty),
+  pods: z.array(usageSchema).nullish().transform(orEmpty),
   notice: z.string().default(''),
 })
 
@@ -1940,7 +1962,7 @@ export const execResultSchema = z.object({
   namespace: z.string(),
   pod: z.string(),
   container: z.string(),
-  command: z.array(z.string()).default([]),
+  command: z.array(z.string()).nullish().transform(orEmpty),
   stdout: z.string().default(''),
   stderr: z.string().default(''),
   truncated: z.boolean().default(false),
@@ -1972,7 +1994,7 @@ export const clusterCapacitySchema = z.object({
   cpu: capacitySchema,
   memory: capacitySchema,
   pods: capacitySchema,
-  nodes: z.array(nodeCapacitySchema).default([]),
+  nodes: z.array(nodeCapacitySchema).nullish().transform(orEmpty),
   notice: z.string().default(''),
 })
 
@@ -1993,7 +2015,7 @@ export const sweepableSchema = z.object({
 })
 
 export const sweepPlanSchema = z.object({
-  items: z.array(sweepableSchema).default([]),
+  items: z.array(sweepableSchema).nullish().transform(orEmpty),
   notice: z.string().default(''),
 })
 
@@ -2009,7 +2031,7 @@ export const volumeSummarySchema = z.object({
    * keeps it. The field somebody needs before deleting and the one no claim
    * carries. */
   reclaim_policy: z.string().default(''),
-  access_modes: z.array(z.string()).default([]),
+  access_modes: z.array(z.string()).nullish().transform(orEmpty),
   driver: z.string().default(''),
   notice: z.string().default(''),
   created_at: z.string().default(''),
@@ -2023,10 +2045,10 @@ export const claimSummarySchema = z.object({
   capacity: z.string().default(''),
   storage_class: z.string().default(''),
   volume: z.string().default(''),
-  access_modes: z.array(z.string()).default([]),
+  access_modes: z.array(z.string()).nullish().transform(orEmpty),
   /** Every running pod that mounts it. Empty is a real answer: storage being
    * paid for and not used. */
-  used_by: z.array(z.string()).default([]),
+  used_by: z.array(z.string()).nullish().transform(orEmpty),
   expandable: z.boolean().default(false),
   notice: z.string().default(''),
   created_at: z.string().default(''),
@@ -2045,9 +2067,9 @@ export const storageClassSummarySchema = z.object({
 })
 
 export const clusterStorageSchema = z.object({
-  volumes: z.array(volumeSummarySchema).default([]),
-  claims: z.array(claimSummarySchema).default([]),
-  classes: z.array(storageClassSummarySchema).default([]),
+  volumes: z.array(volumeSummarySchema).nullish().transform(orEmpty),
+  claims: z.array(claimSummarySchema).nullish().transform(orEmpty),
+  classes: z.array(storageClassSummarySchema).nullish().transform(orEmpty),
   notice: z.string().default(''),
 })
 
@@ -2059,7 +2081,7 @@ export const serviceSummarySchema = z.object({
   /** What reaches it from outside. Empty for a plain ClusterIP, which is the
    * answer to "why can I not reach this from my laptop". */
   external: z.string().default(''),
-  ports: z.array(z.string()).default([]),
+  ports: z.array(z.string()).nullish().transform(orEmpty),
   selector: z.string().default(''),
   /** How many addresses are behind it, and how many of those are READY. An
    * unready endpoint is excluded from load balancing entirely. */
@@ -2076,7 +2098,7 @@ export const policySummarySchema = z.object({
   /** The pod selector in words: "every pod in the namespace" for an empty one,
    * which is the case that surprises people. */
   applies: z.string().default(''),
-  types: z.array(z.string()).default([]),
+  types: z.array(z.string()).nullish().transform(orEmpty),
   /** How many pods it currently matches. Zero means somebody believes something
    * is protected and nothing is. */
   selects: z.number().default(0),
@@ -2087,12 +2109,12 @@ export const policySummarySchema = z.object({
 })
 
 export const clusterNetworkSchema = z.object({
-  services: z.array(serviceSummarySchema).default([]),
-  policies: z.array(policySummarySchema).default([]),
+  services: z.array(serviceSummarySchema).nullish().transform(orEmpty),
+  policies: z.array(policySummarySchema).nullish().transform(orEmpty),
   /** Namespaces with pods and no NetworkPolicy: they accept traffic from every
    * pod in the cluster. */
-  unprotected: z.array(z.string()).default([]),
-  ingress_classes: z.array(z.string()).default([]),
+  unprotected: z.array(z.string()).nullish().transform(orEmpty),
+  ingress_classes: z.array(z.string()).nullish().transform(orEmpty),
   default_ingress_class: z.string().default(''),
   notice: z.string().default(''),
 })
@@ -2118,7 +2140,7 @@ export const bindingSummarySchema = z.object({
   /** False for a binding that grants nothing because the role it names is not
    * there. RBAC has no referential integrity, so nothing else says this. */
   role_exists: z.boolean().default(false),
-  subjects: z.array(rbacSubjectSchema).default([]),
+  subjects: z.array(rbacSubjectSchema).nullish().transform(orEmpty),
   /** Wildcard verbs on wildcard resources, whatever the role is called. */
   administrative: z.boolean().default(false),
   summary: z.string().default(''),
@@ -2130,7 +2152,7 @@ export const roleSummarySchema = z.object({
   kind: z.string().default(''),
   namespace: z.string().default(''),
   name: z.string().default(''),
-  rules: z.array(z.string()).default([]),
+  rules: z.array(z.string()).nullish().transform(orEmpty),
   administrative: z.boolean().default(false),
   bound: z.number().default(0),
   /** A role Kubernetes ships. There are about seventy and they are the same on
@@ -2144,7 +2166,7 @@ export const serviceAccountSummarySchema = z.object({
   name: z.string().default(''),
   /** Every running pod that runs as it. The "default" account is what every pod
    * naming none runs as. */
-  used_by: z.array(z.string()).default([]),
+  used_by: z.array(z.string()).nullish().transform(orEmpty),
   bindings: z.number().default(0),
   administrative: z.boolean().default(false),
   notice: z.string().default(''),
@@ -2152,12 +2174,12 @@ export const serviceAccountSummarySchema = z.object({
 })
 
 export const accessControlSchema = z.object({
-  bindings: z.array(bindingSummarySchema).default([]),
-  roles: z.array(roleSummarySchema).default([]),
-  accounts: z.array(serviceAccountSummarySchema).default([]),
+  bindings: z.array(bindingSummarySchema).nullish().transform(orEmpty),
+  roles: z.array(roleSummarySchema).nullish().transform(orEmpty),
+  accounts: z.array(serviceAccountSummarySchema).nullish().transform(orEmpty),
   /** Every subject reaching wildcard-on-wildcard through some binding. Not a
    * field anywhere in Kubernetes, and the first thing anybody wants to know. */
-  administrators: z.array(z.string()).default([]),
+  administrators: z.array(z.string()).nullish().transform(orEmpty),
   notice: z.string().default(''),
 })
 
@@ -2175,7 +2197,7 @@ export const namespaceSummarySchema = z.object({
   /** Active or Terminating. */
   phase: z.string().default(''),
   pods_running: z.number().default(0),
-  quotas: z.array(quotaLineSchema).default([]),
+  quotas: z.array(quotaLineSchema).nullish().transform(orEmpty),
   /** Whether pods that set no requests get defaults. With a compute quota and
    * without this, every such pod is refused. */
   has_limit_range: z.boolean().default(false),
@@ -2187,7 +2209,7 @@ export const namespaceSummarySchema = z.object({
 export const customKindSchema = z.object({
   group: z.string().default(''),
   kind: z.string().default(''),
-  versions: z.array(z.string()).default([]),
+  versions: z.array(z.string()).nullish().transform(orEmpty),
   stored: z.string().default(''),
   scope: z.string().default(''),
   /** Whether the API server is serving it. A definition that is not established
@@ -2198,8 +2220,8 @@ export const customKindSchema = z.object({
 })
 
 export const inventorySchema = z.object({
-  namespaces: z.array(namespaceSummarySchema).default([]),
-  custom_kinds: z.array(customKindSchema).default([]),
+  namespaces: z.array(namespaceSummarySchema).nullish().transform(orEmpty),
+  custom_kinds: z.array(customKindSchema).nullish().transform(orEmpty),
   notice: z.string().default(''),
 })
 
@@ -2242,8 +2264,8 @@ export const kubernetesOverviewSchema = z.object({
   nodes: z.array(kubernetesNodeSchema),
   pods: z.array(kubernetesPodSchema),
   deployments: z.array(kubernetesDeploymentSchema),
-  services: z.array(kubernetesServiceSchema).default([]),
-  namespaces: z.array(z.string()).default([]),
+  services: z.array(kubernetesServiceSchema).nullish().transform(orEmpty),
+  namespaces: z.array(z.string()).nullish().transform(orEmpty),
   /** Echoed back, so a screen cannot show one namespace's pods under
    * another's heading. */
   namespace: z.string().default(''),
@@ -2265,17 +2287,18 @@ export const manifestObjectSchema = z.object({
 })
 
 export const manifestPlanSchema = z.object({
-  objects: z.array(manifestObjectSchema).default([]),
+  objects: z.array(manifestObjectSchema).nullish().transform(orEmpty),
   /** Things that are true and worth reading before applying: an object that
    * would land in `default`, a kind this cluster does not have. */
-  warnings: z.array(z.string()).default([]),
+  warnings: z.array(z.string()).nullish().transform(orEmpty),
 })
 
 export const manifestApplyResultSchema = z.object({
-  applied: z.array(manifestObjectSchema).default([]),
+  applied: z.array(manifestObjectSchema).nullish().transform(orEmpty),
   failed: z
     .array(z.object({ object: manifestObjectSchema, reason: z.string().default('') }))
-    .default([]),
+    .nullish()
+    .transform(orEmpty),
   /** False when anything failed. The server answers 200 with the per-object
    * truth either way: an apply of ten where the sixth conflicted changed five
    * things, and one status code cannot say which five. */
@@ -2313,7 +2336,7 @@ export const resetPreviewSchema = z.object({
   /** What has to be typed: the machine's own name, because that is the thing
    * an operator can check against the machine in front of them. */
   confirm_phrase: z.string(),
-  disks: z.array(diskSchema).default([]),
+  disks: z.array(diskSchema).nullish().transform(orEmpty),
   /** Least destructive first. A list whose first option wipes the machine is a
    * list somebody will click through. */
   modes: z.array(resetModeSchema),
@@ -2363,28 +2386,28 @@ export const changeSchema = z.object({
   len_after: z.number().default(0),
   /** Values that appear twice in the list after the change. Nearly always a
    * patch that was applied a second time. */
-  duplicates: z.array(z.string()).default([]),
+  duplicates: z.array(z.string()).nullish().transform(orEmpty),
 })
 
 export const verdictSchema = z.object({
   mode: z.enum(['no-reboot', 'reboot', 'staged', 'try']),
   reboot_required: z.boolean(),
-  reboot_paths: z.array(z.string()).default([]),
+  reboot_paths: z.array(z.string()).nullish().transform(orEmpty),
   /** Paths under .machine.install: they apply and change nothing until the
    * next install or upgrade. */
-  install_only: z.array(z.string()).default([]),
-  network_paths: z.array(z.string()).default([]),
+  install_only: z.array(z.string()).nullish().transform(orEmpty),
+  network_paths: z.array(z.string()).nullish().transform(orEmpty),
   /** The countdown for a `try` apply. It is the same number the node uses, or
    * the screen would be lying about how long is left. */
   try_seconds: z.number().default(0),
-  sentences: z.array(z.string()).default([]),
+  sentences: z.array(z.string()).nullish().transform(orEmpty),
 })
 
 export const previewSchema = z.object({
   machine: z.string(),
   diff: z.object({
-    changes: z.array(changeSchema).default([]),
-    paths: z.array(z.string()).default([]),
+    changes: z.array(changeSchema).nullish().transform(orEmpty),
+    paths: z.array(z.string()).nullish().transform(orEmpty),
     duplicates: z.boolean().default(false),
   }),
   verdict: verdictSchema,
@@ -2392,7 +2415,7 @@ export const previewSchema = z.object({
   /** False is nearly always a patch that appends to a list. */
   idempotent: z.boolean(),
   valid: z.boolean(),
-  validation: z.array(z.string()).default([]),
+  validation: z.array(z.string()).nullish().transform(orEmpty),
 })
 
 export type ConfigPreview = z.infer<typeof previewSchema>
@@ -3337,7 +3360,10 @@ export const api = {
         `/api/v1/clusters/${encodeURIComponent(cluster)}/kubernetes/sweep`,
         z.object({
           removed: z.number(),
-          failed: z.array(z.object({ reason: z.string() })).default([]),
+          failed: z
+            .array(z.object({ reason: z.string() }))
+            .nullish()
+            .transform(orEmpty),
         }),
         { items },
       ),

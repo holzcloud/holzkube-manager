@@ -127,6 +127,8 @@ type Inventory struct {
 // Inventory reads every namespace, its quotas, and the cluster's custom kinds.
 func (c *Client) Inventory(ctx context.Context) (Inventory, error) {
 	out := Inventory{
+		Namespaces:  make([]NamespaceSummary, 0, 8),
+		CustomKinds: make([]CustomKind, 0, 8),
 		Notice: "A quota's used figure is what the namespace has reserved, and a full quota is why " +
 			"the next pod is refused -- the pod's own event says \"exceeded quota\" and nothing " +
 			"else shows the quota. Objects of the cluster's own kinds are not counted here: that " +
@@ -193,7 +195,7 @@ func (c *Client) Inventory(ctx context.Context) (Inventory, error) {
 			Name:          namespace.Name,
 			Phase:         string(namespace.Status.Phase),
 			PodsRunning:   running[namespace.Name],
-			Quotas:        byNamespace[namespace.Name],
+			Quotas:        listOrEmpty(byNamespace[namespace.Name]),
 			HasLimitRange: hasRange[namespace.Name],
 			Healthy:       true,
 			CreatedAt:     stamp(namespace.CreationTimestamp),
@@ -326,6 +328,7 @@ func (c *Client) customKinds(ctx context.Context) ([]CustomKind, error) {
 			Group:     stringAt(item.Object, "spec", "group"),
 			Kind:      stringAt(item.Object, "spec", "names", "kind"),
 			Scope:     stringAt(item.Object, "spec", "scope"),
+			Versions:  make([]string, 0, 2),
 			CreatedAt: stamp(item.GetCreationTimestamp()),
 		}
 
