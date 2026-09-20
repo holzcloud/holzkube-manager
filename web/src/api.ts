@@ -574,8 +574,32 @@ export interface SudoChallenge {
    */
   because?: string
 
+  /**
+   * How to run this action again, when it can be run again safely.
+   *
+   * Present only for a request with NO BODY. The sign-in round trip unloads the
+   * page, so the waiting request cannot survive it -- and carrying a body across
+   * would mean putting it in sessionStorage, where for the password change that
+   * is gated the same way it would be the password itself (see
+   * ResumeAfterProvider). A method and a path carry nothing secret, so those are
+   * carried, and an action with a body still asks the operator to repeat it.
+   *
+   * It is what lets the banner after the round trip offer the action itself
+   * instead of a way back to the page it was on. The operator pressed a button,
+   * was taken to their provider and back, and was then asked to find the button
+   * and press it again -- which reads as the action having failed, and is how
+   * they reported it (ledger 165).
+   */
+  replay?: SudoReplay
+
   /** Called with true once the sudo window is open, false if it was cancelled. */
   settle: (granted: boolean) => void
+}
+
+/** A request that can be re-issued: no body, so nothing secret travels. */
+export interface SudoReplay {
+  method: string
+  path: string
 }
 
 type SudoHandler = (challenge: SudoChallenge) => void
@@ -635,6 +659,18 @@ function challengeFor(path: string): { action: string; because?: string } {
     }
   }
   return { action: 'This destructive action' }
+}
+
+/**
+ * Runs a remembered action again, after the identity-provider round trip.
+ *
+ * Through the ordinary pipeline on purpose: if the window is somehow shut again
+ * the dialog opens as it always would, and a failure is the same problem
+ * document every other call produces. A private path here would be a second
+ * copy of the refusal handling, which is how the two drift apart.
+ */
+export async function replaySudoAction(replay: SudoReplay): Promise<void> {
+  await sendPrebuilt(replay.path, buildInit(replay.method, undefined))
 }
 
 /* ---------------------------------------------------------------------- */
@@ -751,13 +787,18 @@ function ceilingError(): Error {
   )
 }
 
-async function askForSudo(path: string): Promise<boolean> {
+async function askForSudo(path: string, init: RequestInit): Promise<boolean> {
   if (sudoHandler === null) {
     return false
   }
   const handler = sudoHandler
+  // Only a request with no body is offered as a replay. See SudoChallenge.replay.
+  const replay =
+    init.body === undefined || init.body === null
+      ? { method: init.method ?? 'GET', path }
+      : undefined
   return new Promise<boolean>((resolve) => {
-    handler({ ...challengeFor(path), settle: resolve })
+    handler({ ...challengeFor(path), replay, settle: resolve })
   })
 }
 
@@ -805,7 +846,7 @@ async function sendPrebuilt(
   let error = await toProblemError(response)
 
   if (interceptSudo && presentationFor(error.problem) === 'sudo-prompt') {
-    const granted = await askForSudo(path)
+    const granted = await askForSudo(path, init)
     if (!granted) {
       throw error
     }

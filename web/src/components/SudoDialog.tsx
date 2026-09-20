@@ -153,10 +153,22 @@ export function SudoDialog() {
             <p className="text-sm text-muted-foreground">
               You signed in through your identity provider, so there is no password here to type.
               Confirming takes you there and back.{' '}
-              <strong className="font-medium text-foreground">
-                This action is not carried across
-              </strong>{' '}
-              — when you return, run it again. It will not ask a second time.
+              {challenge?.replay === undefined ? (
+                <>
+                  <strong className="font-medium text-foreground">
+                    This action is not carried across
+                  </strong>{' '}
+                  — when you return, run it again. It will not ask a second time.
+                </>
+              ) : (
+                <>
+                  <strong className="font-medium text-foreground">
+                    Nothing runs while you are away
+                  </strong>{' '}
+                  — when you return, one press on the banner runs it, and it will not ask a second
+                  time.
+                </>
+              )}
             </p>
 
             <DialogFooter>
@@ -176,6 +188,7 @@ export function SudoDialog() {
                   rememberSudoIntent(
                     challenge?.action ?? 'The action you started',
                     window.location.pathname,
+                    challenge?.replay,
                   )
                   settle(false)
                   window.location.assign(oidcPath.reauthenticate)
