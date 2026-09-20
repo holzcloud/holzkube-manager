@@ -2335,7 +2335,21 @@ export const wallWarningSchema = z.object({
   reason: z.string().default(''),
   message: z.string().default(''),
   count: z.number().default(0),
-  age: z.string().default(''),
+  /** WHEN, as an instant. The age is worked out in the browser: this screen
+   * keeps the last answer up when a refresh fails, and an age baked in at the
+   * server would freeze at the moment the daemon stopped answering. */
+  last_seen: z.string().default(''),
+})
+
+export const wallNamespaceSchema = z.object({
+  name: z.string().default(''),
+  total: z.number().default(0),
+  state: z.string().default('unknown'),
+  /** The thing that decided the colour, as "postgres · 2 of 3 ready". Empty
+   * when nothing is wrong: a tile that always carries a sentence is a tile
+   * whose sentence nobody reads. */
+  worst: z.string().default(''),
+  stopped: z.number().default(0),
 })
 
 export const wallSchema = z.object({
@@ -2345,6 +2359,7 @@ export const wallSchema = z.object({
   generated_at: z.string().default(''),
   nodes: z.array(wallTileSchema).nullish().transform(orEmpty),
   workloads: z.array(wallTileSchema).nullish().transform(orEmpty),
+  namespaces: z.array(wallNamespaceSchema).nullish().transform(orEmpty),
   cpu: capacitySchema,
   memory: capacitySchema,
   pods: capacitySchema,
@@ -2380,6 +2395,8 @@ export type WallLink = z.infer<typeof wallLinkSchema>
 
 export type Wall = z.infer<typeof wallSchema>
 export type WallTile = z.infer<typeof wallTileSchema>
+export type WallNamespace = z.infer<typeof wallNamespaceSchema>
+export type WallWarning = z.infer<typeof wallWarningSchema>
 
 export type Capacity = z.infer<typeof capacitySchema>
 export type ClusterCapacity = z.infer<typeof clusterCapacitySchema>

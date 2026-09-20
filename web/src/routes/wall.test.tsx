@@ -20,8 +20,39 @@ function wrap(node: ReactNode) {
 
 const cluster = { id: 'c-1', name: 'homelab' }
 
+/**
+ * rollUp is what the server does, mirrored here so a fixture cannot describe a
+ * cluster whose two views of itself disagree. The rule itself is tested in Go
+ * (internal/kube/wall_test.go); what these tests are about is what gets DRAWN.
+ */
+function rollUp(workloads: Wall['workloads']): Wall['namespaces'] {
+  const order = ['down', 'unknown', 'warn', 'stopped', 'ok']
+  const byName = new Map<string, Wall['namespaces'][number]>()
+  for (const tile of workloads) {
+    const name = tile.namespace === '' ? '—' : tile.namespace
+    const into = byName.get(name) ?? { name, total: 0, state: 'ok', worst: '', stopped: 0 }
+    into.total += 1
+    if (tile.state === 'stopped') {
+      into.stopped += 1
+    } else if (order.indexOf(tile.state) < order.indexOf(into.state)) {
+      into.state = tile.state
+      into.worst = `${tile.name} · ${tile.detail}`
+    }
+    byName.set(name, into)
+  }
+  const out = [...byName.values()].map((tile) =>
+    tile.stopped === tile.total && tile.state === 'ok' ? { ...tile, state: 'stopped' } : tile,
+  )
+  out.sort((a, b) =>
+    order.indexOf(a.state) !== order.indexOf(b.state)
+      ? order.indexOf(a.state) - order.indexOf(b.state)
+      : b.total - a.total || a.name.localeCompare(b.name),
+  )
+  return out
+}
+
 function wallAt(when: Date, overrides: Partial<Wall> = {}): Wall {
-  return {
+  const base = {
     generated_at: when.toISOString(),
     nodes: [{ kind: 'Node', namespace: '', name: 'cp-1', state: 'ok', detail: 'ready' }],
     workloads: [
@@ -36,10 +67,13 @@ function wallAt(when: Date, overrides: Partial<Wall> = {}): Wall {
     cpu: { allocatable: '4', requested: '1', percent: 25 },
     memory: { allocatable: '8Gi', requested: '2Gi', percent: 25 },
     pods: { allocatable: '110', requested: '20', percent: 18 },
+    namespaces: [] as Wall['namespaces'],
     warnings: [],
     summary: { ok: 2 },
     ...overrides,
   }
+  // Unless a test says otherwise, the roll-up follows from the workloads.
+  return base.namespaces.length > 0 ? base : { ...base, namespaces: rollUp(base.workloads) }
 }
 
 beforeEach(() => {
@@ -94,7 +128,9 @@ describe('the wall', () => {
 
     // A number that appears only during trouble is one nobody has learned to
     // read by the time it appears.
-    expect(await screen.findByText(/^as of \d+s ago$/)).toBeInTheDocument()
+    // And the size of the cluster beside it, so the headline has a denominator:
+    // "everything is running" says much more when everything is 132 things.
+    expect(await screen.findByText(/^as of \d+s ago · 1 workload, 1 node$/)).toBeInTheDocument()
   })
 
   it('stops looking confident when the answer is old', async () => {
@@ -158,9 +194,9 @@ describe('the wall', () => {
     // The operator asked what the green squares meant. Having to ask is the
     // defect: a wall is read by people nobody told anything, and an answer given
     // once in a conversation is an answer nobody walking past ever gets.
-    expect(await screen.findByText(/one square each/)).toBeInTheDocument()
-    expect(screen.getByText(/running 1/)).toBeInTheDocument()
-    expect(screen.getByText(/stopped on purpose 1/)).toBeInTheDocument()
+    expect(await screen.findByText(/worst workload in it/)).toBeInTheDocument()
+    expect(screen.getByText('running')).toBeInTheDocument()
+    expect(screen.getByText('switched off on purpose')).toBeInTheDocument()
   })
 
   it('does not key a colour that is not on the screen', async () => {
@@ -168,9 +204,9 @@ describe('the wall', () => {
 
     wrap(<WallView />)
 
-    await screen.findByText(/one square each/)
+    await screen.findByText(/worst workload in it/)
     // A key to something that is not there is one more thing to read past.
-    expect(screen.queryByText(/stopped on purpose/)).toBeNull()
+    expect(screen.queryByText(/switched off on purpose/)).toBeNull()
   })
 
   it('says why a warning happened, not only that one did', async () => {
@@ -182,7 +218,7 @@ describe('the wall', () => {
             reason: 'Failed',
             message: 'Error: ImagePullBackOff',
             count: 3,
-            age: '',
+            last_seen: '',
           },
         ],
       }),
@@ -196,6 +232,31 @@ describe('the wall', () => {
     expect(await screen.findByText(/Error: ImagePullBackOff/)).toBeInTheDocument()
   })
 
+  it('says how long ago a warning was, not when it was', async () => {
+    const seen = new Date(Date.now() - 5 * 60 * 1000)
+    vi.spyOn(api.kubernetes, 'wall').mockResolvedValue(
+      wallAt(new Date(), {
+        warnings: [
+          {
+            object: 'Pod/api-7c9',
+            reason: 'FailedScheduling',
+            message: 'insufficient memory',
+            count: 340,
+            last_seen: seen.toISOString(),
+          },
+        ],
+      }),
+    )
+
+    wrap(<WallView />)
+
+    // The first photograph of this column read "2026-09-20T09:58:00Z" across a
+    // television. An instant is not something anybody reads from four metres,
+    // and the field used to be called `age` while carrying one.
+    expect(await screen.findByText('5 min ago')).toBeInTheDocument()
+    expect(screen.queryByText(seen.toISOString())).toBeNull()
+  })
+
   it('says a square is a workload and not a pod', async () => {
     vi.spyOn(api.kubernetes, 'wall').mockResolvedValue(wallAt(new Date()))
 
@@ -206,11 +267,16 @@ describe('the wall', () => {
     expect(await screen.findByText(/not a single pod/)).toBeInTheDocument()
   })
 
-  it('hides nothing on a cluster where everything is fine', async () => {
+  it('accounts for every workload on a cluster where everything is fine', async () => {
     // The operator's own screen: 132 workloads, all healthy. The first version
     // of this page drew only the ones that were NOT fine past sixty, so it
     // showed "SHOWING 0 OF 132" and a screen of black -- an empty screen
     // claiming nothing was running, about a cluster running everything.
+    //
+    // The tiles are rolled up per namespace now, which is a different thing from
+    // being hidden: the total is stated, every tile carries its own count, and
+    // the counts have to ADD UP to the total. That is the claim this test makes,
+    // and it is the one that would have caught the original defect.
     const many = Array.from({ length: 132 }, (_, i) => ({
       kind: 'Deployment',
       namespace: i % 3 === 0 ? 'cloud' : 'kube-system',
@@ -222,10 +288,14 @@ describe('the wall', () => {
 
     const { container } = wrap(<WallView />)
 
-    expect(await screen.findByText(/132 workloads/)).toBeInTheDocument()
-    // Every one of them is drawn. A count instead of the tiles is the failure.
-    expect(container.querySelectorAll('[data-row]')).toHaveLength(133) // + the node
+    expect(await screen.findByText(/2 namespaces — 132 workloads/)).toBeInTheDocument()
     expect(screen.queryByText(/showing/i)).toBeNull()
+
+    // 88 in kube-system and 44 in cloud, both on the screen, summing to 132.
+    const counts = [...container.querySelectorAll('[data-state] .tabular-nums')].map((node) =>
+      Number(node.textContent),
+    )
+    expect(counts.filter((n) => Number.isFinite(n)).reduce((a, b) => a + b, 0)).toBe(132)
   })
 
   it('names what needs attention and leaves the rest as a field', async () => {
@@ -255,8 +325,11 @@ describe('the wall', () => {
     expect(await screen.findByText('Needs attention')).toBeInTheDocument()
     expect(screen.getByText('postgres')).toBeInTheDocument()
     expect(screen.queryByText('fine-0')).toBeNull()
-    // And the field has landmarks rather than being anonymous squares.
+    // And the roll-up has landmarks rather than being anonymous squares: the
+    // namespace is named, and the one that is not green says who decided that.
     expect(screen.getByText('cloud')).toBeInTheDocument()
+    expect(screen.getByText('db')).toBeInTheDocument()
+    expect(screen.getByText('postgres · 0 of 3 ready')).toBeInTheDocument()
   })
 
   it('says nothing about attention when there is none to pay', async () => {
@@ -289,6 +362,114 @@ describe('the wall', () => {
     // is a wall asking to be ignored.
     await screen.findByText('Everything is running')
     expect(screen.queryByText('Needs attention')).toBeNull()
+  })
+
+  it('names the nodes whether or not anything is wrong with them', async () => {
+    vi.spyOn(api.kubernetes, 'wall').mockResolvedValue(
+      wallAt(new Date(), {
+        nodes: [
+          { kind: 'Node', namespace: '', name: 'srv-node-01', state: 'ok', detail: 'ready' },
+          { kind: 'Node', namespace: '', name: 'srv-node-02', state: 'ok', detail: 'ready' },
+        ],
+      }),
+    )
+
+    wrap(<WallView />)
+
+    // A wall that only mentioned a node once it had already failed would be a
+    // wall that never showed the thing it is most often consulted about. Three
+    // machines the operator can walk over to; they are named, always.
+    expect(await screen.findByText('srv-node-01')).toBeInTheDocument()
+    expect(screen.getByText('srv-node-02')).toBeInTheDocument()
+    expect(screen.getByText('Nodes')).toBeInTheDocument()
+  })
+
+  it('sizes a tile so a long hostname fits on it', async () => {
+    vi.spyOn(api.kubernetes, 'wall').mockResolvedValue(
+      wallAt(new Date(), {
+        nodes: [
+          {
+            kind: 'Node',
+            name: 'srv-node-01.homelab.example',
+            namespace: '',
+            state: 'ok',
+            detail: 'ready',
+          },
+          {
+            kind: 'Node',
+            name: 'srv-node-02.homelab.example',
+            namespace: '',
+            state: 'ok',
+            detail: 'ready',
+          },
+          {
+            kind: 'Node',
+            name: 'srv-node-03.homelab.example',
+            namespace: '',
+            state: 'ok',
+            detail: 'ready',
+          },
+        ],
+      }),
+    )
+
+    const { container } = wrap(<WallView />)
+    await screen.findByText('srv-node-01.homelab.example')
+
+    // Three tiles used to get the largest type purely because there were three
+    // of them, and the name then broke mid-word across three lines:
+    // "srv-node- / 02.homelab.exampl / e". A hostname is ONE word, so wrapping
+    // cannot rescue it -- only the type size can. This screen has mangled a
+    // node's name three times now.
+    const tile = container.querySelector('[data-state="ok"]')
+    expect(tile?.className).not.toContain('text-[2.9vmin]')
+  })
+
+  it('is legible on a phone and not only on a television', async () => {
+    vi.spyOn(api.kubernetes, 'wall').mockResolvedValue(wallAt(new Date()))
+
+    const { container } = wrap(<WallView />)
+    await screen.findByText('Everything is running')
+
+    // vmin is the right unit for the screen this page is FOR and the wrong one
+    // for the screen the operator actually looked at it on first: on a 390px
+    // phone, 1.4vmin is five pixels. The photograph showed the whole wall
+    // rendered correctly and unreadable.
+    //
+    // So every vmin size is behind `md:` and carries a phone-sized base. A bare
+    // `text-[…vmin]` is the regression, and it cannot be seen in jsdom -- which
+    // has no viewport -- so it is checked as the class it is.
+    const offenders: string[] = []
+    for (const node of container.querySelectorAll('*')) {
+      const classes = typeof node.className === 'string' ? node.className : ''
+      for (const bare of classes.match(/(?<!md:)\btext-\[[0-9.]+vmin\]/g) ?? []) {
+        offenders.push(`${bare} in "${classes}"`)
+      }
+    }
+    expect(offenders).toEqual([])
+  })
+
+  it('fills its tiles with solid colour rather than a tint', async () => {
+    vi.spyOn(api.kubernetes, 'wall').mockResolvedValue(
+      wallAt(new Date(), {
+        workloads: [
+          { kind: 'Deployment', namespace: 'db', name: 'pg', state: 'down', detail: '0 of 3' },
+        ],
+      }),
+    )
+
+    const { container } = wrap(<WallView />)
+    await screen.findByText('pg')
+
+    // This screen is read at four metres, off-axis, on a television nobody has
+    // calibrated, in a lit room. The first version tinted its tiles at fifteen
+    // per cent opacity -- legible on a laptop at arm's length, and a field of
+    // dark grey in the photograph the operator sent from across the room.
+    for (const tile of container.querySelectorAll('[data-state]')) {
+      const classes = tile.className
+      expect(classes).not.toMatch(/bg-[a-z]+-\d+\/\d+/)
+    }
+    expect(container.querySelector('[data-state="down"]')?.className).toContain('bg-red-700')
   })
 
   it('keeps the last answer up when a refresh fails, rather than blanking', async () => {

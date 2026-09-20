@@ -87,6 +87,26 @@ describe('the layout guard’s fixtures', () => {
     expect(overview.services.length).toBeGreaterThanOrEqual(2)
   })
 
+  it("describes a wall whose roll-up accounts for all of the wall's workloads", () => {
+    // wallSchema takes `namespaces` as nullish, so a fixture WITHOUT the
+    // roll-up parses cleanly -- and the layout audit would then photograph a
+    // wall missing a third of itself and report the page as fine. That is the
+    // same unperformed measurement as every other one in this file's history:
+    // the schema says the shape is possible, not that the fixture is a cluster.
+    const wall = wallSchema.parse(fixtures['/api/v1/clusters/c-homelab/wall'])
+
+    expect(wall.namespaces.length).toBeGreaterThanOrEqual(4)
+    expect(wall.namespaces.reduce((sum, tile) => sum + tile.total, 0)).toBe(wall.workloads.length)
+    // And at least one tile that is NOT green, with the offender named: a
+    // photograph of an all-green wall cannot show whether the colour or the
+    // sentence ever renders.
+    const troubled = wall.namespaces.filter((tile) => tile.state !== 'ok')
+    expect(troubled.length).toBeGreaterThanOrEqual(1)
+    for (const tile of troubled) {
+      if (tile.state !== 'stopped') expect(tile.worst).not.toBe('')
+    }
+  })
+
   it('uses values long enough to break a phone layout', () => {
     // Fixtures made of "foo" measure a layout nobody has. The screen the
     // operator photographed broke on a pod name and an image reference, so the

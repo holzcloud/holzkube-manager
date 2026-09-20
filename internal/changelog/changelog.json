@@ -1,5 +1,43 @@
 [
   {
+    "version": "v1.29.0",
+    "date": "2026-09-20",
+    "changes": [
+      {
+        "icon": "🖥️",
+        "text": "The wall has been redesigned after looking at how the boards that do this for a living are built — Grafana's own Kubernetes dashboards, the kube-mixin boards, polystat. It is split now: the left half answers \"is anything wrong\" from ten metres, the right half answers \"what, and why\" from one."
+      },
+      {
+        "icon": "🎨",
+        "text": "Its colours are solid fills rather than fifteen-per-cent tints. A tint is legible on a laptop at arm's length and gone at four metres on a television in a lit room, which is the only place this screen is ever read."
+      },
+      {
+        "icon": "🧩",
+        "text": "The 132 anonymous squares are one tile per namespace, each carrying the worst thing inside it by name — \"postgres · 2 of 3 ready\". Nothing is hidden by the roll-up: every tile shows its own count, the counts add up to the total, and anything not running is still named in full on the left."
+      },
+      {
+        "icon": "🖧",
+        "text": "The nodes are always named on the wall, not only once one has failed."
+      },
+      {
+        "icon": "📐",
+        "text": "The headline is nine per cent of the screen's height, and says how many workloads and nodes it is talking about — \"everything is running\" means more when everything is 132 things."
+      },
+      {
+        "icon": "⏱️",
+        "text": "A warning on the wall said when it last happened as a raw timestamp — \"2026-09-20T09:58:00Z\", on a television. It says \"3 h ago\" now."
+      },
+      {
+        "icon": "📱",
+        "text": "On a phone the wall rendered completely and at about five pixels: its type is sized for a television, in units that shrink with the screen. It now has phone-sized type below tablet width."
+      },
+      {
+        "icon": "↔️",
+        "text": "On a phone the wall ran a third of its width off the right edge — names and warnings with it — and the layout guard had reported it as fine five runs in a row, because it forgives anything inside something that scrolls sideways. It no longer forgives a full-screen pane, and it now names what is sticking out."
+      }
+    ]
+  },
+  {
     "version": "v1.28.1",
     "date": "2026-09-20",
     "changes": [
