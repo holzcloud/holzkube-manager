@@ -6,11 +6,13 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/user"
 	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/holzcloud/holzkube-manager/internal/audit"
+	"github.com/holzcloud/holzkube-manager/internal/auth"
 	"github.com/holzcloud/holzkube-manager/internal/config"
 	"github.com/holzcloud/holzkube-manager/internal/model"
 	"github.com/holzcloud/holzkube-manager/internal/store/fsstore"
@@ -42,6 +44,7 @@ var commands = map[string]func(args []string) error{
 	"restore":      cmdRestore,
 	"backups":      cmdBackups,
 	"verify-audit": cmdVerifyAudit,
+	"break-glass":  cmdBreakGlass,
 	"support":      cmdSupport,
 }
 
@@ -389,7 +392,8 @@ func loadFor(args []string, name string) (config.Config, error) {
 	for _, a := range args {
 		if strings.HasPrefix(a, "--label=") ||
 			strings.HasPrefix(a, "--cluster=") ||
-			strings.HasPrefix(a, "--out=") {
+			strings.HasPrefix(a, "--out=") ||
+			strings.HasPrefix(a, "--ttl=") {
 			continue
 		}
 		kept = append(kept, a)
@@ -423,4 +427,105 @@ func humanBytes(n int64) string {
 		exp++
 	}
 	return fmt.Sprintf("%.1f %ciB", float64(n)/float64(div), "KMGTPE"[exp])
+}
+
+// cmdBreakGlass mints an admin token on this machine, without a sign-in.
+//
+// # Why a local subcommand is allowed to do this
+//
+// It grants nothing new. Whoever can open this data directory can already read
+// every cluster secret in it; the directory IS the authority. What this adds is
+// a supported and AUDITED way to use access somebody already has, in place of
+// the unsupported one -- hand-editing the store -- which leaves no record and
+// can corrupt it.
+//
+// The reasoning holds only because this is a subcommand operating on a path. It
+// is not a route, it is not reachable over the network, and it must never
+// become either: from an account that could not already read the directory, the
+// same act would be a back door.
+//
+// # What it prints, and what it refuses to print
+//
+// The token goes to STDOUT alone and everything else to stderr, so a script can
+// capture it with `$(...)` without a warning ending up in an Authorization
+// header. It is shown once; only its hash is stored.
+func cmdBreakGlass(args []string) error {
+	cfg, err := loadFor(args, "break-glass")
+	if err != nil {
+		return err
+	}
+
+	ttl := auth.DefaultBreakGlassTTL
+	for _, a := range args {
+		if !strings.HasPrefix(a, "--ttl=") {
+			continue
+		}
+		parsed, err := time.ParseDuration(strings.TrimPrefix(a, "--ttl="))
+		if err != nil {
+			return fmt.Errorf("--ttl: %w", err)
+		}
+		ttl = parsed
+	}
+
+	st, err := fsstore.Open(cfg.DataDir)
+	if err != nil {
+		return err
+	}
+	defer st.Close() //nolint:errcheck // nothing is written after this point
+
+	svc, err := auth.New(st, cfg.SessionLifetime)
+	if err != nil {
+		return err
+	}
+
+	ctx := context.Background()
+
+	// The archive entry is written BEFORE the token exists, and its outcome
+	// after. An entry written only on success would leave a failed attempt --
+	// including one that failed because somebody was fishing -- invisible,
+	// which is the one thing an archive is for.
+	al, err := audit.Open(cfg.DataDir)
+	if err != nil {
+		return err
+	}
+	defer al.Close() //nolint:errcheck // the outcome below is what matters
+
+	seq, err := al.Attempt(ctx, audit.Record{
+		Actor:  "local:" + currentUserName(),
+		Action: "auth.break-glass",
+		Params: map[string]any{"ttl": ttl.String(), "username": auth.BreakGlassUsername},
+	})
+	if err != nil {
+		return err
+	}
+
+	user, token, err := svc.MintBreakGlass(ctx, ttl)
+	if err != nil {
+		_ = al.Outcome(ctx, seq, "failed", err)
+		return err
+	}
+	if err := al.Outcome(ctx, seq, "ok", nil); err != nil {
+		return err
+	}
+
+	fmt.Fprintf(os.Stderr,
+		"Minted an admin token for %q. It expires %s (in %s) and is shown once.\n"+
+			"Send it as: Authorization: Bearer <token>\n"+
+			"Revoke it early by deleting the %q account in Settings.\n",
+		user.Username, user.TokenExpiresAt.Format(time.RFC3339), ttl, user.Username)
+	fmt.Println(token)
+	return nil
+}
+
+// currentUserName names whoever ran the subcommand, for the archive.
+//
+// Best effort: the archive entry is worth writing even when the environment
+// cannot say who this is, and "unknown" is an honest answer where a blank would
+// read as though nobody had been asked.
+func currentUserName() string {
+	u, err := user.Current()
+	if err != nil || u.Username == "" {
+		return "unknown"
+	}
+	return u.Username
 }

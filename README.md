@@ -344,7 +344,16 @@ holzkube-managerd backup            # writes a tarball into the data directory
 holzkube-managerd backups           # lists what is there, newest first
 holzkube-managerd restore FILE      # backs up what is there, then unpacks
 holzkube-managerd verify-audit      # checks the audit hash chain
+holzkube-managerd break-glass       # a short-lived admin token, on this machine
 ```
+
+`break-glass` prints an admin token without a sign-in, for the case where the
+only way in is the machine itself. It grants nothing new -- whoever can open the
+data directory already holds everything in it -- so what it adds is a supported
+and audited way to use that, instead of hand-editing the store. It expires in
+fifteen minutes by default, it is always the one account named `break-glass`,
+and the act is written to the audit archive with the local user's name. No HTTP
+route carries it, and a test keeps one from appearing.
 
 They are subcommands of the same binary because the backup format, the
 permission rules and the chain's hashing all live in this build. A backup

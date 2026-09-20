@@ -55,6 +55,14 @@ var (
 
 	// ErrInvalidToken reports a token that authenticates nothing.
 	ErrInvalidToken = errors.New("auth: that token is not valid")
+
+	// ErrTokenExpired reports a token that was valid and no longer is.
+	//
+	// Separate from ErrInvalidToken because the two mean different things to
+	// whoever is holding one: an invalid token was never right, an expired one
+	// was, and the second is fixed by minting another rather than by hunting
+	// for a typo.
+	ErrTokenExpired = errors.New("auth: that token has expired")
 )
 
 // CreateServiceAccount adds a machine identity and returns its one token.
@@ -159,6 +167,12 @@ func (s *Service) AuthenticateToken(ctx context.Context, token string) (model.Us
 	}
 	if !matched {
 		return model.User{}, ErrInvalidToken
+	}
+	// Checked AFTER the constant-time scan, not during it: bailing out early on
+	// an expired account would make the answer's timing depend on which account
+	// matched, which is the property the scan above exists to remove.
+	if !found.TokenExpiresAt.IsZero() && !s.now().UTC().Before(found.TokenExpiresAt) {
+		return model.User{}, ErrTokenExpired
 	}
 
 	s.noteTokenUse(ctx, found)

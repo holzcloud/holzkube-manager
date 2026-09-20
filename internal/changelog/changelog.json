@@ -1,5 +1,27 @@
 [
   {
+    "version": "v1.30.0",
+    "date": "2026-09-20",
+    "changes": [
+      {
+        "icon": "🔑",
+        "text": "New: holzkube-managerd break-glass prints a short-lived admin token on the machine itself, for the case where the only way in is the machine. It grants nothing new — whoever can open the data directory already holds everything in it — so what it adds is a supported and audited way to use that, instead of hand-editing the store."
+      },
+      {
+        "icon": "⏳",
+        "text": "That token expires: fifteen minutes by default, a day at the very most. An ordinary service account still never expires, because an expiry nobody is awake to renew is an outage rather than a safeguard."
+      },
+      {
+        "icon": "🪪",
+        "text": "It is always the one account named break-glass, visible in every list, and minting again rotates it rather than leaving admin accounts nobody remembers creating. The act is written to the audit archive with the local user's name, before it happens and again with its outcome."
+      },
+      {
+        "icon": "🚧",
+        "text": "No HTTP route carries it, and a test keeps one from appearing: the reasoning above holds only for a subcommand operating on a path."
+      }
+    ]
+  },
+  {
     "version": "v1.29.0",
     "date": "2026-09-20",
     "changes": [

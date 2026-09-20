@@ -59,6 +59,20 @@ type User struct {
 	// looking at a list can see which accounts are holding old credentials.
 	TokenIssuedAt time.Time `json:"token_issued_at,omitzero"`
 
+	// TokenExpiresAt is when this token stops authenticating, and the zero
+	// value means never.
+	//
+	// Never is the right default and stays the default: a service account is a
+	// machine identity that runs a backup at three every morning, and an expiry
+	// nobody is awake to renew is an outage rather than a safeguard.
+	//
+	// It exists for the one account that must NOT outlive its errand: the
+	// break-glass token minted on the machine itself (see the break-glass
+	// subcommand). That token is handed out without anybody signing in, so the
+	// only thing standing between it and a forgotten credential in somebody's
+	// shell history is this field.
+	TokenExpiresAt time.Time `json:"token_expires_at,omitzero"`
+
 	// LastUsedAt is the last time this account authenticated.
 	//
 	// It is written best-effort and throttled -- see auth.tokenUseThrottle --
