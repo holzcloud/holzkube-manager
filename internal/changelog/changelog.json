@@ -1,5 +1,19 @@
 [
   {
+    "version": "v1.24.0",
+    "date": "2026-09-20",
+    "changes": [
+      {
+        "icon": "🗂️",
+        "text": "The Kubernetes screen is ten pages instead of one. It had grown to fifteen cards on a single page — everything was reachable and nothing was findable. Overview, Workloads, Pods, Storage, Network, Config, Namespaces, Access, Events and Maintenance each have their own address now, so a link to one is a link you can send, the back button does what it looks like, and a page that fails takes only itself down."
+      },
+      {
+        "icon": "🔗",
+        "text": "The cluster and namespace you picked live in the address, so moving between those pages keeps them — and a link carries them with it. Picking a namespace now narrows every page rather than just the pod list."
+      }
+    ]
+  },
+  {
     "version": "v1.23.1",
     "date": "2026-09-20",
     "changes": [
