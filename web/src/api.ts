@@ -2299,6 +2299,44 @@ export type ClusterNetwork = z.infer<typeof clusterNetworkSchema>
 export type ServiceSummary = z.infer<typeof serviceSummarySchema>
 export type PolicySummary = z.infer<typeof policySummarySchema>
 
+export const wallTileSchema = z.object({
+  kind: z.string().default(''),
+  namespace: z.string().default(''),
+  name: z.string().default(''),
+  /** ok, warn, down, stopped or unknown. Decided by the server so that nothing
+   * on the wall works a colour out from four numbers. */
+  state: z.string().default('unknown'),
+  detail: z.string().default(''),
+})
+
+export const wallWarningSchema = z.object({
+  object: z.string().default(''),
+  reason: z.string().default(''),
+  message: z.string().default(''),
+  count: z.number().default(0),
+  age: z.string().default(''),
+})
+
+export const wallSchema = z.object({
+  /** When this was true. The screen says how old it is and goes visibly stale,
+   * because a wall that cannot go stale lies during exactly the incident it
+   * exists for. */
+  generated_at: z.string().default(''),
+  nodes: z.array(wallTileSchema).nullish().transform(orEmpty),
+  workloads: z.array(wallTileSchema).nullish().transform(orEmpty),
+  cpu: capacitySchema,
+  memory: capacitySchema,
+  pods: capacitySchema,
+  warnings: z.array(wallWarningSchema).nullish().transform(orEmpty),
+  summary: z
+    .record(z.string(), z.number())
+    .nullish()
+    .transform((v) => v ?? {}),
+})
+
+export type Wall = z.infer<typeof wallSchema>
+export type WallTile = z.infer<typeof wallTileSchema>
+
 export type Capacity = z.infer<typeof capacitySchema>
 export type ClusterCapacity = z.infer<typeof clusterCapacitySchema>
 export type NodeCapacity = z.infer<typeof nodeCapacitySchema>
@@ -3326,6 +3364,17 @@ export const api = {
         `/api/v1/clusters/${encodeURIComponent(cluster)}/kubernetes/pods/${encodeURIComponent(namespace)}/${encodeURIComponent(pod)}/exec`,
         execResultSchema,
         { container, command },
+      ),
+
+    /** Everything one screen in the IT office shows, in one answer. */
+    wall: (cluster: string, namespace?: string) =>
+      sendJSON(
+        'GET',
+        `/api/v1/clusters/${encodeURIComponent(cluster)}/wall` +
+          (namespace === undefined || namespace === ''
+            ? ''
+            : `?namespace=${encodeURIComponent(namespace)}`),
+        wallSchema,
       ),
 
     /** Every namespace, its quotas, and the cluster's own kinds. No namespace

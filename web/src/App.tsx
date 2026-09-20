@@ -25,6 +25,7 @@ import { provisionRoute } from '@/routes/provision'
 import { settingsRoute } from '@/routes/settings'
 import { setupRoute } from '@/routes/setup'
 import { upgradesRoute } from '@/routes/upgrades'
+import { wallRoute } from '@/routes/wall'
 
 /**
  * Router wiring, and nothing else.
@@ -38,6 +39,8 @@ import { upgradesRoute } from '@/routes/upgrades'
 const routeTree = rootRoute.addChildren([
   setupRoute,
   loginRoute,
+  // Outside the authenticated layout: a wall has no sidebar. See wall.tsx.
+  wallRoute,
   authenticatedRoute.addChildren([
     indexRoute,
     auditRoute,

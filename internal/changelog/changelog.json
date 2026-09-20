@@ -1,5 +1,27 @@
 [
   {
+    "version": "v1.26.0",
+    "date": "2026-09-20",
+    "changes": [
+      {
+        "icon": "📺",
+        "text": "A screen for the IT office. /wall shows every node and every workload as a tile, how full the cluster is, and the most recent warnings — no navigation, nothing to click, and it never scrolls: the tiles shrink to fit, and past a screenful it says how many there are and draws the ones that are not fine."
+      },
+      {
+        "icon": "🕐",
+        "text": "It says how old its answer is at all times, and dims when that answer is more than a few refreshes old. A wall that cannot go stale lies during exactly the incident it exists for. A failed refresh keeps the last answer up with its age showing rather than blanking the screen."
+      },
+      {
+        "icon": "🎨",
+        "text": "Five colours, not two: a CronJob between runs is not an outage, something you stopped on purpose is not broken, and a node nobody is hearing from is never green. Those three are what a red-and-green wall gets wrong, and the last one is the case the screen exists for."
+      },
+      {
+        "icon": "🔑",
+        "text": "It still needs somebody to sign in on it once, and a session expires — so it is not yet a screen to leave up for weeks. A long-lived, read-only, revocable kiosk link is the next piece."
+      }
+    ]
+  },
+  {
     "version": "v1.25.1",
     "date": "2026-09-20",
     "changes": [
