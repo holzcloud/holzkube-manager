@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -516,9 +517,10 @@ func run(args []string) error {
 			BrokenAtLine: brokenLine,
 			File:         chainFile,
 		}.Public(),
-		AllowedHosts: allowedHosts(cfg),
-		OIDC:         provider,
-		IsSSOOnly:    ssoOnly(cfg),
+		AllowedHosts:   allowedHosts(cfg),
+		OIDC:           provider,
+		IsSSOOnly:      ssoOnly(cfg),
+		LocalSignInURL: localSignInURL(cfg),
 	}
 
 	// The route table is assembled by routeTable, which is the one place it is
@@ -719,4 +721,97 @@ func routeTable(deps httpapi.Deps) []httpapi.Route {
 		handlers.SupportRoutes(deps),
 		handlers.MetricsRoutes(deps),
 	)
+}
+
+// localSignInURL is the address an operator can use the local account on, when
+// the one they are looking at refuses it.
+//
+// # Why it is derived and not configured
+//
+// The sign-in page on an SSO-only address says "the local account works on the
+// local network" and left the operator to remember which address that was. The
+// answer is already written down: the hosts this instance answers to, minus the
+// ones declared SSO-only. Adding a setting for it would be a second place to
+// keep in step with the first, and a link to an address this process does not
+// answer on is worse than no link.
+//
+// # What is deliberately left out
+//
+// Loopback names. A link to https://localhost on the office PC or a phone points
+// at that device, not at this one, and lands on a connection refused -- which
+// reads as the product being broken rather than as the link being useless there.
+//
+// Nothing at all when every answered host is SSO-only, or when the only ones
+// left are loopback. There is then no honest answer, and the sentence stands on
+// its own as it did before.
+func localSignInURL(cfg config.Config) func() string {
+	scheme := "https"
+	if cfg.InsecureHTTP {
+		scheme = "http"
+	}
+
+	// In the order they are most likely to be reachable from elsewhere: a name
+	// the operator wrote down, then the address this process binds.
+	candidates := make([]string, 0, len(cfg.AllowedHosts)+1)
+	candidates = append(candidates, cfg.AllowedHosts...)
+	if h := tlsx.ListenHost(cfg.Listen); h != "" {
+		candidates = append(candidates, h)
+	}
+
+	_, port, err := net.SplitHostPort(cfg.Listen)
+	if err != nil {
+		port = ""
+	}
+
+	found := ""
+	for _, host := range candidates {
+		if cfg.IsSSOOnly(host) || isLoopbackName(host) {
+			continue
+		}
+		found = host
+		break
+	}
+	if found == "" {
+		return func() string { return "" }
+	}
+
+	url := scheme + "://" + bracketIfIPv6(found)
+	if port != "" && port != defaultPortFor(scheme) {
+		url += ":" + port
+	}
+	return func() string { return url }
+}
+
+func isLoopbackName(host string) bool {
+	h := strings.ToLower(strings.Trim(config.NormalizeHost(host), "[]"))
+	if h == "localhost" || strings.HasSuffix(h, ".localhost") {
+		return true
+	}
+	if ip := net.ParseIP(h); ip != nil {
+		return ip.IsLoopback()
+	}
+	return false
+}
+
+// bracketIfIPv6 puts a literal address in the brackets a URL needs.
+//
+// Written here rather than with net.JoinHostPort, and the reason is the guard:
+// TestNoAddressAboveTheSeam refuses that call anywhere outside internal/talos,
+// because a machine is reached through a talos.Target and a Dialer and never
+// through an address a caller assembled. This is the HTTP listener's own
+// address and not a node's -- but the guard cannot tell those apart by reading
+// source, and an exemption for this one would be an exemption for the next one
+// that looked similar. Four lines here cost less than a hole in that rule.
+func bracketIfIPv6(host string) string {
+	if strings.Contains(host, ":") && !strings.HasPrefix(host, "[") {
+		return "[" + host + "]"
+	}
+	return host
+}
+
+func defaultPortFor(scheme string) string {
+	if scheme == "http" {
+		return "80"
+	}
+	return "443"
 }

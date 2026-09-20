@@ -24,6 +24,16 @@ type systemStatus struct {
 	OIDCEnabled   bool `json:"oidc_enabled"`
 	PasswordLogin bool `json:"password_login"`
 
+	// LocalSignInURL is where the local account still works, offered only on an
+	// address that refuses it. Empty when there is no honest answer -- every
+	// address this instance answers to is SSO-only, or the only ones left are
+	// loopback names that would point a browser at the machine it is running on.
+	//
+	// It names nothing an unauthenticated caller could not establish by trying,
+	// for the same reason the two flags above do not: it is an address this
+	// process already answers on, and reaching it still requires a password.
+	LocalSignInURL string `json:"local_sign_in_url,omitempty"`
+
 	// TalosRange is the version window this build was tested against, and
 	// AllowPreRelease whether this instance accepts a pre-release inside it
 	// (OPS-03).
@@ -165,6 +175,10 @@ func SystemRoutes(d httpapi.Deps) []httpapi.Route {
 					SetupRequired: len(users) == 0,
 					OIDCEnabled:   d.OIDC != nil,
 					PasswordLogin: !d.SSOOnly(r),
+					// Only on an address that refuses the local account: on one
+					// that accepts it, a link to somewhere else is an invitation
+					// to leave a page that already works.
+					LocalSignInURL: localSignIn(d, r),
 					// A name, never a path. The audit directory sits under the
 					// XDG-resolved absolute data directory, so the full path
 					// discloses the OS username and the home directory layout
@@ -181,4 +195,16 @@ func SystemRoutes(d httpapi.Deps) []httpapi.Route {
 			}),
 		},
 	}
+}
+
+// localSignIn is the address to offer beside the identity provider.
+//
+// Only on an address that refuses the local password, because on one that
+// accepts it the link would invite an operator away from a page that already
+// works.
+func localSignIn(d httpapi.Deps, r *http.Request) string {
+	if !d.SSOOnly(r) {
+		return ""
+	}
+	return d.LocalSignIn()
 }
