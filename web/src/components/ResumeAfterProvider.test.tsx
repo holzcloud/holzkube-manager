@@ -1,5 +1,9 @@
-import { render, screen } from '@testing-library/react'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { render, screen, waitFor } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
+import type { ReactNode } from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import * as apiModule from '@/api'
 import {
   forgetSudoIntent,
   ResumeAfterProvider,
@@ -12,9 +16,17 @@ vi.mock('@tanstack/react-router', () => ({
   useNavigate: () => navigate,
 }))
 
+/** The banner lives inside the query client, because running an action has to
+ * invalidate what the screens are showing. */
+function render_(node: ReactNode) {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  return render(<QueryClientProvider client={client}>{node}</QueryClientProvider>)
+}
+
 afterEach(() => {
   forgetSudoIntent()
   navigate.mockClear()
+  vi.restoreAllMocks()
 })
 
 /**
@@ -27,23 +39,23 @@ afterEach(() => {
  * operator cannot be left guessing whether a destructive action ran.
  */
 describe('ResumeAfterProvider', () => {
-  it('says plainly that the action did not run, and names it', () => {
+  it('says plainly that the action has not run, and names it', () => {
     rememberSudoIntent('Forgetting this cluster', '/clusters')
 
-    render(<ResumeAfterProvider />)
+    render_(<ResumeAfterProvider />)
 
     // The whole sentence, not the emphasised half: getByText matches the
     // innermost element, and asserting on that would pass over a banner whose
     // surrounding words had been changed to say something else entirely.
-    const sentence = screen.getByText(/did not run/i).closest('p')
+    const sentence = screen.getByText(/has not run yet/i).closest('p')
     expect(sentence?.textContent).toContain('Forgetting this cluster')
     expect(sentence?.textContent).toContain('re-authenticated')
-    expect(sentence?.textContent).toContain('not carried across')
+    expect(sentence?.textContent).toContain('not be carried across')
   })
 
   it('shows nothing when no action was interrupted', () => {
-    render(<ResumeAfterProvider />)
-    expect(screen.queryByText(/did not run/i)).toBeNull()
+    render_(<ResumeAfterProvider />)
+    expect(screen.queryByText(/has not run yet/i)).toBeNull()
   })
 
   it('forgets an intent too old to still be about what the operator is doing', () => {
@@ -53,26 +65,26 @@ describe('ResumeAfterProvider', () => {
     // about something long since dealt with another way is noise, and noise is
     // what teaches an operator to dismiss banners without reading them.
     vi.spyOn(Date, 'now').mockReturnValue(Date.now() + 11 * 60 * 1000)
-    render(<ResumeAfterProvider />)
+    render_(<ResumeAfterProvider />)
     vi.restoreAllMocks()
 
-    expect(screen.queryByText(/did not run/i)).toBeNull()
+    expect(screen.queryByText(/has not run yet/i)).toBeNull()
   })
 
   it('takes the operator back to the screen the action started on', async () => {
     rememberSudoIntent('Forgetting this cluster', '/clusters')
 
-    render(<ResumeAfterProvider />)
+    render_(<ResumeAfterProvider />)
     screen.getByRole('button', { name: /back to where you were/i }).click()
 
     expect(navigate).toHaveBeenCalledWith({ to: '/clusters' })
   })
 
-  it('does not carry the request across, only what it was', () => {
+  it('never carries a request body across, however helpful that would be', () => {
     // The 428 flow replays the ORIGINAL REQUEST, and the password change is
     // gated the same way -- so carrying a request across a navigation would put
-    // a password in sessionStorage. This pins that only the sentence and the
-    // path are stored, against a future change that decides to be helpful.
+    // a password in sessionStorage. An action with a body therefore gets no
+    // replay at all, and the caller in api.ts is what decides that.
     rememberSudoIntent('Changing the operator password', '/settings')
 
     const stored = sessionStorage.getItem('holzkube.sudo-intent') ?? ''
@@ -81,6 +93,76 @@ describe('ResumeAfterProvider', () => {
       path: '/settings',
       at: expect.any(Number),
     })
+  })
+
+  it('runs the action from the banner when it can be run again', async () => {
+    // What the operator reported: they pressed Forget on a machine, went to
+    // their provider and back, and were asked to find the button again. The
+    // journal shows the window opened and no second attempt was ever made --
+    // they read the banner as the deletion having failed.
+    const ran = vi.spyOn(apiModule, 'replaySudoAction').mockResolvedValue(undefined)
+    rememberSudoIntent('Forgetting this machine', '/nodes/holzkube-01', {
+      method: 'DELETE',
+      path: '/api/v1/machines/holzkube-01',
+    })
+
+    render_(<ResumeAfterProvider />)
+    await userEvent.click(screen.getByRole('button', { name: /run forgetting this machine now/i }))
+
+    await waitFor(() =>
+      expect(ran).toHaveBeenCalledWith({
+        method: 'DELETE',
+        path: '/api/v1/machines/holzkube-01',
+      }),
+    )
+    // And the banner goes, because the thing it was about has happened.
+    await waitFor(() => expect(screen.queryByText(/has not run yet/i)).toBeNull())
+  })
+
+  it('offers no run button for an action it cannot re-issue', () => {
+    rememberSudoIntent('Changing the operator password', '/settings')
+
+    render_(<ResumeAfterProvider />)
+
+    expect(screen.queryByRole('button', { name: /run .* now/i })).toBeNull()
+    // And says what to do instead, rather than leaving a dead end.
+    expect(screen.getByText(/Go back and run it again/i)).toBeInTheDocument()
+  })
+
+  it('says why it did not run rather than losing the reason', async () => {
+    vi.spyOn(apiModule, 'replaySudoAction').mockRejectedValue(
+      new Error('the node is still a member of etcd'),
+    )
+    rememberSudoIntent('Forgetting this machine', '/nodes/holzkube-01', {
+      method: 'DELETE',
+      path: '/api/v1/machines/holzkube-01',
+    })
+
+    render_(<ResumeAfterProvider />)
+    await userEvent.click(screen.getByRole('button', { name: /run .* now/i }))
+
+    // The banner is the only place this attempt exists: an error that escaped
+    // it would vanish, and the operator would be back to guessing.
+    expect(await screen.findByText(/still a member of etcd/)).toBeInTheDocument()
+  })
+
+  it('refuses a stored replay that is not a request to this API', () => {
+    // It comes out of storage the page itself wrote, but a malformed one would
+    // build a request from whatever was there.
+    sessionStorage.setItem(
+      'holzkube.sudo-intent',
+      JSON.stringify({
+        action: 'Forgetting this machine',
+        path: '/nodes',
+        replay: { method: 'DELETE', path: 'https://elsewhere.invalid/wipe' },
+        at: Date.now(),
+      }),
+    )
+
+    render_(<ResumeAfterProvider />)
+
+    expect(screen.queryByRole('button', { name: /run .* now/i })).toBeNull()
+    expect(screen.getByText(/has not run yet/i)).toBeInTheDocument()
   })
 })
 
@@ -107,7 +189,7 @@ describe('SudoFailureNotice', () => {
   it('names the missing claim, and says it cannot succeed by retrying', () => {
     withQuery('?sudo_error=oidc.no-auth-time')
 
-    render(<SudoFailureNotice />)
+    render_(<SudoFailureNotice />)
 
     const text = screen.getByText(/auth_time/).textContent ?? ''
     expect(text).toContain('however many times')
@@ -128,7 +210,7 @@ describe('SudoFailureNotice', () => {
   it('still says something for a code it does not know', () => {
     withQuery('?sudo_error=oidc.invented-later')
 
-    render(<SudoFailureNotice />)
+    render_(<SudoFailureNotice />)
 
     const text = screen.getByText(/oidc.invented-later/).textContent ?? ''
     expect(text).toContain('Nothing was confirmed')
@@ -137,13 +219,13 @@ describe('SudoFailureNotice', () => {
   it('takes the code out of the address bar, so a reload does not resurrect it', () => {
     withQuery('?sudo_error=oidc.not-fresh')
 
-    render(<SudoFailureNotice />)
+    render_(<SudoFailureNotice />)
 
     expect(window.location.search).toBe('')
   })
 
   it('shows nothing when the operator did not come back from a refusal', () => {
-    render(<SudoFailureNotice />)
+    render_(<SudoFailureNotice />)
     expect(screen.queryByText(/identity provider/i)).toBeNull()
   })
 })
