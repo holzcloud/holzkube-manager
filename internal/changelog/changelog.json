@@ -4,22 +4,16 @@
     "date": "2026-09-20",
     "changes": [
       {
+        "icon": "🐛",
+        "text": "The Kubernetes page showed a screenful of errors instead of a page on a cluster whose namespaces have no resource quota. An empty list was being answered as null, and the browser reads null and \"missing\" differently — so a page that had been tested, fixtured and released showed nothing at all. Every list in every Kubernetes answer is now an empty list when it is empty, a check walks all of them against a cluster with nothing in it, and the browser treats a null list as an empty one so this can never blank a page again."
+      },
+      {
         "icon": "🗂️",
         "text": "The Kubernetes screen is ten pages instead of one. It had grown to fifteen cards on a single page — everything was reachable and nothing was findable. Overview, Workloads, Pods, Storage, Network, Config, Namespaces, Access, Events and Maintenance each have their own address now, so a link to one is a link you can send, the back button does what it looks like, and a page that fails takes only itself down."
       },
       {
         "icon": "🔗",
         "text": "The cluster and namespace you picked live in the address, so moving between those pages keeps them — and a link carries them with it. Picking a namespace now narrows every page rather than just the pod list."
-      }
-    ]
-  },
-  {
-    "version": "v1.23.1",
-    "date": "2026-09-20",
-    "changes": [
-      {
-        "icon": "🐛",
-        "text": "The Kubernetes page showed a screenful of errors instead of a page on a cluster whose namespaces have no resource quota. An empty list was being answered as null, and the browser reads null and \"missing\" differently — so a page that had been tested, fixtured and released showed nothing at all. Every list in every Kubernetes answer is now an empty list when it is empty, a check walks all of them against a cluster with nothing in it, and the browser treats a null list as an empty one so this can never blank a page again."
       }
     ]
   },
