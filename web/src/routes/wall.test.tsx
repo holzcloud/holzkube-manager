@@ -173,6 +173,39 @@ describe('the wall', () => {
     expect(screen.queryByText(/stopped on purpose/)).toBeNull()
   })
 
+  it('says why a warning happened, not only that one did', async () => {
+    vi.spyOn(api.kubernetes, 'wall').mockResolvedValue(
+      wallAt(new Date(), {
+        warnings: [
+          {
+            object: 'Pod/dupl-test',
+            reason: 'Failed',
+            message: 'Error: ImagePullBackOff',
+            count: 3,
+            age: '',
+          },
+        ],
+      }),
+    )
+
+    wrap(<WallView />)
+
+    // "Failed Pod/dupl-test" names a pod and says nothing at all about what
+    // happened to it. The operator asked what it meant, and the answer had been
+    // fetched, carried through the API and then not drawn.
+    expect(await screen.findByText(/Error: ImagePullBackOff/)).toBeInTheDocument()
+  })
+
+  it('says a square is a workload and not a pod', async () => {
+    vi.spyOn(api.kubernetes, 'wall').mockResolvedValue(wallAt(new Date()))
+
+    wrap(<WallView />)
+
+    // Asked twice, then asked whether the squares were pods. "Workload" is this
+    // product's word and not the operator's.
+    expect(await screen.findByText(/not a single pod/)).toBeInTheDocument()
+  })
+
   it('hides nothing on a cluster where everything is fine', async () => {
     // The operator's own screen: 132 workloads, all healthy. The first version
     // of this page drew only the ones that were NOT fine past sixty, so it
