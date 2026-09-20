@@ -1016,6 +1016,34 @@ and no new listener is opened anywhere.
 `/healthz`" and "somebody read `/admin/users`" are different events. A response is
 cut at 1 MiB, and the cut is reported rather than made quietly.
 
+### Namespaces, quotas and the cluster's own kinds
+
+A namespace has been a filter everywhere in this product. Two things about one are
+findings in their own right, and both look like the workload's fault:
+
+**Stuck in `Terminating`.** Something in it has a finalizer nothing will clear, so
+the namespace hangs — for weeks — the name cannot be reused, and recreating it
+fails with "already exists" while using it fails too. `kubectl get ns` shows the
+word and nothing about what is holding it; the API server's own condition does, and
+that is what the row carries.
+
+**A full quota.** It is why the next pod is refused, and the refusal appears on the
+*pod* as "exceeded quota" in a namespace whose quota nothing showed. Only the
+resources actually full are named — a quota at 6Gi of 8Gi is ordinary, and naming
+it would bury the one that matters.
+
+**A compute quota with no LimitRange**, which refuses every pod that sets no
+requests — not for being too big, but because the quota cannot account for a pod
+that asked for nothing. The error says "must specify limits", which reads as the pod
+being wrong. A quota that only counts objects does not do this, so it is not
+warned about.
+
+**The cluster's own kinds**, because its operators keep their state in them and
+"what is a Longhorn Volume called here" is not answerable from a list of pods. A
+definition the API server is not serving is marked: every manifest naming it is
+refused, and nothing else in a cluster says so. Objects are not counted per kind —
+that would be one request per definition, and a cluster can have two hundred.
+
 ### Who may do what
 
 `kubectl get rolebindings` gives a list of names. Every question somebody has

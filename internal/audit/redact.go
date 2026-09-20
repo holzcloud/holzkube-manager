@@ -443,7 +443,12 @@ var allowlist = map[string][]string{
 	// was READ is the record worth having: somebody enumerated the cluster's
 	// administrators, which is a reasonable thing to do and a reasonable thing to
 	// be able to see afterwards.
-	"cluster.kubernetes-access":     {},
+	"cluster.kubernetes-access": {},
+
+	// Every namespace, its quotas, and the cluster's own kinds (2026-09-20). A
+	// read with no parameters at all: the answer IS the namespaces, so there is
+	// nothing to narrow and nothing for the archive to carry.
+	"cluster.kubernetes-inventory":  {},
 	"cluster.kubernetes-stop":       {},
 	"cluster.kubernetes-start":      {},
 	"cluster.kubernetes-sweep-plan": {},

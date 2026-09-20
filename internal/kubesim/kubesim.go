@@ -116,6 +116,14 @@ type Options struct {
 	Volumes        []Volume
 	StorageClasses []StorageClass
 
+	// Namespaces beyond their names, with what constrains them.
+	NamespaceFixtures []NamespaceFixture
+	Quotas            []Quota
+	LimitRanges       []LimitRange
+
+	// The cluster's own kinds.
+	CustomResourceDefinitions []CustomResourceDefinition
+
 	// Access control: who may do what, and the bindings that grant nothing.
 	Roles           []Role
 	RoleBindings    []RoleBinding
@@ -412,6 +420,54 @@ type IngressClass struct {
 	Default    bool
 }
 
+// NamespaceFixture is one namespace as a test describes it.
+//
+// Terminating and the conditions that explain it are the point: kubectl shows the
+// word and nothing about what is holding the namespace, and a fake that could not
+// render a stuck one could not measure the finding.
+type NamespaceFixture struct {
+	Name string
+	// Terminating makes it the stuck case; Holding is what the API server says is
+	// keeping it, as the condition message.
+	Terminating bool
+	Holding     string
+	Finalizers  []string
+}
+
+// Quota is one ResourceQuota as a test describes it.
+//
+// Used and Hard as plain strings per resource, keyed "cpu", "memory",
+// "count/pods" -- because the claim worth measuring is that a FULL quota is named
+// and a quota on object counts does not trigger the LimitRange warning.
+type Quota struct {
+	Namespace string
+	Name      string
+	Used      map[string]string
+	Hard      map[string]string
+}
+
+// LimitRange only has to exist for the namespace screen's purposes.
+type LimitRange struct {
+	Namespace string
+	Name      string
+}
+
+// CustomResourceDefinition is one of the cluster's own kinds as a test describes
+// it.
+type CustomResourceDefinition struct {
+	Group  string
+	Kind   string
+	Plural string
+	Scope  string
+	// Versions served, and which one stores. NotServed is a version present in
+	// the definition that the API server does not answer.
+	Versions  []string
+	Stored    string
+	NotServed []string
+	// Established false is a kind every manifest naming it is refused for.
+	Established bool
+}
+
 // Role is a Role or a ClusterRole as a test describes it.
 //
 // Rules as three lists, because the claim worth measuring is that wildcard verbs
@@ -591,6 +647,10 @@ type Server struct {
 	slices       []EndpointSlice
 	policies     []NetworkPolicy
 	ingclasses   []IngressClass
+	nsfixtures   []NamespaceFixture
+	quotas       []Quota
+	limitranges  []LimitRange
+	crds         []CustomResourceDefinition
 	roles        []Role
 	bindings     []RoleBinding
 	accounts     []ServiceAccount
@@ -646,6 +706,10 @@ func New(opts Options) (*Server, error) {
 		slices:            append([]EndpointSlice(nil), opts.EndpointSlices...),
 		policies:          append([]NetworkPolicy(nil), opts.NetworkPolicies...),
 		ingclasses:        append([]IngressClass(nil), opts.IngressClasses...),
+		nsfixtures:        append([]NamespaceFixture(nil), opts.NamespaceFixtures...),
+		quotas:            append([]Quota(nil), opts.Quotas...),
+		limitranges:       append([]LimitRange(nil), opts.LimitRanges...),
+		crds:              append([]CustomResourceDefinition(nil), opts.CustomResourceDefinitions...),
 		roles:             append([]Role(nil), opts.Roles...),
 		bindings:          append([]RoleBinding(nil), opts.RoleBindings...),
 		accounts:          append([]ServiceAccount(nil), opts.ServiceAccounts...),
@@ -831,6 +895,15 @@ func (s *Server) routes() http.Handler {
 	}))
 	mux.HandleFunc("/apis/batch/v1/namespaces/", s.record(s.serveBatchNamespaced))
 	mux.HandleFunc("/apis/apps/v1/namespaces/", s.record(s.serveAppsNamespaced))
+	mux.HandleFunc("/api/v1/resourcequotas", s.record(func(w http.ResponseWriter, _ *http.Request) {
+		s.writeQuotas(w, "")
+	}))
+	mux.HandleFunc("/api/v1/limitranges", s.record(func(w http.ResponseWriter, _ *http.Request) {
+		s.writeLimitRanges(w, "")
+	}))
+	mux.HandleFunc("/apis/apiextensions.k8s.io/v1/customresourcedefinitions", s.record(func(w http.ResponseWriter, _ *http.Request) {
+		s.writeCRDs(w)
+	}))
 	mux.HandleFunc("/apis/rbac.authorization.k8s.io/v1/roles", s.record(func(w http.ResponseWriter, _ *http.Request) {
 		s.writeRoles(w, "", false)
 	}))
@@ -970,14 +1043,54 @@ func (s *Server) serveNamespaces(w http.ResponseWriter, _ *http.Request) {
 		TypeMeta: metav1.TypeMeta{APIVersion: "v1", Kind: "NamespaceList"},
 		ListMeta: metav1.ListMeta{ResourceVersion: "1"},
 	}
+	s.mu.Lock()
+	fixtures := append([]NamespaceFixture(nil), s.nsfixtures...)
+	s.mu.Unlock()
+	detailed := map[string]NamespaceFixture{}
+	for _, fixture := range fixtures {
+		detailed[fixture.Name] = fixture
+		// A fixture names a namespace whether or not the plain list did: a test
+		// about a stuck namespace should not also have to list it twice.
+		if !contains(names, fixture.Name) {
+			names = append(names, fixture.Name)
+		}
+	}
+
 	for _, name := range names {
-		list.Items = append(list.Items, corev1.Namespace{
+		rendered := corev1.Namespace{
 			TypeMeta:   metav1.TypeMeta{APIVersion: "v1", Kind: "Namespace"},
 			ObjectMeta: metav1.ObjectMeta{Name: name},
 			Status:     corev1.NamespaceStatus{Phase: corev1.NamespaceActive},
-		})
+		}
+		if fixture, ok := detailed[name]; ok && fixture.Terminating {
+			rendered.Status.Phase = corev1.NamespaceTerminating
+			if fixture.Holding != "" {
+				// The condition is where the API server says WHAT is holding it,
+				// and it is the whole answer kubectl does not show.
+				rendered.Status.Conditions = []corev1.NamespaceCondition{{
+					Type:    corev1.NamespaceContentRemaining,
+					Status:  corev1.ConditionTrue,
+					Message: fixture.Holding,
+				}}
+			}
+			for _, finalizer := range fixture.Finalizers {
+				rendered.Spec.Finalizers = append(rendered.Spec.Finalizers,
+					corev1.FinalizerName(finalizer))
+			}
+		}
+		list.Items = append(list.Items, rendered)
 	}
 	writeJSON(w, http.StatusOK, list)
+}
+
+// contains is the small membership test the namespace merge needs.
+func contains(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
 }
 
 // serveNamespaced routes /api/v1/namespaces/{ns}/{resource}.
@@ -3418,4 +3531,115 @@ func (s *Server) serveRBACNamespaced(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	s.writeStatus(w, http.StatusNotFound, metav1.StatusReasonNotFound, "not found: "+r.URL.Path)
+}
+
+// Quotas, limit ranges and the cluster's own kinds (2026-09-20).
+
+func (s *Server) writeQuotas(w http.ResponseWriter, namespace string) {
+	s.mu.Lock()
+	quotas := append([]Quota(nil), s.quotas...)
+	s.mu.Unlock()
+
+	list := corev1.ResourceQuotaList{
+		TypeMeta: metav1.TypeMeta{APIVersion: "v1", Kind: "ResourceQuotaList"},
+	}
+	asList := func(values map[string]string) corev1.ResourceList {
+		out := corev1.ResourceList{}
+		for name, value := range values {
+			out[corev1.ResourceName(name)] = resource.MustParse(value)
+		}
+		return out
+	}
+	for _, q := range quotas {
+		if namespace != "" && q.Namespace != namespace {
+			continue
+		}
+		list.Items = append(list.Items, corev1.ResourceQuota{
+			TypeMeta:   metav1.TypeMeta{APIVersion: "v1", Kind: "ResourceQuota"},
+			ObjectMeta: metav1.ObjectMeta{Name: q.Name, Namespace: q.Namespace},
+			// On STATUS rather than spec, because that is where the API server
+			// reports what is actually in force and what is used -- a product
+			// reading spec would report a quota as empty the moment somebody
+			// edited it.
+			Status: corev1.ResourceQuotaStatus{Hard: asList(q.Hard), Used: asList(q.Used)},
+		})
+	}
+	writeJSON(w, http.StatusOK, list)
+}
+
+func (s *Server) writeLimitRanges(w http.ResponseWriter, namespace string) {
+	s.mu.Lock()
+	ranges := append([]LimitRange(nil), s.limitranges...)
+	s.mu.Unlock()
+
+	list := corev1.LimitRangeList{
+		TypeMeta: metav1.TypeMeta{APIVersion: "v1", Kind: "LimitRangeList"},
+	}
+	for _, r := range ranges {
+		if namespace != "" && r.Namespace != namespace {
+			continue
+		}
+		list.Items = append(list.Items, corev1.LimitRange{
+			TypeMeta:   metav1.TypeMeta{APIVersion: "v1", Kind: "LimitRange"},
+			ObjectMeta: metav1.ObjectMeta{Name: r.Name, Namespace: r.Namespace},
+		})
+	}
+	writeJSON(w, http.StatusOK, list)
+}
+
+// writeCRDs answers the cluster's own kinds, as unstructured objects.
+//
+// Unstructured rather than typed, because that is how the product reads them --
+// through the dynamic client it already carries for the manifest path. A fake that
+// answered a typed list would be testing a code path the product does not use.
+func (s *Server) writeCRDs(w http.ResponseWriter) {
+	s.mu.Lock()
+	crds := append([]CustomResourceDefinition(nil), s.crds...)
+	s.mu.Unlock()
+
+	items := make([]any, 0, len(crds))
+	for _, crd := range crds {
+		versions := make([]any, 0, len(crd.Versions)+len(crd.NotServed))
+		for _, version := range crd.Versions {
+			versions = append(versions, map[string]any{
+				"name": version, "served": true, "storage": version == crd.Stored,
+			})
+		}
+		for _, version := range crd.NotServed {
+			versions = append(versions, map[string]any{
+				"name": version, "served": false, "storage": false,
+			})
+		}
+		conditions := []any{}
+		if crd.Established {
+			conditions = append(conditions, map[string]any{
+				"type": "Established", "status": "True",
+			})
+		}
+		plural := crd.Plural
+		if plural == "" {
+			plural = strings.ToLower(crd.Kind) + "s"
+		}
+		items = append(items, map[string]any{
+			"apiVersion": "apiextensions.k8s.io/v1",
+			"kind":       "CustomResourceDefinition",
+			"metadata": map[string]any{
+				"name":              plural + "." + crd.Group,
+				"creationTimestamp": time.Now().Add(-time.Hour).UTC().Format(time.RFC3339),
+			},
+			"spec": map[string]any{
+				"group":    crd.Group,
+				"scope":    crd.Scope,
+				"names":    map[string]any{"kind": crd.Kind, "plural": plural},
+				"versions": versions,
+			},
+			"status": map[string]any{"conditions": conditions},
+		})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"apiVersion": "apiextensions.k8s.io/v1",
+		"kind":       "CustomResourceDefinitionList",
+		"metadata":   map[string]any{"resourceVersion": "1"},
+		"items":      items,
+	})
 }

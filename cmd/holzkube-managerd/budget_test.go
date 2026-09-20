@@ -1204,6 +1204,28 @@ var routeBudgets = []routeBudget{
 			"can be sent, and because naming the wrong one is refused rather than guessed.",
 	},
 	{
+		route: "GET /api/v1/clusters/{id}/kubernetes/inventory",
+		calls: []upstreamCall{
+			{name: "NewClusterClient: Version (finding a control-plane node)", class: nodeProbeCall},
+			{name: "COSI Get: the machine configuration, for the API server's address", class: nodeFastReadCall},
+			{name: "Kubernetes: list namespaces", class: kubeCall},
+			{name: "Kubernetes: list pods (what is in each)", class: kubeCall},
+			{name: "Kubernetes: list resource quotas", class: kubeCall},
+			{name: "Kubernetes: list limit ranges", class: kubeCall},
+			{name: "Kubernetes: list custom resource definitions", class: kubeCall},
+		},
+		routeDeadline:     handlers.KubernetesRouteBudget,
+		verdict:           knownOverBudget,
+		clipping:          clipped,
+		deferredTo:        "as above for the two Talos calls.",
+		clippingRationale: "five list calls against a cluster that answers.",
+		why: "The quotas and the limit ranges are read together because the FINDING is the two of " +
+			"them disagreeing: a compute quota with no LimitRange refuses every pod that sets no " +
+			"requests, and the error names the pod. Objects of the cluster's own kinds are " +
+			"deliberately NOT counted -- that would be one more list per definition, and a cluster " +
+			"can have two hundred.",
+	},
+	{
 		route: "GET /api/v1/clusters/{id}/kubernetes/access",
 		calls: []upstreamCall{
 			{name: "NewClusterClient: Version (finding a control-plane node)", class: nodeProbeCall},
