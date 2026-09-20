@@ -6,6 +6,7 @@ import { AccessControl } from '@/components/AccessControl'
 import { ActAs } from '@/components/ActAs'
 import { ApplyManifest } from '@/components/ApplyManifest'
 import { ClusterCapacityPanel } from '@/components/ClusterCapacityPanel'
+import { ClusterInventory } from '@/components/ClusterInventory'
 import { ClusterNetwork } from '@/components/ClusterNetwork'
 import { ClusterResources } from '@/components/ClusterResources'
 import { ClusterStorage } from '@/components/ClusterStorage'
@@ -197,6 +198,15 @@ export function KubernetesView() {
             </CardHeader>
             <CardContent>
               <ClusterCapacityPanel clusterID={selected} />
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Namespaces and the cluster’s own kinds</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <ClusterInventory clusterID={selected} />
             </CardContent>
           </Card>
 

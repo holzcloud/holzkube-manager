@@ -1592,5 +1592,121 @@
       "User admin@example.com"
     ],
     "notice": "A binding that names a role or a service account which does not exist grants nothing, and looks exactly like one that works: RBAC has no referential integrity, deliberately, so that a binding may be written before its role. Administrative means wildcard verbs on wildcard resources, whatever the role is called -- looking for the name cluster-admin would miss every hand-written role with the same power."
+  },
+  "/api/v1/clusters/c-homelab/kubernetes/inventory": {
+    "namespaces": [
+      {
+        "name": "default",
+        "phase": "Active",
+        "pods_running": 4,
+        "quotas": [],
+        "has_limit_range": false,
+        "healthy": true,
+        "notice": "",
+        "created_at": "2026-05-01T12:00:00Z"
+      },
+      {
+        "name": "holzcloud-staging-old",
+        "phase": "Terminating",
+        "pods_running": 0,
+        "quotas": [],
+        "has_limit_range": false,
+        "healthy": false,
+        "notice": "It has been deleted and something in it will not go. Some content in the namespace has finalizers remaining: volumes.longhorn.io in 3 resource instances. Until that clears, the name cannot be reused and nothing new can be created here.",
+        "created_at": "2026-03-11T08:00:00Z"
+      },
+      {
+        "name": "ci",
+        "phase": "Active",
+        "pods_running": 2,
+        "quotas": [
+          {
+            "quota": "build-quota",
+            "resource": "cpu",
+            "used": "4",
+            "hard": "4",
+            "percent": 100
+          },
+          {
+            "quota": "build-quota",
+            "resource": "memory",
+            "used": "6Gi",
+            "hard": "8Gi",
+            "percent": 75
+          }
+        ],
+        "has_limit_range": true,
+        "healthy": false,
+        "notice": "Its quota is full on cpu, so the next thing asking for any of those is refused. The refusal appears on the workload as \"exceeded quota\", which looks like the workload’s fault.",
+        "created_at": "2026-05-01T12:00:00Z"
+      },
+      {
+        "name": "monitoring",
+        "phase": "Active",
+        "pods_running": 0,
+        "quotas": [
+          {
+            "quota": "monitoring-quota",
+            "resource": "requests.memory",
+            "used": "0",
+            "hard": "16Gi",
+            "percent": 0
+          }
+        ],
+        "has_limit_range": false,
+        "healthy": false,
+        "notice": "It has a quota on cpu or memory and no LimitRange, so every pod that does not set requests itself is refused -- not for being too big, but because the quota cannot account for a pod that asked for nothing. The error says \"must specify limits\", which reads as the pod being wrong.",
+        "created_at": "2026-06-14T21:10:00Z"
+      },
+      {
+        "name": "kube-system",
+        "phase": "Active",
+        "pods_running": 11,
+        "quotas": [],
+        "has_limit_range": false,
+        "healthy": true,
+        "notice": "",
+        "created_at": "2026-05-01T12:00:00Z"
+      }
+    ],
+    "custom_kinds": [
+      {
+        "group": "longhorn.io",
+        "kind": "Volume",
+        "versions": [
+          "v1beta2"
+        ],
+        "stored": "v1beta2",
+        "scope": "Namespaced",
+        "established": true,
+        "notice": "",
+        "created_at": "2026-05-01T12:00:00Z"
+      },
+      {
+        "group": "monitoring.coreos.com",
+        "kind": "ServiceMonitor",
+        "versions": [
+          "v1"
+        ],
+        "stored": "v1",
+        "scope": "Namespaced",
+        "established": true,
+        "notice": "",
+        "created_at": "2026-06-14T21:10:00Z"
+      },
+      {
+        "group": "cert-manager.io",
+        "kind": "Certificate",
+        "versions": [
+          "v1"
+        ],
+        "stored": "v1",
+        "scope": "Namespaced",
+        "established": false,
+        "notice": "The API server is not serving this kind, so every manifest naming it is refused. A definition waits like this while its conversion webhook is unreachable.",
+        "created_at": "2026-09-19T20:00:00Z"
+      }
+    ],
+    "notice": "A quota’s used figure is what the namespace has reserved, and a full quota is why the next pod is refused -- the pod’s own event says \"exceeded quota\" and nothing else shows the quota. Objects of the cluster’s own kinds are not counted here: that would be one list call per kind, and a cluster can have two hundred."
   }
 }

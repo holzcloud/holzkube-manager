@@ -2161,6 +2161,52 @@ export const accessControlSchema = z.object({
   notice: z.string().default(''),
 })
 
+export const quotaLineSchema = z.object({
+  quota: z.string().default(''),
+  resource: z.string().default(''),
+  used: z.string().default(''),
+  hard: z.string().default(''),
+  /** Of hard, rounded; -1 when hard cannot be read as a number. */
+  percent: z.number().default(-1),
+})
+
+export const namespaceSummarySchema = z.object({
+  name: z.string(),
+  /** Active or Terminating. */
+  phase: z.string().default(''),
+  pods_running: z.number().default(0),
+  quotas: z.array(quotaLineSchema).default([]),
+  /** Whether pods that set no requests get defaults. With a compute quota and
+   * without this, every such pod is refused. */
+  has_limit_range: z.boolean().default(false),
+  healthy: z.boolean().default(true),
+  notice: z.string().default(''),
+  created_at: z.string().default(''),
+})
+
+export const customKindSchema = z.object({
+  group: z.string().default(''),
+  kind: z.string().default(''),
+  versions: z.array(z.string()).default([]),
+  stored: z.string().default(''),
+  scope: z.string().default(''),
+  /** Whether the API server is serving it. A definition that is not established
+   * is a kind every manifest naming it is refused for. */
+  established: z.boolean().default(false),
+  notice: z.string().default(''),
+  created_at: z.string().default(''),
+})
+
+export const inventorySchema = z.object({
+  namespaces: z.array(namespaceSummarySchema).default([]),
+  custom_kinds: z.array(customKindSchema).default([]),
+  notice: z.string().default(''),
+})
+
+export type Inventory = z.infer<typeof inventorySchema>
+export type NamespaceSummary = z.infer<typeof namespaceSummarySchema>
+export type CustomKind = z.infer<typeof customKindSchema>
+
 export type AccessControl = z.infer<typeof accessControlSchema>
 export type BindingSummary = z.infer<typeof bindingSummarySchema>
 export type RoleSummary = z.infer<typeof roleSummarySchema>
@@ -3200,6 +3246,15 @@ export const api = {
         `/api/v1/clusters/${encodeURIComponent(cluster)}/kubernetes/pods/${encodeURIComponent(namespace)}/${encodeURIComponent(pod)}/exec`,
         execResultSchema,
         { container, command },
+      ),
+
+    /** Every namespace, its quotas, and the cluster's own kinds. No namespace
+     * parameter: the answer IS the namespaces. */
+    inventory: (cluster: string) =>
+      sendJSON(
+        'GET',
+        `/api/v1/clusters/${encodeURIComponent(cluster)}/kubernetes/inventory`,
+        inventorySchema,
       ),
 
     /** Who may do what, and every binding that grants nothing. */
