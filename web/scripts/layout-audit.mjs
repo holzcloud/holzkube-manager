@@ -66,10 +66,32 @@ const WIDTHS = [390, 1280]
 const TOUCH_WIDTH = 390
 const TOUCH_MIN = 44
 const ROUTES = [
-  '/', '/nodes', '/nodes/m-cp-1', '/clusters', '/kubernetes', '/config', '/jobs',
-  '/provision', '/upgrades', '/images', '/audit', '/settings',
+  '/',
+  '/nodes',
+  '/nodes/m-cp-1',
+  '/clusters',
+  // The Kubernetes screen is ten pages since 2026-09-20, and each is measured.
+  // Listing only '/kubernetes' would have measured the overview and called the
+  // other nine checked -- which is the shape of ledger 153 (three screens the
+  // audit had never opened) and 159 (a build it never looked at).
+  '/kubernetes',
+  '/kubernetes/workloads',
+  '/kubernetes/pods',
+  '/kubernetes/storage',
+  '/kubernetes/network',
+  '/kubernetes/config',
+  '/kubernetes/namespaces',
+  '/kubernetes/access',
+  '/kubernetes/events',
+  '/kubernetes/maintenance',
+  '/config',
+  '/jobs',
+  '/provision',
+  '/upgrades',
+  '/images',
+  '/audit',
+  '/settings',
 ]
-
 
 /**
  * The daemon this measures, and why it is built here rather than found here.
@@ -190,9 +212,19 @@ const findClipped = (vw) => {
  */
 const findSmallTargets = (min) => {
   const SELECTOR = [
-    'button', 'a[href]', 'summary', 'input', 'select', 'textarea',
-    '[role="button"]', '[role="checkbox"]', '[role="switch"]', '[role="tab"]',
-    '[role="menuitem"]', '[role="option"]', '[tabindex]:not([tabindex="-1"])',
+    'button',
+    'a[href]',
+    'summary',
+    'input',
+    'select',
+    'textarea',
+    '[role="button"]',
+    '[role="checkbox"]',
+    '[role="switch"]',
+    '[role="tab"]',
+    '[role="menuitem"]',
+    '[role="option"]',
+    '[tabindex]:not([tabindex="-1"])',
   ].join(',')
 
   const out = []
@@ -226,10 +258,10 @@ const findSmallTargets = (min) => {
       w: Math.round(box.width),
       h: Math.round(box.height),
       via: target === el ? '' : ' (via its label)',
-      label: ((el.getAttribute('aria-label') ?? el.textContent ?? el.getAttribute('name') ?? '')
+      label: (el.getAttribute('aria-label') ?? el.textContent ?? el.getAttribute('name') ?? '')
         .trim()
         .replace(/\s+/g, ' ')
-        .slice(0, 34)),
+        .slice(0, 34),
       cls: (el.getAttribute('class') ?? '').slice(0, 50),
     })
   }
@@ -275,7 +307,10 @@ const findWideTables = (vw) => {
       where: (heading?.textContent ?? el.querySelector('caption')?.textContent ?? '')
         .trim()
         .slice(0, 40),
-      first: (el.querySelector('tbody tr')?.textContent ?? '').trim().replace(/\s+/g, ' ').slice(0, 40),
+      first: (el.querySelector('tbody tr')?.textContent ?? '')
+        .trim()
+        .replace(/\s+/g, ' ')
+        .slice(0, 40),
     })
   }
   return out
@@ -295,13 +330,15 @@ const countItems = () =>
 
 /** How many controls the touch pass looked at, so a thin page is visible. */
 const countTargets = () =>
-  [...document.querySelectorAll('button,a[href],summary,input,select,textarea,[role="button"]')].filter(
-    (el) => {
-      const style = getComputedStyle(el)
-      const box = el.getBoundingClientRect()
-      return style.visibility !== 'hidden' && style.display !== 'none' && box.width >= 1 && box.height >= 1
-    },
-  ).length
+  [
+    ...document.querySelectorAll('button,a[href],summary,input,select,textarea,[role="button"]'),
+  ].filter((el) => {
+    const style = getComputedStyle(el)
+    const box = el.getBoundingClientRect()
+    return (
+      style.visibility !== 'hidden' && style.display !== 'none' && box.width >= 1 && box.height >= 1
+    )
+  }).length
 
 /**
  * A picture of the phone, when asked for. Never part of a verdict: the guard
@@ -347,10 +384,14 @@ if (BUILD_IT) {
   // Built from here, so what is measured is what is on disk. A failure is fatal
   // rather than a fall back to whatever was there: measuring the old one is
   // exactly the outcome this exists to prevent.
-  const built = spawnSync('go', ['build', '-o', 'bin/holzkube-managerd', './cmd/holzkube-managerd'], {
-    cwd: '..',
-    stdio: 'inherit',
-  })
+  const built = spawnSync(
+    'go',
+    ['build', '-o', 'bin/holzkube-managerd', './cmd/holzkube-managerd'],
+    {
+      cwd: '..',
+      stdio: 'inherit',
+    },
+  )
   if (built.status !== 0) {
     throw new Error(
       `could not build the daemon (go build exited ${built.status ?? 'without running'}). ` +
@@ -370,8 +411,12 @@ const daemon = spawn(
   { stdio: ['ignore', 'pipe', 'pipe'] },
 )
 let daemonOutput = ''
-daemon.stdout.on('data', (d) => { daemonOutput += d })
-daemon.stderr.on('data', (d) => { daemonOutput += d })
+daemon.stdout.on('data', (d) => {
+  daemonOutput += d
+})
+daemon.stderr.on('data', (d) => {
+  daemonOutput += d
+})
 daemon.on('exit', (code) => {
   if (code !== null && code !== 0) {
     console.error(`the daemon exited with ${code}:\n${daemonOutput}`)
