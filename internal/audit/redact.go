@@ -448,7 +448,15 @@ var allowlist = map[string][]string{
 	// Every namespace, its quotas, and the cluster's own kinds (2026-09-20). A
 	// read with no parameters at all: the answer IS the namespaces, so there is
 	// nothing to narrow and nothing for the archive to carry.
-	"cluster.kubernetes-inventory":  {},
+	"cluster.kubernetes-inventory": {},
+
+	// The wall (2026-09-20). A read with only a namespace in the query, so there
+	// is nothing to carry -- and the record it leaves is the point of contention
+	// worth stating: a screen in the IT office polls this every few seconds for
+	// weeks, so the archive would fill with one action and nothing else. The
+	// middleware records a request per call regardless; this table's job is only
+	// to say what may appear in clear, and the answer is nothing.
+	"cluster.wall":                  {},
 	"cluster.kubernetes-stop":       {},
 	"cluster.kubernetes-start":      {},
 	"cluster.kubernetes-sweep-plan": {},

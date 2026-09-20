@@ -67,6 +67,10 @@ const TOUCH_WIDTH = 390
 const TOUCH_MIN = 44
 const ROUTES = [
   '/',
+  // The wall is measured like every other screen, and it is the one that most
+  // looks like it does not need to be: it is fixed to the viewport and never
+  // scrolls, so anything that does not fit is GONE rather than one swipe away.
+  '/wall',
   '/nodes',
   '/nodes/m-cp-1',
   '/clusters',

@@ -1204,6 +1204,27 @@ var routeBudgets = []routeBudget{
 			"can be sent, and because naming the wrong one is refused rather than guessed.",
 	},
 	{
+		route: "GET /api/v1/clusters/{id}/wall",
+		calls: []upstreamCall{
+			{name: "NewClusterClient: Version (finding a control-plane node)", class: nodeProbeCall},
+			{name: "COSI Get: the machine configuration, for the API server's address", class: nodeFastReadCall},
+			{name: "Kubernetes: list nodes", class: kubeCall},
+			{name: "Kubernetes: list workloads (five kinds, in series)", class: kubeCall},
+			{name: "Kubernetes: list nodes and pods again, for capacity", class: kubeCall},
+			{name: "Kubernetes: list events", class: kubeCall},
+		},
+		routeDeadline:     handlers.KubernetesRouteBudget,
+		verdict:           knownOverBudget,
+		clipping:          clipped,
+		deferredTo:        "as above for the two Talos calls.",
+		clippingRationale: "the widest read in this product, and one call rather than five.",
+		why: "ONE route for the whole screen, and that is the decision this row exists to record. " +
+			"A wall makes the same call every few seconds for weeks; five routes would be five " +
+			"chances for one to fail while the other four painted a confident picture, with " +
+			"nothing on the screen to say which quarter was stale. It costs more per call than " +
+			"any other read here and is made by one screen, on a timer, which is the trade.",
+	},
+	{
 		route: "GET /api/v1/clusters/{id}/kubernetes/inventory",
 		calls: []upstreamCall{
 			{name: "NewClusterClient: Version (finding a control-plane node)", class: nodeProbeCall},

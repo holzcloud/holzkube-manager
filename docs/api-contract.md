@@ -1738,6 +1738,65 @@ INV-08 gives one layer down: an empty screen is a claim.
 | `upstream.no-kubernetes-endpoint` | 502 | no control-plane node could say where the API server is. The endpoint is read from a node's own machine configuration -- in the `KubeClusterConfig` document since Talos 1.14 -- rather than assembled from the address the cluster was adopted through. |
 | `upstream.kubernetes-unreachable` | 502 | the API server did not answer. |
 
+## One screen for the IT office
+
+    GET /api/v1/clusters/{id}/wall[?namespace=]
+
+    {"generated_at":"2026-09-20T09:59:55Z",
+     "nodes":[{"kind":"Node","name":"cp-2","state":"unknown","detail":"not reporting"}],
+     "workloads":[{"kind":"Deployment","namespace":"default","name":"api",
+                   "state":"down","detail":"0 of 2 ready"}],
+     "cpu":{…},"memory":{…},"pods":{…},
+     "warnings":[{"object":"Pod/api-7c9","reason":"FailedScheduling",
+                  "message":"0/3 nodes are available…","count":340,"age":"…"}],
+     "summary":{"ok":4,"warn":2,"down":1,"stopped":1,"unknown":1}}
+
+**One route for the whole screen**, and it is the most expensive read in this
+product. A wall makes the same call every few seconds for weeks; five routes
+would be five chances for one to fail while the other four painted a confident
+picture, with nothing on the screen to say which quarter of it was stale. That is
+the trade this row in the budget table records.
+
+**The state is decided here, not on the screen.** A tile is a colour, and working
+a colour out from four numbers is arithmetic that must not happen in two places —
+least of all on a display nobody is standing in front of to notice them
+disagreeing.
+
+**Five states, because two would lie three ways.** `ok`, `warn`, `down`,
+`stopped`, `unknown`.
+
+- A **CronJob between runs** has no pods. Arithmetic over desired and ready calls
+  nought of nought an outage; on a wall that is red every night at three, and by
+  the second week nobody looks at the wall. It is `ok`.
+- Something **deliberately stopped** is a decision, not a fault. Its own colour,
+  so that seeing it is not the same as being alarmed by it.
+- A **node nobody is hearing from** is `unknown` and never `ok`. That is the one
+  case a wall must never paint green, because it is the case a wall exists for. A
+  client must count it with `down` and not with `warn`.
+
+**`generated_at` is what makes the screen honest.** A wall that cannot go stale
+lies during exactly the incident it exists for: a daemon that died at two leaves a
+confident green screen up all night. A client shows the age at all times — not
+only when it is bad, because a number that appears only during trouble is one
+nobody has learned to read by then — and stops looking confident past a few
+refresh intervals.
+
+**The namespace narrows the workloads and the warnings, and never the nodes.** A
+wall that hid a dead node because somebody had left a namespace selected would be
+the worst possible failure of this screen.
+
+**Warnings only, newest first, at most six.** The events route answers newest
+LAST, because there the sequence is the story; a wall has room for six lines and
+they have to be the six most recent, so the order is turned round here rather than
+in the thing every other screen shares. `count` is carried because a
+FailedScheduling seen 340 times is a different situation from one seen once, and
+from four metres that count is the whole message.
+
+**It carries names and states and nothing else.** No addresses, no versions, no
+key names. This is the answer most likely to end up on a screen a visitor can
+see, and `RoleReader` — whose own definition names "the dashboard left open on a
+screen in the hallway" — is what it asks for.
+
 ## Namespaces, quotas and the cluster's own kinds
 
     GET /api/v1/clusters/{id}/kubernetes/inventory
