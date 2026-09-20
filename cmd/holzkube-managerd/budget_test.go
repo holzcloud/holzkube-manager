@@ -1204,6 +1204,29 @@ var routeBudgets = []routeBudget{
 			"can be sent, and because naming the wrong one is refused rather than guessed.",
 	},
 	{
+		route: "GET /api/v1/clusters/{id}/kubernetes/access",
+		calls: []upstreamCall{
+			{name: "NewClusterClient: Version (finding a control-plane node)", class: nodeProbeCall},
+			{name: "COSI Get: the machine configuration, for the API server's address", class: nodeFastReadCall},
+			{name: "Kubernetes: list roles", class: kubeCall},
+			{name: "Kubernetes: list cluster roles", class: kubeCall},
+			{name: "Kubernetes: list service accounts", class: kubeCall},
+			{name: "Kubernetes: list role bindings", class: kubeCall},
+			{name: "Kubernetes: list cluster role bindings", class: kubeCall},
+			{name: "Kubernetes: list pods (what runs as which account)", class: kubeCall},
+		},
+		routeDeadline: handlers.KubernetesRouteBudget,
+		verdict:       knownOverBudget,
+		clipping:      clipped,
+		deferredTo:    "as above for the two Talos calls.",
+		clippingRationale: "six list calls against a cluster that answers. The cluster roles are " +
+			"about seventy rows on any cluster and the largest of the six; it is still one list.",
+		why: "Every finding here is two objects disagreeing, so both sides have to be read: a " +
+			"binding naming a role that does not exist grants nothing and looks exactly like one " +
+			"that works, because RBAC has no referential integrity. The pods are listed because " +
+			"nothing else knows what runs as which service account.",
+	},
+	{
 		route: "GET /api/v1/clusters/{id}/kubernetes/storage",
 		calls: []upstreamCall{
 			{name: "NewClusterClient: Version (finding a control-plane node)", class: nodeProbeCall},

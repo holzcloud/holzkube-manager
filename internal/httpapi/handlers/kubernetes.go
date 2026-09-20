@@ -368,6 +368,17 @@ func KubernetesRoutes(d httpapi.Deps) []httpapi.Route {
 		},
 		{
 			Method:          http.MethodGet,
+			Pattern:         "/api/v1/clusters/{id}/kubernetes/access",
+			RequiresSession: true,
+			// An operator rather than a reader: this answer names who is an
+			// administrator of the cluster, and that is a different kind of fact
+			// from how many pods are running.
+			MinRole: model.RoleOperator,
+			Action:  "cluster.kubernetes-access",
+			Handler: handler(kubernetesAccess(d)),
+		},
+		{
+			Method:          http.MethodGet,
 			Pattern:         "/api/v1/clusters/{id}/kubernetes/storage",
 			RequiresSession: true,
 			MinRole:         model.RoleReader,
@@ -438,6 +449,27 @@ func KubernetesRoutes(d httpapi.Deps) []httpapi.Route {
 }
 
 // kubernetesCapacity answers how full the cluster and each node is.
+// kubernetesAccess answers who may do what in the cluster.
+//
+// The namespace narrows the namespaced objects only: a ClusterRoleBinding is not
+// something a namespace filter should hide, and it is the grant that matters most.
+func kubernetesAccess(d httpapi.Deps) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		client, ctx, cancel, ok := kubeClientFor(d, w, r)
+		if !ok {
+			return
+		}
+		defer cancel()
+
+		rbac, err := client.AccessControl(ctx, r.URL.Query().Get("namespace"))
+		if err != nil {
+			writeKubernetesError(w, r, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, rbac)
+	}
+}
+
 // kubernetesStorage answers the cluster's volumes, claims and classes.
 //
 // The namespace narrows the claims only: volumes and classes are cluster-scoped,

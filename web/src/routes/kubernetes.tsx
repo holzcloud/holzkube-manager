@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query'
 import { createRoute } from '@tanstack/react-router'
 import { useState } from 'react'
 import { api } from '@/api'
+import { AccessControl } from '@/components/AccessControl'
 import { ActAs } from '@/components/ActAs'
 import { ApplyManifest } from '@/components/ApplyManifest'
 import { ClusterCapacityPanel } from '@/components/ClusterCapacityPanel'
@@ -398,6 +399,15 @@ export function KubernetesView() {
             </CardHeader>
             <CardContent>
               <TidyUp clusterID={selected} namespace={namespace} />
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Who may do what</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <AccessControl clusterID={selected} namespace={namespace} />
             </CardContent>
           </Card>
 
