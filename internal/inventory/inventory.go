@@ -119,6 +119,11 @@ type Service struct {
 	// first time an adoption ran on an instance that had served a list.
 	supervised map[model.MachineID]struct{}
 
+	// missed is which cluster members the membership sync has already warned
+	// about, keyed cluster/hostname, so an unreachable member is one warning
+	// and not one per heartbeat.
+	missed map[string]struct{}
+
 	// runCtx is the lifetime of the supervisors, set by Start.
 	//
 	// Supervise uses it rather than its caller's context, which is the second
@@ -148,6 +153,7 @@ func New(d Deps) *Service {
 		deps:       d,
 		observed:   map[model.MachineID]*observation{},
 		supervised: map[model.MachineID]struct{}{},
+		missed:     map[string]struct{}{},
 	}
 }
 

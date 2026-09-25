@@ -147,6 +147,12 @@ type Options struct {
 	// like a broken one.
 	Members []MemberFixture
 
+	// ListenAddr is where the node listens; empty is 127.0.0.1 on a free
+	// port. A second node of one cluster listens on another loopback address
+	// at the first node's port, because a direct dialer knows one port and a
+	// cluster.Member carries addresses without one.
+	ListenAddr string
+
 	// SchematicID is served as the virtual schematic system extension. Empty
 	// means the node was not installed from a Factory image and reports no
 	// schematic, which is a fact holzkube-manager has to be able to show as "none"
@@ -308,7 +314,11 @@ func New(opts Options) (*Server, error) {
 		return nil, err
 	}
 
-	raw, err := net.Listen("tcp", "127.0.0.1:0")
+	listen := opts.ListenAddr
+	if listen == "" {
+		listen = "127.0.0.1:0"
+	}
+	raw, err := net.Listen("tcp", listen)
 	if err != nil {
 		return nil, fmt.Errorf("talossim: listen on loopback: %w", err)
 	}

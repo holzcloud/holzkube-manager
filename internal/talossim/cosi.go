@@ -378,30 +378,42 @@ func (s *Server) seedExtensions(ctx context.Context) error {
 // derivation pass a test it could not pass against Talos.
 func (s *Server) seedCluster(ctx context.Context) error {
 	for _, m := range s.opts.Members {
-		member := cluster.NewMember(cluster.NamespaceName, m.ID)
-		member.TypedSpec().Hostname = m.Hostname
-		member.TypedSpec().NodeID = m.ID
-		member.TypedSpec().OperatingSystem = "Talos (" + s.opts.TalosVersion + ")"
-		member.TypedSpec().MachineType = machinetype.TypeWorker
-
-		if m.ControlPlane {
-			member.TypedSpec().MachineType = machinetype.TypeControlPlane
-			member.TypedSpec().ControlPlane = &cluster.ControlPlane{APIServerPort: 6443}
-		}
-
-		for _, a := range m.Addresses {
-			addr, err := netip.ParseAddr(a)
-			if err != nil {
-				return fmt.Errorf("talossim: member %s address %q: %w", m.ID, a, err)
-			}
-			member.TypedSpec().Addresses = append(member.TypedSpec().Addresses, addr)
-		}
-
-		if err := s.COSI().Create(ctx, member); err != nil {
-			return fmt.Errorf("talossim: seed %s: %w", cluster.MemberType, err)
+		if err := s.AddMember(ctx, m); err != nil {
+			return err
 		}
 	}
+	return s.seedMachineConfig(ctx)
+}
 
+// AddMember puts one more cluster.Member into this node's discovery, as a
+// node joining the cluster does on a real one.
+func (s *Server) AddMember(ctx context.Context, m MemberFixture) error {
+	member := cluster.NewMember(cluster.NamespaceName, m.ID)
+	member.TypedSpec().Hostname = m.Hostname
+	member.TypedSpec().NodeID = m.ID
+	member.TypedSpec().OperatingSystem = "Talos (" + s.opts.TalosVersion + ")"
+	member.TypedSpec().MachineType = machinetype.TypeWorker
+
+	if m.ControlPlane {
+		member.TypedSpec().MachineType = machinetype.TypeControlPlane
+		member.TypedSpec().ControlPlane = &cluster.ControlPlane{APIServerPort: 6443}
+	}
+
+	for _, a := range m.Addresses {
+		addr, err := netip.ParseAddr(a)
+		if err != nil {
+			return fmt.Errorf("talossim: member %s address %q: %w", m.ID, a, err)
+		}
+		member.TypedSpec().Addresses = append(member.TypedSpec().Addresses, addr)
+	}
+
+	if err := s.COSI().Create(ctx, member); err != nil {
+		return fmt.Errorf("talossim: seed %s: %w", cluster.MemberType, err)
+	}
+	return nil
+}
+
+func (s *Server) seedMachineConfig(ctx context.Context) error {
 	if s.opts.Cluster == nil {
 		return nil
 	}
