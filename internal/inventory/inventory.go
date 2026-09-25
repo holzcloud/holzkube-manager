@@ -124,6 +124,10 @@ type Service struct {
 	// and not one per heartbeat.
 	missed map[string]struct{}
 
+	// reads is the live reads in flight, by target, so concurrent views join
+	// one read instead of each starting their own (ReadLive).
+	reads map[string]chan struct{}
+
 	// runCtx is the lifetime of the supervisors, set by Start.
 	//
 	// Supervise uses it rather than its caller's context, which is the second
@@ -154,6 +158,7 @@ func New(d Deps) *Service {
 		observed:   map[model.MachineID]*observation{},
 		supervised: map[model.MachineID]struct{}{},
 		missed:     map[string]struct{}{},
+		reads:      map[string]chan struct{}{},
 	}
 }
 

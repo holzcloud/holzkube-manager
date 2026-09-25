@@ -113,7 +113,7 @@ func (s *Service) DeleteMachineClass(ctx context.Context, id model.MachineClassI
 // unlabelled, which is one place to look when the membership is not what
 // somebody expected.
 func (s *Service) MachinesMatching(ctx context.Context, sel model.LabelSelector) ([]MachineView, error) {
-	machines, err := s.deps.Store.Machines().List(ctx)
+	machines, err := s.presentMachines(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -138,7 +138,7 @@ func (s *Service) Fleet(ctx context.Context) (clustertemplate.Fleet, error) {
 	if err != nil {
 		return clustertemplate.Fleet{}, err
 	}
-	machines, err := s.deps.Store.Machines().List(ctx)
+	machines, err := s.presentMachines(ctx)
 	if err != nil {
 		return clustertemplate.Fleet{}, err
 	}
@@ -158,7 +158,7 @@ func (s *Service) ClusterAndMachines(ctx context.Context, id model.ClusterID) (m
 		}
 		return model.Cluster{}, nil, err
 	}
-	machines, err := s.deps.Store.Machines().List(ctx)
+	machines, err := s.presentMachines(ctx)
 	if err != nil {
 		return model.Cluster{}, nil, err
 	}
@@ -184,7 +184,7 @@ func (s *Service) ScaleInput(ctx context.Context, id model.ClusterID) (scale.Inp
 		return scale.Input{}, err
 	}
 
-	machines, err := s.deps.Store.Machines().List(ctx)
+	machines, err := s.presentMachines(ctx)
 	if err != nil {
 		return scale.Input{}, err
 	}

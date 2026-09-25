@@ -60,7 +60,7 @@ func (s *Service) KnownAt(ctx context.Context, addr string) bool {
 // warning about quorum into a warning based on a guess, and the operator
 // cannot tell the two apart from the sentence.
 func (s *Service) ControlPlaneCount(ctx context.Context, id model.ClusterID) (int, error) {
-	recs, err := s.deps.Store.Machines().List(ctx)
+	recs, err := s.presentMachines(ctx)
 	if err != nil {
 		return 0, err
 	}
@@ -101,7 +101,7 @@ func (s *Service) ClusterCreds(ctx context.Context, id model.ClusterID) (talos.C
 // cluster, or one nothing has observed yet -- has no answer here, and the
 // caller is told that rather than handed a guess.
 func (s *Service) KubernetesVersion(ctx context.Context, id model.ClusterID) (string, error) {
-	recs, err := s.deps.Store.Machines().List(ctx)
+	recs, err := s.presentMachines(ctx)
 	if err != nil {
 		return "", err
 	}
@@ -157,7 +157,7 @@ func compareVersions(a, b string) int {
 // the upgrade domain and the health gate: both need the role, the lock and the
 // last-known versions, and none of them needs the provenance a view carries.
 func (s *Service) MachinesOf(ctx context.Context, id model.ClusterID) ([]model.Machine, error) {
-	recs, err := s.deps.Store.Machines().List(ctx)
+	recs, err := s.presentMachines(ctx)
 	if err != nil {
 		return nil, err
 	}

@@ -284,6 +284,7 @@ func listClusters(d httpapi.Deps) http.HandlerFunc {
 			httpapi.WriteProblem(w, r, p)
 			return
 		}
+		d.Inventory.ReadLive(r.Context(), "", "")
 		clusters, err := d.Inventory.Clusters(r.Context())
 		if err != nil {
 			httpapi.WriteInternal(w, r, d.Logger, err)
@@ -301,6 +302,7 @@ func getCluster(d httpapi.Deps) http.HandlerFunc {
 			httpapi.WriteProblem(w, r, p)
 			return
 		}
+		d.Inventory.ReadLive(r.Context(), model.ClusterID(r.PathValue("id")), "")
 		c, err := d.Inventory.Cluster(r.Context(), model.ClusterID(r.PathValue("id")))
 		if err != nil {
 			writeInventoryError(w, r, d, err)
@@ -598,6 +600,7 @@ func listMachines(d httpapi.Deps) http.HandlerFunc {
 			httpapi.WriteProblem(w, r, p)
 			return
 		}
+		d.Inventory.ReadLive(r.Context(), "", "")
 		machines, err := d.Inventory.Machines(r.Context())
 		if err != nil {
 			httpapi.WriteInternal(w, r, d.Logger, err)
@@ -613,6 +616,7 @@ func getMachine(d httpapi.Deps) http.HandlerFunc {
 			httpapi.WriteProblem(w, r, p)
 			return
 		}
+		d.Inventory.ReadLive(r.Context(), "", model.MachineID(r.PathValue("id")))
 		m, err := d.Inventory.Machine(r.Context(), model.MachineID(r.PathValue("id")))
 		if err != nil {
 			writeInventoryError(w, r, d, err)
