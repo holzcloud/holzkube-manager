@@ -1,5 +1,27 @@
 [
   {
+    "version": "v1.31.0",
+    "date": "2026-09-25",
+    "changes": [
+      {
+        "icon": "🔄",
+        "text": "The manager follows the cluster's own membership instead of reading it once at import. A node that joins later appears by itself; \"Add a node by address\" is only needed when this host cannot reach any address the cluster reports for it."
+      },
+      {
+        "icon": "📡",
+        "text": "Opening the cluster or node views reads the nodes and the membership right then, not at the last heartbeat. A node that does not answer within three seconds is shown with its last known facts and how old they are."
+      },
+      {
+        "icon": "🙈",
+        "text": "A node the cluster has not listed for ten minutes is hidden. Its labels and lock are kept, and it comes back with them when it rejoins."
+      },
+      {
+        "icon": "🧭",
+        "text": "Roles and IP addresses follow what the cluster reports. A DNS name you typed is left alone."
+      }
+    ]
+  },
+  {
     "version": "v1.30.0",
     "date": "2026-09-20",
     "changes": [
