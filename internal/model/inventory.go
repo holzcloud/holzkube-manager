@@ -213,6 +213,12 @@ type Machine struct {
 	// stopped being found.
 	LostAddrAt time.Time `json:"lost_addr_at,omitzero"`
 
+	// LeftAt is when the cluster's own membership stopped listing this
+	// machine; zero while it is listed. A machine gone long enough is hidden
+	// from every view, and its record -- labels, lock, history -- is kept for
+	// the day it rejoins, which clears this.
+	LeftAt time.Time `json:"left_at,omitzero"`
+
 	// Snapshot is the last confirmed set of facts, persisted so that a restart
 	// of holzkube-manager -- which most likely happens during the outage the operator
 	// is trying to understand -- shows the last known state rather than an

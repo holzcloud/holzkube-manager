@@ -192,7 +192,7 @@ const (
 
 // Machines returns every machine in the inventory, newest adoption last.
 func (s *Service) Machines(ctx context.Context) ([]MachineView, error) {
-	recs, err := s.deps.Store.Machines().List(ctx)
+	recs, err := s.presentMachines(ctx)
 	if err != nil {
 		return nil, err
 	}
