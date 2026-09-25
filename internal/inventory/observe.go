@@ -163,11 +163,21 @@ func (s *Service) Start(ctx context.Context) error {
 	}
 	s.stop = cancel
 	s.runCtx = runCtx
+	// Added under the lock that Close takes first, so its Wait cannot start
+	// between the closed check and this Add.
+	s.wg.Add(1)
 	s.mu.Unlock()
 
 	for _, m := range machines {
 		s.supervise(m.ID)
 	}
+
+	// The cluster's membership is followed for as long as the machines are:
+	// a node that joins later appears without being added by hand.
+	go func() {
+		defer s.wg.Done()
+		s.membershipLoop(runCtx)
+	}()
 	return nil
 }
 
