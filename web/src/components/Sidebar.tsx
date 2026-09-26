@@ -187,9 +187,14 @@ export function Sidebar({ open = false, onNavigate }: { open?: boolean; onNaviga
         'md:visible md:translate-x-0 md:shadow-none',
       )}
     >
-      <div className="mb-4 px-2 pt-1">
-        <span className="font-heading text-lg font-semibold tracking-tight">holzkube-manager</span>
-        <p className="text-xs text-muted-foreground">Talos cluster management</p>
+      <div className="mb-4 flex items-center gap-2.5 px-2 pt-1">
+        <img src="/favicon.svg" alt="" className="size-7 shrink-0" />
+        <div>
+          <span className="font-heading whitespace-nowrap text-base font-semibold tracking-tight">
+            holzkube-manager
+          </span>
+          <p className="text-xs text-muted-foreground">Talos cluster management</p>
+        </div>
       </div>
 
       {/* UAT G-01-5: the active pill alone was a 5/255 step against the sidebar

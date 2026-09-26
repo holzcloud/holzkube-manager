@@ -90,7 +90,8 @@ function SetupPage() {
           card at least says "holzkube-manager" in its own copy; setup said only
           "Create the operator account", so the very first thing an operator
           sees never identified the system they were configuring. */}
-      <div className="text-center">
+      <div className="flex flex-col items-center text-center">
+        <img src="/favicon.svg" alt="" className="mb-2 size-12" />
         <span className="font-heading text-xl font-semibold tracking-tight">holzkube-manager</span>
         <p className="text-sm text-muted-foreground">Talos cluster management</p>
       </div>

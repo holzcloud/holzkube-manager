@@ -262,7 +262,7 @@ get this section as the answer.
 
 1. **Anything that begins with "given a copy of the data directory", "as root on
    the host", or "as the same OS user".** That is the documented blast radius,
-   stated plainly in the README, not a finding. The data directory is equivalent
+   stated plainly in the guide (`docs/guide.md`), not a finding. The data directory is equivalent
    to root on every managed node by design; there is no partial-credential design
    that avoids it, because generating machine configuration genuinely requires
    the CA key.
