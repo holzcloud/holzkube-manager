@@ -3063,7 +3063,9 @@ export const api = {
   power: {
     get: (target: PowerTarget): Promise<Power> => sendJSON('GET', powerPath(target), powerSchema),
     run: (target: PowerTarget, action: PowerAction): Promise<PowerResult> =>
-      sendJSON('POST', `${powerPath(target)}/${action}`, powerResultSchema),
+      // The body is empty and required: the CSRF layer wants a JSON content
+      // type on every mutating route, and only a body carries one.
+      sendJSON('POST', `${powerPath(target)}/${action}`, powerResultSchema, {}),
   },
 
   machines: {

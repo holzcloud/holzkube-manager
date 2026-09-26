@@ -49,77 +49,15 @@ const probeTimeout = 8 * time.Second
 func RegisterNodeActions(e *Engine, connect Connector) {
 	e.Register(model.JobReboot, func(j model.Job) ([]Step, error) {
 		return []Step{
-			reachableStep(connect, j.Machine),
-			{
-				Name: "reboot the node",
-				Do: func(ctx context.Context, job *model.Job) error {
-					// The mutation class budget, applied here because a job's
-					// context deliberately has none: a job outlives the
-					// request that asked for it. Without this the call is
-					// refused outright by the deadline gate -- which a test
-					// found, and which would otherwise have been a reboot
-					// button that never worked.
-					ctx, cancel, err := talos.WithClassDeadline(ctx, talos.MethodReboot)
-					if err != nil {
-						return err
-					}
-					defer cancel()
-
-					cc, err := connect(ctx, job.Machine)
-					if err != nil {
-						return err
-					}
-					defer cc.Close() //nolint:errcheck // the verdict is the RPC's, not the close's
-
-					if err := cc.Reboot(ctx); err != nil {
-						return err
-					}
-					job.Steps[job.Current].Detail = "the node accepted the reboot"
-					return nil
-				},
-				// A node that has rebooted has been up for less time than the
-				// job has been running. That is a read, and it is the
-				// difference between resuming a reboot and rebooting twice.
-				Happened: func(ctx context.Context, job *model.Job) (bool, error) {
-					return rebootedSince(ctx, connect, job.Machine, job.Steps[job.Current].StartedAt)
-				},
-			},
+			ReachableStep(connect, j.Machine),
+			RebootStep(connect, j.Machine, false),
 		}, nil
 	})
 
 	e.Register(model.JobShutdown, func(j model.Job) ([]Step, error) {
 		return []Step{
-			reachableStep(connect, j.Machine),
-			{
-				Name: "shut the node down",
-				Do: func(ctx context.Context, job *model.Job) error {
-					ctx, cancel, err := talos.WithClassDeadline(ctx, talos.MethodShutdown)
-					if err != nil {
-						return err
-					}
-					defer cancel()
-
-					cc, err := connect(ctx, job.Machine)
-					if err != nil {
-						return err
-					}
-					defer cc.Close() //nolint:errcheck // as above
-
-					if err := cc.Shutdown(ctx); err != nil {
-						return err
-					}
-					job.Steps[job.Current].Detail = "the node accepted the shutdown; it will not come back on its own"
-					return nil
-				},
-				// The node answered in step one and does not answer now, which
-				// is what a shutdown looks like. Weaker than the reboot check
-				// and deliberately so: the failure direction is to run the
-				// shutdown again on a node that is already off, which does
-				// nothing.
-				Happened: func(ctx context.Context, job *model.Job) (bool, error) {
-					return !reachable(ctx, connect, job.Machine), nil
-				},
-			},
+			ReachableStep(connect, j.Machine),
+			ShutdownStep(connect, j.Machine, false),
 		}, nil
 	})
 
@@ -130,7 +68,7 @@ func RegisterNodeActions(e *Engine, connect Connector) {
 		}
 
 		return []Step{
-			reachableStep(connect, j.Machine),
+			ReachableStep(connect, j.Machine),
 			{
 				Name: "wipe the node",
 				Do: func(ctx context.Context, job *model.Job) error {
@@ -164,15 +102,113 @@ func RegisterNodeActions(e *Engine, connect Connector) {
 	})
 }
 
-// reachableStep is the cheap check every action starts with.
-func reachableStep(connect Connector, _ model.MachineID) Step {
+// RebootStep reboots one node, and knows afterwards whether it did.
+//
+// It is exported, with ShutdownStep and ReachableStep, because the power model
+// (internal/power) walks the same three RPCs across a node and across a whole
+// cluster, and a second copy of them there would be a second answer to "how do
+// we know a reboot happened" -- the question this engine was built around. The
+// machine is a parameter rather than read off the job so that one job can walk
+// several nodes; the three node actions pass the job's own.
+//
+// force asks Talos's FORCE mode: no cordon, no drain, no graceful handover.
+func RebootStep(connect Connector, id model.MachineID, force bool) Step {
+	name, detail := "reboot the node", "the node accepted the reboot"
+	if force {
+		name, detail = "force-reboot the node", "the node accepted the reboot, without draining anything first"
+	}
+	return Step{
+		Name: name,
+		Do: func(ctx context.Context, job *model.Job) error {
+			// The mutation class budget, applied here because a job's
+			// context deliberately has none: a job outlives the request that
+			// asked for it. Without this the call is refused outright by the
+			// deadline gate -- which a test found, and which would otherwise
+			// have been a reboot button that never worked.
+			ctx, cancel, err := talos.WithClassDeadline(ctx, talos.MethodReboot)
+			if err != nil {
+				return err
+			}
+			defer cancel()
+
+			cc, err := connect(ctx, id)
+			if err != nil {
+				return err
+			}
+			defer cc.Close() //nolint:errcheck // the verdict is the RPC's, not the close's
+
+			if force {
+				err = cc.RebootForced(ctx)
+			} else {
+				err = cc.Reboot(ctx)
+			}
+			if err != nil {
+				return err
+			}
+			job.Steps[job.Current].Detail = detail
+			return nil
+		},
+		// A node that has rebooted has been up for less time than the step has
+		// been running. That is a read, and it is the difference between
+		// resuming a reboot and rebooting twice.
+		Happened: func(ctx context.Context, job *model.Job) (bool, error) {
+			return RebootedSince(ctx, connect, id, job.Steps[job.Current].StartedAt)
+		},
+	}
+}
+
+// ShutdownStep powers one node off. force skips Talos's own cordon and drain;
+// see talos.ClusterClient.ShutdownForced for the two callers that need that.
+func ShutdownStep(connect Connector, id model.MachineID, force bool) Step {
+	name := "shut the node down"
+	if force {
+		name = "force the node off"
+	}
+	return Step{
+		Name: name,
+		Do: func(ctx context.Context, job *model.Job) error {
+			ctx, cancel, err := talos.WithClassDeadline(ctx, talos.MethodShutdown)
+			if err != nil {
+				return err
+			}
+			defer cancel()
+
+			cc, err := connect(ctx, id)
+			if err != nil {
+				return err
+			}
+			defer cc.Close() //nolint:errcheck // as above
+
+			if force {
+				err = cc.ShutdownForced(ctx)
+			} else {
+				err = cc.Shutdown(ctx)
+			}
+			if err != nil {
+				return err
+			}
+			job.Steps[job.Current].Detail = "the node accepted the shutdown; it will not come back on its own"
+			return nil
+		},
+		// The node answered before this step and does not answer now, which is
+		// what a shutdown looks like. Weaker than the reboot check and
+		// deliberately so: the failure direction is to run the shutdown again
+		// on a node that is already off, which does nothing.
+		Happened: func(ctx context.Context, _ *model.Job) (bool, error) {
+			return !Reachable(ctx, connect, id), nil
+		},
+	}
+}
+
+// ReachableStep is the cheap check every action starts with.
+func ReachableStep(connect Connector, id model.MachineID) Step {
 	return Step{
 		Name: "check the node answers",
 		Do: func(ctx context.Context, job *model.Job) error {
 			probeCtx, cancel := context.WithTimeout(ctx, probeTimeout)
 			defer cancel()
 
-			cc, err := connect(probeCtx, job.Machine)
+			cc, err := connect(probeCtx, id)
 			if err != nil {
 				return fmt.Errorf("the node did not answer: %w", err)
 			}
@@ -193,7 +229,8 @@ func reachableStep(connect Connector, _ model.MachineID) Step {
 	}
 }
 
-func reachable(ctx context.Context, connect Connector, id model.MachineID) bool {
+// Reachable reports whether a node answers a liveness probe right now.
+func Reachable(ctx context.Context, connect Connector, id model.MachineID) bool {
 	probeCtx, cancel := context.WithTimeout(ctx, probeTimeout)
 	defer cancel()
 
@@ -207,9 +244,9 @@ func reachable(ctx context.Context, connect Connector, id model.MachineID) bool 
 	return err == nil
 }
 
-// rebootedSince reports whether the node has been up for less time than the
+// RebootedSince reports whether the node has been up for less time than the
 // moment given, which is what a reboot after that moment looks like.
-func rebootedSince(ctx context.Context, connect Connector, id model.MachineID, since time.Time) (bool, error) {
+func RebootedSince(ctx context.Context, connect Connector, id model.MachineID, since time.Time) (bool, error) {
 	probeCtx, cancel := context.WithTimeout(ctx, probeTimeout)
 	defer cancel()
 

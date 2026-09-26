@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -388,7 +389,7 @@ func hardwareRouteCalls() []upstreamCall {
 	}
 }
 
-var routeBudgets = []routeBudget{
+var routeBudgets = slices.Concat([]routeBudget{
 	{
 		route: "GET /api/v1/schematics/{id}/assets",
 		calls: []upstreamCall{
@@ -1720,7 +1721,7 @@ var routeBudgets = []routeBudget{
 			"the table so the table demonstrably distinguishes a route that talks upstream " +
 			"from one that does not -- and so R0 has a row that must *not* declare a ceiling.",
 	},
-}
+}, powerRouteBudgets())
 
 // TestEveryRouteThatReachesUpstreamHasABudgetRow closes the same hole
 // allowlist_test.go closed.

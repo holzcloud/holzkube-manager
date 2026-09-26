@@ -44,6 +44,24 @@ import (
 // runs nothing. Scaling something to zero and suspending something are the same
 // intention expressed in the two ways Kubernetes offers, so both are here under
 // one verb.
+//
+// # A DaemonSet stops by being told to need a node nobody is (2026-09-26)
+//
+// It has no count either: its size is how many nodes match its selector. So it
+// is given one more condition -- the node label holzkube.io/stopped=true, which
+// no node carries -- and it runs nowhere. That used to be refused here with
+// "cordon or drain the nodes instead", which answers a different question: a
+// cordon stops NEW pods on a node and leaves a DaemonSet's own pod exactly where
+// it is. The operator's decision on 2026-09-26 made a DaemonSet stoppable like
+// everything else, and this is the one way Kubernetes offers to do it without
+// deleting the object.
+//
+// The key is ADDED to the selector rather than replacing it, which a strategic
+// merge does on its own: the selector the DaemonSet had stays in place, and
+// starting removes exactly the one key this added. What it had is also written
+// onto the object (holzkube.io/node-selector-before-stop), for the reason the
+// replica count is: somebody reading the object with kubectl deserves to see
+// why its selector looks strange, and what it looked like before.
 
 // ErrCannotStop reports a workload that has no stop.
 var ErrCannotStop = errors.New("kube: that cannot be stopped")
@@ -75,9 +93,11 @@ func (c *Client) Stop(ctx context.Context, kind WorkloadKind, namespace, name st
 		}
 		return c.ScaleWorkload(ctx, kind, namespace, name, 0)
 
+	case KindDaemonSet:
+		return c.stopDaemonSet(ctx, namespace, name)
+
 	default:
-		return fmt.Errorf("%w: a %s runs on every matching node, so there is no count to set "+
-			"to zero. Cordon or drain the nodes instead, or remove the %s", ErrCannotStop, kind, kind)
+		return fmt.Errorf("%w: %q is not a kind this product stops", ErrCannotStop, kind)
 	}
 }
 
@@ -99,6 +119,9 @@ func (c *Client) Start(ctx context.Context, kind WorkloadKind, namespace, name s
 			remembered = 1
 		}
 		return c.ScaleWorkload(ctx, kind, namespace, name, remembered)
+
+	case KindDaemonSet:
+		return c.startDaemonSet(ctx, namespace, name)
 
 	default:
 		return fmt.Errorf("%w: a %s is not something that was stopped", ErrCannotStop, kind)
@@ -137,6 +160,13 @@ func (c *Client) StoppedStateOf(
 			return StoppedState{}, err
 		}
 		return StoppedState{Stopped: current == 0, WouldStartWith: remembered}, nil
+
+	case KindDaemonSet:
+		set, err := c.cs.AppsV1().DaemonSets(namespace).Get(ctx, name, metav1.GetOptions{})
+		if err != nil {
+			return StoppedState{}, wrapNotFound(err, kind, namespace, name)
+		}
+		return StoppedState{Stopped: daemonSetStopped(set.Spec.Template.Spec.NodeSelector)}, nil
 
 	default:
 		return StoppedState{}, nil
@@ -219,6 +249,9 @@ func (c *Client) patchWorkload(ctx context.Context, kind WorkloadKind, namespace
 			ctx, name, types.StrategicMergePatchType, patch, metav1.PatchOptions{})
 	case KindJob:
 		_, err = c.cs.BatchV1().Jobs(namespace).Patch(
+			ctx, name, types.StrategicMergePatchType, patch, metav1.PatchOptions{})
+	case KindDaemonSet:
+		_, err = c.cs.AppsV1().DaemonSets(namespace).Patch(
 			ctx, name, types.StrategicMergePatchType, patch, metav1.PatchOptions{})
 	default:
 		return fmt.Errorf("%w: a %s cannot be patched this way", ErrCannotStop, kind)
