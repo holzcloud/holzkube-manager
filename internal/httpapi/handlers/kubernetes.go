@@ -517,12 +517,19 @@ func clusterWall(d httpapi.Deps) http.HandlerFunc {
 		}
 		defer cancel()
 
-		wall, err := client.ForTheWall(ctx, r.URL.Query().Get("namespace"), time.Now())
+		now := time.Now()
+		wall, err := client.ForTheWall(ctx, r.URL.Query().Get("namespace"), now)
 		if err != nil {
 			writeKubernetesError(w, r, err)
 			return
 		}
-		writeJSON(w, http.StatusOK, wall)
+		// The curves ride on the wall's own answer rather than being fetched
+		// beside it: a wall link opens this route and no other, so a screen
+		// in a corridor could not ask the history routes for them.
+		writeJSON(w, http.StatusOK, struct {
+			kube.Wall
+			Trends wallTrends `json:"trends"`
+		}{Wall: wall, Trends: trendsForTheWall(r.Context(), d, model.ClusterID(r.PathValue("id")), now)})
 	}
 }
 
