@@ -51,17 +51,6 @@ export function NodeActions({
     <div className="flex gap-2 max-md:contents">
       {/* Reboot and shut down live in the power menu since 2026-09-26, as
           restart and stop -- two buttons for one act drifted apart once. */}
-      <Button
-        variant="outline"
-        size="sm"
-        className="text-destructive max-md:min-w-11"
-        onClick={() => setResetOpen(true)}
-        title="Reset"
-        aria-label="Reset"
-      >
-        <Eraser aria-hidden="true" className="size-4" />{' '}
-        <span className="max-md:sr-only">Reset</span>
-      </Button>
 
       {/*
         Only for a node that is in a cluster. A machine in maintenance mode has
@@ -82,6 +71,18 @@ export function NodeActions({
           <span className="max-md:sr-only">Remove from cluster</span>
         </Button>
       )}
+
+      <Button
+        variant="outline"
+        size="sm"
+        className="text-destructive max-md:min-w-11"
+        onClick={() => setResetOpen(true)}
+        title="Reset"
+        aria-label="Reset"
+      >
+        <Eraser aria-hidden="true" className="size-4" />{' '}
+        <span className="max-md:sr-only">Reset</span>
+      </Button>
 
       <ResetDialog machine={machine} open={resetOpen} onOpenChange={setResetOpen} />
       <RemoveFromClusterDialog
