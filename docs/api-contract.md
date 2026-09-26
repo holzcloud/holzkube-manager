@@ -1314,7 +1314,7 @@ A sampler in the daemon reads every machine that belongs to a cluster every
 fifteen seconds — the same read as the route above, with the same budgets — and
 keeps what it saw: fifteen-second samples for the last hour, one-minute averages
 of them for the last twenty-four. It is kept in one file in the data directory
-(`history/metrics.bin`), written at most once a minute and on shutdown, so it
+(`history/metrics.bin`), written at most once every thirty minutes and on shutdown, so it
 survives restarts and updates. Nothing older than a day is kept. Reader; not
 audited; the route reads memory and reaches no node.
 
