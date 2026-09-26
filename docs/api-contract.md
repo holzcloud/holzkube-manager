@@ -1234,6 +1234,7 @@ true; `watch` says only how soon the next change will show up.
 | `POST` | `/api/v1/machines` | no | `machine.add` | cluster-scoped; `201` |
 | `POST` | `/api/v1/machines/{id}/refresh` | no | `machine.refresh` | one observation pass |
 | `GET` | `/api/v1/machines/{id}/hardware` | no | — | live CPU, memory, disks, links, temperatures, fans; see below |
+| `GET` | `/api/v1/machines/{id}/hardware/history` | no | — | `?range=1h\|6h\|24h`; the last day of the same gauges; see below |
 | `DELETE` | `/api/v1/machines/{id}` | **yes** | `machine.forget` | `204`; the machine is not touched |
 
 Importing is mutating and is **not** destructive: it creates and destroys
@@ -1244,9 +1245,11 @@ because there is no way to get it back.
 ### `GET /api/v1/machines/{id}/hardware`: a gauge, not a record
 
 Every request reads the node **now**, over its Talos API: CPU counters, memory,
-load, disk and network counters, mounts, and the kernel's hwmon sensors.
-Nothing is persisted and nothing is read in the background; the route is not
-audited, because an open panel asks every few seconds. Readers may call it.
+load, disk and network counters, mounts, and the kernel's hwmon sensors. This
+route never answers from anything stored; the route is not audited, because an
+open panel asks every few seconds. Readers may call it. (The metrics history
+below reads the same view every fifteen seconds and keeps what it saw; this
+route does not serve from it.)
 
 ```json
 {
@@ -1304,6 +1307,45 @@ Failures: an unknown machine is `404 notfound.record`. A node that does not
 answer is `502` with `upstream.node-unreachable` or `upstream.node-timeout`, as
 for every other live node read — the route never answers with the last reading
 it saw. The route's ceiling is ten seconds.
+
+### `GET /api/v1/machines/{id}/hardware/history`: the last day of the gauges
+
+A sampler in the daemon reads every machine that belongs to a cluster every
+fifteen seconds — the same read as the route above, with the same budgets — and
+keeps what it saw: fifteen-second samples for the last hour, one-minute averages
+of them for the last twenty-four. It is kept in one file in the data directory
+(`history/metrics.bin`), written at most once a minute and on shutdown, so it
+survives restarts and updates. Nothing older than a day is kept. Reader; not
+audited; the route reads memory and reaches no node.
+
+```json
+{"range": "1h", "step_seconds": 15,
+ "from": "2026-09-26T09:15:00Z", "to": "2026-09-26T10:15:00Z",
+ "series": {"cpu": [[1790000000000, 18.2], [1790000015000, 20.1]],
+            "memory": [[1790000000000, 41.5]],
+            "core:0": [[1790000000000, 12.0]],
+            "temp:coretemp/Package id 0": [[1790000000000, 57.0]]}}
+```
+
+- `range` is `1h` (the default), `6h` or `24h`; anything else is a `400`
+  validation problem naming `range`. `1h` is the fifteen-second tier
+  (`step_seconds` 15); `6h` and `24h` are the one-minute tier (`step_seconds`
+  60), `6h` being its last 360 minutes. A minute's value is the mean of the
+  fifteen-second samples in it that exist.
+- A point is `[unix milliseconds, value]`, ascending, at the start of its step.
+- The series keys are `cpu` (usage %), `memory` (used/total %), `rx` and `tx`
+  (bytes/s summed over the links the hardware view lists), `read` and `write`
+  (bytes/s summed over its disks), `core:<i>` (%), `temp:<chip>/<label>` (°C) and
+  `fan:<chip>/<label>` (rpm) — the chip and label exactly as the hardware view
+  writes them.
+- **`series` is always an object and never `null`**; a machine with nothing in
+  the range answers `"series": {}`. A series with no point in the range is left
+  out rather than sent empty.
+- **A node that did not answer leaves a gap, never a zero**: there is simply no
+  point for those steps.
+- An unknown machine is `404 notfound.record`. Forgetting a machine deletes its
+  history within one sampling pass. An instance started without a history
+  answers `502 upstream.history-unavailable`.
 
 ### Adoption is two calls, and the split is the contract
 
@@ -1615,6 +1657,7 @@ sense D-06 means:
 | `GET /api/v1/clusters/{id}/kubernetes/usage` | what nodes and pods are USING, from metrics-server |
 | `GET /api/v1/clusters/{id}/kubernetes/apps` | `?namespace=&node=` — every app (its top-level controller) with what it uses now, read from the kubelets |
 | `GET /api/v1/clusters/{id}/kubernetes/apps/{namespace}/{kind}/{name}` | one app: its pods and containers, the Services that select it, and its events |
+| `GET /api/v1/clusters/{id}/kubernetes/apps/{namespace}/{kind}/{name}/history` | `?range=1h\|6h\|24h` — the app's CPU and memory over the last day |
 | `POST /api/v1/clusters/{id}/kubernetes/pods/{namespace}/{pod}/exec` | takes `{"container": "...", "command": ["prog","arg"]}` and runs it once |
 
 **Running a command in a container is the most dangerous thing here, and four
@@ -2359,6 +2402,24 @@ newest thirty about the app, its ReplicaSets or Jobs, and its pods — finished
 pods included, because a Job's failure is told in the events of the pod that
 failed. An app that is not there, or a kind that is not one, is `404
 notfound.kubernetes-workload`; the kind is matched without regard to case.
+
+    GET /api/v1/clusters/{id}/kubernetes/apps/{namespace}/{kind}/{name}/history[?range=1h|6h|24h]
+
+    {"range":"6h","step_seconds":60,"from":"…","to":"…",
+     "series":{"cpu":[[1790000000000,123]],"memory":[[1790000000000,104857600]]}}
+
+The same shape, ranges and tiers as the machine history, with two series: `cpu`
+in millicores and `memory` in bytes, as the list reports them. The sampler reads
+each cluster's app list every fifteen seconds; an app whose usage is not known
+(`usage_known: false`) records nothing, so its chart has a gap rather than a
+zero. The route reads memory and asks the cluster nothing, so whether the app
+exists is answered from what the sampler saw: an app with history, or one the
+last listing named, is `200` (`"series": {}` when nothing was measured); one the
+last listing did not name is `404 notfound.kubernetes-workload`, as is a kind
+that is not one. Before the cluster has been listed at all — it is down, or the
+daemon has just started — an app with no history is `200` with `"series": {}`
+rather than a `404` nobody could vouch for. An unknown cluster is `404
+notfound.record`. Forgetting a cluster deletes its apps' history.
 
 ## Stopping and starting a workload
 
