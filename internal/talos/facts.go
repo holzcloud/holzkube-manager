@@ -153,6 +153,12 @@ type Link struct {
 	SpeedMbit    int
 	Driver       string
 	Kind         string
+
+	// Physical is Talos's own verdict that this is a real Ethernet device
+	// rather than something software made -- a veth, a bridge, a VXLAN
+	// tunnel. A Kubernetes node carries one veth per pod, and a hardware view
+	// that listed them would bury the one cable the operator plugged in.
+	Physical bool
 }
 
 // Member is one cluster member as the node's own discovery sees it.
@@ -226,18 +232,7 @@ func readNodeFacts(ctx context.Context, st state.State) (NodeFacts, error) {
 		}
 	}
 
-	if err := eachResource(ctx, st, hardware.NamespaceName, hardware.ProcessorType,
-		func(p *hardware.Processor) {
-			s := p.TypedSpec()
-			facts.CPUs = append(facts.CPUs, CPU{
-				Socket:       cpuSocket(s.Socket, p.Metadata().ID()),
-				Manufacturer: s.Manufacturer,
-				ProductName:  s.ProductName,
-				Cores:        s.CoreCount,
-				Threads:      s.ThreadCount,
-				MaxSpeedMHz:  s.MaxSpeed,
-			})
-		}); err != nil {
+	if facts.CPUs, err = readCPUs(ctx, st); err != nil {
 		return NodeFacts{}, err
 	}
 
@@ -250,37 +245,11 @@ func readNodeFacts(ctx context.Context, st state.State) (NodeFacts, error) {
 		return NodeFacts{}, err
 	}
 
-	if err := eachResource(ctx, st, block.NamespaceName, block.DiskType,
-		func(d *block.Disk) {
-			s := d.TypedSpec()
-			facts.BlockDevices = append(facts.BlockDevices, BlockDevice{
-				Device:     d.Metadata().ID(),
-				Size:       s.Size,
-				PrettySize: s.PrettySize,
-				Model:      s.Model,
-				Serial:     s.Serial,
-				Transport:  s.Transport,
-				Rotational: s.Rotational,
-				Readonly:   s.Readonly,
-				CDROM:      s.CDROM,
-			})
-		}); err != nil {
+	if facts.BlockDevices, err = readBlockDevices(ctx, st); err != nil {
 		return NodeFacts{}, err
 	}
 
-	if err := eachResource(ctx, st, network.NamespaceName, network.LinkStatusType,
-		func(l *network.LinkStatus) {
-			s := l.TypedSpec()
-			facts.Links = append(facts.Links, Link{
-				Name:         l.Metadata().ID(),
-				HardwareAddr: s.HardwareAddr.String(),
-				MTU:          s.MTU,
-				Up:           s.LinkState,
-				SpeedMbit:    s.SpeedMegabits,
-				Driver:       s.Driver,
-				Kind:         s.Kind,
-			})
-		}); err != nil {
+	if facts.Links, err = readLinks(ctx, st); err != nil {
 		return NodeFacts{}, err
 	}
 
@@ -305,15 +274,94 @@ func readNodeFacts(ctx context.Context, st state.State) (NodeFacts, error) {
 		return NodeFacts{}, err
 	}
 
-	facts.Hostname = facts.Nodename
-	if host, err := safe.StateGetByID[*network.HostnameStatus](
-		ctx, st, network.HostnameID); err == nil {
-		facts.Hostname = host.TypedSpec().Hostname
-	} else if !state.IsNotFoundError(err) {
+	if facts.Hostname, err = readHostname(ctx, st, facts.Nodename); err != nil {
 		return NodeFacts{}, err
 	}
 
 	return facts, nil
+}
+
+// The four readers below are NodeFacts' own, split out because the hardware
+// view asks the same four questions on every poll (hardware.go), and a second
+// copy of "which resource, which fields" would be a second place for two
+// screens to disagree about what a node's disks are. They are the same walks
+// in the same order, so NodeFacts' call count -- which
+// cmd/holzkube-managerd/budget_test.go declares by hand -- did not move.
+
+// readCPUs lists the node's processors as SMBIOS reports them. A board with no
+// SMBIOS tables -- a Raspberry Pi, most ARM boards -- has none, and that is an
+// empty answer rather than an error.
+func readCPUs(ctx context.Context, st state.State) ([]CPU, error) {
+	var out []CPU
+	err := eachResource(ctx, st, hardware.NamespaceName, hardware.ProcessorType,
+		func(p *hardware.Processor) {
+			s := p.TypedSpec()
+			out = append(out, CPU{
+				Socket:       cpuSocket(s.Socket, p.Metadata().ID()),
+				Manufacturer: s.Manufacturer,
+				ProductName:  s.ProductName,
+				Cores:        s.CoreCount,
+				Threads:      s.ThreadCount,
+				MaxSpeedMHz:  s.MaxSpeed,
+			})
+		})
+	return out, err
+}
+
+// readBlockDevices lists the node's disks as the block resources report them.
+func readBlockDevices(ctx context.Context, st state.State) ([]BlockDevice, error) {
+	var out []BlockDevice
+	err := eachResource(ctx, st, block.NamespaceName, block.DiskType,
+		func(d *block.Disk) {
+			s := d.TypedSpec()
+			out = append(out, BlockDevice{
+				Device:     d.Metadata().ID(),
+				Size:       s.Size,
+				PrettySize: s.PrettySize,
+				Model:      s.Model,
+				Serial:     s.Serial,
+				Transport:  s.Transport,
+				Rotational: s.Rotational,
+				Readonly:   s.Readonly,
+				CDROM:      s.CDROM,
+			})
+		})
+	return out, err
+}
+
+// readLinks lists the node's network interfaces.
+func readLinks(ctx context.Context, st state.State) ([]Link, error) {
+	var out []Link
+	err := eachResource(ctx, st, network.NamespaceName, network.LinkStatusType,
+		func(l *network.LinkStatus) {
+			s := l.TypedSpec()
+			out = append(out, Link{
+				Name:         l.Metadata().ID(),
+				HardwareAddr: s.HardwareAddr.String(),
+				MTU:          s.MTU,
+				Up:           s.LinkState,
+				SpeedMbit:    s.SpeedMegabits,
+				Driver:       s.Driver,
+				Kind:         s.Kind,
+				Physical:     s.Physical(),
+			})
+		})
+	return out, err
+}
+
+// readHostname is the node's own hostname, or fallback when the node has not
+// settled one yet. NodeFacts falls back to the Kubernetes nodename it has
+// already read; a caller with nothing better passes "".
+func readHostname(ctx context.Context, st state.State, fallback string) (string, error) {
+	host, err := safe.StateGetByID[*network.HostnameStatus](ctx, st, network.HostnameID)
+	switch {
+	case err == nil:
+		return host.TypedSpec().Hostname, nil
+	case state.IsNotFoundError(err):
+		return fallback, nil
+	default:
+		return "", err
+	}
 }
 
 // ErrNoMachineIdentity reports a node that did not answer with a UUID.
