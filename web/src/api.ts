@@ -2569,6 +2569,15 @@ export const wallSchema = z.object({
     .record(z.string(), z.number())
     .nullish()
     .transform((v) => v ?? {}),
+  /** The curves: the cluster's mean load per minute over a day, and each
+   * node's processor over the last hour, from the daemon's own record. */
+  trends: z
+    .object({
+      cluster: z.record(z.string(), z.array(z.tuple([z.number(), z.number()]))).default({}),
+      nodes: z.record(z.string(), z.array(z.tuple([z.number(), z.number()]))).default({}),
+    })
+    .nullish()
+    .transform((v) => v ?? { cluster: {}, nodes: {} }),
 })
 
 export const wallLinkSchema = z.object({

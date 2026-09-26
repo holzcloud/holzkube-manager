@@ -9,6 +9,8 @@ import {
   type WallTile,
   type WallWarning,
 } from '@/api'
+import { LiveChart } from '@/components/charts/LiveChart'
+import { Sparkline } from '@/components/charts/Sparkline'
 import { rootRoute } from '@/routes/__root'
 
 /**
@@ -242,7 +244,7 @@ function LeftHalf({ wall, stale, ageMs }: { wall: Wall; stale: boolean; ageMs: n
           cluster and each one is a machine they can walk over to; a wall that
           only mentioned a node once it had already failed would be a wall that
           never showed the thing it is most often consulted about. */}
-      <Named title="Nodes" tiles={wall.nodes} />
+      <Named title="Nodes" tiles={wall.nodes} trends={wall.trends.nodes} />
       {/* And everything that is not running, named, large. Absent — not empty,
           not a zero — when there is nothing to name.
           It GROWS into whatever the column has left: a wall wants the biggest
@@ -258,6 +260,7 @@ function LeftHalf({ wall, stale, ageMs }: { wall: Wall; stale: boolean; ageMs: n
 function RightHalf({ wall, now }: { wall: Wall; now: number }) {
   return (
     <div className="flex min-h-0 min-w-0 flex-col gap-5 md:gap-[2vmin]">
+      <ClusterTrend trends={wall.trends.cluster} />
       <Section title="Room left">
         <div className="flex flex-col gap-3 md:gap-[1.2vmin]">
           <Meter label="CPU" capacity={wall.cpu} />
@@ -267,6 +270,58 @@ function RightHalf({ wall, now }: { wall: Wall; now: number }) {
       </Section>
       <Namespaces tiles={wall.namespaces} workloads={wall.workloads.length} />
       <Warnings warnings={wall.warnings} now={now} />
+    </div>
+  )
+}
+
+/**
+ * The cluster's load over the last day (2026-09-26, the operator's layout A).
+ *
+ * The mean over the nodes that answered, per minute, from the daemon's record
+ * -- so the curve is there the moment the screen is switched on, not a line
+ * that starts growing when it is.
+ */
+function ClusterTrend({ trends }: { trends: Record<string, [number, number][]> }) {
+  const cpu = (trends.cpu ?? []).map(([t, v]) => ({ t, v }))
+  const memory = (trends.memory ?? []).map(([t, v]) => ({ t, v }))
+  if (cpu.length === 0 && memory.length === 0) return null
+  return (
+    <Section title="Cluster load" aside="last 24 hours">
+      <LiveChart
+        title="Cluster load"
+        series={[
+          { key: 'cpu', label: 'CPU', slot: 1, points: cpu },
+          { key: 'memory', label: 'Memory', slot: 2, points: memory },
+        ]}
+        format={(v) => `${Math.round(v)}%`}
+        yMax={100}
+        windowMs={24 * 60 * 60_000}
+        height={180}
+      />
+    </Section>
+  )
+}
+
+/** One node's last hour, the size of a line of text, under its name. */
+function NodeTrend({ points, name }: { points: [number, number][]; name: string }) {
+  const last = points[points.length - 1]?.[1]
+  return (
+    <div className="mt-1 flex items-center gap-2">
+      <Sparkline
+        label={`${name} processor load, last hour`}
+        points={points.map(([t, v]) => ({ t, v }))}
+        max={100}
+        width={180}
+        height={28}
+        color={
+          last === undefined || last < 75
+            ? 'var(--viz-ok)'
+            : last < 90
+              ? 'var(--viz-warn)'
+              : 'var(--viz-danger)'
+        }
+      />
+      {last !== undefined && <span className="tabular-nums opacity-80">{Math.round(last)}%</span>}
     </div>
   )
 }
@@ -340,7 +395,18 @@ function Section({
 /**
  * Nodes and everything that needs attention: named, large, all of them.
  */
-function Named({ title, tiles, grow }: { title: string; tiles: WallTile[]; grow?: boolean }) {
+function Named({
+  title,
+  tiles,
+  grow,
+  trends,
+}: {
+  title: string
+  tiles: WallTile[]
+  grow?: boolean
+  /** A node's last hour of processor load, drawn under its name. */
+  trends?: Record<string, [number, number][]>
+}) {
   if (tiles.length === 0) return null
 
   // Size follows the count AND the longest name, and the floor is the point at
@@ -407,6 +473,9 @@ function Named({ title, tiles, grow }: { title: string; tiles: WallTile[]; grow?
             <p className="truncate opacity-80">
               {tile.namespace === '' ? tile.detail : `${tile.namespace} · ${tile.detail}`}
             </p>
+            {trends?.[tile.name] !== undefined && (
+              <NodeTrend points={trends[tile.name] ?? []} name={tile.name} />
+            )}
           </div>
         ))}
       </div>
