@@ -74,7 +74,9 @@ archives:
     files:
       - LICENSE
       - README.md
-      - docs/*
+      # The Markdown only: docs/ also holds the README's screenshots and the
+      # brand images, which are megabytes nobody installing a daemon needs.
+      - docs/*.md
 
   # Separate, so that somebody who wants the client does not download a server
   # with a web UI compiled into it to get a file they could have fetched on its
