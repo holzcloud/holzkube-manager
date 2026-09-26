@@ -17,12 +17,12 @@ import (
 
 // The file.
 //
-// # One file, rewritten whole, at most once a minute
+// # One file, rewritten whole, at most once every FlushEvery
 //
 // The daemon runs on a Raspberry Pi, and its data directory is an SD card or an
 // NVMe drive: the first wears out under small frequent writes, and the operator
 // decided the history may cost the card one write a minute and no more. So the
-// whole history is one file, replaced once a minute through the store's own
+// whole history is one file, replaced at most once every FlushEvery (thirty minutes) through the store's own
 // atomic write (fsstore.WriteFileAtomic: a temporary, fsync, rename, fsync of
 // the directory) -- one file and not one per subject, because fifty-five
 // renames a minute is fifty-five directory updates where one would do.
@@ -60,7 +60,12 @@ const (
 	FileName = "metrics.bin"
 
 	// FlushEvery is the least time between two writes of the file.
-	FlushEvery = time.Minute
+	//
+	// Thirty minutes, the operator's choice on 2026-09-26: the file is ~1.3 MB
+	// and rewritten whole, so once a minute was up to 2 GB a day on the Pi's
+	// card; this is ~65 MB. A clean stop still writes on the way out, so an
+	// update loses nothing -- only a crash loses up to half an hour.
+	FlushEvery = 30 * time.Minute
 
 	fileVersion = 1
 
@@ -215,7 +220,7 @@ func (s *Store) encodeLocked(now time.Time) ([]byte, error) {
 	var out bytes.Buffer
 	out.Write(fileMagic)
 	out.WriteByte(fileVersion)
-	// BestSpeed: the Pi does this once a minute, and the gain from harder
+	// BestSpeed: the Pi does this every thirty minutes, and the gain from harder
 	// compression on a stream of float32s is a few percent.
 	zw, err := gzip.NewWriterLevel(&out, gzip.BestSpeed)
 	if err != nil {
