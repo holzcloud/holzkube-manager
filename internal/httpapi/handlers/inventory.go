@@ -189,6 +189,16 @@ func InventoryRoutes(d httpapi.Deps) []httpapi.Route {
 			Handler:         handler(refreshMachine(d)),
 		},
 		{
+			// A read, and not audited: an open panel asks every few seconds,
+			// and an archive with one record per refresh would bury every
+			// record anybody needs to find. It changes nothing on the node.
+			Method:          http.MethodGet,
+			Pattern:         "/api/v1/machines/{id}/hardware",
+			RequiresSession: true,
+			MinRole:         model.RoleReader,
+			Handler:         handler(machineHardware(d)),
+		},
+		{
 			Method:          http.MethodDelete,
 			Pattern:         "/api/v1/machines/{id}",
 			RequiresSession: true,
@@ -691,6 +701,40 @@ func refreshMachine(d httpapi.Deps) http.HandlerFunc {
 			writeInventoryError(w, r, d, err)
 			return
 		}
+		writeJSON(w, http.StatusOK, view)
+	}
+}
+
+// HardwareRouteBudget bounds GET /api/v1/machines/{id}/hardware.
+//
+// It is the inventory's own HardwareBudget and not a second number: the route
+// does nothing but the one read, so a route ceiling different from the read's
+// would be either a ceiling that never applies or a read that is always cut.
+const HardwareRouteBudget = inventory.HardwareBudget
+
+// machineHardware is the live hardware view of one node.
+//
+// Unlike GET /machines/{id} it does not answer from the record when the node
+// is down. The record is a history and says how old it is; a gauge that showed
+// the last reading it had would show a temperature that is no longer true
+// without saying so, so a node that does not answer is the same upstream
+// problem every other live read reports.
+func machineHardware(d httpapi.Deps) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if p := inventoryConfigured(d); p != nil {
+			httpapi.WriteProblem(w, r, p)
+			return
+		}
+
+		ctx, cancel := budgetedContext(r, HardwareRouteBudget)
+		defer cancel()
+
+		view, err := d.Inventory.Hardware(ctx, model.MachineID(r.PathValue("id")))
+		if err != nil {
+			writeInventoryError(w, r, d, err)
+			return
+		}
+
 		writeJSON(w, http.StatusOK, view)
 	}
 }
