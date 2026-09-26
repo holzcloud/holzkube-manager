@@ -2707,5 +2707,526 @@
       "unknown": 1,
       "warn": 2
     }
+  },
+  "/api/v1/machines/m-cp-1/hardware": {
+    "machine": "m-cp-1",
+    "hostname": "srv-node-01.homelab.example",
+    "observed_at": "2026-09-26T10:00:00Z",
+    "uptime_seconds": 1054800,
+    "rates_over_seconds": 3.0,
+    "cpu": {
+      "model": "Intel(R) Core(TM) i5-9600K CPU @ 3.70GHz",
+      "cores": 6,
+      "threads": 6,
+      "usage_percent": 18.2,
+      "iowait_percent": 0.4,
+      "per_core": [3.1, 2.9, 95.0, 2.0, 2.2, 4.1],
+      "load1": 1.12,
+      "load5": 0.94,
+      "load15": 0.88
+    },
+    "memory": {
+      "total_bytes": 34359738368,
+      "used_bytes": 12240656793,
+      "cache_bytes": 10522669875,
+      "available_bytes": 22119081574,
+      "swap_total_bytes": 0,
+      "swap_used_bytes": 0
+    },
+    "filesystems": [
+      {
+        "mount": "/var",
+        "device": "/dev/nvme0n1p6",
+        "size_bytes": 944892805120,
+        "used_bytes": 258771779584
+      },
+      {
+        "mount": "/system/state",
+        "device": "/dev/nvme0n1p5",
+        "size_bytes": 104857600,
+        "used_bytes": 3145728
+      }
+    ],
+    "disks": [
+      {
+        "name": "nvme0n1",
+        "model": "Samsung SSD 980 PRO 1TB",
+        "size_bytes": 999653638144,
+        "read_bytes_per_sec": 2400000,
+        "write_bytes_per_sec": 810000,
+        "temperature_c": 41.9
+      },
+      {
+        "name": "sda",
+        "model": "WDC WD40EFRX-68N32N0",
+        "size_bytes": 4002222325104,
+        "read_bytes_per_sec": 0,
+        "write_bytes_per_sec": 120000,
+        "temperature_c": null
+      }
+    ],
+    "network": [
+      {
+        "name": "eth0",
+        "up": true,
+        "speed_mbit": 1000,
+        "rx_bytes_per_sec": 1240000,
+        "tx_bytes_per_sec": 187900
+      },
+      {
+        "name": "eth1",
+        "up": false,
+        "speed_mbit": 0,
+        "rx_bytes_per_sec": 0,
+        "tx_bytes_per_sec": 0
+      }
+    ],
+    "temperatures": [
+      {
+        "chip": "coretemp",
+        "kind": "cpu",
+        "label": "Package id 0",
+        "celsius": 57.0,
+        "high_c": 80.0,
+        "critical_c": 100.0
+      },
+      {
+        "chip": "coretemp",
+        "kind": "cpu",
+        "label": "Core 0",
+        "celsius": 52.0,
+        "high_c": 80.0,
+        "critical_c": 100.0
+      },
+      {
+        "chip": "coretemp",
+        "kind": "cpu",
+        "label": "Core 1",
+        "celsius": 54.0,
+        "high_c": 80.0,
+        "critical_c": 100.0
+      },
+      {
+        "chip": "coretemp",
+        "kind": "cpu",
+        "label": "Core 2",
+        "celsius": 81.0,
+        "high_c": 80.0,
+        "critical_c": 100.0
+      },
+      {
+        "chip": "nct6798",
+        "kind": "board",
+        "label": "SYSTIN",
+        "celsius": 38.0,
+        "high_c": null,
+        "critical_c": null
+      },
+      {
+        "chip": "nct6798",
+        "kind": "board",
+        "label": "CPUTIN",
+        "celsius": 45.0,
+        "high_c": null,
+        "critical_c": null
+      },
+      {
+        "chip": "nvme",
+        "kind": "disk",
+        "label": "nvme0n1 Composite",
+        "celsius": 41.9,
+        "high_c": 82.8,
+        "critical_c": 84.8
+      }
+    ],
+    "fans": [
+      {
+        "chip": "nct6798",
+        "label": "fan1",
+        "rpm": 1080
+      },
+      {
+        "chip": "nct6798",
+        "label": "fan2",
+        "rpm": 0
+      },
+      {
+        "chip": "nct6798",
+        "label": "fan3",
+        "rpm": 820
+      }
+    ],
+    "sensors_notice": ""
+  },
+  "/api/v1/clusters/c-homelab/kubernetes/apps": {
+    "collected_at": "2026-09-26T10:00:00Z",
+    "usage_available": true,
+    "notice": "",
+    "apps": [
+      {
+        "namespace": "media",
+        "kind": "Deployment",
+        "name": "jellyfin",
+        "pods": 1,
+        "ready": 1,
+        "restarts": 0,
+        "nodes": ["srv-node-01.homelab.example"],
+        "cpu_millis": 1450,
+        "memory_bytes": 2040109465,
+        "cpu_request_millis": 500,
+        "cpu_limit_millis": 0,
+        "memory_request_bytes": 1073741824,
+        "memory_limit_bytes": 4294967296,
+        "usage_known": true,
+        "images": ["jellyfin/jellyfin:10.9.11"]
+      },
+      {
+        "namespace": "monitoring",
+        "kind": "StatefulSet",
+        "name": "prometheus",
+        "pods": 1,
+        "ready": 1,
+        "restarts": 0,
+        "nodes": ["srv-node-01.homelab.example"],
+        "cpu_millis": 310,
+        "memory_bytes": 1288490188,
+        "cpu_request_millis": 200,
+        "cpu_limit_millis": 0,
+        "memory_request_bytes": 1073741824,
+        "memory_limit_bytes": 2147483648,
+        "usage_known": true,
+        "images": ["ghcr.io/example/prometheus:1.0"]
+      },
+      {
+        "namespace": "auth",
+        "kind": "Deployment",
+        "name": "authentik",
+        "pods": 2,
+        "ready": 2,
+        "restarts": 1,
+        "nodes": ["srv-node-01.homelab.example"],
+        "cpu_millis": 180,
+        "memory_bytes": 859832320,
+        "cpu_request_millis": 100,
+        "cpu_limit_millis": 0,
+        "memory_request_bytes": 536870912,
+        "memory_limit_bytes": 0,
+        "usage_known": true,
+        "images": ["ghcr.io/example/authentik:1.0"]
+      },
+      {
+        "namespace": "media",
+        "kind": "Deployment",
+        "name": "sonarr",
+        "pods": 1,
+        "ready": 1,
+        "restarts": 0,
+        "nodes": ["srv-node-01.homelab.example"],
+        "cpu_millis": 120,
+        "memory_bytes": 429916160,
+        "cpu_request_millis": 0,
+        "cpu_limit_millis": 0,
+        "memory_request_bytes": 0,
+        "memory_limit_bytes": 0,
+        "usage_known": true,
+        "images": ["ghcr.io/example/sonarr:1.0"]
+      },
+      {
+        "namespace": "kube-system",
+        "kind": "DaemonSet",
+        "name": "cilium",
+        "pods": 1,
+        "ready": 1,
+        "restarts": 0,
+        "nodes": ["srv-node-01.homelab.example"],
+        "cpu_millis": 95,
+        "memory_bytes": 671088640,
+        "cpu_request_millis": 500,
+        "cpu_limit_millis": 0,
+        "memory_request_bytes": 0,
+        "memory_limit_bytes": 0,
+        "usage_known": true,
+        "images": ["ghcr.io/example/cilium:1.0"]
+      },
+      {
+        "namespace": "media",
+        "kind": "Deployment",
+        "name": "overseerr",
+        "pods": 1,
+        "ready": 0,
+        "restarts": 14,
+        "nodes": ["srv-node-01.homelab.example"],
+        "cpu_millis": 4,
+        "memory_bytes": 62914560,
+        "cpu_request_millis": 0,
+        "cpu_limit_millis": 0,
+        "memory_request_bytes": 0,
+        "memory_limit_bytes": 268435456,
+        "usage_known": true,
+        "images": ["ghcr.io/example/overseerr:1.0"]
+      },
+      {
+        "namespace": "kube-system",
+        "kind": "Deployment",
+        "name": "coredns",
+        "pods": 2,
+        "ready": 2,
+        "restarts": 0,
+        "nodes": ["srv-node-01.homelab.example"],
+        "cpu_millis": 12,
+        "memory_bytes": 50331648,
+        "cpu_request_millis": 200,
+        "cpu_limit_millis": 0,
+        "memory_request_bytes": 146800640,
+        "memory_limit_bytes": 356515840,
+        "usage_known": true,
+        "images": ["ghcr.io/example/coredns:1.0"]
+      },
+      {
+        "namespace": "backup",
+        "kind": "CronJob",
+        "name": "velero-daily",
+        "pods": 0,
+        "ready": 0,
+        "restarts": 0,
+        "nodes": [],
+        "cpu_millis": 0,
+        "memory_bytes": 0,
+        "cpu_request_millis": 0,
+        "cpu_limit_millis": 0,
+        "memory_request_bytes": 0,
+        "memory_limit_bytes": 0,
+        "usage_known": false,
+        "images": ["ghcr.io/example/velero-daily:1.0"]
+      }
+    ]
+  },
+  "/api/v1/clusters/c-homelab/kubernetes/apps/media/Deployment/jellyfin": {
+    "collected_at": "2026-09-26T10:00:00Z",
+    "usage_available": true,
+    "notice": "",
+    "app": {
+      "namespace": "media",
+      "kind": "Deployment",
+      "name": "jellyfin",
+      "pods": 1,
+      "ready": 1,
+      "restarts": 0,
+      "nodes": ["srv-node-01.homelab.example"],
+      "cpu_millis": 1450,
+      "memory_bytes": 2040109465,
+      "cpu_request_millis": 500,
+      "cpu_limit_millis": 0,
+      "memory_request_bytes": 1073741824,
+      "memory_limit_bytes": 4294967296,
+      "usage_known": true,
+      "images": ["jellyfin/jellyfin:10.9.11"]
+    },
+    "created_at": "2026-09-19T08:00:00Z",
+    "pods": [
+      {
+        "name": "jellyfin-7d9c6b5f4-x2kqp",
+        "node": "srv-node-01.homelab.example",
+        "phase": "Running",
+        "ready": "1/1",
+        "restarts": 0,
+        "started_at": "2026-09-20T08:00:00Z",
+        "ip": "10.244.0.17",
+        "cpu_millis": 1450,
+        "memory_bytes": 2040109465,
+        "usage_known": true,
+        "containers": [
+          {
+            "name": "jellyfin",
+            "image": "jellyfin/jellyfin:10.9.11",
+            "state": "running",
+            "restarts": 0,
+            "cpu_millis": 1450,
+            "memory_bytes": 2040109465,
+            "usage_known": true,
+            "cpu_request_millis": 500,
+            "cpu_limit_millis": 0,
+            "memory_request_bytes": 1073741824,
+            "memory_limit_bytes": 4294967296
+          }
+        ]
+      }
+    ],
+    "services": [
+      {
+        "name": "jellyfin",
+        "type": "ClusterIP",
+        "cluster_ip": "10.96.44.12",
+        "ports": ["http 8096/TCP"]
+      },
+      {
+        "name": "jellyfin-lb",
+        "type": "LoadBalancer",
+        "cluster_ip": "10.96.51.3",
+        "ports": ["80/TCP → 8096"]
+      }
+    ],
+    "events": [
+      {
+        "type": "Warning",
+        "reason": "Unhealthy",
+        "message": "Readiness probe failed: HTTP probe failed with statuscode: 503",
+        "last_seen": "2026-09-26T08:00:00Z",
+        "count": 3,
+        "object": "Pod/jellyfin-7d9c6b5f4-x2kqp"
+      },
+      {
+        "type": "Normal",
+        "reason": "Pulled",
+        "message": "Container image \"jellyfin/jellyfin:10.9.11\" already present on machine",
+        "last_seen": "2026-09-20T08:00:00Z",
+        "count": 1,
+        "object": "Pod/jellyfin-7d9c6b5f4-x2kqp"
+      }
+    ]
+  },
+  "/api/v1/machines/m-cp-1/power": {
+    "state": "running",
+    "disabled": false,
+    "actions": [
+      {
+        "action": "stop",
+        "available": false,
+        "reason": "Stopping this control-plane node would lose etcd quorum; force-stop does not check.",
+        "sudo": false
+      },
+      {
+        "action": "force-stop",
+        "available": true,
+        "reason": "",
+        "sudo": true
+      },
+      {
+        "action": "start",
+        "available": false,
+        "reason": "It is running.",
+        "sudo": false
+      },
+      {
+        "action": "disable",
+        "available": true,
+        "reason": "",
+        "sudo": false
+      },
+      {
+        "action": "enable",
+        "available": false,
+        "reason": "It is not disabled.",
+        "sudo": false
+      },
+      {
+        "action": "restart",
+        "available": true,
+        "reason": "",
+        "sudo": false
+      },
+      {
+        "action": "force-restart",
+        "available": true,
+        "reason": "",
+        "sudo": true
+      }
+    ]
+  },
+  "/api/v1/clusters/c-homelab/power": {
+    "state": "running",
+    "disabled": false,
+    "actions": [
+      {
+        "action": "stop",
+        "available": true,
+        "reason": "",
+        "sudo": false
+      },
+      {
+        "action": "force-stop",
+        "available": true,
+        "reason": "",
+        "sudo": true
+      },
+      {
+        "action": "start",
+        "available": false,
+        "reason": "It is running.",
+        "sudo": false
+      },
+      {
+        "action": "disable",
+        "available": true,
+        "reason": "",
+        "sudo": false
+      },
+      {
+        "action": "enable",
+        "available": false,
+        "reason": "It is not disabled.",
+        "sudo": false
+      },
+      {
+        "action": "restart",
+        "available": true,
+        "reason": "",
+        "sudo": false
+      },
+      {
+        "action": "force-restart",
+        "available": true,
+        "reason": "",
+        "sudo": true
+      }
+    ]
+  },
+  "/api/v1/clusters/c-homelab/kubernetes/apps/media/Deployment/jellyfin/power": {
+    "state": "running",
+    "disabled": false,
+    "actions": [
+      {
+        "action": "stop",
+        "available": true,
+        "reason": "",
+        "sudo": false
+      },
+      {
+        "action": "force-stop",
+        "available": true,
+        "reason": "",
+        "sudo": true
+      },
+      {
+        "action": "start",
+        "available": false,
+        "reason": "It is running.",
+        "sudo": false
+      },
+      {
+        "action": "disable",
+        "available": true,
+        "reason": "",
+        "sudo": false
+      },
+      {
+        "action": "enable",
+        "available": false,
+        "reason": "It is not disabled.",
+        "sudo": false
+      },
+      {
+        "action": "restart",
+        "available": true,
+        "reason": "",
+        "sudo": false
+      },
+      {
+        "action": "force-restart",
+        "available": true,
+        "reason": "",
+        "sudo": true
+      }
+    ]
   }
 }

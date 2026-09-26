@@ -93,12 +93,12 @@ export function ClusterCard({ cluster }: { cluster: Cluster }) {
 
   return (
     <Card>
-      <CardHeader className="flex flex-row items-start justify-between gap-2">
+      <CardHeader className="flex flex-row flex-wrap items-start justify-between gap-2">
         <div>
           <CardTitle className="text-base">{cluster.name}</CardTitle>
           <p className="font-mono text-xs text-muted-foreground">{cluster.endpoint}</p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <Badge variant="outline">{cluster.origin}</Badge>
           <Badge
             variant="outline"
