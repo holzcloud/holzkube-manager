@@ -168,15 +168,22 @@ func (c *Client) Workloads(ctx context.Context, namespace string) ([]Workload, e
 	for _, d := range daemons.Items {
 		// Desired here is how many nodes match, which is the cluster's shape
 		// rather than somebody's intention -- so it is not scalable, and saying
-		// "on N nodes" keeps that distinction on the screen.
+		// "on N nodes" keeps that distinction on the screen. It is stoppable
+		// since 2026-09-26, by a selector no node matches (see startstop.go).
+		stopped := daemonSetStopped(d.Spec.Template.Spec.NodeSelector)
+		summary := fmt.Sprintf("%d of %d nodes ready", d.Status.NumberReady,
+			d.Status.DesiredNumberScheduled)
+		if stopped {
+			summary = "stopped — it runs on no node"
+		}
 		out = append(out, Workload{
 			Kind: KindDaemonSet, Namespace: d.Namespace, Name: d.Name,
 			Desired: d.Status.DesiredNumberScheduled, Ready: d.Status.NumberReady,
-			Summary: fmt.Sprintf("%d of %d nodes ready", d.Status.NumberReady,
-				d.Status.DesiredNumberScheduled),
+			Summary:   summary,
 			Image:     firstImage(d.Spec.Template.Spec.Containers),
 			CreatedAt: stamp(d.CreationTimestamp),
 			Scalable:  false, Rollable: true,
+			Stoppable: true, Stopped: stopped,
 		})
 	}
 
