@@ -137,8 +137,8 @@ func TestAnUnreadableFileIsAnEmptyHistory(t *testing.T) {
 }
 
 // TestTheFileIsWrittenAtMostOnceAMinute counts the writes the sampler's loop
-// makes over five minutes of passes: five, one a minute, where a write per
-// pass would be twenty.
+// makes over two and a half hours of passes: five, one per FlushEvery (thirty
+// minutes since 2026-09-26), where a write per pass would be six hundred.
 //
 // Fault injected and seen red: FlushIfDue ignoring the minute
 // (due := s.dirty), which wrote after every pass -- 20 writes.
@@ -146,18 +146,18 @@ func TestTheFileIsWrittenAtMostOnceAMinute(t *testing.T) {
 	writes := 0
 	s := Open(historyPath(t), fsstore.ReadFile, func(string, []byte) error { writes++; return nil }, t0, quiet())
 
-	for at := t0.Add(FineStep); !at.After(t0.Add(5 * time.Minute)); at = at.Add(FineStep) {
+	for at := t0.Add(FineStep); !at.After(t0.Add(5 * FlushEvery)); at = at.Add(FineStep) {
 		s.Record("machine/a", at, map[string]float64{"cpu": 1})
 		if err := s.FlushIfDue(at); err != nil {
 			t.Fatal(err)
 		}
 	}
 	if writes != 5 || s.Writes() != 5 {
-		t.Errorf("five minutes of passes wrote the file %d times (store counts %d), want 5", writes, s.Writes())
+		t.Errorf("five flush intervals of passes wrote the file %d times (store counts %d), want 5", writes, s.Writes())
 	}
 
 	// Nothing changed, nothing written, however long it has been.
-	if err := s.FlushIfDue(t0.Add(time.Hour)); err != nil {
+	if err := s.FlushIfDue(t0.Add(10 * FlushEvery)); err != nil {
 		t.Fatal(err)
 	}
 	if writes != 5 {
