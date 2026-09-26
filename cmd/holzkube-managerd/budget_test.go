@@ -1793,6 +1793,14 @@ func TestEveryRouteThatReachesUpstreamHasABudgetRow(t *testing.T) {
 		// building must not depend on the fleet answering.
 		"GET /api/v1/wall-links", "POST /api/v1/wall-links",
 		"DELETE /api/v1/wall-links/{id}",
+		// The metrics history's two reads. They read the sampler's memory and
+		// the inventory's records, and reach no node and no API server: the
+		// sampler did the asking, on its own timer, under inventory.
+		// HardwareBudget per node and history.AppsBudget per cluster -- which
+		// is why a chart of a node that is down still draws the hour before it
+		// went, and why these are here rather than rows above.
+		"GET /api/v1/machines/{id}/hardware/history",
+		"GET /api/v1/clusters/{id}/kubernetes/apps/{namespace}/{kind}/{name}/history",
 	} {
 		noUpstream[r] = true
 	}
