@@ -1,5 +1,35 @@
 [
   {
+    "version": "v1.32.0",
+    "date": "2026-09-26",
+    "changes": [
+      {
+        "icon": "🌡️",
+        "text": "Every node has a live hardware page: processor load overall and per core, memory, disks, filesystems, network, temperatures and fans, read from the node itself every three seconds. A sensor the node does not report is shown as not reported, never as zero; a stopped fan says stopped."
+      },
+      {
+        "icon": "📈",
+        "text": "The curves go back 24 hours. The manager samples every node and every app every 15 seconds and keeps a day: 15-second points for the last hour, minute points before that. Pick Live, 1 h, 6 h or 24 h above the charts. The record survives restarts and updates."
+      },
+      {
+        "icon": "📦",
+        "text": "Kubernetes has an Apps page: every app with what it uses right now against what it asked for, and where it runs, busiest first. Each app has its own page with its pods and containers, the services that reach it and its recent events. The numbers come from each node's kubelet, so no metrics-server is needed."
+      },
+      {
+        "icon": "⏻",
+        "text": "One power menu for a cluster, a node and an app: stop, force stop, start, disable, enable, restart and force restart. Start wakes a switched-off node by Wake-on-LAN. Disable keeps it off until you enable it. Forced actions ask for your password; everything asks once first."
+      },
+      {
+        "icon": "🖥️",
+        "text": "The wall shows the cluster's load over the last day and each node's last hour under its name."
+      },
+      {
+        "icon": "📱",
+        "text": "The node page's buttons are one row of icons on a phone, harmless ones first."
+      }
+    ]
+  },
+  {
     "version": "v1.31.0",
     "date": "2026-09-25",
     "changes": [
