@@ -83,6 +83,7 @@ export function useClusterSelection() {
 /** The pages, in the order somebody works through them. */
 const SECTIONS: { to: string; label: string }[] = [
   { to: '/kubernetes', label: 'Overview' },
+  { to: '/kubernetes/apps', label: 'Apps' },
   { to: '/kubernetes/workloads', label: 'Workloads' },
   { to: '/kubernetes/pods', label: 'Pods' },
   { to: '/kubernetes/storage', label: 'Storage' },

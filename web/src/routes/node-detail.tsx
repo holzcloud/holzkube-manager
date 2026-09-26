@@ -7,6 +7,8 @@ import { HealthField, StageBadge } from '@/components/HealthField'
 import { LabelEditor } from '@/components/LabelEditor'
 import { LogPanel } from '@/components/LogPanel'
 import { NodeActions } from '@/components/NodeActions'
+import { NodeHardware } from '@/components/NodeHardware'
+import { PowerMenu } from '@/components/PowerMenu'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -116,6 +118,9 @@ export function NodeDetailPage() {
         </div>
 
         <div className="flex flex-wrap gap-2">
+          <PowerMenu
+            target={{ kind: 'node', machine: m.id, name: m.hostname.value || m.id.slice(0, 8) }}
+          />
           <NodeActions machine={m} onRemoved={() => void navigate({ to: '/nodes' })} />
           <Button
             variant="outline"
@@ -165,6 +170,8 @@ export function NodeDetailPage() {
           exactly as it was — the UUID identifies a machine, an address does not.
         </p>
       )}
+
+      <NodeHardware machine={m} />
 
       <div className="grid gap-4 lg:grid-cols-2">
         <Card>

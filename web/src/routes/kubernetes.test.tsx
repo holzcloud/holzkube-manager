@@ -285,9 +285,9 @@ describe('the Kubernetes screen', () => {
     at('/kubernetes')
 
     const nav = await screen.findByRole('navigation', { name: 'Kubernetes sections' })
-    // Ten pages, ten links. A page with no link in is a page that shipped and
-    // cannot be found, which is the defect the reachability guard exists for one
-    // layer down.
-    expect(nav.querySelectorAll('a')).toHaveLength(10)
+    // Eleven pages, eleven links -- Apps joined on 2026-09-26. A page with no
+    // link in is a page that shipped and cannot be found, which is the defect
+    // the reachability guard exists for one layer down.
+    expect(nav.querySelectorAll('a')).toHaveLength(11)
   })
 })
