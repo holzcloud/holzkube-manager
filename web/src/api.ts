@@ -1852,16 +1852,27 @@ export type PowerTarget =
   | { kind: 'node'; machine: string; name: string }
   | { kind: 'app'; cluster: string; namespace: string; appKind: string; name: string }
 
-export function powerPath(target: PowerTarget): string {
+/** Where a target lives; its power routes hang off this. */
+function powerBase(target: PowerTarget): string {
   const e = encodeURIComponent
   switch (target.kind) {
     case 'cluster':
-      return `/api/v1/clusters/${e(target.cluster)}/power`
+      return `/api/v1/clusters/${e(target.cluster)}`
     case 'node':
-      return `/api/v1/machines/${e(target.machine)}/power`
+      return `/api/v1/machines/${e(target.machine)}`
     case 'app':
-      return `/api/v1/clusters/${e(target.cluster)}/kubernetes/apps/${e(target.namespace)}/${e(target.appKind)}/${e(target.name)}/power`
+      return `/api/v1/clusters/${e(target.cluster)}/kubernetes/apps/${e(target.namespace)}/${e(target.appKind)}/${e(target.name)}`
   }
+}
+
+/** What can be done to a target now. */
+export function powerPath(target: PowerTarget): string {
+  return `${powerBase(target)}/power`
+}
+
+/** Doing one of the seven, written out so the path is findable as text. */
+export function powerActionPath(target: PowerTarget, action: PowerAction): string {
+  return `${powerBase(target)}/power/${action}`
 }
 
 /**
@@ -3065,7 +3076,7 @@ export const api = {
     run: (target: PowerTarget, action: PowerAction): Promise<PowerResult> =>
       // The body is empty and required: the CSRF layer wants a JSON content
       // type on every mutating route, and only a body carries one.
-      sendJSON('POST', `${powerPath(target)}/${action}`, powerResultSchema, {}),
+      sendJSON('POST', powerActionPath(target, action), powerResultSchema, {}),
   },
 
   machines: {
