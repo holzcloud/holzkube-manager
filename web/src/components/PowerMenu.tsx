@@ -152,10 +152,17 @@ export function PowerMenu({
     <>
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <Button variant="outline" size={size} aria-label={`Power: ${target.name}`}>
-            <PowerIcon aria-hidden="true" className="size-4" /> Power
+          <Button
+            variant="outline"
+            size={size}
+            aria-label={`Power: ${target.name}`}
+            title="Power"
+            className="max-md:min-w-11"
+          >
+            <PowerIcon aria-hidden="true" className="size-4" />{' '}
+            <span className="max-md:sr-only">Power</span>
             {state && state !== 'running' && (
-              <span className="text-muted-foreground text-xs">· {state}</span>
+              <span className="text-muted-foreground text-xs max-md:sr-only">· {state}</span>
             )}
           </Button>
         </DropdownMenuTrigger>
