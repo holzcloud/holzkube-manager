@@ -45,6 +45,8 @@ var endpointFormat = regexp.MustCompile(`%[sqv]:(%[dsqv]|[0-9]{2,5})`)
 //     what Dialer.Resolve is for.
 //   - _test.go files — a test legitimately constructs an address to point a
 //     dialer at a simulated node.
+//   - the files in joinsNonMachineAddresses, for net.JoinHostPort only and each
+//     with its reason. Everything else the guard checks still applies to them.
 func TestNoAddressAboveTheSeam(t *testing.T) {
 	t.Parallel()
 
@@ -71,7 +73,12 @@ func TestNoAddressAboveTheSeam(t *testing.T) {
 			}
 
 			scanned++
-			violations = append(violations, inspect(t, p, rel)...)
+			for _, v := range inspect(t, p, rel) {
+				if _, ok := joinsNonMachineAddresses[rel]; ok && strings.HasSuffix(v, "calls net.JoinHostPort") {
+					continue
+				}
+				violations = append(violations, v)
+			}
 			return nil
 		})
 		if err != nil {
@@ -94,6 +101,24 @@ func TestNoAddressAboveTheSeam(t *testing.T) {
 			"lets a SideroLink tunnel resolve the same Target to an overlay address with no change here.",
 			strings.Join(violations, "\n  "))
 	}
+}
+
+// joinsNonMachineAddresses is the files outside internal/talos that join a host
+// and a port for something that is not a machine, each with the reason.
+//
+// Named files rather than a package, and net.JoinHostPort only, so that the
+// exemption is as narrow as the argument for it: a second address built in the
+// same package, or the machinery client imported there, is still a finding.
+var joinsNonMachineAddresses = map[string]string{
+	// It fired on the first version of this file (2026-09-26), and the answer
+	// is an exemption rather than a rewrite that would slip past the syntax
+	// check: the rule is about reaching a MACHINE, and the reason for it --
+	// identity resolved to an address in one place, so a SideroLink tunnel can
+	// resolve it differently -- has nothing to act on here.
+	filepath.Join("internal", "power", "wol.go"): "A Wake-on-LAN packet is addressed to a " +
+		"network's broadcast address, not to a machine: the machine it wakes has no address " +
+		"while it is off, no talos.Target can name the destination, and a SideroLink tunnel " +
+		"could not carry the broadcast either.",
 }
 
 func inspect(t *testing.T, path, rel string) []string {
