@@ -70,6 +70,7 @@ function wallAt(when: Date, overrides: Partial<Wall> = {}): Wall {
     namespaces: [] as Wall['namespaces'],
     warnings: [],
     summary: { ok: 2 },
+    trends: { cluster: {}, nodes: {} },
     ...overrides,
   }
   // Unless a test says otherwise, the roll-up follows from the workloads.
@@ -98,6 +99,44 @@ describe('the wall', () => {
     // Not "2 down, 1 warn, 4 ok": from four metres that is a puzzle. The worst
     // number, in a sentence, in the largest type on the screen.
     expect(await screen.findByText('2 not running')).toBeInTheDocument()
+  })
+
+  it("draws the cluster's day and each node's hour from the record", async () => {
+    const t = Date.now()
+    vi.spyOn(api.kubernetes, 'wall').mockResolvedValue(
+      wallAt(new Date(), {
+        trends: {
+          cluster: {
+            cpu: [
+              [t - 60_000, 20],
+              [t, 30],
+            ],
+            memory: [
+              [t - 60_000, 40],
+              [t, 41],
+            ],
+          },
+          nodes: {
+            'cp-1': [
+              [t - 15_000, 10],
+              [t, 12],
+            ],
+          },
+        },
+      }),
+    )
+
+    wrap(<WallView />)
+
+    expect(await screen.findByRole('img', { name: /Cluster load, last 24 h/ })).toBeInTheDocument()
+    expect(screen.getByRole('img', { name: 'cp-1 processor load, last hour' })).toBeInTheDocument()
+  })
+
+  it('draws no empty chart when nothing has been recorded', async () => {
+    vi.spyOn(api.kubernetes, 'wall').mockResolvedValue(wallAt(new Date()))
+    wrap(<WallView />)
+    await screen.findByText('Everything is running')
+    expect(screen.queryByRole('img', { name: /Cluster load/ })).toBeNull()
   })
 
   it('says everything is running only when it is', async () => {
