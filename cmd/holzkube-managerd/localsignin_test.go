@@ -30,13 +30,13 @@ func TestTheLocalAddressIsTheOneNotDeclaredSSOOnly(t *testing.T) {
 	t.Parallel()
 
 	got := localSignInURL(configFor(t,
-		"203.0.113.12:8443",
-		[]string{"manager.example.org", "homeserver-01.lan"},
-		[]string{"manager.example.org"},
+		"192.168.1.30:8443",
+		[]string{"manager.example.com", "srv-node-01.lan"},
+		[]string{"manager.example.com"},
 		false,
 	))()
 
-	if got != "https://homeserver-01.lan:8443" {
+	if got != "https://srv-node-01.lan:8443" {
 		t.Errorf("local address = %q, want the configured name that is not SSO-only", got)
 	}
 }
@@ -51,8 +51,8 @@ func TestALoopbackNameIsNeverOffered(t *testing.T) {
 
 	got := localSignInURL(configFor(t,
 		"127.0.0.1:8443",
-		[]string{"manager.example.org", "localhost"},
-		[]string{"manager.example.org"},
+		[]string{"manager.example.com", "localhost"},
+		[]string{"manager.example.com"},
 		false,
 	))()
 
@@ -66,13 +66,13 @@ func TestTheBindAddressIsOfferedWhenNothingElseIs(t *testing.T) {
 	t.Parallel()
 
 	got := localSignInURL(configFor(t,
-		"203.0.113.12:8443",
-		[]string{"manager.example.org"},
-		[]string{"manager.example.org"},
+		"192.168.1.30:8443",
+		[]string{"manager.example.com"},
+		[]string{"manager.example.com"},
 		false,
 	))()
 
-	if got != "https://203.0.113.12:8443" {
+	if got != "https://192.168.1.30:8443" {
 		t.Errorf("local address = %q, want the address this process binds", got)
 	}
 }
@@ -84,8 +84,8 @@ func TestNothingIsOfferedWhenEveryAddressIsSSOOnly(t *testing.T) {
 
 	got := localSignInURL(configFor(t,
 		"0.0.0.0:8443",
-		[]string{"manager.example.org"},
-		[]string{"manager.example.org", "0.0.0.0"},
+		[]string{"manager.example.com"},
+		[]string{"manager.example.com", "0.0.0.0"},
 		false,
 	))()
 
@@ -99,9 +99,9 @@ func TestTheSchemeFollowsTheServerRatherThanBeingAssumed(t *testing.T) {
 	t.Parallel()
 
 	got := localSignInURL(configFor(t,
-		"203.0.113.12:8080",
-		[]string{"manager.example.org", "srv.lan"},
-		[]string{"manager.example.org"},
+		"192.168.1.30:8080",
+		[]string{"manager.example.com", "srv.lan"},
+		[]string{"manager.example.com"},
 		true,
 	))()
 
@@ -116,9 +116,9 @@ func TestTheDefaultPortIsLeftOut(t *testing.T) {
 	t.Parallel()
 
 	got := localSignInURL(configFor(t,
-		"203.0.113.12:443",
-		[]string{"manager.example.org", "srv.lan"},
-		[]string{"manager.example.org"},
+		"192.168.1.30:443",
+		[]string{"manager.example.com", "srv.lan"},
+		[]string{"manager.example.com"},
 		false,
 	))()
 

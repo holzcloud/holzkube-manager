@@ -725,8 +725,8 @@ func TestAMachineWithNoClusterIsNotDown(t *testing.T) {
 }
 
 // TestFingerprintOnThisManagersOwnAddressSaysSo is the guard for the operator's
-// import form: they typed 203.0.113.12, the Pi holzkube-manager runs on, where
-// the node is 203.0.113.10. The answer was "the node is unreachable", which is
+// import form: they typed 192.168.1.30, the Pi holzkube-manager runs on, where
+// the node is 192.168.1.110. The answer was "the node is unreachable", which is
 // true and sends a person to check a node that was never asked.
 //
 // Loopback stands in for the Pi's LAN address: both are addresses of the
