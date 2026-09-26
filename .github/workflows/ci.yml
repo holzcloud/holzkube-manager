@@ -259,11 +259,24 @@ jobs:
           git tag -a "$TAG" -F /tmp/tag-message
           git push origin "refs/tags/$TAG"
 
+      # The release page carries the changelog entry, the same words the app's
+      # "What's new" panel shows, rather than goreleaser's commit list. Both
+      # paths reach here with an annotated tag at HEAD; its message is the
+      # dispatch input's notes, or whatever the tag was pushed with.
+      - name: Write the release notes from the changelog
+        env:
+          TAG: ${{ inputs.tag != '' && inputs.tag || github.ref_name }}
+        run: |
+          set -euo pipefail
+          git tag -l --format='%(contents)' "$TAG" > /tmp/tag-annotation
+          python3 .github/release-notes.py "$TAG" /tmp/tag-annotation > /tmp/release-notes.md
+          cat /tmp/release-notes.md
+
       - uses: goreleaser/goreleaser-action@v6
         with:
           distribution: goreleaser
           version: v2.18.0
-          args: release --clean
+          args: release --clean --release-notes=/tmp/release-notes.md
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 

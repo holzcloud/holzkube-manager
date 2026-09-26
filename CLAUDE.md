@@ -33,6 +33,24 @@ cluster, and on 2026-09-26 had to be cut out of the whole history, with every
 tag moved. `internal/publicrepo` now fails the gate on the known values; it
 lists them as hashes, so a new one gets added there as a hash too.
 
+## A feature is not done until the README says so; a release is not done without its changelog
+
+The operator's standing rule, 2026-09-26.
+
+**Every new feature updates the README in the same change.** The README is the
+short tour a public repository opens on: the "What it does" list, and a
+screenshot in "A look around" when the feature is a screen of its own. Depth
+goes into `docs/guide.md`, not the README. Screenshots are rendered, never
+taken from the real cluster: add the screen's data to `web/fixtures/demo.json`
+and run `task build && node web/scripts/readme-images.mjs`.
+
+**Every release carries its changelog.** The entry in
+`internal/changelog/changelog.json` -- newest first, written for the operator,
+not a commit list -- is what the app's "What's new" panel shows and, through
+`.github/release-notes.py`, what the GitHub release page shows. The release job
+refuses a tag without one, and `verify-release.py` fails a published release
+whose page does not carry it.
+
 ## What that means for verification
 
 **Where a session runs decides what it can check, so say which one it was.**
