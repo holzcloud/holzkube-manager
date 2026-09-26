@@ -151,6 +151,14 @@ const (
 	// tighter than either, because a management screen is not where long work
 	// belongs.
 	kubeExecCall callClass = "kube-exec"
+
+	// The fourth, added with the apps screen: every node's kubelet summary,
+	// read through the API server's node proxy concurrently and under ONE
+	// shared deadline. It is one call in a row for that reason -- however many
+	// nodes there are, the reads together cannot take longer than this -- and
+	// it is its own constant because behind it is a kubelet, and a powered-off
+	// node is the ordinary state of a homelab rather than an exception.
+	kubeSummaryCall callClass = "kube-summary"
 )
 
 // upstreamCall is one call a route makes in series: what it is, and which
@@ -183,6 +191,8 @@ func (u upstreamCall) budget() (time.Duration, bool) {
 		return kube.ProxyBudget, true
 	case kubeExecCall:
 		return kube.ExecBudget, true
+	case kubeSummaryCall:
+		return kube.SummaryBudget, true
 	default:
 		return 0, false
 	}
@@ -243,6 +253,24 @@ func accessReviewCalls() []upstreamCall {
 		})
 	}
 	return calls
+}
+
+// appsCalls is what the apps list does, in the order it does it. The detail
+// route makes the same calls and two more.
+func appsCalls() []upstreamCall {
+	return []upstreamCall{
+		{name: "NewClusterClient: Version (finding a control-plane node)", class: nodeProbeCall},
+		{name: "COSI Get: the machine configuration, for the API server's address", class: nodeFastReadCall},
+		{name: "Kubernetes: list replicasets (which Deployment owns them)", class: kubeCall},
+		{name: "Kubernetes: list jobs (which CronJob owns them)", class: kubeCall},
+		{name: "Kubernetes: list deployments", class: kubeCall},
+		{name: "Kubernetes: list statefulsets", class: kubeCall},
+		{name: "Kubernetes: list daemonsets", class: kubeCall},
+		{name: "Kubernetes: list cronjobs", class: kubeCall},
+		{name: "Kubernetes: list pods", class: kubeCall},
+		{name: "Kubernetes: every node's kubelet summary, concurrently, under one deadline", class: kubeSummaryCall},
+		{name: "Kubernetes: pod metrics (only when every kubelet failed)", class: kubeCall},
+	}
 }
 
 // sweepCalls is one delete per item a sweep may carry.
@@ -1183,6 +1211,38 @@ var routeBudgets = []routeBudget{
 		why: "Through the aggregation layer, so a cluster with no metrics-server answers 404 on " +
 			"the whole group -- which this route reports as 'nobody is collecting this' rather " +
 			"than as zeroes or as the cluster being unreachable.",
+	},
+	{
+		route:         "GET /api/v1/clusters/{id}/kubernetes/apps",
+		calls:         appsCalls(),
+		routeDeadline: handlers.KubernetesRouteBudget,
+		verdict:       knownOverBudget,
+		clipping:      clipped,
+		deferredTo:    "as above for the two Talos calls.",
+		clippingRationale: "Seven list calls against a cluster that answers, then the kubelets " +
+			"under a shared ten-second ceiling of their own -- which is what keeps a dead node " +
+			"from spending the route's budget. The metrics fallback is made only when every " +
+			"kubelet failed, and answers 404 at once on a cluster without metrics-server.",
+		why: "The controllers are listed BEFORE the pods, so that every pod's ReplicaSet or Job is " +
+			"already known when the pod is read. The usage is read from each node's kubelet " +
+			"through the API server's proxy, because Talos ships no metrics-server and every " +
+			"kubelet measures anyway; only the nodes the listed pods run on are asked.",
+	},
+	{
+		route: "GET /api/v1/clusters/{id}/kubernetes/apps/{namespace}/{kind}/{name}",
+		calls: append(appsCalls(),
+			upstreamCall{name: "Kubernetes: list services (which select its pods)", class: kubeCall},
+			upstreamCall{name: "Kubernetes: list events (about it, its ReplicaSets or Jobs, its pods)", class: kubeCall},
+		),
+		routeDeadline:     handlers.KubernetesRouteBudget,
+		verdict:           knownOverBudget,
+		clipping:          clipped,
+		deferredTo:        "as above for the two Talos calls.",
+		clippingRationale: "the list route's reads, narrowed to one namespace, and two more lists.",
+		why: "The app is computed exactly as the list computes it, so the page and the row that " +
+			"was clicked cannot disagree -- which costs the same seven lists rather than a get. " +
+			"Only the nodes this app's pods run on are asked for usage. The events are one " +
+			"namespace list filtered here, not one field-selected question per pod.",
 	},
 	{
 		route: "POST /api/v1/clusters/{id}/kubernetes/pods/{namespace}/{pod}/exec",

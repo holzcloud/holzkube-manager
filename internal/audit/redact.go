@@ -413,6 +413,12 @@ var allowlist = map[string][]string{
 	// own measurement rather than anything this installation holds.
 	"cluster.kubernetes-usage": {},
 
+	// What runs and what it uses, as apps (2026-09-26). Two reads; the
+	// namespace and node filters are in the query and the app is in the path,
+	// which the archive records, so there is no body to carry.
+	"cluster.kubernetes-apps": {},
+	"cluster.kubernetes-app":  {},
+
 	// Running a command in a container. THE COMMAND IS THE EVENT and every
 	// argument is archived in clear -- which is only possible because a shell
 	// with a string is refused: "sh -lc" plus one opaque argument would be a

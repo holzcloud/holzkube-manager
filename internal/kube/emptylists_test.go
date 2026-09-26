@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/holzcloud/holzkube-manager/internal/kube"
 	"github.com/holzcloud/holzkube-manager/internal/kubesim"
 )
 
@@ -80,6 +81,10 @@ func TestNoAnswerContainsANullList(t *testing.T) {
 			return client.PlanSweep(ctx, "", time.Now())
 		},
 		"events": func() (any, error) { return client.Events(ctx, "") },
+		// The apps' own nulls -- an app with no node, no image, a detail with
+		// no pods -- need something in the cluster to appear at all, and are
+		// in TestNoAppsAnswerContainsANull. This is the list itself, empty.
+		"apps": func() (any, error) { return client.Apps(ctx, kube.AppsQuery{}, time.Now()) },
 	}
 
 	for name, answer := range answers {
