@@ -1,0 +1,69 @@
+# One-off, 2026-09-26: delete every release and every tag, so the product can
+# start again at v0.0.1 as declared alpha software. The operator's decision.
+#
+# It exists as a workflow because an agent session cannot delete a ref (403)
+# and the Actions token can. It is removed again in the commit after the run;
+# if it is still here, the reset has not been cleaned up.
+#
+# Destructive and not undoable, so it refuses to run without the exact
+# confirmation string and anywhere but main.
+
+name: Reset releases (one-off)
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Type delete-every-release to delete all releases and tags'
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  reset:
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' && inputs.confirm == 'delete-every-release'
+    steps:
+      - name: Delete every release, with its tag
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          gh release list --repo "$REPO" --limit 1000 --json tagName -q '.[].tagName' > releases.txt
+          echo "releases: $(wc -l < releases.txt)"
+          while read -r tag; do
+            gh release delete "$tag" --repo "$REPO" --yes --cleanup-tag
+            echo "deleted release $tag"
+          done < releases.txt
+
+      - name: Delete every tag that is left
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          gh api --paginate "repos/$REPO/git/matching-refs/tags" -q '.[].ref' > tags.txt
+          echo "tags left: $(wc -l < tags.txt)"
+          while read -r ref; do
+            gh api -X DELETE "repos/$REPO/git/$ref"
+            echo "deleted $ref"
+          done < tags.txt
+
+      - name: Delete the branch that carried the rewritten tags
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: gh api -X DELETE "repos/$REPO/git/refs/heads/history-rewrite" || echo "already gone"
+
+      - name: Nothing is left
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          releases=$(gh release list --repo "$REPO" --limit 1000 --json tagName -q 'length')
+          tags=$(gh api "repos/$REPO/git/matching-refs/tags" -q 'length')
+          echo "releases: $releases, tags: $tags"
+          [ "$releases" = 0 ] && [ "$tags" = 0 ]
