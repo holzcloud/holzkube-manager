@@ -7,7 +7,7 @@ came apart once already: the script picked the first asset whose name ended in
 `linux_<arch>.tar.gz`, and the release began carrying two of those the moment
 holzkubectl got an archive of its own.
 
-So this asks the API for the release that now exists and checks the four things
+So this asks the API for the release that now exists and checks the things
 the update path depends on. Every one of them can be false while goreleaser is
 green, which is the only reason to check them at all:
 
@@ -21,6 +21,7 @@ green, which is the only reason to check them at all:
   - not a draft and not a prerelease, because /releases/latest skips both and a
     release nothing can see is not a release. This is the failure that looks
     like success from every angle except the host that needed it.
+  - the notes are the changelog entry and not goreleaser's commit list.
 
 Usage: verify-release.py <repo> <tag>   (GITHUB_TOKEN in the environment)
 """
@@ -109,6 +110,15 @@ def main() -> int:
     if mismatched:
         problems.append(
             f"daemon archives that do not carry version {version}: {', '.join(mismatched)}"
+        )
+
+    # The notes are the changelog entry (release-notes.py). A page without its
+    # heading means goreleaser was not handed them and fell back to the commit
+    # list -- the release exists and says nothing an operator can read.
+    if f"## What's new in {tag}" not in (release.get("body") or ""):
+        problems.append(
+            f"the release notes do not carry the changelog entry for {tag}; "
+            f"the page shows something other than .github/release-notes.py's output"
         )
 
     print(f"release {tag}: {len(names)} assets")
