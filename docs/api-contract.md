@@ -1548,6 +1548,8 @@ sense D-06 means:
 | `POST /api/v1/clusters/{id}/kubernetes/delete` | takes `{"api_version","kind","namespace","name"}` and removes that one object |
 | `GET /api/v1/clusters/{id}/kubernetes/nodes/{node}` | one node's conditions, taints, and how much room the scheduler has left |
 | `GET /api/v1/clusters/{id}/kubernetes/usage` | what nodes and pods are USING, from metrics-server |
+| `GET /api/v1/clusters/{id}/kubernetes/apps` | `?namespace=&node=` — every app (its top-level controller) with what it uses now, read from the kubelets |
+| `GET /api/v1/clusters/{id}/kubernetes/apps/{namespace}/{kind}/{name}` | one app: its pods and containers, the Services that select it, and its events |
 | `POST /api/v1/clusters/{id}/kubernetes/pods/{namespace}/{pod}/exec` | takes `{"container": "...", "command": ["prog","arg"]}` and runs it once |
 
 **Running a command in a container is the most dangerous thing here, and four
@@ -2217,6 +2219,81 @@ room for it.
 third level of the same question: which pod took the space. Init containers
 contribute their **maximum** rather than their sum, because they run one at a
 time — summing them overstates every pod that has more than one.
+
+## What runs, and what it is using
+
+    GET /api/v1/clusters/{id}/kubernetes/apps[?namespace=][&node=]
+
+    {"collected_at":"2026-09-26T10:00:00Z","usage_available":true,"notice":"",
+     "apps":[{"namespace":"media","kind":"Deployment","name":"jellyfin",
+              "pods":2,"ready":2,"restarts":0,"nodes":["w-1","w-2"],
+              "cpu_millis":123,"memory_bytes":104857600,
+              "cpu_request_millis":100,"cpu_limit_millis":0,
+              "memory_request_bytes":0,"memory_limit_bytes":0,
+              "usage_known":true,"images":["jellyfin/jellyfin:10.9"]}]}
+
+    GET /api/v1/clusters/{id}/kubernetes/apps/{namespace}/{kind}/{name}
+
+    {"collected_at":"…","usage_available":true,"notice":"",
+     "app":{…the same object as in the list…},
+     "created_at":"…",
+     "pods":[{"name":"jellyfin-7d9c-abcde","node":"w-1","phase":"Running",
+              "ready":"1/1","restarts":0,"started_at":"…","ip":"10.244.1.7",
+              "cpu_millis":60,"memory_bytes":52428800,"usage_known":true,
+              "containers":[{"name":"jellyfin","image":"…","state":"running",
+                             "restarts":0,"cpu_millis":60,"memory_bytes":52428800,
+                             "usage_known":true,"cpu_request_millis":100,
+                             "cpu_limit_millis":0,"memory_request_bytes":0,
+                             "memory_limit_bytes":0}]}],
+     "services":[{"name":"jellyfin","type":"ClusterIP","cluster_ip":"10.96.0.10",
+                  "ports":["8096/TCP"]}],
+     "events":[{"type":"Warning","reason":"BackOff","message":"…","object":"Pod/jellyfin-7d9c-abcde",
+                "count":3,"first_seen":"…","last_seen":"…"}]}
+
+**An app is the top-level controller**, with its pods folded in: a Deployment
+through its ReplicaSets, a CronJob through its Jobs, a StatefulSet, a DaemonSet,
+a Job nothing schedules, and a pod nothing owns — kind `Pod`, under its own name.
+The Talos control plane is static pods whose controller reference is the Node;
+they are listed as `Pod`s, as what they are. Ownership is followed through
+`apps/v1` and `batch/v1` only: a pod whose controller is anything else — an
+operator's own kind, a ReplicaSet no Deployment manages, a `StatefulSet` of
+another group — is listed as a `Pod` too, so `kind` is always one of the six.
+
+**The numbers are read live from each node's kubelet**, through the API server's
+node proxy (`/api/v1/nodes/{node}/proxy/stats/summary`), because Talos ships no
+metrics-server and every kubelet measures anyway. `cpu_millis` is rounded up the
+way `kubectl top` rounds it; `memory_bytes` is the working set, which is what the
+kubelet evicts on. Only the nodes the listed pods run on are asked, concurrently,
+under one ten-second deadline shared by all of them.
+
+**Unknown is not zero.** `usage_known` is false for an app none of whose pods has
+a figure — its node did not answer, or its kubelet has not measured it yet — and
+its `cpu_millis` then says nothing. A node whose kubelet did not answer is named
+in `notice`, and the other nodes' numbers are still live. When **no** kubelet
+answers, the figures come from metrics.k8s.io instead and `notice` says so (per
+pod only: containers are then `usage_known:false`). When that is missing too,
+`usage_available` is false and `notice` says nobody is measuring — a different
+sentence from "these apps use nothing".
+
+**Finished pods are history, not load.** `Succeeded` and `Failed` pods are left
+out of every count and sum; a CronJob between runs is still listed, with
+`pods:0` and the images its template would run. Requests and limits are summed
+over the running containers, native sidecars included; `0` means unset.
+
+**`node` narrows both membership and the numbers**: only apps with a pod on that
+node, counted over those pods only — the node page's question is what runs
+*here* and what it uses *here*. Sorted by `cpu_millis`, heaviest first, then by
+namespace and name. Every list is an array, never null.
+
+**The detail computes the app exactly as the list does**, so the page and the row
+that was clicked cannot disagree. `services` are the Services in the namespace
+whose selector matches one of the app's pods (an empty selector matches nothing);
+`ports` are written the way the network screen writes them — `8096/TCP`, with the
+port's name, target port and node port when there are any. `events` are the
+newest thirty about the app, its ReplicaSets or Jobs, and its pods — finished
+pods included, because a Job's failure is told in the events of the pod that
+failed. An app that is not there, or a kind that is not one, is `404
+notfound.kubernetes-workload`; the kind is matched without regard to case.
 
 ## Stopping and starting a workload
 

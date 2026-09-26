@@ -346,6 +346,33 @@ func KubernetesRoutes(d httpapi.Deps) []httpapi.Route {
 			Handler:         handler(kubernetesUsage(d)),
 		},
 		{
+			Method:  http.MethodGet,
+			Pattern: "/api/v1/clusters/{id}/kubernetes/apps",
+
+			// Reader, like the usage route whose numbers it carries: it is the
+			// workload list, the pod list and the usage put side by side, and
+			// somebody who may see each of them may see them together. The
+			// filters are in the query and name nothing sensitive.
+			RequiresSession: true,
+			MinRole:         model.RoleReader,
+			Action:          "cluster.kubernetes-apps",
+			Handler:         handler(kubernetesApps(d)),
+		},
+		{
+			Method:  http.MethodGet,
+			Pattern: "/api/v1/clusters/{id}/kubernetes/apps/{namespace}/{kind}/{name}",
+
+			// Reader too. It shows a pod's IP and the Services in front of it,
+			// which the network screen already shows a reader, and the events,
+			// which the events screen does. Nothing here is a value out of a
+			// ConfigMap or an environment variable: that is the object view,
+			// and the object view is an operator's.
+			RequiresSession: true,
+			MinRole:         model.RoleReader,
+			Action:          "cluster.kubernetes-app",
+			Handler:         handler(kubernetesApp(d)),
+		},
+		{
 			Method:  http.MethodPost,
 			Pattern: "/api/v1/clusters/{id}/kubernetes/pods/{namespace}/{pod}/exec",
 
@@ -794,6 +821,57 @@ func kubernetesUsage(d httpapi.Deps) http.HandlerFunc {
 			Notice: "This is what they are using. What the scheduler reserves is what they " +
 				"REQUESTED, which is on the node detail and is a different number.",
 		})
+	}
+}
+
+// kubernetesApps answers what runs, grouped by what somebody installed, with
+// what each of them is using now.
+//
+// 200 whatever the usage turned out to be. A kubelet that did not answer, or a
+// cluster where nothing measures at all, is carried in usage_available and the
+// notice rather than as an error: the list of what runs is true without the
+// numbers, and a 502 would say the cluster is unreachable when only one of its
+// nodes is.
+func kubernetesApps(d httpapi.Deps) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		client, ctx, cancel, ok := kubeClientFor(d, w, r)
+		if !ok {
+			return
+		}
+		defer cancel()
+
+		apps, err := client.Apps(ctx, kube.AppsQuery{
+			Namespace: r.URL.Query().Get("namespace"),
+			Node:      r.URL.Query().Get("node"),
+		}, time.Now())
+		if err != nil {
+			writeKubernetesError(w, r, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, apps)
+	}
+}
+
+// kubernetesApp answers one app, down to its containers.
+//
+// An app that does not exist is a 404 through kube.ErrNoSuchWorkload, the same
+// answer every other named-object route gives -- including for a kind that is
+// not one, because "there is no Frobnicator called web" is the same fact.
+func kubernetesApp(d httpapi.Deps) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		client, ctx, cancel, ok := kubeClientFor(d, w, r)
+		if !ok {
+			return
+		}
+		defer cancel()
+
+		detail, err := client.AppDetail(ctx, r.PathValue("namespace"), r.PathValue("kind"),
+			r.PathValue("name"), time.Now())
+		if err != nil {
+			writeKubernetesError(w, r, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, detail)
 	}
 }
 
