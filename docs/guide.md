@@ -382,7 +382,7 @@ and the API can wipe a machine, so putting it on a LAN address is a deliberate
 act.
 
 ```sh
-docker compose up -d
+docker compose up -d --build
 ```
 
 Scratch rather than alpine or distroless: the binary is static and embeds its
