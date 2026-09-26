@@ -1211,6 +1211,109 @@ export const machineSchema = z.object({
 
 export type Machine = z.infer<typeof machineSchema>
 
+/**
+ * One node's hardware, read live from the node at request time (2026-09-26).
+ *
+ * Nothing here is stored. Percentages and rates are the difference between two
+ * readings of the node's own counters, and `rates_over_seconds` says how far
+ * apart those readings were. A sensor the node does not report is absent rather
+ * than zero: a missing fan and a stopped fan are different findings.
+ */
+const nullableNumber = z
+  .number()
+  .nullish()
+  .transform((v) => v ?? null)
+
+export const hardwareSchema = z.object({
+  machine: z.string(),
+  hostname: z.string().default(''),
+  observed_at: z.string(),
+  uptime_seconds: z.number().default(0),
+  rates_over_seconds: z.number().default(0),
+  cpu: z.object({
+    model: z.string().default(''),
+    cores: z.number().default(0),
+    threads: z.number().default(0),
+    usage_percent: z.number().default(0),
+    iowait_percent: z.number().default(0),
+    per_core: z.array(z.number()).nullish().transform(orEmpty),
+    load1: z.number().default(0),
+    load5: z.number().default(0),
+    load15: z.number().default(0),
+  }),
+  memory: z.object({
+    total_bytes: z.number().default(0),
+    used_bytes: z.number().default(0),
+    cache_bytes: z.number().default(0),
+    available_bytes: z.number().default(0),
+    swap_total_bytes: z.number().default(0),
+    swap_used_bytes: z.number().default(0),
+  }),
+  filesystems: z
+    .array(
+      z.object({
+        mount: z.string(),
+        device: z.string().default(''),
+        size_bytes: z.number().default(0),
+        used_bytes: z.number().default(0),
+      }),
+    )
+    .nullish()
+    .transform(orEmpty),
+  disks: z
+    .array(
+      z.object({
+        name: z.string(),
+        model: z.string().default(''),
+        size_bytes: z.number().default(0),
+        read_bytes_per_sec: z.number().default(0),
+        write_bytes_per_sec: z.number().default(0),
+        temperature_c: nullableNumber,
+      }),
+    )
+    .nullish()
+    .transform(orEmpty),
+  network: z
+    .array(
+      z.object({
+        name: z.string(),
+        up: z.boolean().default(false),
+        speed_mbit: z.number().default(0),
+        rx_bytes_per_sec: z.number().default(0),
+        tx_bytes_per_sec: z.number().default(0),
+      }),
+    )
+    .nullish()
+    .transform(orEmpty),
+  temperatures: z
+    .array(
+      z.object({
+        chip: z.string().default(''),
+        kind: z.string().default('other'),
+        label: z.string().default(''),
+        celsius: z.number(),
+        high_c: nullableNumber,
+        critical_c: nullableNumber,
+      }),
+    )
+    .nullish()
+    .transform(orEmpty),
+  fans: z
+    .array(
+      z.object({
+        chip: z.string().default(''),
+        label: z.string().default(''),
+        rpm: z.number().default(0),
+      }),
+    )
+    .nullish()
+    .transform(orEmpty),
+  sensors_notice: z.string().default(''),
+})
+
+export type Hardware = z.infer<typeof hardwareSchema>
+export type Temperature = Hardware['temperatures'][number]
+
 export const clusterSchema = z.object({
   id: z.string(),
   name: z.string(),
@@ -1699,6 +1802,67 @@ export const acceptedJobSchema = z.object({
 })
 
 export type AcceptedJob = z.infer<typeof acceptedJobSchema>
+
+/**
+ * The seven things that can be done to a cluster, a node or an app's power
+ * (2026-09-26): one vocabulary for all three, so the menu reads the same
+ * wherever it appears. The server says which are possible now and, for each
+ * that is not, why -- the screen never guesses.
+ */
+export const powerActions = [
+  'stop',
+  'force-stop',
+  'start',
+  'disable',
+  'enable',
+  'restart',
+  'force-restart',
+] as const
+
+export type PowerAction = (typeof powerActions)[number]
+
+export const powerSchema = z.object({
+  state: z.string().default('unknown'),
+  disabled: z.boolean().default(false),
+  actions: z
+    .array(
+      z.object({
+        action: z.string(),
+        available: z.boolean().default(false),
+        reason: z.string().default(''),
+        sudo: z.boolean().default(false),
+      }),
+    )
+    .nullish()
+    .transform(orEmpty),
+})
+
+export type Power = z.infer<typeof powerSchema>
+
+/** A node or cluster action is a job; an app action is done when it answers. */
+export const powerResultSchema = z.union([
+  acceptedJobSchema,
+  z.object({ message: z.string().default('') }),
+])
+
+export type PowerResult = z.infer<typeof powerResultSchema>
+
+export type PowerTarget =
+  | { kind: 'cluster'; cluster: string; name: string }
+  | { kind: 'node'; machine: string; name: string }
+  | { kind: 'app'; cluster: string; namespace: string; appKind: string; name: string }
+
+export function powerPath(target: PowerTarget): string {
+  const e = encodeURIComponent
+  switch (target.kind) {
+    case 'cluster':
+      return `/api/v1/clusters/${e(target.cluster)}/power`
+    case 'node':
+      return `/api/v1/machines/${e(target.machine)}/power`
+    case 'app':
+      return `/api/v1/clusters/${e(target.cluster)}/kubernetes/apps/${e(target.namespace)}/${e(target.appKind)}/${e(target.name)}/power`
+  }
+}
 
 /**
  * What rotating a cluster's Talos certificate authority would do.
@@ -2403,6 +2567,106 @@ export type ClusterCapacity = z.infer<typeof clusterCapacitySchema>
 export type NodeCapacity = z.infer<typeof nodeCapacitySchema>
 export type Sweepable = z.infer<typeof sweepableSchema>
 export type ClusterUsage = z.infer<typeof clusterUsageSchema>
+
+/**
+ * An app is what somebody deployed -- a Deployment, StatefulSet, DaemonSet,
+ * CronJob, Job, or a pod nothing owns -- with what its pods are using right now,
+ * read from each node's kubelet (2026-09-26). `usage_known` false is "nobody
+ * could say", which is not the same as zero.
+ */
+export const appSchema = z.object({
+  namespace: z.string(),
+  kind: z.string(),
+  name: z.string(),
+  pods: z.number().default(0),
+  ready: z.number().default(0),
+  restarts: z.number().default(0),
+  nodes: z.array(z.string()).nullish().transform(orEmpty),
+  cpu_millis: z.number().default(0),
+  memory_bytes: z.number().default(0),
+  cpu_request_millis: z.number().default(0),
+  cpu_limit_millis: z.number().default(0),
+  memory_request_bytes: z.number().default(0),
+  memory_limit_bytes: z.number().default(0),
+  usage_known: z.boolean().default(false),
+  images: z.array(z.string()).nullish().transform(orEmpty),
+})
+
+export type App = z.infer<typeof appSchema>
+
+export const appsSchema = z.object({
+  collected_at: z.string().default(''),
+  usage_available: z.boolean().default(false),
+  notice: z.string().default(''),
+  apps: z.array(appSchema).nullish().transform(orEmpty),
+})
+
+export type Apps = z.infer<typeof appsSchema>
+
+const appContainerSchema = z.object({
+  name: z.string(),
+  image: z.string().default(''),
+  state: z.string().default(''),
+  restarts: z.number().default(0),
+  cpu_millis: z.number().default(0),
+  memory_bytes: z.number().default(0),
+  usage_known: z.boolean().default(false),
+  cpu_request_millis: z.number().default(0),
+  cpu_limit_millis: z.number().default(0),
+  memory_request_bytes: z.number().default(0),
+  memory_limit_bytes: z.number().default(0),
+})
+
+export const appPodSchema = z.object({
+  name: z.string(),
+  node: z.string().default(''),
+  phase: z.string().default(''),
+  ready: z.string().default(''),
+  restarts: z.number().default(0),
+  started_at: z.string().default(''),
+  ip: z.string().default(''),
+  cpu_millis: z.number().default(0),
+  memory_bytes: z.number().default(0),
+  usage_known: z.boolean().default(false),
+  containers: z.array(appContainerSchema).nullish().transform(orEmpty),
+})
+
+export type AppPod = z.infer<typeof appPodSchema>
+
+export const appDetailSchema = z.object({
+  collected_at: z.string().default(''),
+  usage_available: z.boolean().default(false),
+  notice: z.string().default(''),
+  app: appSchema,
+  created_at: z.string().default(''),
+  pods: z.array(appPodSchema).nullish().transform(orEmpty),
+  services: z
+    .array(
+      z.object({
+        name: z.string(),
+        type: z.string().default(''),
+        cluster_ip: z.string().default(''),
+        ports: z.array(z.string()).nullish().transform(orEmpty),
+      }),
+    )
+    .nullish()
+    .transform(orEmpty),
+  events: z
+    .array(
+      z.object({
+        type: z.string().default(''),
+        reason: z.string().default(''),
+        message: z.string().default(''),
+        last_seen: z.string().default(''),
+        count: z.number().default(0),
+        object: z.string().default(''),
+      }),
+    )
+    .nullish()
+    .transform(orEmpty),
+})
+
+export type AppDetail = z.infer<typeof appDetailSchema>
 export type NodeDetail = z.infer<typeof nodeDetailSchema>
 export type ClusterResource = z.infer<typeof clusterResourceSchema>
 export type Workload = z.infer<typeof workloadSchema>
@@ -2796,6 +3060,12 @@ export const api = {
     },
   },
 
+  power: {
+    get: (target: PowerTarget): Promise<Power> => sendJSON('GET', powerPath(target), powerSchema),
+    run: (target: PowerTarget, action: PowerAction): Promise<PowerResult> =>
+      sendJSON('POST', `${powerPath(target)}/${action}`, powerResultSchema),
+  },
+
   machines: {
     list: async (): Promise<Machine[]> =>
       (await sendJSON('GET', '/api/v1/machines', machinesSchema)).machines,
@@ -2810,6 +3080,12 @@ export const api = {
      * unreachable node comes back as a record whose fields are stale. */
     refresh: (id: string): Promise<Machine> =>
       sendJSON('POST', `/api/v1/machines/${encodeURIComponent(id)}/refresh`, machineSchema),
+
+    /** The node's hardware as it is now: load, temperatures, fans, memory,
+     * disks, network. Read from the node on every call; nothing is cached but
+     * the previous counters the rates are computed against. */
+    hardware: (id: string): Promise<Hardware> =>
+      sendJSON('GET', `/api/v1/machines/${encodeURIComponent(id)}/hardware`, hardwareSchema),
 
     forget: async (id: string): Promise<void> => {
       await send('DELETE', `/api/v1/machines/${encodeURIComponent(id)}`)
@@ -3406,6 +3682,29 @@ export const api = {
         'GET',
         `/api/v1/clusters/${encodeURIComponent(cluster)}/kubernetes/nodes/${encodeURIComponent(node)}`,
         nodeDetailSchema,
+      ),
+
+    /** Every app with what it uses now, optionally narrowed to one namespace
+     * or to the pods on one node. */
+    apps: (cluster: string, filter: { namespace?: string; node?: string } = {}) => {
+      const params = new URLSearchParams()
+      if (filter.namespace) params.set('namespace', filter.namespace)
+      if (filter.node) params.set('node', filter.node)
+      const query = params.toString()
+      return sendJSON(
+        'GET',
+        `/api/v1/clusters/${encodeURIComponent(cluster)}/kubernetes/apps${query ? `?${query}` : ''}`,
+        appsSchema,
+      )
+    },
+
+    /** One app: its pods and containers with their usage, the services that
+     * reach it, and what happened to it recently. */
+    app: (cluster: string, namespace: string, kind: string, name: string) =>
+      sendJSON(
+        'GET',
+        `/api/v1/clusters/${encodeURIComponent(cluster)}/kubernetes/apps/${encodeURIComponent(namespace)}/${encodeURIComponent(kind)}/${encodeURIComponent(name)}`,
+        appDetailSchema,
       ),
 
     /** What nodes and pods are USING — a different number from what they
