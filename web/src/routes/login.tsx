@@ -2,6 +2,7 @@ import { useQueryClient } from '@tanstack/react-query'
 import { createRoute, useNavigate } from '@tanstack/react-router'
 import { type FormEvent, useEffect, useState } from 'react'
 import { api, oidcPath } from '@/api'
+import { AlphaNotice } from '@/components/Alpha'
 import { SourceNotice } from '@/components/SourceNotice'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -109,6 +110,7 @@ export function LoginPage() {
       <div className="flex flex-col items-center text-center">
         <img src="/favicon.svg" alt="" className="mb-2 size-12" />
         <span className="font-heading text-xl font-semibold tracking-tight">holzkube-manager</span>
+        <AlphaNotice className="mt-1 max-w-sm text-xs text-muted-foreground" />
       </div>
       <Card className="w-full max-w-md">
         <CardHeader>

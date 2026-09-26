@@ -51,6 +51,16 @@ not a commit list -- is what the app's "What's new" panel shows and, through
 refuses a tag without one, and `verify-release.py` fails a published release
 whose page does not carry it.
 
+## Alpha, and said so everywhere
+
+Since 2026-09-26 the product is declared **alpha**: under heavy development,
+with breaking changes possible in any release. That is said in the app (the
+badge and sentence in `web/src/components/Alpha.tsx`, on the shell, both
+unauthenticated screens and the wall), at the top of the README and the guide,
+and on every release page (`.github/release-notes.py`). It stays until the
+operator says otherwise. `holzkube-managerd --version` stays a bare version:
+the update script reads its last field.
+
 ## What that means for verification
 
 **Where a session runs decides what it can check, so say which one it was.**

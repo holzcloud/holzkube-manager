@@ -360,6 +360,7 @@ function Headline({ wall, stale, ageMs }: { wall: Wall; stale: boolean; ageMs: n
             : `as of ${readableAge(ageMs)} ago`}
         {' · '}
         {plural(wall.workloads.length, 'workload')}, {plural(wall.nodes.length, 'node')}
+        {' · holzkube-manager alpha'}
       </p>
     </div>
   )

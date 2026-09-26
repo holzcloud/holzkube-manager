@@ -3,6 +3,11 @@
 Everything about building, running and operating holzkube-manager, in depth.
 The [README](../README.md) is the short tour; this is the manual it points to.
 
+> [!WARNING]
+> **Alpha software, under heavy development.** Any release can change or break
+> features, the API, the command line and the data directory's format, without
+> a deprecation period. Back up the data directory before every update.
+
 ## Build
 
 One command produces both binaries:
