@@ -34,7 +34,7 @@ func newInventoryHarness(t *testing.T) *inventoryHarness {
 // options named. The cluster, the hostname and the control-plane role are the
 // harness's own and are filled in whatever opts says, because the adoption the
 // harness walks needs all three.
-func newInventoryHarnessWith(t *testing.T, opts talossim.Options) *inventoryHarness {
+func newInventoryHarnessWith(t *testing.T, opts talossim.Options, extra ...harnessOpt) *inventoryHarness {
 	t.Helper()
 
 	cl, err := talossim.NewCluster("homelab", "https://192.168.1.41:6443")
@@ -50,13 +50,13 @@ func newInventoryHarnessWith(t *testing.T, opts talossim.Options) *inventoryHarn
 	}
 	t.Cleanup(func() { _ = sim.Close() })
 
-	h := newHarness(t, withInventory(func(st *fsstore.Store) *inventory.Service {
+	h := newHarness(t, append([]harnessOpt{withInventory(func(st *fsstore.Store) *inventory.Service {
 		return inventory.New(inventory.Deps{
 			Store:  st,
 			Dialer: talos.NewDirectDialer(sim.Port()),
 			Logger: slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError})),
 		})
-	}))
+	})}, extra...)...)
 
 	resp, raw := h.do(t, http.MethodPost, "/api/v1/setup", map[string]string{
 		"username": testUser, "password": testPass,

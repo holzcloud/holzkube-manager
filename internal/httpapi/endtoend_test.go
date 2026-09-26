@@ -22,6 +22,7 @@ import (
 
 	"github.com/holzcloud/holzkube-manager/internal/audit"
 	"github.com/holzcloud/holzkube-manager/internal/auth"
+	"github.com/holzcloud/holzkube-manager/internal/history"
 	"github.com/holzcloud/holzkube-manager/internal/httpapi"
 	"github.com/holzcloud/holzkube-manager/internal/httpapi/handlers"
 	"github.com/holzcloud/holzkube-manager/internal/imagefactory"
@@ -57,6 +58,7 @@ type harness struct {
 	hub     *streamhub.Hub
 	streams *nodestream.Manager
 	jobs    *jobs.Engine
+	history *history.Store
 
 	// bootstrap is the etcd lease directory, shared by the provisioning
 	// service and the job steps. One per harness, for the reason the lease
@@ -81,6 +83,7 @@ type harnessConfig struct {
 	registerProvisionJob func(*jobs.Engine, *harness)
 	upgrade              func(*harness) *upgrade.Service
 	power                bool
+	history              bool
 	allowedHosts         []string
 	factoryBase          string
 	wrapStore            func(store.Store) store.Store
@@ -166,6 +169,12 @@ func withPower() harnessOpt {
 		c.jobs = true
 		c.streaming = true
 	}
+}
+
+// withHistory adds an in-memory metrics history and its routes. Nothing fills
+// it: a test records into h.history, or runs a sampler over h.inv itself.
+func withHistory() harnessOpt {
+	return func(c *harnessConfig) { c.history = true }
 }
 
 // withJobs adds the job engine, the confirmer and the node-action routes. It
@@ -399,6 +408,11 @@ func newHarness(t *testing.T, opts ...harnessOpt) *harness {
 		})
 	}
 
+	if cfg.history {
+		h2.history = history.NewMemory()
+		deps.History = h2.history
+	}
+
 	deps.Routes = slices.Concat(
 		handlers.SystemRoutes(deps),
 		handlers.MetricsRoutes(deps),
@@ -417,6 +431,7 @@ func newHarness(t *testing.T, opts ...harnessOpt) *harness {
 		handlers.AuthorityRoutes(deps),
 		handlers.KubernetesRoutes(deps),
 		handlers.PowerRoutes(deps),
+		handlers.HistoryRoutes(deps),
 	)
 
 	srv := httptest.NewTLSServer(httpapi.New(deps))
