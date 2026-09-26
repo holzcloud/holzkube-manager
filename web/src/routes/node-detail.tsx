@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { createRoute, Link, useNavigate } from '@tanstack/react-router'
-import { RefreshCw, Trash2 } from 'lucide-react'
+import { BookX, RefreshCw } from 'lucide-react'
 import { type ReactNode, useState } from 'react'
 import { api, type Field, type Machine } from '@/api'
 import { HealthField, StageBadge } from '@/components/HealthField'
@@ -117,7 +117,7 @@ export function NodeDetailPage() {
           <LastAnswered machine={m} />
         </div>
 
-        <div className="flex flex-wrap gap-2">
+        <div className="flex flex-wrap gap-2 max-md:w-full max-md:flex-nowrap max-md:justify-between">
           <PowerMenu
             target={{ kind: 'node', machine: m.id, name: m.hostname.value || m.id.slice(0, 8) }}
           />
@@ -125,10 +125,14 @@ export function NodeDetailPage() {
           <Button
             variant="outline"
             size="sm"
+            className="max-md:min-w-11"
             disabled={refresh.isPending}
             onClick={() => refresh.mutate()}
+            title="Refresh"
+            aria-label="Refresh"
           >
-            <RefreshCw aria-hidden="true" className="size-4" /> Refresh
+            <RefreshCw aria-hidden="true" className="size-4" />{' '}
+            <span className="max-md:sr-only">Refresh</span>
           </Button>
           {/*
             Destructive, so the server answers 428 and the shared interceptor
@@ -142,12 +146,14 @@ export function NodeDetailPage() {
           <Button
             variant="outline"
             size="sm"
-            className="text-destructive"
+            className="text-destructive max-md:min-w-11"
             disabled={forget.isPending}
             onClick={() => forget.mutate()}
-            title="Remove this record from the inventory. The machine itself is not touched."
+            title="Forget: remove this record from the inventory. The machine itself is not touched."
+            aria-label="Forget"
           >
-            <Trash2 aria-hidden="true" className="size-4" /> Forget
+            <BookX aria-hidden="true" className="size-4" />{' '}
+            <span className="max-md:sr-only">Forget</span>
           </Button>
         </div>
       </header>

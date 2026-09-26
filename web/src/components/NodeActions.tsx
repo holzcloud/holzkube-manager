@@ -1,6 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { AlertTriangle, Power, RotateCcw, Trash2, Unplug } from 'lucide-react'
-import type { ReactNode } from 'react'
+import { AlertTriangle, Eraser, Trash2, Unplug } from 'lucide-react'
 import { useState } from 'react'
 import { api, type Machine } from '@/api'
 import { Button } from '@/components/ui/button'
@@ -49,28 +48,18 @@ export function NodeActions({
   const [removeOpen, setRemoveOpen] = useState(false)
 
   return (
-    <div className="flex flex-wrap gap-2">
-      <SimpleAction
-        machine={machine}
-        kind="reboot"
-        label="Reboot"
-        icon={<RotateCcw aria-hidden="true" className="size-4" />}
-        description="The node reboots and comes back on its own. Workloads on it stop until it does."
-      />
-      <SimpleAction
-        machine={machine}
-        kind="shutdown"
-        label="Shut down"
-        icon={<Power aria-hidden="true" className="size-4" />}
-        description="The node powers off and does not come back until somebody turns it on."
-      />
+    <div className="flex gap-2 max-md:contents">
+      {/* Reboot and shut down live in the power menu since 2026-09-26, as
+          restart and stop -- two buttons for one act drifted apart once. */}
       <Button
         variant="outline"
         size="sm"
-        className="text-destructive"
+        className="text-destructive max-md:min-w-11"
         onClick={() => setResetOpen(true)}
+        title="Reset"
+        aria-label="Reset"
       >
-        <Trash2 aria-hidden="true" className="size-4" /> Reset
+        <Eraser aria-hidden="true" className="size-4" /> <span className="max-md:sr-only">Reset</span>
       </Button>
 
       {/*
@@ -83,10 +72,13 @@ export function NodeActions({
         <Button
           variant="outline"
           size="sm"
-          className="text-destructive"
+          className="text-destructive max-md:min-w-11"
           onClick={() => setRemoveOpen(true)}
+          title="Remove from cluster"
+          aria-label="Remove from cluster"
         >
-          <Unplug aria-hidden="true" className="size-4" /> Remove from cluster
+          <Unplug aria-hidden="true" className="size-4" />{' '}
+          <span className="max-md:sr-only">Remove from cluster</span>
         </Button>
       )}
 
@@ -249,73 +241,6 @@ function RemoveFromClusterDialog({
   )
 }
 
-/**
- * Reboot and shutdown: one confirmation, no typing.
- *
- * Asking somebody to type a hostname before every reboot is how they learn to
- * paste it without reading -- and then the typing means nothing on the one
- * screen where it matters.
- */
-function SimpleAction({
-  machine,
-  kind,
-  label,
-  icon,
-  description,
-}: {
-  machine: Machine
-  kind: 'reboot' | 'shutdown'
-  label: string
-  icon: ReactNode
-  description: string
-}) {
-  const queryClient = useQueryClient()
-  const [open, setOpen] = useState(false)
-  const [failure, setFailure] = useState('')
-
-  const run = useMutation({
-    mutationFn: async () => {
-      const { token } = await api.machines.confirm(machine.id, `node.${kind}`, {}, '')
-      return api.machines.action(machine.id, kind, token, {}, machine.cluster)
-    },
-    onSuccess: () => {
-      setOpen(false)
-      setFailure('')
-      void queryClient.invalidateQueries({ queryKey: ['jobs'] })
-    },
-    onError: (e: Error) => setFailure(e.message),
-  })
-
-  return (
-    <>
-      <Button variant="outline" size="sm" onClick={() => setOpen(true)}>
-        {icon} {label}
-      </Button>
-
-      <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>
-              {label} {machine.hostname.value || machine.id.slice(0, 8)}?
-            </DialogTitle>
-            <DialogDescription>{description}</DialogDescription>
-          </DialogHeader>
-
-          {failure !== '' && <p className="text-sm text-destructive">{failure}</p>}
-
-          <div className="flex justify-end gap-2">
-            <Button variant="ghost" onClick={() => setOpen(false)}>
-              Cancel
-            </Button>
-            <Button disabled={run.isPending} onClick={() => run.mutate()}>
-              {label}
-            </Button>
-          </div>
-        </DialogContent>
-      </Dialog>
-    </>
-  )
-}
 
 /**
  * The reset dialog (JOB-07).
