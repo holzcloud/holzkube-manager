@@ -156,3 +156,26 @@ func removeAndSync(path string) error {
 	}
 	return fsyncDir(filepath.Dir(path))
 }
+
+// WriteFileAtomic is writeAtomic for a file that is not a record: something
+// kept in the data directory beside the store rather than inside it, which
+// still has to survive a crash as either the old version or the new one.
+//
+// It is this function and not a copy of its sequence because the sequence is
+// the store's crash contract -- the temp prefix the startup sweep removes, the
+// modes Guard insists on, the two fsyncs -- and a second copy is a second place
+// for one of them to be forgotten. The metrics history (internal/history) is
+// its first caller: a file rewritten once a minute is the file most likely to
+// be mid-write when the power goes.
+func WriteFileAtomic(path string, data []byte) error {
+	return writeAtomic(path, data)
+}
+
+// ReadFile is WriteFileAtomic's other half: the one read of a file kept beside
+// the store. It is here rather than an os.ReadFile in the caller because the
+// data directory is reached through this package and nowhere else
+// (TestNoDirectFileAccessOutsideFsstore), and a file the store writes is a file
+// the store reads.
+func ReadFile(path string) ([]byte, error) {
+	return os.ReadFile(path) //nolint:gosec // a path inside the data directory, named by its owner
+}

@@ -20,6 +20,10 @@ import (
 // value would be a gauge that is wrong in exactly the moment somebody looks at
 // it because something is wrong. So it asks the node, every time.
 //
+// (Since 2026-09-26 internal/history's sampler calls Hardware every fifteen
+// seconds and keeps the answers for the charts. That is a caller of this read,
+// not a cache in front of it: the view still never answers from the past.)
+//
 // What it does remember is the one thing a gauge cannot do without: the
 // previous reading. A CPU percentage and a throughput are differences between
 // two counter readings, and the second request of an open panel already has
