@@ -8,7 +8,7 @@
     "the empty state passes the exact screen the operator photographed as broken.",
     "",
     "The values are deliberately LONG. A short hostname fits anywhere; what breaks",
-    "a phone layout is 'srv-rsp-prod01.holzcloud.ch', a pod called",
+    "a phone layout is 'srv-node-01.homelab.example', a pod called",
     "'coredns-7c65d6cfc9-x4m2p' and an image reference with a registry in front of",
     "it. Fixtures made of 'foo' and 'bar' would measure a layout nobody has.",
     "",
@@ -31,12 +31,12 @@
           "disk": "nvme"
         },
         "hostname": {
-          "value": "srv-rsp-prod01.holzcloud.ch",
+          "value": "srv-node-01.homelab.example",
           "level": "node",
           "available": true
         },
         "addr": {
-          "value": "192.168.0.30",
+          "value": "192.168.1.30",
           "level": "node",
           "available": true
         },
@@ -116,7 +116,7 @@
         "seen_at": "2026-09-19T09:58:00Z",
         "labels": {},
         "hostname": {
-          "value": "worker-02.holzcloud.ch",
+          "value": "worker-02.homelab.example",
           "level": "node",
           "available": true
         },
@@ -270,7 +270,7 @@
         "id": "c-homelab",
         "name": "homelab",
         "origin": "imported",
-        "endpoint": "https://192.168.0.30:6443",
+        "endpoint": "https://192.168.1.30:6443",
         "locked": false,
         "created_at": "2026-09-01T08:00:00Z",
         "client_cert_not_after": "2026-12-01T08:00:00Z",
@@ -483,18 +483,18 @@
     "namespaces": ["default", "kube-system", "longhorn-system"],
     "nodes": [
       {
-        "name": "srv-rsp-prod01.holzcloud.ch",
+        "name": "srv-node-01.homelab.example",
         "ready": "True",
         "unschedulable": false,
         "roles": ["control-plane"],
         "kubelet_version": "v1.36.4",
         "os_image": "Talos (v1.14.2)",
         "created_at": "2026-09-01T08:04:00Z",
-        "internal_address": "192.168.0.30",
+        "internal_address": "192.168.1.30",
         "container_runtime": "containerd://2.0.5"
       },
       {
-        "name": "worker-02.holzcloud.ch",
+        "name": "worker-02.homelab.example",
         "ready": "False",
         "unschedulable": true,
         "roles": [],
@@ -509,7 +509,7 @@
       {
         "namespace": "kube-system",
         "name": "coredns-7c65d6cfc9-x4m2p",
-        "node": "srv-rsp-prod01.holzcloud.ch",
+        "node": "srv-node-01.homelab.example",
         "phase": "Running",
         "ready": 1,
         "containers": 1,
@@ -524,7 +524,7 @@
       {
         "namespace": "longhorn-system",
         "name": "longhorn-manager-4kqwz",
-        "node": "worker-02.holzcloud.ch",
+        "node": "worker-02.homelab.example",
         "phase": "Running",
         "ready": 1,
         "containers": 2,
@@ -539,7 +539,7 @@
       {
         "namespace": "default",
         "name": "holzcloud-website-6d9f7b8c54-qn2vt",
-        "node": "srv-rsp-prod01.holzcloud.ch",
+        "node": "srv-node-01.homelab.example",
         "phase": "Running",
         "ready": 1,
         "containers": 1,
@@ -660,12 +660,12 @@
       "disk": "nvme"
     },
     "hostname": {
-      "value": "srv-rsp-prod01.holzcloud.ch",
+      "value": "srv-node-01.homelab.example",
       "level": "node",
       "available": true
     },
     "addr": {
-      "value": "192.168.0.30",
+      "value": "192.168.1.30",
       "level": "node",
       "available": true
     },
@@ -750,11 +750,11 @@
       "value": [
         {
           "name": "end0",
-          "hardware_addr": "2c:cf:67:1a:4b:9e",
+          "hardware_addr": "02:00:c0:a8:01:1e",
           "mtu": 1500,
           "up": true,
           "speed_mbit": 1000,
-          "addresses": ["192.168.0.30/24", "fe80::2ecf:67ff:fe1a:4b9e/64"],
+          "addresses": ["192.168.1.30/24", "fe80::2ecf:67ff:fe1a:4b9e/64"],
           "driver": "bcmgenet",
           "kind": ""
         },
@@ -982,7 +982,7 @@
         "namespace": "default",
         "name": "holzcloud-website",
         "summary": "no address yet — no controller has claimed it",
-        "detail": "holzcloud.ch, www.holzcloud.ch",
+        "detail": "example.com, www.example.com",
         "healthy": false,
         "created_at": "2026-09-17T18:22:00Z"
       },
@@ -1033,8 +1033,8 @@
       }
     ]
   },
-  "/api/v1/clusters/c-homelab/kubernetes/nodes/srv-rsp-prod01.holzcloud.ch": {
-    "name": "srv-rsp-prod01.holzcloud.ch",
+  "/api/v1/clusters/c-homelab/kubernetes/nodes/srv-node-01.homelab.example": {
+    "name": "srv-node-01.homelab.example",
     "conditions": [
       {
         "type": "MemoryPressure",
@@ -1084,7 +1084,7 @@
     "nodes": [
       {
         "namespace": "",
-        "name": "srv-rsp-prod01.holzcloud.ch",
+        "name": "srv-node-01.homelab.example",
         "cpu_millis": 1180,
         "memory_bytes": 3221225472,
         "cpu": "1180m",
@@ -1092,7 +1092,7 @@
       },
       {
         "namespace": "",
-        "name": "worker-02.holzcloud.ch",
+        "name": "worker-02.homelab.example",
         "cpu_millis": 240,
         "memory_bytes": 1073741824,
         "cpu": "240m",
@@ -1145,7 +1145,7 @@
     },
     "nodes": [
       {
-        "name": "srv-rsp-prod01.holzcloud.ch",
+        "name": "srv-node-01.homelab.example",
         "ready": true,
         "cordoned": false,
         "cpu": {
@@ -1166,7 +1166,7 @@
         "pods_running": 31
       },
       {
-        "name": "srv-rsp-prod02.holzcloud.ch",
+        "name": "srv-node-02.homelab.example",
         "ready": true,
         "cordoned": true,
         "cpu": {
@@ -1187,7 +1187,7 @@
         "pods_running": 43
       },
       {
-        "name": "srv-rsp-prod03.holzcloud.ch",
+        "name": "srv-node-03.homelab.example",
         "ready": false,
         "cordoned": false,
         "cpu": {
@@ -1416,7 +1416,7 @@
           {
             "kind": "User",
             "namespace": "",
-            "name": "holz@holzcloud.ch",
+            "name": "admin@example.com",
             "checkable": false,
             "exists": false
           }
@@ -1540,7 +1540,7 @@
         "created_at": "2026-06-14T21:10:00Z"
       }
     ],
-    "administrators": ["ServiceAccount ci/github-actions-deployer", "User holz@holzcloud.ch"],
+    "administrators": ["ServiceAccount ci/github-actions-deployer", "User admin@example.com"],
     "notice": "A binding that names a role or a service account which does not exist grants nothing, and looks exactly like one that works: RBAC has no referential integrity, deliberately, so that a binding may be written before its role. Administrative means wildcard verbs on wildcard resources, whatever the role is called -- looking for the name cluster-admin would miss every hand-written role with the same power."
   },
   "/api/v1/clusters/c-homelab/kubernetes/inventory": {
@@ -1659,21 +1659,21 @@
       {
         "kind": "Node",
         "namespace": "",
-        "name": "srv-rsp-prod02.holzcloud.ch",
+        "name": "srv-node-02.homelab.example",
         "state": "unknown",
         "detail": "not reporting"
       },
       {
         "kind": "Node",
         "namespace": "",
-        "name": "srv-rsp-prod03.holzcloud.ch",
+        "name": "srv-node-03.homelab.example",
         "state": "warn",
         "detail": "cordoned"
       },
       {
         "kind": "Node",
         "namespace": "",
-        "name": "srv-rsp-prod01.holzcloud.ch",
+        "name": "srv-node-01.homelab.example",
         "state": "ok",
         "detail": "ready"
       }
@@ -2710,7 +2710,7 @@
   },
   "/api/v1/machines/m-cp-1/hardware": {
     "machine": "m-cp-1",
-    "hostname": "srv-rsp-prod01.holzcloud.ch",
+    "hostname": "srv-node-01.homelab.example",
     "observed_at": "2026-09-26T10:00:00Z",
     "uptime_seconds": 1054800,
     "rates_over_seconds": 3.0,
@@ -2870,7 +2870,7 @@
         "pods": 1,
         "ready": 1,
         "restarts": 0,
-        "nodes": ["srv-rsp-prod01.holzcloud.ch"],
+        "nodes": ["srv-node-01.homelab.example"],
         "cpu_millis": 1450,
         "memory_bytes": 2040109465,
         "cpu_request_millis": 500,
@@ -2887,7 +2887,7 @@
         "pods": 1,
         "ready": 1,
         "restarts": 0,
-        "nodes": ["srv-rsp-prod01.holzcloud.ch"],
+        "nodes": ["srv-node-01.homelab.example"],
         "cpu_millis": 310,
         "memory_bytes": 1288490188,
         "cpu_request_millis": 200,
@@ -2904,7 +2904,7 @@
         "pods": 2,
         "ready": 2,
         "restarts": 1,
-        "nodes": ["srv-rsp-prod01.holzcloud.ch"],
+        "nodes": ["srv-node-01.homelab.example"],
         "cpu_millis": 180,
         "memory_bytes": 859832320,
         "cpu_request_millis": 100,
@@ -2921,7 +2921,7 @@
         "pods": 1,
         "ready": 1,
         "restarts": 0,
-        "nodes": ["srv-rsp-prod01.holzcloud.ch"],
+        "nodes": ["srv-node-01.homelab.example"],
         "cpu_millis": 120,
         "memory_bytes": 429916160,
         "cpu_request_millis": 0,
@@ -2938,7 +2938,7 @@
         "pods": 1,
         "ready": 1,
         "restarts": 0,
-        "nodes": ["srv-rsp-prod01.holzcloud.ch"],
+        "nodes": ["srv-node-01.homelab.example"],
         "cpu_millis": 95,
         "memory_bytes": 671088640,
         "cpu_request_millis": 500,
@@ -2955,7 +2955,7 @@
         "pods": 1,
         "ready": 0,
         "restarts": 14,
-        "nodes": ["srv-rsp-prod01.holzcloud.ch"],
+        "nodes": ["srv-node-01.homelab.example"],
         "cpu_millis": 4,
         "memory_bytes": 62914560,
         "cpu_request_millis": 0,
@@ -2972,7 +2972,7 @@
         "pods": 2,
         "ready": 2,
         "restarts": 0,
-        "nodes": ["srv-rsp-prod01.holzcloud.ch"],
+        "nodes": ["srv-node-01.homelab.example"],
         "cpu_millis": 12,
         "memory_bytes": 50331648,
         "cpu_request_millis": 200,
@@ -3012,7 +3012,7 @@
       "pods": 1,
       "ready": 1,
       "restarts": 0,
-      "nodes": ["srv-rsp-prod01.holzcloud.ch"],
+      "nodes": ["srv-node-01.homelab.example"],
       "cpu_millis": 1450,
       "memory_bytes": 2040109465,
       "cpu_request_millis": 500,
@@ -3026,7 +3026,7 @@
     "pods": [
       {
         "name": "jellyfin-7d9c6b5f4-x2kqp",
-        "node": "srv-rsp-prod01.holzcloud.ch",
+        "node": "srv-node-01.homelab.example",
         "phase": "Running",
         "ready": "1/1",
         "restarts": 0,

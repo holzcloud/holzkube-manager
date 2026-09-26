@@ -132,7 +132,7 @@ func TestACertificateFromAnotherAuthorityIsRefused(t *testing.T) {
 func TestAClusterWithNoKubernetesAuthorityIsRefusedWithTheRepair(t *testing.T) {
 	t.Parallel()
 
-	_, err := kube.MintCreds("https://192.168.0.110:6443", nil, nil, time.Now())
+	_, err := kube.MintCreds("https://192.168.1.110:6443", nil, nil, time.Now())
 	if !errors.Is(err, kube.ErrNoKubernetesAuthority) {
 		t.Fatalf("err = %v, want ErrNoKubernetesAuthority", err)
 	}
@@ -156,7 +156,7 @@ func TestNodesCarryWhatKubernetesKnowsAndTheInventoryDoesNot(t *testing.T) {
 		{
 			Name: "holzkube-01", Ready: corev1.ConditionTrue, Roles: []string{"control-plane"},
 			KubeletVersion: "v1.34.1", OSImage: "Talos (v1.14.1)",
-			InternalAddress: "192.168.0.110", ContainerRuntime: "containerd://2.1.4",
+			InternalAddress: "192.168.1.110", ContainerRuntime: "containerd://2.1.4",
 		},
 		{Name: "holzkube-02", Ready: corev1.ConditionUnknown, Unschedulable: true},
 	}})
@@ -173,7 +173,7 @@ func TestNodesCarryWhatKubernetesKnowsAndTheInventoryDoesNot(t *testing.T) {
 	if first.Name != "holzkube-01" || first.Ready != "True" {
 		t.Errorf("first node = %+v", first)
 	}
-	if first.KubeletVersion != "v1.34.1" || first.InternalAddress != "192.168.0.110" {
+	if first.KubeletVersion != "v1.34.1" || first.InternalAddress != "192.168.1.110" {
 		t.Errorf("the node's own facts did not survive the round trip: %+v", first)
 	}
 	if len(first.Roles) != 1 || first.Roles[0] != "control-plane" {

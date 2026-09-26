@@ -324,7 +324,7 @@ Ranked by what changes the build.
 ## Sources
 
 ### Primary (HIGH confidence)
-- Downloaded module source at `/Users/holz/go/pkg/mod/github.com/siderolabs/talos/pkg/machinery@v1.13.9` — every import path, `client/connection.go`, `client/client.go`, `config/generate/example_test.go`, `config/contract.go`, `config/configpatcher/*`, `config/configdiff/*`, `resources/hardware/system_information.go`, `api/machine/{machine,lifecycle}_grpc.pb.go`
+- Downloaded module source at `/Users/you/go/pkg/mod/github.com/siderolabs/talos/pkg/machinery@v1.13.9` — every import path, `client/connection.go`, `client/client.go`, `config/generate/example_test.go`, `config/contract.go`, `config/configpatcher/*`, `config/configdiff/*`, `resources/hardware/system_information.go`, `api/machine/{machine,lifecycle}_grpc.pb.go`
 - `siderolabs/talos` v1.13.9 `pkg/provision/providers/docker/{docker,node}.go`, `pkg/provision/providers/qemu/{preflight,launch}_darwin.go`
 - `siderolabs/image-factory` v1.5.1 `pkg/client/client.go`, `pkg/schematic/schematic.go`, `docs/api.md`
 - Live Image Factory API (2026-08-27): `POST /schematics` (real ID returned), `GET /versions`, `GET /version/<v>/extensions/official`, OCI manifest probes, bogus-extension 200-then-400 experiment

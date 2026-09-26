@@ -11,7 +11,7 @@
 Version and API claims here were **not** taken from training data. They were produced by:
 
 1. `curl https://proxy.golang.org/<module>/@latest` for every Go module version.
-2. `go get github.com/siderolabs/talos/pkg/machinery@v1.13.9` into a scratch module, then reading the **actual downloaded source** at `/Users/holz/go/pkg/mod/github.com/siderolabs/talos/pkg/machinery@v1.13.9`. Every import path below was confirmed to exist on disk at that version.
+2. `go get github.com/siderolabs/talos/pkg/machinery@v1.13.9` into a scratch module, then reading the **actual downloaded source** at `/Users/you/go/pkg/mod/github.com/siderolabs/talos/pkg/machinery@v1.13.9`. Every import path below was confirmed to exist on disk at that version.
 3. Live `POST` against `https://factory.talos.dev/schematics` — the example payload below returned a real schematic ID.
 4. `curl https://registry.npmjs.org/<pkg>/latest` for every npm version.
 5. Reading provisioner source in `siderolabs/talos` at tag `v1.13.9` for the sandbox section.
@@ -641,7 +641,7 @@ Build order is a hard dependency: **frontend must build before Go compiles**, be
 ## Sources
 
 - `https://proxy.golang.org/<module>/@latest` — authoritative Go module versions (machinery v1.13.9, cosi-runtime v1.16.2, image-factory v1.5.1, and all backend libs). **HIGH**
-- Downloaded module source at `/Users/holz/go/pkg/mod/github.com/siderolabs/talos/pkg/machinery@v1.13.9` — every import path, `client/connection.go`, `client/client.go`, `client/options.go`, `config/generate/example_test.go`, `config/contract.go`, `config/configpatcher/*`, `config/configdiff/*`, `resources/hardware/system_information.go`, `api/machine/machine_grpc.pb.go`, `api/machine/lifecycle_grpc.pb.go`, `api/machine/lifecycle.pb.go`. **HIGH**
+- Downloaded module source at `/Users/you/go/pkg/mod/github.com/siderolabs/talos/pkg/machinery@v1.13.9` — every import path, `client/connection.go`, `client/client.go`, `client/options.go`, `config/generate/example_test.go`, `config/contract.go`, `config/configpatcher/*`, `config/configdiff/*`, `resources/hardware/system_information.go`, `api/machine/machine_grpc.pb.go`, `api/machine/lifecycle_grpc.pb.go`, `api/machine/lifecycle.pb.go`. **HIGH**
 - `https://factory.talos.dev/schematics` — live POST, 2026-08-27, returned ID `20e64852c1be21e6c5e22cafc52c2dcc5add07e66ce62e30fad173d709d5b652`. **HIGH**
 - `https://factory.talos.dev/versions`, `/version/v1.13.9/extensions/official`, `/talosctl/v1.13.9` — live. **HIGH**
 - `https://raw.githubusercontent.com/siderolabs/image-factory/v1.5.1/docs/api.md` — official API reference (schematic shape, asset paths, OCI installer paths, the extensions-only wording). **HIGH**

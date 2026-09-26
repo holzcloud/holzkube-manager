@@ -24,7 +24,7 @@ cluster:
   id: placeholder
   secret: placeholder-cluster-secret-value
   controlPlane:
-    endpoint: https://192.168.0.110:6443
+    endpoint: https://192.168.1.110:6443
 `
 
 // TestAMachineConfigUploadedAsATalosconfigIsNamed is the guard for the

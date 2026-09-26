@@ -64,13 +64,13 @@ afterEach(() => {
 describe('the sign-in page on an SSO-only address', () => {
   it('links to the address the local account works on', async () => {
     vi.spyOn(api, 'status').mockResolvedValue(
-      statusOf({ local_sign_in_url: 'https://192.168.0.30:8443' }),
+      statusOf({ local_sign_in_url: 'https://192.168.1.30:8443' }),
     )
 
     renderLogin()
 
-    const link = await screen.findByRole('link', { name: 'https://192.168.0.30:8443' })
-    expect(link).toHaveAttribute('href', 'https://192.168.0.30:8443')
+    const link = await screen.findByRole('link', { name: 'https://192.168.1.30:8443' })
+    expect(link).toHaveAttribute('href', 'https://192.168.1.30:8443')
   })
 
   it('says the sentence without a link when the server has no honest answer', async () => {
@@ -85,13 +85,13 @@ describe('the sign-in page on an SSO-only address', () => {
 
   it('offers no such link on an address that accepts the local account', async () => {
     vi.spyOn(api, 'status').mockResolvedValue(
-      statusOf({ password_login: true, local_sign_in_url: 'https://192.168.0.30:8443' }),
+      statusOf({ password_login: true, local_sign_in_url: 'https://192.168.1.30:8443' }),
     )
 
     renderLogin()
 
     // A link away from a page that already works is an invitation to leave it.
     await screen.findByLabelText(/password/i)
-    expect(screen.queryByRole('link', { name: /192\.168\.0\.30/ })).toBeNull()
+    expect(screen.queryByRole('link', { name: /192\.168\.1\.30/ })).toBeNull()
   })
 })

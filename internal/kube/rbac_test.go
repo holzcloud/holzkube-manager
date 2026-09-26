@@ -48,7 +48,7 @@ func rbacCluster(t *testing.T) (*kubesim.Server, *kube.Client) {
 			{Name: "platform-team", RoleKind: "ClusterRole", RoleName: "platform-operator",
 				Subjects: []kubesim.BindingSubject{
 					{Kind: "ServiceAccount", Namespace: "ci", Name: "deployer"},
-					{Kind: "User", Name: "holz@holzcloud.ch"},
+					{Kind: "User", Name: "admin@example.com"},
 				}},
 			// Names a role that does not exist: grants nothing, looks fine.
 			{Namespace: "web", Name: "web-readers", RoleKind: "Role", RoleName: "pod-readr",
@@ -185,7 +185,7 @@ func TestAdministrativeIsAboutTheRulesAndNotTheName(t *testing.T) {
 	// And who those subjects are, which is not a field anywhere in Kubernetes.
 	want := map[string]bool{
 		"ServiceAccount ci/deployer": true,
-		"User holz@holzcloud.ch":     true,
+		"User admin@example.com":     true,
 	}
 	for _, who := range rbac.Administrators {
 		if !want[who] {

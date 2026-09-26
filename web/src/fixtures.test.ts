@@ -61,7 +61,7 @@ describe('the layout guard’s fixtures', () => {
     ['/api/v1/clusters/c-homelab/kubernetes/events', clusterEventsSchema],
     ['/api/v1/clusters/c-homelab/kubernetes/workloads', workloadsSchema],
     ['/api/v1/clusters/c-homelab/kubernetes/resources', clusterResourcesSchema],
-    ['/api/v1/clusters/c-homelab/kubernetes/nodes/srv-rsp-prod01.holzcloud.ch', nodeDetailSchema],
+    ['/api/v1/clusters/c-homelab/kubernetes/nodes/srv-node-01.homelab.example', nodeDetailSchema],
     ['/api/v1/clusters/c-homelab/kubernetes/usage', clusterUsageSchema],
     ['/api/v1/clusters/c-homelab/kubernetes/capacity', clusterCapacitySchema],
     ['/api/v1/clusters/c-homelab/kubernetes/sweep', sweepPlanSchema],

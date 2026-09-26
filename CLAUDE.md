@@ -18,11 +18,26 @@ So `linux/arm64` is the architecture that matters. amd64 is still built — the
 ROADMAP's OPS-05 is an amd64 hardware run and the Talos nodes themselves are
 amd64 — but when only one can be checked, the one to check is arm64.
 
+## This repository is public
+
+Nothing that identifies the operator's installation goes into it: no LAN
+address, host name, public name, mail address, MAC or home directory from the
+real setup. Not in tests, not in fixtures, not in the ledger, and not in commit
+messages. Use documentation values (192.168.1.10, homeserver, example.com)
+instead. That also holds when the value is what the journal or a screenshot
+showed.
+
+This happened once already: the identifiers were removed before the repository
+went public on 2026-09-03, came back through sessions working against the real
+cluster, and on 2026-09-26 had to be cut out of the whole history, with every
+tag moved. `internal/publicrepo` now fails the gate on the known values; it
+lists them as hashes, so a new one gets added there as a hash too.
+
 ## What that means for verification
 
 **Where a session runs decides what it can check, so say which one it was.**
 
-**On the operator's Pi (aarch64, srv-rsp-prod01)** — where sessions run since
+**On the operator's Pi (aarch64, srv-node-01)** — where sessions run since
 2026-09-17 — arm64 executes natively, and the production daemon runs beside the
 checkout: `holzkube-manager.service`, data in `/var/lib/holzkube-manager`,
 `holzkube-manager-update.timer` pulling releases hourly. Its journal

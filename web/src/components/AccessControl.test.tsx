@@ -28,7 +28,7 @@ const adminBinding: BindingSummary = {
   role_exists: true,
   subjects: [
     { kind: 'ServiceAccount', namespace: 'ci', name: 'deployer', checkable: true, exists: true },
-    { kind: 'User', namespace: '', name: 'holz@holzcloud.ch', checkable: false, exists: false },
+    { kind: 'User', namespace: '', name: 'admin@example.com', checkable: false, exists: false },
   ],
   administrative: true,
   summary: 'Grants platform-operator, which permits every verb on every resource.',
@@ -89,7 +89,7 @@ const answer: Answer = {
       created_at: '',
     },
   ],
-  administrators: ['ServiceAccount ci/deployer', 'User holz@holzcloud.ch'],
+  administrators: ['ServiceAccount ci/deployer', 'User admin@example.com'],
   notice: 'A binding that names a role which does not exist grants nothing.',
 }
 
@@ -104,7 +104,7 @@ describe('who may do what', () => {
     wrap(<AccessControl clusterID="c-1" namespace="" />)
 
     expect(
-      await screen.findByText('ServiceAccount ci/deployer, User holz@holzcloud.ch'),
+      await screen.findByText('ServiceAccount ci/deployer, User admin@example.com'),
     ).toBeInTheDocument()
   })
 

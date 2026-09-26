@@ -407,8 +407,8 @@ describe('the wall', () => {
     vi.spyOn(api.kubernetes, 'wall').mockResolvedValue(
       wallAt(new Date(), {
         nodes: [
-          { kind: 'Node', namespace: '', name: 'srv-rsp-prod01', state: 'ok', detail: 'ready' },
-          { kind: 'Node', namespace: '', name: 'srv-rsp-prod02', state: 'ok', detail: 'ready' },
+          { kind: 'Node', namespace: '', name: 'srv-node-01', state: 'ok', detail: 'ready' },
+          { kind: 'Node', namespace: '', name: 'srv-node-02', state: 'ok', detail: 'ready' },
         ],
       }),
     )
@@ -418,8 +418,8 @@ describe('the wall', () => {
     // A wall that only mentioned a node once it had already failed would be a
     // wall that never showed the thing it is most often consulted about. Three
     // machines the operator can walk over to; they are named, always.
-    expect(await screen.findByText('srv-rsp-prod01')).toBeInTheDocument()
-    expect(screen.getByText('srv-rsp-prod02')).toBeInTheDocument()
+    expect(await screen.findByText('srv-node-01')).toBeInTheDocument()
+    expect(screen.getByText('srv-node-02')).toBeInTheDocument()
     expect(screen.getByText('Nodes')).toBeInTheDocument()
   })
 
@@ -429,21 +429,21 @@ describe('the wall', () => {
         nodes: [
           {
             kind: 'Node',
-            name: 'srv-rsp-prod01.holzcloud.ch',
+            name: 'srv-node-01.homelab.example',
             namespace: '',
             state: 'ok',
             detail: 'ready',
           },
           {
             kind: 'Node',
-            name: 'srv-rsp-prod02.holzcloud.ch',
+            name: 'srv-node-02.homelab.example',
             namespace: '',
             state: 'ok',
             detail: 'ready',
           },
           {
             kind: 'Node',
-            name: 'srv-rsp-prod03.holzcloud.ch',
+            name: 'srv-node-03.homelab.example',
             namespace: '',
             state: 'ok',
             detail: 'ready',
@@ -453,11 +453,11 @@ describe('the wall', () => {
     )
 
     const { container } = wrap(<WallView />)
-    await screen.findByText('srv-rsp-prod01.holzcloud.ch')
+    await screen.findByText('srv-node-01.homelab.example')
 
     // Three tiles used to get the largest type purely because there were three
     // of them, and the name then broke mid-word across three lines:
-    // "srv-rsp- / prod02.holzcloud.c / h". A hostname is ONE word, so wrapping
+    // "srv-node- / 02.homelab.exampl / e". A hostname is ONE word, so wrapping
     // cannot rescue it -- only the type size can. This screen has mangled a
     // node's name three times now.
     const tile = container.querySelector('[data-state="ok"]')

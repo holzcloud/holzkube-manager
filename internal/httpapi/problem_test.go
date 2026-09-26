@@ -116,7 +116,7 @@ func TestProblemRateLimitedSetsRetryAfter(t *testing.T) {
 // reconnaissance for whoever is probing it.
 func TestProblemInternalLeaksNothing(t *testing.T) {
 	const (
-		secretPath = "/Users/holz/.local/share/holzkube-manager/users/a1b2c3.json"
+		secretPath = "/Users/you/.local/share/holzkube-manager/users/a1b2c3.json"
 		goErrText  = "open " + secretPath + ": permission denied"
 	)
 	cause := fmt.Errorf("load user record: %w", fmt.Errorf("%s", goErrText))

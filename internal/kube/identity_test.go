@@ -26,7 +26,7 @@ func TestEveryCallArrivesAsTheOperatorWhenActingAsOne(t *testing.T) {
 
 	ctx := testContext(t)
 	sim, admin := newCluster(t, kubesim.Options{
-		AllowImpersonated: []string{"holz@holzcloud.ch"},
+		AllowImpersonated: []string{"admin@example.com"},
 		Nodes:             []kubesim.Node{{Name: "cp-1", Ready: corev1.ConditionTrue}},
 		Pods:              []kubesim.Pod{{Namespace: "default", Name: "api-1", Node: "cp-1"}},
 	})
@@ -39,11 +39,11 @@ func TestEveryCallArrivesAsTheOperatorWhenActingAsOne(t *testing.T) {
 		t.Errorf("the plain client impersonated %q", got[len(got)-1])
 	}
 
-	as, err := admin.As(kube.Identity{User: "holz@holzcloud.ch", Groups: []string{"platform"}})
+	as, err := admin.As(kube.Identity{User: "admin@example.com", Groups: []string{"platform"}})
 	if err != nil {
 		t.Fatalf("As: %v", err)
 	}
-	if as.Identity().User != "holz@holzcloud.ch" {
+	if as.Identity().User != "admin@example.com" {
 		t.Errorf("identity = %+v", as.Identity())
 	}
 
@@ -59,7 +59,7 @@ func TestEveryCallArrivesAsTheOperatorWhenActingAsOne(t *testing.T) {
 	// impersonated some of its calls would produce an audit log that is right
 	// about the reads and wrong about the writes.
 	for i, who := range sim.Impersonated()[before:] {
-		if who != "holz@holzcloud.ch" {
+		if who != "admin@example.com" {
 			t.Errorf("request %d arrived as %q, want the operator", i, who)
 		}
 	}
@@ -119,11 +119,11 @@ func TestTheClusterIsAskedWhatTheIdentityMayDo(t *testing.T) {
 
 	ctx := testContext(t)
 	_, admin := newCluster(t, kubesim.Options{
-		AllowImpersonated: []string{"reader@holzcloud.ch"},
+		AllowImpersonated: []string{"reader@example.com"},
 		DenyVerbs:         []string{"delete:pods", "patch:nodes"},
 	})
 
-	as, err := admin.As(kube.Identity{User: "reader@holzcloud.ch"})
+	as, err := admin.As(kube.Identity{User: "reader@example.com"})
 	if err != nil {
 		t.Fatalf("As: %v", err)
 	}
@@ -148,7 +148,7 @@ func TestTheClusterIsAskedWhatTheIdentityMayDo(t *testing.T) {
 	}
 	// The authoriser's own sentence, rather than this product's guess about
 	// somebody else's RBAC.
-	if !strings.Contains(byName["delete:pods"].Reason, "reader@holzcloud.ch") {
+	if !strings.Contains(byName["delete:pods"].Reason, "reader@example.com") {
 		t.Errorf("reason = %q, want the cluster's own", byName["delete:pods"].Reason)
 	}
 
@@ -195,10 +195,10 @@ func TestTheManifestPathActsAsTheOperatorToo(t *testing.T) {
 
 	ctx := testContext(t)
 	sim, admin := newCluster(t, kubesim.Options{
-		AllowImpersonated: []string{"holz@holzcloud.ch"},
+		AllowImpersonated: []string{"admin@example.com"},
 	})
 
-	as, err := admin.As(kube.Identity{User: "holz@holzcloud.ch"})
+	as, err := admin.As(kube.Identity{User: "admin@example.com"})
 	if err != nil {
 		t.Fatalf("As: %v", err)
 	}
@@ -219,7 +219,7 @@ func TestTheManifestPathActsAsTheOperatorToo(t *testing.T) {
 		t.Fatal("the manifest path made no requests")
 	}
 	for i, who := range after {
-		if who != "holz@holzcloud.ch" {
+		if who != "admin@example.com" {
 			t.Errorf("manifest request %d arrived as %q -- discovery and the dynamic client have "+
 				"to carry the identity as well", i, who)
 		}

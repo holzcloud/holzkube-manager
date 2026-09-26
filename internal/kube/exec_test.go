@@ -51,7 +51,7 @@ func TestAShellWithAStringIsRefused(t *testing.T) {
 
 	ctx := testContext(t)
 	_, admin := newCluster(t, kubesim.Options{})
-	as, err := admin.As(kube.Identity{User: "holz@holzcloud.ch"})
+	as, err := admin.As(kube.Identity{User: "admin@example.com"})
 	if err != nil {
 		t.Fatalf("As: %v", err)
 	}
@@ -102,7 +102,7 @@ func TestAnArgumentCannotSmuggleALineBreak(t *testing.T) {
 
 	ctx := testContext(t)
 	_, admin := newCluster(t, kubesim.Options{})
-	as, err := admin.As(kube.Identity{User: "holz@holzcloud.ch"})
+	as, err := admin.As(kube.Identity{User: "admin@example.com"})
 	if err != nil {
 		t.Fatalf("As: %v", err)
 	}

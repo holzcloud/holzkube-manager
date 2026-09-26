@@ -147,7 +147,7 @@ func TestAuditRecordsTheStableCodeNotTheGoError(t *testing.T) {
 func TestAuditFallsBackToTheStatusWhenThereIsNoCode(t *testing.T) {
 	rec := &recorder{}
 	serve(t, rec, "auth.login", http.MethodPost, `{}`, func(w http.ResponseWriter, _ *http.Request) {
-		http.Error(w, "boom: /Users/holz/secret/path", http.StatusBadGateway)
+		http.Error(w, "boom: /Users/you/secret/path", http.StatusBadGateway)
 	})
 
 	cause := rec.results[0].cause

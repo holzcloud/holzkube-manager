@@ -161,7 +161,7 @@ receives, for example:
 
 ```json
 {"setup_required":false,"audit_chain":{"ok":true,"broken_at_line":0,
- "file":"/home/holz/.local/share/holzkube/audit/audit-2026-08-28.jsonl"}}
+ "file":"/home/op/.local/share/holzkube/audit/audit-2026-08-28.jsonl"}}
 ```
 
 which discloses the OS username, the home directory layout, and the exact location of the

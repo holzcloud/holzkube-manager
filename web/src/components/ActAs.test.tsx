@@ -32,9 +32,9 @@ const asProduct: KubeIdentity = {
 }
 
 const allowed: KubeIdentity = {
-  user: 'holz@holzcloud.ch',
+  user: 'admin@example.com',
   groups: [],
-  describes: 'holz@holzcloud.ch',
+  describes: 'admin@example.com',
   permissions: [{ verb: 'list', resource: 'pods', namespace: '', allowed: true, reason: '' }],
   missing: 0,
   notice: 'This is what the cluster says.',
@@ -49,7 +49,7 @@ const refused: KubeIdentity = {
       resource: 'nodes',
       namespace: '',
       allowed: false,
-      reason: 'no RBAC policy allows "holz@holzcloud.ch" to patch nodes',
+      reason: 'no RBAC policy allows "admin@example.com" to patch nodes',
     },
   ],
   missing: 1,
@@ -65,7 +65,7 @@ describe('choosing whose name the cluster sees', () => {
     const save = vi.spyOn(api.kubernetes, 'setIdentity').mockResolvedValue(undefined)
 
     wrap(<ActAs clusterID="c-1" />)
-    await userEvent.type(screen.getByLabelText(/act as/i), 'holz@holzcloud.ch')
+    await userEvent.type(screen.getByLabelText(/act as/i), 'admin@example.com')
 
     expect(screen.getByRole('button', { name: 'Use it' })).toBeDisabled()
     expect(save).not.toHaveBeenCalled()
@@ -77,14 +77,14 @@ describe('choosing whose name the cluster sees', () => {
       .mockImplementation(async (_cluster, opts) => (opts?.as ? refused : asProduct))
 
     wrap(<ActAs clusterID="c-1" />)
-    await userEvent.type(screen.getByLabelText(/act as/i), 'holz@holzcloud.ch')
+    await userEvent.type(screen.getByLabelText(/act as/i), 'admin@example.com')
     await userEvent.click(screen.getByRole('button', { name: 'Check it' }))
 
     await waitFor(() => expect(screen.getByText(/refuses 1 of 2/i)).toBeInTheDocument())
     // The authoriser's own sentence, not this product's paraphrase of somebody
     // else's RBAC.
     expect(screen.getByText(/no RBAC policy allows/i)).toBeInTheDocument()
-    expect(identity).toHaveBeenCalledWith('c-1', { as: 'holz@holzcloud.ch' })
+    expect(identity).toHaveBeenCalledWith('c-1', { as: 'admin@example.com' })
   })
 
   it('stores exactly the name that was checked', async () => {
@@ -95,12 +95,12 @@ describe('choosing whose name the cluster sees', () => {
 
     wrap(<ActAs clusterID="c-1" />)
     const field = screen.getByLabelText(/act as/i)
-    await userEvent.type(field, 'holz@holzcloud.ch')
+    await userEvent.type(field, 'admin@example.com')
     await userEvent.click(screen.getByRole('button', { name: 'Check it' }))
     await waitFor(() => expect(screen.getByRole('button', { name: 'Use it' })).toBeEnabled())
 
     await userEvent.click(screen.getByRole('button', { name: 'Use it' }))
-    expect(save).toHaveBeenCalledWith('c-1', 'holz@holzcloud.ch')
+    expect(save).toHaveBeenCalledWith('c-1', 'admin@example.com')
   })
 
   it('throws the check away when the name is edited afterwards', async () => {
@@ -111,7 +111,7 @@ describe('choosing whose name the cluster sees', () => {
 
     wrap(<ActAs clusterID="c-1" />)
     const field = screen.getByLabelText(/act as/i)
-    await userEvent.type(field, 'holz@holzcloud.ch')
+    await userEvent.type(field, 'admin@example.com')
     await userEvent.click(screen.getByRole('button', { name: 'Check it' }))
     await waitFor(() => expect(screen.getByRole('button', { name: 'Use it' })).toBeEnabled())
 

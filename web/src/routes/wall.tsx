@@ -413,8 +413,8 @@ function Named({
   // which a name is still readable from across a room.
   //
   // The count alone is not enough: three nodes got the largest size and then
-  // "srv-rsp-prod02.holzcloud.ch" broke mid-word across three lines -- "srv-rsp-
-  // prod02.holzcloud.c / h". A hostname is one word, so wrapping cannot help it;
+  // "srv-node-02.homelab.example" broke mid-word across three lines -- "srv-node-
+  // 02.homelab.exampl / e". A hostname is one word, so wrapping cannot help it;
   // only the type size can. Third time this screen has mangled a node's name
   // (ledger 170, then again on first sight of this layout).
   const longest = Math.max(...tiles.map((tile) => tile.name.length))
@@ -430,14 +430,14 @@ function Named({
       <div
         // auto-FIT, not auto-fill: three nodes on a television should be three
         // WIDE tiles whose names fit, not three narrow ones beside four empty
-        // tracks. The first photograph of this screen showed "srv-rsp-prod02…"
+        // tracks. The first photograph of this screen showed "srv-node-02…"
         // truncated with two thirds of the row unused.
         className={`grid gap-[0.9vmin] ${
           grow ? 'min-h-0 md:h-full md:content-stretch' : 'content-start'
         } ${
           // The FLOOR follows the longest name too, not only the count. On a
           // 390px phone two 9rem tracks leave 147px of text, and
-          // "srv-rsp-prod02.holzcloud.ch" does not fit in that at any size a
+          // "srv-node-02.homelab.example" does not fit in that at any size a
           // wall should use -- so it broke mid-word into "holzcloud.c / h".
           // A long name takes the whole width there and reads in one line.
           longest > 22
@@ -466,7 +466,7 @@ function Named({
               grow ? 'flex flex-col justify-center' : ''
             } ${TILE_COLOURS[tile.state] ?? TILE_COLOURS.unknown}`}
           >
-            {/* Wrapped, not truncated: "srv-rsp-prod02.ho…" is not an address
+            {/* Wrapped, not truncated: "srv-node-02.ho…" is not an address
                 anybody can act on, and this is the second time this screen has
                 cut a node's name in half (ledger 170). */}
             <p className="break-words font-semibold leading-tight">{tile.name}</p>

@@ -2073,7 +2073,7 @@ client says both readings of an empty list.
 
     GET /api/v1/clusters/{id}/kubernetes/access[?namespace=]
 
-    {"administrators":["ServiceAccount ci/deployer","User holz@holzcloud.ch"],
+    {"administrators":["ServiceAccount ci/deployer","User admin@example.com"],
      "bindings":[{"kind":"RoleBinding","namespace":"web","name":"web-readers",
                   "role_kind":"Role","role_name":"pod-readr","role_exists":false,
                   "subjects":[{"kind":"ServiceAccount","namespace":"web","name":"reader",

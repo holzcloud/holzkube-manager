@@ -31,7 +31,7 @@ import (
 func TestAConfigWithEveryDocumentKnownYieldsItsSecrets(t *testing.T) {
 	t.Parallel()
 
-	cluster, err := talossim.NewCluster("holzkube", "https://192.168.0.110:6443")
+	cluster, err := talossim.NewCluster("holzkube", "https://192.168.1.110:6443")
 	if err != nil {
 		t.Fatalf("build a simulated cluster: %v", err)
 	}
@@ -64,7 +64,7 @@ func TestAConfigWithEveryDocumentKnownYieldsItsSecrets(t *testing.T) {
 func TestSelectingOnlyV1Alpha1WouldLoseTheKubernetesCA(t *testing.T) {
 	t.Parallel()
 
-	cluster, err := talossim.NewCluster("holzkube", "https://192.168.0.110:6443")
+	cluster, err := talossim.NewCluster("holzkube", "https://192.168.1.110:6443")
 	if err != nil {
 		t.Fatalf("build a simulated cluster: %v", err)
 	}
@@ -110,7 +110,7 @@ func TestSelectingOnlyV1Alpha1WouldLoseTheKubernetesCA(t *testing.T) {
 func TestAnUnknownDocumentIsNamedAsTooNew(t *testing.T) {
 	t.Parallel()
 
-	cluster, err := talossim.NewCluster("holzkube", "https://192.168.0.110:6443")
+	cluster, err := talossim.NewCluster("holzkube", "https://192.168.1.110:6443")
 	if err != nil {
 		t.Fatalf("build a simulated cluster: %v", err)
 	}
@@ -148,7 +148,7 @@ name: default
 func TestAWorkerIsRefusedWithoutDerivingAnything(t *testing.T) {
 	t.Parallel()
 
-	cluster, err := talossim.NewCluster("holzkube", "https://192.168.0.110:6443")
+	cluster, err := talossim.NewCluster("holzkube", "https://192.168.1.110:6443")
 	if err != nil {
 		t.Fatalf("build a simulated cluster: %v", err)
 	}

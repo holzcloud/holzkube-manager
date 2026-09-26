@@ -34,7 +34,7 @@ describe('running a command', () => {
       stdout: '127.0.0.1 localhost',
       stderr: '',
       truncated: false,
-      identity: 'holz@holzcloud.ch',
+      identity: 'admin@example.com',
     })
 
     wrap(<RunCommand clusterID="c-1" namespace="default" pod="api-1" container="api" />)
@@ -54,7 +54,7 @@ describe('running a command', () => {
       stdout: 'uid=0',
       stderr: '',
       truncated: false,
-      identity: 'holz@holzcloud.ch',
+      identity: 'admin@example.com',
     })
 
     wrap(<RunCommand clusterID="c-1" namespace="default" pod="api-1" container="api" />)
@@ -63,7 +63,7 @@ describe('running a command', () => {
 
     // Attributed to the person, not to the product.
     await waitFor(() =>
-      expect(screen.getByRole('status')).toHaveTextContent(/ran as holz@holzcloud\.ch/i),
+      expect(screen.getByRole('status')).toHaveTextContent(/ran as admin@example\.com/i),
     )
   })
 
