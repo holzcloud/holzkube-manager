@@ -99,7 +99,7 @@ export function LiveChart({
       <div ref={ref} className="relative w-full" style={{ height }}>
         <svg
           role="img"
-          aria-label={`${title}, last ${Math.round(windowMs / 60_000)} minutes`}
+          aria-label={`${title}, last ${spanLabel(windowMs)}`}
           width={width}
           height={height}
           // biome-ignore lint/a11y/noNoninteractiveTabindex: the chart is explorable by keyboard — arrows move the readout — which is what makes it more than a picture
@@ -137,7 +137,7 @@ export function LiveChart({
             x={GUTTER}
             y={height - 4}
             className="fill-muted-foreground text-[10px]"
-          >{`−${Math.round(windowMs / 60_000)} min`}</text>
+          >{`−${spanLabel(windowMs)}`}</text>
           <text
             x={GUTTER + plotW}
             y={height - 4}
@@ -152,8 +152,24 @@ export function LiveChart({
             const first = pts[0]
             const last = lastOf(pts)
             if (first === undefined || last === undefined) return null
-            const line = pts.map((p, i) => `${i === 0 ? 'M' : 'L'}${x(p.t)},${y(p.v)}`).join(' ')
-            const area = `${line} L${x(last.t)},${y(0)} L${x(first.t)},${y(0)} Z`
+            // A reading that did not happen is a gap, not a line drawn across
+            // it: a node that was off for an hour must not look like it idled.
+            const runs = segments(pts)
+            const line = runs
+              .map((run) =>
+                run.map((p, i) => `${i === 0 ? 'M' : 'L'}${x(p.t)},${y(p.v)}`).join(' '),
+              )
+              .join(' ')
+            const area = runs
+              .map((run) => {
+                const a = run[0] as Point
+                const b = lastOf(run) as Point
+                const edge = run
+                  .map((p, i) => `${i === 0 ? 'M' : 'L'}${x(p.t)},${y(p.v)}`)
+                  .join(' ')
+                return `${edge} L${x(b.t)},${y(0)} L${x(a.t)},${y(0)} Z`
+              })
+              .join(' ')
             const color = `var(--viz-series-${s.slot})`
             return (
               <g key={s.key}>
@@ -202,7 +218,7 @@ export function LiveChart({
                 : { left: x(focused.t) + 8 }
             }
           >
-            <p className="text-muted-foreground">{new Date(focused.t).toLocaleTimeString()}</p>
+            <p className="text-muted-foreground">{stamp(focused.t, windowMs)}</p>
             {series.map((s) => {
               const p = s.points[focus ?? 0]
               return (
@@ -248,7 +264,7 @@ export function LiveChart({
               .reverse()
               .map(({ p, i }) => (
                 <tr key={p.t}>
-                  <td>{new Date(p.t).toLocaleTimeString()}</td>
+                  <td>{stamp(p.t, windowMs)}</td>
                   {series.map((s) => (
                     <td key={s.key}>{s.points[i] !== undefined ? format(s.points[i].v) : '—'}</td>
                   ))}
@@ -259,6 +275,40 @@ export function LiveChart({
       </details>
     </figure>
   )
+}
+
+/** "5 min", "1 h", "24 h": how far back the chart reaches. */
+export function spanLabel(ms: number): string {
+  const minutes = Math.round(ms / 60_000)
+  return minutes < 120 && minutes % 60 !== 0 ? `${minutes} min` : `${Math.round(minutes / 60)} h`
+}
+
+/** A point's time, with the day once the chart spans more than a few hours. */
+function stamp(t: number, windowMs: number): string {
+  const d = new Date(t)
+  return windowMs > 6 * 60 * 60_000 ? d.toLocaleString() : d.toLocaleTimeString()
+}
+
+/**
+ * segments splits points where readings stopped: a gap longer than three
+ * times the usual spacing (and at least 45 s, the heartbeat) starts a new run.
+ */
+export function segments(points: Point[]): Point[][] {
+  if (points.length === 0) return []
+  const steps = points
+    .slice(1)
+    .map((p, i) => p.t - (points[i] as Point).t)
+    .sort((a, b) => a - b)
+  const usual = steps[Math.floor(steps.length / 2)] ?? 0
+  const gap = Math.max(45_000, usual * 3)
+  const runs: Point[][] = [[points[0] as Point]]
+  for (let i = 1; i < points.length; i++) {
+    const p = points[i] as Point
+    const prev = points[i - 1] as Point
+    if (p.t - prev.t > gap) runs.push([p])
+    else (lastOf(runs) as Point[]).push(p)
+  }
+  return runs
 }
 
 function lastOf<T>(items: T[]): T | undefined {

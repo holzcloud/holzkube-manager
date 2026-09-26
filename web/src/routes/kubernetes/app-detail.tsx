@@ -3,12 +3,14 @@ import { createRoute, Link } from '@tanstack/react-router'
 import { type AppPod, api } from '@/api'
 import { LiveChart } from '@/components/charts/LiveChart'
 import { StatTile } from '@/components/charts/Meter'
+import { RangePicker } from '@/components/charts/RangePicker'
 import { DataTable } from '@/components/DataTable'
 import { KubernetesShell, useClusterSelection } from '@/components/KubernetesSection'
 import { PowerMenu } from '@/components/PowerMenu'
 import { Problem } from '@/components/Problem'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { merge, useChartRange } from '@/hooks/useChartRange'
 import { useLiveSeries } from '@/hooks/useLiveSeries'
 import { formatBytes, formatCores } from '@/lib/format'
 import { kubernetesRoute } from '@/routes/kubernetes'
@@ -39,12 +41,19 @@ export function AppDetailPage() {
   )
 
   const d = detail.data
-  const history = useLiveSeries(
+  const live = useLiveSeries(
     `app:${selected}/${namespace}/${kind}/${name}`,
     d,
     d?.collected_at,
     (r) => ({ cpu: r.app.cpu_millis, memory: r.app.memory_bytes }),
   )
+  const chart = useChartRange(
+    ['kubernetes', 'app', selected, namespace, kind, name],
+    (range) => api.kubernetes.appHistory(selected, namespace, kind, name, range),
+    selected !== '',
+  )
+  const now = d?.collected_at ? Date.parse(d.collected_at) : Date.now()
+  const history = merge(chart.history.data, live, chart.windowMs, now)
 
   return (
     <KubernetesShell>
@@ -124,6 +133,16 @@ export function AppDetailPage() {
               />
             </div>
 
+            <RangePicker
+              value={chart.range}
+              onChange={chart.setRange}
+              note={
+                chart.history.error
+                  ? 'No recorded history yet — the curves start with this page.'
+                  : undefined
+              }
+            />
+
             <div className="grid gap-4 lg:grid-cols-2">
               <Card>
                 <CardHeader>
@@ -134,6 +153,7 @@ export function AppDetailPage() {
                     title="CPU in use"
                     series={[{ key: 'cpu', label: 'CPU', slot: 1, points: history.cpu ?? [] }]}
                     format={formatCores}
+                    windowMs={chart.windowMs}
                   />
                 </CardContent>
               </Card>
@@ -148,6 +168,7 @@ export function AppDetailPage() {
                       { key: 'memory', label: 'Memory', slot: 1, points: history.memory ?? [] },
                     ]}
                     format={formatBytes}
+                    windowMs={chart.windowMs}
                   />
                 </CardContent>
               </Card>
