@@ -106,6 +106,10 @@ export function LoginPage() {
 
   return (
     <div className="flex min-h-dvh flex-col items-center justify-center gap-4 p-6">
+      <div className="flex flex-col items-center text-center">
+        <img src="/favicon.svg" alt="" className="mb-2 size-12" />
+        <span className="font-heading text-xl font-semibold tracking-tight">holzkube-manager</span>
+      </div>
       <Card className="w-full max-w-md">
         <CardHeader>
           <CardTitle>Sign in</CardTitle>

@@ -1,0 +1,9 @@
+<!-- The tab icon: the mark with two rings instead of three. At 16 pixels the
+     third ring is not a ring but a smear. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <defs><clipPath id="hk-hex"><polygon points="32.00,4.00 56.25,18.00 56.25,46.00 32.00,60.00 7.75,46.00 7.75,18.00"/></clipPath></defs>
+  <g clip-path="url(#hk-hex)">
+    <rect width="64" height="64" fill="#F0AE5F"/>
+    <g fill="none" stroke="#150E08" stroke-width="5"><circle cx="31" cy="31.2" r="6.5"/><circle cx="32" cy="32" r="17.5"/></g>
+  </g>
+</svg>

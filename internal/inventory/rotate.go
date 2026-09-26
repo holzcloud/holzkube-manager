@@ -29,7 +29,7 @@ import (
 // fresh one is accepted the moment it is presented, with nothing rolled and
 // nothing restarted. That is what makes this provable here and what makes it
 // safe; it is a different operation from rotating the authority itself, which
-// changes what every node trusts and is not built (see README, "What this
+// changes what every node trusts and is not built (see docs/guide.md, "What this
 // product does not do").
 
 // ErrNoCertificateAuthority reports a cluster whose stored bundle cannot issue
