@@ -118,10 +118,8 @@ export function NodeDetailPage() {
         </div>
 
         <div className="flex flex-wrap gap-2 max-md:w-full max-md:flex-nowrap max-md:justify-between">
-          <PowerMenu
-            target={{ kind: 'node', machine: m.id, name: m.hostname.value || m.id.slice(0, 8) }}
-          />
-          <NodeActions machine={m} onRemoved={() => void navigate({ to: '/nodes' })} />
+          {/* Harmless first, destructive last and apart: reading, power, then
+              the three acts that take the machine or its record away. */}
           <Button
             variant="outline"
             size="sm"
@@ -134,6 +132,11 @@ export function NodeDetailPage() {
             <RefreshCw aria-hidden="true" className="size-4" />{' '}
             <span className="max-md:sr-only">Refresh</span>
           </Button>
+          <PowerMenu
+            target={{ kind: 'node', machine: m.id, name: m.hostname.value || m.id.slice(0, 8) }}
+          />
+          <span aria-hidden="true" className="w-4 max-md:hidden" />
+          <NodeActions machine={m} onRemoved={() => void navigate({ to: '/nodes' })} />
           {/*
             Destructive, so the server answers 428 and the shared interceptor
             opens the password prompt and replays this exact request. There is
