@@ -337,6 +337,11 @@ type DaemonSet struct {
 	Scheduled int32
 	Ready     int32
 	Image     string
+
+	// NodeSelector is the selector its pod template carries. A patch that
+	// changes it changes it here, so a stop that adds a key and a start that
+	// removes it are read back rather than taken on trust.
+	NodeSelector map[string]string
 }
 
 // Job is one as a test describes it: its numbers are succeeded and failed.
@@ -679,6 +684,12 @@ type Server struct {
 	// it meant to: a traversal that slipped through would show up here as a path
 	// nobody asked for, and nowhere else.
 	proxied []string
+
+	// graces records the grace period each pod DELETE asked for, keyed
+	// "namespace/name", and nil when it asked for none. A force-stop and a stop
+	// both delete; the grace period is the whole difference, so it has to be
+	// readable back.
+	graces map[string]*int64
 }
 
 // New starts one.
@@ -1155,6 +1166,10 @@ func (s *Server) writePods(w http.ResponseWriter, r *http.Request, namespace str
 			node = name
 		}
 	}
+	// And the label selector an app's pods are found by, for the same reason:
+	// a fake that ignored it would let a force-stop of one app kill another's
+	// pods and report success.
+	selector := r.URL.Query().Get("labelSelector")
 
 	s.mu.Lock()
 	pods := append([]Pod(nil), s.pods...)
@@ -1169,6 +1184,9 @@ func (s *Server) writePods(w http.ResponseWriter, r *http.Request, namespace str
 			continue
 		}
 		if node != "" && p.Node != node {
+			continue
+		}
+		if !matchesLabels(p.Labels, selector) {
 			continue
 		}
 
@@ -1477,6 +1495,7 @@ func (s *Server) servePod(w http.ResponseWriter, r *http.Request, namespace, nam
 	case http.MethodDelete:
 		s.pods = append(s.pods[:index:index], s.pods[index+1:]...)
 		s.deleted = append(s.deleted, namespace+"/"+name)
+		s.recordGrace(namespace+"/"+name, r)
 		s.mu.Unlock()
 		writeJSON(w, http.StatusOK, metav1.Status{
 			TypeMeta: metav1.TypeMeta{APIVersion: "v1", Kind: "Status"},
@@ -1532,7 +1551,9 @@ func (s *Server) serveAppsNamespaced(w http.ResponseWriter, r *http.Request) {
 	case len(parts) == 2 && parts[0] == "statefulsets" && r.Method == http.MethodPatch:
 		s.restartTemplate(w, r, "statefulset", ns, parts[1])
 	case len(parts) == 2 && parts[0] == "daemonsets" && r.Method == http.MethodPatch:
-		s.restartTemplate(w, r, "daemonset", ns, parts[1])
+		s.patchDaemonSet(w, r, ns, parts[1])
+	case len(parts) == 2 && parts[0] == "daemonsets" && r.Method == http.MethodGet:
+		s.writeDaemonSet(w, ns, parts[1])
 	case len(parts) == 1 && parts[0] == "daemonsets":
 		s.writeDaemonSets(w, ns)
 	case len(parts) == 3 && parts[0] == "deployments" && parts[2] == "scale":
@@ -1621,7 +1642,7 @@ func (s *Server) serveScale(w http.ResponseWriter, r *http.Request, namespace, n
 func (s *Server) restartDeployment(w http.ResponseWriter, r *http.Request, namespace, name string) {
 	var patch struct {
 		Metadata struct {
-			Annotations map[string]string `json:"annotations"`
+			Annotations map[string]*string `json:"annotations"`
 		} `json:"metadata"`
 		Spec struct {
 			Template struct {
@@ -1715,6 +1736,8 @@ func renderDeployment(d Deployment) appsv1.Deployment {
 		}
 	}
 
+	template.Labels = map[string]string{"app": d.Name}
+
 	return appsv1.Deployment{
 		TypeMeta: metav1.TypeMeta{APIVersion: "apps/v1", Kind: "Deployment"},
 		ObjectMeta: metav1.ObjectMeta{
@@ -1722,7 +1745,9 @@ func renderDeployment(d Deployment) appsv1.Deployment {
 			Namespace:         d.Namespace,
 			CreationTimestamp: metav1.NewTime(time.Now().Add(-time.Hour).UTC()),
 		},
-		Spec: appsv1.DeploymentSpec{Replicas: &replicas, Template: template},
+		Spec: appsv1.DeploymentSpec{
+			Replicas: &replicas, Template: template, Selector: appSelector(d.Name),
+		},
 		Status: appsv1.DeploymentStatus{
 			Replicas:          d.Desired,
 			ReadyReplicas:     d.Ready,
@@ -2408,6 +2433,7 @@ func (s *Server) writeStatefulSets(w http.ResponseWriter, namespace string) {
 			Spec: appsv1.StatefulSetSpec{
 				Replicas: &desired,
 				Template: podTemplate(r.Name, r.Image),
+				Selector: appSelector(r.Name),
 			},
 			Status: appsv1.StatefulSetStatus{
 				ReadyReplicas:   r.Ready,
@@ -2423,6 +2449,7 @@ func (s *Server) writeDaemonSets(w http.ResponseWriter, namespace string) {
 	s.mu.Lock()
 	rows := append([]DaemonSet(nil), s.daemonSets...)
 	s.mu.Unlock()
+	// renderDaemonSet takes the lock itself, for the annotations.
 
 	list := appsv1.DaemonSetList{
 		TypeMeta: metav1.TypeMeta{APIVersion: "apps/v1", Kind: "DaemonSetList"},
@@ -2432,15 +2459,7 @@ func (s *Server) writeDaemonSets(w http.ResponseWriter, namespace string) {
 		if namespace != "" && r.Namespace != namespace {
 			continue
 		}
-		list.Items = append(list.Items, appsv1.DaemonSet{
-			TypeMeta:   metav1.TypeMeta{APIVersion: "apps/v1", Kind: "DaemonSet"},
-			ObjectMeta: metav1.ObjectMeta{Name: r.Name, Namespace: r.Namespace},
-			Spec:       appsv1.DaemonSetSpec{Template: podTemplate(r.Name, r.Image)},
-			Status: appsv1.DaemonSetStatus{
-				DesiredNumberScheduled: r.Scheduled,
-				NumberReady:            r.Ready,
-			},
-		})
+		list.Items = append(list.Items, s.renderDaemonSet(r))
 	}
 	writeJSON(w, http.StatusOK, list)
 }
@@ -2458,15 +2477,7 @@ func (s *Server) writeJobs(w http.ResponseWriter, namespace string) {
 		if namespace != "" && r.Namespace != namespace {
 			continue
 		}
-		suspend := r.Suspended
-		list.Items = append(list.Items, batchv1.Job{
-			TypeMeta:   metav1.TypeMeta{APIVersion: "batch/v1", Kind: "Job"},
-			ObjectMeta: metav1.ObjectMeta{Name: r.Name, Namespace: r.Namespace},
-			Spec:       batchv1.JobSpec{Suspend: &suspend, Template: podTemplate(r.Name, r.Image)},
-			Status: batchv1.JobStatus{
-				Succeeded: r.Succeeded, Failed: r.Failed, Active: r.Active,
-			},
-		})
+		list.Items = append(list.Items, renderJob(r, nil))
 	}
 	writeJSON(w, http.StatusOK, list)
 }
@@ -2527,6 +2538,8 @@ func (s *Server) serveBatchNamespaced(w http.ResponseWriter, r *http.Request) {
 			s.patchSuspend(w, r, "job", ns, parts[1])
 		case len(parts) == 2 && parts[0] == "cronjobs" && r.Method == http.MethodGet:
 			s.writeCronJob(w, ns, parts[1])
+		case len(parts) == 2 && parts[0] == "jobs" && r.Method == http.MethodGet:
+			s.writeJob(w, ns, parts[1])
 		case len(parts) == 2 && parts[0] == "jobs" && r.Method == http.MethodDelete:
 			s.recordDelete(w, "jobs", ns, parts[1])
 		default:
@@ -2606,7 +2619,11 @@ func (s *Server) serveStatefulSetScale(w http.ResponseWriter, r *http.Request, n
 // A fake that dropped them would let "starting restores what was running" pass
 // while restoring nothing: the count is written as an annotation precisely so
 // it outlives the scale to zero.
-func (s *Server) storeAnnotations(kind, namespace, name string, annotations map[string]string) {
+//
+// A null removes the key, which is what a strategic merge patch means by it:
+// an enable that removed the disabled mark and a fake that kept it as "" would
+// disagree about whether the app is disabled.
+func (s *Server) storeAnnotations(kind, namespace, name string, annotations map[string]*string) {
 	if len(annotations) == 0 {
 		return
 	}
@@ -2617,7 +2634,11 @@ func (s *Server) storeAnnotations(kind, namespace, name string, annotations map[
 		s.annotations[key] = map[string]string{}
 	}
 	for k, v := range annotations {
-		s.annotations[key][k] = v
+		if v == nil {
+			delete(s.annotations[key], k)
+			continue
+		}
+		s.annotations[key][k] = *v
 	}
 }
 
@@ -2630,7 +2651,7 @@ func (s *Server) restartTemplate(w http.ResponseWriter, r *http.Request, kind, n
 	}
 	var patch struct {
 		Metadata struct {
-			Annotations map[string]string `json:"annotations"`
+			Annotations map[string]*string `json:"annotations"`
 		} `json:"metadata"`
 		Spec struct {
 			Template struct {
@@ -3092,7 +3113,10 @@ func (s *Server) writeStatefulSet(w http.ResponseWriter, namespace, name string)
 		ObjectMeta: metav1.ObjectMeta{
 			Name: found.Name, Namespace: found.Namespace, Annotations: annotations,
 		},
-		Spec:   appsv1.StatefulSetSpec{Replicas: &desired, Template: podTemplate(found.Name, found.Image)},
+		Spec: appsv1.StatefulSetSpec{
+			Replicas: &desired, Template: podTemplate(found.Name, found.Image),
+			Selector: appSelector(found.Name),
+		},
 		Status: appsv1.StatefulSetStatus{ReadyReplicas: found.Ready, UpdatedReplicas: found.Updated},
 	})
 }
@@ -3114,10 +3138,15 @@ func (s *Server) writeCronJob(w http.ResponseWriter, namespace, name string) {
 		return
 	}
 	suspend := found.Suspended
+	s.mu.Lock()
+	annotations := s.annotationsFor("cronjob", namespace, name)
+	s.mu.Unlock()
 	writeJSON(w, http.StatusOK, batchv1.CronJob{
-		TypeMeta:   metav1.TypeMeta{APIVersion: "batch/v1", Kind: "CronJob"},
-		ObjectMeta: metav1.ObjectMeta{Name: found.Name, Namespace: found.Namespace},
-		Spec:       batchv1.CronJobSpec{Schedule: found.Schedule, Suspend: &suspend},
+		TypeMeta: metav1.TypeMeta{APIVersion: "batch/v1", Kind: "CronJob"},
+		ObjectMeta: metav1.ObjectMeta{
+			Name: found.Name, Namespace: found.Namespace, Annotations: annotations,
+		},
+		Spec: batchv1.CronJobSpec{Schedule: found.Schedule, Suspend: &suspend},
 	})
 }
 
@@ -3171,13 +3200,22 @@ func (s *Server) patchSuspend(w http.ResponseWriter, r *http.Request, kind, name
 		return
 	}
 	var patch struct {
+		Metadata struct {
+			Annotations map[string]*string `json:"annotations"`
+		} `json:"metadata"`
 		Spec struct {
 			Suspend *bool `json:"suspend"`
 		} `json:"spec"`
 	}
-	if err := json.Unmarshal(body, &patch); err != nil || patch.Spec.Suspend == nil {
+	if err := json.Unmarshal(body, &patch); err != nil ||
+		(patch.Spec.Suspend == nil && len(patch.Metadata.Annotations) == 0) {
 		s.writeStatus(w, http.StatusBadRequest, metav1.StatusReasonBadRequest,
-			"kubesim applies only patches that set spec.suspend here")
+			"kubesim applies only patches that set spec.suspend or metadata.annotations here")
+		return
+	}
+	s.storeAnnotations(kind, namespace, name, patch.Metadata.Annotations)
+	if patch.Spec.Suspend == nil {
+		writeJSON(w, http.StatusOK, metav1.ObjectMeta{Name: name, Namespace: namespace})
 		return
 	}
 

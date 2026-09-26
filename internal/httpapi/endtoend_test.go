@@ -32,6 +32,7 @@ import (
 	"github.com/holzcloud/holzkube-manager/internal/metrics"
 	"github.com/holzcloud/holzkube-manager/internal/model"
 	"github.com/holzcloud/holzkube-manager/internal/nodestream"
+	"github.com/holzcloud/holzkube-manager/internal/power"
 	"github.com/holzcloud/holzkube-manager/internal/provision"
 	"github.com/holzcloud/holzkube-manager/internal/rotateca"
 	"github.com/holzcloud/holzkube-manager/internal/store"
@@ -79,6 +80,7 @@ type harnessConfig struct {
 	provision            func(*harness) *provision.Service
 	registerProvisionJob func(*jobs.Engine, *harness)
 	upgrade              func(*harness) *upgrade.Service
+	power                bool
 	allowedHosts         []string
 	factoryBase          string
 	wrapStore            func(store.Store) store.Store
@@ -151,6 +153,16 @@ func withProvisionJob(register func(*jobs.Engine, *harness)) harnessOpt {
 func withUpgrade(build func(*harness) *upgrade.Service) harnessOpt {
 	return func(c *harnessConfig) {
 		c.upgrade = build
+		c.jobs = true
+		c.streaming = true
+	}
+}
+
+// withPower adds the power model and its routes. It implies jobs, because a
+// node or cluster power action is a job submission.
+func withPower() harnessOpt {
+	return func(c *harnessConfig) {
+		c.power = true
 		c.jobs = true
 		c.streaming = true
 	}
@@ -353,6 +365,22 @@ func newHarness(t *testing.T, opts ...harnessOpt) *harness {
 		cfg.registerProvisionJob(h2.jobs, h2)
 	}
 
+	// The power model, wired the way the composition root wires it -- except
+	// the waker, which is the dry-run one: no test sends a real broadcast.
+	if cfg.power && inv != nil && h2.jobs != nil {
+		deps.Power = power.New(power.Deps{
+			Store:    st,
+			Logger:   deps.Logger,
+			Jobs:     h2.jobs,
+			Connect:  inv.Connect,
+			Kube:     inv.KubeClient,
+			Machines: inv.MachinesOf,
+			Gate:     upgrade.NewGate(inv.Connect, inv.ControlPlanesOf),
+			Waker:    power.DryRunWaker{},
+		})
+		deps.Power.Register(h2.jobs)
+	}
+
 	// The Prometheus exporter, wired the way the composition root wires it:
 	// over the same read model the API serves. A second source here would make
 	// a metrics test pass against numbers no screen ever shows.
@@ -388,6 +416,7 @@ func newHarness(t *testing.T, opts ...harnessOpt) *harness {
 		handlers.UpgradeRoutes(deps),
 		handlers.AuthorityRoutes(deps),
 		handlers.KubernetesRoutes(deps),
+		handlers.PowerRoutes(deps),
 	)
 
 	srv := httptest.NewTLSServer(httpapi.New(deps))
