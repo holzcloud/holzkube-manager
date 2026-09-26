@@ -14,6 +14,7 @@ import (
 	"github.com/holzcloud/holzkube-manager/internal/audit"
 	"github.com/holzcloud/holzkube-manager/internal/auth"
 	"github.com/holzcloud/holzkube-manager/internal/auth/oidc"
+	"github.com/holzcloud/holzkube-manager/internal/history"
 	"github.com/holzcloud/holzkube-manager/internal/httpapi/middleware"
 	"github.com/holzcloud/holzkube-manager/internal/imagefactory"
 	"github.com/holzcloud/holzkube-manager/internal/inventory"
@@ -228,6 +229,11 @@ type Deps struct {
 	// a deployment that offers none of them, and those handlers answer 502
 	// rather than panicking if it is.
 	Power *power.Service
+
+	// History is the last day of the charts, filled by the sampler the
+	// composition root starts. It is nil in a deployment that keeps none, and
+	// the history routes answer 502 rather than panicking if it is.
+	History *history.Store
 
 	// Metrics renders the Prometheus exposition. It is nil in a deployment
 	// with no inventory to report on, and /metrics then answers 503 -- which
