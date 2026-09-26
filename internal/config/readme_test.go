@@ -1,7 +1,8 @@
 package config
 
-// The README's option table is a claim about this package, so it is checked
-// like one.
+// The option table in the guide (docs/guide.md, which was the README until
+// the README became the short tour on 2026-09-26) is a claim about this
+// package, so it is checked like one.
 //
 // Three options -- dry-run, allow-prerelease and image-factory -- had been
 // added to the option table without a row in README.md, which is how an
@@ -25,9 +26,9 @@ var readmeFlagRow = regexp.MustCompile("(?m)^\\| `--([a-z0-9-]+)` \\| `([A-Z0-9_
 func TestTheReadmeDocumentsEveryOption(t *testing.T) {
 	t.Parallel()
 
-	raw, err := os.ReadFile(filepath.Join("..", "..", "README.md"))
+	raw, err := os.ReadFile(filepath.Join("..", "..", "docs", "guide.md"))
 	if err != nil {
-		t.Fatalf("read the README: %v", err)
+		t.Fatalf("read the guide: %v", err)
 	}
 
 	rows := map[string]string{}
