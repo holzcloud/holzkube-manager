@@ -79,6 +79,9 @@ const ROUTES = [
   // other nine checked -- which is the shape of ledger 153 (three screens the
   // audit had never opened) and 159 (a build it never looked at).
   '/kubernetes',
+  // The apps list and one app, since 2026-09-26.
+  '/kubernetes/apps',
+  '/kubernetes/apps/media/Deployment/jellyfin',
   '/kubernetes/workloads',
   '/kubernetes/pods',
   '/kubernetes/storage',

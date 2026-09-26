@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest'
 import { z } from 'zod'
 import {
   accessControlSchema,
+  appDetailSchema,
+  appsSchema,
   auditPageSchema,
   clusterCapacitySchema,
   clusterEventsSchema,
@@ -10,6 +12,7 @@ import {
   clusterStorageSchema,
   clustersSchema,
   clusterUsageSchema,
+  hardwareSchema,
   inventorySchema,
   jobsSchema,
   kubernetesOverviewSchema,
@@ -17,6 +20,7 @@ import {
   machinesSchema,
   nodeDetailSchema,
   noticesSchema,
+  powerSchema,
   schematicSchema,
   sweepPlanSchema,
   usersSchema,
@@ -66,6 +70,12 @@ describe('the layout guard’s fixtures', () => {
     ['/api/v1/clusters/c-homelab/kubernetes/access', accessControlSchema],
     ['/api/v1/clusters/c-homelab/kubernetes/inventory', inventorySchema],
     ['/api/v1/clusters/c-homelab/wall', wallSchema],
+    ['/api/v1/machines/m-cp-1/hardware', hardwareSchema],
+    ['/api/v1/clusters/c-homelab/kubernetes/apps', appsSchema],
+    ['/api/v1/clusters/c-homelab/kubernetes/apps/media/Deployment/jellyfin', appDetailSchema],
+    ['/api/v1/machines/m-cp-1/power', powerSchema],
+    ['/api/v1/clusters/c-homelab/power', powerSchema],
+    ['/api/v1/clusters/c-homelab/kubernetes/apps/media/Deployment/jellyfin/power', powerSchema],
   ])('%s is something the product would accept', (path, schema) => {
     const parsed = schema.safeParse(fixtures[path])
     // The error is printed in full rather than as "expected true": a fixture
