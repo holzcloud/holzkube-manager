@@ -72,6 +72,31 @@ type nodeState struct {
 	resets     int
 	poweredOff bool
 
+	// shutdowns and forcedShutdowns count Shutdown RPCs, the second only those
+	// that asked Talos to skip its own cordon and drain; lastRebootMode is the
+	// mode the last Reboot asked for. A force-stop and a stop reach the same
+	// RPC, and the only difference between them is this one flag -- so a test
+	// asserting which one happened has to be able to read the flag back.
+	shutdowns       int
+	forcedShutdowns int
+	lastRebootMode  string
+
+	// powerOns counts the times something outside the node switched it back
+	// on -- Wake-on-LAN, in the product. stayDown makes the next Reboot leave
+	// the node off instead of bringing it back, which is a node that does not
+	// survive its reboot: the case a rolling restart has to stop at.
+	powerOns int
+	stayDown bool
+
+	// stayUp makes a Reboot accepted and not performed: the node goes on
+	// answering with the boot time it had. It is the few seconds on real
+	// hardware between a node accepting a reboot and going down, stretched
+	// out -- the window in which "it answers" is not "it is back".
+	stayUp bool
+
+	// bootTakes is Options.BootTakes.
+	bootTakes time.Duration
+
 	appliedConfigs int
 }
 
@@ -110,6 +135,16 @@ type NodeState struct {
 	// is not counted, because a dry run that changed the node would not be one.
 	AppliedConfigs int
 
+	// Shutdowns counts Shutdown RPCs and ForcedShutdowns the ones that asked
+	// Talos to skip its own cordon and drain. LastRebootMode is the mode the
+	// last Reboot asked for: "DEFAULT", "POWERCYCLE" or "FORCE", empty before
+	// the first one. PowerOns counts the times the node was switched back on
+	// from outside, which is what Wake-on-LAN does.
+	Shutdowns       int
+	ForcedShutdowns int
+	LastRebootMode  string
+	PowerOns        int
+
 	// RecoverCalls counts EtcdRecover uploads. UploadedSnapshot is what the
 	// last one left on the node; RecoveredFrom is what a recovery bootstrap
 	// then started etcd from.
@@ -134,6 +169,7 @@ func newNodeState(opts Options) *nodeState {
 		version:      opts.TalosVersion,
 		lastBoot:     now(),
 		bootstrapped: opts.Bootstrapped,
+		bootTakes:    opts.BootTakes,
 	}
 }
 
@@ -172,7 +208,7 @@ func (n *nodeState) upgradeTo(version string) {
 	defer n.mu.Unlock()
 	n.version = version
 	n.reboots++
-	n.lastBoot = n.now()
+	n.lastBoot = n.now().Add(n.bootTakes)
 }
 
 // removeMember drops a member from this node's idea of the etcd membership.
@@ -203,16 +239,20 @@ func (n *nodeState) snapshot() NodeState {
 	defer n.mu.Unlock()
 
 	return NodeState{
-		Hostname:       n.hostname,
-		Version:        n.version,
-		Bootstrapped:   n.bootstrapped,
-		BootstrapCalls: n.bootstrapCalls,
-		Reboots:        n.reboots,
-		LastBoot:       n.lastBoot,
-		Resets:         n.resets,
-		PoweredOff:     n.poweredOff,
-		AppliedConfigs: n.appliedConfigs,
-		RecoverCalls:   n.recoverCalls,
+		Hostname:        n.hostname,
+		Version:         n.version,
+		Bootstrapped:    n.bootstrapped,
+		BootstrapCalls:  n.bootstrapCalls,
+		Reboots:         n.reboots,
+		LastBoot:        n.lastBoot,
+		Resets:          n.resets,
+		PoweredOff:      n.poweredOff,
+		AppliedConfigs:  n.appliedConfigs,
+		RecoverCalls:    n.recoverCalls,
+		Shutdowns:       n.shutdowns,
+		ForcedShutdowns: n.forcedShutdowns,
+		LastRebootMode:  n.lastRebootMode,
+		PowerOns:        n.powerOns,
 		// Cloned, because NodeState promises a caller holding it cannot race
 		// the server, and a shared backing array is exactly that race.
 		UploadedSnapshot: bytes.Clone(n.uploadedSnapshot),
@@ -322,20 +362,64 @@ func (n *nodeState) recoverBootstrap(skipHashCheck bool) error {
 }
 
 // reboot restarts the node. etcd data survives a reboot, so bootstrapped does.
-func (n *nodeState) reboot() {
+//
+// A node told to stay down goes off instead, and stays off until something
+// switches it on: it is the node whose reboot did not bring it back.
+func (n *nodeState) reboot(mode string) {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 
 	n.reboots++
-	n.lastBoot = n.now()
+	n.lastRebootMode = mode
+	switch {
+	case n.stayDown:
+		n.poweredOff = true
+	case n.stayUp:
+		// Accepted, and nothing happened.
+	default:
+		n.lastBoot = n.now().Add(n.bootTakes)
+	}
 }
 
 // shutdown powers the node off.
-func (n *nodeState) shutdown() {
+func (n *nodeState) shutdown(force bool) {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 
+	n.shutdowns++
+	if force {
+		n.forcedShutdowns++
+	}
 	n.poweredOff = true
+}
+
+// powerOn is the node being switched on from outside. It boots, so the boot
+// time moves; a node that was already on is left exactly as it was, which is
+// what a Wake-on-LAN packet does to a machine that is running.
+func (n *nodeState) powerOn() {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+
+	if !n.poweredOff {
+		return
+	}
+	n.powerOns++
+	n.poweredOff = false
+	n.lastBoot = n.now().Add(n.bootTakes)
+}
+
+func (n *nodeState) setStayDown(v bool) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+
+	n.stayDown = v
+}
+
+func (n *nodeState) setStayUp(v bool) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+
+	n.stayUp = v
 }
 
 // reset wipes the node. A reset erases the etcd data directory, so the node
@@ -404,6 +488,25 @@ func (s *Server) Node() NodeState { return s.node.snapshot() }
 // SetVersion changes what the node reports as its Talos version, which is what
 // an upgrade does.
 func (s *Server) SetVersion(version string) { s.node.setVersion(version) }
+
+// PowerOn switches a node that is off back on, which is what a Wake-on-LAN
+// packet does to a real one. It is a method on the server rather than an RPC
+// because a machine that is off has no API to call: whatever wakes it arrives
+// from outside, and a test's stand-in for the magic packet calls this.
+func (s *Server) PowerOn() { s.node.powerOn() }
+
+// StayDownOnReboot makes every later Reboot leave the node off instead of
+// bringing it back, until it is switched on again. It is the node a rolling
+// restart has to stop at: one whose reboot was accepted and which never came
+// back.
+func (s *Server) StayDownOnReboot(v bool) { s.node.setStayDown(v) }
+
+// StayUpOnReboot makes every later Reboot accepted and not performed: the node
+// keeps answering, with the boot time it had. On hardware that is the seconds
+// between a node accepting a reboot and going down; here it lasts, so that a
+// test can tell a wait that asks "has it rebooted" from one that only asks
+// "does it answer".
+func (s *Server) StayUpOnReboot(v bool) { s.node.setStayUp(v) }
 
 // actorID is the identifier Talos returns for an asynchronous action so that a
 // caller can correlate the reply with the events the action goes on to emit.
@@ -738,12 +841,12 @@ func (m *machineService) ApplyConfiguration(ctx context.Context, req *machine.Ap
 // Reboot restarts the node. etcd data survives, so a bootstrapped node comes
 // back bootstrapped; what moves is the last-boot timestamp the service list
 // reports.
-func (m *machineService) Reboot(_ context.Context, _ *machine.RebootRequest) (*machine.RebootResponse, error) {
+func (m *machineService) Reboot(_ context.Context, req *machine.RebootRequest) (*machine.RebootResponse, error) {
 	if err := m.server.node.up(); err != nil {
 		return nil, err
 	}
 
-	m.server.node.reboot()
+	m.server.node.reboot(req.GetMode().String())
 
 	// ip_changes_on_reboot models a DHCP lease that did not survive the reboot.
 	// The rebind happens before the reply is written and severs this connection
@@ -769,7 +872,7 @@ func (m *machineService) Reboot(_ context.Context, _ *machine.RebootRequest) (*m
 
 // Shutdown powers the node off. Afterwards it answers Unavailable, because a
 // machine that is off does not answer at all.
-func (m *machineService) Shutdown(_ context.Context, _ *machine.ShutdownRequest) (*machine.ShutdownResponse, error) {
+func (m *machineService) Shutdown(_ context.Context, req *machine.ShutdownRequest) (*machine.ShutdownResponse, error) {
 	if err := m.server.node.up(); err != nil {
 		return nil, err
 	}
@@ -781,7 +884,7 @@ func (m *machineService) Shutdown(_ context.Context, _ *machine.ShutdownRequest)
 		}},
 	}
 
-	m.server.node.shutdown()
+	m.server.node.shutdown(req.GetForce())
 
 	return resp, nil
 }

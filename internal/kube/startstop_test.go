@@ -2,7 +2,6 @@ package kube_test
 
 import (
 	"errors"
-	"strings"
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
@@ -115,21 +114,10 @@ func TestStoppingACronJobSuspendsIt(t *testing.T) {
 	}
 }
 
-// TestADaemonSetHasNoStop, and the refusal says what to do instead.
-func TestADaemonSetHasNoStop(t *testing.T) {
-	t.Parallel()
-
-	ctx := testContext(t)
-	_, client := newCluster(t, kubesim.Options{})
-
-	err := client.Stop(ctx, kube.KindDaemonSet, "longhorn-system", "longhorn-manager")
-	if !errors.Is(err, kube.ErrCannotStop) {
-		t.Fatalf("err = %v, want ErrCannotStop", err)
-	}
-	if !strings.Contains(err.Error(), "Cordon or drain") {
-		t.Errorf("reason = %q, want it to name what to do instead", err)
-	}
-}
+// A DaemonSet has a stop since 2026-09-26: see TestADaemonSetStopsAndStartsAgain
+// in apppower_test.go. The refusal this file used to pin ("cordon or drain the
+// nodes instead") answered a different question -- a cordon leaves a
+// DaemonSet's own pod exactly where it is.
 
 // TestStoppingAPodMeansStoppingItsController.
 //

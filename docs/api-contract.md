@@ -2251,11 +2251,16 @@ workload row is how a client says so before anybody presses.
 they have no replicas, and a suspended CronJob keeps its schedule and runs
 nothing. One verb, the two ways Kubernetes expresses it.
 
-**A DaemonSet has no stop** (`conflict.cannot-stop`), and the refusal says what
-to do instead — cordon or drain the nodes. Its size is how many nodes match, so
-there is no count to set to zero. `stoppable` on the workload row says this per
-kind, for the same reason `scalable` does: a button the API server would refuse
-teaches that the buttons are suggestions.
+**A DaemonSet stops by needing a node nobody is** (since 2026-09-26; it used to
+have no stop). Its size is how many nodes match its selector, so there is no count
+to set to zero — instead the key `holzkube.io/stopped: "true"`, which no node
+carries, is *added* to its pod template's `nodeSelector`, and the selector it had
+is written down as `holzkube.io/node-selector-before-stop`. Starting removes
+exactly that one key, so a selector somebody changed while it was stopped is not
+undone. `stoppable` on the workload row is now `true` for a DaemonSet and
+`stopped` reads the key. The refusal this paragraph used to describe — "cordon or
+drain the nodes instead" — answered a different question: a cordon leaves a
+DaemonSet's own pod exactly where it is.
 
 **Starting is `Destructive` too**, and that is not symmetry for its own sake:
 starting something somebody stopped deliberately is as much a change to what the
@@ -2925,6 +2930,118 @@ The lease is per cluster, not global — one slow node must not stop the fleet �
 and it is held in memory rather than in the store. A lease that survived a crash
 would block every job on that cluster until somebody cleared it by hand, and the
 record a crashed job leaves behind already says what happened.
+
+## Power: one model for a cluster, a node and an app
+
+Seven verbs, the same seven for all three targets, decided by the operator on
+2026-09-26:
+
+| action | cluster | node | app |
+|---|---|---|---|
+| `stop` | workers first (each cordoned, drained, shut down), then the control plane one node at a time, the node this daemon reaches the cluster through last | cordon, drain (every PodDisruptionBudget honoured), graceful Talos shutdown; **refused on a control-plane node etcd cannot spare** | scale to zero remembering the count; CronJob and Job suspended; DaemonSet given a selector no node matches; a bare pod deleted |
+| `force-stop` | every node shut down at once, no drain | Talos shutdown with `force`, no drain, no etcd check | the stop, then the app's pods deleted with a grace period of zero |
+| `start` | Wake-on-LAN to the control plane, wait for the Kubernetes API, Wake-on-LAN to the workers, wait for them, uncordon every node the stop cordoned; disabled nodes skipped | Wake-on-LAN, wait for the Talos API, uncordon; a node that already answers is only uncordoned | the existing start: the remembered count, unsuspended, the selector key removed |
+| `disable` | the cluster marked disabled, then `stop` | the node marked disabled, then `stop` | `holzkube.io/disabled: "true"` on the object, then `stop` |
+| `enable` | the mark cleared, then `start` | the mark cleared, then `start` | the annotation removed, then `start` |
+| `restart` | rolling, one node at a time — workers first — cordon, drain, reboot, wait until it answers and its kube node is Ready, uncordon; **stops at the first node that does not come back healthy** | cordon, drain, reboot, wait for Ready, uncordon | `rollout restart`; not offered for a CronJob, a Job or a bare pod |
+| `force-restart` | every node rebooted at once in Talos's FORCE mode | Talos reboot in FORCE mode, no drain, wait, uncordon if it was schedulable before | the app's pods deleted with a grace period of zero; the controller makes new ones; not offered for a bare pod |
+
+"Disabled" means *off, and stays off*: a start refuses while the mark is there, a
+cluster start skips a disabled node, and a disabled node that comes up anyway —
+somebody pressed its power button — is cordoned by the daemon within a minute and
+the journal says so (`power: a disabled node is running; cordoned it ...`). It is
+not switched off again behind the back of whoever just switched it on.
+
+### Routes
+
+    GET  /api/v1/clusters/{id}/power
+    GET  /api/v1/machines/{id}/power
+    GET  /api/v1/clusters/{id}/kubernetes/apps/{namespace}/{kind}/{name}/power
+
+    POST /api/v1/clusters/{id}/power/{action}
+    POST /api/v1/machines/{id}/power/{action}
+    POST /api/v1/clusters/{id}/kubernetes/apps/{namespace}/{kind}/{name}/power/{action}
+
+`{action}` is one of the seven, literally: each is its own route, so that the
+route table can mark the two forced ones — and only those — `Destructive`, and so
+that the audit archive records *which* verb was pressed (`cluster.stop`,
+`node.force-restart`, `cluster.kubernetes-app-disable`, …). An action that is not
+one of the seven has no route and is answered `404` `notfound.route`.
+
+`{kind}` is `Deployment`, `StatefulSet`, `DaemonSet`, `Job`, `CronJob` or `Pod`,
+in any case. `Pod` is a bare pod — one nothing owns; a pod with a controller is
+refused by name, because stopping it means stopping its owner.
+
+**The POST carries no parameters.** Like every mutating route it still needs
+`Content-Type: application/json` and a JSON object body (`{}`) to pass the CSRF
+contract; the body is ignored.
+
+The reads need `reader`. The actions need `operator` and the cluster's mutation
+lock open (`forbidden.cluster-locked` otherwise). `force-stop` and
+`force-restart` additionally need the sudo window (`428` `sudo.required`); the
+five careful verbs do not, because they refuse the damaging cases themselves.
+
+### The report
+
+    {"state": "running",
+     "disabled": false,
+     "actions": [
+       {"action": "stop",          "available": true,  "reason": "", "sudo": false},
+       {"action": "force-stop",    "available": true,  "reason": "", "sudo": true},
+       {"action": "start",         "available": false, "reason": "It is running.", "sudo": false},
+       {"action": "disable",       "available": true,  "reason": "", "sudo": false},
+       {"action": "enable",        "available": false, "reason": "It is not disabled.", "sudo": false},
+       {"action": "restart",       "available": true,  "reason": "", "sudo": false},
+       {"action": "force-restart", "available": true,  "reason": "", "sudo": true}]}
+
+`state` is `running`, `stopped`, `partial` (some nodes answer and some do not;
+an app wants more than it has ready), `disabled` (the mark wins over whatever the
+thing is doing) or `unknown` (nothing could be asked). **All seven actions, always,
+in this order.** `reason` is one plain sentence when `available` is false and `""`
+when it is true — never omitted. `sudo` is read from the same table the route
+table's `Destructive` flag is.
+
+A node's report probes the node live, and for a control-plane node that is up asks
+the etcd health gate — the rolling upgrade's — whether the cluster survives losing
+it; a cluster's report probes every node in parallel. A node that answers but is
+still cordoned from a power action offers `start`, which is its uncordon.
+
+### What an action answers
+
+A cluster or node action is a job: **`202 Accepted`** with `{"job": …, "topic":
+"job:<id>"}` and a `Location` header, exactly like the node actions above. The
+kinds are `cluster.<action>` and `node.<action>`, and each step is named after the
+node it touches (`drain w-1`, `wait for cp-2 to come back`), so the Jobs screen
+reads as the walk. Every step can be resumed after a restart of the daemon except
+"force-reboot every node at once" when a node does not answer afterwards, which
+parks.
+
+An app action is synchronous — a scale, a patch or a few deletes — and answers
+**`200`** `{"message": "Scaled web to zero; a start brings back the 3 it ran."}`.
+
+| code | HTTP | when |
+|---|---|---|
+| `conflict.power-unavailable` | 409 | the action is not available right now; `detail` is the report's sentence for it |
+| `sudo.required` | 428 | a forced action without an open sudo window |
+| `forbidden.cluster-locked` | 403 | the cluster was adopted read-only |
+| `store.cluster-busy` | 409 | another job holds the cluster's lease |
+| `notfound.record` | 404 | no such machine or cluster |
+| `notfound.kubernetes-workload` | 404 | no such app, or a `{kind}` that is not one of the six |
+| `notfound.route` | 404 | an `{action}` that is not one of the seven |
+| `upstream.power-unavailable` | 502 | this instance was started without the power model |
+
+### Wake-on-LAN
+
+A start of a node that is off sends a magic packet (six bytes of `0xFF`, then the
+MAC sixteen times) for every physical network card the node's last snapshot
+recorded, over UDP to port 9, to `255.255.255.255` and to the directed broadcast
+of every IPv4 network the daemon's host is on. The MAC addresses come from the
+snapshot because a machine that is off cannot be asked; a node that was never read
+has none, and its start says so rather than waiting for nothing. **Whether the
+card woke is never known from the packet** — it has no answer — so a start is a
+wake followed by a wait for the node's API, and the wait's failure names the node
+and the two usual reasons (Wake-on-LAN off in its firmware, or a network the
+broadcast does not reach). An instance started with `--dry-run` sends no packet.
 
 ## Machine configuration
 

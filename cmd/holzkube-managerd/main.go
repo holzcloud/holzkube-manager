@@ -32,6 +32,7 @@ import (
 	"github.com/holzcloud/holzkube-manager/internal/metrics"
 	"github.com/holzcloud/holzkube-manager/internal/model"
 	"github.com/holzcloud/holzkube-manager/internal/nodestream"
+	"github.com/holzcloud/holzkube-manager/internal/power"
 	"github.com/holzcloud/holzkube-manager/internal/provision"
 	"github.com/holzcloud/holzkube-manager/internal/rotateca"
 	"github.com/holzcloud/holzkube-manager/internal/store/fsstore"
@@ -392,6 +393,38 @@ func run(args []string) error {
 		},
 	})
 
+	// The power model (2026-09-26): stop, start, disable, enable and restart
+	// for a cluster, a node and an app. It is built from what already exists
+	// rather than beside it -- the inventory's connector and Kubernetes
+	// client, the upgrade's etcd gate, this engine -- because every one of
+	// those is a question this product already has one answer to.
+	//
+	// The waker is the real one only when this instance may change the fleet.
+	// A magic packet is not a Talos call, so --dry-run's refusal in the
+	// transport never sees it; without this a dry-run instance would refuse
+	// every shutdown and still switch machines on.
+	var waker power.Waker = power.NetWaker{}
+	if cfg.DryRun {
+		waker = power.DryRunWaker{}
+	}
+	powerSvc := power.New(power.Deps{
+		Store:  st,
+		Logger: logger,
+		Jobs:   engine,
+		Connect: func(ctx context.Context, id model.MachineID) (*talos.ClusterClient, error) {
+			return inv.Connect(ctx, id)
+		},
+		Kube: func(ctx context.Context, cluster model.ClusterID) (*kube.Client, error) {
+			return inv.KubeClient(ctx, cluster)
+		},
+		Machines: inv.MachinesOf,
+		Gate:     upgradeDeps.Gate,
+		Waker:    waker,
+	})
+	// Before Resume, like every registration: a stored power job whose kind
+	// this engine did not know at resume would be parked instead of continued.
+	powerSvc.Register(engine)
+
 	// The certificate authority rotation (V2-OPS-02, ledger 103). It is wired
 	// from the same connector and inventory as the upgrade, and its pass 3 --
 	// mint a certificate from the new authority, prove it, then keep it -- is
@@ -497,6 +530,7 @@ func run(args []string) error {
 		Config:      configSvc,
 		Provision:   provisionSvc,
 		Upgrade:     upgradeSvc,
+		Power:       powerSvc,
 		Support:     supportCollector,
 		Metrics:     metricsExporter,
 		// The per-cluster read-only lock, read by the route middleware rather
@@ -536,6 +570,16 @@ func run(args []string) error {
 	// needed, and makes stale_since meaningless on the first load.
 	if err := inv.Start(context.Background()); err != nil {
 		return err
+	}
+
+	// The keeper of disabled nodes: one that comes up anyway is cordoned and
+	// said so in the log. Not in --dry-run, which promises to change nothing
+	// -- and a cordon is a change the keeper would make on its own, with
+	// nobody having pressed anything.
+	keepCtx, stopKeeping := context.WithCancel(context.Background())
+	defer stopKeeping()
+	if !cfg.DryRun {
+		go powerSvc.Keep(keepCtx, power.KeepEvery)
 	}
 
 	// Resume before the listener opens, so that a job interrupted by the last
@@ -723,6 +767,7 @@ func routeTable(deps httpapi.Deps) []httpapi.Route {
 		handlers.ConfigRoutes(deps),
 		handlers.ProvisionRoutes(deps),
 		handlers.UpgradeRoutes(deps),
+		handlers.PowerRoutes(deps),
 		handlers.SupportRoutes(deps),
 		handlers.MetricsRoutes(deps),
 	)

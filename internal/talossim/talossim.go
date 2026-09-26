@@ -175,6 +175,21 @@ type Options struct {
 	// test that has to assert "the service last changed at the last boot"
 	// should be able to say what time that was.
 	Now func() time.Time
+
+	// BootTakes is how long a boot takes, as the node's own boot time reports
+	// it: a node rebooted or powered on at t reports having booted at
+	// t+BootTakes. Zero keeps the instant boot every existing test was written
+	// against.
+	//
+	// It exists because Talos reports its boot time in whole seconds, and the
+	// product's only evidence that a reboot happened is "the node has been up
+	// for less time than the request is old". A simulated reboot that lands in
+	// the same second as the request it answers is therefore indistinguishable
+	// from no reboot at all -- which a real node, whose reboot takes a minute,
+	// never is. A test that waits for a node to come BACK has to be able to
+	// build a node whose boot is visibly after the request, or the wait it is
+	// testing can never end.
+	BootTakes time.Duration
 }
 
 // Server is a running simulated node.
