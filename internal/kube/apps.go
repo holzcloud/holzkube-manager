@@ -380,6 +380,17 @@ var appKinds = map[string]string{
 	"pod":         AppKindPod,
 }
 
+// CanonicalAppKind is the kind as the list reports it for what a URL said, and
+// false for anything that is not a kind of app. It is exported for the metrics
+// history, which files an app under the list's spelling and is asked for it
+// under whatever the path carried: the same forgiveness AppDetail extends, so
+// the detail page and its chart cannot disagree about which app "deployment"
+// names.
+func CanonicalAppKind(kind string) (string, bool) {
+	canonical, ok := appKinds[strings.ToLower(kind)]
+	return canonical, ok
+}
+
 type appKey struct{ namespace, kind, name string }
 
 // appSeed is what a listed controller contributes before any pod is counted:
