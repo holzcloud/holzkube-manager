@@ -36,7 +36,7 @@ interface LiveChartProps {
   height?: number
 }
 
-const GUTTER = 48
+const GUTTER = 64
 const PAD_TOP = 8
 const PAD_BOTTOM = 18
 
