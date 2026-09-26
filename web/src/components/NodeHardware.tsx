@@ -4,9 +4,11 @@ import { Fan } from 'lucide-react'
 import { api, type Hardware, type Machine, type Temperature } from '@/api'
 import { LiveChart } from '@/components/charts/LiveChart'
 import { Meter, severityOf } from '@/components/charts/Meter'
+import { RangePicker } from '@/components/charts/RangePicker'
 import { Sparkline } from '@/components/charts/Sparkline'
 import { Problem } from '@/components/Problem'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { merge, useChartRange } from '@/hooks/useChartRange'
 import { useLiveSeries } from '@/hooks/useLiveSeries'
 import { formatBytes, formatCores, formatPercent, formatRate } from '@/lib/format'
 
@@ -80,7 +82,7 @@ export function NodeHardware({ machine }: { machine: Machine }) {
   })
 
   const h = hardware.data
-  const history = useLiveSeries(`hardware:${machine.id}`, h, h?.observed_at, (r) => {
+  const live = useLiveSeries(`hardware:${machine.id}`, h, h?.observed_at, (r) => {
     const values: Record<string, number> = {
       cpu: r.cpu.usage_percent,
       memory: r.memory.total_bytes > 0 ? (r.memory.used_bytes / r.memory.total_bytes) * 100 : 0,
@@ -96,6 +98,12 @@ export function NodeHardware({ machine }: { machine: Machine }) {
     for (const f of r.fans) values[`fan:${f.chip}/${f.label}`] = f.rpm
     return values
   })
+
+  const chart = useChartRange(['hardware', machine.id], (range) =>
+    api.machines.hardwareHistory(machine.id, range),
+  )
+  const now = h ? Date.parse(h.observed_at) : Date.now()
+  const history = merge(chart.history.data, live, chart.windowMs, now)
 
   if (h === undefined) {
     if (hardware.error) {
@@ -137,6 +145,16 @@ export function NodeHardware({ machine }: { machine: Machine }) {
         </p>
       )}
 
+      <RangePicker
+        value={chart.range}
+        onChange={chart.setRange}
+        note={
+          chart.history.error
+            ? 'No recorded history yet — the curves start with this page.'
+            : undefined
+        }
+      />
+
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_20rem]">
         <div className="min-w-0 space-y-4">
           <Card>
@@ -163,6 +181,7 @@ export function NodeHardware({ machine }: { machine: Machine }) {
                 format={(v) => `${Math.round(v)}%`}
                 yMax={100}
                 height={160}
+                windowMs={chart.windowMs}
               />
               {h.cpu.per_core.length > 0 && (
                 <ul className="grid grid-cols-2 gap-x-4 gap-y-2 sm:grid-cols-3 xl:grid-cols-6">
@@ -215,6 +234,7 @@ export function NodeHardware({ machine }: { machine: Machine }) {
                   series={[{ key: 'memory', label: 'Used', slot: 1, points: history.memory ?? [] }]}
                   format={(v) => `${Math.round(v)}%`}
                   yMax={100}
+                  windowMs={chart.windowMs}
                 />
                 <p className="text-muted-foreground text-xs tabular-nums">
                   {formatBytes(mem.cache_bytes)} cache · {formatBytes(mem.available_bytes)}{' '}
@@ -237,6 +257,7 @@ export function NodeHardware({ machine }: { machine: Machine }) {
                     { key: 'write', label: 'Write', slot: 1, points: history.write ?? [] },
                   ]}
                   format={formatRate}
+                  windowMs={chart.windowMs}
                 />
                 <p className="sr-only">
                   Now: read {formatRate(totalRead)}, write {formatRate(totalWrite)}.
@@ -266,6 +287,7 @@ export function NodeHardware({ machine }: { machine: Machine }) {
                   { key: 'tx', label: 'Outbound', slot: 1, points: history.tx ?? [] },
                 ]}
                 format={formatRate}
+                windowMs={chart.windowMs}
               />
               <p className="sr-only">
                 Now: in {formatRate(totalRx)}, out {formatRate(totalTx)}.

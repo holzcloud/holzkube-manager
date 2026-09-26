@@ -1312,6 +1312,32 @@ export const hardwareSchema = z.object({
 })
 
 export type Hardware = z.infer<typeof hardwareSchema>
+
+/**
+ * The recorded past of a node or an app (2026-09-26): what the daemon sampled
+ * every 15 s and kept for a day, so a chart opened now starts yesterday rather
+ * than at the moment it was opened. Points are [unix ms, value], ascending.
+ */
+export const historyRanges = ['1h', '6h', '24h'] as const
+export type HistoryRange = (typeof historyRanges)[number]
+
+export const historySchema = z.object({
+  range: z.string().default('1h'),
+  step_seconds: z.number().default(15),
+  from: z.string().default(''),
+  to: z.string().default(''),
+  series: z
+    .record(
+      z.string(),
+      z
+        .array(z.tuple([z.number(), z.number()]))
+        .nullish()
+        .transform(orEmpty),
+    )
+    .default({}),
+})
+
+export type History = z.infer<typeof historySchema>
 export type Temperature = Hardware['temperatures'][number]
 
 export const clusterSchema = z.object({
@@ -3100,6 +3126,14 @@ export const api = {
     hardware: (id: string): Promise<Hardware> =>
       sendJSON('GET', `/api/v1/machines/${encodeURIComponent(id)}/hardware`, hardwareSchema),
 
+    /** What the daemon recorded about this node over the range. */
+    hardwareHistory: (id: string, range: HistoryRange): Promise<History> =>
+      sendJSON(
+        'GET',
+        `/api/v1/machines/${encodeURIComponent(id)}/hardware/history?range=${range}`,
+        historySchema,
+      ),
+
     forget: async (id: string): Promise<void> => {
       await send('DELETE', `/api/v1/machines/${encodeURIComponent(id)}`)
     },
@@ -3710,6 +3744,20 @@ export const api = {
         appsSchema,
       )
     },
+
+    /** What the daemon recorded about this app's usage over the range. */
+    appHistory: (
+      cluster: string,
+      namespace: string,
+      kind: string,
+      name: string,
+      range: HistoryRange,
+    ) =>
+      sendJSON(
+        'GET',
+        `/api/v1/clusters/${encodeURIComponent(cluster)}/kubernetes/apps/${encodeURIComponent(namespace)}/${encodeURIComponent(kind)}/${encodeURIComponent(name)}/history?range=${range}`,
+        historySchema,
+      ),
 
     /** One app: its pods and containers with their usage, the services that
      * reach it, and what happened to it recently. */
