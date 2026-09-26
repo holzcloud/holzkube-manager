@@ -22,6 +22,7 @@ import (
 	"github.com/holzcloud/holzkube-manager/internal/auth"
 	"github.com/holzcloud/holzkube-manager/internal/auth/oidc"
 	"github.com/holzcloud/holzkube-manager/internal/config"
+	"github.com/holzcloud/holzkube-manager/internal/history"
 	"github.com/holzcloud/holzkube-manager/internal/httpapi"
 	"github.com/holzcloud/holzkube-manager/internal/httpapi/handlers"
 	"github.com/holzcloud/holzkube-manager/internal/imagefactory"
@@ -403,6 +404,12 @@ func run(args []string) error {
 	// A magic packet is not a Talos call, so --dry-run's refusal in the
 	// transport never sees it; without this a dry-run instance would refuse
 	// every shutdown and still switch machines on.
+	// The metrics history (2026-09-26): the last day of every chart, kept in
+	// one file in the data directory so it survives a restart -- above all
+	// the hourly update's. Opened after the store, whose startup sweep has
+	// already removed a temporary this file's last write may have left.
+	historyStore := history.Open(history.Path(cfg.DataDir), fsstore.ReadFile, fsstore.WriteFileAtomic, time.Now(), logger)
+
 	var waker power.Waker = power.NetWaker{}
 	if cfg.DryRun {
 		waker = power.DryRunWaker{}
@@ -531,6 +538,7 @@ func run(args []string) error {
 		Provision:   provisionSvc,
 		Upgrade:     upgradeSvc,
 		Power:       powerSvc,
+		History:     historyStore,
 		Support:     supportCollector,
 		Metrics:     metricsExporter,
 		// The per-cluster read-only lock, read by the route middleware rather
@@ -571,6 +579,42 @@ func run(args []string) error {
 	if err := inv.Start(context.Background()); err != nil {
 		return err
 	}
+
+	// The sampler behind the history. Started in --dry-run too, unlike the
+	// keeper below: it only reads, and dry-run promises no changes, not no
+	// reads. Stopped before the inventory closes -- this defer runs first --
+	// and waited for, because its last act is writing the file, and a
+	// shutdown that did not wait for that would lose the minute an update
+	// restart is most likely to land in.
+	sampler := history.NewSampler(history.SamplerDeps{
+		History: historyStore,
+		Logger:  logger,
+		Inventory: func(ctx context.Context) ([]model.Machine, []model.Cluster, error) {
+			machines, err := st.Machines().List(ctx)
+			if err != nil {
+				return nil, nil, err
+			}
+			clusters, err := st.Clusters().List(ctx)
+			if err != nil {
+				return nil, nil, err
+			}
+			return machines, clusters, nil
+		},
+		Hardware: inv.Hardware,
+		Apps: history.KubeApps(func(ctx context.Context, cluster model.ClusterID) (*kube.Client, error) {
+			return inv.KubeClient(ctx, cluster)
+		}, time.Now),
+	})
+	sampleCtx, stopSampling := context.WithCancel(context.Background())
+	sampled := make(chan struct{})
+	go func() {
+		defer close(sampled)
+		sampler.Run(sampleCtx)
+	}()
+	defer func() {
+		stopSampling()
+		<-sampled
+	}()
 
 	// The keeper of disabled nodes: one that comes up anyway is cordoned and
 	// said so in the log. Not in --dry-run, which promises to change nothing
@@ -768,6 +812,7 @@ func routeTable(deps httpapi.Deps) []httpapi.Route {
 		handlers.ProvisionRoutes(deps),
 		handlers.UpgradeRoutes(deps),
 		handlers.PowerRoutes(deps),
+		handlers.HistoryRoutes(deps),
 		handlers.SupportRoutes(deps),
 		handlers.MetricsRoutes(deps),
 	)

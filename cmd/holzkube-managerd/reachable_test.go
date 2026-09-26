@@ -46,19 +46,33 @@ var notInTheInterface = map[string]string{
 //
 // It is NOT an exemption in notInTheInterface's sense -- these routes' caller
 // is the interface -- and it is built so that it cannot go stale the way a
-// written exemption can: it holds only while web/src mentions NONE of them. The
-// moment the screen lands and mentions one, it is void for all of them, and
-// every one it does not mention is reported like any other route. Deleting it
-// then is housekeeping; leaving it is harmless, because it no longer exempts
-// anything.
-func interfaceInFlight() map[string]bool {
-	out := map[string]bool{}
-	// The power model (2026-09-26): the screen is being built against the
-	// contract in parallel, by a separate change.
-	for _, route := range handlers.PowerRoutes(httpapi.Deps{}) {
-		out[route.Method+" "+route.Pattern] = true
+// written exemption can: each group holds only while web/src mentions NONE of
+// its routes. The moment the screen lands and mentions one, that group is void
+// for all of its routes, and every one it does not mention is reported like
+// any other route. Deleting a void group then is housekeeping; leaving it is
+// harmless, because it no longer exempts anything.
+//
+// Groups and not one set, because two pieces of work can be in flight at once
+// and land at different times: with one set, the power screen landing voided
+// the exemption of a history route whose screen was still being written, and
+// the only way to keep the guard green would have been a permanent exemption
+// -- which is exactly the kind of line this construction exists to avoid.
+func interfaceInFlight() []map[string]bool {
+	group := func(routes []httpapi.Route) map[string]bool {
+		out := map[string]bool{}
+		for _, route := range routes {
+			out[route.Method+" "+route.Pattern] = true
+		}
+		return out
 	}
-	return out
+	return []map[string]bool{
+		// The power model (2026-09-26): the screen is being built against the
+		// contract in parallel, by a separate change.
+		group(handlers.PowerRoutes(httpapi.Deps{})),
+		// The metrics history (2026-09-26): the charts that open on the last
+		// day are being written against the contract in parallel.
+		group(handlers.HistoryRoutes(httpapi.Deps{})),
+	}
 }
 
 // TestEveryRouteIsReachableFromTheInterface walks the route table against the
@@ -86,12 +100,21 @@ func TestEveryRouteIsReachableFromTheInterface(t *testing.T) {
 
 	sources := readFrontendSources(t)
 
-	// Void as soon as the interface mentions any route of the set.
-	inFlight := interfaceInFlight()
-	for _, route := range routeTable(httpapi.Deps{}) {
-		if inFlight[route.Method+" "+route.Pattern] && mentions(sources, route.Pattern) {
-			inFlight = nil
-			break
+	// Each group is void as soon as the interface mentions any route of it.
+	inFlight := map[string]bool{}
+	for _, group := range interfaceInFlight() {
+		void := false
+		for _, route := range routeTable(httpapi.Deps{}) {
+			if group[route.Method+" "+route.Pattern] && mentions(sources, route.Pattern) {
+				void = true
+				break
+			}
+		}
+		if void {
+			continue
+		}
+		for name := range group {
+			inFlight[name] = true
 		}
 	}
 
