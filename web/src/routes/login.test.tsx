@@ -95,3 +95,13 @@ describe('the sign-in page on an SSO-only address', () => {
     expect(screen.queryByRole('link', { name: /192\.168\.1\.30/ })).toBeNull()
   })
 })
+
+describe('the sign-in page', () => {
+  it('says the software is alpha before anybody signs in', async () => {
+    vi.spyOn(api, 'status').mockResolvedValue(statusOf({ password_login: true }))
+
+    renderLogin()
+
+    expect(await screen.findByText(/^Alpha — under heavy development\./)).toBeInTheDocument()
+  })
+})

@@ -35,7 +35,16 @@ def render(tag: str, annotation: str = "") -> str:
     if not entry.get("changes"):
         sys.exit(f"::error::the changelog entry for {tag} lists no changes")
 
-    lines = [heading(tag), "", f"_{entry['date']}_", ""]
+    lines = [
+        heading(tag),
+        "",
+        f"_{entry['date']}_",
+        "",
+        "> [!WARNING]",
+        "> holzkube-manager is **alpha** software under heavy development: this release "
+        "can change or break things. Back up the data directory before updating.",
+        "",
+    ]
     for change in entry["changes"]:
         lines.append(f"- {change.get('icon', '•')} {change['text']}")
     annotation = annotation.strip()

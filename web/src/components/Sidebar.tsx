@@ -14,6 +14,7 @@ import {
   Server,
   Settings,
 } from 'lucide-react'
+import { AlphaBadge, AlphaNotice } from '@/components/Alpha'
 import { SourceNotice } from '@/components/SourceNotice'
 import { WhatsNew } from '@/components/WhatsNew'
 import { cn } from '@/lib/utils'
@@ -194,6 +195,7 @@ export function Sidebar({ open = false, onNavigate }: { open?: boolean; onNaviga
             holzkube-manager
           </span>
           <p className="text-xs text-muted-foreground">Talos cluster management</p>
+          <AlphaBadge className="mt-1 inline-block" />
         </div>
       </div>
 
@@ -242,6 +244,7 @@ export function Sidebar({ open = false, onNavigate }: { open?: boolean; onNaviga
           "what am I looking at" rather than a place to navigate to. */}
       <div className="mt-auto px-2 pt-3">
         <WhatsNew />
+        <AlphaNotice className="mt-1 text-[11px] leading-snug text-sidebar-foreground/60" />
       </div>
 
       {/* AGPL section 13: the running instance has to offer its own source. */}
