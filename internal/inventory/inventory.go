@@ -128,6 +128,15 @@ type Service struct {
 	// one read instead of each starting their own (ReadLive).
 	reads map[string]chan struct{}
 
+	// hardware is the hardware view's memory, per machine: the last counters
+	// read, which the next request's rates are computed against, and the
+	// discovered sensor layout. It is guarded by hwMu rather than mu, because
+	// it is touched on every poll of an open hardware panel and has nothing to
+	// do with the supervisors mu serialises. Memory only, by design: a counter
+	// from before a restart is a baseline nobody can vouch for (hardware.go).
+	hwMu     sync.Mutex
+	hardware map[model.MachineID]*hardwareMemo
+
 	// runCtx is the lifetime of the supervisors, set by Start.
 	//
 	// Supervise uses it rather than its caller's context, which is the second
@@ -159,6 +168,7 @@ func New(d Deps) *Service {
 		supervised: map[model.MachineID]struct{}{},
 		missed:     map[string]struct{}{},
 		reads:      map[string]chan struct{}{},
+		hardware:   map[model.MachineID]*hardwareMemo{},
 	}
 }
 

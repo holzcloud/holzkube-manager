@@ -1233,12 +1233,77 @@ true; `watch` says only how soon the next change will show up.
 | `GET` | `/api/v1/machines/{id}` | no | — | |
 | `POST` | `/api/v1/machines` | no | `machine.add` | cluster-scoped; `201` |
 | `POST` | `/api/v1/machines/{id}/refresh` | no | `machine.refresh` | one observation pass |
+| `GET` | `/api/v1/machines/{id}/hardware` | no | — | live CPU, memory, disks, links, temperatures, fans; see below |
 | `DELETE` | `/api/v1/machines/{id}` | **yes** | `machine.forget` | `204`; the machine is not touched |
 
 Importing is mutating and is **not** destructive: it creates and destroys
 nothing. Unlocking is destructive because it is what makes every other
 destructive route reachable on that cluster. Forgetting a record is destructive
 because there is no way to get it back.
+
+### `GET /api/v1/machines/{id}/hardware`: a gauge, not a record
+
+Every request reads the node **now**, over its Talos API: CPU counters, memory,
+load, disk and network counters, mounts, and the kernel's hwmon sensors.
+Nothing is persisted and nothing is read in the background; the route is not
+audited, because an open panel asks every few seconds. Readers may call it.
+
+```json
+{
+  "machine": "<uuid>",
+  "hostname": "cp-1",
+  "observed_at": "2026-09-26T10:15:02.114Z",
+  "uptime_seconds": 12345,
+  "rates_over_seconds": 3.0,
+  "cpu": {"model": "Intel(R) Core(TM) i5-9600K", "cores": 6, "threads": 6,
+          "usage_percent": 18.2, "iowait_percent": 0.4, "per_core": [3.1, 2.0],
+          "load1": 0.5, "load5": 0.4, "load15": 0.3},
+  "memory": {"total_bytes": 0, "used_bytes": 0, "cache_bytes": 0, "available_bytes": 0,
+             "swap_total_bytes": 0, "swap_used_bytes": 0},
+  "filesystems": [{"mount": "/var", "device": "/dev/sda6", "size_bytes": 0, "used_bytes": 0}],
+  "disks": [{"name": "nvme0n1", "model": "Samsung SSD 980", "size_bytes": 0,
+             "read_bytes_per_sec": 0, "write_bytes_per_sec": 0, "temperature_c": 41.9}],
+  "network": [{"name": "eth0", "up": true, "speed_mbit": 1000,
+               "rx_bytes_per_sec": 0, "tx_bytes_per_sec": 0}],
+  "temperatures": [{"chip": "coretemp", "kind": "cpu", "label": "Package id 0",
+                    "celsius": 57.0, "high_c": 80.0, "critical_c": 100.0}],
+  "fans": [{"chip": "nct6798", "label": "fan2", "rpm": 1080}],
+  "sensors_notice": ""
+}
+```
+
+- **Every array is present and never `null`**; empty is `[]`.
+- **`temperature_c`, `high_c` and `critical_c` are `null` when unknown** — a
+  drive with no sensor the kernel exposes, a chip that sets no limit. Nothing
+  else is ever `null`.
+- **Rates are computed between two counter readings**, and `rates_over_seconds`
+  is the window. A request whose predecessor for the same machine is between
+  0.5 s and 5 min old (and from the same boot) is measured against it, so an
+  open panel's refresh interval is the window. Otherwise the server reads the
+  counters twice, one second apart — a first request therefore takes about a
+  second longer. `usage_percent` excludes I/O wait, which is reported beside it.
+- `memory.used_bytes` is total minus `MemAvailable`; `cache_bytes` is buffers +
+  page cache + reclaimable slab.
+- `filesystems` are the `/dev/*` mounts other than the squashfs root, **once per
+  device** (a Talos node mounts EPHEMERAL again at every bind mount), at the
+  device's first mount. `used_bytes` is size minus space available to
+  unprivileged writers.
+- `disks` are the node's whole drives — no partitions, loop, RAM, device-mapper,
+  md or optical devices. A drive temperature is its hwmon sensor matched by the
+  controller's serial number, or by model when exactly one drive has it; two
+  identical drives that cannot be told apart get `null` rather than a guess.
+- `network` is physical links, bonds and VLANs. Veths, bridges, tunnels and
+  loopback are left out.
+- `temperatures[].kind` is one of `cpu`, `board`, `disk`, `gpu`, `other`, from
+  the chip's driver name. A disk sensor's `label` is prefixed with its drive.
+  Fans at `0` rpm are listed: a stopped fan is a reading.
+- `sensors_notice` is one sentence when the node reports no temperatures and/or
+  no fans, naming the kernel's drivers as the cause. It is `""` otherwise.
+
+Failures: an unknown machine is `404 notfound.record`. A node that does not
+answer is `502` with `upstream.node-unreachable` or `upstream.node-timeout`, as
+for every other live node read — the route never answers with the last reading
+it saw. The route's ceiling is ten seconds.
 
 ### Adoption is two calls, and the split is the contract
 
