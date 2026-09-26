@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { AlertTriangle, Eraser, Trash2, Unplug } from 'lucide-react'
+import { AlertTriangle, Eraser, Unplug } from 'lucide-react'
 import { useState } from 'react'
 import { api, type Machine } from '@/api'
 import { Button } from '@/components/ui/button'
