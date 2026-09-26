@@ -28,6 +28,9 @@ binary in it as the answer to "build a new version". The answer is a release URL
   this session's credential scope.
 - **Delete a ref.** Same 403. A tag that goes out wrong stays; the recovery is a
   new tag, never an untag. `tmp-ref-probe` is still on origin as the proof.
+  Since 2026-09-26 a tag ruleset also stops the Actions token from deleting a
+  tag (measured: the one-off reset workflow got 422 "Cannot delete this tag"),
+  while creating one still works.
 
 Both are why the workflow takes the tag as a dispatch input and creates it
 itself.
@@ -44,12 +47,14 @@ itself.
 3. **Green there on the head commit.** Check the CI run for the exact SHA being
    released. Not "main was green yesterday".
 
-4. **Pick the version.** Milestone-aligned, which is what the existing tags mean:
-   `v1.14.0-beta.1` was milestone v1.14, and a commit that says "ship
-   v1.15.0-beta.1" was milestone v1.15. So a milestone's first beta is
-   `v<milestone>.0-beta.1`, and a second beta of the same milestone is
-   `-beta.2`. Read `.planning/` for which milestone is actually complete rather
-   than guessing from the last tag — the last tag has been behind before.
+4. **Pick the version.** Since 2026-09-26 the product is alpha and numbered
+   from `v0.0.1` again; every release before that was deleted. Plain
+   `v0.MINOR.PATCH`, never a `-alpha` or `-beta` suffix: the update script reads
+   `/releases/latest`, which skips anything GitHub counts as a prerelease, so a
+   suffix would make the release invisible to every host (see the end of this
+   file). New features raise MINOR (`v0.1.0`), fixes alone raise PATCH
+   (`v0.0.2`). The alpha status is said in the notes and the app, not in the
+   number.
 
 5. **README and changelog.** Two rules of the operator's, and a release is not
    cut without both (CLAUDE.md):

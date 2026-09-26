@@ -102,8 +102,8 @@ Open `https://<host>:8443` and create the first account in the browser. The
 certificate is self-signed; compare the fingerprint your browser shows with the
 `sha256_fingerprint` line in the log before accepting it.
 
-Prefer a container? `docker compose up -d` with the
-[`compose.yaml`](compose.yaml) in this repository. To build from source you
+Prefer a container? `docker compose up -d --build` in a checkout builds the
+image from the [`compose.yaml`](compose.yaml) in this repository. To build from source you
 need Go 1.26 and Node:
 
 ```sh
