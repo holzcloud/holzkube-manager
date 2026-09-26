@@ -3,6 +3,7 @@
 </p>
 
 <p align="center">
+  <img src="https://img.shields.io/badge/status-alpha-ec8272?style=flat-square&labelColor=150e08" alt="Status: alpha">
   <a href="https://github.com/holzcloud/holzkube-manager/releases/latest"><img src="https://img.shields.io/github/v/release/holzcloud/holzkube-manager?style=flat-square&color=f0ae5f&labelColor=150e08" alt="Latest release"></a>
   <a href="https://github.com/holzcloud/holzkube-manager/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/holzcloud/holzkube-manager/ci.yml?branch=main&style=flat-square&labelColor=150e08&label=CI" alt="CI"></a>
   <img src="https://img.shields.io/badge/Talos-v1.12%20–%20v1.14-f0ae5f?style=flat-square&labelColor=150e08" alt="Talos v1.12 to v1.14">
@@ -23,6 +24,12 @@ cluster rather than in it — a Raspberry Pi on the same network is enough. It
 speaks the Talos machine API and the Kubernetes API directly and reads what it
 shows live from the cluster, so a screen never says more than the cluster just
 did.
+
+> [!WARNING]
+> **holzkube-manager is alpha software under heavy development.** Any release
+> can change or remove features, the API and the data directory's format, and
+> an update can break things. Keep a backup of the data directory (see the
+> [guide](docs/guide.md#backups)) and read the release notes before updating.
 
 ![Live hardware of a node over the last 24 hours](docs/screenshots/node-hardware.png)
 

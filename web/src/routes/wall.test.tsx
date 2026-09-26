@@ -169,7 +169,9 @@ describe('the wall', () => {
     // read by the time it appears.
     // And the size of the cluster beside it, so the headline has a denominator:
     // "everything is running" says much more when everything is 132 things.
-    expect(await screen.findByText(/^as of \d+s ago · 1 workload, 1 node$/)).toBeInTheDocument()
+    expect(
+      await screen.findByText(/^as of \d+s ago · 1 workload, 1 node · holzkube-manager alpha$/),
+    ).toBeInTheDocument()
   })
 
   it('stops looking confident when the answer is old', async () => {

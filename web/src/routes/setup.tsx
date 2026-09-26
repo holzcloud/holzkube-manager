@@ -2,6 +2,7 @@ import { useQueryClient } from '@tanstack/react-query'
 import { createRoute, useNavigate } from '@tanstack/react-router'
 import { type FormEvent, useState } from 'react'
 import { api } from '@/api'
+import { AlphaNotice } from '@/components/Alpha'
 import { SourceNotice } from '@/components/SourceNotice'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -94,6 +95,7 @@ function SetupPage() {
         <img src="/favicon.svg" alt="" className="mb-2 size-12" />
         <span className="font-heading text-xl font-semibold tracking-tight">holzkube-manager</span>
         <p className="text-sm text-muted-foreground">Talos cluster management</p>
+        <AlphaNotice className="mt-2 max-w-sm text-xs text-muted-foreground" />
       </div>
       <Card className="w-full max-w-md">
         <CardHeader>
