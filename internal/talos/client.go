@@ -755,6 +755,33 @@ func (c *ClusterClient) Shutdown(ctx context.Context) error {
 	return err
 }
 
+// ShutdownForced powers a node off without Talos's own cordon and drain.
+//
+// A method of its own rather than a flag on Shutdown, for the reason Shutdown
+// is not a flag on Reboot: which of the two a call site makes should be
+// readable at the call site. Talos's graceful shutdown cordons and drains the
+// node through the Kubernetes API first, and there are two callers for whom
+// that is wrong: a force-stop, which by definition does not wait for anybody,
+// and the last control-plane nodes of a whole-cluster stop, whose API server is
+// already gone once etcd has lost its quorum -- a graceful shutdown there waits
+// on a cordon that can never succeed. Everything else about the shutdown is the
+// same: services are stopped in order and the disks are unmounted.
+func (c *ClusterClient) ShutdownForced(ctx context.Context) error {
+	_, err := c.conn.c.MachineClient.Shutdown(ctx, &machine.ShutdownRequest{Force: true})
+	return err
+}
+
+// RebootForced restarts a node in Talos's FORCE mode: no cordon, no drain, and
+// no graceful handover of the node's workloads first.
+//
+// It is what a force-restart means, and it is separate from Reboot for the
+// reason ShutdownForced is separate from Shutdown. The same call name as
+// Reboot, deliberately -- TestMethodCoverage resolves call sites by the
+// machinery method's name, and a mode is an argument rather than a second RPC.
+func (c *ClusterClient) RebootForced(ctx context.Context) error {
+	return c.conn.c.Reboot(ctx, client.WithRebootMode(machine.RebootRequest_FORCE))
+}
+
 // ResetOptions is what a reset actually does, spelled out.
 //
 // Every field is required at the call site -- there is no zero value that

@@ -133,11 +133,18 @@ const (
 	// again with a talosconfig that carries the authority.
 	CodeNoKubernetesAuthority = "conflict.no-kubernetes-authority"
 
-	// CodeCannotStop: a workload with no stop. A DaemonSet runs on every
-	// matching node and has no count to set to zero; a pod nothing owns has no
+	// CodeCannotStop: a workload with no stop. A pod nothing owns has no
 	// controller to tell, and removing it would be a deletion rather than a
-	// stop.
+	// stop. (A DaemonSet had none either until 2026-09-26; it now stops by
+	// being given a node selector no node matches.)
 	CodeCannotStop = "conflict.cannot-stop"
+
+	// CodePowerUnavailable: one of the seven power actions cannot be pressed
+	// on this cluster, node or app right now. The detail is the same one
+	// sentence GET .../power showed beside the button -- "It is running.",
+	// "Disabled — enable it first." -- so a client that drew the button from
+	// the report and a client that pressed it anyway read the same reason.
+	CodePowerUnavailable = "conflict.power-unavailable"
 
 	// CodeExecRefused: a command this product will not run, or a cluster with
 	// no identity to run it as. A conflict rather than a validation failure:
