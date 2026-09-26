@@ -26,6 +26,7 @@ export function RangePicker({
             size="sm"
             variant={value === r.value ? 'secondary' : 'ghost'}
             aria-pressed={value === r.value}
+            className="max-md:min-w-12"
             onClick={() => onChange(r.value)}
           >
             {r.label}
