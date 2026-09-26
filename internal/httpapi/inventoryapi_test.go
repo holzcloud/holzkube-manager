@@ -27,15 +27,24 @@ type inventoryHarness struct {
 func newInventoryHarness(t *testing.T) *inventoryHarness {
 	t.Helper()
 
+	return newInventoryHarnessWith(t, talossim.Options{})
+}
+
+// newInventoryHarnessWith is newInventoryHarness with the simulated node's
+// options named. The cluster, the hostname and the control-plane role are the
+// harness's own and are filled in whatever opts says, because the adoption the
+// harness walks needs all three.
+func newInventoryHarnessWith(t *testing.T, opts talossim.Options) *inventoryHarness {
+	t.Helper()
+
 	cl, err := talossim.NewCluster("homelab", "https://192.168.1.41:6443")
 	if err != nil {
 		t.Fatalf("NewCluster: %v", err)
 	}
-	sim, err := talossim.New(talossim.Options{
-		Hostname:     "cp-1",
-		Cluster:      cl,
-		ControlPlane: true,
-	})
+	opts.Hostname = "cp-1"
+	opts.Cluster = cl
+	opts.ControlPlane = true
+	sim, err := talossim.New(opts)
 	if err != nil {
 		t.Fatalf("talossim.New: %v", err)
 	}

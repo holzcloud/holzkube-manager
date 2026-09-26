@@ -170,6 +170,26 @@ type Options struct {
 	MemoryMiB uint64
 	Disks     []DiskFixture
 
+	// Sensors is which hwmon and thermal trees the node's simulated sysfs
+	// carries. The zero value is a desktop board: a CPU package sensor, one
+	// NVMe temperature per NVMe disk above, and a Super I/O chip with two fan
+	// headers, one of them empty. See hardware.go.
+	Sensors SensorProfile
+
+	// ListHidesSymlinks makes the List RPC blind to symlinks: a link is
+	// reported without its target, and a root that is a link is answered with
+	// the link itself rather than with the directory it points at. Neither is
+	// what Talos's walker does today -- it reads every link and resolves its
+	// root -- and it is what a walker built on os.Lstat alone would do. Every
+	// entry under /sys/class is such a link, so this is how a test makes the
+	// product find a node's sensors without being able to list a single chip.
+	ListHidesSymlinks bool
+
+	// RefuseFileReads makes List and Read answer PermissionDenied, as Talos's
+	// RBAC does for a client certificate whose role may not read the node's
+	// files. The node is answering; it will not say what is in /sys.
+	RefuseFileReads bool
+
 	// Now is the clock the node stamps its state with. It is a field rather
 	// than a call to time.Now for the same reason auth.Service carries one: a
 	// test that has to assert "the service last changed at the last boot"
@@ -194,6 +214,10 @@ type Server struct {
 
 	// streams is the per-server emitter behind Logs, Dmesg and Events.
 	streams *Streamer
+
+	// sysfs is the node's simulated /sys: the files List and Read serve. It
+	// is built once from Options and never changes, so it needs no lock.
+	sysfs *sysfs
 
 	pki *pki
 
@@ -299,6 +323,7 @@ func newServer(opts Options) (*Server, error) {
 		pki:       p,
 		node:      newNodeState(opts),
 		streams:   newStreamer(opts.StreamMessages, opts.StreamChunk),
+		sysfs:     newSimulatedSysfs(opts),
 		done:      make(chan struct{}),
 		scenarios: make(map[ScenarioName]Scenario),
 		calls:     make(map[string]int),
