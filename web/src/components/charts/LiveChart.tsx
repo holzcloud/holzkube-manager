@@ -226,7 +226,9 @@ export function LiveChart({
       </div>
 
       <details className="mt-1 text-xs">
-        <summary className="cursor-pointer text-muted-foreground">Show as table</summary>
+        <summary className="cursor-pointer text-muted-foreground max-md:py-3.5">
+          Show as table
+        </summary>
         <table className="mt-1 w-full tabular-nums">
           <caption className="sr-only">{title}</caption>
           <thead>

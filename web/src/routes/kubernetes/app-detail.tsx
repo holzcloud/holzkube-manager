@@ -1,10 +1,9 @@
 import { useQuery } from '@tanstack/react-query'
 import { createRoute, Link } from '@tanstack/react-router'
-import { ChevronRight } from 'lucide-react'
-import { Fragment, useState } from 'react'
 import { type AppPod, api } from '@/api'
 import { LiveChart } from '@/components/charts/LiveChart'
 import { StatTile } from '@/components/charts/Meter'
+import { DataTable } from '@/components/DataTable'
 import { KubernetesShell, useClusterSelection } from '@/components/KubernetesSection'
 import { PowerMenu } from '@/components/PowerMenu'
 import { Problem } from '@/components/Problem'
@@ -242,115 +241,119 @@ export function AppDetailPage() {
   )
 }
 
-/** The pods, each opening onto its containers. */
+/**
+ * The pods, with their containers under each.
+ *
+ * Through DataTable, so a phone gets a card per pod rather than a table it has
+ * to swipe -- the layout guard caught the first version doing exactly that.
+ */
 function PodTable({ pods, machineByHost }: { pods: AppPod[]; machineByHost: Map<string, string> }) {
-  const [open, setOpen] = useState<Record<string, boolean>>({})
   return (
-    <div className="overflow-x-auto">
-      <table className="w-full text-sm">
-        <thead>
-          <tr className="text-left text-muted-foreground text-xs">
-            <th className="py-1 font-normal">Pod</th>
-            <th className="py-1 font-normal">Node</th>
-            <th className="py-1 font-normal">State</th>
-            <th className="py-1 text-right font-normal">CPU</th>
-            <th className="py-1 text-right font-normal">Memory</th>
-          </tr>
-        </thead>
-        <tbody>
-          {pods.map((p) => {
+    <DataTable
+      label="Pods"
+      rows={pods}
+      keyOf={(p) => p.name}
+      empty="No pod of this app is running."
+      columns={[
+        {
+          key: 'pod',
+          label: 'Pod',
+          role: 'identity',
+          render: (p) => (
+            <div className="min-w-0">
+              <span className="break-all font-mono text-xs">{p.name}</span>
+              {p.ip && <p className="font-mono text-muted-foreground text-xs">{p.ip}</p>}
+            </div>
+          ),
+        },
+        {
+          key: 'node',
+          label: 'Node',
+          render: (p) => {
             const machine = machineByHost.get(p.node)
-            const expanded = open[p.name] === true
-            return (
-              <Fragment key={p.name}>
-                <tr className="border-t align-top">
-                  <td className="py-1.5">
-                    <button
-                      type="button"
-                      aria-expanded={expanded}
-                      className="flex items-center gap-1 text-left"
-                      onClick={() => setOpen((o) => ({ ...o, [p.name]: !expanded }))}
-                    >
-                      <ChevronRight
-                        aria-hidden="true"
-                        className={
-                          expanded
-                            ? 'size-3.5 rotate-90 transition-transform'
-                            : 'size-3.5 transition-transform'
-                        }
-                      />
-                      <span className="break-all font-mono text-xs">{p.name}</span>
-                    </button>
-                    {p.ip && <p className="pl-5 font-mono text-muted-foreground text-xs">{p.ip}</p>}
-                  </td>
-                  <td className="py-1.5">
-                    {machine ? (
-                      <Link
-                        to="/nodes/$uuid"
-                        params={{ uuid: machine }}
-                        className="font-mono text-xs underline-offset-2 hover:underline"
-                      >
-                        {p.node}
-                      </Link>
-                    ) : (
-                      <span className="font-mono text-xs">{p.node || '—'}</span>
-                    )}
-                  </td>
-                  <td className="py-1.5 text-xs">
-                    {p.phase} · {p.ready}
-                    {p.restarts > 0 && (
-                      <span className="text-amber-700 dark:text-amber-300">
-                        {' '}
-                        · {p.restarts} restarts
-                      </span>
-                    )}
-                  </td>
-                  <td className="py-1.5 text-right tabular-nums">
-                    {p.usage_known ? formatCores(p.cpu_millis) : '—'}
-                  </td>
-                  <td className="py-1.5 text-right tabular-nums">
-                    {p.usage_known ? formatBytes(p.memory_bytes) : '—'}
-                  </td>
-                </tr>
-                {expanded &&
-                  p.containers.map((c) => (
-                    <tr key={`${p.name}/${c.name}`} className="text-xs">
-                      <td className="py-1 pl-5" colSpan={2}>
-                        <span className="font-medium">{c.name}</span>{' '}
-                        <span className="break-all font-mono text-muted-foreground">{c.image}</span>
-                      </td>
-                      <td className="py-1">
-                        {c.state}
-                        {c.restarts > 0 && ` · ${c.restarts} restarts`}
-                      </td>
-                      <td className="py-1 text-right tabular-nums">
-                        {c.usage_known ? formatCores(c.cpu_millis) : '—'}
-                        <p className="text-muted-foreground">
-                          {c.cpu_limit_millis > 0
-                            ? `limit ${formatCores(c.cpu_limit_millis)}`
-                            : c.cpu_request_millis > 0
-                              ? `req ${formatCores(c.cpu_request_millis)}`
-                              : 'no request'}
-                        </p>
-                      </td>
-                      <td className="py-1 text-right tabular-nums">
-                        {c.usage_known ? formatBytes(c.memory_bytes) : '—'}
-                        <p className="text-muted-foreground">
-                          {c.memory_limit_bytes > 0
-                            ? `limit ${formatBytes(c.memory_limit_bytes)}`
-                            : c.memory_request_bytes > 0
-                              ? `req ${formatBytes(c.memory_request_bytes)}`
-                              : 'no request'}
-                        </p>
-                      </td>
-                    </tr>
-                  ))}
-              </Fragment>
+            return machine ? (
+              <Link
+                to="/nodes/$uuid"
+                params={{ uuid: machine }}
+                className="break-all font-mono text-xs underline-offset-2 hover:underline max-md:inline-flex max-md:min-h-11 max-md:items-center"
+              >
+                {p.node}
+              </Link>
+            ) : (
+              <span className="break-all font-mono text-xs">{p.node || '—'}</span>
             )
-          })}
-        </tbody>
-      </table>
-    </div>
+          },
+        },
+        {
+          key: 'state',
+          label: 'State',
+          render: (p) => (
+            <span className="text-xs">
+              {p.phase} · {p.ready}
+              {p.restarts > 0 && (
+                <span className="text-amber-700 dark:text-amber-300"> · {p.restarts} restarts</span>
+              )}
+            </span>
+          ),
+        },
+        {
+          key: 'cpu',
+          label: 'CPU',
+          render: (p) => (
+            <span className="tabular-nums">{p.usage_known ? formatCores(p.cpu_millis) : '—'}</span>
+          ),
+        },
+        {
+          key: 'memory',
+          label: 'Memory',
+          render: (p) => (
+            <span className="tabular-nums">
+              {p.usage_known ? formatBytes(p.memory_bytes) : '—'}
+            </span>
+          ),
+        },
+        {
+          key: 'containers',
+          label: 'Containers',
+          role: 'detail',
+          render: (p) => (
+            <ul className="space-y-1 text-xs">
+              {p.containers.map((c) => (
+                <li key={c.name}>
+                  <span className="font-medium">{c.name}</span>{' '}
+                  <span className="text-muted-foreground">{c.state}</span>
+                  {c.restarts > 0 && ` · ${c.restarts} restarts`}
+                  <span className="block tabular-nums">
+                    {c.usage_known ? formatCores(c.cpu_millis) : '—'}
+                    <span className="text-muted-foreground">
+                      {' '}
+                      of{' '}
+                      {c.cpu_limit_millis > 0
+                        ? `limit ${formatCores(c.cpu_limit_millis)}`
+                        : c.cpu_request_millis > 0
+                          ? `request ${formatCores(c.cpu_request_millis)}`
+                          : 'no request'}
+                    </span>
+                    {' · '}
+                    {c.usage_known ? formatBytes(c.memory_bytes) : '—'}
+                    <span className="text-muted-foreground">
+                      {' '}
+                      of{' '}
+                      {c.memory_limit_bytes > 0
+                        ? `limit ${formatBytes(c.memory_limit_bytes)}`
+                        : c.memory_request_bytes > 0
+                          ? `request ${formatBytes(c.memory_request_bytes)}`
+                          : 'no request'}
+                    </span>
+                  </span>
+                  <span className="block break-all font-mono text-muted-foreground">{c.image}</span>
+                </li>
+              ))}
+            </ul>
+          ),
+        },
+      ]}
+    />
   )
 }
 
