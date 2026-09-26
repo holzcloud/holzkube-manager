@@ -22,6 +22,7 @@ import (
 	"github.com/holzcloud/holzkube-manager/internal/metrics"
 	"github.com/holzcloud/holzkube-manager/internal/model"
 	"github.com/holzcloud/holzkube-manager/internal/nodestream"
+	"github.com/holzcloud/holzkube-manager/internal/power"
 	"github.com/holzcloud/holzkube-manager/internal/provision"
 	"github.com/holzcloud/holzkube-manager/internal/store"
 	"github.com/holzcloud/holzkube-manager/internal/streamhub"
@@ -221,6 +222,12 @@ type Deps struct {
 	// a deployment that upgrades nothing, and those handlers answer 502 rather
 	// than panicking if it is.
 	Upgrade *upgrade.Service
+
+	// Power is the one power model for clusters, nodes and apps: stop,
+	// force-stop, start, disable, enable, restart, force-restart. It is nil in
+	// a deployment that offers none of them, and those handlers answer 502
+	// rather than panicking if it is.
+	Power *power.Service
 
 	// Metrics renders the Prometheus exposition. It is nil in a deployment
 	// with no inventory to report on, and /metrics then answers 503 -- which

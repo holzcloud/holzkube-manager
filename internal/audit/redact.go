@@ -444,6 +444,36 @@ var allowlist = map[string][]string{
 	"cluster.kubernetes-storage": {},
 	"cluster.kubernetes-network": {},
 
+	// The power model (2026-09-26): seven verbs for a cluster, a node and an
+	// app, one audited action each. No body is sent and none is read: WHAT was
+	// done is the action token itself -- which is why there is one route per
+	// verb rather than one with the verb as a parameter -- and what it was done
+	// to is the cluster, machine or app in the path. Every entry is empty on
+	// purpose, which is this table saying so rather than nobody having looked.
+	"cluster.stop":          {},
+	"cluster.force-stop":    {},
+	"cluster.start":         {},
+	"cluster.disable":       {},
+	"cluster.enable":        {},
+	"cluster.restart":       {},
+	"cluster.force-restart": {},
+
+	"node.stop":          {},
+	"node.force-stop":    {},
+	"node.start":         {},
+	"node.disable":       {},
+	"node.enable":        {},
+	"node.restart":       {},
+	"node.force-restart": {},
+
+	"cluster.kubernetes-app-stop":          {},
+	"cluster.kubernetes-app-force-stop":    {},
+	"cluster.kubernetes-app-start":         {},
+	"cluster.kubernetes-app-disable":       {},
+	"cluster.kubernetes-app-enable":        {},
+	"cluster.kubernetes-app-restart":       {},
+	"cluster.kubernetes-app-force-restart": {},
+
 	// Who may do what (2026-09-20). A read, with the namespace in the query
 	// rather than the body, so there is nothing for the archive to carry. That it
 	// was READ is the record worth having: somebody enumerated the cluster's
