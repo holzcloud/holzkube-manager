@@ -59,7 +59,8 @@ export function NodeActions({
         title="Reset"
         aria-label="Reset"
       >
-        <Eraser aria-hidden="true" className="size-4" /> <span className="max-md:sr-only">Reset</span>
+        <Eraser aria-hidden="true" className="size-4" />{' '}
+        <span className="max-md:sr-only">Reset</span>
       </Button>
 
       {/*
@@ -240,7 +241,6 @@ function RemoveFromClusterDialog({
     </Dialog>
   )
 }
-
 
 /**
  * The reset dialog (JOB-07).
