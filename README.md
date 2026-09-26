@@ -48,7 +48,8 @@ did.
   re-authentication before anything destructive, a hash-chained audit log, and a
   `--dry-run` mode that refuses every change at the wire
 - **Around it** — `holzkubectl` on the command line, Prometheus `/metrics`, a
-  support bundle, and an interface that works on a phone
+  support bundle, and an interface that works on a phone and sits on its home
+  screen like an app
 
 ## A look around
 

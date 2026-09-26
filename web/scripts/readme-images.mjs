@@ -1,6 +1,7 @@
 /**
- * Renders the pictures the README shows: the banner and social card from
- * docs/brand, and the screenshots in docs/screenshots.
+ * Renders the pictures the README shows -- the banner and social card in
+ * docs/brand, the screenshots in docs/screenshots -- and the app's home-screen
+ * icons in web/public.
  *
  *   ./bin/task build && node web/scripts/readme-images.mjs
  *
@@ -78,6 +79,24 @@ await card(
     <div class="s" style="font-size:26px">Talos Linux and Kubernetes, managed from one binary.</div>
   </div>`,
 )
+
+// The home-screen icon: the mark on the ground colour, opaque, because iOS
+// fills a transparent corner with black and Android masks to its own shape. The
+// mark stays inside the middle 64%, the safe zone of a maskable icon.
+const favicon = readFileSync(join(root, 'web/public/favicon.svg'), 'utf8').replace(/<!--[\s\S]*?-->/, '')
+for (const [file, size] of [
+  ['apple-touch-icon.png', 180],
+  ['icon-192.png', 192],
+  ['icon-512.png', 512],
+]) {
+  const page = await browser.newPage({ viewport: { width: size, height: size }, deviceScaleFactor: 1 })
+  const inner = Math.round(size * 0.64)
+  await page.setContent(`<!doctype html><style>html,body{margin:0;background:#150e08}
+    div{width:${size}px;height:${size}px;display:grid;place-items:center}</style>
+    <div>${favicon.replace('width="64" height="64"', `width="${inner}" height="${inner}"`)}</div>`)
+  await page.screenshot({ path: join(root, 'web/public', file) })
+  await page.close()
+}
 
 // --- screenshots -------------------------------------------------------------
 
@@ -226,4 +245,4 @@ await strip.screenshot({ path: join(shots, 'phone.png'), omitBackground: true })
 await browser.close()
 daemon.kill()
 await rm(dir, { recursive: true, force: true })
-console.log('wrote docs/brand/{banner,social}.png and docs/screenshots/*.png')
+console.log('wrote docs/brand/{banner,social}.png, web/public/*.png and docs/screenshots/*.png')

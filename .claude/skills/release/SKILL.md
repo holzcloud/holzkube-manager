@@ -51,30 +51,43 @@ itself.
    `-beta.2`. Read `.planning/` for which milestone is actually complete rather
    than guessing from the last tag — the last tag has been behind before.
 
-5. **Write the annotation.** It is the record, so it is worth the ten minutes:
+5. **README and changelog.** Two rules of the operator's, and a release is not
+   cut without both (CLAUDE.md):
+   - The README describes every feature this release ships. Compare
+     `git log <previous tag>..HEAD` against its "What it does" list and its
+     screenshots; a new screen gets a picture (`node web/scripts/readme-images.mjs`
+     after `task build`). Commit that before tagging.
+   - `internal/changelog/changelog.json` has an entry for the new version as its
+     **first** element, written for the operator. It becomes the release page
+     (`.github/release-notes.py`) and the app's "What's new" panel. The job
+     refuses a tag without it, and the release has failed twice for exactly that
+     -- write it before dispatching, not after the red run.
+
+6. **Write the annotation.** It is the record, so it is worth the ten minutes:
    what this beta covers, what it is *for*, what is new since the previous tag,
    and the known limits with their ledger entry numbers. `git tag -l
    --format='%(contents)' <previous>` shows the shape. Keep it honest about what
    is built-but-unproven; this project has a ledger full of that and hiding it
    in a release note would be the one place it matters most.
 
-6. **Dispatch.** `mcp__github__actions_run_trigger`, method `run_workflow`,
+7. **Dispatch.** `mcp__github__actions_run_trigger`, method `run_workflow`,
    workflow `ci.yml`, ref `main`, inputs `{tag, notes}`. The job creates the tag
    with its own token, but only after `ci` and `test-macos` are green on that
    commit — the dispatch does not skip the gate, it queues behind it.
 
-7. **Watch it.** The run queues behind any in-flight run on `main`: same
+8. **Watch it.** The run queues behind any in-flight run on `main`: same
    concurrency group, and `cancel-in-progress` is deliberately false outside
    pull requests so a half-uploaded release cannot happen. Expect roughly
    fifteen minutes end to end, most of it the two gates.
 
-8. **Read the verification step.** `Verify the release an operator would
+9. **Read the verification step.** `Verify the release an operator would
    download` checks the release the API now serves: both linux architectures,
-   exactly one daemon archive each, `checksums.txt`, and that it is neither a
-   draft nor a prerelease. If it fails, the release exists and is wrong — say so
+   exactly one daemon archive each, `checksums.txt`, that it is neither a
+   draft nor a prerelease, and that its page carries the changelog entry.
+   If it fails, the release exists and is wrong — say so
    plainly rather than reporting the goreleaser success.
 
-9. **Report the URL**, the tag, and the assets. Not a file.
+10. **Report the URL**, the tag, and the assets. Not a file.
 
 ## Which architecture is the one that matters
 
