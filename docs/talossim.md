@@ -144,3 +144,30 @@ stay each other's exact inverse: `k8s.Nodename` and `k8s.KubeletSpec`. The
 kubelet spec joined the list in phase 3 because that is where a node's
 Kubernetes version is read from — leaving it behind would mean a node with
 Kubernetes down still confidently reporting a Kubernetes version.
+
+## Simulated hardware
+
+The hardware view reads counters and sensors live, so the node has them
+(`hardware.go`):
+
+- **Counters that advance.** `SystemStat`'s CPU times, `DiskStats` and
+  `NetworkDeviceStats` are each a constant rate times the time since the node's
+  last boot. They move between two reads, restart from zero on a reboot, and
+  what a view computes from them is known in advance: `SimulatedThreadBusy`,
+  `SimulatedIowait`, `SimulatedDiskReadBytesPerSec` and the rest are exported
+  so a test asserts the rate the node was built to produce. The partitions, the
+  loop device, loopback and a pod's veth carry traffic too, because a view that
+  summed everything the kernel counts can only be caught against a node that
+  has them.
+- **`Memory`, `LoadAvg`, `Mounts`** in the shape Talos reports them —
+  EPHEMERAL mounted at `/var` and again at every bind mount made from it.
+- **A read-only `/sys`** served by `List` and `Read`: `/sys/class` entries are
+  symlinks into `/sys/devices`, chip attributes sit beside a `device` link, an
+  NVMe model is space-padded as the controller reports it, and a missing file
+  is refused with the error Talos returns (`codes.Unknown`).
+  `Options.Sensors` picks the tree: `SensorsDesktop` (coretemp, an nvme chip
+  per NVMe disk — each three degrees warmer than the last — and an nct6798
+  with one fan at 0 rpm), `SensorsNone`, or `SensorsThermalZoneOnly` (a CPU
+  temperature that exists only as a thermal zone).
+  `Options.ListHidesSymlinks` makes `List` blind to links, which is how the
+  product's fallback of probing file names is exercised.

@@ -298,6 +298,22 @@ func (s *Server) seedHardware(ctx context.Context) error {
 		return fmt.Errorf("talossim: seed %s: %w", network.LinkStatusType, err)
 	}
 
+	// One pod's veth, which every Kubernetes node has one of per pod. It is
+	// an Ethernet link by type and not a physical one by kind, and a reader
+	// that told the two apart by type alone would list every pod as a NIC --
+	// NetworkDeviceStats carries its counters too (hardware.go).
+	veth := network.NewLinkStatus(network.NamespaceName, "veth3f2a1b9c")
+	veth.TypedSpec().Type = nethelpers.LinkEther
+	veth.TypedSpec().Kind = "veth"
+	veth.TypedSpec().LinkState = true
+	veth.TypedSpec().MTU = 1450
+	veth.TypedSpec().SpeedMegabits = 10000
+	veth.TypedSpec().Driver = "veth"
+
+	if err := s.COSI().Create(ctx, veth); err != nil {
+		return fmt.Errorf("talossim: seed %s: %w", network.LinkStatusType, err)
+	}
+
 	return nil
 }
 

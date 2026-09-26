@@ -579,22 +579,28 @@ func (m *machineService) ServiceList(_ context.Context, _ *emptypb.Empty) (*mach
 // A node that already has an etcd data directory refuses, exactly as a real
 // one does. Answering a second bootstrap with success would make this
 // simulator easier to satisfy than the hardware it stands in for.
-// SystemStat answers with the node's boot time.
+// SystemStat answers with the node's boot time and its CPU counters.
 //
-// It exists here because the product asks for it, and it asks for exactly one
-// field: a reboot job's paired "did it happen?" check is "has this node been
-// up for less time than the request has existed". The simulator therefore has
-// to move lastBoot when it reboots, which it already does -- which is what
-// makes the check testable at all rather than only assertable against
-// hardware.
+// The boot time was the first field the product asked for: a reboot job's
+// paired "did it happen?" check is "has this node been up for less time than
+// the request has existed". The simulator therefore has to move lastBoot when
+// it reboots, which it already does -- which is what makes the check testable
+// at all rather than only assertable against hardware.
+//
+// The CPU counters came with the hardware view, and they are derived from the
+// same boot: see simulatedCPU. A reboot therefore resets them to zero exactly
+// as a real kernel's do, which is the case the view has to survive.
 func (m *machineService) SystemStat(_ context.Context, _ *emptypb.Empty) (*machine.SystemStatResponse, error) {
 	state := m.server.node.snapshot()
+	total, perCPU := m.server.simulatedCPU(state.LastBoot)
 
 	return &machine.SystemStatResponse{
 		Messages: []*machine.SystemStat{{
 			Metadata: m.server.node.metadata(),
 			//nolint:gosec // a boot time in seconds since the epoch cannot be negative
 			BootTime: uint64(state.LastBoot.Unix()),
+			CpuTotal: total,
+			Cpu:      perCPU,
 		}},
 	}, nil
 }
