@@ -8,6 +8,8 @@ import { indexRoute } from '@/routes/index'
 import { jobsRoute } from '@/routes/jobs'
 import { kubernetesRoute } from '@/routes/kubernetes'
 import { kubernetesAccessRoute } from '@/routes/kubernetes/access'
+import { appDetailRoute } from '@/routes/kubernetes/app-detail'
+import { kubernetesAppsRoute } from '@/routes/kubernetes/apps'
 import { kubernetesConfigRoute } from '@/routes/kubernetes/config'
 import { kubernetesEventsRoute } from '@/routes/kubernetes/events'
 import { kubernetesMaintenanceRoute } from '@/routes/kubernetes/maintenance'
@@ -50,6 +52,8 @@ const routeTree = rootRoute.addChildren([
     clustersRoute,
     kubernetesRoute.addChildren([
       kubernetesOverviewRoute,
+      kubernetesAppsRoute,
+      appDetailRoute,
       kubernetesWorkloadsRoute,
       kubernetesPodsRoute,
       kubernetesStorageRoute,

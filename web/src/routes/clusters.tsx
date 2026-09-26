@@ -5,6 +5,7 @@ import { useState } from 'react'
 import { api, type Cluster } from '@/api'
 import { ClusterScalePanel } from '@/components/ClusterScale'
 import { ClusterTemplatePanel } from '@/components/ClusterTemplate'
+import { PowerMenu } from '@/components/PowerMenu'
 import { RenewCertificate } from '@/components/RenewCertificate'
 import { RotateAuthority } from '@/components/RotateAuthority'
 import { Badge } from '@/components/ui/badge'
@@ -109,6 +110,7 @@ export function ClusterCard({ cluster }: { cluster: Cluster }) {
           >
             {cluster.locked ? 'read-only' : 'writable'}
           </Badge>
+          <PowerMenu target={{ kind: 'cluster', cluster: cluster.id, name: cluster.name }} />
         </div>
       </CardHeader>
 

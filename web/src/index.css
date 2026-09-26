@@ -212,6 +212,18 @@
   --chart-3: var(--hcl-info);
   --chart-4: var(--hcl-ok);
   --chart-5: var(--hcl-warn);
+  /* Live charts (2026-09-26). Two series at most per chart - brass and a
+     cool blue, stepped into each mode's band and run through the dataviz
+     validator on the pane they sit on (#ffffff here, #20150d dark): every
+     check passes, worst adjacent CVD dE 26. Status is NOT drawn from these:
+     a meter that means "too hot" uses --viz-ok/--viz-warn/--viz-danger. */
+  --viz-series-1: #b0651c;
+  --viz-series-2: #2a78d6;
+  --viz-grid: var(--hcl-hairline);
+  --viz-track: rgb(26 18 11 / 0.08);
+  --viz-ok: var(--hcl-ok);
+  --viz-warn: #b7860f;
+  --viz-danger: var(--hcl-danger);
   /* 16px is --hc-r. shadcn derives sm/md from it, which lands close
      enough to the template's 8/16/24 step without a second scale. */
   --radius: 1rem;
@@ -315,6 +327,13 @@
   --chart-3: var(--hc-ok);
   --chart-4: var(--hc-warn);
   --chart-5: var(--hc-danger);
+  --viz-series-1: #c47a2c;
+  --viz-series-2: #3987e5;
+  --viz-grid: var(--hc-hairline);
+  --viz-track: rgb(255 226 190 / 0.08);
+  --viz-ok: var(--hc-ok);
+  --viz-warn: var(--hc-warn);
+  --viz-danger: var(--hc-danger);
   --sidebar: var(--hc-pane-bar-solid);
   --sidebar-foreground: var(--hc-ink);
   --sidebar-primary: var(--hc-brass);
