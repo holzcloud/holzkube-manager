@@ -124,6 +124,14 @@ const (
 	nodeFastReadCall callClass = "node-fast-read"
 	nodeMutationCall callClass = "node-mutation"
 
+	// A node's bounded streams, added with the hardware view: List and Read,
+	// the machine API's file reads. They are the stream class in
+	// internal/talos's table and carry no total deadline of their own, so what
+	// one of them can ask of a route is its first-byte deadline -- a sysfs
+	// attribute is a page at most and arrives in the first message or not at
+	// all.
+	nodeStreamCall callClass = "node-stream-first-byte"
+
 	// The Kubernetes API's class, added with milestone v1.17. A fourth family:
 	// the three above are the Image Factory's and the Talos node's, and this is
 	// a cluster's own API server, reached with client-go.
@@ -185,6 +193,8 @@ func (u upstreamCall) budget() (time.Duration, bool) {
 		return talos.ClassFastRead.Deadline(), true
 	case nodeMutationCall:
 		return talos.ClassMutation.Deadline(), true
+	case nodeStreamCall:
+		return talos.ClassStream.FirstByte(), true
 	case kubeCall:
 		return kube.CallBudget, true
 	case kubeProxyCall:
@@ -360,6 +370,23 @@ const nodeReadClippingRationale = "Every fast read here is a node answering out 
 	"node that cannot serve its own resource state, and being cut there is the right " +
 	"outcome: what the operator needs then is the record marked unconfirmed, which is " +
 	"exactly what a cut produces."
+
+// hardwareRouteCalls is the hardware view's longest chain of calls that wait
+// on each other. See its row for how the chain was chosen.
+func hardwareRouteCalls() []upstreamCall {
+	return []upstreamCall{
+		{name: "NewClusterClient: Version", class: nodeProbeCall},
+		{name: "HardwareSample: the cached layout's sensor inputs, found stale", class: nodeStreamCall},
+		{name: "discoverSensors: List /sys/class/hwmon", class: nodeStreamCall},
+		{name: "discoverSensors: List of every chip directory, concurrently", class: nodeStreamCall},
+		{name: "discoverSensors: Read of every chip's name (and probed inputs)", class: nodeStreamCall},
+		{name: "discoverSensors: Read of labels, limits and drive models", class: nodeStreamCall},
+		{name: "thermalZones: List /sys/class/thermal (no hwmon CPU sensor)", class: nodeStreamCall},
+		{name: "thermalZones: Read of zone types and temperatures", class: nodeStreamCall},
+		{name: "readSensors: the new layout's inputs", class: nodeStreamCall},
+		{name: "first request only: HardwareCounters again after the one-second gap", class: nodeFastReadCall},
+	}
+}
 
 var routeBudgets = []routeBudget{
 	{
@@ -540,6 +567,32 @@ var routeBudgets = []routeBudget{
 		why: "inventory.Refresh connects, walks the resource state, and then asks the three " +
 			"typed RPCs that have no resource behind them. EtcdMemberList is in the list " +
 			"because a control-plane node is the worst case; a worker skips it.",
+	},
+	{
+		route:         "GET /api/v1/machines/{id}/hardware",
+		calls:         hardwareRouteCalls(),
+		routeDeadline: handlers.HardwareRouteBudget,
+		verdict:       withinBudget,
+		clipping:      clipped,
+		clippingRationale: "Every call after the connection is a node reading its own kernel " +
+			"counters or a page of sysfs, which it answers in microseconds; the class " +
+			"deadlines are ceilings for a node that is barely answering. A node that cannot " +
+			"finish that inside ten seconds is a node the panel should report as not " +
+			"answering, and being cut is exactly that report. Nothing is written on any path, " +
+			"so a cut loses one refresh of a gauge and the next refresh, a few seconds " +
+			"later, asks again.",
+		why: "inventory.Hardware connects, then talos.HardwareSample reads everything " +
+			"concurrently. The counter, memory, load, mount and resource reads each finish in " +
+			"one fast read; the branch that can run longest is the sensors, and that branch is " +
+			"what is listed, at its worst: the inputs of a cached layout read and found stale, " +
+			"then a whole discovery -- the hwmon class, every chip directory, the names, the " +
+			"labels and limits, the thermal-zone fallback and its files -- and the new " +
+			"layout's inputs read. Each of those rounds is concurrent and is declared as one " +
+			"call, although with more than eight files a round is several waves of eight; the " +
+			"route ceiling is the bound that holds whatever the chip count. A first request " +
+			"then waits one second, which is not an upstream call, and reads the counters " +
+			"again. Whoever changes HardwareSample or discoverSensors has to come back and " +
+			"revisit this list; nothing derives it.",
 	},
 	{
 		route: "POST /api/v1/provision/scan",
