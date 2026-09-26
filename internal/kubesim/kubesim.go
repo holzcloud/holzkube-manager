@@ -65,6 +65,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/intstr"
 )
 
 // Options configure a simulated cluster.
@@ -142,6 +143,30 @@ type Options struct {
 	// product that assumed the numbers exist fails in the ordinary test rather
 	// than on somebody's cluster.
 	Usage map[string]string
+
+	// Summary is what each node's kubelet reports at /stats/summary, reached
+	// through the API server's node proxy: keyed "namespace/pod", then by
+	// container name, as "cpu,memory" the way Usage writes it -- "250m,512Mi".
+	//
+	// A pod is reported by the kubelet of the node the Pods fixture puts it
+	// on, and only there, which is what makes a failing node measurable: its
+	// pods, and no others, are the ones that go unknown. A pod with no entry is
+	// one the kubelet has not measured yet, which is a real state for the
+	// seconds after a container starts. The container name "" sets the
+	// pod-level figure; without one it is the sum of the containers, which is
+	// roughly what a kubelet's pod cgroup reports.
+	//
+	// Unlike Usage, a nil map is not "nobody measuring": every kubelet serves
+	// its summary, so the endpoint answers with no pods rather than 404.
+	Summary map[string]map[string]string
+
+	// SummaryFails names nodes whose kubelet the API server cannot reach. The
+	// proxy answers 503 for them, which is what a powered-off node looks like
+	// from the client's side. SummaryHangs names nodes whose kubelet accepts
+	// the connection and never answers, which is the case a deadline exists
+	// for.
+	SummaryFails []string
+	SummaryHangs []string
 
 	// Events the cluster has to report.
 	Events []Event
@@ -263,8 +288,20 @@ type Pod struct {
 	// test thinks about them rather than as owner references and annotations.
 	//
 	// OwnerKind is the controller that would recreate this pod -- "ReplicaSet",
-	// "DaemonSet", "StatefulSet" -- or empty for a bare pod nothing owns.
+	// "DaemonSet", "StatefulSet", "Job" -- or empty for a bare pod nothing owns.
 	OwnerKind string
+
+	// OwnerName is that controller's name, for the apps screen: which
+	// ReplicaSet, which Job. Empty keeps the name every test before it was
+	// written against, the pod's own name with "-owner".
+	OwnerName string
+
+	// OwnerAPIVersion overrides the group the reference is in, which is
+	// otherwise the real one for the kind. It exists for the controllers that
+	// reuse a built-in kind's NAME in a group of their own -- OpenKruise ships a
+	// StatefulSet in apps.kruise.io -- which a reader checking only the kind
+	// would take for the built-in one.
+	OwnerAPIVersion string
 
 	// Mirror marks a static pod: the control plane's own on Talos, owned by the
 	// kubelet, which the API server cannot evict.
@@ -311,6 +348,21 @@ type Pod struct {
 	// current container.
 	Logs         map[string]string
 	PreviousLogs map[string]string
+
+	// What the apps screen reads besides (2026-09-26).
+	//
+	// IP is the pod's address. Sidecars are native sidecars: init containers
+	// with restartPolicy Always, which run beside the others for the life of
+	// the pod -- rendered running and ready, with the pod's image and
+	// resources. The requests and limits are put on every container of the
+	// pod, as Kubernetes quantities; empty is unset, which is what most pods in
+	// a homelab are.
+	IP            string
+	Sidecars      []string
+	CPURequest    string
+	CPULimit      string
+	MemoryRequest string
+	MemoryLimit   string
 }
 
 // StatefulSet is one as a test describes it.
@@ -343,6 +395,9 @@ type DaemonSet struct {
 type Job struct {
 	Namespace string
 	Name      string
+	// Owner names the CronJob that made it; empty is a Job somebody ran by
+	// hand, which is an app of its own.
+	Owner     string
 	Succeeded int32
 	Failed    int32
 	Active    int32
@@ -662,6 +717,9 @@ type Server struct {
 	replicaSets  []ReplicaSet
 	annotations  map[string]map[string]string
 	usage        map[string]string
+	summary      map[string]map[string]string
+	summaryFails []string
+	summaryHangs []string
 	restarted    map[string]string
 	events       []Event
 
@@ -722,6 +780,9 @@ func New(opts Options) (*Server, error) {
 		replicaSets:       append([]ReplicaSet(nil), opts.ReplicaSets...),
 		annotations:       map[string]map[string]string{},
 		usage:             opts.Usage,
+		summary:           opts.Summary,
+		summaryFails:      append([]string(nil), opts.SummaryFails...),
+		summaryHangs:      append([]string(nil), opts.SummaryHangs...),
 		allowImpersonated: append([]string(nil), opts.AllowImpersonated...),
 		denyVerbs:         append([]string(nil), opts.DenyVerbs...),
 		proxyBodies:       opts.ProxyBodies,
@@ -1223,6 +1284,14 @@ func renderNode(n Node) corev1.Node {
 // exactly this one.
 func (s *Server) serveNode(w http.ResponseWriter, r *http.Request) {
 	name := strings.TrimPrefix(r.URL.Path, "/api/v1/nodes/")
+	// The kubelet's summary, through the node proxy: the one proxied node path
+	// this product reads. Matched exactly, so any other path under a node
+	// still answers 404 rather than something plausible.
+	if node, ok := strings.CutSuffix(name, "/proxy/stats/summary"); ok &&
+		r.Method == http.MethodGet && node != "" && !strings.Contains(node, "/") {
+		s.writeSummary(w, r, node)
+		return
+	}
 	if name == "" || strings.Contains(name, "/") {
 		s.serveNotFound(w, r)
 		return
@@ -1398,20 +1467,38 @@ func renderPod(p Pod) corev1.Pod {
 		phase = corev1.PodRunning
 	}
 
+	created := metav1.NewTime(time.Now().Add(-time.Minute).UTC())
 	meta := metav1.ObjectMeta{
 		Name:              p.Name,
 		Namespace:         p.Namespace,
-		CreationTimestamp: metav1.NewTime(time.Now().Add(-time.Minute).UTC()),
+		CreationTimestamp: created,
 		Labels:            p.Labels,
 	}
 	if p.OwnerKind != "" {
 		// A controller reference: what a drain and a restart both read to
-		// decide whether anything would recreate this pod.
+		// decide whether anything would recreate this pod, and what the apps
+		// screen follows up to the app. The group is the real one per kind,
+		// because the apps screen checks it -- a Job is batch/v1, and a
+		// reference claiming apps/v1 would be a kind nobody ships.
 		controller := true
+		owner := p.OwnerName
+		if owner == "" {
+			owner = p.Name + "-owner"
+		}
+		apiVersion := "apps/v1"
+		switch p.OwnerKind {
+		case "Job", "CronJob":
+			apiVersion = "batch/v1"
+		case "Node":
+			apiVersion = "v1"
+		}
+		if p.OwnerAPIVersion != "" {
+			apiVersion = p.OwnerAPIVersion
+		}
 		meta.OwnerReferences = []metav1.OwnerReference{{
-			APIVersion: "apps/v1",
+			APIVersion: apiVersion,
 			Kind:       p.OwnerKind,
-			Name:       p.Name + "-owner",
+			Name:       owner,
 			UID:        types.UID(p.Namespace + "/" + p.Name + "/owner"),
 			Controller: &controller,
 		}}
@@ -1421,8 +1508,22 @@ func renderPod(p Pod) corev1.Pod {
 	}
 
 	spec := corev1.PodSpec{NodeName: p.Node, ServiceAccountName: p.ServiceAccount}
+	resources := resourcesOf(p)
 	for _, name := range names {
-		spec.Containers = append(spec.Containers, corev1.Container{Name: name, Image: p.Image})
+		spec.Containers = append(spec.Containers, corev1.Container{
+			Name: name, Image: p.Image, Resources: resources,
+		})
+	}
+	var initStatuses []corev1.ContainerStatus
+	for _, name := range p.Sidecars {
+		always := corev1.ContainerRestartPolicyAlways
+		spec.InitContainers = append(spec.InitContainers, corev1.Container{
+			Name: name, Image: p.Image, Resources: resources, RestartPolicy: &always,
+		})
+		initStatuses = append(initStatuses, corev1.ContainerStatus{
+			Name: name, Image: p.Image, Ready: true,
+			State: corev1.ContainerState{Running: &corev1.ContainerStateRunning{}},
+		})
 	}
 	if p.LocalData {
 		spec.Volumes = append(spec.Volumes, corev1.Volume{
@@ -1439,12 +1540,46 @@ func renderPod(p Pod) corev1.Pod {
 		})
 	}
 
+	status := corev1.PodStatus{
+		Phase: phase, ContainerStatuses: statuses, InitContainerStatuses: initStatuses, PodIP: p.IP,
+	}
+	if p.Node != "" {
+		// A pod the kubelet has started carries a start time; an unscheduled
+		// one does not, and the difference is what a detail screen shows.
+		status.StartTime = &created
+	}
+
 	return corev1.Pod{
 		TypeMeta:   metav1.TypeMeta{APIVersion: "v1", Kind: "Pod"},
 		ObjectMeta: meta,
 		Spec:       spec,
-		Status:     corev1.PodStatus{Phase: phase, ContainerStatuses: statuses},
+		Status:     status,
 	}
+}
+
+// resourcesOf is the requests and limits a test gave a pod, on each container.
+// A quantity that does not parse is left out rather than guessed at, which the
+// test then sees as unset.
+func resourcesOf(p Pod) corev1.ResourceRequirements {
+	out := corev1.ResourceRequirements{}
+	put := func(list *corev1.ResourceList, name corev1.ResourceName, value string) {
+		if value == "" {
+			return
+		}
+		q, err := resource.ParseQuantity(value)
+		if err != nil {
+			return
+		}
+		if *list == nil {
+			*list = corev1.ResourceList{}
+		}
+		(*list)[name] = q
+	}
+	put(&out.Requests, corev1.ResourceCPU, p.CPURequest)
+	put(&out.Requests, corev1.ResourceMemory, p.MemoryRequest)
+	put(&out.Limits, corev1.ResourceCPU, p.CPULimit)
+	put(&out.Limits, corev1.ResourceMemory, p.MemoryLimit)
+	return out
 }
 
 // servePod is one pod: the read a restart makes first, and the delete that IS
@@ -2101,8 +2236,12 @@ func (s *Server) writeServices(w http.ResponseWriter, namespace string) {
 			rendered.Spec.Type = corev1.ServiceTypeClusterIP
 		}
 		for _, p := range svc.Ports {
+			// The target port defaulted to the port, as the API server does on
+			// create. Left at zero it rendered as "80/TCP → 0" -- a port no
+			// real Service ever reports.
 			rendered.Spec.Ports = append(rendered.Spec.Ports, corev1.ServicePort{
 				Name: p.Name, Port: p.Port, Protocol: corev1.ProtocolTCP,
+				TargetPort: intstr.FromInt32(p.Port),
 			})
 		}
 		list.Items = append(list.Items, rendered)
@@ -2459,9 +2598,20 @@ func (s *Server) writeJobs(w http.ResponseWriter, namespace string) {
 			continue
 		}
 		suspend := r.Suspended
+		meta := metav1.ObjectMeta{
+			Name: r.Name, Namespace: r.Namespace,
+			CreationTimestamp: metav1.NewTime(time.Now().Add(-time.Hour).UTC()),
+		}
+		if r.Owner != "" {
+			// What makes a Job a CronJob's run rather than an app of its own.
+			controller := true
+			meta.OwnerReferences = []metav1.OwnerReference{{
+				APIVersion: "batch/v1", Kind: "CronJob", Name: r.Owner, Controller: &controller,
+			}}
+		}
 		list.Items = append(list.Items, batchv1.Job{
 			TypeMeta:   metav1.TypeMeta{APIVersion: "batch/v1", Kind: "Job"},
-			ObjectMeta: metav1.ObjectMeta{Name: r.Name, Namespace: r.Namespace},
+			ObjectMeta: meta,
 			Spec:       batchv1.JobSpec{Suspend: &suspend, Template: podTemplate(r.Name, r.Image)},
 			Status: batchv1.JobStatus{
 				Succeeded: r.Succeeded, Failed: r.Failed, Active: r.Active,
@@ -3037,6 +3187,148 @@ func halve(value string) string {
 	return resource.NewMilliQuantity(q.MilliValue()/2, resource.DecimalSI).String()
 }
 
+// The kubelet's summary (2026-09-26).
+
+// writeSummary answers one node's /stats/summary the way a kubelet does when
+// the API server proxies to it.
+//
+// Rendered in the kubelet's own units -- nanocores and bytes, as integers --
+// rather than as quantities, because that is the wire shape: a reader that
+// parsed "250m" here would pass against this fake and fail against a kubelet.
+// A figure a test did not give -- "" or ",64Mi" -- is left OUT rather than
+// written as zero, which is how the kubelet says it has no rate yet, and a pod
+// with no entry at all is not in the summary.
+func (s *Server) writeSummary(w http.ResponseWriter, r *http.Request, node string) {
+	s.mu.Lock()
+	known := slices.ContainsFunc(s.nodes, func(n Node) bool { return n.Name == node })
+	fails := slices.Contains(s.summaryFails, node)
+	hangs := slices.Contains(s.summaryHangs, node)
+	pods := append([]Pod(nil), s.pods...)
+	summary := s.summary
+	s.mu.Unlock()
+
+	switch {
+	case !known:
+		s.writeStatus(w, http.StatusNotFound, metav1.StatusReasonNotFound,
+			fmt.Sprintf("nodes %q not found", node))
+		return
+	case hangs:
+		// Holds the request until the client gives up, which is what a
+		// kubelet behind a dead link does. Bounded, so a test that forgot its
+		// own deadline cannot hold the server's Close for ever.
+		select {
+		case <-r.Context().Done():
+		case <-time.After(30 * time.Second):
+		}
+		return
+	case fails:
+		// The API server's own answer when it cannot dial the kubelet. The
+		// address is a documentation one written out whole: this fake does not
+		// know a node's address, and assembling one with Sprintf is what
+		// internal/talos's seam guard exists to catch -- it caught this.
+		s.writeStatus(w, http.StatusServiceUnavailable, metav1.StatusReasonServiceUnavailable,
+			"error trying to reach service: dial tcp 192.0.2.12:10250: connect: no route to host")
+		return
+	}
+
+	type cpu struct {
+		UsageNanoCores int64 `json:"usageNanoCores"`
+	}
+	type memory struct {
+		WorkingSetBytes int64 `json:"workingSetBytes"`
+	}
+	type container struct {
+		Name   string  `json:"name"`
+		CPU    *cpu    `json:"cpu,omitempty"`
+		Memory *memory `json:"memory,omitempty"`
+	}
+	type podRef struct {
+		Name      string `json:"name"`
+		Namespace string `json:"namespace"`
+	}
+	type pod struct {
+		PodRef     podRef      `json:"podRef"`
+		CPU        *cpu        `json:"cpu,omitempty"`
+		Memory     *memory     `json:"memory,omitempty"`
+		Containers []container `json:"containers"`
+	}
+	out := struct {
+		Node struct {
+			NodeName string `json:"nodeName"`
+		} `json:"node"`
+		Pods []pod `json:"pods"`
+	}{Pods: []pod{}}
+	out.Node.NodeName = node
+
+	for _, p := range pods {
+		if p.Node != node {
+			continue
+		}
+		figures, ok := summary[p.Namespace+"/"+p.Name]
+		if !ok {
+			continue
+		}
+		row := pod{PodRef: podRef{Name: p.Name, Namespace: p.Namespace}, Containers: []container{}}
+		var sumCPU, sumMemory int64
+		complete := true
+		names := make([]string, 0, len(figures))
+		for name := range figures {
+			names = append(names, name)
+		}
+		slices.Sort(names)
+		for _, name := range names {
+			if name == "" {
+				continue
+			}
+			c, m := summaryFigures(figures[name])
+			entry := container{Name: name}
+			if c != nil {
+				entry.CPU = &cpu{UsageNanoCores: *c}
+				sumCPU += *c
+			} else {
+				complete = false
+			}
+			if m != nil {
+				entry.Memory = &memory{WorkingSetBytes: *m}
+				sumMemory += *m
+			} else {
+				complete = false
+			}
+			row.Containers = append(row.Containers, entry)
+		}
+		switch level, ok := figures[""]; {
+		case ok:
+			c, m := summaryFigures(level)
+			if c != nil {
+				row.CPU = &cpu{UsageNanoCores: *c}
+			}
+			if m != nil {
+				row.Memory = &memory{WorkingSetBytes: *m}
+			}
+		case complete && len(row.Containers) > 0:
+			row.CPU = &cpu{UsageNanoCores: sumCPU}
+			row.Memory = &memory{WorkingSetBytes: sumMemory}
+		}
+		out.Pods = append(out.Pods, row)
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+// summaryFigures turns a test's "cpu,memory" into the kubelet's nanocores and
+// bytes. Either half may be absent, and is then nil rather than zero.
+func summaryFigures(value string) (nanocores, bytes *int64) {
+	cpu, memory, _ := strings.Cut(value, ",")
+	if q, err := resource.ParseQuantity(cpu); cpu != "" && err == nil {
+		n := q.ScaledValue(resource.Nano)
+		nanocores = &n
+	}
+	if q, err := resource.ParseQuantity(memory); memory != "" && err == nil {
+		b := q.Value()
+		bytes = &b
+	}
+	return nanocores, bytes
+}
+
 // Stopping, starting and sweeping (2026-09-20).
 
 // annotationsFor returns the annotations a test's object carries, including the
@@ -3135,18 +3427,23 @@ func (s *Server) writeReplicaSets(w http.ResponseWriter, namespace string) {
 			continue
 		}
 		replicas := r.Replicas
+		meta := metav1.ObjectMeta{
+			Name: r.Name, Namespace: r.Namespace,
+			CreationTimestamp: metav1.NewTime(time.Now().Add(-r.Age).UTC()),
+		}
+		// No Owner is a ReplicaSet somebody created by hand. It has no
+		// controller reference at all, rather than one naming nothing.
+		if r.Owner != "" {
+			meta.OwnerReferences = []metav1.OwnerReference{{
+				APIVersion: "apps/v1", Kind: "Deployment", Name: r.Owner,
+				Controller: &controller,
+			}}
+		}
 		list.Items = append(list.Items, appsv1.ReplicaSet{
-			TypeMeta: metav1.TypeMeta{APIVersion: "apps/v1", Kind: "ReplicaSet"},
-			ObjectMeta: metav1.ObjectMeta{
-				Name: r.Name, Namespace: r.Namespace,
-				CreationTimestamp: metav1.NewTime(time.Now().Add(-r.Age).UTC()),
-				OwnerReferences: []metav1.OwnerReference{{
-					APIVersion: "apps/v1", Kind: "Deployment", Name: r.Owner,
-					Controller: &controller,
-				}},
-			},
-			Spec:   appsv1.ReplicaSetSpec{Replicas: &replicas},
-			Status: appsv1.ReplicaSetStatus{Replicas: replicas},
+			TypeMeta:   metav1.TypeMeta{APIVersion: "apps/v1", Kind: "ReplicaSet"},
+			ObjectMeta: meta,
+			Spec:       appsv1.ReplicaSetSpec{Replicas: &replicas},
+			Status:     appsv1.ReplicaSetStatus{Replicas: replicas},
 		})
 	}
 	writeJSON(w, http.StatusOK, list)
