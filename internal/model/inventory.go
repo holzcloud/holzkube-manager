@@ -76,6 +76,18 @@ type Cluster struct {
 	// server uses whatever the user maps to on its own.
 	ActAsGroups []string `json:"act_as_groups,omitempty"`
 
+	// Disabled is "off, and stays off" for the whole cluster (2026-09-26).
+	//
+	// It is the operator's statement of intent, not an observation, and that is
+	// why it is stored here rather than derived from which nodes answer: a
+	// cluster that is off because somebody disabled it and one that is off
+	// because the power failed look identical from the network, and only one
+	// of them should be brought back by the next "start". A start refuses while
+	// it is set; enabling clears it and then starts. Additive and unversioned,
+	// for the reason every other late field on these records is: a record
+	// written before it existed decodes as false, which is what it was.
+	Disabled bool `json:"disabled,omitempty"`
+
 	Rev uint64 `json:"rev"`
 }
 
@@ -218,6 +230,26 @@ type Machine struct {
 	// from every view, and its record -- labels, lock, history -- is kept for
 	// the day it rejoins, which clears this.
 	LeftAt time.Time `json:"left_at,omitzero"`
+
+	// Disabled is "off, and stays off" for this one node (2026-09-26).
+	//
+	// Set by the power model's disable and cleared by its enable, and by
+	// nothing else. While it is set a start refuses, a cluster start skips this
+	// node, and a node that comes up anyway -- somebody pressed its power button
+	// -- is kept cordoned by the daemon rather than silently rejoining the
+	// scheduler. It is a person's decision, like Locked and unlike everything
+	// the snapshot holds, so no observation touches it.
+	Disabled bool `json:"disabled,omitempty"`
+
+	// PowerCordoned says the node was schedulable when a power action took it
+	// down, and that the power model owes it an uncordon when it comes back.
+	//
+	// It is stored rather than kept in the job because the two halves are
+	// different jobs: a cluster stop cordons, and the cluster start that undoes
+	// it may run a week later, after any number of daemon restarts. A node that
+	// was already cordoned by somebody else is never marked, so bringing it back
+	// does not undo a cordon this product did not make.
+	PowerCordoned bool `json:"power_cordoned,omitempty"`
 
 	// Snapshot is the last confirmed set of facts, persisted so that a restart
 	// of holzkube-manager -- which most likely happens during the outage the operator
