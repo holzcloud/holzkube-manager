@@ -19,6 +19,7 @@ import (
 
 	"github.com/siderolabs/talos/pkg/machinery/api/common"
 	"github.com/siderolabs/talos/pkg/machinery/api/machine"
+	"github.com/siderolabs/talos/pkg/machinery/client"
 	"github.com/siderolabs/talos/pkg/machinery/resources/k8s"
 
 	"github.com/holzcloud/holzkube-manager/internal/model"
@@ -634,14 +635,30 @@ func assertAccepts(t *testing.T, addr string) {
 
 // assertRefused asserts that a dial to addr is actively refused rather than
 // hanging until a timeout.
+//
+// The address may keep answering for a moment first: a rebooting node answers
+// its Reboot before it goes (ledger 7, rebindGrace). So a dial that connects is
+// retried until the refusal comes or the allowance runs out, and only a dial
+// that neither connects nor is refused -- a black hole -- fails at once.
 func assertRefused(t *testing.T, addr string) {
 	t.Helper()
 
 	started := time.Now()
-	conn, err := net.DialTimeout("tcp", addr, 3*time.Second)
-	if err == nil {
+	var (
+		conn net.Conn
+		err  error
+	)
+	for {
+		conn, err = net.DialTimeout("tcp", addr, 3*time.Second)
+		if err != nil {
+			break
+		}
 		_ = conn.Close()
-		t.Fatalf("a dial to the abandoned address %s succeeded", addr)
+		if time.Since(started) > 3*time.Second {
+			t.Fatalf("the abandoned address %s still accepts connections %s after the node left it",
+				addr, time.Since(started))
+		}
+		time.Sleep(20 * time.Millisecond)
 	}
 	if !errors.Is(err, syscall.ECONNREFUSED) {
 		t.Errorf("dial to %s failed with %v after %s, want a connection refused: a released port "+
@@ -1068,4 +1085,47 @@ func gateProbes() map[talossim.ScenarioName]gateProbe {
 			},
 		},
 	}
+}
+
+// Ledger 7: under ip_changes_on_reboot a client connected over TCP still gets
+// the Reboot reply, as it does from real hardware, and only then does the node
+// leave its old address. The other scenario tests dial in-process, where the
+// severing never reached the reply; over a socket it did, which made the
+// simulator stricter than a node for exactly the RPC the scenario is about.
+func TestScenarioIPChangesOnRebootStillAnswersOverTCP(t *testing.T) {
+	t.Parallel()
+
+	sim := newSim(t, talossim.Options{Hostname: "moving-node"})
+	creds := sim.ClientCreds()
+	ctx := testContext(t)
+	cl, err := client.New(ctx, client.WithTLSConfig(creds.TLS), client.WithEndpoints(sim.Addr()))
+	if err != nil {
+		t.Fatalf("client.New over TCP: %v", err)
+	}
+	t.Cleanup(func() { _ = cl.Close() })
+
+	// A first call, so the connection the reply has to travel on exists before
+	// the reboot rather than being dialled by it.
+	if _, err := cl.Version(ctx); err != nil {
+		t.Fatalf("Version over TCP before the reboot: %v", err)
+	}
+
+	restore, err := sim.Inject(talossim.Scenario{Name: talossim.ScenarioIPChangesOnReboot})
+	if err != nil {
+		t.Fatalf("Inject ip_changes_on_reboot: %v", err)
+	}
+	defer restore()
+
+	before := sim.Addr()
+	resp, err := cl.RebootWithResponse(ctx)
+	if err != nil {
+		t.Fatalf("Reboot over TCP under ip_changes_on_reboot failed: %v; a real node answers "+
+			"before it goes away", err)
+	}
+	assertAnsweredBy(t, "Reboot", resp.GetMessages()[0].GetMetadata().GetHostname(), "moving-node")
+
+	if sim.Addr() == before {
+		t.Fatalf("Addr() is still %q after the reboot", before)
+	}
+	assertRefused(t, before)
 }

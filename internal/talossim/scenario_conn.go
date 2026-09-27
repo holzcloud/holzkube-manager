@@ -249,10 +249,31 @@ func (s *Server) rebind() error {
 		return err
 	}
 
-	s.severListener(old)
+	// The old address goes a moment later rather than now (ledger 7). A real
+	// node answers the Reboot before it goes away; severing here, while the
+	// handler that called this has not yet returned, cut the reply off for a
+	// client on a socket, which made the simulator stricter than hardware for
+	// the one RPC this scenario is about. The new address is already the
+	// node's, so Addr() moves at once; only the old one lingers, for as long as
+	// it takes the reply to leave. Close does not wait out the grace: done
+	// ends it, and the old address is severed on the way out.
+	s.sg.Add(1)
+	go func() {
+		defer s.sg.Done()
+		select {
+		case <-time.After(rebindGrace):
+		case <-s.done:
+		}
+		s.severListener(old)
+	}()
 
 	return nil
 }
+
+// rebindGrace is how long the address a rebooting node leaves keeps serving
+// after the new one is up: long enough for the Reboot reply to be written, and
+// short against anything a caller waits for.
+const rebindGrace = 200 * time.Millisecond
 
 // closeListener stops the node accepting, and severs the connections already
 // open on it.

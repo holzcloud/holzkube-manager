@@ -491,3 +491,21 @@ func typeString(expr ast.Expr) string {
 		return ""
 	}
 }
+
+// Ledger 4: talossim's Events stream is a stub -- it repeats one RUNNING
+// status rather than following the node through Bootstrap, Reboot and Reset --
+// and that is safe only while nothing in the product listens to it. The day a
+// production call site subscribes, the simulator would answer every test of it
+// with a node that never changes, so this fails first and names the work.
+func TestNothingInTheProductListensToTheStubbedEventStream(t *testing.T) {
+	t.Parallel()
+
+	callSites, _, _ := machineryCallSites(t)
+	for _, name := range callSites {
+		if name == "Events" || name == "EventsWatch" || name == "EventsWatchV2" {
+			t.Fatalf("the product now calls %s on the machinery client, and talossim's event stream is a "+
+				"stub that never follows the node's state (ledger 4). Drive it from Bootstrap, Reboot and "+
+				"Reset in internal/talossim/stream.go before relying on a test of this call.", name)
+		}
+	}
+}
