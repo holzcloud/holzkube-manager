@@ -4,7 +4,7 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/status-alpha-ec8272?style=flat-square&labelColor=150e08" alt="Status: alpha">
-  <a href="https://github.com/holzcloud/holzkube-manager/releases/latest"><img src="https://img.shields.io/github/v/release/holzcloud/holzkube-manager?style=flat-square&color=f0ae5f&labelColor=150e08" alt="Latest release"></a>
+  <a href="https://github.com/holzcloud/holzkube-manager/releases"><img src="https://img.shields.io/github/v/release/holzcloud/holzkube-manager?include_prereleases&style=flat-square&color=f0ae5f&labelColor=150e08" alt="Latest release"></a>
   <a href="https://github.com/holzcloud/holzkube-manager/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/holzcloud/holzkube-manager/ci.yml?branch=main&style=flat-square&labelColor=150e08&label=CI" alt="CI"></a>
   <img src="https://img.shields.io/badge/Talos-v1.12%20–%20v1.14-f0ae5f?style=flat-square&labelColor=150e08" alt="Talos v1.12 to v1.14">
   <img src="https://img.shields.io/badge/linux-arm64%20·%20amd64-f0ae5f?style=flat-square&labelColor=150e08" alt="linux arm64 and amd64">
@@ -90,7 +90,7 @@ the latest warnings. It never scrolls, and it always says how old its answer is.
 ## Quick start
 
 Download the archive for your machine from the
-[latest release](https://github.com/holzcloud/holzkube-manager/releases/latest)
+[newest release](https://github.com/holzcloud/holzkube-manager/releases)
 (`linux_arm64` for a Raspberry Pi, `linux_amd64` otherwise), then:
 
 ```sh
