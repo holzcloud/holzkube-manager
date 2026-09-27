@@ -143,30 +143,23 @@ download() {
 }
 
 # --- Welches Release ist das neueste? ---------------------------------------
-# /releases/latest ueberspringt Drafts und Prereleases, und das ist hier die
-# richtige Semantik: goreleaser legt jedes Release als Draft an (release.draft
-# in .goreleaser.yaml), und ein Draft ist ausdruecklich noch nicht freigegeben.
-# Ein Update-Skript, das Drafts installiert, wuerde die Bedeutung des Wortes
-# unterlaufen.
-#
-# Damit die Fehlermeldung trotzdem hilft, wird bei einem 404 in der vollen
-# Liste nachgesehen und der wartende Draft beim Namen genannt.
-if ! LATEST_JSON=$(api "https://api.github.com/repos/$REPO/releases/latest" 2>/dev/null); then
-  DRAFTS=$(api "https://api.github.com/repos/$REPO/releases?per_page=10" 2>/dev/null \
-    | python3 -c "
+# Jedes Release ist ein Prerelease (seit 2026-09-26: das Produkt ist Alpha, und
+# GitHub soll das auch so zeigen). /releases/latest ueberspringt Prereleases und
+# fand darum ab da nichts mehr. Gelesen wird deshalb die Liste, die GitHub
+# neueste zuerst liefert, und genommen wird das erste Release, das kein Entwurf
+# ist. Ein Entwurf ist ausdruecklich noch nicht freigegeben; ein Prerelease ist
+# hier der Normalfall.
+RELEASES_JSON=$(api "https://api.github.com/repos/$REPO/releases?per_page=20" 2>/dev/null) \
+  || fail "die Release-Liste von $REPO ist nicht lesbar"
+LATEST_JSON=$(printf '%s' "$RELEASES_JSON" | python3 -c "
 import json,sys
-try: rs = json.load(sys.stdin)
-except Exception: sys.exit(0)
-print(', '.join(r['tag_name'] for r in rs if r.get('draft')))
-" || true)
-  if [[ -n ${DRAFTS:-} ]]; then
-    fail "kein veroeffentlichtes Release. Als Entwurf liegt bereit: $DRAFTS
-goreleaser legt Releases als Draft an - auf GitHub freigeben, dann erneut ausfuehren."
-  fi
-  fail "kein Release in $REPO gefunden.
-Ein Release entsteht durch einen Tag: git tag -a v1.0.0 -m 'v1.0.0' && git push origin v1.0.0
-Der CI-Job 'release' baut daraus die Archive."
-fi
+rs = json.load(sys.stdin)
+published = [r for r in rs if not r.get('draft')]
+if not published:
+    drafts = ', '.join(r['tag_name'] for r in rs if r.get('draft'))
+    sys.exit('kein veroeffentlichtes Release' + (' (als Entwurf: ' + drafts + ')' if drafts else ''))
+json.dump(published[0], sys.stdout)
+") || fail "kein Release in $REPO gefunden, das installiert werden koennte."
 
 # Ein Release traegt seit v1.16 ZWEI Archive pro Architektur: den Daemon und
 # holzkubectl, das sein eigenes bekommen hat, damit niemand einen Server mit
@@ -280,6 +273,18 @@ for _ in $(seq 1 20); do
 done
 
 if [[ $ok -eq 1 ]]; then
+  # Das Archiv traegt dieses Skript mit. Es ersetzt sich erst, nachdem der
+  # Dienst gesund ist: ein neues Skript, das mit einem kaputten Update kaeme,
+  # soll nicht auch noch den Rueckweg tragen muessen. So braucht eine Aenderung
+  # am Update-Weg -- wie die Umstellung auf Prereleases -- nie wieder Handarbeit
+  # auf dem Host.
+  if tar -xzf "$TMP/$ASSET_NAME" -C "$TMP" deploy/holzkube-manager-update.sh 2>/dev/null; then
+    SELF=$(readlink -f "$0")
+    if ! cmp -s "$TMP/deploy/holzkube-manager-update.sh" "$SELF"; then
+      install -o root -g root -m 0755 "$TMP/deploy/holzkube-manager-update.sh" "$SELF"
+      log "Update-Skript erneuert: $SELF"
+    fi
+  fi
   log ""
   log "Aktualisiert auf $("$BIN" --version)."
   log "Zuruecknehmen mit: sudo $0 --rollback"

@@ -18,9 +18,9 @@ green, which is the only reason to check them at all:
     would otherwise be choosing between two and could not say why.
   - checksums.txt, without which the script downloads and installs unverified,
     warns once into a log nobody reads, and carries on.
-  - not a draft and not a prerelease, because /releases/latest skips both and a
-    release nothing can see is not a release. This is the failure that looks
-    like success from every angle except the host that needed it.
+  - not a draft, because the update script skips drafts and a release nothing
+    can see is not a release; and a prerelease, because every release of this
+    alpha is one.
   - the notes are the changelog entry and not goreleaser's commit list.
 
 Usage: verify-release.py <repo> <tag>   (GITHUB_TOKEN in the environment)
@@ -62,7 +62,7 @@ def fetch(repo: str, tag: str) -> dict:
         if err.code == 404:
             sys.exit(
                 f"::error::no published release for {tag}. Either it is still a draft, "
-                f"in which case /releases/latest cannot see it either, or the tag and the "
+                f"in which case the update script cannot see it either, or the tag and the "
                 f"release have come apart."
             )
         raise
@@ -76,12 +76,13 @@ def main() -> int:
     problems = []
 
     if release.get("draft"):
-        problems.append("the release is a draft; /releases/latest skips drafts")
-    if release.get("prerelease"):
+        problems.append("the release is a draft; the update script skips drafts")
+    # Every release is a prerelease since 2026-09-26 (alpha); the update script
+    # reads the release list rather than /releases/latest because of it.
+    if not release.get("prerelease"):
         problems.append(
-            "the release is marked prerelease; /releases/latest skips prereleases, so "
-            "every host running the update script would keep installing the previous build "
-            "and report itself up to date"
+            "the release is not marked prerelease; every release of this alpha is one "
+            "(.goreleaser.yaml release.prerelease)"
         )
 
     for arch in REQUIRED_LINUX_ARCHES:
@@ -131,7 +132,7 @@ def main() -> int:
         return 1
 
     print(f"::notice::{tag} carries linux/{' and linux/'.join(REQUIRED_LINUX_ARCHES)}, "
-          f"checksums, and is visible to /releases/latest")
+          f"checksums and its changelog, and is a published prerelease")
     return 0
 
 
