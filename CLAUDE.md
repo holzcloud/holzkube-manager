@@ -128,6 +128,15 @@ missing, and the length of what came before is no excuse: that is the moment the
 operator is being handed the work of inventing the options. If a message would
 end in a question, the question is a choice, or it does not go in the message.
 
+**Every question is a choice, always, and it goes through the choice tool.**
+The operator's words, 2026-09-27: "Stelle mir immer alles als Auswahl fragen.
+Merken!" That covers every question, not only the big decisions: what to do
+next at the end of a report, which of two fixes, whether to continue, whether
+something may be done now. Ask it with `AskUserQuestion` -- two to four named
+options, each with its cost and what it buys, the recommended one first and
+marked. A question typed into the reply text is the thing this rule forbids,
+even when it lists options.
+
 ## The method this repository is built on
 
 A guard is worth nothing until it has gone red against the fault deliberately
