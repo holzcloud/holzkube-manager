@@ -1,5 +1,27 @@
 [
   {
+    "version": "v0.1.0",
+    "date": "2026-09-27",
+    "changes": [
+      {
+        "icon": "☸️",
+        "text": "Kubernetes upgrades rebuilt. The upgrade now runs in the order talosctl upgrade-k8s uses: it pulls every image onto every node first, then moves kube-apiserver, kube-controller-manager and kube-scheduler node by node, waiting until each node reports the pod ready on its new image, then kube-proxy (its DaemonSet included, with a rollout wait), and the kubelets last."
+      },
+      {
+        "icon": "🩹",
+        "text": "Fixed: a Kubernetes upgrade would have replaced a node's whole configuration with its few image lines, and a real node refuses that, so every run would have stopped at its first node. Each change now merges into the configuration the node has, in the shape it keeps it (Talos v1.14 documents or the older fields)."
+      },
+      {
+        "icon": "⚠️",
+        "text": "The Kubernetes upgrade is tested end to end against the simulator, not yet against a real cluster. Take an etcd snapshot before you run it."
+      },
+      {
+        "icon": "🔄",
+        "text": "The update script finds prerelease builds and, after a healthy update, replaces itself from the release archive. A host running the script from before v0.0.1 needs the new one installed once by hand."
+      }
+    ]
+  },
+  {
     "version": "v0.0.1",
     "date": "2026-09-26",
     "changes": [
