@@ -83,6 +83,16 @@ func (c *ClusterClient) ImagePull(ctx context.Context, ref string) error {
 	return c.conn.c.ImagePull(ctx, common.ContainerdNamespace_NS_SYSTEM, ref) //nolint:staticcheck // see above
 }
 
+// ImagePullCRI pulls an image into the namespace the kubelet's container
+// runtime uses, which is where the control-plane static pods and kube-proxy
+// run from. ImagePull puts an image into the system namespace, where Talos's
+// own containers -- the installer, the kubelet -- run. A Kubernetes upgrade
+// needs both, and pulling a static pod's image into the system namespace
+// would leave the runtime that starts the pod to download it again.
+func (c *ClusterClient) ImagePullCRI(ctx context.Context, ref string) error {
+	return c.conn.c.ImagePull(ctx, common.ContainerdNamespace_NS_CRI, ref) //nolint:staticcheck // see ImagePull
+}
+
 // Upgrade starts an upgrade and returns the node's own output as it arrives.
 //
 // It uses LifecycleService rather than the deprecated MachineService.Upgrade,
