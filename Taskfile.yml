@@ -116,10 +116,23 @@ tasks:
       # golangci-lint is lower than the targeted Go version"), and a host with
       # a *newer* one is worse: it runs, it disagrees with CI, and nothing
       # says which of the two answers is the one that will block a push.
+      #
+      # Ledger 34: the binary is resolved here, not left to the caller's PATH.
+      # `go install` puts it in $(go env GOPATH)/bin, which is off the default
+      # PATH, and a bare `golangci-lint` then reads as a missing tool; and a
+      # stale ./bin copy is worse than none, because it refuses the module's Go
+      # version and looks like a broken repository. So every place it can be
+      # is asked, and the first one that is the pinned version wins.
       - |
-        lint=golangci-lint
-        if [ -x ./bin/golangci-lint ]; then
-          lint=./bin/golangci-lint
+        want="{{.GOLANGCI_VERSION | trimPrefix "v"}}"
+        lint=""
+        for c in ./bin/golangci-lint "$(go env GOPATH)/bin/golangci-lint" "$(command -v golangci-lint || true)"; do
+          [ -n "$c" ] && [ -x "$c" ] || continue
+          if "$c" --version 2>/dev/null | grep -q "version $want "; then lint=$c; break; fi
+        done
+        if [ -z "$lint" ]; then
+          echo "golangci-lint $want not found in ./bin, \$(go env GOPATH)/bin or PATH; run: task lint:go:install" >&2
+          exit 1
         fi
         "$lint" --version
         "$lint" run

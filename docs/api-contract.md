@@ -769,7 +769,8 @@ against that divergence (FACT-04).**
     "pxe": "https://factory.talos.dev/pxe/<id>/v1.13.9/metal-amd64-secureboot",
     "disk_image": "https://factory.talos.dev/image/<id>/v1.13.9/metal-amd64-secureboot.raw.zst",
     "cmdline": "https://factory.talos.dev/image/<id>/v1.13.9/cmdline-metal-amd64-secureboot",
-    "installer": "factory.talos.dev/metal-installer-secureboot/<id>:v1.13.9"
+    "installer": "factory.talos.dev/metal-installer-secureboot/<id>:v1.13.9",
+    "warnings": []
   }
   ```
 
@@ -846,8 +847,15 @@ against that divergence (FACT-04).**
 
   1. **Proven** — the preferred candidate answered. The reference is returned
      with `warnings: []` and no `installer_error`.
-  2. **Provisional** — a candidate failed at the transport level and a later one
-     answered, so the preferred name was never actually ruled out. The reference
+  2. **Provisional** — a candidate did not answer usably and a later one
+     answered, so the preferred name was never actually ruled out. "Did not
+     answer usably" is wider than a transport failure: it is any error before a
+     response *and* any non-2xx that is not a refusal — a `429`, a `503`, an
+     authentication challenge. The answer stays provisional for as long as it is
+     cached: every response that serves it, including ones served from the
+     cache, carries the warning, and the preferred name is asked again once the
+     entry is older than the re-question interval (`installerRepoRetryInterval`).
+     A proven answer replaces it and is never downgraded. The reference
      is returned *and* carries `installer.repo-fallback-unverified` — or, for a
      SecureBoot request, `installer.secureboot-repo-fallback-unverified`, which
      adds that the name that answered may select a *different image* rather than
