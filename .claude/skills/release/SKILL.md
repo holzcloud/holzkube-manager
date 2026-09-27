@@ -49,10 +49,9 @@ itself.
 
 4. **Pick the version.** Since 2026-09-26 the product is alpha and numbered
    from `v0.0.1` again; every release before that was deleted. Plain
-   `v0.MINOR.PATCH`, never a `-alpha` or `-beta` suffix: the update script reads
-   `/releases/latest`, which skips anything GitHub counts as a prerelease, so a
-   suffix would make the release invisible to every host (see the end of this
-   file). New features raise MINOR (`v0.1.0`), fixes alone raise PATCH
+   `v0.MINOR.PATCH`, no `-alpha` or `-beta` suffix: every release is marked
+   prerelease by goreleaser anyway (see the end of this file), and the number
+   stays plain. New features raise MINOR (`v0.1.0`), fixes alone raise PATCH
    (`v0.0.2`). The alpha status is said in the notes and the app, not in the
    number.
 
@@ -87,8 +86,8 @@ itself.
 
 9. **Read the verification step.** `Verify the release an operator would
    download` checks the release the API now serves: both linux architectures,
-   exactly one daemon archive each, `checksums.txt`, that it is neither a
-   draft nor a prerelease, and that its page carries the changelog entry.
+   exactly one daemon archive each, `checksums.txt`, that it is a published
+   prerelease and not a draft, and that its page carries the changelog entry.
    If it fails, the release exists and is wrong — say so
    plainly rather than reporting the goreleaser success.
 
@@ -111,13 +110,15 @@ those, and say what they do not cover.
 
 ## Two settings that move together or not at all
 
-`.goreleaser.yaml` has `draft: false` and leaves `prerelease` at false, and both
-are load-bearing for the update script rather than matters of taste:
-`/releases/latest` skips drafts **and** prereleases. Marking a beta as a
-prerelease reads as the careful choice and is the one that breaks every host
-running `holzkube-manager-update.sh` — they would go on installing the previous
-build and report themselves up to date.
+Every release is a **prerelease** (the operator's decision, 2026-09-26: the
+product is alpha). `.goreleaser.yaml` sets `prerelease: "true"` and
+`draft: false`, and `verify-release.py` fails a release that is not a
+published prerelease.
 
-If betas should ever stop being "latest", the script has to learn to ask for
-them first. Change one without the other and the failure is silent on every
-machine that matters.
+That only works because `deploy/holzkube-manager-update.sh` reads the release
+list and takes the newest release that is not a draft: `/releases/latest`
+skips prereleases, and the script used to read nothing else. A host still
+running the old script finds no release at all and needs the new script
+installed once by hand; after that the script replaces itself from each
+release archive once the update is healthy. Change the one without the other
+and the failure is silent on every machine that matters.
