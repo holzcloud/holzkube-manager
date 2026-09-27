@@ -268,103 +268,103 @@ Gefüllt bei der Roadmap-Erstellung. Quelle: `.planning/ROADMAP.md`.
 
 Requirements mit **🚫** sind Release-Blocker.
 
-| Requirement | Phase | Status |
-|-------------|-------|--------|
-| FOUND-01 | Phase 1 | Complete |
-| FOUND-02 | Phase 1 | Complete |
-| FOUND-03 | Phase 1 | Complete |
-| FOUND-04 | Phase 1 | Complete |
-| FOUND-05 | Phase 1 | Complete |
-| FOUND-06 | Phase 1 | Complete |
-| FOUND-07 | Phase 1 | Complete |
-| FOUND-08 | Phase 1 | Complete |
-| FOUND-09 | Phase 1 | Complete |
-| FOUND-10 | Phase 1 | Complete |
-| FOUND-11 | Phase 1 | Complete |
-| FOUND-12 | Phase 2 | Complete |
-| TRANS-01 | Phase 2 | Complete |
-| TRANS-02 | Phase 2 | Complete |
-| TRANS-03 | Phase 2 | Complete |
-| TRANS-04 | Phase 2 | Complete |
-| TRANS-05 | Phase 2 | Complete |
-| **TRANS-06** 🚫 | Phase 2 | Complete |
-| TRANS-07 | Phase 2 | Complete |
-| TRANS-08 | Phase 3 | Complete |
-| FACT-01 | Phase 2 | Complete |
-| FACT-02 | Phase 2 | Complete |
-| FACT-03 | Phase 2 | Complete |
-| FACT-04 | Phase 2 | Complete |
-| FACT-05 | Phase 2 | Complete |
-| FACT-06 | Phase 2 | Complete |
-| **INV-01** 🚫 | Phase 3 | Complete |
-| INV-02 | Phase 3 | Complete |
-| **INV-03** 🚫 | Phase 3 | Complete |
-| **INV-04** 🚫 | Phase 3 | Complete |
-| **INV-05** 🚫 | Phase 3 | Complete |
-| INV-06 | Phase 3 | Complete |
-| **INV-07** 🚫 | Phase 3 | Complete |
-| INV-08 | Phase 3 | Complete |
-| INV-09 | Phase 3 | Complete |
-| INV-10 | Phase 3 | Complete |
-| INV-11 | Phase 3 | Complete |
-| INV-12 | Phase 3 | Complete |
-| INV-13 | Phase 3 | Complete |
-| STREAM-01 | Phase 5 | Complete |
-| STREAM-02 | Phase 5 | Complete |
-| STREAM-03 | Phase 5 | Complete |
-| STREAM-04 | Phase 5 | Complete |
-| JOB-01 | Phase 6 | Complete |
-| JOB-02 | Phase 6 | Complete |
-| JOB-03 | Phase 6 | Complete |
-| JOB-04 | Phase 6 | Complete |
-| JOB-05 | Phase 6 | Complete |
-| JOB-06 | Phase 6 | Complete |
-| **JOB-07** 🚫 | Phase 6 | Complete |
-| JOB-08 | Phase 6 | Complete |
-| JOB-09 | Phase 6 | Complete |
-| CFG-01 | Phase 7 | Complete |
-| **CFG-02** 🚫 | Phase 7 | Complete |
-| CFG-03 | Phase 7 | Complete |
-| CFG-04 | Phase 7 | Complete |
-| CFG-05 | Phase 7 | Complete |
-| CFG-06 | Phase 7 | Complete |
-| CFG-07 | Phase 7 | Complete |
-| CFG-08 | Phase 7 | Complete |
-| CFG-09 | Phase 7 | Complete |
-| CFG-10 | Phase 7 | Complete |
-| CFG-11 | Phase 7 | Complete |
-| PROV-01 | Phase 8 | Complete |
-| PROV-02 | Phase 8 | Complete |
-| PROV-03 | Phase 8 | Complete |
-| PROV-04 | Phase 8 | Complete |
-| **PROV-05** 🚫 | Phase 8 | Complete |
-| PROV-06 | Phase 8 | Complete |
-| PROV-07 | Phase 8 | Complete |
-| PROV-08 | Phase 8 | Complete |
-| **PROV-09** 🚫 | Phase 8 | Complete |
-| **PROV-10** 🚫 | Phase 8 | Complete |
-| PROV-11 | Phase 8 | Complete |
-| PROV-12 | Phase 8 | Complete |
-| PROV-13 | Phase 8 | Complete |
-| UPG-01 | Phase 9 | Complete |
-| **UPG-02** 🚫 | Phase 9 | Complete |
-| **UPG-03** 🚫 | Phase 9 | Complete |
-| UPG-04 | Phase 9 | Complete |
-| UPG-05 | Phase 9 | Complete |
-| **UPG-06** 🚫 | Phase 9 | Complete |
-| **UPG-07** 🚫 | Phase 9 | Complete |
-| UPG-08 | Phase 9 | Complete |
-| UPG-09 | Phase 9 | Complete |
-| UPG-10 | Phase 9 | Complete |
-| UPG-11 | Phase 9 | Complete |
-| UPG-12 | Phase 9 | Complete |
-| UPG-13 | Phase 9 | Complete |
-| UPG-14 | Phase 9 | Complete |
-| OPS-01 | Phase 10 | Complete |
-| OPS-02 | Phase 10 | Complete |
-| OPS-03 | Phase 10 | Complete |
-| OPS-04 | Phase 10 | Complete (unbuilt, window 88) |
-| **OPS-05** 🚫 | Phase 10 | **Open — window 87** |
+| Requirement | Phase | Status | Blocker |
+|-------------|-------|--------|---------|
+| FOUND-01 | Phase 1 | Complete |  |
+| FOUND-02 | Phase 1 | Complete |  |
+| FOUND-03 | Phase 1 | Complete |  |
+| FOUND-04 | Phase 1 | Complete |  |
+| FOUND-05 | Phase 1 | Complete |  |
+| FOUND-06 | Phase 1 | Complete |  |
+| FOUND-07 | Phase 1 | Complete |  |
+| FOUND-08 | Phase 1 | Complete |  |
+| FOUND-09 | Phase 1 | Complete |  |
+| FOUND-10 | Phase 1 | Complete |  |
+| FOUND-11 | Phase 1 | Complete |  |
+| FOUND-12 | Phase 2 | Complete |  |
+| TRANS-01 | Phase 2 | Complete |  |
+| TRANS-02 | Phase 2 | Complete |  |
+| TRANS-03 | Phase 2 | Complete |  |
+| TRANS-04 | Phase 2 | Complete |  |
+| TRANS-05 | Phase 2 | Complete |  |
+| TRANS-06 | Phase 2 | Complete | 🚫 |
+| TRANS-07 | Phase 2 | Complete |  |
+| TRANS-08 | Phase 3 | Complete |  |
+| FACT-01 | Phase 2 | Complete |  |
+| FACT-02 | Phase 2 | Complete |  |
+| FACT-03 | Phase 2 | Complete |  |
+| FACT-04 | Phase 2 | Complete |  |
+| FACT-05 | Phase 2 | Complete |  |
+| FACT-06 | Phase 2 | Complete |  |
+| INV-01 | Phase 3 | Complete | 🚫 |
+| INV-02 | Phase 3 | Complete |  |
+| INV-03 | Phase 3 | Complete | 🚫 |
+| INV-04 | Phase 3 | Complete | 🚫 |
+| INV-05 | Phase 3 | Complete | 🚫 |
+| INV-06 | Phase 3 | Complete |  |
+| INV-07 | Phase 3 | Complete | 🚫 |
+| INV-08 | Phase 3 | Complete |  |
+| INV-09 | Phase 3 | Complete |  |
+| INV-10 | Phase 3 | Complete |  |
+| INV-11 | Phase 3 | Complete |  |
+| INV-12 | Phase 3 | Complete |  |
+| INV-13 | Phase 3 | Complete |  |
+| STREAM-01 | Phase 5 | Complete |  |
+| STREAM-02 | Phase 5 | Complete |  |
+| STREAM-03 | Phase 5 | Complete |  |
+| STREAM-04 | Phase 5 | Complete |  |
+| JOB-01 | Phase 6 | Complete |  |
+| JOB-02 | Phase 6 | Complete |  |
+| JOB-03 | Phase 6 | Complete |  |
+| JOB-04 | Phase 6 | Complete |  |
+| JOB-05 | Phase 6 | Complete |  |
+| JOB-06 | Phase 6 | Complete |  |
+| JOB-07 | Phase 6 | Complete | 🚫 |
+| JOB-08 | Phase 6 | Complete |  |
+| JOB-09 | Phase 6 | Complete |  |
+| CFG-01 | Phase 7 | Complete |  |
+| CFG-02 | Phase 7 | Complete | 🚫 |
+| CFG-03 | Phase 7 | Complete |  |
+| CFG-04 | Phase 7 | Complete |  |
+| CFG-05 | Phase 7 | Complete |  |
+| CFG-06 | Phase 7 | Complete |  |
+| CFG-07 | Phase 7 | Complete |  |
+| CFG-08 | Phase 7 | Complete |  |
+| CFG-09 | Phase 7 | Complete |  |
+| CFG-10 | Phase 7 | Complete |  |
+| CFG-11 | Phase 7 | Complete |  |
+| PROV-01 | Phase 8 | Complete |  |
+| PROV-02 | Phase 8 | Complete |  |
+| PROV-03 | Phase 8 | Complete |  |
+| PROV-04 | Phase 8 | Complete |  |
+| PROV-05 | Phase 8 | Complete | 🚫 |
+| PROV-06 | Phase 8 | Complete |  |
+| PROV-07 | Phase 8 | Complete |  |
+| PROV-08 | Phase 8 | Complete |  |
+| PROV-09 | Phase 8 | Complete | 🚫 |
+| PROV-10 | Phase 8 | Complete | 🚫 |
+| PROV-11 | Phase 8 | Complete |  |
+| PROV-12 | Phase 8 | Complete |  |
+| PROV-13 | Phase 8 | Complete |  |
+| UPG-01 | Phase 9 | Complete |  |
+| UPG-02 | Phase 9 | Complete | 🚫 |
+| UPG-03 | Phase 9 | Complete | 🚫 |
+| UPG-04 | Phase 9 | Complete |  |
+| UPG-05 | Phase 9 | Complete |  |
+| UPG-06 | Phase 9 | Complete | 🚫 |
+| UPG-07 | Phase 9 | Complete | 🚫 |
+| UPG-08 | Phase 9 | Complete |  |
+| UPG-09 | Phase 9 | Complete |  |
+| UPG-10 | Phase 9 | Complete |  |
+| UPG-11 | Phase 9 | Complete |  |
+| UPG-12 | Phase 9 | Complete |  |
+| UPG-13 | Phase 9 | Complete |  |
+| UPG-14 | Phase 9 | Complete |  |
+| OPS-01 | Phase 10 | Complete |  |
+| OPS-02 | Phase 10 | Complete |  |
+| OPS-03 | Phase 10 | Complete |  |
+| OPS-04 | Phase 10 | Complete (unbuilt, window 88) |  |
+| OPS-05 | Phase 10 | **Open — window 87** | 🚫 |
 
 **Verteilung pro Phase:**
 
