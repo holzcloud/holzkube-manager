@@ -97,6 +97,13 @@ func (s *Server) setMachineConfig(ctx context.Context, raw []byte) error {
 	if err != nil {
 		return fmt.Errorf("talossim: the applied machine configuration does not load: %w", err)
 	}
+	// Loading is not accepting. A three-line fragment loads, and a real node
+	// refuses it: it names no machine type, no cluster and no secrets. This
+	// simulator stored such a fragment as the node's whole configuration, and
+	// the Kubernetes upgrade passed every test while doing exactly that.
+	if _, err := provider.ValidateAsClient(simValidationMode{}); err != nil {
+		return fmt.Errorf("talossim: the applied machine configuration is not valid: %w", err)
+	}
 
 	next := configres.NewMachineConfig(provider)
 
@@ -529,3 +536,12 @@ func nodeUUID(hostname string) string {
 		sum&0xffffffffffff,
 	)
 }
+
+// simValidationMode is the RuntimeMode the validator asks about. Not requiring
+// an install matches internal/machineconfig's own check, so the simulator
+// refuses what the product would refuse and no more.
+type simValidationMode struct{}
+
+func (simValidationMode) String() string        { return "talossim" }
+func (simValidationMode) RequiresInstall() bool { return false }
+func (simValidationMode) InContainer() bool     { return false }

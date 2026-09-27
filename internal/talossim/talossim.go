@@ -269,6 +269,10 @@ type Server struct {
 	tcpAddr     string
 	transitions int
 	addrHistory []string
+	// abandoned is the address a reboot under ip_changes_on_reboot left,
+	// for the moment it lingers (rebindGrace): calls that arrive on it are
+	// refused, only the reply already in flight goes out. See rebind.
+	abandoned map[string]*abandonedAddr
 
 	mu sync.Mutex
 	// verified records the common name of every client certificate the TLS
