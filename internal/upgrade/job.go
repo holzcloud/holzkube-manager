@@ -8,6 +8,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/siderolabs/talos/pkg/machinery/config/configloader"
+
 	"github.com/holzcloud/holzkube-manager/internal/jobs"
 	"github.com/holzcloud/holzkube-manager/internal/machineconfig"
 	"github.com/holzcloud/holzkube-manager/internal/model"
@@ -74,6 +76,13 @@ type Deps struct {
 	// that node's SecureBoot state in it. It belongs to the composition root
 	// because resolving means asking the Image Factory.
 	ResolveInstaller ResolveInstaller
+
+	// KubeProxy moves the kube-proxy DaemonSet to an image and waits for the
+	// rollout, returning what it saw; ErrNoKubeProxy when the cluster runs
+	// none. It speaks the Kubernetes API, which is the composition root's to
+	// reach. Nil means no Kubernetes access: the configuration is still
+	// updated, and the step says the DaemonSet was not.
+	KubeProxy func(ctx context.Context, cluster model.ClusterID, image string) (string, error)
 }
 
 // Register teaches a job engine both rolling upgrades.
@@ -292,14 +301,23 @@ func talosNodeStep(
 	}
 }
 
-// kubernetesSteps upgrades the Kubernetes control plane and the kubelets.
+// kubernetesSteps upgrades the Kubernetes control plane and the kubelets, in
+// the order talosctl upgrade-k8s uses (ledger 86):
 //
-// It walks the same nodes in the same order and through the same gate, and the
-// difference is what it writes: a Kubernetes upgrade is a configuration change
-// to the static pod and kubelet images rather than a new system on disk, so
-// there is no installer and no reboot. What it shares with the Talos path is
-// the thing that matters -- the gate runs before every node, and the result is
-// verified against the node rather than against the call's return value.
+//  1. pull every image the run will need onto every node, so no component is
+//     restarted onto an image its node still has to download;
+//  2. the API server on each control-plane node, then the controller manager,
+//     then the scheduler -- the server before its clients, one node at a time,
+//     each waited for until the node reports the pod back, ready, on the new
+//     image;
+//  3. kube-proxy, whose image lives both in the control-plane configuration
+//     and in a DaemonSet in the Kubernetes API;
+//  4. the kubelet on each node, control plane first.
+//
+// Every change is written the way a configuration apply writes one: the node's
+// current configuration is read, the patch is merged into it, and the whole
+// result is applied. The version the node runs therefore has one source, its
+// configuration, and the health gate runs before every control-plane node.
 func kubernetesSteps(d Deps, req Request, cluster model.ClusterID) ([]jobs.Step, error) {
 	to, err := ParseVersion(req.To)
 	if err != nil {
@@ -309,16 +327,382 @@ func kubernetesSteps(d Deps, req Request, cluster model.ClusterID) ([]jobs.Step,
 		return nil, errors.New("upgrade: this run names no nodes")
 	}
 
-	steps := make([]jobs.Step, 0, len(req.Machines))
+	steps := make([]jobs.Step, 0, len(req.Machines)+5)
+	steps = append(steps, prepullStep(d, cluster, req.Machines, to))
+	for _, component := range talos.ControlPlaneComponents {
+		steps = append(steps, componentStep(d, cluster, req.Machines, component, to))
+	}
+	steps = append(steps, kubeProxyStep(d, cluster, req.Machines, to))
 	for _, id := range req.Machines {
 		steps = append(steps, kubernetesNodeStep(d, cluster, id, to))
 	}
 	return steps, nil
 }
 
+// componentConfigKey is where each control-plane component's image lives in
+// the machine configuration.
+var componentConfigKey = map[string]string{
+	"kube-apiserver":          "apiServer",
+	"kube-controller-manager": "controllerManager",
+	"kube-scheduler":          "scheduler",
+}
+
+// kubernetesImages are the images a node needs for a run: its kubelet, and on
+// a control-plane node the three static pods and kube-proxy.
+func kubernetesImages(to Version, controlPlane bool) (system, cri []string) {
+	v := to.String()
+	system = []string{kubeletImage(to)}
+	if controlPlane {
+		for _, c := range talos.ControlPlaneComponents {
+			cri = append(cri, "registry.k8s.io/"+c+":"+v)
+		}
+	}
+	cri = append(cri, proxyImage(to))
+	return system, cri
+}
+
+func kubeletImage(to Version) string { return "ghcr.io/siderolabs/kubelet:" + to.String() }
+func proxyImage(to Version) string   { return "registry.k8s.io/kube-proxy:" + to.String() }
+
+// imageChange is one image a Kubernetes upgrade moves, in both of the shapes a
+// node's configuration can hold it.
+//
+// Talos v1.14 generates a configuration in which every Kubernetes component is
+// a document of its own -- KubeletConfig, KubeAPIServerConfig and so on, each
+// with an image -- and its validator refuses the old v1alpha1 field set beside
+// such a document ("kube-apiserver config is already set in v1alpha1 config").
+// A configuration generated before v1.14 has only the v1alpha1 field. So the
+// patch is decided per node, from the configuration the node actually has: the
+// document when it carries one, the old field when it does not.
+type imageChange struct {
+	kind   string // the v1.14 document kind
+	legacy string // the v1alpha1 patch
+	path   string // the v1alpha1 path, which is also what the apply mode is read from
+	image  string
+}
+
+var componentDocKind = map[string]string{
+	"kube-apiserver":          "KubeAPIServerConfig",
+	"kube-controller-manager": "KubeControllerManagerConfig",
+	"kube-scheduler":          "KubeSchedulerConfig",
+}
+
+func componentChange(component string, to Version) imageChange {
+	key := componentConfigKey[component]
+	image := "registry.k8s.io/" + component + ":" + to.String()
+	return imageChange{
+		kind:   componentDocKind[component],
+		legacy: "cluster:\n  " + key + ":\n    image: " + image + "\n",
+		path:   ".cluster." + key + ".image",
+		image:  image,
+	}
+}
+
+func proxyChange(to Version) imageChange {
+	return imageChange{
+		kind:   "KubeProxyConfig",
+		legacy: "cluster:\n  proxy:\n    image: " + proxyImage(to) + "\n",
+		path:   ".cluster.proxy.image",
+		image:  proxyImage(to),
+	}
+}
+
+func kubeletChange(to Version) imageChange {
+	return imageChange{
+		kind:   "KubeletConfig",
+		legacy: "machine:\n  kubelet:\n    image: " + kubeletImage(to) + "\n",
+		path:   ".machine.kubelet.image",
+		image:  kubeletImage(to),
+	}
+}
+
+// patchFor is the patch this change needs against one node's configuration.
+func (c imageChange) patchFor(base []byte) (string, error) {
+	provider, err := configloader.NewFromBytes(base)
+	if err != nil {
+		return "", fmt.Errorf("upgrade: the node's configuration did not load: %w", err)
+	}
+	for _, d := range provider.Documents() {
+		if d.Kind() == c.kind {
+			return "apiVersion: v1alpha1\nkind: " + c.kind + "\nimage: " + c.image + "\n", nil
+		}
+	}
+	return c.legacy, nil
+}
+
+// applyImage merges one image change into a node's current configuration and
+// applies the whole result.
+//
+// The whole result, and that is the defect this replaced: the Kubernetes
+// upgrade used to send its three image lines AS the configuration. A real node
+// refuses a document that names no machine type, cluster or secrets, so every
+// run failed at its first node; the simulator stored it, so every test passed.
+func applyImage(ctx context.Context, d Deps, id model.MachineID, change imageChange) error {
+	cc, err := d.Connect(ctx, id)
+	if err != nil {
+		return err
+	}
+	defer cc.Close() //nolint:errcheck // the verdict is the apply's
+
+	readCtx, cancel, err := talos.WithClassDeadline(ctx, talos.MethodCOSIList)
+	if err != nil {
+		return err
+	}
+	base, err := cc.MachineConfigYAML(readCtx)
+	cancel()
+	if err != nil {
+		return fmt.Errorf("upgrade: reading the configuration of %s: %w", id, err)
+	}
+	patch, err := change.patchFor(base)
+	if err != nil {
+		return err
+	}
+	full, err := machineconfig.ApplyPatches(base, []string{patch})
+	if err != nil {
+		return fmt.Errorf("upgrade: merging the image change into the configuration of %s: %w", id, err)
+	}
+
+	// The mode is computed from the paths, through the same whitelist a
+	// configuration apply goes through. It is no-reboot for every path here,
+	// and computing it rather than writing it down is what keeps this honest
+	// the day a path that does need a restart is added.
+	verdict := machineconfig.ModeFor([]string{change.path})
+
+	applyCtx, cancel, err := talos.WithClassDeadline(ctx, talos.MethodApplyConfiguration)
+	if err != nil {
+		return err
+	}
+	defer cancel()
+	_, err = cc.ApplyConfigurationWithMode(applyCtx, full, string(verdict.Mode))
+	return err
+}
+
+// controlPlaneOf is the run's nodes that are control-plane nodes, in the run's
+// order, read at step time because the inventory is the source of roles.
+func controlPlaneOf(ctx context.Context, d Deps, cluster model.ClusterID, ids []model.MachineID) ([]model.Machine, error) {
+	machines, err := d.Machines(ctx, cluster)
+	if err != nil {
+		return nil, err
+	}
+	var out []model.Machine
+	for _, id := range ids {
+		if m, ok := machineByID(machines, id); ok && m.Role == model.RoleControlPlane && !m.Locked {
+			out = append(out, m)
+		}
+	}
+	return out, nil
+}
+
+// prepullStep pulls every image the run will install, on every node, before
+// anything is changed. Pulling is where an unreachable registry or a mistyped
+// version fails, and failing there costs nothing: no component has been
+// restarted yet.
+func prepullStep(d Deps, cluster model.ClusterID, ids []model.MachineID, to Version) jobs.Step {
+	return jobs.Step{
+		Name: "pull the Kubernetes " + to.String() + " images onto every node",
+		Do: func(ctx context.Context, job *model.Job) error {
+			machines, err := d.Machines(ctx, cluster)
+			if err != nil {
+				return err
+			}
+			pulled := 0
+			for _, id := range ids {
+				me, ok := machineByID(machines, id)
+				if !ok || me.Locked {
+					continue
+				}
+				system, cri := kubernetesImages(to, me.Role == model.RoleControlPlane)
+				if err := pullOnto(ctx, d, id, system, cri); err != nil {
+					return fmt.Errorf("upgrade: pulling the images onto %s: %w", nameOf(me), err)
+				}
+				pulled++
+			}
+			job.Steps[job.Current].Detail = fmt.Sprintf("images pulled onto %d node(s)", pulled)
+			return nil
+		},
+		// Pulling again is harmless and cheap once the images are there, so a
+		// resumed run simply does it again rather than guessing.
+	}
+}
+
+func pullOnto(ctx context.Context, d Deps, id model.MachineID, system, cri []string) error {
+	cc, err := d.Connect(ctx, id)
+	if err != nil {
+		return err
+	}
+	defer cc.Close() //nolint:errcheck // the verdict is the pulls'
+
+	pull := func(ref string, into func(context.Context, string) error) error {
+		pullCtx, cancel, err := talos.WithClassDeadline(ctx, talos.MethodImagePull)
+		if err != nil {
+			return err
+		}
+		defer cancel()
+		return into(pullCtx, ref)
+	}
+	for _, ref := range system {
+		if err := pull(ref, cc.ImagePull); err != nil {
+			return fmt.Errorf("%s: %w", ref, err)
+		}
+	}
+	for _, ref := range cri {
+		if err := pull(ref, cc.ImagePullCRI); err != nil {
+			return fmt.Errorf("%s: %w", ref, err)
+		}
+	}
+	return nil
+}
+
+// componentStep moves one control-plane component to the new version, one
+// control-plane node at a time, each behind the health gate and each waited
+// for until the node reports the pod back ready on the new image.
+func componentStep(d Deps, cluster model.ClusterID, ids []model.MachineID, component string, to Version) jobs.Step {
+	want := "registry.k8s.io/" + component + ":" + to.String()
+	return jobs.Step{
+		Name: "move " + component + " to " + to.String() + " on every control-plane node",
+		Do: func(ctx context.Context, job *model.Job) error {
+			cps, err := controlPlaneOf(ctx, d, cluster, ids)
+			if err != nil {
+				return err
+			}
+			for _, me := range cps {
+				if at, err := staticPodImage(ctx, d, me.ID, component); err == nil && at.Image == want && at.Ready {
+					continue // already there -- a resumed run, or a node done by hand
+				}
+				verdict, err := d.Gate.Evaluate(ctx, cluster, me.ID)
+				if err != nil {
+					return err
+				}
+				if !verdict.OK {
+					return fmt.Errorf("upgrade: the health gate refused before %s: %s", nameOf(me), verdict.Reason)
+				}
+				if err := applyImage(ctx, d, me.ID, componentChange(component, to)); err != nil {
+					return err
+				}
+				if err := waitForStaticPod(ctx, d, me, component, want); err != nil {
+					return err
+				}
+			}
+			job.Steps[job.Current].Detail = fmt.Sprintf("%s runs %s on %d control-plane node(s)",
+				component, to, len(cps))
+			return nil
+		},
+		Happened: func(ctx context.Context, _ *model.Job) (bool, error) {
+			cps, err := controlPlaneOf(ctx, d, cluster, ids)
+			if err != nil {
+				return false, nil //nolint:nilerr // an inventory that cannot be read is not "done"
+			}
+			for _, me := range cps {
+				at, err := staticPodImage(ctx, d, me.ID, component)
+				if err != nil || at.Image != want || !at.Ready {
+					return false, nil //nolint:nilerr // unreachable is not "done"
+				}
+			}
+			return true, nil
+		},
+	}
+}
+
+// ComponentBudget is how long one control-plane node gets to bring a
+// component back on its new image: the kubelet notices the changed manifest,
+// stops the old pod, starts the new one, and the new one has to pass its
+// readiness probe. An expectation rather than a hard deadline, like
+// ReappearBudget.
+const ComponentBudget = 5 * time.Minute
+
+// pollInterval is how often a waiting step asks the node again. A variable so
+// the package's tests can wait in milliseconds instead of seconds.
+var pollInterval = 10 * time.Second
+
+func staticPodImage(ctx context.Context, d Deps, id model.MachineID, component string) (talos.StaticPod, error) {
+	cc, err := d.Connect(ctx, id)
+	if err != nil {
+		return talos.StaticPod{}, err
+	}
+	defer cc.Close() //nolint:errcheck // the verdict is the read's
+
+	readCtx, cancel, err := talos.WithClassDeadline(ctx, talos.MethodCOSIList)
+	if err != nil {
+		return talos.StaticPod{}, err
+	}
+	defer cancel()
+	pods, err := cc.StaticPods(readCtx)
+	if err != nil {
+		return talos.StaticPod{}, err
+	}
+	for _, p := range pods {
+		if p.Component == component {
+			return p, nil
+		}
+	}
+	return talos.StaticPod{}, fmt.Errorf("upgrade: %s reports no %s static pod", id, component)
+}
+
+func waitForStaticPod(ctx context.Context, d Deps, me model.Machine, component, want string) error {
+	started := time.Now()
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(pollInterval):
+		}
+		at, err := staticPodImage(ctx, d, me.ID, component)
+		if err == nil && at.Image == want && at.Ready {
+			return nil
+		}
+		if time.Since(started) > ComponentBudget {
+			return fmt.Errorf("upgrade: %s has not reported %s ready on %s after %s. The configuration "+
+				"was applied; what has not happened is the kubelet bringing the pod back on the new image",
+				nameOf(me), component, want, round(time.Since(started)))
+		}
+	}
+}
+
+// kubeProxyStep moves kube-proxy: its image in every control-plane node's
+// configuration, which Talos renders the manifest from, and its image in the
+// DaemonSet, which is what actually runs. A cluster without kube-proxy --
+// a CNI that replaces it, or the proxy disabled in the configuration -- has
+// nothing to move, and the step says so rather than failing.
+func kubeProxyStep(d Deps, cluster model.ClusterID, ids []model.MachineID, to Version) jobs.Step {
+	return jobs.Step{
+		Name: "move kube-proxy to " + to.String(),
+		Do: func(ctx context.Context, job *model.Job) error {
+			cps, err := controlPlaneOf(ctx, d, cluster, ids)
+			if err != nil {
+				return err
+			}
+			for _, me := range cps {
+				if err := applyImage(ctx, d, me.ID, proxyChange(to)); err != nil {
+					return err
+				}
+			}
+			if d.KubeProxy == nil {
+				job.Steps[job.Current].Detail = "kube-proxy's image set in the configuration; " +
+					"no Kubernetes access here to move the running DaemonSet"
+				return nil
+			}
+			detail, err := d.KubeProxy(ctx, cluster, proxyImage(to))
+			if errors.Is(err, ErrNoKubeProxy) {
+				job.Steps[job.Current].Detail = "this cluster runs no kube-proxy; nothing to move"
+				return nil
+			}
+			if err != nil {
+				return err
+			}
+			job.Steps[job.Current].Detail = detail
+			return nil
+		},
+	}
+}
+
+// ErrNoKubeProxy is a cluster without a kube-proxy DaemonSet, which is a
+// cluster whose CNI replaces it rather than a fault.
+var ErrNoKubeProxy = errors.New("upgrade: this cluster runs no kube-proxy")
+
+// kubernetesNodeStep moves one node's kubelet, the last part of the run.
 func kubernetesNodeStep(d Deps, cluster model.ClusterID, id model.MachineID, to Version) jobs.Step {
 	return jobs.Step{
-		Name: "move " + string(id) + " to Kubernetes " + to.String(),
+		Name: "move " + string(id) + "'s kubelet to Kubernetes " + to.String(),
 
 		Do: func(ctx context.Context, job *model.Job) error {
 			machines, err := d.Machines(ctx, cluster)
@@ -345,34 +729,7 @@ func kubernetesNodeStep(d Deps, cluster model.ClusterID, id model.MachineID, to 
 				}
 			}
 
-			// The version the node is asked to run is written into its machine
-			// configuration, which is the same mechanism a configuration apply
-			// uses -- deliberately, because a Kubernetes version that arrived
-			// by some other path would be a second source of truth about what
-			// this node runs.
-			patch, paths := kubernetesPatch(to, me.Role == model.RoleControlPlane)
-
-			// The mode is computed from the paths this patch touches, through
-			// the same whitelist a configuration apply goes through. It is
-			// `no-reboot` for every path here -- .machine.kubelet and .cluster
-			// are both on the list -- and computing it rather than writing it
-			// down is what keeps this honest the day somebody adds a path to
-			// the patch that does need a restart.
-			verdict := machineconfig.ModeFor(paths)
-
-			cc, err := d.Connect(ctx, id)
-			if err != nil {
-				return err
-			}
-			applyCtx, cancel, err := talos.WithClassDeadline(ctx, talos.MethodApplyConfiguration)
-			if err != nil {
-				_ = cc.Close()
-				return err
-			}
-			_, err = cc.ApplyConfigurationWithMode(applyCtx, patch, string(verdict.Mode))
-			cancel()
-			_ = cc.Close()
-			if err != nil {
+			if err := applyImage(ctx, d, id, kubeletChange(to)); err != nil {
 				return err
 			}
 
@@ -473,7 +830,7 @@ func waitForKubernetes(ctx context.Context, d Deps, id model.MachineID, to Versi
 		select {
 		case <-ctx.Done():
 			return Observed{}, ctx.Err()
-		case <-time.After(10 * time.Second):
+		case <-time.After(pollInterval):
 		}
 
 		cc, err := d.Connect(ctx, id)
@@ -500,32 +857,6 @@ func waitForKubernetes(ctx context.Context, d Deps, id model.MachineID, to Versi
 				id, to, round(time.Since(started)))
 		}
 	}
-}
-
-// kubernetesPatch is the configuration change a Kubernetes upgrade writes.
-//
-// A control-plane node carries the three static pods as well as the kubelet; a
-// worker carries only the kubelet. Writing the control-plane images onto a
-// worker would be writing configuration for components it does not run, which
-// Talos accepts and nobody can read afterwards.
-func kubernetesPatch(to Version, controlPlane bool) (patch []byte, paths []string) {
-	v := to.String()
-
-	var b strings.Builder
-	b.WriteString("machine:\n  kubelet:\n    image: ghcr.io/siderolabs/kubelet:" + v + "\n")
-	paths = append(paths, ".machine.kubelet.image")
-
-	if controlPlane {
-		b.WriteString("cluster:\n")
-		b.WriteString("  apiServer:\n    image: registry.k8s.io/kube-apiserver:" + v + "\n")
-		b.WriteString("  controllerManager:\n    image: registry.k8s.io/kube-controller-manager:" + v + "\n")
-		b.WriteString("  scheduler:\n    image: registry.k8s.io/kube-scheduler:" + v + "\n")
-		paths = append(paths,
-			".cluster.apiServer.image",
-			".cluster.controllerManager.image",
-			".cluster.scheduler.image")
-	}
-	return []byte(b.String()), paths
 }
 
 // isNodeLeaving reports an error that is the node rebooting into what it just

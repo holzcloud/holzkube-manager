@@ -181,12 +181,17 @@ func (s *Server) renderDaemonSet(r DaemonSet) appsv1.DaemonSet {
 	return appsv1.DaemonSet{
 		TypeMeta: metav1.TypeMeta{APIVersion: "apps/v1", Kind: "DaemonSet"},
 		ObjectMeta: metav1.ObjectMeta{
-			Name: r.Name, Namespace: r.Namespace, Annotations: annotations,
+			Name: r.Name, Namespace: r.Namespace, Annotations: annotations, Generation: 1,
 		},
 		Spec: appsv1.DaemonSetSpec{Template: template, Selector: appSelector(r.Name)},
+		// A rollout here is instant: the controller has seen the latest
+		// generation and every scheduled pod runs the current template.
 		Status: appsv1.DaemonSetStatus{
 			DesiredNumberScheduled: r.Scheduled,
 			NumberReady:            r.Ready,
+			ObservedGeneration:     1,
+			UpdatedNumberScheduled: r.Scheduled,
+			NumberAvailable:        r.Ready,
 		},
 	}
 }
@@ -232,6 +237,10 @@ func (s *Server) patchDaemonSet(w http.ResponseWriter, r *http.Request, namespac
 				} `json:"metadata"`
 				Spec struct {
 					NodeSelector map[string]*string `json:"nodeSelector"`
+					Containers   []struct {
+						Name  string `json:"name"`
+						Image string `json:"image"`
+					} `json:"containers"`
 				} `json:"spec"`
 			} `json:"template"`
 		} `json:"spec"`
@@ -267,6 +276,14 @@ func (s *Server) patchDaemonSet(w http.ResponseWriter, r *http.Request, namespac
 			selector[k] = *v
 		}
 		s.daemonSets[index].NodeSelector = selector
+	}
+	// A container patched by name gets its new image, which is how a
+	// Kubernetes upgrade moves kube-proxy. The template has one container,
+	// named after the DaemonSet; a patch naming another is not about it.
+	for _, c := range patch.Spec.Template.Spec.Containers {
+		if c.Name == s.daemonSets[index].Name && c.Image != "" {
+			s.daemonSets[index].Image = c.Image
+		}
 	}
 	if stamp := patch.Spec.Template.Metadata.Annotations["kubectl.kubernetes.io/restartedAt"]; stamp != "" {
 		if s.restarted == nil {

@@ -16,6 +16,7 @@ import (
 	cosiserver "github.com/cosi-project/runtime/pkg/state/protobuf/server"
 	"google.golang.org/grpc"
 
+	talosconfig "github.com/siderolabs/talos/pkg/machinery/config"
 	"github.com/siderolabs/talos/pkg/machinery/config/configloader"
 	machinetype "github.com/siderolabs/talos/pkg/machinery/config/machine"
 	"github.com/siderolabs/talos/pkg/machinery/nethelpers"
@@ -126,6 +127,15 @@ func (s *Server) setMachineConfig(ctx context.Context, raw []byte) error {
 		if err := s.SetHostname(ctx, hc.Hostname()); err != nil {
 			return err
 		}
+	}
+
+	// The kubelet and the control-plane static pods follow the configuration,
+	// which is what a Kubernetes upgrade writes and then waits on.
+	if err := s.syncKubelet(ctx, provider); err != nil {
+		return err
+	}
+	if err := s.syncStaticPods(ctx, provider); err != nil {
+		return err
 	}
 
 	// And the node's TLS follows its configuration, which is the half that
@@ -457,6 +467,63 @@ func (s *Server) seedMachineConfig(ctx context.Context) error {
 
 	if err := s.COSI().Create(ctx, configres.NewMachineConfig(provider)); err != nil {
 		return fmt.Errorf("talossim: seed %s: %w", configres.MachineConfigType, err)
+	}
+	return s.syncStaticPods(ctx, provider)
+}
+
+// syncStaticPods writes what the kubelet would report back about the three
+// control-plane static pods: running, ready, on the image the configuration
+// names. A real node gets there by the kubelet restarting the pod; here the
+// configuration is the whole story, which is what lets the Kubernetes upgrade
+// wait for a component to come back on its new image and be tested doing so.
+func (s *Server) syncStaticPods(ctx context.Context, provider talosconfig.Provider) error {
+	if provider.Machine() == nil || !provider.Machine().Type().IsControlPlane() {
+		return nil
+	}
+	hostname := s.node.snapshot().Hostname
+	for _, pod := range []struct{ name, image string }{
+		{"kube-apiserver", provider.K8sAPIServerConfig().Image()},
+		{"kube-controller-manager", provider.K8sControllerManagerConfig().Image()},
+		{"kube-scheduler", provider.K8sSchedulerConfig().Image()},
+	} {
+		st := k8s.NewStaticPodStatus(k8s.NamespaceName, "kube-system/"+pod.name+"-"+hostname)
+		st.TypedSpec().PodStatus = map[string]any{
+			"phase":      "Running",
+			"conditions": []any{map[string]any{"type": "Ready", "status": "True"}},
+			"containerStatuses": []any{map[string]any{
+				"name": pod.name, "image": pod.image, "ready": true,
+			}},
+		}
+		if err := s.COSI().Destroy(ctx, st.Metadata()); err != nil && !state.IsNotFoundError(err) {
+			return fmt.Errorf("talossim: replace %s: %w", st.Metadata().ID(), err)
+		}
+		if err := s.COSI().Create(ctx, st); err != nil {
+			return fmt.Errorf("talossim: write %s: %w", st.Metadata().ID(), err)
+		}
+	}
+	return nil
+}
+
+// syncKubelet points the node's KubeletSpec at the kubelet image the applied
+// configuration names, which is where the node's Kubernetes version is read
+// from (D-20). A node with no KubeletSpec -- Kubernetes down -- is left so.
+func (s *Server) syncKubelet(ctx context.Context, provider talosconfig.Provider) error {
+	kubelet := provider.K8sKubeletConfig()
+	if kubelet == nil {
+		return nil
+	}
+	image := kubelet.Image()
+	if image == "" {
+		return nil
+	}
+	_, err := safe.StateUpdateWithConflicts(ctx, s.COSI(),
+		k8s.NewKubeletSpec(k8s.NamespaceName, k8s.KubeletID).Metadata(),
+		func(r *k8s.KubeletSpec) error {
+			r.TypedSpec().Image = image
+			return nil
+		})
+	if err != nil && !state.IsNotFoundError(err) {
+		return fmt.Errorf("talossim: point the kubelet at %s: %w", image, err)
 	}
 	return nil
 }

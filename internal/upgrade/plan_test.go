@@ -226,31 +226,40 @@ func TestReleasesFiltersToWhatThisBuildWasTestedAgainst(t *testing.T) {
 	}
 }
 
-// TestTheKubernetesPatchWritesControlPlaneImagesOnlyOnAControlPlane.
+// TestEachKubernetesPatchTouchesOneThing.
 //
-// Writing them onto a worker is writing configuration for components it does
-// not run: Talos accepts it and nobody can read it afterwards.
-func TestTheKubernetesPatchWritesControlPlaneImagesOnlyOnAControlPlane(t *testing.T) {
+// The run writes one change at a time so that each can be waited for: the
+// kubelet patch carries no control-plane image (a worker gets only it, and
+// writing images for components a node does not run is configuration nobody
+// can read afterwards), and each component patch carries only its component.
+func TestEachKubernetesPatchTouchesOneThing(t *testing.T) {
 	t.Parallel()
 
-	worker, workerPaths := upgrade.KubernetesPatch(v(t, "v1.34.1"), false)
-	if strings.Contains(string(worker), "kube-apiserver") {
-		t.Errorf("a worker's patch carries control-plane images:\n%s", worker)
+	kubelet, kubeletPaths := upgrade.KubeletPatch(v(t, "v1.34.1"))
+	if strings.Contains(kubelet, "kube-apiserver") || !strings.Contains(kubelet, "kubelet:v1.34.1") {
+		t.Errorf("the kubelet patch is not only the kubelet:\n%s", kubelet)
 	}
-	if !strings.Contains(string(worker), "kubelet:v1.34.1") {
-		t.Errorf("a worker's patch does not set the kubelet image:\n%s", worker)
-	}
-	if len(workerPaths) != 1 {
-		t.Errorf("a worker's patch declares %d path(s), want 1: %v", len(workerPaths), workerPaths)
+	if len(kubeletPaths) != 1 {
+		t.Errorf("the kubelet patch declares %d path(s), want 1: %v", len(kubeletPaths), kubeletPaths)
 	}
 
-	cp, cpPaths := upgrade.KubernetesPatch(v(t, "v1.34.1"), true)
-	for _, want := range []string{"kube-apiserver", "kube-controller-manager", "kube-scheduler"} {
-		if !strings.Contains(string(cp), want+":v1.34.1") {
-			t.Errorf("a control plane's patch does not set %s:\n%s", want, cp)
+	for _, c := range []string{"kube-apiserver", "kube-controller-manager", "kube-scheduler"} {
+		patch, paths := upgrade.ComponentPatch(c, v(t, "v1.34.1"))
+		if !strings.Contains(patch, c+":v1.34.1") {
+			t.Errorf("the %s patch does not set its image:\n%s", c, patch)
+		}
+		for _, other := range []string{"kube-apiserver", "kube-controller-manager", "kube-scheduler", "kubelet"} {
+			if other != c && strings.Contains(patch, other+":") {
+				t.Errorf("the %s patch also sets %s:\n%s", c, other, patch)
+			}
+		}
+		if len(paths) != 1 {
+			t.Errorf("the %s patch declares %d path(s), want 1: %v", c, len(paths), paths)
 		}
 	}
-	if len(cpPaths) != 4 {
-		t.Errorf("a control plane's patch declares %d path(s), want 4: %v", len(cpPaths), cpPaths)
+
+	proxy, _ := upgrade.ProxyPatch(v(t, "v1.34.1"))
+	if !strings.Contains(proxy, "kube-proxy:v1.34.1") {
+		t.Errorf("the proxy patch does not set kube-proxy:\n%s", proxy)
 	}
 }
