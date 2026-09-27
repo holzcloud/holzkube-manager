@@ -1,10 +1,10 @@
 ---
 schema_version: 1
-open_count: 44
+open_count: 43
 waived_count: 1
-fixed_count: 127
+fixed_count: 128
 total_count: 172
-last_updated: 2026-09-27T09:00:00.000Z
+last_updated: 2026-09-27T10:00:00.000Z
 ---
 
 # Broken Windows Ledger
@@ -17,7 +17,7 @@ last_updated: 2026-09-27T09:00:00.000Z
 |----|-------|------|------|------|-------------|--------|--------|-------------|-------------|
 | 1 | 02 | stub | internal/talos/dial_direct.go |  | directDialer.Probe leaves Identity.Version empty: the version is not in the TLS certificate and Dialer.Probe carries no Creds to make an authenticated RPC. GESCHLOSSEN DURCH ENTFERNEN, NICHT DURCH BAUEN, und der Befund war schaerfer als der Eintrag: NIEMAND HAT DAS FELD GELESEN (go build und go vet bleiben nach dem Entfernen sauber), waehrend TALOSSIM ES FUELLTE -- ein Test haette also eine Version behaupten koennen, die die Produktion nie traegt, was genau die Gattung TRANS-06 ist. Ein Probe ist ein TLS-Handshake und sonst nichts, weil er gegen einen Knoten im Maintenance-Modus funktionieren muss; ein Zertifikat traegt Subject, DNS-Namen und Aussteller, keine Version. Wo die Version einer unkonfigurierten Maschine wirklich gebraucht wird, holt der Provisionierungs-Pfad sie mit einem Version-RPC ueber einen Maintenance-Client (internal/provision/plan.go). WAECHTER: TestAProbesIdentityCarriesOnlyWhatAHandshakeShows prueft die Felder von Identity gegen das, was ein Handshake zeigen kann, und dass der Typ selbst weiter begruendet, warum keine Version darin steht; rot gegen das wieder eingebaute Feld. | fixed | Entfernt statt gebaut; Waechter gegen die Rueckkehr, rot gesehen. | 2026-08-28T19:58:41.457Z | 2026-09-18T09:20:00.000Z |
 | 2 | 02 | stub | internal/talossim/machine.go |  | talossim implements 2 of 54 MachineService RPCs; the rest inherit Unimplemented. Scoped to plan 02-08 by the plan's own scope_decision | fixed | GESCHLOSSEN 2026-09-27. Die Zahl 2 von 54 ist laengst ueberholt, und die Aussage, die zaehlt, ist nicht wie viele RPCs talossim kann, sondern ob es jede kann, die das Produkt ruft. Das haelt TestMethodCoverage (internal/talossim/coverage_test.go): es findet jeden Machinery-Aufruf im Produkt und ruft ihn gegen einen laufenden Simulator. ROT GESEHEN: Shutdown in talossim/machine.go umbenannt -> 'Shutdown (machine.MachineService): the simulator answered Unimplemented', wiederhergestellt -> gruen. Die RPCs, die das Produkt nicht ruft, bleiben absichtlich geerbt. | 2026-08-28T19:58:41.580Z | 2026-09-27T09:00:00.000Z |
-| 3 | 02 | stub | internal/talossim/machine.go |  | ApplyConfiguration counts an applied config but does not parse it: applying a config that sets a hostname does not change what Hostname reports. Server.SetHostname/SetVersion give a scenario the same effect explicitly. | open |  | 2026-08-29T05:01:33.912Z |  |
+| 3 | 02 | stub | internal/talossim/machine.go |  | ApplyConfiguration counts an applied config but does not parse it: applying a config that sets a hostname does not change what Hostname reports. Server.SetHostname/SetVersion give a scenario the same effect explicitly. | fixed | GESCHLOSSEN 2026-09-27. Die gespeicherte Haelfte war schon behoben (die angewandte Konfiguration wird die aktive des Knotens, fuer die CA-Rotation). Jetzt auch der Hostname: nennt die angewandte Konfiguration in ihrem HostnameConfig-Dokument einen festen Hostnamen, meldet der Knoten ihn danach (setMachineConfig -> SetHostname, ueber machinerys NetworkHostnameConfig gelesen). Ein automatischer ('auto: stable') bleibt unveraendert, weil der Simulator ihn nicht nachbilden kann. ROT GESEHEN: TestAnAppliedHostnameIsTheNodesHostname ohne die Aenderung -> 'hostname ... = "before", want "after"'; mit ihr gruen, talossim, rotateca, talos und inventory ebenso. | 2026-08-29T05:01:33.912Z | 2026-09-27T10:00:00.000Z |
 | 4 | 02 | stub | internal/talossim/stream.go |  | Events emits an identical MachineStatusEvent{Stage: RUNNING} payload per message; the event stream is not driven by the node's actual state transitions. Correlating events with Bootstrap/Reboot/Reset belongs to plan 02-03's scenario engine. | open |  | 2026-08-29T05:01:34.036Z |  |
 | 5 | 02 | unrun-verify | internal/imagefactory/live_test.go |  | TestLiveFactory ist der einzige Drift-Waechter gegen factory.talos.dev, ist opt-in und wird von nichts geplant; factory.talos.dev hat in dieser Sitzung nachweislich gedrosselt, ein Retry fehlt. GEPLANT UND EINMAL GEMESSEN: .github/workflows/factory-drift.yml laeuft woechentlich (do 05:23 UTC), dreimal mit fuenf Minuten Abstand gegen Drosselung, und ein Waechter in internal/imagefactory/scheduled_test.go haelt fest, dass es die Datei gibt, dass sie einen cron-Trigger hat und dass sie die Opt-in-Variable BEIM NAMEN setzt (rot gegen einen Tippfehler darin). ERSTER ECHTER LAUF 2026-09-18 (run 35327206733): gruen im ersten Versuch, 597 s -- Versionsliste, Extension-Katalog, die aufgezeichnete Schematic-Id, 'creation is still not validation', ein kalter Build im Probe-Budget und die Installer-Matrix stimmen weiter mit factory.talos.dev ueberein. UNGEPRUEFT BLIEB DABEI die SecureBoot-Paarung: der gewoehnliche Installer loeste bei v1.13.9 nicht auf ('upstream did not answer usably'), der Untertest hat sich deshalb ausdruecklich als NOT OBSERVED uebersprungen -- das ist Eintrag 30 und bleibt offen. | fixed | Woechentlicher Lauf plus Waechter auf den Zeitplan; erster Lauf gruen gemessen. | 2026-08-29T05:30:01.609Z | 2026-09-18T09:30:00.000Z |
 | 6 | 02 | unrun-verify | docs/api-contract.md |  | golangci-lint run could not be executed on this host (binary not installed); go vet and gofmt are clean. Plan 02-06 task acceptance criterion 'golangci-lint run exits 0' is unverified. | fixed | Not installed on the subagent PATH, but present at ~/go/bin/golangci-lint (installed during plan 02-01 at the version CI pins). Orchestrator ran it at the wave-3 gate with that path exported: 0 issues. | 2026-08-29T06:53:45.252Z | 2026-08-29T09:05:00.000Z |
@@ -213,10 +213,10 @@ last_updated: 2026-09-27T09:00:00.000Z
     "file": "internal/talossim/machine.go",
     "line": null,
     "description": "ApplyConfiguration counts an applied config but does not parse it: applying a config that sets a hostname does not change what Hostname reports. Server.SetHostname/SetVersion give a scenario the same effect explicitly.",
-    "status": "open",
-    "reason": "",
+    "status": "fixed",
+    "reason": "GESCHLOSSEN 2026-09-27. Die gespeicherte Haelfte war schon behoben (die angewandte Konfiguration wird die aktive des Knotens, fuer die CA-Rotation). Jetzt auch der Hostname: nennt die angewandte Konfiguration in ihrem HostnameConfig-Dokument einen festen Hostnamen, meldet der Knoten ihn danach (setMachineConfig -> SetHostname, ueber machinerys NetworkHostnameConfig gelesen). Ein automatischer ('auto: stable') bleibt unveraendert, weil der Simulator ihn nicht nachbilden kann. ROT GESEHEN: TestAnAppliedHostnameIsTheNodesHostname ohne die Aenderung -> 'hostname ... = \"before\", want \"after\"'; mit ihr gruen, talossim, rotateca, talos und inventory ebenso.",
     "recorded_at": "2026-08-29T05:01:33.912Z",
-    "resolved_at": null
+    "resolved_at": "2026-09-27T10:00:00.000Z"
   },
   {
     "id": 4,

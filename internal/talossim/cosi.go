@@ -112,6 +112,15 @@ func (s *Server) setMachineConfig(ctx context.Context, raw []byte) error {
 		return fmt.Errorf("talossim: storing the applied machine configuration: %w", err)
 	}
 
+	// A configuration that names a hostname renames the node, as it does on a
+	// real one (ledger 3). An automatic hostname ("auto: stable") says nothing
+	// the simulator can reproduce, so only a static one is taken.
+	if hc := provider.NetworkHostnameConfig(); hc != nil && hc.Hostname() != "" {
+		if err := s.SetHostname(ctx, hc.Hostname()); err != nil {
+			return err
+		}
+	}
+
 	// And the node's TLS follows its configuration, which is the half that
 	// makes a CA rotation measurable: the authorities it accepts a client
 	// certificate from, and the one its own certificate is issued by. Read

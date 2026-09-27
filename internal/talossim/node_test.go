@@ -2,6 +2,7 @@ package talossim_test
 
 import (
 	"context"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -441,4 +442,41 @@ func (c *fakeClock) advance(d time.Duration) {
 	defer c.mu.Unlock()
 
 	c.now = c.now.Add(d)
+}
+
+// Ledger 3: an applied configuration that names a hostname changes what the
+// node reports as its hostname, as it does on a real node. Before, the apply
+// was stored and the hostname stayed, so a test of anything that renames a
+// node through its configuration proved only that an RPC had been sent.
+func TestAnAppliedHostnameIsTheNodesHostname(t *testing.T) {
+	t.Parallel()
+
+	cl, err := talossim.NewCluster("homelab", "https://192.168.1.41:6443")
+	if err != nil {
+		t.Fatalf("NewCluster: %v", err)
+	}
+	sim := newSim(t, talossim.Options{Hostname: "before", Cluster: cl, ControlPlane: true})
+	c := newMachineryClient(t, sim)
+
+	cfg := string(cl.Config(true))
+	if !strings.Contains(cfg, "kind: HostnameConfig") || !strings.Contains(cfg, "auto: stable") {
+		t.Fatal("the generated configuration no longer carries a HostnameConfig with auto: stable; " +
+			"this test edits that document and would prove nothing without it")
+	}
+	cfg = strings.Replace(cfg, "auto: stable", "hostname: after", 1)
+
+	ctx := testContext(t)
+	if _, err := c.ApplyConfiguration(ctx, &machine.ApplyConfigurationRequest{
+		Data: []byte(cfg), Mode: machine.ApplyConfigurationRequest_NO_REBOOT,
+	}); err != nil {
+		t.Fatalf("ApplyConfiguration: %v", err)
+	}
+
+	resp, err := c.MachineClient.Hostname(ctx, &emptypb.Empty{})
+	if err != nil {
+		t.Fatalf("Hostname: %v", err)
+	}
+	if got := resp.GetMessages()[0].GetHostname(); got != "after" {
+		t.Errorf("hostname after applying a configuration that sets it = %q, want %q", got, "after")
+	}
 }
