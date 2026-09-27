@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/peer"
 	"google.golang.org/grpc/status"
 )
 
@@ -257,6 +258,22 @@ func (s *Server) rebind() error {
 	// node's, so Addr() moves at once; only the old one lingers, for as long as
 	// it takes the reply to leave. Close does not wait out the grace: done
 	// ends it, and the old address is severed on the way out.
+	//
+	// Lingering is not answering, though. From this moment the address is
+	// abandoned: a call that arrives on it is refused as a node that has gone
+	// would refuse it (see refuseAbandoned), and only the reply already being
+	// written goes out. Otherwise a caller asking again within the grace would
+	// get an answer from an address the node has given up, which is exactly
+	// what the contract for this scenario rules out.
+	oldAddr := old.Addr().String()
+	gone := &abandonedAddr{l: old}
+	s.lmu.Lock()
+	if s.abandoned == nil {
+		s.abandoned = map[string]*abandonedAddr{}
+	}
+	s.abandoned[oldAddr] = gone
+	s.lmu.Unlock()
+
 	s.sg.Add(1)
 	go func() {
 		defer s.sg.Done()
@@ -264,7 +281,7 @@ func (s *Server) rebind() error {
 		case <-time.After(rebindGrace):
 		case <-s.done:
 		}
-		s.severListener(old)
+		s.severAbandoned(oldAddr, gone)
 	}()
 
 	return nil
@@ -450,4 +467,43 @@ func (c *trackedConn) Close() error {
 	c.owner.forget(c.Conn)
 
 	return c.Conn.Close()
+}
+
+// abandonedAddr is an address the node left at a reboot, severed once --
+// either when its grace runs out or at the first call that arrives on it.
+type abandonedAddr struct {
+	l    net.Listener
+	once sync.Once
+}
+
+// severAbandoned severs the address and forgets it, so a later listener that
+// happens to be given the same port is not refused for its predecessor.
+func (s *Server) severAbandoned(addr string, a *abandonedAddr) {
+	a.once.Do(func() { s.severListener(a.l) })
+	s.lmu.Lock()
+	if s.abandoned[addr] == a {
+		delete(s.abandoned, addr)
+	}
+	s.lmu.Unlock()
+}
+
+// refuseAbandoned answers a call that arrived on an address the node has
+// given up the way a node that has gone answers it: not at all. The address
+// is severed there and then, so the caller sees its connection drop -- a
+// transport failure -- rather than an error the node sent, which would read as
+// a node that is still there and said no. See rebind.
+func (s *Server) refuseAbandoned(ctx context.Context) error {
+	p, ok := peer.FromContext(ctx)
+	if !ok || p.LocalAddr == nil {
+		return nil
+	}
+	addr := p.LocalAddr.String()
+	s.lmu.Lock()
+	gone := s.abandoned[addr]
+	s.lmu.Unlock()
+	if gone == nil {
+		return nil
+	}
+	s.severAbandoned(addr, gone)
+	return status.Error(codes.Unavailable, "talossim: this node has left the address the call arrived on")
 }

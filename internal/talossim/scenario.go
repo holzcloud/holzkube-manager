@@ -370,6 +370,9 @@ func shortMethod(fullMethod string) string {
 func (s *Server) scenarioUnary(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
 	s.recordCall(info.FullMethod)
 
+	if err := s.refuseAbandoned(ctx); err != nil {
+		return nil, err
+	}
 	if err := s.scenarioGate(ctx, info.FullMethod); err != nil {
 		return nil, err
 	}
@@ -385,6 +388,9 @@ func (s *Server) scenarioUnary(ctx context.Context, req any, info *grpc.UnarySer
 func (s *Server) scenarioStream(srv any, ss grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
 	s.recordCall(info.FullMethod)
 
+	if err := s.refuseAbandoned(ss.Context()); err != nil {
+		return err
+	}
 	if err := s.scenarioGate(ss.Context(), info.FullMethod); err != nil {
 		return err
 	}
