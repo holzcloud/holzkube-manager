@@ -650,6 +650,15 @@ func assertRefused(t *testing.T, addr string) {
 	)
 	for {
 		conn, err = net.DialTimeout("tcp", addr, 3*time.Second)
+		// A reset is the port closing under the dial: the handshake reached a
+		// listener that was shut a moment later, which macOS reports as a
+		// reset rather than a refusal (seen in CI at exactly rebindGrace).
+		// That is the address still going away, so it is waited through like
+		// a dial that connected.
+		if errors.Is(err, syscall.ECONNRESET) && time.Since(started) <= 3*time.Second {
+			time.Sleep(20 * time.Millisecond)
+			continue
+		}
 		if err != nil {
 			break
 		}
