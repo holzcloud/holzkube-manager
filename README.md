@@ -48,6 +48,7 @@ did.
 - **Power** — stop, start, restart or force it, for a whole cluster, one node or
   one app; Wake-on-LAN brings a node back
 - **Lifecycle** — Talos upgrades built from Image Factory schematics,
+  Kubernetes upgrades in `talosctl upgrade-k8s`'s order,
   SecureBoot, disk encryption, etcd snapshots and restore, certificate renewal
 - **A wall** — one page for a screen in the office that answers "is everything
   fine?" without anybody touching it

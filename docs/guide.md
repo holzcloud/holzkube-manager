@@ -572,6 +572,32 @@ installation provisioned it, because it may not have been the one that did. A
 node that will not answer is blocked rather than upgraded on a guess: either
 guess is wrong for half a mixed fleet.
 
+### Upgrading Kubernetes
+
+A Kubernetes upgrade runs in the order `talosctl upgrade-k8s` uses:
+
+1. **Pull** every image the run will install onto every node first. A registry
+   that cannot be reached or a version that does not exist fails here, before
+   anything has been restarted.
+2. **The control plane, one component at a time**: the API server on every
+   control-plane node, then the controller manager, then the scheduler — the
+   server before its clients. Each node waits until it reports the pod back,
+   ready, on the new image, and the etcd health gate runs before each node.
+3. **kube-proxy**: its image in the control-plane configuration and in the
+   DaemonSet, and the step waits for the rollout. A cluster whose CNI replaces
+   kube-proxy has none, and the step says so.
+4. **The kubelets**, node by node, control plane first.
+
+Every change is written the way a configuration apply writes one: the node's
+current configuration is read, the image is merged into it, and the whole
+configuration is applied without a reboot. A Talos v1.14 configuration keeps
+each component in a document of its own (`KubeAPIServerConfig`, `KubeletConfig`,
+…), an older one in the v1alpha1 fields, and the change goes where the node
+keeps it.
+
+This has run against the simulator and a fake Kubernetes API, not yet against a
+real cluster.
+
 ### Certificates
 
 holzkube-manager reaches a cluster with an admin certificate it minted for

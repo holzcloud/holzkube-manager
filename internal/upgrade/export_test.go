@@ -1,6 +1,10 @@
 package upgrade
 
-import "github.com/holzcloud/holzkube-manager/internal/model"
+import (
+	"time"
+
+	"github.com/holzcloud/holzkube-manager/internal/model"
+)
 
 // Decide exposes the gate's rule to its own test.
 //
@@ -16,7 +20,32 @@ func Decide(in GateInput, taking model.MachineID, machines []model.Machine) Verd
 	return decide(in, taking, machines)
 }
 
-// KubernetesPatch exposes the configuration a Kubernetes upgrade writes.
-func KubernetesPatch(to Version, controlPlane bool) ([]byte, []string) {
-	return kubernetesPatch(to, controlPlane)
+// ComponentPatch, KubeletPatch and ProxyPatch expose the v1alpha1 patch and
+// path of each change a Kubernetes upgrade writes; ComponentPatchFor shows the
+// patch a given configuration gets.
+func ComponentPatch(component string, to Version) (string, []string) {
+	c := componentChange(component, to)
+	return c.legacy, []string{c.path}
+}
+
+func KubeletPatch(to Version) (string, []string) {
+	c := kubeletChange(to)
+	return c.legacy, []string{c.path}
+}
+
+func ProxyPatch(to Version) (string, []string) {
+	c := proxyChange(to)
+	return c.legacy, []string{c.path}
+}
+
+func ComponentPatchFor(component string, to Version, base []byte) (string, error) {
+	return componentChange(component, to).patchFor(base)
+}
+
+// FastPolling makes the waiting steps poll in milliseconds for the length of a
+// test, and puts the interval back afterwards.
+func FastPolling(t interface{ Cleanup(func()) }) {
+	was := pollInterval
+	pollInterval = 20 * time.Millisecond
+	t.Cleanup(func() { pollInterval = was })
 }

@@ -381,6 +381,37 @@ func run(args []string) error {
 		ResolveInstaller: resolveInstaller(factory, st),
 	}
 	upgradeDeps.Gate = upgrade.NewGate(upgradeDeps.Connect, inv.ControlPlanesOf)
+	// kube-proxy is the one part of a Kubernetes upgrade that lives in the
+	// Kubernetes API rather than in a node's configuration (ledger 86).
+	upgradeDeps.KubeProxy = func(ctx context.Context, cluster model.ClusterID, image string) (string, error) {
+		kc, err := inv.KubeClient(ctx, cluster)
+		if err != nil {
+			return "", err
+		}
+		const ns, name = "kube-system", "kube-proxy"
+		if err := kc.SetDaemonSetImage(ctx, ns, name, name, image); err != nil {
+			if errors.Is(err, kube.ErrNoSuchDaemonSet) {
+				return "", upgrade.ErrNoKubeProxy
+			}
+			return "", err
+		}
+		deadline := time.Now().Add(upgrade.ComponentBudget)
+		for {
+			r, err := kc.DaemonSetRolledOut(ctx, ns, name)
+			if err == nil && r.Done {
+				return fmt.Sprintf("kube-proxy runs %s on %d of %d node(s)", image, r.Available, r.Desired), nil
+			}
+			if time.Now().After(deadline) {
+				return "", fmt.Errorf("upgrade: kube-proxy has not rolled out %s after %s (%d of %d updated, %d available)",
+					image, upgrade.ComponentBudget, r.Updated, r.Desired, r.Available)
+			}
+			select {
+			case <-ctx.Done():
+				return "", ctx.Err()
+			case <-time.After(5 * time.Second):
+			}
+		}
+	}
 
 	upgrade.Register(engine, upgradeDeps)
 	// Draining a node (milestone v1.17 slice 3). The client is a function
