@@ -480,3 +480,26 @@ func TestAnAppliedHostnameIsTheNodesHostname(t *testing.T) {
 		t.Errorf("hostname after applying a configuration that sets it = %q, want %q", got, "after")
 	}
 }
+
+// A fragment is not a configuration. Talos validates what it is handed and
+// refuses a document that names no machine type, no cluster and no secrets; a
+// simulator that stored it instead let the Kubernetes upgrade replace a node's
+// whole configuration with its three image lines and pass every test.
+func TestAFragmentIsRefusedLikeTalosRefusesIt(t *testing.T) {
+	t.Parallel()
+
+	cl, err := talossim.NewCluster("homelab", "https://192.168.1.41:6443")
+	if err != nil {
+		t.Fatalf("NewCluster: %v", err)
+	}
+	sim := newSim(t, talossim.Options{Hostname: "cp", Cluster: cl, ControlPlane: true})
+	c := newMachineryClient(t, sim)
+
+	fragment := "machine:\n  kubelet:\n    image: ghcr.io/siderolabs/kubelet:v1.36.5\n"
+	_, err = c.ApplyConfiguration(testContext(t), &machine.ApplyConfigurationRequest{
+		Data: []byte(fragment), Mode: machine.ApplyConfigurationRequest_NO_REBOOT,
+	})
+	if status.Code(err) != codes.InvalidArgument {
+		t.Fatalf("applying a three-line fragment = %v (code %s), want InvalidArgument", err, status.Code(err))
+	}
+}
