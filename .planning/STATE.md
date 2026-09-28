@@ -5,16 +5,16 @@ milestone_name: Host & Telefon
 current_phase: 11
 current_phase_name: Host-Seite — Gerät, Dienst, Live-Werte
 status: executing
-stopped_at: Completed 11-04-PLAN.md
-last_updated: "2026-09-28T15:51:11.994Z"
+stopped_at: Completed 11-05-PLAN.md
+last_updated: "2026-09-28T16:50:40.914Z"
 last_activity: 2026-09-28
 last_activity_desc: Phase 11 execution started
-state_head: e5896f958d5b0c1482f0596f3291f8a99c84587b
+state_head: 7933fe94c7cddf962c4665224bb8a73c07a8607b
 progress:
   total_phases: 4
   completed_phases: 0
   total_plans: 7
-  completed_plans: 4
+  completed_plans: 5
   percent: 0
 ---
 
@@ -33,7 +33,7 @@ See: .planning/PROJECT.md (updated 2026-09-28)
 ## Current Position
 
 Phase: 11 (Host-Seite — Gerät, Dienst, Live-Werte) — EXECUTING
-Plan: 5 of 7
+Plan: 6 of 7
 Status: Ready to execute
 Last activity: 2026-09-28 — Phase 11 execution started
 
@@ -81,6 +81,8 @@ Siehe `PROJECT.md`, die `MILESTONE-*.md`-Dateien und für v1.18 den Abschnitt
 - [Phase 11]: Filesystem Use% on /host is df's: used/(used+available) rounded up; UI-SPEC's used/size and nearest rounding both differ from the shell (23% / 24% vs 25%)
 - [Phase 11]: Host filesystems merge only on equal major:minor from mountinfo; without a mount table nothing is merged
 - [Phase 11]: Data-dir size walk: 60 s cache counts failed attempts too; a failed re-walk serves the last good value with its measured_at
+- [Phase 11]: Host sensors reuse the talos rules (ClassifyChip, ThermalTwinName, Millidegrees) exported, not copied; thermal zones only when no CPU hwmon chip reported; trip points never used as limits
+- [Phase 11]: Sensor list, fan rows and temperature limits live in web/src/components/charts/Sensors.tsx, shared by NodeHardware and /host; the sparkline column exists only when a history is passed
 
 ### Blockers/Concerns
 
@@ -95,8 +97,8 @@ Siehe `PROJECT.md`, die `MILESTONE-*.md`-Dateien und für v1.18 den Abschnitt
 
 ## Session Continuity
 
-Last session: 2026-09-28T15:51:11.933Z
-Stopped at: Completed 11-04-PLAN.md
+Last session: 2026-09-28T16:50:40.856Z
+Stopped at: Completed 11-05-PLAN.md
 Resume file: None
 Next: `/gsd-plan-phase 11`
 
@@ -108,3 +110,4 @@ Next: `/gsd-plan-phase 11`
 | Phase 11 P02 | 9min | 2 tasks | 4 files |
 | Phase 11 P03 | 25min | 3 tasks | 22 files |
 | Phase 11 P04 | 24min | 3 tasks | 16 files |
+| Phase 11 P05 | 60min | 3 tasks | 60 files |
