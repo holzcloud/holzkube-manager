@@ -1,7 +1,8 @@
 ---
 phase: "12"
 slug: "host-verlauf"
-status: draft
+status: approved
+reviewed_at: "2026-09-28"
 shadcn_initialized: true
 preset: "b4nI (radix-nova, neutral base, lucide, Manrope) — holzcloud-design tokens mapped in web/src/index.css"
 created: "2026-09-28"
@@ -420,3 +421,26 @@ No third-party registry (`components.json` `registries: {}`); the vetting gate d
 - [ ] Dimension 7 Inventory Provenance: PASS
 
 **Approval:** pending
+
+## Checker resolutions (orchestrator, 2026-09-28)
+
+Decided after the UI checker's flags, binding for the planner:
+
+1. **Focal point in the hardening state.** When CPU usage is not readable, the
+   load figure (1-minute load, formatted as the node page does) takes the
+   Processor card's `text-xl` figure slot; usage then sits as a muted
+   `MissingValue` row below it. In every state the page therefore has a
+   readable figure where the eye lands first. (Fixes 11-UI-REVIEW finding 1.)
+2. **Unreadable load is drawn by `MissingValue`** with its reason, like every
+   other missing value — the ad-hoc "Load not readable: …" line goes.
+   (Fixes 11-UI-REVIEW finding 2.)
+3. **Reduced motion.** The spinning fan icon uses `motion-safe:animate-spin`.
+   (Fixes 11-UI-REVIEW finding 3.)
+4. **12 px tracking.** The collapsed word spacing in 12 px lines
+   (`--hc-track-snug`, `web/src/index.css`) is fixed app-wide in this phase,
+   since this phase adds more 12 px lines; the layout audit and the node page
+   tests must stay green.
+5. **6 px (`gap-1.5`)** is an inherited exception held by D-05 (shared
+   components must render identically on the node page).
+6. Minor 11-UI-REVIEW copy items ride along: "1 core" singular; the
+   filesystem caption states the df-style percentage it shows.
