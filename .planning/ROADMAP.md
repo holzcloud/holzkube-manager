@@ -88,14 +88,14 @@ injiziert hat, ist kein Ergebnis.
   4. Hinterlegt der Update-Mechanismus, wann zuletzt gesucht wurde und welche Version verfügbar ist, zeigt die Seite beides; hinterlegt er nichts — der Stand der heute auf dem Pi installierten `holzkube-manager-update` —, sagt sie „nicht hinterlegt", statt eine Zeit oder eine Version zu erfinden. Was das Skript dafür künftig schreibt, liegt in `deploy/` und wird nicht installiert.
 
 **Research**: `/proc` unter `ProcSubset=pid` und `ProtectProc=invisible` — welche Dateien genau verschwinden und woran der Daemon das von einem echten Lesefehler unterscheidet; wo der Pi 5 Temperatur und Lüfter in `/sys` ablegt und wo ein amd64-Host.
-**Plans**: 1/7 plans executed
+**Plans**: 2/7 plans executed
 
 Plans:
 **Wave 1**
 - [x] 11-01-PLAN.md — Tracer: `internal/host` + `GET /api/v1/host` + `/host` mit Gerät-Karte, Container-Hinweis, Navigation, Layout-Fixture (HOST-01)
 
 **Wave 2** *(blocked on Wave 1 completion)*
-- [ ] 11-02-PLAN.md — Update-Skript hinterlegt sein Ergebnis über einen EXIT-Trap; strenger Leser `internal/host/updatestatus` (HOST-03)
+- [x] 11-02-PLAN.md — Update-Skript hinterlegt sein Ergebnis über einen EXIT-Trap; strenger Leser `internal/host/updatestatus` (HOST-03)
 - [ ] 11-03-PLAN.md — CPU, Load, Speicher, Swap live; Härtung `subset=pid` deterministisch erkannt, „Not readable" statt 0; Echt-Kernel-Test (HMON-01, HMON-06)
 
 **Wave 3** *(blocked on Wave 2 completion)*
@@ -170,7 +170,7 @@ Waves: 1 → {01} · 2 → {02, 03} · 3 → {04} · 4 → {05} · 5 → {06} ·
 
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
-| 11. Host-Seite — Gerät, Dienst, Live-Werte | v1.18 | 1/7 | In Progress|  |
+| 11. Host-Seite — Gerät, Dienst, Live-Werte | v1.18 | 2/7 | In Progress|  |
 | 12. Host wie ein Knoten — Verlauf, Warnung, Wand | v1.18 | 0/TBD | Not started | - |
 | 13. Host-Aktionen über einen root-eigenen Helfer | v1.18 | 0/TBD | Not started | - |
 | 14. Telefon — Tippziele, die ein Daumen trifft | v1.18 | 0/TBD | Not started | - |
