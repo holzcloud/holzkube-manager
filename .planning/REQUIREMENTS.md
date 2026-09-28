@@ -41,7 +41,7 @@ damit er es am Ende auf einen Blick prüfen und umwerfen kann.
 - [x] **HOST-01**: Der Betreiber sieht auf einer eigenen Seite das Gerät, auf dem holzkube-manager läuft: Hostname, Modell, Architektur, Betriebssystem, Kernel, Laufzeit seit dem Boot
 - [x] **HOST-02**: Der Betreiber sieht den Zustand des Dienstes selbst: laufende Version, Laufzeit des Prozesses, Größe und freier Platz des Datenverzeichnisses
 - [x] **HOST-03**: Der Betreiber sieht, ob und wann zuletzt nach Updates gesucht wurde und welche Version verfügbar ist, soweit der Update-Mechanismus es hinterlegt
-- [ ] **HOST-04**: Der Host erscheint in der Navigation und auf der Wand wie ein Knoten, mit einem Zustand (gesund / Warnung / nicht lesbar)
+- [x] **HOST-04**: Der Host erscheint in der Navigation und auf der Wand wie ein Knoten, mit einem Zustand (gesund / Warnung / nicht lesbar)
 
 ### Host-Monitoring (HMON)
 
@@ -51,7 +51,7 @@ damit er es am Ende auf einen Blick prüfen und umwerfen kann.
 - [x] **HMON-04**: Der Betreiber sieht den Durchsatz der Netzwerkschnittstellen
 - [x] **HMON-05**: Zu CPU, Speicher, Temperatur und Netzwerk gibt es Verlaufsdiagramme über 1 h / 6 h / 24 h, die einen Neustart des Daemons überleben
 - [x] **HMON-06**: Ein Wert, der wegen der Härtung der Unit nicht lesbar ist, wird als „nicht lesbar" mit der Ursache gezeigt, nie als 0
-- [ ] **HMON-07**: Überschreitet Temperatur oder Datenträgerbelegung eine Schwelle, zeigt der Host eine Warnung mit dem Grund
+- [x] **HMON-07**: Überschreitet Temperatur oder Datenträgerbelegung eine Schwelle, zeigt der Host eine Warnung mit dem Grund
 
 ### Host-Aktionen (HACT)
 
@@ -88,14 +88,14 @@ damit er es am Ende auf einen Blick prüfen und umwerfen kann.
 | HOST-01 | Phase 11 | Complete |
 | HOST-02 | Phase 11 | Complete |
 | HOST-03 | Phase 11 | Complete |
-| HOST-04 | Phase 12 | Pending |
+| HOST-04 | Phase 12 | Complete |
 | HMON-01 | Phase 11 | Complete |
 | HMON-02 | Phase 11 | Complete |
 | HMON-03 | Phase 11 | Complete |
 | HMON-04 | Phase 11 | Complete |
 | HMON-05 | Phase 12 | Complete |
 | HMON-06 | Phase 11 | Complete |
-| HMON-07 | Phase 12 | Pending |
+| HMON-07 | Phase 12 | Complete |
 | HACT-01 | Phase 13 | Pending |
 | HACT-02 | Phase 13 | Pending |
 | HACT-03 | Phase 13 | Pending |
