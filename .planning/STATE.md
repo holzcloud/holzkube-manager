@@ -5,16 +5,16 @@ milestone_name: Host & Telefon
 current_phase: 11
 current_phase_name: Host-Seite — Gerät, Dienst, Live-Werte
 status: executing
-stopped_at: Completed 11-01-PLAN.md
-last_updated: "2026-09-28T14:46:19.875Z"
+stopped_at: Completed 11-02-PLAN.md
+last_updated: "2026-09-28T14:57:56.024Z"
 last_activity: 2026-09-28
 last_activity_desc: Phase 11 execution started
-state_head: 744998dc62e9ac6474bff30890098045e8495a0c
+state_head: 76573b2b84acfe99b03fbf68048114567e680cab
 progress:
   total_phases: 4
   completed_phases: 0
   total_plans: 7
-  completed_plans: 1
+  completed_plans: 2
   percent: 0
 ---
 
@@ -33,7 +33,7 @@ See: .planning/PROJECT.md (updated 2026-09-28)
 ## Current Position
 
 Phase: 11 (Host-Seite — Gerät, Dienst, Live-Werte) — EXECUTING
-Plan: 2 of 7
+Plan: 3 of 7
 Status: Ready to execute
 Last activity: 2026-09-28 — Phase 11 execution started
 
@@ -73,6 +73,8 @@ Siehe `PROJECT.md`, die `MILESTONE-*.md`-Dateien und für v1.18 den Abschnitt
 - [Phase 11]: Reading[T] keeps its value behind a pointer tagged omitempty; health.Field is not reused because omitzero drops a readable 0
 - [Phase 11]: os-release escapes are unescaped inside either quote style (Python platform.freedesktop_os_release behaviour)
 - [Phase 11]: GET /api/v1/host: session + reader, not audited, not a wall-link route; collector built unconditionally in main
+- [Phase 11]: 11-02: update status recorded by root into /var/lib/holzkube-manager-update/status.json from one EXIT trap (set +e, || true); record_status also guards itself; TMP/OUTCOME/INSTALLED/LATEST start empty
+- [Phase 11]: 11-02: updatestatus.Read is strict (4 KiB, one object, RFC 3339, five outcomes, version pattern, null only for failed); lives in internal/host/updatestatus
 
 ### Blockers/Concerns
 
@@ -87,8 +89,8 @@ Siehe `PROJECT.md`, die `MILESTONE-*.md`-Dateien und für v1.18 den Abschnitt
 
 ## Session Continuity
 
-Last session: 2026-09-28T14:46:19.806Z
-Stopped at: Completed 11-01-PLAN.md
+Last session: 2026-09-28T14:57:55.846Z
+Stopped at: Completed 11-02-PLAN.md
 Resume file: None
 Next: `/gsd-plan-phase 11`
 
@@ -97,3 +99,4 @@ Next: `/gsd-plan-phase 11`
 | Plan | Duration | Tasks | Files |
 |------|----------|-------|-------|
 | Phase 11 P01 | 37min | 3 tasks | 32 files |
+| Phase 11 P02 | 9min | 2 tasks | 4 files |

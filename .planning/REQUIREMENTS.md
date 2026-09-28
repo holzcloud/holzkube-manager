@@ -40,7 +40,7 @@ damit er es am Ende auf einen Blick prüfen und umwerfen kann.
 
 - [x] **HOST-01**: Der Betreiber sieht auf einer eigenen Seite das Gerät, auf dem holzkube-manager läuft: Hostname, Modell, Architektur, Betriebssystem, Kernel, Laufzeit seit dem Boot
 - [ ] **HOST-02**: Der Betreiber sieht den Zustand des Dienstes selbst: laufende Version, Laufzeit des Prozesses, Größe und freier Platz des Datenverzeichnisses
-- [ ] **HOST-03**: Der Betreiber sieht, ob und wann zuletzt nach Updates gesucht wurde und welche Version verfügbar ist, soweit der Update-Mechanismus es hinterlegt
+- [x] **HOST-03**: Der Betreiber sieht, ob und wann zuletzt nach Updates gesucht wurde und welche Version verfügbar ist, soweit der Update-Mechanismus es hinterlegt
 - [ ] **HOST-04**: Der Host erscheint in der Navigation und auf der Wand wie ein Knoten, mit einem Zustand (gesund / Warnung / nicht lesbar)
 
 ### Host-Monitoring (HMON)
@@ -87,7 +87,7 @@ damit er es am Ende auf einen Blick prüfen und umwerfen kann.
 |-------------|-------|--------|
 | HOST-01 | Phase 11 | Complete |
 | HOST-02 | Phase 11 | Pending |
-| HOST-03 | Phase 11 | Pending |
+| HOST-03 | Phase 11 | Complete |
 | HOST-04 | Phase 12 | Pending |
 | HMON-01 | Phase 11 | Pending |
 | HMON-02 | Phase 11 | Pending |
