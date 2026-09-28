@@ -7,10 +7,12 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/http/httptrace"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -143,6 +145,9 @@ type fakeFactory struct {
 	// code path under test is the right one and the classification is shared --
 	// but the measured incident is not reproduced here. A timeout-shaped variant
 	// would need a fake that sleeps past the client timeout, which is a 30s test.
+	//
+	// The silence reaches the client as silence only on a fresh connection; see
+	// the Connection: close at the top of serve.
 	unreachable map[string]bool
 
 	// silentRemaining is how many *further* manifest requests for a repository
@@ -292,6 +297,58 @@ func (f *fakeFactory) setRepoUnreachable(repo string) {
 	f.unreachable[repo] = true
 }
 
+// TestFakeSilenceIsNeverRetriedByTheClient pins what the silence knobs rest on:
+// one request the fake answers with silence reaches the fake exactly once.
+//
+// The first body is read to EOF on purpose. That pools its connection on every
+// toolchain, so this goes red on go1.26 as well as go1.27 the moment the fake
+// lets a connection be reused -- not only on the toolchain whose drain-on-close
+// happened to expose it, and not only on the runs where that drain wins its
+// race.
+func TestFakeSilenceIsNeverRetriedByTheClient(t *testing.T) {
+	fake := newFakeFactory(t)
+	fake.setRepoUnreachable("metal-installer")
+
+	transport := &http.Transport{}
+	t.Cleanup(transport.CloseIdleConnections)
+	client := &http.Client{Transport: transport}
+
+	var reused atomic.Bool
+	get := func(repo string) error {
+		ctx := httptrace.WithClientTrace(t.Context(), &httptrace.ClientTrace{
+			GotConn: func(i httptrace.GotConnInfo) {
+				if i.Reused {
+					reused.Store(true)
+				}
+			},
+		})
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet,
+			fake.URL+"/v2/"+repo+"/"+schematicA+"/manifests/"+installerModernVersion, nil)
+		if err != nil {
+			t.Fatalf("build request: %v", err)
+		}
+		resp, err := client.Do(req)
+		if err != nil {
+			return err
+		}
+		defer func() { _ = resp.Body.Close() }()
+		_, err = io.Copy(io.Discard, resp.Body)
+		return err
+	}
+
+	if err := get("installer"); err != nil {
+		t.Fatalf("the answering repository did not answer: %v", err)
+	}
+	if err := get("metal-installer"); err == nil {
+		t.Fatal("the silent repository answered")
+	}
+	if n := fake.count("GET /v2/metal-installer/manifests/" + installerModernVersion); n != 1 {
+		t.Errorf("one request to the silent repository reached the fake %d times (a connection was "+
+			"reused: %t) -- the client's Transport retried the silence on another connection, so "+
+			"the silence knobs no longer produce silence", n, reused.Load())
+	}
+}
+
 // setRepoReachable undoes setRepoUnreachable, so a repository can go from
 // silent back to answering within one test.
 func (f *fakeFactory) setRepoReachable(repo string) {
@@ -360,6 +417,25 @@ func (f *fakeFactory) forgeID(id string) {
 
 func (f *fakeFactory) serve(w http.ResponseWriter, r *http.Request) {
 	parts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
+
+	// Every answer closes its connection, so every request arrives on a fresh
+	// one. The silence knobs depend on that and nothing else guarantees it.
+	//
+	// net/http's Transport retries an idempotent GET, invisibly and on another
+	// connection, when a *reused* connection is closed before the first response
+	// byte (persistConn.shouldRetryRequest). A hijacked silence on a reused
+	// connection is therefore not silence to the client: under unreachable the
+	// fake counts two requests for one question, and under silentRemaining the
+	// retry claims no silence and is answered normally, so the interleaving the
+	// knob exists to force never happens and the guard built on it goes green
+	// with its fault reinstated.
+	//
+	// This used to hold by accident. probeStatus closes a manifest body without
+	// reading it, and up to go1.26 that closed the connection; go1.27 drains a
+	// small unread body on Close and pools the connection instead. The pinned
+	// toolchain never saw a reused manifest connection, the Pi's go1.27.1 saw one
+	// on nearly every run. TestFakeSilenceIsNeverRetriedByTheClient pins this.
+	w.Header().Set("Connection", "close")
 
 	// Before the switch and before any per-branch recording: a delayed request
 	// is still a request that was made, but the recording lives inside each
