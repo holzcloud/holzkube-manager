@@ -2,6 +2,7 @@ package host
 
 import (
 	"encoding/json"
+	"math"
 	"reflect"
 	"strings"
 	"testing"
@@ -282,6 +283,20 @@ func TestUnreadableIsNeverHealthy(t *testing.T) {
 		}
 		if h.Summary != strings.Join(want, " ") {
 			t.Errorf("summary = %q", h.Summary)
+		}
+	})
+
+	// WR-01: a statfs with no blocks, or a sum that wrapped, is no usage
+	// figure -- not "below 80%".
+	t.Run("a filesystem with no capacity", func(t *testing.T) {
+		t.Parallel()
+		for _, u := range []FSUsage{{}, {UsedBytes: math.MaxUint64, AvailableBytes: 2}} {
+			row := Filesystem{Mount: "/srv", Usage: Read(u)}
+			h := Assess(hostLive(sensorsRead(sensorAt("cpu_thermal", "temp1", 50, 80, 110)), fine, row))
+			want := []string{"Usage of /srv reports no capacity."}
+			if h.State != HealthUnknown || !reflect.DeepEqual(h.Unreadable, want) {
+				t.Errorf("%+v: = %+v, want unknown with %q", u, h, want)
+			}
 		}
 	})
 
