@@ -228,8 +228,8 @@ func (c *Collector) readLive() Live {
 	// When the path cannot be resolved, the lexical one is all there is.
 	dataDir := c.cfg.DataDir
 	if dataDir != "" {
-		if real, ok := resolvePath(c.cfg.FS, dataDir); ok {
-			dataDir = real
+		if resolved, ok := resolvePath(c.cfg.FS, dataDir); ok {
+			dataDir = resolved
 		}
 	}
 	live.Filesystems = filesystems(mounts, dataDir, c.cfg.Sys)
