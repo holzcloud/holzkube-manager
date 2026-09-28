@@ -29,7 +29,11 @@
 // key at all.
 package host
 
-import "time"
+import (
+	"time"
+
+	"github.com/holzcloud/holzkube-manager/internal/inventory"
+)
 
 // Reason says why a value is not there. Code is for the browser to branch on,
 // Message is the server's sentence for the operator.
@@ -95,6 +99,35 @@ type View struct {
 	Container bool `json:"container"`
 
 	Device Device `json:"device"`
+
+	Live Live `json:"live"`
+}
+
+// Live is how the machine is doing at ObservedAt (HMON-01).
+//
+// CPU usage, memory and swap come from /proc/stat and /proc/meminfo, which the
+// production unit's ProcSubset=pid hides: under that unit they are readings
+// with the reason hardening.proc-subset, never a 0 (D-02, D-03). Load survives,
+// through sysinfo(2) (D-05).
+type Live struct {
+	// RatesOverSeconds is the window every rate in this answer was computed
+	// over, rounded to a tenth of a second, and null while there is no usable
+	// previous reading to compute one against (D-12).
+	RatesOverSeconds *float64 `json:"rates_over_seconds"`
+
+	CPU    CPU                               `json:"cpu"`
+	Memory Reading[inventory.HardwareMemory] `json:"memory"`
+}
+
+// CPU is the processor's share of busy time and the run-queue average.
+//
+// Usage and PerCore are percentages over RatesOverSeconds: a CPU counter only
+// means something as the difference between two readings, so the first answer
+// after the daemon starts has none and says so (rate.no-baseline).
+type CPU struct {
+	Usage   Reading[float64]   `json:"usage"`
+	PerCore Reading[[]float64] `json:"per_core"`
+	Load    Reading[Load]      `json:"load"`
 }
 
 // Device is what the machine is (HOST-01).

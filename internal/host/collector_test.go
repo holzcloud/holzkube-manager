@@ -129,10 +129,12 @@ func TestEveryReadingIsWellFormed(t *testing.T) {
 	}
 }
 
-// nullableKeys names every key that may be JSON null, with the reason. Empty:
-// nothing in the view is nullable yet, and a nil slice that marshals to null is
-// exactly the default this guard exists to catch.
-var nullableKeys = map[string]string{}
+// nullableKeys names every key that may be JSON null, with the reason. Every
+// other null is a bug: a nil slice that marshals to null is exactly the default
+// this guard exists to catch.
+var nullableKeys = map[string]string{
+	"rates_over_seconds": "null while there is no usable previous reading (D-12)",
+}
 
 func TestNoNulls(t *testing.T) {
 	t.Parallel()
