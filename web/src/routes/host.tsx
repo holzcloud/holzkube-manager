@@ -514,11 +514,14 @@ function NetworkCard({
 }
 
 function LinkRow({ link }: { link: Link }) {
-  const state = !link.up
-    ? ' · down'
-    : link.speed_mbit !== null
-      ? ` · up · ${link.speed_mbit} Mbit/s`
-      : ' · up'
+  const state =
+    link.up === null
+      ? ' · state not readable'
+      : !link.up
+        ? ' · down'
+        : link.speed_mbit !== null
+          ? ` · up · ${link.speed_mbit} Mbit/s`
+          : ' · up'
   return (
     <li className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 py-2 text-sm">
       <span className="min-w-0 break-words">

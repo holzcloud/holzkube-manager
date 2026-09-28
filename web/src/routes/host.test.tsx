@@ -56,7 +56,7 @@ function readableLive(overrides: Record<string, unknown> = {}) {
 
 type LinkShape = {
   name: string
-  up: boolean
+  up: boolean | null
   speed_mbit: number | null
   rx_bytes_per_sec: number | null
   tx_bytes_per_sec: number | null
@@ -64,7 +64,7 @@ type LinkShape = {
 
 const linkOf = (
   name: string,
-  up: boolean,
+  up: boolean | null,
   speed: number | null,
   rx: number | null,
   tx: number | null,
@@ -81,7 +81,7 @@ function pi5Network(): { physical: LinkShape[]; virtual: LinkShape[] } {
     virtual: [
       linkOf('br-0a1b2c3d4e5f', true, 10000, 410, 260),
       linkOf('docker0', true, 10000, 320, 180),
-      linkOf('lo', false, null, 1210, 1210),
+      linkOf('lo', true, null, 1210, 1210),
       linkOf('veth1a2b3c4', true, 10000, 410, 260),
     ],
   }
@@ -858,6 +858,16 @@ describe('the Network card', () => {
     // A rate the server computed as 0 is a reading of an idle link.
     expect(wlan0).toHaveTextContent('in 0 B/s · out 0 B/s')
     expect(within(card).queryByText('Waiting for a second reading')).toBeNull()
+  })
+
+  it('says the state is not readable, not down, when the server could not read it', () => {
+    const live = readableLive({
+      network: read({ physical: [linkOf('usb0', null, null, 10, 10)], virtual: [] }),
+    })
+    wrap(<HostView host={hostShape({ live })} stale={null} />)
+    const row = linkRow(cardOf('Network'), 'usb0')
+    expect(row).toHaveTextContent(/^usb0 · state not readablein/)
+    expect(row).not.toHaveTextContent('down')
   })
 
   it('says up without a speed when an up link reports none', () => {

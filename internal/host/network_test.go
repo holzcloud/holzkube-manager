@@ -68,8 +68,9 @@ func (f failingRead) Read([]byte) (int, error) {
 
 func intp(n int) *int           { return &n }
 func floatp(f float64) *float64 { return &f }
+func boolp(b bool) *bool         { return &b }
 func link(name string, up bool, speed *int) Link {
-	return Link{Name: name, Up: up, SpeedMbit: speed}
+	return Link{Name: name, Up: &up, SpeedMbit: speed}
 }
 
 func readNetwork(t *testing.T, c *Collector) (Network, *float64) {
@@ -89,7 +90,7 @@ func showNetwork(n Network) string {
 	show := func(ls []Link) string {
 		var b strings.Builder
 		for _, l := range ls {
-			fmt.Fprintf(&b, "[%s up=%v speed=%s rx=%s tx=%s]", l.Name, l.Up, showPtr(l.SpeedMbit), showPtr(l.RxBytesPerSec), showPtr(l.TxBytesPerSec))
+			fmt.Fprintf(&b, "[%s up=%s speed=%s rx=%s tx=%s]", l.Name, showPtr(l.Up), showPtr(l.SpeedMbit), showPtr(l.RxBytesPerSec), showPtr(l.TxBytesPerSec))
 		}
 		return b.String()
 	}
@@ -110,7 +111,8 @@ func pi5Network(docker0Speed *int) Network {
 		Virtual: []Link{
 			link("br-0a1b2c3d4e5f", true, intp(10000)),
 			link("docker0", true, docker0Speed),
-			link("lo", false, nil),
+			// operstate "unknown", flags 0x9: IFF_UP, so up (WR-02).
+			link("lo", true, nil),
 			link("veth1a2b3c4", true, intp(10000)),
 			link("veth5d6e7f8", true, intp(10000)),
 		},
@@ -177,6 +179,63 @@ func TestNetworkSpeedEINVAL(t *testing.T) {
 	wantNetwork(t, "speed reads failing with EINVAL", got, pi5Network(nil))
 }
 
+// TestNetworkLinkState (WR-02): operstate "unknown" is the kernel not
+// knowing, not the link being down. The loopback always says it, as do
+// tun/WireGuard and some USB NICs; their administrative flag decides then. A
+// state neither file gave is not claimed at all.
+func TestNetworkLinkState(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name             string
+		operstate, flags *string
+		want             *bool
+	}{
+		{"up", strp("up\n"), strp("0x1003\n"), boolp(true)},
+		{"down with IFF_UP set (no carrier)", strp("down\n"), strp("0x1003\n"), boolp(false)},
+		{"dormant", strp("dormant\n"), strp("0x1003\n"), boolp(false)},
+		{"lowerlayerdown", strp("lowerlayerdown\n"), strp("0x1003\n"), boolp(false)},
+		{"unknown, IFF_UP set (loopback)", strp("unknown\n"), strp("0x9\n"), boolp(true)},
+		{"unknown, IFF_UP set (wireguard)", strp("unknown\n"), strp("0x91\n"), boolp(true)},
+		{"unknown, IFF_UP clear", strp("unknown\n"), strp("0x1002\n"), boolp(false)},
+		{"unknown, no flags", strp("unknown\n"), nil, nil},
+		{"unknown, flags unparsable", strp("unknown\n"), strp("up\n"), nil},
+		{"operstate unreadable, IFF_UP set", nil, strp("0x1003\n"), boolp(true)},
+		{"operstate empty, IFF_UP set", strp("\n"), strp("0x91\n"), boolp(true)},
+		{"neither readable", nil, nil, nil},
+	} {
+		fsys := fstest.MapFS{"sys/class/net/x0/statistics/rx_bytes": {Data: []byte("0\n")}}
+		if tc.operstate != nil {
+			fsys["sys/class/net/x0/operstate"] = &fstest.MapFile{Data: []byte(*tc.operstate)}
+		}
+		if tc.flags != nil {
+			fsys["sys/class/net/x0/flags"] = &fstest.MapFile{Data: []byte(*tc.flags)}
+		}
+		got, _ := readNetwork(t, New(Config{FS: fsys, Sys: fakeSys{}, Now: newLiveClock().now}))
+		if len(got.Virtual) != 1 || !reflect.DeepEqual(got.Virtual[0].Up, tc.want) {
+			t.Errorf("%s: got %s, want up=%s", tc.name, showNetwork(got), showPtr(tc.want))
+		}
+	}
+
+	// On the wire an unknown state is null, never false and never absent.
+	fsys := fstest.MapFS{"sys/class/net/x0/statistics/rx_bytes": {Data: []byte("0\n")}}
+	wire := marshalView(t, New(Config{FS: fsys, Sys: fakeSys{}, Now: newLiveClock().now}).Read(context.Background()))
+	live, _ := wire["live"].(map[string]any)
+	netw, _ := live["network"].(map[string]any)
+	value, _ := netw["value"].(map[string]any)
+	virtual, _ := value["virtual"].([]any)
+	if len(virtual) != 1 {
+		t.Fatalf("virtual on the wire = %v", value["virtual"])
+	}
+	if l, _ := virtual[0].(map[string]any); l["up"] != nil {
+		t.Errorf("up = %v, want null", l["up"])
+	} else if _, has := l["up"]; !has {
+		t.Errorf("up is absent, want null")
+	}
+}
+
+func strp(s string) *string { return &s }
+
 func TestNetworkSpeedValues(t *testing.T) {
 	t.Parallel()
 
@@ -206,7 +265,7 @@ func netDir(fsys fstest.MapFS, name string, physical bool, rx, tx uint64) {
 }
 
 func rated(name string, rx, tx *float64) Link {
-	return Link{Name: name, Up: true, SpeedMbit: intp(1000), RxBytesPerSec: rx, TxBytesPerSec: tx}
+	return Link{Name: name, Up: boolp(true), SpeedMbit: intp(1000), RxBytesPerSec: rx, TxBytesPerSec: tx}
 }
 
 // TestNetworkRates is the memo for links (D-12): the same window and the same

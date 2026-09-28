@@ -2950,11 +2950,13 @@ export function reading<T extends z.ZodType>(value: T) {
  * with the numbers nullable. A link with no speed (down, or a kind without one)
  * and a round with no rate (the first read, a link that appeared since, a
  * counter that went backwards) are null -- never a default 0, because 0 B/s is
- * what an idle link reads (D-02).
+ * what an idle link reads (D-02). `up` is null when the server could read
+ * neither the link's state nor its flags -- never a default false, because
+ * "down" is a reading too.
  */
 export const linkSchema = z.object({
   name: z.string(),
-  up: z.boolean(),
+  up: z.boolean().nullable(),
   speed_mbit: z.number().nullable(),
   rx_bytes_per_sec: z.number().nullable(),
   tx_bytes_per_sec: z.number().nullable(),
