@@ -1,0 +1,112 @@
+// Package host reads the machine holzkube-manager itself runs on: what it is,
+// and how it is doing right now (HOST-01, HMON-01..06).
+//
+// # Where the readings come from
+//
+// Everything is read through an fs.FS rooted at "/" and through four syscalls
+// behind the Sys interface -- no subprocess, no D-Bus, no root (D-01). The
+// production daemon hands in os.DirFS("/") and OS(); the tests hand in fixture
+// trees and a fake, so a test about the Pi 5's device-tree model passes on an
+// amd64 laptop and a test about DMI passes on the Pi. It is also why nothing in
+// this package calls os.ReadFile or os.Open: the file-access guard in
+// internal/store/fsstore forbids them outside the store, and an fs.FS does not
+// need them.
+//
+// # Every value is a reading
+//
+// The systemd unit this product ships sets ProcSubset=pid, which hides
+// /proc/stat and /proc/meminfo. A value that could not be read is therefore an
+// ordinary state, and it must never be drawn as a 0: 0 % CPU, 0 B of swap and
+// 0 cores are all real readings that mean something else (D-02). So every value
+// is a Reading, which either carries a value or carries a Reason, and never
+// both.
+//
+// The health package's Field[T] is not reused for this, deliberately. Its value
+// is tagged `omitzero`, which drops a readable zero from the JSON -- a machine
+// with no swap would arrive looking exactly like a machine whose swap could not
+// be read. Reading keeps its value behind a pointer tagged `omitempty`, which
+// omits only nil: a readable 0 is sent as 0, and an unread value has no value
+// key at all.
+package host
+
+import "time"
+
+// Reason says why a value is not there. Code is for the browser to branch on,
+// Message is the server's sentence for the operator.
+type Reason struct {
+	Code    string `json:"code"`
+	Message string `json:"message"`
+}
+
+// The reason codes. A client branches on these, so they are a contract: see
+// docs/api-contract.md, "The machine holzkube-manager runs on".
+const (
+	// CodeProcSubset: the unit's ProcSubset=pid hides the file this comes
+	// from. A consequence of a hardening the operator chose, not a fault.
+	CodeProcSubset = "hardening.proc-subset"
+
+	// CodeReadFailed: the source exists in principle and reading it failed.
+	// The message names the path and the error.
+	CodeReadFailed = "read-failed"
+
+	// CodeNoBaseline: a rate needs two readings and there has been one.
+	CodeNoBaseline = "rate.no-baseline"
+
+	// CodeNotRecorded: the update script on this machine does not record its
+	// checks. Not an error: there is nothing to read yet.
+	CodeNotRecorded = "update.not-recorded"
+
+	// CodeUnsupported: this platform has no such source at all (the daemon
+	// also builds for darwin, where none of the Linux interfaces exist).
+	CodeUnsupported = "unsupported"
+)
+
+// Reading is one value that was either read or not.
+//
+// Readable with a Value, or not readable with a Reason -- never both, never a
+// zero value standing in for "could not read". Build one with Read or Hidden
+// rather than by hand; the two constructors are what keep that invariant.
+type Reading[T any] struct {
+	Readable bool    `json:"readable"`
+	Value    *T      `json:"value,omitempty"`
+	Reason   *Reason `json:"reason,omitempty"`
+}
+
+// Read is a value that was read.
+func Read[T any](v T) Reading[T] {
+	return Reading[T]{Readable: true, Value: &v}
+}
+
+// Hidden is a value that was not read, and why.
+func Hidden[T any](r Reason) Reading[T] {
+	return Reading[T]{Reason: &r}
+}
+
+// View is the whole answer of GET /api/v1/host, taken at one instant.
+//
+// ObservedAt is set once per read, so every section in one answer is from the
+// same moment (D-11).
+type View struct {
+	ObservedAt time.Time `json:"observed_at"`
+
+	// Container reports that the daemon runs in a container (D-17): kernel,
+	// CPU, memory and temperatures are then the host's, and hostname, network
+	// and filesystems the container's.
+	Container bool `json:"container"`
+
+	Device Device `json:"device"`
+}
+
+// Device is what the machine is (HOST-01).
+type Device struct {
+	Hostname Reading[string] `json:"hostname"`
+	Kernel   Reading[string] `json:"kernel"`
+}
+
+// Arch is the architecture twice: as Go names it (what this binary was built
+// for) and as the kernel names it (uname -m). They say different things on a
+// 32-bit userland over a 64-bit kernel, which is why both are shown.
+type Arch struct {
+	GOARCH  string `json:"goarch"`
+	Machine string `json:"machine"`
+}
