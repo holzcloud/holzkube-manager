@@ -85,10 +85,10 @@ Registry audit: `components.json` present, no third-party registries declared (`
 ---
 
 ## Files Audited
-- /home/operator/Projects/holzkube-manager/web/src/routes/host.tsx
-- /home/operator/Projects/holzkube-manager/web/src/components/charts/Sensors.tsx
-- /home/operator/Projects/holzkube-manager/web/src/components/Sidebar.tsx (NAV_AREAS entry)
-- /home/operator/Projects/holzkube-manager/web/src/lib/format.ts (formatPercent)
-- /home/operator/Projects/holzkube-manager/web/src/index.css (tracking token)
-- /home/operator/Projects/holzkube-manager/docs/screenshots/host.png
-- /home/operator/Projects/holzkube-manager/.planning/phases/11-host-seite/11-UI-SPEC.md
+- web/src/routes/host.tsx
+- web/src/components/charts/Sensors.tsx
+- web/src/components/Sidebar.tsx (NAV_AREAS entry)
+- web/src/lib/format.ts (formatPercent)
+- web/src/index.css (tracking token)
+- docs/screenshots/host.png
+- .planning/phases/11-host-seite/11-UI-SPEC.md
