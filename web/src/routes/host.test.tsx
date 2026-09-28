@@ -457,8 +457,9 @@ describe('the Live section', () => {
     // No per-core meters, no memory meter: nothing to draw a bar for.
     expect(within(processor).queryByText('CPU 0')).toBeNull()
     expect(within(memory).queryByText('Swap')).toBeNull()
-    // Load survives the hardening.
-    expect(within(processor).getByText('load 0.52 · 0.41 · 0.33')).toBeInTheDocument()
+    // Load survives the hardening, and takes the figure's place.
+    expect(within(processor).getByText('load 0.52')).toBeInTheDocument()
+    expect(within(processor).getByText('5 min 0.41 · 15 min 0.33')).toBeInTheDocument()
 
     const notice = screen.getByText(HARDENING_HEADLINE).closest('div')
     if (!(notice instanceof HTMLElement)) throw new Error('no hardening notice')
@@ -521,7 +522,8 @@ describe('the Live section', () => {
     expect(within(processor).getByText('Waiting for a second reading')).toBeInTheDocument()
     expect(within(processor).queryByText('CPU 0')).toBeNull()
     expectNoDrawnZero(processor)
-    expect(within(processor).getByText('load 7.29 · 4.90 · 2.98')).toBeInTheDocument()
+    expect(within(processor).getByText('load 7.29')).toBeInTheDocument()
+    expect(within(processor).getByText('5 min 4.90 · 15 min 2.98')).toBeInTheDocument()
     expect(screen.queryByText(/Rates are over/)).toBeNull()
     expect(screen.queryByText(HARDENING_HEADLINE)).toBeNull()
   })
@@ -703,6 +705,80 @@ describe('the charts', () => {
     expect(notice).toHaveTextContent(
       'CPU usage, memory and swap are shown as not readable rather than as zero, and are not recorded.',
     )
+  })
+})
+
+const GiB = 2 ** 30
+
+describe('the Processor card figure', () => {
+  it('with usage read shows usage as the figure and the three loads under it', () => {
+    wrap(<HostView host={hostShape()} stale={null} />)
+
+    const figure = within(cardOf('Processor')).getByText('18%', { selector: 'p' })
+    expect(figure).toHaveClass('text-xl')
+    expect(figure.nextElementSibling).toHaveTextContent('load 7.29 · 4.90 · 2.98')
+  })
+
+  it('with usage hidden puts the 1-minute load in the figure slot and says usage once, muted, below', () => {
+    wrap(<HostView host={hostShape({ live: procSubsetLive() })} stale={null} />)
+
+    const processor = cardOf('Processor')
+    const figure = within(processor).getByText('load 0.52')
+    expect(figure).toHaveClass('font-semibold', 'text-xl')
+    const loads = figure.nextElementSibling
+    expect(loads).toHaveTextContent(/^5 min 0\.41 · 15 min 0\.33$/)
+    const usage = loads?.nextElementSibling
+    expect(usage).toHaveTextContent(
+      "Not readableHidden by the unit's ProcSubset=pid — see the note at the top.",
+    )
+    expect(usage).toHaveClass('text-right')
+    // The one strong figure is the load, never a usage figure.
+    expect(processor.querySelectorAll('.text-xl')).toHaveLength(1)
+  })
+
+  it('draws an unreadable load as MissingValue with its reason, like every missing value', () => {
+    const live = readableLive({
+      cpu: {
+        ...readableLive().cpu,
+        load: hidden('read-failed', 'Could not read /proc/loadavg: gone'),
+      },
+    })
+    wrap(<HostView host={hostShape({ live })} stale={null} />)
+
+    const processor = cardOf('Processor')
+    const reason = within(processor).getByText('Could not read /proc/loadavg: gone')
+    expect(reason.previousElementSibling).toHaveTextContent('Not readable')
+    expect(reason.parentElement).toHaveClass('text-right')
+    expect(processor).not.toHaveTextContent('Load not readable')
+  })
+
+  it('says 1 core for one and 4 cores for four', () => {
+    const { unmount } = wrap(<HostView host={hostShape({}, { cores: read(1) })} stale={null} />)
+    expect(within(cardOf('Processor')).getByText('1 core')).toBeInTheDocument()
+    expect(within(cardOf('Processor')).queryByText('1 cores')).toBeNull()
+    unmount()
+
+    wrap(<HostView host={hostShape()} stale={null} />)
+    expect(within(cardOf('Processor')).getByText('4 cores')).toBeInTheDocument()
+  })
+})
+
+describe('the filesystem caption', () => {
+  it('names the denominator its df-style figure divides by', () => {
+    const live = readableLive({
+      filesystems: [
+        {
+          ...mergedRoot(),
+          usage: read({ size_bytes: 105 * GiB, used_bytes: 80 * GiB, available_bytes: 20 * GiB }),
+        },
+      ],
+    })
+    wrap(<HostView host={hostShape({ live })} stale={null} />)
+
+    const card = cardOf('Filesystems')
+    expect(within(card).getByText('80%')).toBeInTheDocument()
+    expect(card).toHaveTextContent('80 GiB of 100 GiB usable · 20 GiB free · /dev/mmcblk0p2')
+    expect(card).not.toHaveTextContent('of 105 GiB')
   })
 })
 
@@ -899,7 +975,7 @@ describe('the Filesystems card', () => {
     // rounded up. used / size would say 23%.
     expect(within(card).getByText('25%')).toBeInTheDocument()
     expect(card).toHaveTextContent(
-      `${formatBytes(28882735104)} of ${formatBytes(125260451840)} · ${formatBytes(91212472320)} free · /dev/mmcblk0p2`,
+      `${formatBytes(28882735104)} of ${formatBytes(28882735104 + 91212472320)} usable · ${formatBytes(91212472320)} free · /dev/mmcblk0p2`,
     )
     expect(within(card).getByText('/dev/mmcblk0p2')).toHaveClass('font-mono')
   })
