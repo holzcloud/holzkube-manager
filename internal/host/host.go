@@ -112,6 +112,18 @@ type Device struct {
 	UptimeSeconds Reading[int64]  `json:"uptime_seconds"`
 }
 
+// Load is the run-queue average over one, five and fifteen minutes, and where
+// it came from: "loadavg" when /proc/loadavg was readable, "sysinfo" when the
+// unit's ProcSubset=pid hid it and sysinfo(2) answered instead. The numbers are
+// the same either way (D-05); the source is there so the page can say why load
+// is still shown when CPU usage is not.
+type Load struct {
+	Load1  float64 `json:"load1"`
+	Load5  float64 `json:"load5"`
+	Load15 float64 `json:"load15"`
+	Source string  `json:"source"`
+}
+
 // Arch is the architecture twice: as Go names it (what this binary was built
 // for) and as the kernel names it (uname -m). They say different things on a
 // 32-bit userland over a 64-bit kernel, which is why both are shown.

@@ -356,7 +356,7 @@ func computeRates(prev, cur talos.HardwareCounters) hardwareRates {
 		links:   make(map[string]ioRate, len(cur.Links)),
 	}
 
-	r.usage, r.iowait = cpuPercent(prev.CPUTotal, cur.CPUTotal)
+	r.usage, r.iowait = CPUPercent(prev.CPUTotal, cur.CPUTotal)
 
 	// By position, because that is the kernel's own identity for a logical
 	// CPU. A CPU that came online between the readings has nothing to be
@@ -364,7 +364,7 @@ func computeRates(prev, cur talos.HardwareCounters) hardwareRates {
 	// its whole uptime.
 	for i, now := range cur.CPUs {
 		if i < len(prev.CPUs) {
-			r.perCore[i], _ = cpuPercent(prev.CPUs[i], now)
+			r.perCore[i], _ = CPUPercent(prev.CPUs[i], now)
 		}
 	}
 
@@ -388,14 +388,17 @@ func computeRates(prev, cur talos.HardwareCounters) hardwareRates {
 	return r
 }
 
-// cpuPercent is the share of the CPU time between two readings spent busy,
+// CPUPercent is the share of the CPU time between two readings spent busy,
 // and the share spent waiting on I/O.
 //
 // The denominator is the CPU time that passed, not the wall-clock window: the
 // kernel's counters are the authority on how much time there was to spend,
 // and dividing by the window instead would report a CPU at 104 % whenever the
 // two readings were taken a little further apart than the timestamps say.
-func cpuPercent(prev, cur talos.CPUTimes) (busy, iowait float64) {
+//
+// Exported for internal/host, which rates the local machine's CPU with the
+// same arithmetic.
+func CPUPercent(prev, cur talos.CPUTimes) (busy, iowait float64) {
 	total := cpuSum(cur) - cpuSum(prev)
 	if total <= 0 {
 		return 0, 0
@@ -439,7 +442,7 @@ func hardwareView(id model.MachineID, hostname string, sample talos.HardwareSamp
 		UptimeSeconds:    max(int64(cur.At.Sub(cur.Boot)/time.Second), 0),
 		RatesOverSeconds: round(r.window, 3),
 		CPU:              cpuView(sample, r),
-		Memory:           memoryView(sample.Memory),
+		Memory:           MemoryView(sample.Memory),
 		Filesystems:      filesystemsView(sample.Mounts),
 		Disks:            disksView(sample.BlockDevices, r, diskTemps),
 		Network:          networkView(sample.Links, r),
@@ -484,7 +487,10 @@ func cpuView(sample talos.HardwareSample, r hardwareRates) HardwareCPU {
 	return v
 }
 
-func memoryView(m talos.MemoryInfo) HardwareMemory {
+// MemoryView is memory the way free(1) counts it: used is total minus
+// MemAvailable, cache is buffers plus page cache plus reclaimable slab. The
+// host page (internal/host) calls this rather than repeating the arithmetic.
+func MemoryView(m talos.MemoryInfo) HardwareMemory {
 	return HardwareMemory{
 		TotalBytes:     m.TotalBytes,
 		UsedBytes:      saturatingSub(m.TotalBytes, m.AvailableBytes),
