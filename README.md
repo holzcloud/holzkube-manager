@@ -40,6 +40,10 @@ did.
   from the cluster's own membership
 - **Live hardware per node** — load per core, temperatures, fans, memory,
   disks and network, with the last 24 hours kept across restarts
+- **The machine it runs on** — the Host page: what the device is, which
+  version runs and what the last update check found, and live CPU, memory,
+  filesystems, temperatures and network throughput; a value the service's
+  hardening hides says so instead of showing 0
 - **Apps** — everything that runs, grouped by what was installed, with its CPU
   and memory now and over the day
 - **Kubernetes** — workloads, pods and why one is broken, events, storage,

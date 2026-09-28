@@ -2945,6 +2945,23 @@ export function reading<T extends z.ZodType>(value: T) {
   ])
 }
 
+/**
+ * One network interface on the host page (HMON-04): the node page's link keys,
+ * with the numbers nullable. A link with no speed (down, or a kind without one)
+ * and a round with no rate (the first read, a link that appeared since, a
+ * counter that went backwards) are null -- never a default 0, because 0 B/s is
+ * what an idle link reads (D-02).
+ */
+export const linkSchema = z.object({
+  name: z.string(),
+  up: z.boolean(),
+  speed_mbit: z.number().nullable(),
+  rx_bytes_per_sec: z.number().nullable(),
+  tx_bytes_per_sec: z.number().nullable(),
+})
+
+export type Link = z.infer<typeof linkSchema>
+
 /** The machine holzkube-manager runs on: GET /api/v1/host (Phase 11). */
 export const hostSchema = z.object({
   observed_at: z.string(),
@@ -3046,6 +3063,17 @@ export const hostSchema = z.object({
       z.object({
         temperatures: z.array(temperatureSchema).nullish().transform(orEmpty),
         fans: z.array(fanSchema).nullish().transform(orEmpty),
+      }),
+    ),
+    /**
+     * The interfaces (HMON-04, D-09): physical ones have a device behind
+     * them; loopback, bridges and veths are virtual. Not readable only when
+     * /sys/class/net could not be listed. In a container, the container's.
+     */
+    network: reading(
+      z.object({
+        physical: z.array(linkSchema).nullish().transform(orEmpty),
+        virtual: z.array(linkSchema).nullish().transform(orEmpty),
       }),
     ),
   }),

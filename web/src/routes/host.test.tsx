@@ -49,8 +49,53 @@ function readableLive(overrides: Record<string, unknown> = {}) {
     }),
     filesystems: [mergedRoot()],
     sensors: read(pi5Sensors()),
+    network: read(pi5Network()),
     ...overrides,
   }
+}
+
+type LinkShape = {
+  name: string
+  up: boolean
+  speed_mbit: number | null
+  rx_bytes_per_sec: number | null
+  tx_bytes_per_sec: number | null
+}
+
+const linkOf = (
+  name: string,
+  up: boolean,
+  speed: number | null,
+  rx: number | null,
+  tx: number | null,
+): LinkShape => ({ name, up, speed_mbit: speed, rx_bytes_per_sec: rx, tx_bytes_per_sec: tx })
+
+/**
+ * The Pi 5's interfaces with a second reading in: eth0 up at 1000 Mbit/s,
+ * wlan0 down (no speed, and no rate for a link that moved nothing is still a
+ * rate -- here it is 0), and the loopback, docker's bridges and a veth.
+ */
+function pi5Network(): { physical: LinkShape[]; virtual: LinkShape[] } {
+  return {
+    physical: [linkOf('eth0', true, 1000, 187900, 42100), linkOf('wlan0', false, null, 0, 0)],
+    virtual: [
+      linkOf('br-0a1b2c3d4e5f', true, 10000, 410, 260),
+      linkOf('docker0', true, 10000, 320, 180),
+      linkOf('lo', false, null, 1210, 1210),
+      linkOf('veth1a2b3c4', true, 10000, 410, 260),
+    ],
+  }
+}
+
+/** The same interfaces on the first read after start: no rate anywhere. */
+function pi5NetworkFirstRead(): { physical: LinkShape[]; virtual: LinkShape[] } {
+  const noRate = (l: LinkShape): LinkShape => ({
+    ...l,
+    rx_bytes_per_sec: null,
+    tx_bytes_per_sec: null,
+  })
+  const n = pi5Network()
+  return { physical: n.physical.map(noRate), virtual: n.virtual.map(noRate) }
 }
 
 /** The Pi 5's sensors as the daemon reads them: the CPU and the RP1's ADC, no fan. */
@@ -130,6 +175,7 @@ function procSubsetLive() {
     memory: hidden('hardening.proc-subset', HARDENING_MEMINFO),
     filesystems: [mergedRoot()],
     sensors: read(pi5Sensors()),
+    network: read(pi5Network()),
   }
 }
 
@@ -787,6 +833,159 @@ describe('the Sensors card', () => {
     ).toBeInTheDocument()
     expect(within(card).queryByText(NO_FAN)).toBeNull()
     expect(within(card).queryByText(/°C/)).toBeNull()
+  })
+})
+
+/** The row of the interface with this name. */
+function linkRow(card: HTMLElement, name: string): HTMLElement {
+  const row = within(card).getByText(name, { selector: '.font-mono' }).closest('li')
+  if (!(row instanceof HTMLElement)) throw new Error(`no row for ${name}`)
+  return row
+}
+
+describe('the Network card', () => {
+  it('lists the physical interfaces with state, speed and throughput', () => {
+    wrap(<HostView host={hostShape()} stale={null} />)
+
+    const card = cardOf('Network')
+    const eth0 = linkRow(card, 'eth0')
+    expect(eth0).toHaveTextContent('eth0 · up · 1000 Mbit/s')
+    expect(eth0).toHaveTextContent('in 188 kB/s · out 42.1 kB/s')
+    expect(eth0).toHaveClass('flex', 'flex-wrap', 'items-baseline', 'justify-between')
+    const wlan0 = linkRow(card, 'wlan0')
+    expect(wlan0).toHaveTextContent('wlan0 · down')
+    expect(wlan0).not.toHaveTextContent('Mbit/s')
+    // A rate the server computed as 0 is a reading of an idle link.
+    expect(wlan0).toHaveTextContent('in 0 B/s · out 0 B/s')
+    expect(within(card).queryByText('Waiting for a second reading')).toBeNull()
+  })
+
+  it('says up without a speed when an up link reports none', () => {
+    const live = readableLive({
+      network: read({ physical: [linkOf('usb0', true, null, 10, 10)], virtual: [] }),
+    })
+    wrap(<HostView host={hostShape({ live })} stale={null} />)
+    expect(linkRow(cardOf('Network'), 'usb0')).toHaveTextContent(/^usb0 · upin/)
+  })
+
+  it('before a second reading shows — for every rate, never 0 B/s, and says why once', () => {
+    const live = readableLive({ rates_over_seconds: null, network: read(pi5NetworkFirstRead()) })
+    wrap(<HostView host={hostShape({ live })} stale={null} />)
+
+    const card = cardOf('Network')
+    // No zero for a rate nobody measured -- checked per element first, so a
+    // "0 B/s" is named by its own text rather than hidden in a glued string.
+    expect(
+      within(card)
+        .queryAllByText(/0 B\/s/)
+        .map((n) => n.textContent),
+    ).toEqual([])
+    expect(card).not.toHaveTextContent('0 B/s')
+    for (const name of ['eth0', 'wlan0']) {
+      expect(linkRow(card, name)).toHaveTextContent('in — · out —')
+    }
+    expect(within(card).getAllByText('Waiting for a second reading')).toHaveLength(1)
+  })
+
+  it('counts the virtual interfaces behind one disclosure a thumb can open', () => {
+    wrap(<HostView host={hostShape()} stale={null} />)
+
+    const card = cardOf('Network')
+    const summary = within(card).getByText(/virtual interfaces?$/, { selector: 'summary' })
+    expect(summary).toHaveTextContent('4 virtual interfaces')
+    expect(summary).toHaveClass('min-h-11')
+    expect(summary.closest('details')).not.toHaveAttribute('open')
+    for (const name of ['br-0a1b2c3d4e5f', 'docker0', 'lo', 'veth1a2b3c4']) {
+      expect(linkRow(card, name).closest('details')).toBe(summary.closest('details'))
+    }
+    expect(within(card).getAllByText(/virtual interface/)).toHaveLength(1)
+  })
+
+  it('says 1 virtual interface in the singular, and shows no disclosure for none', () => {
+    const one = readableLive({
+      network: read({ ...pi5Network(), virtual: [linkOf('lo', false, null, 5, 5)] }),
+    })
+    const { unmount } = wrap(<HostView host={hostShape({ live: one })} stale={null} />)
+    expect(
+      within(cardOf('Network')).getByText(/virtual interface/, { selector: 'summary' }),
+    ).toHaveTextContent(/^▶1 virtual interface$/)
+    unmount()
+
+    const none = readableLive({ network: read({ ...pi5Network(), virtual: [] }) })
+    wrap(<HostView host={hostShape({ live: none })} stale={null} />)
+    const card = cardOf('Network')
+    expect(within(card).queryByText(/virtual interface/)).toBeNull()
+    expect(card.querySelector('details')).toBeNull()
+  })
+
+  it('says no physical interface was found, and still counts the virtual ones', () => {
+    const live = readableLive({ network: read({ ...pi5Network(), physical: [] }) })
+    wrap(<HostView host={hostShape({ live })} stale={null} />)
+
+    const card = cardOf('Network')
+    expect(within(card).getByText('No physical network interface found.')).toBeInTheDocument()
+    expect(within(card).getByText('4 virtual interfaces', { exact: false })).toBeInTheDocument()
+  })
+
+  it('marks the card as the container view when the daemon runs in one', () => {
+    wrap(<HostView host={hostShape({ container: true })} stale={null} />)
+    expect(within(cardOf('Network')).getByText('container')).toBeInTheDocument()
+  })
+
+  it('carries no container badge on a host', () => {
+    wrap(<HostView host={hostShape()} stale={null} />)
+    expect(within(cardOf('Network')).queryByText('container')).toBeNull()
+  })
+
+  it('says Not readable with the reason when the interfaces could not be listed', () => {
+    const live = readableLive({
+      network: hidden('read-failed', 'Could not read /sys/class/net: permission denied'),
+    })
+    wrap(<HostView host={hostShape({ live })} stale={null} />)
+
+    const card = cardOf('Network')
+    expect(within(card).getByText('Not readable')).toBeInTheDocument()
+    expect(
+      within(card).getByText('Could not read /sys/class/net: permission denied'),
+    ).toBeInTheDocument()
+    expect(within(card).queryByText('No physical network interface found.')).toBeNull()
+  })
+})
+
+/**
+ * UI-SPEC "populated": one complete readable Pi 5 answer draws every card with
+ * every value -- the page as the operator sees it with ProcSubset=all.
+ */
+describe('the complete Pi 5 page', () => {
+  it('renders every live card from one readable answer', () => {
+    wrap(<HostView host={hostShape()} stale={null} />)
+
+    const processor = cardOf('Processor')
+    for (const i of [0, 1, 2, 3]) {
+      expect(within(processor).getByText(`CPU ${i}`)).toBeInTheDocument()
+    }
+    expect(processor.querySelectorAll('[data-severity]')).toHaveLength(4)
+
+    const memory = cardOf('Memory')
+    expect(within(memory).getByText('Memory', { selector: 'span' })).toBeInTheDocument()
+    expect(within(memory).getByText('Swap')).toBeInTheDocument()
+    expect(memory.querySelectorAll('[data-severity]')).toHaveLength(2)
+
+    const filesystems = cardOf('Filesystems')
+    expect(filesystems.querySelectorAll('[data-severity]')).toHaveLength(1)
+    expect(within(filesystems).getByText('root · data directory')).toBeInTheDocument()
+
+    const network = cardOf('Network')
+    expect(linkRow(network, 'eth0')).toBeInTheDocument()
+    expect(linkRow(network, 'wlan0')).toBeInTheDocument()
+
+    const sensors = cardOf('Sensors')
+    expect(within(sensors).getByText('cpu_thermal')).toBeInTheDocument()
+    expect(within(sensors).getByText('rp1_adc')).toBeInTheDocument()
+    expect(within(sensors).getByText(NO_FAN)).toBeInTheDocument()
+
+    expect(screen.queryByText(HARDENING_HEADLINE)).toBeNull()
+    expect(screen.getByText(/Rates are over the last 3\.0 s\./)).toBeInTheDocument()
   })
 })
 
