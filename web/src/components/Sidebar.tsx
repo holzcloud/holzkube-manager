@@ -1,4 +1,5 @@
-import { Link } from '@tanstack/react-router'
+import { useQuery } from '@tanstack/react-query'
+import { Link, useRouterState } from '@tanstack/react-router'
 import {
   ArrowUpCircle,
   Boxes,
@@ -15,7 +16,9 @@ import {
   Server,
   Settings,
 } from 'lucide-react'
+import { api, type Host } from '@/api'
 import { AlphaBadge, AlphaNotice } from '@/components/Alpha'
+import { HostStateMark } from '@/components/HostState'
 import { SourceNotice } from '@/components/SourceNotice'
 import { WhatsNew } from '@/components/WhatsNew'
 import { cn } from '@/lib/utils'
@@ -174,6 +177,23 @@ export const NAV_AREAS: NavArea[] = [
  * click would be two rules for one thing.
  */
 export function Sidebar({ open = false, onNavigate }: { open?: boolean; onNavigate?: () => void }) {
+  // The Host entry's state mark (D-13), from the server's one decision -- the
+  // same ['host'] query /host polls, so the mark and the page cannot disagree.
+  //
+  // On /host the page's own 3-s poll feeds the mark and the sidebar asks
+  // nothing of its own: every observer of a query keeps its own interval, and
+  // a second caller of GET /api/v1/host would shorten the window /host's rates
+  // are computed over (RESEARCH Pattern 8). Elsewhere a 30-s refresh: the
+  // sidebar is on every page, and a whole host reading every 3 s on every
+  // screen is waste. No retry: a failed poll is shown as one, at once.
+  const onHostPage = useRouterState({ select: (s) => s.location.pathname === '/host' })
+  const host = useQuery({
+    queryKey: ['host'],
+    queryFn: api.host,
+    retry: false,
+    refetchInterval: onHostPage ? false : 30_000,
+  })
+
   return (
     <nav
       aria-label="Main navigation"
@@ -234,6 +254,7 @@ export function Sidebar({ open = false, onNavigate }: { open?: boolean; onNaviga
         >
           <area.icon aria-hidden="true" className="size-4 shrink-0" />
           <span className="flex-1">{area.label}</span>
+          {area.path === '/host' && <HostMark host={host} />}
           {area.phase !== null && (
             /* The chip fill and the active row's highlight were the same
                token, so the open page's badge lost its pill while every other
@@ -259,5 +280,34 @@ export function Sidebar({ open = false, onNavigate }: { open?: boolean; onNaviga
       {/* AGPL section 13: the running instance has to offer its own source. */}
       <SourceNotice className="px-2 pt-1 text-xs text-sidebar-foreground/60" />
     </nav>
+  )
+}
+
+/**
+ * The mark in the Host entry, in the slot a P{n} chip would take. Nothing
+ * before the first answer (nothing has been asked yet, and a grey ring would
+ * claim "not readable"). When the latest poll failed, the ring with "did not
+ * answer" -- never the state of an earlier answer: an unanswered question is
+ * not an answer, and a green dot kept from before would vouch for a host
+ * nobody heard from (the wall's rule, T-12-14). Otherwise the server's state,
+ * with its summary as the title.
+ */
+function HostMark({ host }: { host: { data?: Host; error: unknown } }) {
+  if (host.error) {
+    return (
+      <HostStateMark
+        state="unanswered"
+        summary="holzkube-manager did not answer the latest request."
+        form="sidebar"
+      />
+    )
+  }
+  if (host.data === undefined) return null
+  return (
+    <HostStateMark
+      state={host.data.health.state}
+      summary={host.data.health.summary}
+      form="sidebar"
+    />
   )
 }
