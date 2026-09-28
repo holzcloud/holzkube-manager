@@ -695,7 +695,7 @@ verdict; the `detail` names both versions there, so an operator can tell the
 version decline from the architecture one. This is a
 recorded constraint rather than a defect — the
 reasoning and the decided direction are in
-`.planning/phases/02-transport-seam-talossim-image-factory/02-DECISION-schematic-identity.md`.
+`.planning/milestones/v1.14-phases/02-transport-seam-talossim-image-factory/02-DECISION-schematic-identity.md`.
 
 The `201` body is the schematic resource plus:
 

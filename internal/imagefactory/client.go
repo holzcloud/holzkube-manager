@@ -45,7 +45,7 @@ const (
 	// budget is at least twice the slowest observed cold response for the
 	// workload it bounds, rounded up to the next thirty seconds. The
 	// observations are the five cold probes recorded in
-	// .planning/phases/02-transport-seam-talossim-image-factory/02-DECISION-probe-budget.md,
+	// .planning/milestones/v1.14-phases/02-transport-seam-talossim-image-factory/02-DECISION-probe-budget.md,
 	// measured across two investigators: 30.50, 30.59, 31.18, 31.52 and 32.69
 	// seconds. The slowest doubles to 65.38 and rounds to 90.
 	//

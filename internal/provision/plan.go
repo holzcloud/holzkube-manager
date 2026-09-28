@@ -353,7 +353,7 @@ func VerifyMachine(ctx context.Context, d talos.Dialer, addr string, want model.
 //
 // The number is a placeholder until phase 4's measurement replaces it, and it
 // is written here rather than guessed at each call site so that replacing it is
-// one edit. See `.planning/phases/04-walking-skeleton/04-SUMMARY.md`.
+// one edit. See `.planning/milestones/v1.14-phases/04-walking-skeleton/04-SUMMARY.md`.
 const ReappearBudget = 8 * time.Minute
 
 // ReappearState is one of the three answers the probe can give (PROV-09).

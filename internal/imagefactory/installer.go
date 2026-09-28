@@ -65,7 +65,7 @@ const legacyInstallerRepo = "installer"
 // resolution's own bookkeeping for exactly this reason. This interval bounds how
 // often an unproven answer is re-asked and it still moves no deadline; the two
 // mechanisms are independent and the decision behind both is
-// .planning/phases/02-transport-seam-talossim-image-factory/02-DECISION-probe-budget.md.
+// .planning/milestones/v1.14-phases/02-transport-seam-talossim-image-factory/02-DECISION-probe-budget.md.
 // cmd/holzkube-managerd/budget_test.go composes them and fails in both
 // directions. Do not "simplify" this constant away against the UAT's wording
 // without reading that document first.
