@@ -104,6 +104,14 @@ func Assess(l Live) Health {
 			unreadable = append(unreadable, "Usage of "+row.Mount+" could not be read"+because(row.Usage.Reason))
 			continue
 		}
+		// A statfs with no blocks -- some FUSE filesystems, a pseudo-fs bound
+		// over the data directory -- gives no usage figure at all: "below 80%"
+		// would be a green nothing measured (D-12). A sum that wrapped is no
+		// figure either.
+		if u := *row.Usage.Value; u.UsedBytes+u.AvailableBytes == 0 || u.UsedBytes+u.AvailableBytes < u.UsedBytes {
+			unreadable = append(unreadable, "Usage of "+row.Mount+" reports no capacity.")
+			continue
+		}
 		if f, ok := filesystemFinding(row.Mount, *row.Usage.Value); ok {
 			found = append(found, f)
 		}
@@ -189,8 +197,8 @@ func temperatureFindings(temps []inventory.HardwareTemperature) []finding {
 // one of them wrong.
 func filesystemFinding(mount string, u FSUsage) (finding, bool) {
 	total := u.UsedBytes + u.AvailableBytes
-	// A sum that wrapped cannot come from statfs; it is not rated rather
-	// than divided by (bits.Div64 would panic on it).
+	// Assess has listed a zero or wrapped sum as unreadable already; the
+	// guard stays so that bits.Div64 can never panic here.
 	if total == 0 || total < u.UsedBytes {
 		return finding{}, false
 	}

@@ -1646,6 +1646,9 @@ decision; none of them works one out.
   listed, or a fallback thermal zone whose `temp` fails is named in
   `unreadable` ("Temperature cpu_thermal temp1 could not be read."), so a host
   whose every input failed is `unknown`, never the sensor-less `ok`.
+- **A filesystem that reports no capacity** (used + available is 0, as some
+  FUSE and pseudo filesystems do) gives no usage figure, and is listed in
+  `unreadable` ("Usage of / reports no capacity.") rather than rated below 80%.
 - `health` is taken from the same reading as `live`, so the two never
   disagree within one answer. The thresholds are not configurable.
 
