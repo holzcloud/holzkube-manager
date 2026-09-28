@@ -2,11 +2,12 @@ import { useQuery } from '@tanstack/react-query'
 import { createRoute } from '@tanstack/react-router'
 import type { ReactNode } from 'react'
 import { api, type Host, type Reason } from '@/api'
+import { Meter } from '@/components/charts/Meter'
 import { HARDWARE_POLL_INTERVAL_MS } from '@/components/NodeHardware'
 import { Problem } from '@/components/Problem'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { formatUptime } from '@/lib/format'
+import { formatBytes, formatPercent, formatUptime } from '@/lib/format'
 import { authenticatedRoute } from '@/routes/__root'
 
 /**
@@ -62,6 +63,9 @@ export function HostView({ host, stale }: { host: Host; stale: unknown }) {
   const isStale = stale !== null && stale !== undefined
   const observed = new Date(host.observed_at)
   const d = host.device
+  const hidden = hiddenByHardening(host)
+  const load = host.live.cpu.load
+  const rates = host.live.rates_over_seconds
 
   return (
     <section className="space-y-5">
@@ -86,6 +90,30 @@ export function HostView({ host, stale }: { host: Host; stale: unknown }) {
           holzkube-manager runs in a container. Kernel, CPU, memory and temperatures are the host's;
           hostname, network and filesystems are the container's.
         </p>
+      )}
+      {hidden.length > 0 && (
+        <div className="rounded-md border border-slate-500/40 bg-slate-500/10 px-3 py-2 text-sm text-slate-700 dark:text-slate-300">
+          <p>
+            <strong className="font-semibold">
+              Some readings are hidden by the service's hardening.
+            </strong>{' '}
+            The systemd unit sets <code className="font-mono">ProcSubset=pid</code>, which hides
+            /proc/stat and /proc/meminfo from holzkube-manager, so {joinList(hidden)}{' '}
+            {hidden.length === 1 ? 'is' : 'are'} shown as not readable rather than as zero.
+            {load.readable && load.value.source === 'sysinfo' && (
+              <> Load is still exact; it comes from sysinfo(2).</>
+            )}{' '}
+            To show them, set this line in the unit's [Service] section, then reload systemd and
+            restart the service:
+          </p>
+          <code className="mt-2 block overflow-x-auto rounded-sm bg-muted px-2 py-1 font-mono text-xs">
+            ProcSubset=all
+          </code>
+          <p className="mt-2">
+            <code className="font-mono">ProtectProc=invisible</code> can stay: other processes
+            remain hidden either way.
+          </p>
+        </div>
       )}
 
       <div className={isStale ? 'space-y-5 opacity-60' : 'space-y-5'}>
@@ -136,12 +164,165 @@ export function HostView({ host, stale }: { host: Host; stale: unknown }) {
           </Card>
         </div>
 
+        <LiveSection host={host} />
+
         <p className="text-xs text-muted-foreground">
           Read {observed.toLocaleTimeString()}, every 3 s while this page is open.
+          {rates !== null && ` Rates are over the last ${rates.toFixed(1)} s.`}
         </p>
       </div>
     </section>
   )
+}
+
+/**
+ * The Live block (HMON-01): figures and meters of the moment, no curves --
+ * history is Phase 12's.
+ */
+function LiveSection({ host }: { host: Host }) {
+  return (
+    <section aria-labelledby="host-live" className="space-y-4">
+      <div>
+        <h2 id="host-live" className="text-base font-semibold">
+          Live
+        </h2>
+        <p className="text-sm text-muted-foreground">
+          Read every 3 s while this page is open. Nothing on this page is stored.
+        </p>
+      </div>
+      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_20rem]">
+        <div className="min-w-0 space-y-4">
+          <ProcessorCard host={host} />
+          <div className="grid gap-4 md:grid-cols-2">
+            <MemoryCard memory={host.live.memory} />
+          </div>
+        </div>
+      </div>
+    </section>
+  )
+}
+
+function ProcessorCard({ host }: { host: Host }) {
+  const { usage, per_core: perCore, load } = host.live.cpu
+  const cores = host.device.cores
+  return (
+    <Card>
+      <CardHeader className="flex flex-row items-start justify-between gap-3">
+        <div className="min-w-0">
+          <CardTitle className="text-base">Processor</CardTitle>
+          {cores.readable && (
+            <p className="truncate text-sm text-muted-foreground">{cores.value} cores</p>
+          )}
+        </div>
+        <div className="text-right">
+          {usage.readable ? (
+            <p className="font-semibold text-xl tabular-nums">{formatPercent(usage.value)}</p>
+          ) : (
+            <MissingValue reason={usage.reason} align="right" />
+          )}
+          {/* Load survives the hardening (it comes from sysinfo(2)), so it is
+              shown whenever it was read, whatever happened to usage. */}
+          {load.readable ? (
+            <p className="text-xs text-muted-foreground tabular-nums">
+              load {load.value.load1.toFixed(2)} · {load.value.load5.toFixed(2)} ·{' '}
+              {load.value.load15.toFixed(2)}
+            </p>
+          ) : (
+            <p className="text-xs text-muted-foreground">
+              Load not readable: {reasonDetail(load.reason)}
+            </p>
+          )}
+        </div>
+      </CardHeader>
+      {/* Per-core meters only for numbers that were read: an unread or not yet
+          computed core is left out, never drawn as an empty bar. */}
+      {perCore.readable && perCore.value.length > 0 && (
+        <CardContent>
+          <div className="grid grid-cols-2 gap-x-4 gap-y-2 sm:grid-cols-4">
+            {perCore.value.map((u, i) => (
+              <Meter
+                // biome-ignore lint/suspicious/noArrayIndexKey: the index IS the CPU's name
+                key={i}
+                dense
+                label={`CPU ${i}`}
+                display={formatPercent(u)}
+                value={u}
+                max={100}
+                warn={75}
+                danger={90}
+              />
+            ))}
+          </div>
+        </CardContent>
+      )}
+    </Card>
+  )
+}
+
+function MemoryCard({ memory }: { memory: Host['live']['memory'] }) {
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-base">Memory</CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        {memory.readable ? (
+          <>
+            <Meter
+              label="Memory"
+              display={formatPercent(share(memory.value.used_bytes, memory.value.total_bytes))}
+              value={memory.value.used_bytes}
+              max={memory.value.total_bytes}
+              detail={`${formatBytes(memory.value.used_bytes)} of ${formatBytes(memory.value.total_bytes)} · ${formatBytes(memory.value.cache_bytes)} cache · ${formatBytes(memory.value.available_bytes)} available`}
+            />
+            {memory.value.swap_total_bytes > 0 ? (
+              <Meter
+                label="Swap"
+                display={formatPercent(
+                  share(memory.value.swap_used_bytes, memory.value.swap_total_bytes),
+                )}
+                value={memory.value.swap_used_bytes}
+                max={memory.value.swap_total_bytes}
+                detail={`${formatBytes(memory.value.swap_used_bytes)} of ${formatBytes(memory.value.swap_total_bytes)}`}
+              />
+            ) : (
+              <p className="text-sm text-muted-foreground">No swap configured.</p>
+            )}
+          </>
+        ) : (
+          // Memory and swap come from the same file: one reason covers both.
+          <MissingValue reason={memory.reason} />
+        )}
+      </CardContent>
+    </Card>
+  )
+}
+
+/** used as a percentage of total; NaN (drawn as "—") for a total of 0. */
+function share(used: number, total: number): number {
+  return total > 0 ? (used / total) * 100 : Number.NaN
+}
+
+const HARDENING = 'hardening.proc-subset'
+
+/**
+ * The readings the hardening hid, named from the response rather than from a
+ * fixed list, in the order the page shows them.
+ */
+function hiddenByHardening(host: Host): string[] {
+  const byHardening = (r: Reading<unknown>) => !r.readable && r.reason.code === HARDENING
+  const { cpu, memory } = host.live
+  const names: string[] = []
+  if (byHardening(cpu.usage) || byHardening(cpu.per_core)) names.push('CPU usage')
+  if (byHardening(cpu.load)) names.push('load')
+  if (byHardening(memory)) names.push('memory', 'swap')
+  return names
+}
+
+/** "A", "A and B", "A, B and C". */
+function joinList(items: string[]): string {
+  if (items.length <= 1) return items.join('')
+  return `${items.slice(0, -1).join(', ')} and ${items[items.length - 1]}`
 }
 
 function Mono({ children }: { children: ReactNode }) {
@@ -193,16 +374,21 @@ export function MissingValue({ reason, align }: { reason: Reason; align?: 'right
     )
   }
   const headline = reason.code === 'update.not-recorded' ? 'Not recorded' : 'Not readable'
-  const detail =
-    reason.code === 'hardening.proc-subset'
-      ? "Hidden by the unit's ProcSubset=pid — see the note at the top."
-      : reason.message
+  const detail = reasonDetail(reason)
   return (
     <div className={alignment}>
       <p className="text-sm text-muted-foreground">{headline}</p>
       {detail && <p className="text-xs text-muted-foreground">{detail}</p>}
     </div>
   )
+}
+
+/** The reason's second line: the short form for the hardening, whose full
+ *  explanation is the notice at the top; the server's sentence otherwise. */
+function reasonDetail(reason: Reason): string {
+  return reason.code === HARDENING
+    ? "Hidden by the unit's ProcSubset=pid — see the note at the top."
+    : reason.message
 }
 
 export const hostRoute = createRoute({

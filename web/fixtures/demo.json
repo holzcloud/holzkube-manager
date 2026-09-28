@@ -3240,6 +3240,27 @@
       "os": { "readable": true, "value": "Debian GNU/Linux 13 (trixie)" },
       "kernel": { "readable": true, "value": "6.18.50+rpt-rpi-2712" },
       "uptime_seconds": { "readable": true, "value": 26090 }
+    },
+    "live": {
+      "rates_over_seconds": 3.0,
+      "cpu": {
+        "usage": {
+          "readable": false,
+          "reason": { "code": "hardening.proc-subset", "message": "Hidden by the unit's ProcSubset=pid: /proc/stat is not visible to holzkube-manager. Set ProcSubset=all in the unit's [Service] section to show it." }
+        },
+        "per_core": {
+          "readable": false,
+          "reason": { "code": "hardening.proc-subset", "message": "Hidden by the unit's ProcSubset=pid: /proc/stat is not visible to holzkube-manager. Set ProcSubset=all in the unit's [Service] section to show it." }
+        },
+        "load": {
+          "readable": true,
+          "value": { "load1": 0.52, "load5": 0.41, "load15": 0.33, "source": "sysinfo" }
+        }
+      },
+      "memory": {
+        "readable": false,
+        "reason": { "code": "hardening.proc-subset", "message": "Hidden by the unit's ProcSubset=pid: /proc/meminfo is not visible to holzkube-manager. Set ProcSubset=all in the unit's [Service] section to show it." }
+      }
     }
   }
 }

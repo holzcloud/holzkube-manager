@@ -29,11 +29,51 @@ const hidden = (code: string, message: string) => ({
   reason: { code, message },
 })
 
+/** Everything read, a second reading in: the shape of an unhardened host. */
+function readableLive(overrides: Record<string, unknown> = {}) {
+  return {
+    rates_over_seconds: 3,
+    cpu: {
+      usage: read(18.2),
+      per_core: read([12.5, 0, 40, 97]),
+      load: read({ load1: 7.29, load5: 4.9, load15: 2.98, source: 'loadavg' }),
+    },
+    memory: read({
+      total_bytes: 8453947392,
+      used_bytes: 4093853696,
+      cache_bytes: 3259285504,
+      available_bytes: 4360093696,
+      swap_total_bytes: 2147467264,
+      swap_used_bytes: 1498169344,
+    }),
+    ...overrides,
+  }
+}
+
+const HARDENING_STAT =
+  "Hidden by the unit's ProcSubset=pid: /proc/stat is not visible to holzkube-manager. Set ProcSubset=all in the unit's [Service] section to show it."
+const HARDENING_MEMINFO =
+  "Hidden by the unit's ProcSubset=pid: /proc/meminfo is not visible to holzkube-manager. Set ProcSubset=all in the unit's [Service] section to show it."
+
+/** The production unit: /proc/stat and /proc/meminfo hidden, load from sysinfo(2). */
+function procSubsetLive() {
+  return {
+    rates_over_seconds: 3,
+    cpu: {
+      usage: hidden('hardening.proc-subset', HARDENING_STAT),
+      per_core: hidden('hardening.proc-subset', HARDENING_STAT),
+      load: read({ load1: 0.52, load5: 0.41, load15: 0.33, source: 'sysinfo' }),
+    },
+    memory: hidden('hardening.proc-subset', HARDENING_MEMINFO),
+  }
+}
+
 function hostShape(
   overrides: Record<string, unknown> = {},
   device: Record<string, unknown> = {},
 ): Host {
   return hostSchema.parse({
+    live: readableLive(),
     observed_at: '2026-09-28T10:00:03Z',
     container: false,
     device: {
@@ -78,7 +118,7 @@ describe('HostView', () => {
     expect(hostname).toHaveTextContent('example-host')
     expect(within(hostname).getByText('example-host')).toHaveClass('font-mono')
     expect(cellOf('Kernel')).toHaveTextContent('6.18.50+rpt-rpi-2712')
-    expect(screen.getByText(/every 3 s while this page is open/)).toBeInTheDocument()
+    expect(screen.getByText(/, every 3 s while this page is open/)).toBeInTheDocument()
   })
 
   it('draws an unreadable hostname as Not readable with its reason, never an empty cell', () => {
@@ -209,6 +249,140 @@ describe('the Device card', () => {
 
     expect(screen.queryByText(CONTAINER_SENTENCE)).toBeNull()
     expect(within(cellOf('Hostname')).queryByText('container')).toBeNull()
+  })
+})
+
+/** The Card whose title is this text. */
+function cardOf(title: string): HTMLElement {
+  const card = screen
+    .getByText(title, { selector: '[data-slot="card-title"]' })
+    .closest('[data-slot="card"]')
+  if (!(card instanceof HTMLElement)) throw new Error(`no card titled ${title}`)
+  return card
+}
+
+/** A zero drawn where a value belongs: "0%", "0.0%", "0 B". */
+const DRAWN_ZERO = /(^|\s)0(\.0)?%|(^|\s)0 B(\s|$)/
+
+/**
+ * No element inside `card` shows a zero. Per element rather than over the
+ * card's textContent: textContent glues neighbours together ("4 cores" and
+ * "0.0%" become "cores0.0%"), and the regex's word boundary then misses the
+ * very zero it is looking for (seen while injecting one).
+ */
+function expectNoDrawnZero(card: HTMLElement) {
+  const zeros = within(card)
+    .queryAllByText(DRAWN_ZERO)
+    .map((node) => node.textContent)
+  expect(zeros).toEqual([])
+}
+
+const HARDENING_HEADLINE = "Some readings are hidden by the service's hardening."
+
+describe('the Live section', () => {
+  it('under ProcSubset=pid says Not readable, names the hidden readings and the fix, never 0', () => {
+    wrap(<HostView host={hostShape({ live: procSubsetLive() })} stale={null} />)
+
+    expect(screen.getByRole('heading', { level: 2, name: 'Live' })).toBeInTheDocument()
+
+    const processor = cardOf('Processor')
+    const memory = cardOf('Memory')
+    for (const card of [processor, memory]) {
+      expect(card).toHaveTextContent('Not readable')
+      expect(card).toHaveTextContent(
+        "Hidden by the unit's ProcSubset=pid — see the note at the top.",
+      )
+      expectNoDrawnZero(card)
+    }
+    // No per-core meters, no memory meter: nothing to draw a bar for.
+    expect(within(processor).queryByText('CPU 0')).toBeNull()
+    expect(within(memory).queryByText('Swap')).toBeNull()
+    // Load survives the hardening.
+    expect(within(processor).getByText('load 0.52 · 0.41 · 0.33')).toBeInTheDocument()
+
+    const notice = screen.getByText(HARDENING_HEADLINE).closest('div')
+    if (!(notice instanceof HTMLElement)) throw new Error('no hardening notice')
+    expect(notice).toHaveTextContent('CPU usage, memory and swap are shown as not readable')
+    expect(notice).toHaveTextContent('Load is still exact; it comes from sysinfo(2).')
+    const fix = within(notice).getByText('ProcSubset=all', { selector: 'code' })
+    expect(fix).toHaveClass('block', 'overflow-x-auto')
+    expect(notice).toHaveTextContent('ProtectProc=invisible can stay')
+  })
+
+  it('draws a readable host: usage, four cores including a real 0 %, memory and load', () => {
+    wrap(<HostView host={hostShape()} stale={null} />)
+
+    const processor = cardOf('Processor')
+    expect(within(processor).getByText('18%')).toBeInTheDocument()
+    expect(within(processor).getByText('4 cores')).toBeInTheDocument()
+    expect(within(processor).getByText('load 7.29 · 4.90 · 2.98')).toBeInTheDocument()
+    for (const i of [0, 1, 2, 3]) {
+      expect(within(processor).getByText(`CPU ${i}`)).toBeInTheDocument()
+    }
+    // A core that did nothing is a reading, and it is drawn.
+    expect(within(processor).getByText('0.0%')).toBeInTheDocument()
+
+    const memory = cardOf('Memory')
+    expect(memory).toHaveTextContent('3.81 GiB of 7.87 GiB · 3.04 GiB cache · 4.06 GiB available')
+    expect(within(memory).getByText('Swap')).toBeInTheDocument()
+    expect(memory).toHaveTextContent('1.4 GiB of 2 GiB')
+
+    expect(screen.queryByText(HARDENING_HEADLINE)).toBeNull()
+    expect(screen.getByText(/Rates are over the last 3\.0 s\./)).toBeInTheDocument()
+  })
+
+  it('says No swap configured. for a readable swap total of 0, and draws no swap meter', () => {
+    const live = readableLive({
+      memory: read({
+        total_bytes: 8453947392,
+        used_bytes: 4093853696,
+        cache_bytes: 3259285504,
+        available_bytes: 4360093696,
+        swap_total_bytes: 0,
+        swap_used_bytes: 0,
+      }),
+    })
+    wrap(<HostView host={hostShape({ live })} stale={null} />)
+
+    const memory = cardOf('Memory')
+    expect(within(memory).getByText('No swap configured.')).toBeInTheDocument()
+    expect(within(memory).queryByText('Swap')).toBeNull()
+  })
+
+  it('before a second reading says so, with no core meters and no rates clause', () => {
+    const noBaseline = hidden('rate.no-baseline', 'Waiting for a second reading')
+    const live = readableLive({
+      rates_over_seconds: null,
+      cpu: { ...readableLive().cpu, usage: noBaseline, per_core: noBaseline },
+    })
+    wrap(<HostView host={hostShape({ live })} stale={null} />)
+
+    const processor = cardOf('Processor')
+    expect(within(processor).getByText('Waiting for a second reading')).toBeInTheDocument()
+    expect(within(processor).queryByText('CPU 0')).toBeNull()
+    expectNoDrawnZero(processor)
+    expect(within(processor).getByText('load 7.29 · 4.90 · 2.98')).toBeInTheDocument()
+    expect(screen.queryByText(/Rates are over/)).toBeNull()
+    expect(screen.queryByText(HARDENING_HEADLINE)).toBeNull()
+  })
+
+  it('shows no hardening notice when nothing carries the hardening code', () => {
+    const failed = hidden('read-failed', 'Could not read /proc/stat: permission denied')
+    const live = readableLive({ cpu: { ...readableLive().cpu, usage: failed, per_core: failed } })
+    wrap(<HostView host={hostShape({ live })} stale={null} />)
+
+    expect(screen.queryByText(HARDENING_HEADLINE)).toBeNull()
+    expect(screen.queryByText('ProcSubset=all')).toBeNull()
+    expect(cardOf('Processor')).toHaveTextContent('Could not read /proc/stat: permission denied')
+  })
+
+  it('lists only what the response hides', () => {
+    const live = { ...procSubsetLive(), memory: readableLive().memory }
+    wrap(<HostView host={hostShape({ live })} stale={null} />)
+
+    const notice = screen.getByText(HARDENING_HEADLINE).closest('div')
+    expect(notice).toHaveTextContent('so CPU usage is shown as not readable')
+    expect(notice).not.toHaveTextContent('memory and swap')
   })
 })
 
