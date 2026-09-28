@@ -1429,6 +1429,190 @@ never a `0` standing in for a value that could not be read. The reason codes are
 answer. A daemon started without a host reader answers
 `502 upstream.host-unavailable`.
 
+### GET /api/v1/host: read on every call, kept nowhere
+
+A full answer, from a Raspberry Pi under a systemd unit with
+`ProcSubset=pid`, shortened where a list repeats itself:
+
+```json
+{
+  "observed_at": "2026-09-28T10:00:03Z",
+  "container": false,
+  "device": {
+    "hostname": { "readable": true, "value": "example-host" },
+    "model": { "readable": true, "value": "Raspberry Pi 5 Model B Rev 1.0" },
+    "arch": { "readable": true, "value": { "goarch": "arm64", "machine": "aarch64" } },
+    "cores": { "readable": true, "value": 4 },
+    "os": { "readable": true, "value": "Debian GNU/Linux 13 (trixie)" },
+    "kernel": { "readable": true, "value": "6.12.47+rpt-rpi-2712" },
+    "uptime_seconds": { "readable": true, "value": 26090 }
+  },
+  "service": {
+    "version": "v0.1.0",
+    "started_at": "2026-09-28T08:00:00Z",
+    "uptime_seconds": 7203,
+    "data_dir": {
+      "path": "/var/lib/holzkube-manager",
+      "size": { "readable": true, "value": { "bytes": 432013312, "measured_at": "2026-09-28T09:59:40Z" } }
+    },
+    "update": {
+      "readable": false,
+      "reason": {
+        "code": "update.not-recorded",
+        "message": "The update script installed on this machine does not record its checks. Versions from this release on do; the next update brings it."
+      }
+    }
+  },
+  "live": {
+    "rates_over_seconds": 3.0,
+    "cpu": {
+      "usage": {
+        "readable": false,
+        "reason": {
+          "code": "hardening.proc-subset",
+          "message": "Hidden by the unit's ProcSubset=pid: /proc/stat is not visible to holzkube-manager. Set ProcSubset=all in the unit's [Service] section to show it."
+        }
+      },
+      "per_core": { "readable": false, "reason": { "code": "hardening.proc-subset", "message": "…" } },
+      "load": { "readable": true, "value": { "load1": 0.52, "load5": 0.41, "load15": 0.33, "source": "sysinfo" } }
+    },
+    "memory": { "readable": false, "reason": { "code": "hardening.proc-subset", "message": "…" } },
+    "filesystems": [
+      {
+        "mount": "/",
+        "device": "/dev/mmcblk0p2",
+        "fstype": "ext4",
+        "roles": ["root", "data directory"],
+        "usage": { "readable": true, "value": { "size_bytes": 125260451840, "used_bytes": 28882735104, "available_bytes": 91212472320 } }
+      }
+    ],
+    "sensors": {
+      "readable": true,
+      "value": {
+        "temperatures": [
+          { "chip": "cpu_thermal", "kind": "cpu", "label": "temp1", "celsius": 64.4, "high_c": null, "critical_c": null }
+        ],
+        "fans": []
+      }
+    },
+    "network": {
+      "readable": true,
+      "value": {
+        "physical": [
+          { "name": "eth0", "up": true, "speed_mbit": 1000, "rx_bytes_per_sec": 187900, "tx_bytes_per_sec": 42100 },
+          { "name": "wlan0", "up": false, "speed_mbit": null, "rx_bytes_per_sec": null, "tx_bytes_per_sec": null }
+        ],
+        "virtual": [
+          { "name": "lo", "up": false, "speed_mbit": null, "rx_bytes_per_sec": 1210, "tx_bytes_per_sec": 1210 }
+        ]
+      }
+    }
+  }
+}
+```
+
+**The reading rule.** A reading with `"readable": true` has a `value` and no
+`reason`. A reading with `"readable": false` has a `reason` with a `code` and a
+`message` and **no `value` key at all**. A readable `0` is sent as `0` -- no
+swap, an idle link, 0 % CPU -- so a client that sees a number may draw it, and a
+client that sees `readable: false` must not draw a number in its place. The
+`message` is the server's sentence for the operator; the `code` is what to
+branch on:
+
+| Code | When |
+|---|---|
+| `hardening.proc-subset` | `/proc/stat`, `/proc/meminfo` or `/proc/loadavg` does not exist **and** the topmost `/proc` mount carries `subset=pid` in its super options (the last field of that line in `/proc/self/mountinfo`, not the per-mount options before the separator) -- what systemd's `ProcSubset=pid` does. Absence without that proof is `read-failed`. Applies to `live.cpu.usage`, `live.cpu.per_core` and `live.memory`; load does not end up here, see below. |
+| `read-failed` | the source exists in principle and reading it failed: a file missing without the proof above, a permission error, an unparsable file, a status file that is not what the update script writes, a `statfs(2)` that failed for one filesystem row, a `/sys/class/hwmon` or `/sys/class/net` that exists and could not be listed, a data-directory walk that took longer than 5 s. The message names the path and the error. |
+| `rate.no-baseline` | CPU usage and per-core usage need two readings of `/proc/stat` taken between 0.5 s and 5 minutes apart, and there is no such pair: the first call after the daemon started, a call less than 0.5 s after the previous one, or one more than 5 minutes after it. Per-core usage alone says so when a core came online or went offline between the two readings. |
+| `update.not-recorded` | `service.update` only: the status file does not exist, because the installed update script predates it or has not run yet -- or the daemon runs in a container, where the host's update timer does not run. A state, not a fault. |
+| `unsupported` | this platform has no such source at all: a darwin build, where none of the Linux interfaces exist. |
+
+**Load survives the hardening.** `live.cpu.load` comes from `/proc/loadavg` when
+it is readable (`"source": "loadavg"`) and otherwise from `sysinfo(2)`
+(`"source": "sysinfo"`), rendered to the same two decimals `/proc/loadavg`
+prints. The numbers are the same either way; the source is there so a page can
+say why load is shown when CPU usage is not.
+
+**Keys that may be `null`**, and nothing else is:
+
+| Key | Null when |
+|---|---|
+| `live.rates_over_seconds` | there is no usable previous reading to compute a rate against. Otherwise the window every rate in this answer was taken over, to a tenth of a second. |
+| `speed_mbit` | the link reports no speed: it is down (the kernel answers the read with `EINVAL`), or it is a kind of link that has none. |
+| `rx_bytes_per_sec`, `tx_bytes_per_sec` | this call has no rate for the link: the first read, a link that appeared since the previous call, or a counter that went backwards (the interface was recreated; both are then null). Never `0` for "unknown" -- `0` is an idle link. |
+| `high_c`, `critical_c` | the chip sets no such limit. Thermal zones never supply one: a zone's critical trip sits far above where the firmware throttles. |
+| `installed`, `latest` (in `service.update.value`) | the update run ended as `failed` before it learned that version. For every other outcome both are set. |
+
+**Lists are never `null`**: `filesystems`, `roles`, `per_core`,
+`temperatures`, `fans`, `physical` and `virtual` are `[]` when empty. A machine
+without `/sys/class/hwmon` or `/sys/class/net` answers readable empty lists;
+only a directory that exists and cannot be listed is `read-failed`.
+
+**Sections.**
+
+- `container` is true when `/.dockerenv` or `/run/.containerenv` exists or PID
+  1's environment carries `container=`. Kernel, CPU, memory and temperatures
+  are then the host's, and hostname, network and filesystems the container's.
+- `device` comes from sources that survive `ProcSubset=pid`: `uname(2)` for
+  hostname, kernel and `arch.machine`; the device tree's `model` or DMI for
+  `model`; `PRETTY_NAME` from os-release for `os`; the online CPU list under
+  `/sys/devices/system/cpu` for `cores`; `CLOCK_BOOTTIME` for `uptime_seconds`.
+  `arch.goarch` is what this binary was built for.
+- `service.version`, `started_at` and `uptime_seconds` are this process's own
+  and always there. `data_dir.size` is measured the way `du -s -B1` measures --
+  allocated blocks, each inode once, symlinks not followed -- at most once a
+  minute; `measured_at` says how old the number is.
+- `live.filesystems` are exactly two paths' filesystems, `/` and the data
+  directory's, and **one row when they are one filesystem**. That is decided by
+  device number (`stat(2)`'s `st_dev`), never by mount point: under
+  `ProtectSystem=strict` systemd bind-mounts the data directory over itself, so
+  the mount table has two lines for one partition. The merged row carries both
+  roles and the root entry's name. `used_bytes` is `blocks - bfree` and
+  `available_bytes` is `bavail`, as `df` computes them; the root reserve is in
+  neither.
+- `live.sensors` are hwmon's temperatures and fans; where no hwmon chip is a
+  CPU, the thermal zones are added. `kind` is `cpu`, `board`, `disk`, `gpu` or
+  `other` -- the node page's classification, by driver name.
+- `live.network.physical` are the interfaces with a `device` link under
+  `/sys/class/net/<name>/`; everything else -- loopback, bridges, veths -- is
+  `virtual`. Both sorted by name. The listing stops at 512 interfaces.
+
+**Polling, auditing, upstream.** The route reads this process's own namespace on
+every call; nothing is stored and nothing is cached except the data-directory
+size. The page polls it every 3 s (`HARDWARE_POLL_INTERVAL_MS`), and CPU and
+network rates are the difference to the previous call's counters, which the
+daemon keeps in memory. It needs a session with the reader role, **is not
+audited** -- reading is not an action -- and **reaches no upstream**: no node,
+no Kubernetes API, no network at all. A daemon started without a host reader
+answers `502 upstream.host-unavailable`.
+
+**The update status file.** `service.update` is what
+`deploy/holzkube-manager-update.sh` recorded after its last run that reached a
+decision. The script runs as root and writes
+`/var/lib/holzkube-manager-update/status.json` -- directory owned by root, mode
+`0755`, file mode `0644`, written atomically through a temporary file in the
+same directory and `mv`. It is deliberately **not** in the daemon's data
+directory: root does not write into a directory an unprivileged user owns.
+
+```json
+{"checked_at": "2026-09-28T09:00:12Z", "installed": "v0.1.0", "latest": "v0.1.1", "outcome": "available"}
+```
+
+| Field | Meaning |
+|---|---|
+| `checked_at` | when the run ended, RFC 3339 in UTC |
+| `installed` | the version installed when the run ended; `null` only for `failed` |
+| `latest` | the newest release the run saw; `null` only for `failed` |
+| `outcome` | `current` (installed is the newest), `available` (`--check` found a newer one and changed nothing), `updated` (the newest was installed and came back healthy), `rolled-back` (it did not, and the previous binary was put back), `failed` (the run ended with an error before any of those) |
+
+The daemon only reads it, strictly: at most 4096 bytes, one JSON object, those
+four fields, an RFC 3339 time, one of the five outcomes, versions matching
+`^v?[0-9A-Za-z.+-]{1,64}$`. A file that is not that is `read-failed` with the
+field and the rule named -- never a partially filled status, never an invented
+time or version. The path is set with `--update-status-file`
+(`HOLZKUBE_MANAGER_UPDATE_STATUS_FILE`), default
+`/var/lib/holzkube-manager-update/status.json`.
+
 ## Cluster templates
 
 Two routes, and **neither of them applies anything**. That is the scope and it
