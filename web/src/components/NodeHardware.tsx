@@ -1,10 +1,16 @@
 import { useQuery } from '@tanstack/react-query'
 import { Link } from '@tanstack/react-router'
-import { Fan } from 'lucide-react'
 import { api, type Hardware, type Machine, type Temperature } from '@/api'
 import { LiveChart } from '@/components/charts/LiveChart'
 import { Meter, severityOf } from '@/components/charts/Meter'
 import { RangePicker } from '@/components/charts/RangePicker'
+import {
+  FanList,
+  SEVERITY_COLOR,
+  Sensors,
+  sensorKey,
+  TEMPERATURE_DEFAULTS,
+} from '@/components/charts/Sensors'
 import { Sparkline } from '@/components/charts/Sparkline'
 import { Problem } from '@/components/Problem'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -27,40 +33,6 @@ import { formatBytes, formatCores, formatPercent, formatRate } from '@/lib/forma
  */
 
 export const HARDWARE_POLL_INTERVAL_MS = 3_000
-
-/**
- * Where a temperature turns amber and where it turns red, when the chip does
- * not say.
- *
- * The chip's own `high` and `crit` win whenever it reports them: Intel's
- * TjMax, an NVMe drive's warning composite temperature, are the manufacturer's
- * numbers and better than any default. These are for chips that report only a
- * reading, and they are the conventional ones -- a desktop CPU at 80 °C is
- * working hard, a drive at 60 °C is past where its life shortens.
- */
-const TEMPERATURE_DEFAULTS = {
-  cpu: { warn: 80, danger: 95 },
-  disk: { warn: 60, danger: 70 },
-  board: { warn: 70, danger: 85 },
-  gpu: { warn: 80, danger: 95 },
-  other: { warn: 75, danger: 90 },
-} as const satisfies Record<string, { warn: number; danger: number }>
-
-export function temperatureLimits(t: Temperature): { warn: number; danger: number } {
-  const fallback: { warn: number; danger: number } =
-    TEMPERATURE_DEFAULTS[t.kind as keyof typeof TEMPERATURE_DEFAULTS] ?? TEMPERATURE_DEFAULTS.other
-  const danger = t.critical_c ?? fallback.danger
-  const warn = t.high_c !== null && t.high_c < danger ? t.high_c : Math.min(fallback.warn, danger)
-  return { warn, danger }
-}
-
-const KIND_LABEL: Record<string, string> = {
-  cpu: 'Processor',
-  board: 'Mainboard',
-  disk: 'Drives',
-  gpu: 'Graphics',
-  other: 'Other',
-}
 
 /** The hottest processor sensor: the package reading if there is one. */
 export function cpuTemperature(h: Hardware): Temperature | undefined {
@@ -367,46 +339,25 @@ export function NodeHardware({ machine }: { machine: Machine }) {
             <p className="text-muted-foreground text-sm">Temperatures and fans, live</p>
           </CardHeader>
           <CardContent className="space-y-4">
-            <Sensors temperatures={h.temperatures} history={history} />
+            <Sensors
+              temperatures={h.temperatures}
+              history={history}
+              emptyText="This node reports no temperature sensors."
+            />
             {h.sensors_notice !== '' && (
               <p className="text-muted-foreground text-xs">{h.sensors_notice}</p>
             )}
             <div>
               <p className="mb-1 text-muted-foreground text-xs">Fans</p>
-              {h.fans.length === 0 ? (
-                <p className="text-muted-foreground text-sm">
-                  This node reports no fans. That usually means its fan controller has no driver in
-                  the Talos kernel — not that it has none.
-                </p>
-              ) : (
-                <ul className="space-y-1">
-                  {h.fans.map((f) => (
-                    <li
-                      key={`${f.chip}/${f.label}`}
-                      className="flex items-center justify-between gap-2 text-sm"
-                    >
-                      <span className="flex min-w-0 items-center gap-1.5">
-                        <Fan
-                          aria-hidden="true"
-                          className={
-                            f.rpm > 0
-                              ? 'size-3.5 shrink-0 animate-spin [animation-duration:2s]'
-                              : 'size-3.5 shrink-0 text-muted-foreground'
-                          }
-                        />
-                        <span className="truncate">{f.label}</span>
-                      </span>
-                      <span className="tabular-nums">
-                        {f.rpm > 0 ? (
-                          `${f.rpm} RPM`
-                        ) : (
-                          <span className="text-muted-foreground">stopped</span>
-                        )}
-                      </span>
-                    </li>
-                  ))}
-                </ul>
-              )}
+              <FanList
+                fans={h.fans}
+                empty={
+                  <p className="text-muted-foreground text-sm">
+                    This node reports no fans. That usually means its fan controller has no driver
+                    in the Talos kernel — not that it has none.
+                  </p>
+                }
+              />
             </div>
           </CardContent>
         </Card>
@@ -420,85 +371,6 @@ export function NodeHardware({ machine }: { machine: Machine }) {
         {h.rates_over_seconds.toFixed(1)} s.
       </p>
     </section>
-  )
-}
-
-const SEVERITY_COLOR = {
-  ok: 'var(--viz-ok)',
-  warn: 'var(--viz-warn)',
-  danger: 'var(--viz-danger)',
-} as const
-
-/** A sensor's identity across readings: its chip and its label. */
-export function sensorKey(t: Temperature): string {
-  return `${t.chip}/${t.label}`
-}
-
-/**
- * The sensor column: every temperature the node reports, grouped by what it
- * measures, each with its recent past and its figure.
- */
-function Sensors({
-  temperatures,
-  history,
-}: {
-  temperatures: Temperature[]
-  history: Record<string, { t: number; v: number }[]>
-}) {
-  if (temperatures.length === 0) {
-    return (
-      <p className="text-muted-foreground text-sm">This node reports no temperature sensors.</p>
-    )
-  }
-  const groups = ['cpu', 'board', 'disk', 'gpu', 'other']
-    .map((kind) => ({ kind, items: temperatures.filter((t) => (t.kind || 'other') === kind) }))
-    .filter((g) => g.items.length > 0)
-  return (
-    <div className="space-y-3">
-      {groups.map((g) => (
-        <div key={g.kind}>
-          <p className="mb-1 text-muted-foreground text-xs">{KIND_LABEL[g.kind] ?? g.kind}</p>
-          <ul className="divide-y">
-            {g.items.map((t) => {
-              const limits = temperatureLimits(t)
-              const severity = severityOf(t.celsius, limits.warn, limits.danger)
-              return (
-                <li
-                  key={sensorKey(t)}
-                  data-severity={severity}
-                  className="flex items-center justify-between gap-2 py-1.5"
-                >
-                  <span className="min-w-0">
-                    <span className="block truncate text-sm">{t.label || t.chip}</span>
-                    <span className="block truncate text-muted-foreground text-xs">{t.chip}</span>
-                  </span>
-                  <Sparkline
-                    label={`${t.label || t.chip} temperature`}
-                    points={history[`temp:${sensorKey(t)}`] ?? []}
-                    max={limits.danger}
-                    width={64}
-                    height={22}
-                    color={SEVERITY_COLOR[severity]}
-                  />
-                  <span className="w-16 shrink-0 text-right font-medium text-sm tabular-nums">
-                    {t.celsius.toFixed(0)} °C
-                    {severity !== 'ok' && (
-                      <span className="text-[color:var(--viz-danger)]">
-                        {' '}
-                        ▲
-                        <span className="sr-only">
-                          {severity === 'danger' ? ' critical' : ' high'}
-                        </span>
-                      </span>
-                    )}
-                  </span>
-                </li>
-              )
-            })}
-          </ul>
-        </div>
-      ))}
-    </div>
   )
 }
 

@@ -1224,6 +1224,31 @@ const nullableNumber = z
   .nullish()
   .transform((v) => v ?? null)
 
+/**
+ * One temperature sensor and one fan, as a node's hardware answer and the
+ * host's answer both carry them (inventory.HardwareTemperature and
+ * inventory.HardwareFan on the server). One schema each, so the two pages parse
+ * the same JSON the same way and hand it to the same components.
+ */
+export const temperatureSchema = z.object({
+  chip: z.string().default(''),
+  kind: z.string().default('other'),
+  label: z.string().default(''),
+  celsius: z.number(),
+  high_c: nullableNumber,
+  critical_c: nullableNumber,
+})
+
+export type Temperature = z.infer<typeof temperatureSchema>
+
+export const fanSchema = z.object({
+  chip: z.string().default(''),
+  label: z.string().default(''),
+  rpm: z.number().default(0),
+})
+
+export type Fan = z.infer<typeof fanSchema>
+
 export const hardwareSchema = z.object({
   machine: z.string(),
   hostname: z.string().default(''),
@@ -1285,29 +1310,8 @@ export const hardwareSchema = z.object({
     )
     .nullish()
     .transform(orEmpty),
-  temperatures: z
-    .array(
-      z.object({
-        chip: z.string().default(''),
-        kind: z.string().default('other'),
-        label: z.string().default(''),
-        celsius: z.number(),
-        high_c: nullableNumber,
-        critical_c: nullableNumber,
-      }),
-    )
-    .nullish()
-    .transform(orEmpty),
-  fans: z
-    .array(
-      z.object({
-        chip: z.string().default(''),
-        label: z.string().default(''),
-        rpm: z.number().default(0),
-      }),
-    )
-    .nullish()
-    .transform(orEmpty),
+  temperatures: z.array(temperatureSchema).nullish().transform(orEmpty),
+  fans: z.array(fanSchema).nullish().transform(orEmpty),
   sensors_notice: z.string().default(''),
 })
 
@@ -1338,7 +1342,6 @@ export const historySchema = z.object({
 })
 
 export type History = z.infer<typeof historySchema>
-export type Temperature = Hardware['temperatures'][number]
 
 export const clusterSchema = z.object({
   id: z.string(),
