@@ -18,6 +18,12 @@ export interface Point {
   /** Milliseconds since the epoch, from the reading's own timestamp. */
   t: number
   v: number
+  /**
+   * Set on a recorded point whose sample slot before it has no value: the
+   * daemon was not running, or the value could not be read. The curve breaks
+   * here however short the hole (see merge and segments).
+   */
+  gap?: true
 }
 
 export type Series = Record<string, Point[]>
@@ -52,9 +58,11 @@ export function append(
   }
   // A key this reading does not carry keeps its past, cut to the window, and
   // gets no point for now. A sensor that failed one read, or a CPU that turned
-  // unreadable, loses one point -- the chart shows the gap because no point
-  // exists for that time -- not its whole curve. Once all its points have aged
-  // out, the key is gone.
+  // unreadable, loses one point, not its whole curve. Once all its points have
+  // aged out, the key is gone. The page's own readings have no fixed slots, so
+  // segments() breaks their curve only past its tolerance (45 s, or three
+  // times the usual spacing): one missed 3-s poll is drawn across. The daemon's
+  // record, which has slots, breaks at every one that is empty (merge).
   for (const [name, points] of Object.entries(current)) {
     if (name in next) continue
     const kept = points.filter((p) => p.t >= cutoff)

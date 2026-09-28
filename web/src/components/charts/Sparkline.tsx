@@ -1,3 +1,4 @@
+import { segments } from '@/components/charts/LiveChart'
 import type { Point } from '@/hooks/useLiveSeries'
 
 /**
@@ -7,7 +8,9 @@ import type { Point } from '@/hooks/useLiveSeries'
  * to, and that figure is the value. The line only says "steady", "climbing" or
  * "spiking", which is the one thing the figure alone cannot say. `max` fixes the
  * scale where the quantity has a natural ceiling (100 %, a sensor's critical
- * temperature) so two sparklines side by side are comparable.
+ * temperature) so two sparklines side by side are comparable. Where readings
+ * stopped it breaks, as the large chart does (segments): small is no licence
+ * to draw a reading nobody took.
  */
 export function Sparkline({
   points,
@@ -34,13 +37,23 @@ export function Sparkline({
   const top = max ?? Math.max(1e-9, ...points.map((p) => p.v)) * 1.1
   const x = (t: number) => ((t - t0) / span) * width
   const y = (v: number) => height - 2 - (Math.min(v, top) / (top || 1)) * (height - 4)
-  const line = points
-    .map((p, i) => `${i === 0 ? 'M' : 'L'}${x(p.t).toFixed(1)},${y(p.v).toFixed(1)}`)
+  const runs = segments(points)
+  const paths = runs.map((run) =>
+    run.map((p, i) => `${i === 0 ? 'M' : 'L'}${x(p.t).toFixed(1)},${y(p.v).toFixed(1)}`).join(' '),
+  )
+  const line = paths.join(' ')
+  // Each run is filled down to the baseline under itself only.
+  const area = runs
+    .map((run, i) => {
+      const a = run[0] as Point
+      const b = run[run.length - 1] as Point
+      return `${paths[i]} L${x(b.t).toFixed(1)},${height} L${x(a.t).toFixed(1)},${height} Z`
+    })
     .join(' ')
 
   return (
     <svg role="img" aria-label={label} width={width} height={height} className="shrink-0">
-      <path d={`${line} L${width},${height} L0,${height} Z`} fill={color} fillOpacity={0.1} />
+      <path d={area} fill={color} fillOpacity={0.1} />
       <path d={line} fill="none" stroke={color} strokeWidth={1.5} strokeLinejoin="round" />
     </svg>
   )

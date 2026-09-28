@@ -105,6 +105,26 @@ describe("the limits are the server's", () => {
     expect(svg.querySelectorAll('path')[1]?.getAttribute('d')).toBe('M0.0,2.0 L64.0,11.0')
   })
 
+  // WR-04: a recorded slot with no reading breaks the sparkline too.
+  it('breaks the sparkline where a recorded sample is missing', () => {
+    render(
+      <Sensors
+        temperatures={[{ ...cpu, celsius: 30, warn_c: 55, danger_c: 60 }]}
+        history={{
+          'temp:cpu_thermal/temp1': [
+            { t: 0, v: 30 },
+            { t: 15_000, v: 31 },
+            { t: 45_000, v: 32, gap: true },
+            { t: 60_000, v: 33 },
+          ],
+        }}
+        emptyText="none"
+      />,
+    )
+    const svg = screen.getByRole('img', { name: /temp1 temperature/ })
+    expect(svg.querySelectorAll('path')[1]?.getAttribute('d')?.match(/M/g)).toHaveLength(2)
+  })
+
   it('refuses a temperature without its lines, on both pages', () => {
     const fixtures = demo as Record<string, unknown>
     const host = structuredClone(fixtures['/api/v1/host']) as {

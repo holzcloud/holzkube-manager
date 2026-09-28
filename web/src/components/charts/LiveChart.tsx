@@ -290,8 +290,11 @@ function stamp(t: number, windowMs: number): string {
 }
 
 /**
- * segments splits points where readings stopped: a gap longer than three
- * times the usual spacing (and at least 45 s, the heartbeat) starts a new run.
+ * segments splits points where readings stopped. A point marked `gap` -- a
+ * recorded sample whose slot before it is empty, see merge -- always starts a
+ * new run. Otherwise, for the page's own readings, which have no slots, a gap
+ * longer than three times the usual spacing (and at least 45 s, the heartbeat)
+ * starts one.
  */
 export function segments(points: Point[]): Point[][] {
   if (points.length === 0) return []
@@ -305,7 +308,7 @@ export function segments(points: Point[]): Point[][] {
   for (let i = 1; i < points.length; i++) {
     const p = points[i] as Point
     const prev = points[i - 1] as Point
-    if (p.t - prev.t > gap) runs.push([p])
+    if (p.gap === true || p.t - prev.t > gap) runs.push([p])
     else (lastOf(runs) as Point[]).push(p)
   }
   return runs
