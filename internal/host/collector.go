@@ -113,11 +113,54 @@ func (c *Collector) Read(ctx context.Context) View {
 	now := c.cfg.Now()
 	v := View{ObservedAt: now.UTC()}
 
+	if platformUnsupported(c.cfg.Sys) {
+		return c.readUnsupported(v, now)
+	}
+
 	v.Device = c.readDevice()
 	v.Container = detectContainer(c.cfg.FS)
 	v.Service = c.readService(ctx, now, v.Container)
 	v.Live = c.readLive()
 
+	return v
+}
+
+// readUnsupported is the answer on a platform with no readings (a darwin
+// build): every reading says unsupported, and only what the process knows
+// about itself -- its version, when it started, where its data is -- is
+// stated. The filesystem rows still ask statfs, which answers unsupported
+// there too.
+func (c *Collector) readUnsupported(v View, now time.Time) View {
+	r := reasonFor("", errUnsupported)
+	v.Device = Device{
+		Hostname:      Hidden[string](r),
+		Model:         Hidden[string](r),
+		Arch:          Hidden[Arch](r),
+		Cores:         Hidden[int](r),
+		OS:            Hidden[string](r),
+		Kernel:        Hidden[string](r),
+		UptimeSeconds: Hidden[int64](r),
+	}
+	v.Service = Service{
+		Version:   c.cfg.Version,
+		StartedAt: c.cfg.Started.UTC(),
+		DataDir:   DataDir{Path: c.cfg.DataDir, Size: Hidden[DirSize](r)},
+		Update:    Hidden[updatestatus.Status](r),
+	}
+	if !c.cfg.Started.IsZero() {
+		v.Service.UptimeSeconds = int64(now.Sub(c.cfg.Started) / time.Second)
+	}
+	v.Live = Live{
+		CPU: CPU{
+			Usage:   Hidden[float64](r),
+			PerCore: Hidden[[]float64](r),
+			Load:    Hidden[Load](r),
+		},
+		Memory:      Hidden[inventory.HardwareMemory](r),
+		Filesystems: filesystems(nil, c.cfg.DataDir, c.cfg.Sys),
+		Sensors:     Hidden[Sensors](r),
+		Network:     Hidden[Network](r),
+	}
 	return v
 }
 

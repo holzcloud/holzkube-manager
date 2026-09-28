@@ -3,6 +3,7 @@ package host
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sort"
 	"strings"
 	"testing"
@@ -216,6 +217,67 @@ func walkNulls(node any, path string, found func(path, key string)) {
 				continue
 			}
 			walkNulls(child, path+"[]", found)
+		}
+	}
+}
+
+// unsupportedSys is the darwin build's Sys: every syscall unsupported, and
+// the marker that makes the collector read nothing else either.
+type unsupportedSys struct{ fakeSys }
+
+func (unsupportedSys) unsupportedPlatform() {}
+
+func newUnsupportedSys() unsupportedSys {
+	return unsupportedSys{fakeSys{
+		unameErr: errUnsupported, bootErr: errUnsupported, loadsErr: errUnsupported,
+		statfsErr: map[string]error{"/": errUnsupported, "/srv/holzkube-manager": errUnsupported},
+	}}
+}
+
+// TestUnsupportedPlatformReadsNothing (WR-03): on a platform without Linux's
+// interfaces every reading is unsupported -- none readable, and none a read
+// failure naming a Linux path. /sys and /proc are absent there, which the
+// readers would otherwise report as "no sensors" and "no interfaces".
+func TestUnsupportedPlatformReadsNothing(t *testing.T) {
+	t.Parallel()
+
+	c := New(Config{
+		FS: fstest.MapFS{}, Sys: newUnsupportedSys(), Now: func() time.Time { return fixedNow },
+		DataDir: "/srv/holzkube-manager", Version: "0.1.0", Started: fixedNow.Add(-time.Hour),
+	})
+	for round := range 2 {
+		wire := marshalView(t, c.Read(context.Background()))
+		readings := 0
+		var walk func(path string, x any)
+		walk = func(path string, x any) {
+			switch v := x.(type) {
+			case map[string]any:
+				if _, has := v["readable"]; has {
+					readings++
+					reason, _ := v["reason"].(map[string]any)
+					if v["readable"] != false || reason["code"] != CodeUnsupported {
+						t.Errorf("round %d %s = %v, want not readable with code %s", round, path, v, CodeUnsupported)
+					}
+					return
+				}
+				for k, e := range v {
+					walk(path+"."+k, e)
+				}
+			case []any:
+				for i, e := range v {
+					walk(fmt.Sprintf("%s[%d]", path, i), e)
+				}
+			}
+		}
+		walk("", wire)
+		// device 7, service 2, live cpu 3 + memory + sensors + network, and
+		// the two filesystem rows.
+		if readings != 17 {
+			t.Errorf("round %d: %d readings on the page, want 17", round, readings)
+		}
+		svc, _ := wire["service"].(map[string]any)
+		if svc["version"] != "0.1.0" || svc["uptime_seconds"] != 3600.0 {
+			t.Errorf("round %d: service = %v, want the process's own version and uptime", round, svc)
 		}
 	}
 }
