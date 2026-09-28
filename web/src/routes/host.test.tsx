@@ -313,7 +313,7 @@ describe('HostView', () => {
 })
 
 const THRESHOLD_RULE =
-  "A temperature warns at its chip's own limit, or at a default for its kind (80 °C for a processor) when the chip names none; a filesystem warns at 80% used."
+  "A temperature warns at its chip's own limit, or at its thermal zone's trip point, or at a default for its kind (80 °C for a processor) when neither names one; a filesystem warns at 80% used."
 
 /** The mark on the header's state line. */
 function stateMark(): HTMLElement {

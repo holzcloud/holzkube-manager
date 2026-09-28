@@ -249,8 +249,9 @@ function WarningNotice({ health }: { health: HostHealth }) {
         <p className="mt-1 break-words">Also not readable: {health.unreadable.join(' ')}</p>
       )}
       <p className="mt-1 text-xs">
-        A temperature warns at its chip's own limit, or at a default for its kind (80 °C for a
-        processor) when the chip names none; a filesystem warns at 80% used.
+        A temperature warns at its chip's own limit, or at its thermal zone's trip point, or at a
+        default for its kind (80 °C for a processor) when neither names one; a filesystem warns at
+        80% used.
       </p>
     </div>
   )
