@@ -2,6 +2,12 @@ import { useQuery } from '@tanstack/react-query'
 import { createRoute } from '@tanstack/react-router'
 import type { ReactNode } from 'react'
 import { api, type Host, type Link, type Reason } from '@/api'
+import {
+  CoreList,
+  MemoryChart,
+  NetworkChart,
+  ProcessorChart,
+} from '@/components/charts/HardwareCharts'
 import { Meter } from '@/components/charts/Meter'
 import { RangePicker } from '@/components/charts/RangePicker'
 import { FanList, Sensors, sensorKey } from '@/components/charts/Sensors'
@@ -20,13 +26,19 @@ import { authenticatedRoute } from '@/routes/__root'
  *
  * Every other page in this product is about the cluster; this one is about the
  * box beside it -- on the operator's installation a Raspberry Pi. It is read
- * live, every 3 s while the page is open, and nothing on it is stored.
+ * live, every 3 s while the page is open, and since Phase 12 the daemon also
+ * records it every 15 s under host/local and keeps 24 hours of it, through a
+ * restart; the curves are that record followed by this page's own readings,
+ * drawn by the node page's own chart blocks (D-05).
  *
  * The rule the whole page is built around (D-02): a value the daemon could not
  * read is drawn as "Not readable" with the reason, and never as a zero or an
  * empty cell. The production unit hides /proc/stat and /proc/meminfo from the
  * daemon, so an unread value is an everyday state here, not an error -- and a
  * 0 % that is really "could not look" is the one lie this page must not tell.
+ * On a curve that rule reads: an unread value is no point at all, so a stretch
+ * without readings is a gap, and a value never read in the window gets a
+ * sentence instead of an empty axis (HistorySlot).
  * The schema makes the renderer branch on `readable` before it can format
  * anything; MissingValue is the only way a missing value is drawn.
  */
@@ -110,7 +122,8 @@ export function HostView({ host, stale }: { host: Host; stale: unknown }) {
             </strong>{' '}
             The systemd unit sets <code className="font-mono">ProcSubset=pid</code>, which hides
             /proc/stat and /proc/meminfo from holzkube-manager, so {joinList(hidden)}{' '}
-            {hidden.length === 1 ? 'is' : 'are'} shown as not readable rather than as zero.
+            {hidden.length === 1 ? 'is' : 'are'} shown as not readable rather than as zero, and{' '}
+            {hidden.length === 1 ? 'is' : 'are'} not recorded.
             {load.readable && load.value.source === 'sysinfo' && (
               <> Load is still exact; it comes from sysinfo(2).</>
             )}{' '}
@@ -181,6 +194,7 @@ export function HostView({ host, stale }: { host: Host; stale: unknown }) {
         <p className="text-xs text-muted-foreground">
           Read {observed.toLocaleTimeString()}, every 3 s while this page is open.
           {rates !== null && ` Rates are over the last ${rates.toFixed(1)} s.`}
+          {' History is sampled every 15 s.'}
         </p>
       </div>
     </section>
@@ -416,8 +430,9 @@ function dfPercent(used: number, available: number): string {
 }
 
 /**
- * The Live block (HMON-01): figures and meters of the moment, no curves --
- * history is Phase 12's.
+ * The Readings block (HMON-01, HMON-05): the figures and meters of the moment,
+ * and over them the curves a node has -- processor, memory, network and the
+ * sensors' sparklines -- over the range the RangePicker chose.
  */
 function LiveSection({
   host,
@@ -429,13 +444,14 @@ function LiveSection({
   history: Series
 }) {
   return (
-    <section aria-labelledby="host-live" className="space-y-4">
+    <section aria-labelledby="host-readings" className="space-y-4">
       <div>
-        <h2 id="host-live" className="text-base font-semibold">
-          Live
+        <h2 id="host-readings" className="text-base font-semibold">
+          Readings
         </h2>
         <p className="text-sm text-muted-foreground">
-          Read every 3 s while this page is open. Nothing on this page is stored.
+          Read every 3 s while this page is open. holzkube-manager also records them every 15 s and
+          keeps the last 24 hours, through a restart.
         </p>
       </div>
       <RangePicker
@@ -449,15 +465,17 @@ function LiveSection({
       />
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_20rem]">
         <div className="min-w-0 space-y-4">
-          <ProcessorCard host={host} />
+          <ProcessorCard host={host} history={history} windowMs={chart.windowMs} />
           <div className="grid gap-4 md:grid-cols-2">
-            <MemoryCard memory={host.live.memory} />
+            <MemoryCard memory={host.live.memory} history={history} windowMs={chart.windowMs} />
             <FilesystemsCard filesystems={host.live.filesystems} />
           </div>
           <NetworkCard
             network={host.live.network}
             container={host.container}
             waiting={host.live.rates_over_seconds === null}
+            history={history}
+            windowMs={chart.windowMs}
           />
         </div>
         <SensorsCard sensors={host.live.sensors} history={history} />
@@ -477,10 +495,14 @@ function NetworkCard({
   network,
   container,
   waiting,
+  history,
+  windowMs,
 }: {
   network: Host['live']['network']
   container: boolean
   waiting: boolean
+  history: Series
+  windowMs: number
 }) {
   return (
     <Card>
@@ -494,7 +516,10 @@ function NetworkCard({
           )}
         </CardTitle>
       </CardHeader>
-      <CardContent className="space-y-2">
+      <CardContent className="space-y-3">
+        <HistorySlot reading={network} points={pointsOf(history, 'rx', 'tx')}>
+          <NetworkChart history={history} windowMs={windowMs} />
+        </HistorySlot>
         {network.readable ? (
           <>
             {network.value.physical.length > 0 ? (
@@ -611,7 +636,15 @@ function SensorsCard({ sensors, history }: { sensors: Host['live']['sensors']; h
   )
 }
 
-function ProcessorCard({ host }: { host: Host }) {
+function ProcessorCard({
+  host,
+  history,
+  windowMs,
+}: {
+  host: Host
+  history: Series
+  windowMs: number
+}) {
   const { usage, per_core: perCore, load } = host.live.cpu
   const cores = host.device.cores
   return (
@@ -643,38 +676,38 @@ function ProcessorCard({ host }: { host: Host }) {
           )}
         </div>
       </CardHeader>
-      {/* Per-core meters only for numbers that were read: an unread or not yet
-          computed core is left out, never drawn as an empty bar. */}
-      {perCore.readable && perCore.value.length > 0 && (
-        <CardContent>
-          <div className="grid grid-cols-2 gap-x-4 gap-y-2 sm:grid-cols-4">
-            {perCore.value.map((u, i) => (
-              <Meter
-                // biome-ignore lint/suspicious/noArrayIndexKey: the index IS the CPU's name
-                key={i}
-                dense
-                label={`CPU ${i}`}
-                display={formatPercent(u)}
-                value={u}
-                max={100}
-                warn={75}
-                danger={90}
-              />
-            ))}
-          </div>
-        </CardContent>
-      )}
+      <CardContent className="space-y-3">
+        <HistorySlot reading={usage} points={pointsOf(history, 'cpu')}>
+          <ProcessorChart history={history} windowMs={windowMs} />
+        </HistorySlot>
+        {/* The node page's per-core list, only for numbers that were read: an
+            unread or not yet computed core is left out, never drawn as 0. */}
+        {perCore.readable && perCore.value.length > 0 && (
+          <CoreList perCore={perCore.value} history={history} />
+        )}
+      </CardContent>
     </Card>
   )
 }
 
-function MemoryCard({ memory }: { memory: Host['live']['memory'] }) {
+function MemoryCard({
+  memory,
+  history,
+  windowMs,
+}: {
+  memory: Host['live']['memory']
+  history: Series
+  windowMs: number
+}) {
   return (
     <Card>
       <CardHeader>
         <CardTitle className="text-base">Memory</CardTitle>
       </CardHeader>
       <CardContent className="space-y-3">
+        <HistorySlot reading={memory} points={pointsOf(history, 'memory')}>
+          <MemoryChart history={history} windowMs={windowMs} />
+        </HistorySlot>
         {memory.readable ? (
           <>
             <Meter
@@ -764,6 +797,84 @@ function Row<T>({
   )
 }
 
+const NO_BASELINE = 'rate.no-baseline'
+
+/**
+ * A chart slot, or the sentence that there is nothing to chart (D-05).
+ *
+ * A value that is not readable now and has no point in the chosen window has
+ * no curve: an empty axis would look like a chart of nothing happening, and a
+ * line at 0 would be the lie HMON-06 forbids. So the slot says "Not readable —
+ * no history" and reserves no box. Anything else is the chart, whose own
+ * segments() draws a stretch without points as a gap. A rate still waiting for
+ * its second reading (rate.no-baseline) is pending, not unreadable: its chart
+ * is drawn and says the curve starts now.
+ */
+function HistorySlot({
+  reading,
+  points,
+  children,
+}: {
+  reading: Reading<unknown>
+  points: number
+  children: ReactNode
+}) {
+  const unreadable = !reading.readable && reading.reason.code !== NO_BASELINE
+  if (unreadable && points === 0) {
+    return <p className="text-xs text-muted-foreground">Not readable — no history</p>
+  }
+  return children
+}
+
+/** How many points the keys have in the merged, window-cut series. */
+function pointsOf(history: Series, ...keys: string[]): number {
+  return keys.reduce((sum, key) => sum + (history[key]?.length ?? 0), 0)
+}
+
+/**
+ * The page's own readings as history values: the keys the daemon records under
+ * host/local (host.HistoryValues), so the two splice. A value that was not read
+ * writes no key -- never a 0 -- and the curve has a gap there.
+ */
+function hostHistoryValues(host: Host): Record<string, number> {
+  const values: Record<string, number> = {}
+  const { cpu, memory, network } = host.live
+  if (cpu.usage.readable) values.cpu = cpu.usage.value
+  if (cpu.per_core.readable) {
+    cpu.per_core.value.forEach((usage, i) => {
+      values[`core:${i}`] = usage
+    })
+  }
+  if (memory.readable && memory.value.total_bytes > 0) {
+    values.memory = (memory.value.used_bytes / memory.value.total_bytes) * 100
+  }
+  // Physical interfaces only, and only when every one of them has both rates
+  // this round: a sum over some links would be a dip that did not happen.
+  const links = network.readable ? network.value.physical : []
+  if (host.live.rates_over_seconds !== null && links.length > 0) {
+    let rx = 0
+    let tx = 0
+    let rated = true
+    for (const l of links) {
+      if (l.rx_bytes_per_sec === null || l.tx_bytes_per_sec === null) rated = false
+      else {
+        rx += l.rx_bytes_per_sec
+        tx += l.tx_bytes_per_sec
+      }
+    }
+    if (rated) {
+      values.rx = rx
+      values.tx = tx
+    }
+  }
+  const sensors = host.live.sensors
+  if (sensors.readable) {
+    for (const t of sensors.value.temperatures) values[`temp:${sensorKey(t)}`] = t.celsius
+    for (const f of sensors.value.fans) values[`fan:${f.chip}/${f.label}`] = f.rpm
+  }
+  return values
+}
+
 /**
  * The one way a missing value is drawn on /host.
  *
@@ -773,24 +884,9 @@ function Row<T>({
  * everything else. The hardening reason gets its short form here; the full
  * explanation and the fix live in the notice at the top of the page.
  */
-/**
- * The page's own readings as history values: the keys the daemon records under
- * host/local (host.HistoryValues), so the two splice. A value that was not read
- * writes no key -- never a 0 -- and the curve has a gap there.
- */
-function hostHistoryValues(host: Host): Record<string, number> {
-  const values: Record<string, number> = {}
-  const sensors = host.live.sensors
-  if (sensors.readable) {
-    for (const t of sensors.value.temperatures) values[`temp:${sensorKey(t)}`] = t.celsius
-    for (const f of sensors.value.fans) values[`fan:${f.chip}/${f.label}`] = f.rpm
-  }
-  return values
-}
-
 export function MissingValue({ reason, align }: { reason: Reason; align?: 'right' }) {
   const alignment = align === 'right' ? 'text-right' : undefined
-  if (reason.code === 'rate.no-baseline') {
+  if (reason.code === NO_BASELINE) {
     return (
       <p className={['text-sm text-muted-foreground', alignment].filter(Boolean).join(' ')}>
         Waiting for a second reading
