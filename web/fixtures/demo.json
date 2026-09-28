@@ -3228,5 +3228,18 @@
         "sudo": true
       }
     ]
+  },
+  "/api/v1/host": {
+    "observed_at": "2026-09-28T10:00:03Z",
+    "container": false,
+    "device": {
+      "hostname": { "readable": true, "value": "manager-01.homelab.example" },
+      "model": { "readable": true, "value": "Raspberry Pi 5 Model B Rev 1.0" },
+      "arch": { "readable": true, "value": { "goarch": "arm64", "machine": "aarch64" } },
+      "cores": { "readable": true, "value": 4 },
+      "os": { "readable": true, "value": "Debian GNU/Linux 13 (trixie)" },
+      "kernel": { "readable": true, "value": "6.18.50+rpt-rpi-2712" },
+      "uptime_seconds": { "readable": true, "value": 26090 }
+    }
   }
 }
