@@ -21,9 +21,9 @@ func historyConfigured(d httpapi.Deps) *httpapi.Problem {
 
 // HistoryRoutes serves the last day of the charts (2026-09-26).
 //
-// Both are reads of memory: the sampler (internal/history) did the asking, on
-// its own timer and under its own budgets, and these routes reach no node and
-// no API server. That is why they have no budget row -- they are in
+// All three are reads of memory: the sampler (internal/history) did the
+// asking, on its own timer and under its own budgets, and these routes reach
+// no node and no API server. That is why they have no budget row -- they are in
 // budget_test.go's list of routes that reach nothing -- and why a chart of a
 // node that is down still draws the hour before it went.
 //
@@ -44,6 +44,13 @@ func HistoryRoutes(d httpapi.Deps) []httpapi.Route {
 			RequiresSession: true,
 			MinRole:         model.RoleReader,
 			Handler:         handler(appHistory(d)),
+		},
+		{
+			Method:          http.MethodGet,
+			Pattern:         "/api/v1/host/history",
+			RequiresSession: true,
+			MinRole:         model.RoleReader,
+			Handler:         handler(hostHistory(d)),
 		},
 	}
 }
@@ -87,6 +94,24 @@ func machineHistory(d httpapi.Deps) http.HandlerFunc {
 			return
 		}
 		writeJSON(w, http.StatusOK, d.History.Query(history.MachineSubject(id), rg, time.Now()))
+	}
+}
+
+// hostHistory is the history of the machine this daemon runs on (D-04): the
+// node's answer and the node's refusals, without the inventory check -- the
+// host is not in the inventory, and there is exactly one of it. Before the
+// sampler's first pass it is 200 with no series, like a node never sampled.
+func hostHistory(d httpapi.Deps) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if p := historyConfigured(d); p != nil {
+			httpapi.WriteProblem(w, r, p)
+			return
+		}
+		rg, ok := historyRange(w, r)
+		if !ok {
+			return
+		}
+		writeJSON(w, http.StatusOK, d.History.Query(history.HostSubject(), rg, time.Now()))
 	}
 }
 

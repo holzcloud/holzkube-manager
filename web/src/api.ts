@@ -3091,6 +3091,10 @@ export const api = {
   /** The machine this daemon runs on, read now. Polled every 3 s by /host. */
   host: (): Promise<Host> => sendJSON('GET', '/api/v1/host', hostSchema),
 
+  /** What the daemon recorded about the host over the range, every 15 s. */
+  hostHistory: (range: HistoryRange): Promise<History> =>
+    sendJSON('GET', `/api/v1/host/history?range=${range}`, historySchema),
+
   status: (): Promise<SystemStatus> =>
     sendJSON('GET', '/api/v1/system/status', systemStatusSchema, undefined, {
       interceptUnauthenticated: false,
