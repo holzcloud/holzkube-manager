@@ -83,11 +83,21 @@ func TestUnreadableUnameHasNoValue(t *testing.T) {
 }
 
 // readingViews are the shapes the well-formedness walk runs over: everything
-// readable, and everything failing.
+// readable, everything failing, and a recorded update run that failed --
+// the one status with a null in it.
 func readingViews() map[string]View {
+	failedRun := fstest.MapFS{
+		"var/lib/holzkube-manager-update/status.json": {Data: []byte(`{"checked_at":"2026-09-28T09:00:00Z","installed":"0.1.0","latest":null,"outcome":"failed"}`)},
+		"proc/self/mountinfo":                         {Data: []byte("22 1 179:2 / / rw shared:1 - ext4 /dev/mmcblk0p2 rw\n41 22 259:1 / /srv rw shared:41 - ext4 /dev/nvme0n1p1 rw\n")},
+	}
+	statfs := map[string]FSStats{"/": piRootStatfs, "/srv/holzkube-manager": piRootStatfs}
 	return map[string]View{
 		"readable":   newTestCollector(fstest.MapFS{}, tracerSys()).Read(context.Background()),
 		"unreadable": newTestCollector(fstest.MapFS{}, fakeSys{unameErr: errors.New("nope"), bootErr: errors.New("nope"), loadsErr: errors.New("nope")}).Read(context.Background()),
+		"recorded failure, two filesystems": New(Config{
+			FS: failedRun, Sys: fakeSys{uname: tracerSys().uname, statfs: statfs},
+			Now: func() time.Time { return fixedNow }, DataDir: "/srv/holzkube-manager", Version: "0.1.0", Started: fixedNow,
+		}).Read(context.Background()),
 	}
 }
 
@@ -134,6 +144,8 @@ func TestEveryReadingIsWellFormed(t *testing.T) {
 // this guard exists to catch.
 var nullableKeys = map[string]string{
 	"rates_over_seconds": "null while there is no usable previous reading (D-12)",
+	"installed":          "null only for outcome failed, when the script could not know (D-14, D-16)",
+	"latest":             "null only for outcome failed, when the script could not know (D-14, D-16)",
 }
 
 func TestNoNulls(t *testing.T) {

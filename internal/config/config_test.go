@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/holzcloud/holzkube-manager/internal/host/updatestatus"
 	"github.com/holzcloud/holzkube-manager/internal/imagefactory"
 )
 
@@ -168,6 +169,7 @@ func TestEveryOptionIsSettableByFlagAndByEnvironment(t *testing.T) {
 		"allowed-hosts":           "manager.example.com,192.168.1.10",
 		"sso-only-hosts":          "manager.example.com",
 		"data-dir":                "/data",
+		"update-status-file":      "/run/holzkube-manager-update/status.json",
 		"tls-cert":                "/tls/cert.pem",
 		"tls-key":                 "/tls/key.pem",
 		"insecure-http":           "true",
@@ -714,5 +716,62 @@ func TestTheImageFactoryDefaultIsTheOneImagefactoryPublishes(t *testing.T) {
 	if cfg.ImageFactoryURL != imagefactory.DefaultBaseURL {
 		t.Errorf("the default Image Factory is %q, but imagefactory.DefaultBaseURL is %q",
 			cfg.ImageFactoryURL, imagefactory.DefaultBaseURL)
+	}
+}
+
+// TestUpdateStatusFileMustBeAbsolute: the daemon reads the file through an
+// fs.FS rooted at "/", where a relative path would silently mean something
+// other than what the operator typed.
+func TestUpdateStatusFileMustBeAbsolute(t *testing.T) {
+	for _, tc := range []struct {
+		args []string
+		env  map[string]string
+	}{
+		{args: []string{"--update-status-file=relative/status.json"}},
+		{env: map[string]string{"HOLZKUBE_MANAGER_UPDATE_STATUS_FILE": "status.json"}},
+	} {
+		_, err := LoadWith(tc.args, envFrom(tc.env), testHome)
+		if err == nil {
+			t.Errorf("%v %v: a relative update status path was accepted", tc.args, tc.env)
+			continue
+		}
+		for _, want := range []string{"update-status-file", "must be an absolute path"} {
+			if !strings.Contains(err.Error(), want) {
+				t.Errorf("error %q does not contain %q", err, want)
+			}
+		}
+	}
+
+	cfg := load(t, []string{"--update-status-file=/srv/update//status.json"}, nil)
+	if cfg.UpdateStatusFile != "/srv/update/status.json" {
+		t.Errorf("UpdateStatusFile = %q, want the cleaned path", cfg.UpdateStatusFile)
+	}
+}
+
+// TestUpdateStatusDefaultMatchesTheScript keeps the daemon's default reading
+// where the update script writes. They are two files in two languages, and a
+// drift between them would show "Not recorded" forever on a machine whose
+// script records every run.
+func TestUpdateStatusDefaultMatchesTheScript(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("..", "..", "deploy", "holzkube-manager-update.sh"))
+	if err != nil {
+		t.Fatalf("read the update script: %v", err)
+	}
+	const marker = "HOLZKUBE_MANAGER_UPDATE_STATUS_DIR:-"
+	_, rest, found := strings.Cut(string(raw), "STATUS_DIR=${"+marker)
+	if !found {
+		t.Fatalf("the update script has no STATUS_DIR=${%s...} default", marker)
+	}
+	scriptDir, _, found := strings.Cut(rest, "}")
+	if !found || scriptDir == "" {
+		t.Fatalf("could not read the script's STATUS_DIR default from %q", rest[:min(len(rest), 80)])
+	}
+
+	cfg := load(t, nil, nil)
+	if got := filepath.Dir(cfg.UpdateStatusFile); got != scriptDir {
+		t.Errorf("the daemon reads the update status in %s, the script writes it in %s", got, scriptDir)
+	}
+	if cfg.UpdateStatusFile != updatestatus.DefaultPath {
+		t.Errorf("the default is %q, updatestatus.DefaultPath is %q", cfg.UpdateStatusFile, updatestatus.DefaultPath)
 	}
 }

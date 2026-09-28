@@ -32,6 +32,7 @@ package host
 import (
 	"time"
 
+	"github.com/holzcloud/holzkube-manager/internal/host/updatestatus"
 	"github.com/holzcloud/holzkube-manager/internal/inventory"
 )
 
@@ -100,7 +101,40 @@ type View struct {
 
 	Device Device `json:"device"`
 
+	Service Service `json:"service"`
+
 	Live Live `json:"live"`
+}
+
+// Service is holzkube-manager itself on this machine (HOST-02, HOST-03).
+//
+// Version, StartedAt and UptimeSeconds are this process's own facts and are
+// always there. The data directory's size and the update status come from
+// outside the process and are readings.
+type Service struct {
+	// Version is the one --version prints: the release tag in a release
+	// build, "dev" in a working-tree build.
+	Version string `json:"version"`
+	// StartedAt is when this process started serving, in UTC.
+	StartedAt time.Time `json:"started_at"`
+	// UptimeSeconds is whole seconds since StartedAt -- the process's age, not
+	// the machine's (that is Device.UptimeSeconds).
+	UptimeSeconds int64 `json:"uptime_seconds"`
+
+	DataDir DataDir `json:"data_dir"`
+
+	// Update is what the update script last recorded, or why there is
+	// nothing: update.not-recorded when the file does not exist, read-failed
+	// when it exists and is not what the script writes. Never an invented
+	// time or version (D-16).
+	Update Reading[updatestatus.Status] `json:"update"`
+}
+
+// DataDir is the daemon's state directory and its size on disk. Its free space
+// is the Filesystems row with the "data directory" role.
+type DataDir struct {
+	Path string           `json:"path"`
+	Size Reading[DirSize] `json:"size"`
 }
 
 // Live is how the machine is doing at ObservedAt (HMON-01).

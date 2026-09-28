@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/holzcloud/holzkube-manager/internal/host/updatestatus"
 	"github.com/holzcloud/holzkube-manager/internal/inventory"
 	"github.com/holzcloud/holzkube-manager/internal/talos"
 )
@@ -39,6 +40,14 @@ type Config struct {
 	// second row of the Filesystems card, and its size is walked at most once a
 	// minute. Empty: only the root row, and no size.
 	DataDir string
+
+	// Version is the running version, the variable --version prints.
+	Version string
+	// Started is when the process started serving.
+	Started time.Time
+	// UpdateStatusPath is the absolute path of the update script's status
+	// file (--update-status-file). Empty means updatestatus.DefaultPath.
+	UpdateStatusPath string
 }
 
 // minRateWindow and maxRateWindow bound when the previous reading may serve
@@ -85,6 +94,9 @@ func New(cfg Config) *Collector {
 	if cfg.Now == nil {
 		cfg.Now = time.Now
 	}
+	if cfg.UpdateStatusPath == "" {
+		cfg.UpdateStatusPath = updatestatus.DefaultPath
+	}
 	return &Collector{cfg: cfg, sizer: &dirSizer{fsys: cfg.FS, dir: cfg.DataDir}}
 }
 
@@ -94,15 +106,55 @@ func New(cfg Config) *Collector {
 // section that could not be read is a section with a Reason, and the page shows
 // every other section beside it. A failure of the whole answer is a failure to
 // reach the daemon at all, which the browser sees as exactly that.
-func (c *Collector) Read(context.Context) View {
+func (c *Collector) Read(ctx context.Context) View {
 	now := c.cfg.Now()
 	v := View{ObservedAt: now.UTC()}
 
 	v.Device = c.readDevice()
 	v.Container = detectContainer(c.cfg.FS)
+	v.Service = c.readService(ctx, now, v.Container)
 	v.Live = c.readLive(now)
 
 	return v
+}
+
+// The two sentences an absent status file is explained with (D-16). On a host
+// the installed update script predates the status file; in a container there
+// is no update timer at all, so the first sentence would send the operator
+// looking for a script that does not exist there.
+const (
+	notRecordedHost = "The update script installed on this machine does not record its checks. " +
+		"Versions from this release on do; the next update brings it."
+	notRecordedContainer = "holzkube-manager runs in a container, where the host's update timer does not run. " +
+		"A container is updated by pulling a new image."
+	updateUnreadablePrefix = "The update status file exists but could not be read: "
+)
+
+// readService fills the Service card (HOST-02, HOST-03).
+func (c *Collector) readService(ctx context.Context, now time.Time, container bool) Service {
+	s := Service{
+		Version:   c.cfg.Version,
+		StartedAt: c.cfg.Started.UTC(),
+		DataDir:   DataDir{Path: c.cfg.DataDir, Size: c.sizer.size(ctx, now)},
+	}
+	if !c.cfg.Started.IsZero() {
+		s.UptimeSeconds = int64(now.Sub(c.cfg.Started) / time.Second)
+	}
+
+	status, err := updatestatus.Read(c.cfg.FS, c.cfg.UpdateStatusPath)
+	switch {
+	case errors.Is(err, updatestatus.ErrNotRecorded):
+		msg := notRecordedHost
+		if container {
+			msg = notRecordedContainer
+		}
+		s.Update = Hidden[updatestatus.Status](Reason{Code: CodeNotRecorded, Message: msg})
+	case err != nil:
+		s.Update = Hidden[updatestatus.Status](Reason{Code: CodeReadFailed, Message: updateUnreadablePrefix + err.Error()})
+	default:
+		s.Update = Read(status)
+	}
+	return s
 }
 
 // readLive fills the Live section: CPU, load, memory and swap (HMON-01), and

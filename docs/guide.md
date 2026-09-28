@@ -95,6 +95,7 @@ flag > environment > default.
 | `--allowed-hosts` | `HOLZKUBE_MANAGER_ALLOWED_HOSTS` | (none) |
 | `--sso-only-hosts` | `HOLZKUBE_MANAGER_SSO_ONLY_HOSTS` | (none) |
 | `--data-dir` | `HOLZKUBE_MANAGER_DATA_DIR` | `$XDG_DATA_HOME/holzkube-manager`, else `~/.local/share/holzkube-manager` |
+| `--update-status-file` | `HOLZKUBE_MANAGER_UPDATE_STATUS_FILE` | `/var/lib/holzkube-manager-update/status.json` |
 | `--tls-cert` | `HOLZKUBE_MANAGER_TLS_CERT` | generated on first run |
 | `--tls-key` | `HOLZKUBE_MANAGER_TLS_KEY` | generated on first run |
 | `--insecure-http` | `HOLZKUBE_MANAGER_INSECURE_HTTP` | `false` |
@@ -113,6 +114,12 @@ flag > environment > default.
 same table as the flags, so it cannot drift from them. The table above is
 checked against that same option table by a test, because three options had
 already been added without a row here.
+
+`--update-status-file` is the file the update script writes as root after each
+run, recording when it checked, which versions it saw and what came of it; the
+daemon only reads it, for the "Update check" row on the Host page. Until the
+installed update script has been replaced by a release that carries this, the
+Host page says "Not recorded" there.
 
 `--image-factory` points at a different Image Factory — a private one at an
 air-gapped site, for instance. A response from it carrying a field this build

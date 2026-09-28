@@ -20,6 +20,7 @@ import (
 	"net"
 	"net/url"
 	"os"
+	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
@@ -129,6 +130,15 @@ type Config struct {
 	// would give two answers to one question; the composition root calls it
 	// before serving, so a bad value is still a start failure.
 	ImageFactoryURL string
+
+	// UpdateStatusFile is where deploy/holzkube-manager-update.sh records the
+	// outcome of its last run, and what the host page's "Update check" row
+	// reads (HOST-03). Root writes it after every run; the daemon only reads
+	// it. It lives outside the data directory on purpose (D-14): the daemon's
+	// user owns that directory, and root writing into a directory an
+	// unprivileged user controls is the symlink trap.
+	UpdateStatusFile string
+
 	SudoWindow      time.Duration
 	SessionLifetime time.Duration
 	LogLevel        slog.Level
@@ -264,6 +274,20 @@ func optionTable(defaultDataDir string) []option {
 				return nil
 			},
 			render: func(c Config) string { return c.DataDir },
+		},
+		{
+			// The default is the update script's own STATUS_DIR; a test holds
+			// the two spellings together.
+			name: "update-status-file", env: "UPDATE_STATUS_FILE", def: "/var/lib/holzkube-manager-update/status.json",
+			usage: "where the update script records its last run; read only (env " + EnvPrefix + "UPDATE_STATUS_FILE)",
+			apply: func(c *Config, raw string) error {
+				if !filepath.IsAbs(raw) {
+					return errors.New("must be an absolute path")
+				}
+				c.UpdateStatusFile = filepath.Clean(raw)
+				return nil
+			},
+			render: func(c Config) string { return c.UpdateStatusFile },
 		},
 		{
 			name: "tls-cert", env: "TLS_CERT", def: "",
