@@ -5,16 +5,16 @@ milestone_name: Host & Telefon
 current_phase: 11
 current_phase_name: Host-Seite — Gerät, Dienst, Live-Werte
 status: executing
-stopped_at: Completed 11-03-PLAN.md
-last_updated: "2026-09-28T15:24:29.950Z"
+stopped_at: Completed 11-04-PLAN.md
+last_updated: "2026-09-28T15:51:11.994Z"
 last_activity: 2026-09-28
 last_activity_desc: Phase 11 execution started
-state_head: 05f7f7f745482430f3c3c5698207056fceca271c
+state_head: e5896f958d5b0c1482f0596f3291f8a99c84587b
 progress:
   total_phases: 4
   completed_phases: 0
   total_plans: 7
-  completed_plans: 3
+  completed_plans: 4
   percent: 0
 ---
 
@@ -33,7 +33,7 @@ See: .planning/PROJECT.md (updated 2026-09-28)
 ## Current Position
 
 Phase: 11 (Host-Seite — Gerät, Dienst, Live-Werte) — EXECUTING
-Plan: 4 of 7
+Plan: 5 of 7
 Status: Ready to execute
 Last activity: 2026-09-28 — Phase 11 execution started
 
@@ -78,6 +78,9 @@ Siehe `PROJECT.md`, die `MILESTONE-*.md`-Dateien und für v1.18 den Abschnitt
 - [Phase 11]: 11-03: hardening named only with proof -- ENOENT plus subset=pid in the topmost /proc super options
 - [Phase 11]: 11-03: load falls back to sysinfo(2) on any /proc/loadavg failure
 - [Phase 11]: 11-03: rate memo advances only past 0.5 s (or on a negative window); rates_over_seconds reported even while /proc/stat is hidden, for plan 06's network rates
+- [Phase 11]: Filesystem Use% on /host is df's: used/(used+available) rounded up; UI-SPEC's used/size and nearest rounding both differ from the shell (23% / 24% vs 25%)
+- [Phase 11]: Host filesystems merge only on equal major:minor from mountinfo; without a mount table nothing is merged
+- [Phase 11]: Data-dir size walk: 60 s cache counts failed attempts too; a failed re-walk serves the last good value with its measured_at
 
 ### Blockers/Concerns
 
@@ -92,8 +95,8 @@ Siehe `PROJECT.md`, die `MILESTONE-*.md`-Dateien und für v1.18 den Abschnitt
 
 ## Session Continuity
 
-Last session: 2026-09-28T15:24:29.893Z
-Stopped at: Completed 11-03-PLAN.md
+Last session: 2026-09-28T15:51:11.933Z
+Stopped at: Completed 11-04-PLAN.md
 Resume file: None
 Next: `/gsd-plan-phase 11`
 
@@ -104,3 +107,4 @@ Next: `/gsd-plan-phase 11`
 | Phase 11 P01 | 37min | 3 tasks | 32 files |
 | Phase 11 P02 | 9min | 2 tasks | 4 files |
 | Phase 11 P03 | 25min | 3 tasks | 22 files |
+| Phase 11 P04 | 24min | 3 tasks | 16 files |
