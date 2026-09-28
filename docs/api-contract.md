@@ -1564,8 +1564,11 @@ only a directory that exists and cannot be listed is `read-failed`.
   allocated blocks, each inode once, symlinks not followed -- at most once a
   minute; `measured_at` says how old the number is.
 - `live.filesystems` are exactly two paths' filesystems, `/` and the data
-  directory's, and **one row when they are one filesystem**. That is decided by
-  device number (`stat(2)`'s `st_dev`), never by mount point: under
+  directory's, and **one row when they are one filesystem**. The data
+  directory's filesystem is the mount its real path is on, symlinks followed:
+  a data directory linked to another disk is on that disk. Whether it is the
+  root's is decided by device number (the mount table's `major:minor`, which
+  is `stat(2)`'s `st_dev`), never by mount point: under
   `ProtectSystem=strict` systemd bind-mounts the data directory over itself, so
   the mount table has two lines for one partition. The merged row carries both
   roles and the root entry's name. `used_bytes` is `blocks - bfree` and

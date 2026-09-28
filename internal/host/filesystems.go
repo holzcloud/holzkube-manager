@@ -129,6 +129,55 @@ func underMount(p, mountPoint string) bool {
 	return p == mountPoint || strings.HasPrefix(p, mountPoint+"/")
 }
 
+// maxSymlinkHops bounds resolvePath the way the kernel bounds a path lookup
+// (40 links, then ELOOP).
+const maxSymlinkHops = 40
+
+// resolvePath is abs with every symlink in it followed, read through fsys:
+// filepath.EvalSymlinks over the collector's filesystem, so a fixture can
+// stand in for the machine. ok is false when a component cannot be read or
+// the links do not end.
+func resolvePath(fsys fs.FS, abs string) (string, bool) {
+	rest := strings.Split(path.Clean(abs), "/")
+	resolved := "/"
+	hops := 0
+	for len(rest) > 0 {
+		part := rest[0]
+		rest = rest[1:]
+		switch part {
+		case "", ".":
+			continue
+		case "..":
+			resolved = path.Dir(resolved)
+			continue
+		}
+		next := path.Join(resolved, part)
+		info, err := fs.Lstat(fsys, fsPath(next))
+		if err != nil {
+			return "", false
+		}
+		if info.Mode()&fs.ModeSymlink == 0 {
+			resolved = next
+			continue
+		}
+		hops++
+		if hops > maxSymlinkHops {
+			return "", false
+		}
+		target, err := fs.ReadLink(fsys, fsPath(next))
+		if err != nil {
+			return "", false
+		}
+		// A relative target is taken from the link's own directory, which
+		// resolved still is; an absolute one from the root.
+		if path.IsAbs(target) {
+			resolved = "/"
+		}
+		rest = append(strings.Split(target, "/"), rest...)
+	}
+	return resolved, true
+}
+
 // fsUsage is statfs(2) on p in df's arithmetic.
 func fsUsage(sys Sys, p string) Reading[FSUsage] {
 	st, err := sys.Statfs(p)
