@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io/fs"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -100,6 +101,75 @@ func TestFilesystemsOnTwoDevices(t *testing.T) {
 	}
 	if u := mustRead(t, "data usage", rows[1].Usage); u.SizeBytes != 1000*4096 {
 		t.Errorf("data size = %d, want %d", u.SizeBytes, 1000*4096)
+	}
+}
+
+// TestFilesystemsSymlinkedDataDir (WR-08): a data directory moved to another
+// disk by a symlink is on that disk. Matched lexically, /var/lib/... sits
+// under / and the row showed the SD card's free space as the SSD's.
+func TestFilesystemsSymlinkedDataDir(t *testing.T) {
+	t.Parallel()
+
+	const dataDir = "/var/lib/holzkube-manager"
+	mountinfo := "22 1 179:2 / / rw,noatime shared:1 - ext4 /dev/mmcblk0p2 rw\n" +
+		"41 22 8:1 / /mnt/ssd rw,noatime shared:41 - ext4 /dev/sda1 rw\n"
+	ssd := FSStats{FrameSize: 4096, Blocks: 1000, Free: 400, Avail: 350}
+	sys := fakeSys{statfs: map[string]FSStats{"/": piRootStatfs, "/mnt/ssd/hkm": ssd}}
+	symlink := func(target string) *fstest.MapFile {
+		return &fstest.MapFile{Mode: fs.ModeSymlink | 0o777, Data: []byte(target)}
+	}
+
+	for name, links := range map[string]fstest.MapFS{
+		"absolute": {"var/lib/holzkube-manager": symlink("/mnt/ssd/hkm")},
+		"relative": {"var/lib/holzkube-manager": symlink("../../mnt/ssd/hkm")},
+		"chained, through a linked parent": {
+			"var/lib/holzkube-manager": symlink("/data/hkm"),
+			// Relative to /, where the link is.
+			"data": symlink("mnt/ssd"),
+		},
+	} {
+		fsys := fstest.MapFS{
+			"proc/self/mountinfo": {Data: []byte(mountinfo)},
+			"mnt/ssd/hkm/store":   {Data: []byte("{}")},
+		}
+		maps.Copy(fsys, links)
+
+		v := New(Config{FS: fsys, Sys: sys, Now: newLiveClock().now, DataDir: dataDir}).Read(context.Background())
+		rows := v.Live.Filesystems
+		if len(rows) != 2 {
+			t.Errorf("%s: got %d rows, want 2 (root, and the SSD the data directory is on): %+v", name, len(rows), rows)
+			continue
+		}
+		if rows[1].Mount != "/mnt/ssd" || rows[1].Device != "/dev/sda1" || !slices.Equal(rows[1].Roles, []string{"data directory"}) {
+			t.Errorf("%s: second row = %q %q %q, want /mnt/ssd /dev/sda1 [data directory]", name, rows[1].Mount, rows[1].Device, rows[1].Roles)
+		}
+		if u := mustRead(t, name+" data usage", rows[1].Usage); u.SizeBytes != 1000*4096 {
+			t.Errorf("%s: data size = %d, want the SSD's %d", name, u.SizeBytes, 1000*4096)
+		}
+		// The page still names the path the operator configured.
+		if v.Service.DataDir.Path != dataDir {
+			t.Errorf("%s: data_dir.path = %q, want the configured %q", name, v.Service.DataDir.Path, dataDir)
+		}
+	}
+}
+
+// TestResolvePathGivesUp: links that do not end, and a component that cannot
+// be read, resolve to nothing -- and the caller keeps the lexical path.
+func TestResolvePathGivesUp(t *testing.T) {
+	t.Parallel()
+
+	fsys := fstest.MapFS{
+		"a": {Mode: fs.ModeSymlink | 0o777, Data: []byte("b")},
+		"b": {Mode: fs.ModeSymlink | 0o777, Data: []byte("/a")},
+		"c": {Mode: fs.ModeDir | 0o755},
+	}
+	for _, p := range []string{"/a/x", "/missing/x"} {
+		if got, ok := resolvePath(fsys, p); ok {
+			t.Errorf("resolvePath(%q) = %q, want no answer", p, got)
+		}
+	}
+	if got, ok := resolvePath(fsys, "/c/../c/./"); !ok || got != "/c" {
+		t.Errorf("resolvePath(/c/../c/./) = %q %v, want /c", got, ok)
 	}
 }
 

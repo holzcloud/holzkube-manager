@@ -344,6 +344,11 @@ func (f slowWalkFS) Open(name string) (fs.File, error) {
 	return f.FS.Open(name)
 }
 
+// Lstat and ReadLink pass through without moving the clock: resolving the
+// data directory's real path looks at it, and that is not the walk.
+func (f slowWalkFS) Lstat(name string) (fs.FileInfo, error) { return fs.Lstat(f.FS, name) }
+func (f slowWalkFS) ReadLink(name string) (string, error)   { return fs.ReadLink(f.FS, name) }
+
 // TestNetworkRateWindowExcludesTheSizeWalk (WR-01): the counters' window is
 // the time between the two counter reads. The data directory walk runs
 // before the counters are read, once a minute, for up to 5 s; stamping the

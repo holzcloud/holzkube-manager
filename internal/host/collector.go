@@ -221,7 +221,18 @@ func (c *Collector) readLive() Live {
 
 	var live Live
 	live.Memory = c.readMemory(subsetPid)
-	live.Filesystems = filesystems(mounts, c.cfg.DataDir, c.cfg.Sys)
+	// The data directory's filesystem is the one its real path is on. A data
+	// directory moved off the SD card by a symlink (/var/lib/holzkube-manager
+	// -> /mnt/ssd/hkm) lexically sits under /, and matched lexically it would
+	// show the SD card's free space as the SSD's -- a plausible wrong number.
+	// When the path cannot be resolved, the lexical one is all there is.
+	dataDir := c.cfg.DataDir
+	if dataDir != "" {
+		if real, ok := resolvePath(c.cfg.FS, dataDir); ok {
+			dataDir = real
+		}
+	}
+	live.Filesystems = filesystems(mounts, dataDir, c.cfg.Sys)
 	live.CPU.Load = c.readLoad(subsetPid)
 	if sensors, err := readSensors(c.cfg.FS); err != nil {
 		live.Sensors = Hidden[Sensors](reasonFor(sensorsPath(err), err))
