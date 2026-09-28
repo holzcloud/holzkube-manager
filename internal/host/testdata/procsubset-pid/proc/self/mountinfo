@@ -1,0 +1,7 @@
+335 290 179:2 / / ro,noatime master:1 - ext4 /dev/mmcblk0p2 rw
+336 335 0:54 / /dev rw,nosuid,noexec,relatime shared:385 - tmpfs tmpfs rw,size=4096k,nr_inodes=1024,mode=755
+337 335 0:53 / /proc rw,nosuid,nodev,noexec,relatime shared:384 - proc proc rw,hidepid=invisible,subset=pid
+338 335 0:19 / /sys rw,nosuid,nodev,noexec,relatime master:6 - sysfs sysfs rw
+339 335 0:55 / /tmp rw,nosuid,nodev shared:386 - tmpfs tmpfs rw
+340 335 179:1 / /boot/firmware ro,relatime master:40 - vfat /dev/mmcblk0p1 rw,fmask=0022,dmask=0022,codepage=437,iocharset=ascii,shortname=mixed,errors=remount-ro
+345 335 179:2 /var/lib/holzkube-manager /var/lib/holzkube-manager rw,noatime master:1 - ext4 /dev/mmcblk0p2 rw
