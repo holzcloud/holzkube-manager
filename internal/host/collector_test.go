@@ -94,10 +94,15 @@ func readingViews() map[string]View {
 		"sys/class/hwmon/hwmon0/temp1_input": {Data: []byte("64400\n")},
 		"sys/class/hwmon/hwmon1/name":        {Data: []byte("nct6798\n")},
 		"sys/class/hwmon/hwmon1/fan1_input":  {Data: []byte("0\n")},
+		// A link without a speed, on a first read: speed and rates are null.
+		"sys/class/net/eth0/device/vendor":       {Data: []byte("0x14e4\n")},
+		"sys/class/net/eth0/operstate":           {Data: []byte("down\n")},
+		"sys/class/net/eth0/statistics/rx_bytes": {Data: []byte("100\n")},
+		"sys/class/net/eth0/statistics/tx_bytes": {Data: []byte("100\n")},
 	}
-	// A hwmon class that is a file, not a directory: listing it fails, and
-	// live.sensors is a reading with a reason.
-	unlistable := fstest.MapFS{"sys/class/hwmon": {Data: []byte("x")}}
+	// Class directories that are files, not directories: listing them fails,
+	// and live.sensors and live.network are readings with a reason.
+	unlistable := fstest.MapFS{"sys/class/hwmon": {Data: []byte("x")}, "sys/class/net": {Data: []byte("x")}}
 	statfs := map[string]FSStats{"/": piRootStatfs, "/srv/holzkube-manager": piRootStatfs}
 	return map[string]View{
 		"readable":   newTestCollector(fstest.MapFS{}, tracerSys()).Read(context.Background()),
@@ -156,6 +161,9 @@ var nullableKeys = map[string]string{
 	"latest":             "null only for outcome failed, when the script could not know (D-14, D-16)",
 	"high_c":             "null when the chip sets no limit -- inventory.HardwareTemperature",
 	"critical_c":         "null when the chip sets no limit -- inventory.HardwareTemperature",
+	"speed_mbit":         "null when the link reports no speed -- down, or a kind of link without one",
+	"rx_bytes_per_sec":   "null when this round has no rate for the link (D-02, D-12)",
+	"tx_bytes_per_sec":   "null when this round has no rate for the link (D-02, D-12)",
 }
 
 func TestNoNulls(t *testing.T) {

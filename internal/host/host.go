@@ -161,6 +161,12 @@ type Live struct {
 	// /sys/class/hwmon exists and could not be listed; a machine without it
 	// reads as empty lists.
 	Sensors Reading[Sensors] `json:"sensors"`
+
+	// Network is the interfaces, physical and virtual, with their throughput
+	// over RatesOverSeconds (HMON-04, D-09). Not readable only when
+	// /sys/class/net exists and could not be listed. In a container these are
+	// the container's interfaces, not the host's (D-17).
+	Network Reading[Network] `json:"network"`
 }
 
 // CPU is the processor's share of busy time and the run-queue average.

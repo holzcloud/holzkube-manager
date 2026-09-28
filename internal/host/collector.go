@@ -87,6 +87,9 @@ type counters struct {
 	// cpu is nil when /proc/stat could not be read; cores then too.
 	cpu   *talos.CPUTimes
 	cores []talos.CPUTimes
+	// links are the byte counters of every interface that had both, by name.
+	// Empty when /sys/class/net could not be listed.
+	links map[string]talos.LinkIO
 }
 
 // New builds a Collector. It reads nothing until Read is called.
@@ -158,8 +161,8 @@ func (c *Collector) readService(ctx context.Context, now time.Time, container bo
 }
 
 // readLive fills the Live section: CPU, load, memory and swap (HMON-01), the
-// filesystems of / and the data directory (HMON-02), and the temperatures and
-// fans (HMON-03).
+// filesystems of / and the data directory (HMON-02), the temperatures and
+// fans (HMON-03), and the network interfaces (HMON-04).
 func (c *Collector) readLive(now time.Time) Live {
 	// The proof the hardening is in force (D-03). A mountinfo that cannot be
 	// read or parsed proves nothing, so every missing file is then reported as
@@ -183,7 +186,9 @@ func (c *Collector) readLive(now time.Time) Live {
 		live.Sensors = Read(sensors)
 	}
 
-	cur := counters{at: now}
+	links, linkErr := readLinks(c.cfg.FS)
+
+	cur := counters{at: now, links: linkCounters(links)}
 	var statReason *Reason
 	if raw, err := readBounded(c.cfg.FS, fsPath(pathProcStat), maxSmallFile); err != nil {
 		r := classify(pathProcStat, err, subsetPid)
@@ -194,14 +199,15 @@ func (c *Collector) readLive(now time.Time) Live {
 	} else {
 		cur.cpu, cur.cores = &total, cores
 	}
-	c.rates(&live, cur, statReason)
+	c.rates(&live, cur, statReason, links, linkErr)
 
 	return live
 }
 
-// rates computes the CPU percentages against the remembered previous read and
-// decides whether this read becomes the next one's baseline.
-func (c *Collector) rates(live *Live, cur counters, statReason *Reason) {
+// rates computes the CPU percentages and the link throughputs against the
+// remembered previous read, over one window, and decides whether this read
+// becomes the next one's baseline.
+func (c *Collector) rates(live *Live, cur counters, statReason *Reason, links []linkSample, linkErr error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
@@ -237,6 +243,16 @@ func (c *Collector) rates(live *Live, cur counters, statReason *Reason) {
 	default:
 		live.CPU.Usage = Hidden[float64](noBaseline)
 		live.CPU.PerCore = Hidden[[]float64](noBaseline)
+	}
+
+	if linkErr != nil {
+		live.Network = Hidden[Network](reasonFor("/"+netClass, linkErr))
+	} else {
+		var prevLinks map[string]talos.LinkIO
+		if prev != nil {
+			prevLinks = prev.links
+		}
+		live.Network = Read(network(links, prevLinks, window.Seconds(), usable))
 	}
 
 	if usable {
