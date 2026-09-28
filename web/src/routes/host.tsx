@@ -3,6 +3,7 @@ import { createRoute } from '@tanstack/react-router'
 import type { ReactNode } from 'react'
 import { api, type Host, type Reason } from '@/api'
 import { Meter } from '@/components/charts/Meter'
+import { ago } from '@/components/HealthField'
 import { HARDWARE_POLL_INTERVAL_MS } from '@/components/NodeHardware'
 import { Problem } from '@/components/Problem'
 import { Badge } from '@/components/ui/badge'
@@ -162,6 +163,7 @@ export function HostView({ host, stale }: { host: Host; stale: unknown }) {
               </dl>
             </CardContent>
           </Card>
+          <ServiceCard host={host} observed={observed} />
         </div>
 
         <LiveSection host={host} />
@@ -173,6 +175,234 @@ export function HostView({ host, stale }: { host: Host; stale: unknown }) {
       </div>
     </section>
   )
+}
+
+const DATA_DIR_ROLE = 'data directory'
+
+/**
+ * holzkube-manager itself (HOST-02, HOST-03): which version runs, since when,
+ * where its state lives and how much room is left there, and what the update
+ * script last recorded -- or that it records nothing.
+ */
+function ServiceCard({ host, observed }: { host: Host; observed: Date }) {
+  const s = host.service
+  const size = s.data_dir.size
+  const dataFs = host.live.filesystems.find((f) => f.roles.includes(DATA_DIR_ROLE))
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-base">Service</CardTitle>
+      </CardHeader>
+      <CardContent>
+        <dl className="grid grid-cols-1 md:grid-cols-[10rem_minmax(0,1fr)] gap-x-4 gap-y-2 text-sm">
+          <dt className="text-muted-foreground">Version</dt>
+          <dd className="min-w-0 break-words">
+            <Mono>{s.version}</Mono>
+          </dd>
+
+          <dt className="text-muted-foreground">Running for</dt>
+          <dd className="min-w-0 break-words">
+            {formatUptime(s.uptime_seconds)}{' '}
+            <span className="text-xs text-muted-foreground">
+              since {new Date(s.started_at).toLocaleString()}
+            </span>
+          </dd>
+
+          <dt className="text-muted-foreground">Data directory</dt>
+          <dd className="min-w-0 break-words">
+            <Mono>{s.data_dir.path}</Mono>
+            {/* The size is walked at most once a minute, so its age is said
+                rather than implied current. */}
+            {size.readable ? (
+              <p className="text-xs text-muted-foreground tabular-nums">
+                {formatBytes(size.value.bytes)} · measured {ago(size.value.measured_at, observed)}
+              </p>
+            ) : (
+              <MissingValue reason={size.reason} />
+            )}
+          </dd>
+
+          <dt className="text-muted-foreground">Free space</dt>
+          <dd className="min-w-0 break-words">
+            {dataFs === undefined ? (
+              <MissingValue
+                reason={{
+                  code: 'read-failed',
+                  message: 'The answer names no filesystem for the data directory.',
+                }}
+              />
+            ) : dataFs.usage.readable ? (
+              <span className="tabular-nums">
+                {formatBytes(dataFs.usage.value.available_bytes)} free of{' '}
+                {formatBytes(dataFs.usage.value.size_bytes)} on <Mono>{dataFs.mount}</Mono>
+              </span>
+            ) : (
+              <MissingValue reason={dataFs.usage.reason} />
+            )}
+          </dd>
+
+          <dt className="text-muted-foreground">Update check</dt>
+          <dd className="min-w-0 break-words">
+            <UpdateCheck update={s.update} version={s.version} observed={observed} />
+          </dd>
+        </dl>
+      </CardContent>
+    </Card>
+  )
+}
+
+type UpdateStatus = Extract<Host['service']['update'], { readable: true }>['value']
+
+/**
+ * The update row (HOST-03, D-16): what the script recorded, or the server's
+ * sentence for why there is nothing. Every time and version on it is one the
+ * status file named; a half the script could not know is left out, not filled.
+ */
+function UpdateCheck({
+  update,
+  version,
+  observed,
+}: {
+  update: Host['service']['update']
+  version: string
+  observed: Date
+}) {
+  if (!update.readable) {
+    return <MissingValue reason={update.reason} />
+  }
+  const u = update.value
+  const attention = u.outcome === 'failed' || u.outcome === 'rolled-back'
+  const mismatch = u.installed !== null && bare(u.installed) !== bare(version)
+  return (
+    <>
+      <p className={attention ? 'text-amber-700 dark:text-amber-300' : undefined}>
+        {outcomeSentence(u)}
+      </p>
+      <p className="text-xs text-muted-foreground">
+        Checked {ago(u.checked_at, observed)} · {new Date(u.checked_at).toLocaleString()}
+      </p>
+      {(u.installed !== null || u.latest !== null) && (
+        <p className="text-xs text-muted-foreground">
+          {u.installed !== null && (
+            <>
+              Installed <Mono>{u.installed}</Mono>
+            </>
+          )}
+          {u.installed !== null && u.latest !== null && ' · '}
+          {u.latest !== null && (
+            <>
+              latest <Mono>{u.latest}</Mono>
+            </>
+          )}
+        </p>
+      )}
+      {mismatch && (
+        <p className="text-xs text-muted-foreground">
+          The update status names {u.installed} as installed; this process runs {version}.
+        </p>
+      )}
+    </>
+  )
+}
+
+function outcomeSentence(u: UpdateStatus): string {
+  switch (u.outcome) {
+    case 'current':
+      return 'Up to date.'
+    case 'available':
+      return u.latest !== null ? `${u.latest} is available.` : 'A newer release is available.'
+    case 'updated':
+      return u.installed !== null ? `Updated to ${u.installed}.` : 'Updated.'
+    case 'rolled-back':
+      return u.latest !== null && u.installed !== null
+        ? `The update to ${u.latest} was rolled back; ${u.installed} is installed.`
+        : 'The update was rolled back.'
+    case 'failed':
+      return u.installed !== null
+        ? `The last update run failed; ${u.installed} is still installed.`
+        : 'The last update run failed.'
+  }
+}
+
+/** A version without its tag's leading "v": v0.1.0 and 0.1.0 are one release. */
+function bare(v: string): string {
+  return v.startsWith('v') ? v.slice(1) : v
+}
+
+/**
+ * / and the data directory's filesystem (HMON-02, D-07). One meter per
+ * filesystem: when the data directory lives on the root filesystem -- as on the
+ * production Pi -- that is one meter with both roles, never two identical bars.
+ */
+function FilesystemsCard({ filesystems }: { filesystems: Host['live']['filesystems'] }) {
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-base">Filesystems</CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        {filesystems.length === 0 && (
+          <p className="text-sm text-muted-foreground">No filesystem was reported.</p>
+        )}
+        {filesystems.map((f) => {
+          const label = (
+            <>
+              <span className="font-mono">{f.mount}</span>
+              {f.roles.length > 0 && (
+                <span className="text-muted-foreground"> {f.roles.join(' · ')}</span>
+              )}
+            </>
+          )
+          if (!f.usage.readable) {
+            return (
+              <div key={f.mount} className="space-y-1">
+                <p className="text-sm">{label}</p>
+                <MissingValue reason={f.usage.reason} />
+              </div>
+            )
+          }
+          const { size_bytes: size, used_bytes: used, available_bytes: free } = f.usage.value
+          // df's denominator: blocks reserved for root are neither used nor
+          // available, so used / size would read lower than df's Use%.
+          const ceiling = used + free
+          return (
+            <Meter
+              key={f.mount}
+              dense
+              label={label}
+              display={dfPercent(used, free)}
+              value={used}
+              max={ceiling}
+              warn={ceiling * 0.8}
+              danger={ceiling * 0.9}
+              detail={
+                <>
+                  {formatBytes(used)} of {formatBytes(size)} · {formatBytes(free)} free
+                  {f.device !== '' && (
+                    <>
+                      {' · '}
+                      <span className="font-mono">{f.device}</span>
+                    </>
+                  )}
+                </>
+              }
+            />
+          )
+        })}
+      </CardContent>
+    </Card>
+  )
+}
+
+/**
+ * df(1)'s Use%: used / (used + available), rounded UP to a whole percent --
+ * gnulib's df adds one whenever the division leaves a remainder. The figure on
+ * this page is the one the operator's shell prints for the same filesystem.
+ */
+function dfPercent(used: number, available: number): string {
+  const total = used + available
+  if (!(total > 0)) return '—'
+  return `${Math.ceil((used * 100) / total)}%`
 }
 
 /**
@@ -195,6 +425,7 @@ function LiveSection({ host }: { host: Host }) {
           <ProcessorCard host={host} />
           <div className="grid gap-4 md:grid-cols-2">
             <MemoryCard memory={host.live.memory} />
+            <FilesystemsCard filesystems={host.live.filesystems} />
           </div>
         </div>
       </div>

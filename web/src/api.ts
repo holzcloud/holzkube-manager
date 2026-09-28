@@ -2956,6 +2956,32 @@ export const hostSchema = z.object({
     uptime_seconds: reading(z.number()),
   }),
   /**
+   * holzkube-manager itself (HOST-02, HOST-03). Version, start and process
+   * uptime are the process's own facts; the data directory's size (walked at
+   * most once a minute, hence `measured_at`) and the update status are
+   * readings. The update status is not readable with `update.not-recorded`
+   * when the installed update script does not record its runs.
+   */
+  service: z.object({
+    version: z.string(),
+    started_at: z.string(),
+    uptime_seconds: z.number(),
+    data_dir: z.object({
+      path: z.string(),
+      size: reading(z.object({ bytes: z.number(), measured_at: z.string() })),
+    }),
+    update: reading(
+      z.object({
+        checked_at: z.string(),
+        /** null only for a failed run that could not tell. */
+        installed: z.string().nullable(),
+        /** null only for a failed run that never got as far as asking. */
+        latest: z.string().nullable(),
+        outcome: z.enum(['current', 'available', 'updated', 'rolled-back', 'failed']),
+      }),
+    ),
+  }),
+  /**
    * How the machine is doing right now (HMON-01). Under the production unit's
    * ProcSubset=pid, usage, per_core and memory arrive not readable with
    * `hardening.proc-subset`; load stays readable, from sysinfo(2).
@@ -2985,6 +3011,29 @@ export const hostSchema = z.object({
         swap_used_bytes: z.number(),
       }),
     ),
+    /**
+     * / and the data directory's filesystem (HMON-02): one row with both
+     * roles when they are one filesystem. used + available is df's
+     * denominator; size also counts the blocks reserved for root.
+     */
+    filesystems: z
+      .array(
+        z.object({
+          mount: z.string(),
+          device: z.string(),
+          fstype: z.string(),
+          roles: z.array(z.string()).nullish().transform(orEmpty),
+          usage: reading(
+            z.object({
+              size_bytes: z.number(),
+              used_bytes: z.number(),
+              available_bytes: z.number(),
+            }),
+          ),
+        }),
+      )
+      .nullish()
+      .transform(orEmpty),
   }),
 })
 

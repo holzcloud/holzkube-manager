@@ -3,6 +3,7 @@ import { render, screen, within } from '@testing-library/react'
 import type { ReactNode } from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { api, type Host, hostSchema } from '@/api'
+import { formatBytes } from '@/lib/format'
 import { HostPage, HostView } from './host'
 
 /**
@@ -46,6 +47,42 @@ function readableLive(overrides: Record<string, unknown> = {}) {
       swap_total_bytes: 2147467264,
       swap_used_bytes: 1498169344,
     }),
+    filesystems: [mergedRoot()],
+    ...overrides,
+  }
+}
+
+/** statfs("/") on the Pi, beside `df -B1 /`: 125260451840 28882735104 91212472320 25% /. */
+const PI_ROOT_USAGE = {
+  size_bytes: 125260451840,
+  used_bytes: 28882735104,
+  available_bytes: 91212472320,
+}
+
+/** The production shape: the data directory on the root filesystem, one row. */
+function mergedRoot() {
+  return {
+    mount: '/',
+    device: '/dev/mmcblk0p2',
+    fstype: 'ext4',
+    roles: ['root', 'data directory'],
+    usage: read(PI_ROOT_USAGE),
+  }
+}
+
+const NOT_RECORDED =
+  'The update script installed on this machine does not record its checks. Versions from this release on do; the next update brings it.'
+
+function service(overrides: Record<string, unknown> = {}) {
+  return {
+    version: '0.1.0',
+    started_at: '2026-09-28T08:00:00Z',
+    uptime_seconds: 7203,
+    data_dir: {
+      path: '/var/lib/holzkube-manager',
+      size: read({ bytes: 432013312, measured_at: '2026-09-28T09:59:40Z' }),
+    },
+    update: hidden('update.not-recorded', NOT_RECORDED),
     ...overrides,
   }
 }
@@ -65,6 +102,7 @@ function procSubsetLive() {
       load: read({ load1: 0.52, load5: 0.41, load15: 0.33, source: 'sysinfo' }),
     },
     memory: hidden('hardening.proc-subset', HARDENING_MEMINFO),
+    filesystems: [mergedRoot()],
   }
 }
 
@@ -74,6 +112,7 @@ function hostShape(
 ): Host {
   return hostSchema.parse({
     live: readableLive(),
+    service: service(),
     observed_at: '2026-09-28T10:00:03Z',
     container: false,
     device: {
@@ -152,7 +191,9 @@ describe('the Device card', () => {
   it('shows the seven rows of a Pi 5, in order', () => {
     wrap(<HostView host={hostShape()} stale={null} />)
 
-    const labels = screen.getAllByRole('term').map((dt) => dt.textContent)
+    const labels = within(cardOf('Device'))
+      .getAllByRole('term')
+      .map((dt) => dt.textContent)
     expect(labels).toEqual([
       'Hostname',
       'Model',
@@ -383,6 +424,254 @@ describe('the Live section', () => {
     const notice = screen.getByText(HARDENING_HEADLINE).closest('div')
     expect(notice).toHaveTextContent('so CPU usage is shown as not readable')
     expect(notice).not.toHaveTextContent('memory and swap')
+  })
+})
+
+/** A recorded update run, as the status file names it. */
+function recorded(
+  outcome: string,
+  installed: string | null,
+  latest: string | null,
+  checkedAt = '2026-09-28T09:37:03Z',
+) {
+  return read({ checked_at: checkedAt, installed, latest, outcome })
+}
+
+describe('the Service card', () => {
+  it('shows the version, how long the process has run, the data directory and its free space', () => {
+    wrap(<HostView host={hostShape()} stale={null} />)
+
+    const labels = within(cardOf('Service'))
+      .getAllByRole('term')
+      .map((dt) => dt.textContent)
+    expect(labels).toEqual([
+      'Version',
+      'Running for',
+      'Data directory',
+      'Free space',
+      'Update check',
+    ])
+
+    expect(within(cellOf('Version')).getByText('0.1.0')).toHaveClass('font-mono')
+    const running = cellOf('Running for')
+    expect(running).toHaveTextContent('2 h 0 min')
+    expect(running).toHaveTextContent(`since ${new Date('2026-09-28T08:00:00Z').toLocaleString()}`)
+
+    const dataDir = cellOf('Data directory')
+    expect(within(dataDir).getByText('/var/lib/holzkube-manager')).toHaveClass('font-mono')
+    // Measured 23 s before the reading was taken.
+    expect(dataDir).toHaveTextContent(`${formatBytes(432013312)} · measured 23s ago`)
+
+    expect(cellOf('Free space')).toHaveTextContent(
+      `${formatBytes(91212472320)} free of ${formatBytes(125260451840)} on /`,
+    )
+    expect(within(cellOf('Free space')).getByText('/')).toHaveClass('font-mono')
+  })
+
+  it('draws an unmeasured data directory and an unreadable free space as Not readable', () => {
+    const live = readableLive({
+      filesystems: [
+        {
+          ...mergedRoot(),
+          usage: hidden('read-failed', 'Could not read statfs(/): permission denied'),
+        },
+      ],
+    })
+    const svc = service({
+      data_dir: {
+        path: '/var/lib/holzkube-manager',
+        size: hidden(
+          'read-failed',
+          'Could not read /var/lib/holzkube-manager: the size walk took longer than 5 s',
+        ),
+      },
+    })
+    wrap(<HostView host={hostShape({ live, service: svc })} stale={null} />)
+
+    expect(cellOf('Data directory')).toHaveTextContent('Not readable')
+    expect(cellOf('Data directory')).toHaveTextContent('the size walk took longer than 5 s')
+    expect(cellOf('Free space')).toHaveTextContent('Not readable')
+    expect(cellOf('Free space')).toHaveTextContent('permission denied')
+    expectNoDrawnZero(cardOf('Service'))
+  })
+
+  it('says Not recorded with the server sentence, and invents no check time', () => {
+    wrap(<HostView host={hostShape()} stale={null} />)
+
+    const update = cellOf('Update check')
+    expect(update).toHaveTextContent('Not recorded')
+    expect(update).toHaveTextContent(NOT_RECORDED)
+    expect(update).not.toHaveTextContent('Checked')
+    expect(update).not.toHaveTextContent('Installed')
+  })
+
+  it('in a container says the container sentence the server sent', () => {
+    const sentence =
+      "holzkube-manager runs in a container, where the host's update timer does not run. A container is updated by pulling a new image."
+    wrap(
+      <HostView
+        host={hostShape({
+          container: true,
+          service: service({ update: hidden('update.not-recorded', sentence) }),
+        })}
+        stale={null}
+      />,
+    )
+
+    expect(cellOf('Update check')).toHaveTextContent(sentence)
+    expect(cellOf('Update check')).not.toHaveTextContent(NOT_RECORDED)
+  })
+
+  it('says Not readable with the cause for a broken status file', () => {
+    const cause =
+      'The update status file exists but could not be read: outcome in the update status file is none of current, available, updated, rolled-back, failed'
+    wrap(
+      <HostView
+        host={hostShape({ service: service({ update: hidden('read-failed', cause) }) })}
+        stale={null}
+      />,
+    )
+
+    const update = cellOf('Update check')
+    expect(update).toHaveTextContent('Not readable')
+    expect(update).toHaveTextContent(cause)
+    expect(update).not.toHaveTextContent('Checked')
+  })
+
+  it.each([
+    ['current', '0.1.0', '0.1.0', 'Up to date.', false],
+    ['available', '0.1.0', '0.2.0', '0.2.0 is available.', false],
+    ['updated', '0.1.0', '0.1.0', 'Updated to 0.1.0.', false],
+    [
+      'rolled-back',
+      '0.1.0',
+      '0.2.0',
+      'The update to 0.2.0 was rolled back; 0.1.0 is installed.',
+      true,
+    ],
+    ['failed', '0.1.0', null, 'The last update run failed; 0.1.0 is still installed.', true],
+    ['failed', null, null, 'The last update run failed.', true],
+  ] as const)(
+    'outcome %s (installed %s, latest %s) reads "%s"',
+    (outcome, installed, latest, sentence, amber) => {
+      wrap(
+        <HostView
+          host={hostShape({ service: service({ update: recorded(outcome, installed, latest) }) })}
+          stale={null}
+        />,
+      )
+
+      const update = cellOf('Update check')
+      const line = within(update).getByText(sentence)
+      if (amber) {
+        expect(line).toHaveClass('text-amber-700')
+      } else {
+        expect(line).not.toHaveClass('text-amber-700')
+      }
+      // Checked 23 min before the reading; the absolute time beside it.
+      expect(update).toHaveTextContent(
+        `Checked 23m ago · ${new Date('2026-09-28T09:37:03Z').toLocaleString()}`,
+      )
+      if (installed !== null) {
+        expect(
+          within(update).getAllByText(installed, { selector: '.font-mono' }).length,
+        ).toBeGreaterThan(0)
+        expect(update).toHaveTextContent(`Installed ${installed}`)
+      } else {
+        expect(update).not.toHaveTextContent('Installed')
+      }
+      if (latest !== null) {
+        expect(update).toHaveTextContent(`latest ${latest}`)
+      } else {
+        expect(update).not.toHaveTextContent('latest')
+      }
+    },
+  )
+
+  it('names a status that disagrees with the running version, ignoring a leading v', () => {
+    const mismatchLine = 'The update status names 0.0.9 as installed; this process runs 0.1.0.'
+    const { unmount } = wrap(
+      <HostView
+        host={hostShape({ service: service({ update: recorded('current', '0.0.9', '0.0.9') }) })}
+        stale={null}
+      />,
+    )
+    expect(cellOf('Update check')).toHaveTextContent(mismatchLine)
+    unmount()
+
+    wrap(
+      <HostView
+        host={hostShape({ service: service({ update: recorded('current', 'v0.1.0', 'v0.1.0') }) })}
+        stale={null}
+      />,
+    )
+    expect(cellOf('Update check')).not.toHaveTextContent('The update status names')
+  })
+})
+
+describe('the Filesystems card', () => {
+  it("draws one meter for root and data directory on one filesystem, at df's Use%", () => {
+    wrap(<HostView host={hostShape()} stale={null} />)
+
+    const card = cardOf('Filesystems')
+    expect(within(card).getByText('root · data directory')).toBeInTheDocument()
+    expect(within(card).getAllByText('/', { selector: '.font-mono' })).toHaveLength(1)
+    // df -B1 / printed 25% for these numbers: used / (used + available),
+    // rounded up. used / size would say 23%.
+    expect(within(card).getByText('25%')).toBeInTheDocument()
+    expect(card).toHaveTextContent(
+      `${formatBytes(28882735104)} of ${formatBytes(125260451840)} · ${formatBytes(91212472320)} free · /dev/mmcblk0p2`,
+    )
+    expect(within(card).getByText('/dev/mmcblk0p2')).toHaveClass('font-mono')
+  })
+
+  it('draws two meters when the data directory has its own filesystem', () => {
+    const live = readableLive({
+      filesystems: [
+        { ...mergedRoot(), roles: ['root'] },
+        {
+          mount: '/srv',
+          device: '/dev/nvme0n1p1',
+          fstype: 'ext4',
+          roles: ['data directory'],
+          usage: read({ size_bytes: 4096000, used_bytes: 1638400, available_bytes: 1433600 }),
+        },
+      ],
+    })
+    wrap(<HostView host={hostShape({ live })} stale={null} />)
+
+    const card = cardOf('Filesystems')
+    expect(within(card).getByText('root')).toBeInTheDocument()
+    expect(within(card).getByText('data directory')).toBeInTheDocument()
+    expect(within(card).queryByText('root · data directory')).toBeNull()
+    expect(within(card).getByText('/srv')).toHaveClass('font-mono')
+    // Free space names the data directory's filesystem, not the root's.
+    expect(cellOf('Free space')).toHaveTextContent(
+      `${formatBytes(1433600)} free of ${formatBytes(4096000)} on /srv`,
+    )
+  })
+
+  it('shows Not readable for one filesystem while the other meter renders', () => {
+    const live = readableLive({
+      filesystems: [
+        { ...mergedRoot(), roles: ['root'] },
+        {
+          mount: '/srv',
+          device: '/dev/nvme0n1p1',
+          fstype: 'ext4',
+          roles: ['data directory'],
+          usage: hidden('read-failed', 'Could not read statfs(/srv/data): permission denied'),
+        },
+      ],
+    })
+    wrap(<HostView host={hostShape({ live })} stale={null} />)
+
+    const card = cardOf('Filesystems')
+    expect(within(card).getByText('/srv')).toBeInTheDocument()
+    expect(card).toHaveTextContent('Not readable')
+    expect(card).toHaveTextContent('permission denied')
+    expect(within(card).getByText('25%')).toBeInTheDocument()
+    expectNoDrawnZero(card)
   })
 })
 
