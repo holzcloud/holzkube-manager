@@ -116,7 +116,7 @@ func (c *Collector) Read(ctx context.Context) View {
 	v.Device = c.readDevice()
 	v.Container = detectContainer(c.cfg.FS)
 	v.Service = c.readService(ctx, now, v.Container)
-	v.Live = c.readLive(now)
+	v.Live = c.readLive()
 
 	return v
 }
@@ -163,7 +163,7 @@ func (c *Collector) readService(ctx context.Context, now time.Time, container bo
 // readLive fills the Live section: CPU, load, memory and swap (HMON-01), the
 // filesystems of / and the data directory (HMON-02), the temperatures and
 // fans (HMON-03), and the network interfaces (HMON-04).
-func (c *Collector) readLive(now time.Time) Live {
+func (c *Collector) readLive() Live {
 	// The proof the hardening is in force (D-03). A mountinfo that cannot be
 	// read or parsed proves nothing, so every missing file is then reported as
 	// the read failure it is -- and no two paths are claimed to share a disk.
@@ -186,9 +186,15 @@ func (c *Collector) readLive(now time.Time) Live {
 		live.Sensors = Read(sensors)
 	}
 
+	// The rate clock is read here, where the counters are, and not taken from
+	// the start of the request: readService may have walked the data
+	// directory for up to dirSizeDeadline in between, and counters stamped
+	// before that walk would be divided by a window the walk is missing from
+	// -- too high in the poll that walked, too low in the one after.
+	sampledAt := c.cfg.Now()
 	links, linkErr := readLinks(c.cfg.FS)
 
-	cur := counters{at: now, links: linkCounters(links)}
+	cur := counters{at: sampledAt, links: linkCounters(links)}
 	var statReason *Reason
 	if raw, err := readBounded(c.cfg.FS, fsPath(pathProcStat), maxSmallFile); err != nil {
 		r := classify(pathProcStat, err, subsetPid)

@@ -268,6 +268,53 @@ func TestNetworkRates(t *testing.T) {
 	})
 }
 
+// slowWalkFS makes the data directory's size walk take walk on the test's
+// clock: opening the directory moves the clock, as a walk over an SD card
+// moves the real one.
+type slowWalkFS struct {
+	fs.FS
+	dir   string
+	clock *liveClock
+	walk  time.Duration
+}
+
+func (f slowWalkFS) Open(name string) (fs.File, error) {
+	if name == f.dir {
+		f.clock.advance(f.walk)
+	}
+	return f.FS.Open(name)
+}
+
+// TestNetworkRateWindowExcludesTheSizeWalk (WR-01): the counters' window is
+// the time between the two counter reads. The data directory walk runs
+// before the counters are read, once a minute, for up to 5 s; stamping the
+// counters with the request's start put that walk inside the window of one
+// poll and outside the next, so a link moving 100000 B/s read as 60000 here.
+func TestNetworkRateWindowExcludesTheSizeWalk(t *testing.T) {
+	t.Parallel()
+
+	mapFS := fstest.MapFS{"srv/hkm/state.json": &fstest.MapFile{Data: []byte("{}")}}
+	clock := newLiveClock()
+	fsys := slowWalkFS{FS: mapFS, dir: "srv/hkm", clock: clock, walk: 2 * time.Second}
+	c := New(Config{FS: fsys, Sys: fakeSys{loads: sysinfoLoads}, Now: clock.now, DataDir: "/srv/hkm"})
+
+	// 1: this read walks the data directory, which takes 2 s.
+	netDir(mapFS, "eth0", true, 1_000_000, 500_000)
+	readNetwork(t, c)
+
+	// 2: 3 s after the counters were read, inside the walk's minute: no walk.
+	clock.advance(3 * time.Second)
+	netDir(mapFS, "eth0", true, 1_300_000, 530_000)
+	got, over := readNetwork(t, c)
+	wantNetwork(t, "3 s after the counters", got, Network{
+		Physical: []Link{rated("eth0", floatp(100_000), floatp(10_000))},
+		Virtual:  []Link{},
+	})
+	if over == nil || *over != 3.0 {
+		t.Errorf("rates_over_seconds = %v, want 3 -- the walk is not part of the window", showPtr(over))
+	}
+}
+
 // TestNetworkUnreadable: a class directory that exists and cannot be listed is
 // a reading with a reason -- not an empty list, which would say "no
 // interfaces" about a machine nobody could look at.
