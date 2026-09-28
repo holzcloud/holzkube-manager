@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { render, screen, within } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import type { ReactNode } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { api, type History, type Host, historySchema, hostSchema } from '@/api'
@@ -22,7 +22,21 @@ vi.mock('@/routes/__root', () => ({
 
 function wrap(node: ReactNode) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-  return render(<QueryClientProvider client={client}>{node}</QueryClientProvider>)
+  const rendered = render(<QueryClientProvider client={client}>{node}</QueryClientProvider>)
+  return {
+    ...rendered,
+    client,
+    /** Renders the page again with the same query client: the next poll. */
+    rerender: (next: ReactNode) =>
+      rendered.rerender(<QueryClientProvider client={client}>{next}</QueryClientProvider>),
+  }
+}
+
+/** Waits until the page's history request has answered. */
+async function historySettled(client: QueryClient) {
+  await waitFor(() => {
+    expect(client.getQueryState(['host', 'history', '1h'])?.status).toBe('success')
+  })
 }
 
 const read = <T,>(value: T) => ({ readable: true as const, value })
@@ -410,10 +424,17 @@ const DRAWN_ZERO = /(^|\s)0(\.0)?%|(^|\s)0 B(\s|$)/
  * very zero it is looking for (seen while injecting one).
  */
 function expectNoDrawnZero(card: HTMLElement) {
-  const zeros = within(card)
-    .queryAllByText(DRAWN_ZERO)
-    .map((node) => node.textContent)
+  const zeros = outsideAxes(within(card).queryAllByText(DRAWN_ZERO)).map((node) => node.textContent)
   expect(zeros).toEqual([])
+}
+
+/**
+ * The nodes that are not a chart's axis labels. A chart's scale starts at
+ * "0%" or "0 B/s" whatever it draws; that label is the axis, not a reading, and
+ * the reading guards here are about readings.
+ */
+function outsideAxes(nodes: HTMLElement[]): HTMLElement[] {
+  return nodes.filter((node) => node.closest('svg') === null)
 }
 
 const HARDENING_HEADLINE = "Some readings are hidden by the service's hardening."
@@ -422,7 +443,7 @@ describe('the Live section', () => {
   it('under ProcSubset=pid says Not readable, names the hidden readings and the fix, never 0', () => {
     wrap(<HostView host={hostShape({ live: procSubsetLive() })} stale={null} />)
 
-    expect(screen.getByRole('heading', { level: 2, name: 'Live' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { level: 2, name: 'Readings' })).toBeInTheDocument()
 
     const processor = cardOf('Processor')
     const memory = cardOf('Memory')
@@ -452,7 +473,7 @@ describe('the Live section', () => {
     wrap(<HostView host={hostShape()} stale={null} />)
 
     const processor = cardOf('Processor')
-    expect(within(processor).getByText('18%')).toBeInTheDocument()
+    expect(within(processor).getByText('18%', { selector: 'p' })).toBeInTheDocument()
     expect(within(processor).getByText('4 cores')).toBeInTheDocument()
     expect(within(processor).getByText('load 7.29 · 4.90 · 2.98')).toBeInTheDocument()
     for (const i of [0, 1, 2, 3]) {
@@ -522,6 +543,166 @@ describe('the Live section', () => {
     const notice = screen.getByText(HARDENING_HEADLINE).closest('div')
     expect(notice).toHaveTextContent('so CPU usage is shown as not readable')
     expect(notice).not.toHaveTextContent('memory and swap')
+  })
+})
+
+const NO_CURVE = 'Not readable — no history'
+const OBSERVED = Date.parse('2026-09-28T10:00:03Z')
+
+/** A series recorded every 15 s from `fromMin` to `toMin` minutes before the reading. */
+function every15s(fromMin: number, toMin: number, v: number): [number, number][] {
+  const out: [number, number][] = []
+  for (let t = OBSERVED - fromMin * 60_000; t <= OBSERVED - toMin * 60_000; t += 15_000) {
+    out.push([t, v])
+  }
+  return out
+}
+
+describe('the charts', () => {
+  it('draws the processor, memory and network curves and a sparkline per core, as a node does', async () => {
+    vi.spyOn(api, 'hostHistory').mockResolvedValue(
+      hostHistory({
+        cpu: every15s(4, 0.25, 21),
+        'core:0': every15s(4, 0.25, 12),
+        memory: every15s(4, 0.25, 48),
+        rx: every15s(4, 0.25, 150_000),
+        tx: every15s(4, 0.25, 40_000),
+      }),
+    )
+    const { client } = wrap(<HostView host={hostShape()} stale={null} />)
+    await historySettled(client)
+
+    const processor = cardOf('Processor')
+    expect(
+      within(processor).getByRole('img', { name: 'Processor load, last 5 min' }),
+    ).toBeInTheDocument()
+    // Core 0 has a recorded curve; the others start with this page's reading.
+    expect(within(processor).getByRole('img', { name: 'CPU 0 load' })).toBeInTheDocument()
+    for (const i of [1, 2, 3]) {
+      expect(
+        within(processor).getByRole('img', { name: `CPU ${i} load: collecting` }),
+      ).toBeInTheDocument()
+    }
+    expect(
+      within(cardOf('Memory')).getByRole('img', { name: 'Memory in use, last 5 min' }),
+    ).toBeInTheDocument()
+    expect(
+      within(cardOf('Network')).getByRole('img', { name: 'Network throughput, last 5 min' }),
+    ).toBeInTheDocument()
+    expect(
+      within(cardOf('Sensors')).getAllByRole('img', { name: /^temp1 temperature/ }),
+    ).toHaveLength(2)
+    expect(screen.queryByText(NO_CURVE)).toBeNull()
+  })
+
+  it('under ProcSubset=pid with nothing recorded says Not readable — no history for processor and memory, and draws no axis', async () => {
+    vi.spyOn(api, 'hostHistory').mockResolvedValue(
+      hostHistory({ 'temp:cpu_thermal/temp1': every15s(4, 0.25, 63) }),
+    )
+    const { client } = wrap(<HostView host={hostShape({ live: procSubsetLive() })} stale={null} />)
+    await historySettled(client)
+
+    for (const [title, chart] of [
+      ['Processor', /^Processor load/],
+      ['Memory', /^Memory in use/],
+    ] as const) {
+      const card = cardOf(title)
+      const sentence = within(card).getByText(NO_CURVE)
+      expect(sentence.tagName).toBe('P')
+      expect(sentence).toHaveClass('text-xs', 'text-muted-foreground')
+      expect(within(card).queryByRole('img', { name: chart })).toBeNull()
+      expectNoDrawnZero(card)
+    }
+    // The hardening hides neither the network nor the sensors: they chart.
+    expect(
+      within(cardOf('Network')).getByRole('img', { name: /^Network throughput/ }),
+    ).toBeInTheDocument()
+    expect(
+      within(cardOf('Sensors')).getAllByRole('img', { name: /^temp1 temperature/ }),
+    ).toHaveLength(2)
+  })
+
+  it('hardened now, draws the processor curve it recorded before rather than the sentence', async () => {
+    vi.spyOn(api, 'hostHistory').mockResolvedValue(hostHistory({ cpu: every15s(4, 2, 30) }))
+    const { client } = wrap(<HostView host={hostShape({ live: procSubsetLive() })} stale={null} />)
+    await historySettled(client)
+
+    const processor = cardOf('Processor')
+    expect(within(processor).getByRole('img', { name: /^Processor load/ })).toBeInTheDocument()
+    expect(within(processor).queryByText(NO_CURVE)).toBeNull()
+    // Memory has no earlier stretch: it still says so.
+    expect(within(cardOf('Memory')).getByText(NO_CURVE)).toBeInTheDocument()
+  })
+
+  it('on the first poll after a restart draws the processor chart, starting now, never Not readable — no history', async () => {
+    const noBaseline = hidden('rate.no-baseline', 'Waiting for a second reading')
+    const live = readableLive({
+      rates_over_seconds: null,
+      cpu: { ...readableLive().cpu, usage: noBaseline, per_core: noBaseline },
+      network: read(pi5NetworkFirstRead()),
+    })
+    const { client } = wrap(<HostView host={hostShape({ live })} stale={null} />)
+    await historySettled(client)
+
+    const processor = cardOf('Processor')
+    expect(within(processor).getByRole('img', { name: /^Processor load/ })).toBeInTheDocument()
+    expect(
+      within(processor).getByText('The curve starts now; it fills in as readings arrive.'),
+    ).toBeInTheDocument()
+    expect(screen.queryByText(NO_CURVE)).toBeNull()
+  })
+
+  it('draws a stretch without readings as a gap: two runs, nothing between them', async () => {
+    vi.spyOn(api, 'hostHistory').mockResolvedValue(
+      hostHistory({ cpu: [...every15s(30, 20, 25), ...every15s(10, 0.25, 35)] }),
+    )
+    const { client } = wrap(<HostView host={hostShape()} stale={null} />)
+    await historySettled(client)
+    fireEvent.click(screen.getByRole('button', { name: '1 h' }))
+
+    const chart = await within(cardOf('Processor')).findByRole('img', {
+      name: 'Processor load, last 1 h',
+    })
+    const line = chart.querySelector('path[fill="none"]')
+    const d = line?.getAttribute('d') ?? ''
+    expect(d.match(/M/g)).toHaveLength(2)
+  })
+
+  it('adds no processor or memory point while the hardening hides them, poll after poll', async () => {
+    const first = hostShape({ live: procSubsetLive() })
+    const second = hostShape({ live: procSubsetLive(), observed_at: '2026-09-28T10:00:06Z' })
+    const page = wrap(<HostView host={first} stale={null} />)
+    await historySettled(page.client)
+    page.rerender(<HostView host={second} stale={null} />)
+
+    for (const title of ['Processor', 'Memory']) {
+      expect(within(cardOf(title)).getByText(NO_CURVE)).toBeInTheDocument()
+    }
+    expect(screen.queryByRole('img', { name: /^Processor load/ })).toBeNull()
+    // The network is read both times: its curve has the two points.
+    const network = within(cardOf('Network')).getByRole('img', { name: /^Network throughput/ })
+    expect(network.closest('figure')?.querySelectorAll('tbody tr')).toHaveLength(2)
+  })
+
+  it('says what is true now: Readings, recorded every 15 s, and that hidden values are not recorded', () => {
+    wrap(<HostView host={hostShape({ live: procSubsetLive() })} stale={null} />)
+
+    const heading = screen.getByRole('heading', { level: 2, name: 'Readings' })
+    expect(heading).toHaveAttribute('id', 'host-readings')
+    expect(heading.closest('section')).toHaveAttribute('aria-labelledby', 'host-readings')
+    expect(
+      screen.getByText(
+        'Read every 3 s while this page is open. holzkube-manager also records them every 15 s and keeps the last 24 hours, through a restart.',
+      ),
+    ).toBeInTheDocument()
+    expect(screen.queryByText(/Nothing on this page is stored/)).toBeNull()
+    expect(screen.getByText(/, every 3 s while this page is open\./)).toHaveTextContent(
+      /Rates are over the last 3\.0 s\. History is sampled every 15 s\.$/,
+    )
+    const notice = screen.getByText(HARDENING_HEADLINE).closest('div')
+    expect(notice).toHaveTextContent(
+      'CPU usage, memory and swap are shown as not readable rather than as zero, and are not recorded.',
+    )
   })
 })
 
@@ -952,12 +1133,7 @@ describe('the Network card', () => {
     const card = cardOf('Network')
     // No zero for a rate nobody measured -- checked per element first, so a
     // "0 B/s" is named by its own text rather than hidden in a glued string.
-    expect(
-      within(card)
-        .queryAllByText(/0 B\/s/)
-        .map((n) => n.textContent),
-    ).toEqual([])
-    expect(card).not.toHaveTextContent('0 B/s')
+    expect(outsideAxes(within(card).queryAllByText(/0 B\/s/)).map((n) => n.textContent)).toEqual([])
     for (const name of ['eth0', 'wlan0']) {
       expect(linkRow(card, name)).toHaveTextContent('in — · out —')
     }
@@ -992,7 +1168,9 @@ describe('the Network card', () => {
     wrap(<HostView host={hostShape({ live: none })} stale={null} />)
     const card = cardOf('Network')
     expect(within(card).queryByText(/virtual interface/)).toBeNull()
-    expect(card.querySelector('details')).toBeNull()
+    // The chart's own "Show as table" is a details too; it is not a disclosure
+    // of interfaces.
+    expect([...card.querySelectorAll('details')].filter((d) => !d.closest('figure'))).toEqual([])
   })
 
   it('says no physical interface was found, and still counts the virtual ones', () => {
