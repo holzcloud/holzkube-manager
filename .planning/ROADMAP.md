@@ -88,7 +88,32 @@ injiziert hat, ist kein Ergebnis.
   4. Hinterlegt der Update-Mechanismus, wann zuletzt gesucht wurde und welche Version verfügbar ist, zeigt die Seite beides; hinterlegt er nichts — der Stand der heute auf dem Pi installierten `holzkube-manager-update` —, sagt sie „nicht hinterlegt", statt eine Zeit oder eine Version zu erfinden. Was das Skript dafür künftig schreibt, liegt in `deploy/` und wird nicht installiert.
 
 **Research**: `/proc` unter `ProcSubset=pid` und `ProtectProc=invisible` — welche Dateien genau verschwinden und woran der Daemon das von einem echten Lesefehler unterscheidet; wo der Pi 5 Temperatur und Lüfter in `/sys` ablegt und wo ein amd64-Host.
-**Plans**: TBD
+**Plans**: 7 plans
+
+Plans:
+**Wave 1**
+- [ ] 11-01-PLAN.md — Tracer: `internal/host` + `GET /api/v1/host` + `/host` mit Gerät-Karte, Container-Hinweis, Navigation, Layout-Fixture (HOST-01)
+
+**Wave 2** *(blocked on Wave 1 completion)*
+- [ ] 11-02-PLAN.md — Update-Skript hinterlegt sein Ergebnis über einen EXIT-Trap; strenger Leser `internal/host/updatestatus` (HOST-03)
+- [ ] 11-03-PLAN.md — CPU, Load, Speicher, Swap live; Härtung `subset=pid` deterministisch erkannt, „Not readable" statt 0; Echt-Kernel-Test (HMON-01, HMON-06)
+
+**Wave 3** *(blocked on Wave 2 completion)*
+- [ ] 11-04-PLAN.md — Dienst-Karte (Version, Laufzeit, Datenverzeichnis, Update-Status) und Dateisysteme, nach Gerätenummer zusammengelegt (HOST-02, HMON-02, HOST-03)
+
+**Wave 4** *(blocked on Wave 3 completion)*
+- [ ] 11-05-PLAN.md — Sensoren: hwmon/thermal über die Talos-Regeln, gemeinsames Sensor-Modul mit NodeHardware (HMON-03)
+
+**Wave 5** *(blocked on Wave 4 completion)*
+- [ ] 11-06-PLAN.md — Netzwerk: physische Schnittstellen mit Durchsatz, virtuelle eingeklappt (HMON-04)
+
+**Wave 6** *(blocked on Wave 5 completion)*
+- [ ] 11-07-PLAN.md — Vertrag und Anleitung, 390-px-Browsermessung, Abgleich auf dem Pi gegen die Shell und `subset=pid`, `./bin/task ci`
+
+**Cross-cutting constraints:**
+- Long host identifiers wrap and never widen the page at 390 px
+
+Waves: 1 → {01} · 2 → {02, 03} · 3 → {04} · 4 → {05} · 5 → {06} · 6 → {07}
 **UI hint**: yes
 
 ### Phase 12: Host wie ein Knoten — Verlauf, Warnung, Wand
