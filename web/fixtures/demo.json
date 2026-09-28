@@ -3305,7 +3305,7 @@
         "readable": true,
         "value": {
           "temperatures": [
-            { "chip": "cpu_thermal", "kind": "cpu", "label": "temp1", "celsius": 64.4, "high_c": null, "critical_c": 110, "warn_c": 80, "danger_c": 110 },
+            { "chip": "cpu_thermal", "kind": "cpu", "label": "temp1", "celsius": 82.1, "high_c": null, "critical_c": 110, "warn_c": 80, "danger_c": 110 },
             { "chip": "rp1_adc", "kind": "other", "label": "temp1", "celsius": 55.4, "high_c": null, "critical_c": null, "warn_c": 75, "danger_c": 90 }
           ],
           "fans": []
@@ -3326,6 +3326,12 @@
           ]
         }
       }
+    },
+    "health": {
+      "state": "warn",
+      "summary": "1 threshold crossed.",
+      "warnings": ["cpu_thermal 82.1 °C ≥ 80 °C"],
+      "unreadable": []
     }
   }
 }

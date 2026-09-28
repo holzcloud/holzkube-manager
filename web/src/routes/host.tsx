@@ -1,7 +1,8 @@
 import { useQuery } from '@tanstack/react-query'
 import { createRoute } from '@tanstack/react-router'
+import { AlertTriangle } from 'lucide-react'
 import type { ReactNode } from 'react'
-import { api, type Host, type Link, type Reason } from '@/api'
+import { api, type Host, type HostHealth, type Link, type Reason } from '@/api'
 import {
   CoreList,
   MemoryChart,
@@ -12,6 +13,7 @@ import { Meter } from '@/components/charts/Meter'
 import { RangePicker } from '@/components/charts/RangePicker'
 import { FanList, Sensors, sensorKey } from '@/components/charts/Sensors'
 import { ago } from '@/components/HealthField'
+import { HostStateMark, STATE_WORD } from '@/components/HostState'
 import { HARDWARE_POLL_INTERVAL_MS } from '@/components/NodeHardware'
 import { Problem } from '@/components/Problem'
 import { Badge } from '@/components/ui/badge'
@@ -83,6 +85,7 @@ export function HostView({ host, stale }: { host: Host; stale: unknown }) {
   const hidden = hiddenByHardening(host)
   const load = host.live.cpu.load
   const rates = host.live.rates_over_seconds
+  const health = host.health
 
   // The charts are the node page's (D-05): the daemon's recorded history for
   // the range, with this page's own readings appended after its last point.
@@ -98,16 +101,29 @@ export function HostView({ host, stale }: { host: Host; stale: unknown }) {
           <p className="text-sm text-muted-foreground">
             The machine holzkube-manager runs on, and the service itself.
           </p>
+          {/* The server's state (D-06, D-10), drawn as it came. Only the word
+              is live, so a temperature that changes every 3 s is not
+              re-announced, but a change of state is. Not dimmed when stale:
+              the stale notice below says how old it is. */}
+          <p className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
+            <HostStateMark state={health.state} summary={health.summary} form="line" />
+            <span aria-live="polite" className="font-semibold">
+              {STATE_WORD[health.state]}
+            </span>
+            <span className="text-muted-foreground">{health.summary}</span>
+          </p>
         </div>
       </header>
 
-      {/* Notices, in this order when they apply: stale, container, hardening. */}
+      {/* Notices, in this order when they apply: stale, warning, container,
+          hardening. Stale stays first: it says the warning itself may be old. */}
       {isStale && (
         <p className="rounded-md border border-amber-600/40 bg-amber-600/10 px-3 py-2 text-sm text-amber-700 dark:text-amber-300">
           holzkube-manager did not answer the latest request. What you see is its reading from{' '}
           {observed.toLocaleTimeString()}. {stale instanceof Error ? stale.message : ''}
         </p>
       )}
+      {health.state === 'warn' && <WarningNotice health={health} />}
       {host.container && (
         <p className="rounded-md border border-slate-500/40 bg-slate-500/10 px-3 py-2 text-sm text-slate-700 dark:text-slate-300">
           holzkube-manager runs in a container. Kernel, CPU, memory and temperatures are the host's;
@@ -208,6 +224,38 @@ const DATA_DIR_ROLE = 'data directory'
  * where its state lives and how much room is left there, and what the update
  * script last recorded -- or that it records nothing.
  */
+/**
+ * What is wrong and by how much (HMON-07, D-09): every warning sentence the
+ * server sent, in the server's order -- worst first -- and never re-sorted or
+ * re-worded here. The per-value marks (the sensor ▲, the filesystem meter's
+ * amber) hang on the same lines the server judged by, so they agree with this
+ * list rather than repeat a rule of the browser's own.
+ */
+function WarningNotice({ health }: { health: HostHealth }) {
+  const n = health.warnings.length
+  return (
+    <div className="rounded-md border border-amber-600/40 bg-amber-600/10 px-3 py-2 text-sm text-amber-700 dark:text-amber-300">
+      <p className="flex items-center gap-2 font-semibold">
+        <AlertTriangle aria-hidden="true" className="size-4 shrink-0" />
+        Warning — {n} {n === 1 ? 'threshold' : 'thresholds'} crossed
+      </p>
+      <ul className="mt-1 space-y-1 break-words tabular-nums">
+        {health.warnings.map((w, i) => (
+          // biome-ignore lint/suspicious/noArrayIndexKey: the server's list, in its order; sentences may repeat
+          <li key={i}>{w}</li>
+        ))}
+      </ul>
+      {health.unreadable.length > 0 && (
+        <p className="mt-1 break-words">Also not readable: {health.unreadable.join(' ')}</p>
+      )}
+      <p className="mt-1 text-xs">
+        A temperature warns at its chip's own limit, or at a default for its kind (80 °C for a
+        processor) when the chip names none; a filesystem warns at 80% used.
+      </p>
+    </div>
+  )
+}
+
 function ServiceCard({ host, observed }: { host: Host; observed: Date }) {
   const s = host.service
   const size = s.data_dir.size

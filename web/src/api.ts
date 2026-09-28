@@ -3094,9 +3094,25 @@ export const hostSchema = z.object({
       }),
     ),
   }),
+  /**
+   * The server's one decision about this host (D-06): ok, warn or unknown,
+   * with the sentences that explain it. The page, the navigation and the wall
+   * all draw this and never work a state out of their own; the browser prints
+   * the summary, the warnings (worst first) and the unreadable reasons
+   * verbatim. `state` and `summary` have no default on purpose: an answer
+   * without them fails to parse, rather than turning into a browser-side "ok".
+   */
+  health: z.object({
+    state: z.enum(['ok', 'warn', 'unknown']),
+    summary: z.string(),
+    warnings: z.array(z.string()).nullish().transform(orEmpty),
+    unreadable: z.array(z.string()).nullish().transform(orEmpty),
+  }),
 })
 
 export type Host = z.infer<typeof hostSchema>
+export type HostHealth = Host['health']
+export type HostState = HostHealth['state']
 
 export const api = {
   /** The running build and its changelog. Behind the session gate, which is
