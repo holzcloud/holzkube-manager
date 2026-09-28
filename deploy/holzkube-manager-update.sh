@@ -29,21 +29,35 @@
 #     Binary aus.
 set -euo pipefail
 
+# Pfade, die die Umgebung ueberschreiben darf. Im Betrieb setzt sie niemand:
+# die Unit nicht, und sudo verwirft sie mit env_reset. Es gibt sie fuer den
+# Test in internal/host/updatestatus, der eine Kopie dieses Skripts gegen
+# Attrappen laufen laesst und dabei weder die Konfiguration noch das Binary
+# dieses Hosts anfassen darf:
+#
+#   HOLZKUBE_MANAGER_UPDATE_CONF        /etc/holzkube-manager/update.conf
+#   HOLZKUBE_MANAGER_BIN                /usr/local/bin/holzkube-managerd
+#   HOLZKUBE_MANAGER_PREVIOUS           /usr/local/lib/holzkube-manager/holzkube-managerd.previous
+#   HOLZKUBE_MANAGER_TOKEN_FILE         /etc/holzkube-manager/github-token
+#   HOLZKUBE_MANAGER_HEALTH_URL         https://127.0.0.1:8443/api/v1/system/status
+#   HOLZKUBE_MANAGER_UPDATE_STATUS_DIR  /var/lib/holzkube-manager-update
+
 # Woher die Releases kommen. Ein Repo, seit die beiden am 2026-09-03 wieder
 # zusammengelegt wurden. CONF darf es ueberschreiben, ohne das Skript zu
 # aendern:
 #
 #   echo 'REPO=holzcloud/anderes-repo' > /etc/holzkube-manager/update.conf
 REPO=${REPO:-holzcloud/holzkube-manager}
-CONF=/etc/holzkube-manager/update.conf
+CONF=${HOLZKUBE_MANAGER_UPDATE_CONF:-/etc/holzkube-manager/update.conf}
 # shellcheck source=/dev/null
 [[ -r $CONF ]] && . "$CONF"
 
 SERVICE=holzkube-manager.service
-BIN=/usr/local/bin/holzkube-managerd
-PREVIOUS=/usr/local/lib/holzkube-manager/holzkube-managerd.previous
-TOKEN_FILE=/etc/holzkube-manager/github-token
-HEALTH_URL=https://127.0.0.1:8443/api/v1/system/status
+BIN=${HOLZKUBE_MANAGER_BIN:-/usr/local/bin/holzkube-managerd}
+PREVIOUS=${HOLZKUBE_MANAGER_PREVIOUS:-/usr/local/lib/holzkube-manager/holzkube-managerd.previous}
+TOKEN_FILE=${HOLZKUBE_MANAGER_TOKEN_FILE:-/etc/holzkube-manager/github-token}
+HEALTH_URL=${HOLZKUBE_MANAGER_HEALTH_URL:-https://127.0.0.1:8443/api/v1/system/status}
+STATUS_DIR=${HOLZKUBE_MANAGER_UPDATE_STATUS_DIR:-/var/lib/holzkube-manager-update}
 
 # Die Architektur wird nicht angenommen, sondern gelesen: dasselbe Skript soll
 # auf dem Pi und auf einem amd64-Host dasselbe tun.
@@ -69,6 +83,92 @@ done
 log()  { printf '%s\n' "$*"; }
 fail() { printf 'FEHLER: %s\n' "$*" >&2; exit 1; }
 
+# --- Was zuletzt geschah ----------------------------------------------------
+# Nach jedem Lauf, der zu einer Entscheidung kommt, steht in
+# $STATUS_DIR/status.json, wann nachgesehen wurde, was installiert war, was das
+# neueste Release war und was daraus wurde: current, available, updated,
+# rolled-back oder failed. Die Host-Seite des Daemons liest genau diese Datei
+# (internal/host/updatestatus) - sonst weiss dort niemand, was dieser Timer
+# stuendlich tut.
+#
+# Das Verzeichnis gehoert root und liegt ausdruecklich nicht im
+# Datenverzeichnis des Daemons: das gehoert dem Dienstbenutzer, und root, das in
+# ein Verzeichnis schreibt, das ein anderer kontrolliert, schreibt dorthin, wo
+# dessen Symlink hinzeigt.
+#
+# Das Festhalten ist Nebensache. Es darf kein Update scheitern lassen und
+# keinen Exit-Code aendern; darum laeuft es aus genau einer EXIT-Falle, mit
+# set +e und || true, und gibt bei jedem Hindernis still auf.
+#
+# Die Variablen werden hier geleert, nicht aus der Umgebung uebernommen: TMP
+# zumal ist in manchen Umgebungen gesetzt (TMP=/tmp), und die Falle loescht,
+# was darin steht.
+OUTCOME=""
+INSTALLED=""
+LATEST=""
+TMP=""
+
+record_status() {
+  local rc=$1 outcome=${OUTCOME:-} dir=${STATUS_DIR:-} tmp
+  if [[ -z $outcome && $rc -ne 0 ]]; then
+    outcome=failed
+  fi
+  [[ -n $outcome && -n $dir ]] || return 0
+
+  # Ein Symlink wird nicht verfolgt, von niemandem.
+  [[ ! -L $dir ]] || return 0
+  if [[ ! -d $dir ]]; then
+    # Anlegen darf es nur root, und dann so, wie es gehoert.
+    [[ $EUID -eq 0 ]] || return 0
+    install -d -o root -g root -m 0755 "$dir" || return 0
+  fi
+  # Als root nur in ein Verzeichnis, das root gehoert. Die Pruefung laeuft in
+  # python3, weil stat(1) auf Linux und BSD verschiedene Schalter hat.
+  if [[ $EUID -eq 0 ]]; then
+    python3 -c 'import os, sys; sys.exit(0 if os.stat(sys.argv[1]).st_uid == 0 else 1)' "$dir" \
+      || return 0
+  fi
+  # --check ohne root: nicht schreibbar heisst nichts festhalten.
+  [[ -w $dir ]] || return 0
+
+  tmp=$(mktemp "$dir/.status.XXXXXX") || return 0
+  # Die Werte gehen als argv hinein und als JSON heraus. Tag-Namen kommen von
+  # GitHub; sie in JSON-Text einzusetzen hiesse, GitHub die Syntax der Datei
+  # bestimmen zu lassen.
+  if ! python3 - "$outcome" "${INSTALLED:-}" "${LATEST:-}" > "$tmp" <<'PY'
+import datetime, json, sys
+outcome, installed, latest = sys.argv[1:4]
+json.dump({
+    "checked_at": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+    "installed": installed or None,
+    "latest": latest or None,
+    "outcome": outcome,
+}, sys.stdout)
+sys.stdout.write("\n")
+PY
+  then
+    rm -f "$tmp"
+    return 0
+  fi
+  if ! { chmod 0644 "$tmp" && mv -f "$tmp" "$dir/status.json"; }; then
+    rm -f "$tmp"
+  fi
+  return 0
+}
+
+# Die einzige EXIT-Falle. Sie raeumt das Arbeitsverzeichnis weg und haelt fest,
+# was geschah. Sie ruft nie exit, also bleibt der Exit-Code der, den das Skript
+# ohnehin hatte; und set +e, weil unter set -e jeder scheiternde Befehl in der
+# Falle das Skript mit seinem eigenen Status beenden wuerde.
+on_exit() {
+  local rc=$?
+  set +e
+  if [[ -n ${TMP:-} ]]; then
+    rm -rf "$TMP"
+  fi
+  record_status "$rc" >/dev/null 2>&1 || true
+}
+
 # root braucht nur, wer etwas veraendert. --check sieht nach und fasst nichts
 # an; es dafuer sudo zu verlangen, erzieht dazu, alles mit sudo aufzurufen.
 if [[ $CHECK_ONLY -eq 0 ]]; then
@@ -86,6 +186,16 @@ if [[ $ROLLBACK -eq 1 ]]; then
   log "Zurueckgerollt. Die Datei unter $PREVIOUS bleibt liegen."
   exit 0
 fi
+
+# Ab hier kommt jeder Lauf zu einer Entscheidung, und die wird festgehalten.
+# --help, eine unbekannte Option, die Weigerung ohne root und --rollback enden
+# oben und halten nichts fest.
+trap on_exit EXIT
+
+# Was installiert ist, steht fest, bevor irgendetwas das Netz fragt: auch ein
+# Lauf, der an der Release-Liste scheitert, soll sagen koennen, was lief.
+LOCAL_VERSION=$("$BIN" --version 2>/dev/null | awk '{print $NF}' || echo "keine")
+[[ $LOCAL_VERSION == keine ]] || INSTALLED=$LOCAL_VERSION
 
 command -v curl    >/dev/null || fail "curl fehlt"
 command -v tar     >/dev/null || fail "tar fehlt"
@@ -191,24 +301,32 @@ print(r['tag_name'], asset['id'], asset['name'], sums['id'] if sums else '')
 ") || fail "Release-Metadaten nicht lesbar"
 
 REMOTE_VERSION=${TAG#v}
-LOCAL_VERSION=$("$BIN" --version 2>/dev/null | awk '{print $NF}' || echo "keine")
+LATEST=$REMOTE_VERSION
 
 log "installiert: $LOCAL_VERSION"
 log "neuestes Release: $TAG ($ASSET_NAME)"
 
 if [[ $CHECK_ONLY -eq 1 ]]; then
-  [[ $LOCAL_VERSION == "$REMOTE_VERSION" ]] && log "aktuell." || log "Update verfuegbar."
+  if [[ $LOCAL_VERSION == "$REMOTE_VERSION" ]]; then
+    OUTCOME=current
+    log "aktuell."
+  else
+    OUTCOME=available
+    log "Update verfuegbar."
+  fi
   exit 0
 fi
 
 if [[ $LOCAL_VERSION == "$REMOTE_VERSION" && $FORCE -eq 0 ]]; then
+  OUTCOME=current
   log "Bereits aktuell. --force installiert trotzdem neu."
   exit 0
 fi
 
 # --- Herunterladen und pruefen ----------------------------------------------
+# Aufgeraeumt wird es von on_exit. Eine zweite EXIT-Falle hier wuerde die
+# erste ersetzen, und ab dann hielte kein Lauf mehr fest, was geschah.
 TMP=$(mktemp -d /tmp/holzkube-manager-update.XXXXXX)
-trap 'rm -rf "$TMP"' EXIT
 
 log "lade $ASSET_NAME ..."
 # GitHub leitet auf einen Speicher-Host um; curl schickt den
@@ -285,6 +403,8 @@ if [[ $ok -eq 1 ]]; then
       log "Update-Skript erneuert: $SELF"
     fi
   fi
+  INSTALLED=$("$BIN" --version 2>/dev/null | awk '{print $NF}') || INSTALLED=""
+  OUTCOME=updated
   log ""
   log "Aktualisiert auf $("$BIN" --version)."
   log "Zuruecknehmen mit: sudo $0 --rollback"
@@ -297,6 +417,8 @@ journalctl -u "$SERVICE" --no-pager -n 20 -o cat || true
 if [[ -x $PREVIOUS ]]; then
   install -o root -g root -m 0755 "$PREVIOUS" "$BIN"
   systemctl restart "$SERVICE"
+  # Ohne vorherige Version bleibt OUTCOME leer, und Exit 1 wird zu "failed".
+  OUTCOME=rolled-back
   log "Zurueckgerollt auf $("$BIN" --version)."
 fi
 exit 1
