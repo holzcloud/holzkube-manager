@@ -12,6 +12,21 @@ vars:
   # next to the one actually installed; changing it means changing
   # .github/workflows/ci.yml in the same commit.
   GOLANGCI_VERSION: v2.13.1
+  # The race detector's ThreadSanitizer refuses the Raspberry Pi 5 kernel's
+  # 47-bit address space, so on aarch64 the tests run without it and the race
+  # detector stays CI's alone (CLAUDE.md). Everywhere else it is on.
+  RACE:
+    sh: '[ "$(uname -m)" = aarch64 ] || echo -race'
+
+# The gates build with the toolchain go.mod names, which is the one CI and the
+# releases use. Without this, a newer Go installed on the machine wins -- go.mod's
+# `toolchain` line only ever upgrades -- and "green here" stops meaning "green
+# for the release". That happened: the Pi ran go1.27.1 against a release built
+# with go1.26.7 (.planning/debug/resolved/installer-requestion-arm64.md).
+# `test:next` is where the installed, newer Go gets its say.
+env:
+  GOTOOLCHAIN:
+    sh: awk '/^toolchain /{print $2}' go.mod
 
 tasks:
   default:
@@ -65,9 +80,21 @@ tasks:
     deps: ["build:go", "build:cli"]
 
   test:
-    desc: Run the Go tests with the race detector.
+    desc: Run the Go tests with the release toolchain (and the race detector where it runs).
     cmds:
-      - go test ./... -count=1 -race
+      - go test ./... -count=1 {{.RACE}}
+
+  test:next:
+    desc: Run the Go tests once more with the locally installed Go, as an early warning.
+    # Not a gate: a failure here is news about the next Go release, not a
+    # reason to stop. It is how the fake registry that stopped being silent
+    # under go1.27 was found, while every gate on go1.26.7 stayed green.
+    ignore_error: true
+    env:
+      GOTOOLCHAIN: local
+    cmds:
+      - go version
+      - go test ./... -count=1
 
   test:web:
     desc: Run the frontend tests.
@@ -187,6 +214,8 @@ tasks:
       # ledger entries 5 and 64 record a drift watcher that existed, was never
       # scheduled, and therefore never watched anything.
       - task: test:layout
+      # After every gate, and never able to fail the chain (see test:next).
+      - task: test:next
 
   fmt:
     desc: Format Go and frontend sources in place.

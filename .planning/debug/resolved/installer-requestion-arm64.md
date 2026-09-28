@@ -10,7 +10,7 @@ updated: 2026-09-28
 ## Symptoms
 
 - **Expected:** `go test -count=3 -run TestInstallerImageReQuestionsAProvisionalAnswer ./internal/imagefactory/` passes, as it did in CI (GitHub Actions, amd64) on commit 3e772fc.
-- **Actual:** it fails every time on the operator's Raspberry Pi 5 (linux/arm64, homeserver-01).
+- **Actual:** it fails every time on the operator's Raspberry Pi 5 (linux/arm64).
 - **Error:** `installer_test.go:541: the never-ruled-out candidate was asked 3 times across two calls, want 2 -- a stale provisional entry must be re-questioned`
 - **Timeline:** seen 2026-09-28; fails on unchanged main 3e772fc too, so not caused by later edits. Unknown when it started on arm64 (CI is amd64 only, and since 2026-09-28 CI no longer runs on push).
 - **Reproduction:** `export PATH=$HOME/.local/go/bin:$PATH; go test -count=3 -run TestInstallerImageReQuestionsAProvisionalAnswer ./internal/imagefactory/` (0.04 s, deterministic).
@@ -131,7 +131,7 @@ verification:
   revert_and_reconfirm: { result: pass, bug_returned_on_revert: true, fixed_on_reapply: true }
   product_faults_reinstated_with_fix: "freeze (no re-question) 10/10 RED; full-list re-question 10/10 RED; lost-update guard removed 10/10 RED -- each on go1.26.7 AND go1.27.1 (lost-update was 1/10 on go1.27.1 before the fix)"
   guardrail_verdict: accepted
-  environment: "all of the above ran on the operator's Pi, homeserver-01, linux/arm64 (aarch64). amd64 was not executed in this session; CI (amd64, go1.26.7) was not dispatched."
+  environment: "all of the above ran on the operator's Pi, linux/arm64 (aarch64). amd64 was not executed in this session; CI (amd64, go1.26.7) was not dispatched."
 
 ## Human Verification
 
