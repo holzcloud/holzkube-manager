@@ -2,8 +2,10 @@ package host
 
 import (
 	"context"
+	"encoding/json"
 	"io/fs"
 	"reflect"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -254,9 +256,92 @@ func TestSensorsSkipsBadInput(t *testing.T) {
 	assertTemperatures(t, s.Temperatures, []inventory.HardwareTemperature{
 		temp("nct6798", "board", "temp2", 41),
 	})
+	// Skipped, not forgotten: the two that failed are named (D-12).
+	if want := []string{"nct6798 temp1", "nct6798 temp3"}; !reflect.DeepEqual(s.Unread, want) {
+		t.Errorf("unread = %q, want %q", s.Unread, want)
+	}
 	want := []inventory.HardwareFan{{Chip: "nct6798", Label: "CPU fan", RPM: 900}}
 	if !reflect.DeepEqual(s.Fans, want) {
 		t.Errorf("fans = %+v, want %+v", s.Fans, want)
+	}
+}
+
+// TestSensorsThatFailAreNotNone (D-12): a temperature that is there and could
+// not be read is named in Unread, never dropped -- so a host whose every input
+// failed is not "a machine with no temperature sensors", judged healthy by its
+// filesystems alone. A fan that fails is only skipped: nothing is rated on it.
+func TestSensorsThatFailAreNotNone(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name string
+		fsys fs.FS
+		want []string
+	}{
+		{
+			// The review's probe: the Pi's CPU chip answering with nothing,
+			// and its zone with garbage.
+			name: "the CPU chip and its zone both fail",
+			fsys: fstest.MapFS{
+				"sys/class/hwmon/hwmon0/name":          {Data: []byte("cpu_thermal\n")},
+				"sys/class/hwmon/hwmon0/temp1_input":   {Data: []byte("\n")},
+				"sys/class/thermal/thermal_zone0/type": {Data: []byte("cpu-thermal\n")},
+				"sys/class/thermal/thermal_zone0/temp": {Data: []byte("garbage\n")},
+			},
+			want: []string{"cpu_thermal temp1", "cpu-thermal"},
+		},
+		{
+			name: "a labelled input that fails beside a fan that reads",
+			fsys: fstest.MapFS{
+				"sys/class/hwmon/hwmon0/name":        {Data: []byte("nct6798\n")},
+				"sys/class/hwmon/hwmon0/temp1_input": {Data: []byte("not a number\n")},
+				"sys/class/hwmon/hwmon0/temp1_label": {Data: []byte("SYSTIN\n")},
+				"sys/class/hwmon/hwmon0/fan1_input":  {Data: []byte("900\n")},
+			},
+			want: []string{"nct6798 SYSTIN"},
+		},
+		{
+			name: "a chip whose directory cannot be listed",
+			fsys: deniedDir{MapFS: fstest.MapFS{
+				"sys/class/hwmon/hwmon0/name":        {Data: []byte("k10temp\n")},
+				"sys/class/hwmon/hwmon0/temp1_input": {Data: []byte("48000\n")},
+			}, dir: "sys/class/hwmon/hwmon0"},
+			want: []string{"k10temp"},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			s := mustReadSensors(t, tc.fsys)
+			if !reflect.DeepEqual(s.Unread, tc.want) {
+				t.Errorf("unread = %q, want %q", s.Unread, tc.want)
+			}
+			h := Assess(hostLive(Read(s), fine))
+			if h.State != HealthUnknown {
+				t.Errorf("health = %+v, want unknown", h)
+			}
+			for _, name := range tc.want {
+				sentence := "Temperature " + name + " could not be read."
+				if !slices.Contains(h.Unreadable, sentence) {
+					t.Errorf("unreadable = %q, want %q among them", h.Unreadable, sentence)
+				}
+			}
+		})
+	}
+
+	// What is there and read leaves Unread empty, and stays off the wire.
+	s := mustReadSensors(t, fstest.MapFS{
+		"sys/class/hwmon/hwmon0/name":        {Data: []byte("cpu_thermal\n")},
+		"sys/class/hwmon/hwmon0/temp1_input": {Data: []byte("49600\n")},
+	})
+	if len(s.Unread) != 0 {
+		t.Errorf("unread = %q, want none", s.Unread)
+	}
+	raw, err := json.Marshal(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(strings.ToLower(string(raw)), "unread") {
+		t.Errorf("sensors on the wire carry Unread: %s", raw)
 	}
 }
 

@@ -1641,6 +1641,11 @@ decision; none of them works one out.
   crossed is `ok`.
 - **A host with no temperature sensor** (a virtual machine) rates nothing
   there. It is judged by its filesystems alone and its `ok` summary says so.
+- **A sensor that is there and could not be read** is not a host without
+  one. An input that fails or does not parse, a chip whose directory cannot be
+  listed, or a fallback thermal zone whose `temp` fails is named in
+  `unreadable` ("Temperature cpu_thermal temp1 could not be read."), so a host
+  whose every input failed is `unknown`, never the sensor-less `ok`.
 - `health` is taken from the same reading as `live`, so the two never
   disagree within one answer. The thresholds are not configurable.
 

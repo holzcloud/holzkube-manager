@@ -36,9 +36,18 @@ const (
 // same JSON for a sensor and render it with the same components (D-13). Both
 // lists are never null: an empty list is a machine with no such sensor, which
 // the page says in words.
+//
+// Unread names every temperature that is there and could not be read: an
+// input that failed or did not parse, a chip whose directory could not be
+// listed, a fallback zone whose temp failed. It is what keeps "this machine
+// has no temperature sensor" apart from "its sensors could not be read" (D-12):
+// without it, a host whose every input failed would read as a machine with
+// none, and be judged healthy. It is not sent: Assess turns it into the
+// Unreadable sentences the page shows.
 type Sensors struct {
 	Temperatures []inventory.HardwareTemperature `json:"temperatures"`
 	Fans         []inventory.HardwareFan         `json:"fans"`
+	Unread       []string                        `json:"-"`
 }
 
 // sensorChip is one hwmon entry found in the class directory.
@@ -89,7 +98,8 @@ func readSensors(fsys fs.FS) (Sensors, error) {
 	listed := map[string]bool{}
 	cpuTemps := false
 	for _, chip := range chips {
-		temps, fans, name := readChip(fsys, chip, twins)
+		temps, fans, unread, name := readChip(fsys, chip, twins)
+		out.Unread = append(out.Unread, unread...)
 		if len(temps) == 0 && len(fans) == 0 {
 			// A voltage monitor, a battery, a power sensor: nothing this card
 			// shows. Left out rather than listed empty, as on the node page.
@@ -115,11 +125,13 @@ func readSensors(fsys fs.FS) (Sensors, error) {
 		// The fallback for a machine whose CPU has no hwmon chip, with each
 		// zone's own trip points as its limits.
 		for _, z := range zones {
-			celsius, ok := readMillidegrees(fsys, z.dir+"/temp")
-			if !ok {
+			if listed[talos.ThermalTwinName(z.typ)] {
 				continue
 			}
-			if listed[talos.ThermalTwinName(z.typ)] {
+			celsius, ok := readMillidegrees(fsys, z.dir+"/temp")
+			if !ok {
+				// The CPU's only temperature, there and not read (D-12).
+				out.Unread = append(out.Unread, z.typ)
 				continue
 			}
 			kind := string(talos.ClassifyChip(z.typ))
@@ -249,13 +261,15 @@ func classEntries(fsys fs.FS, class, prefix string, limit int) ([]sensorChip, er
 	return out, nil
 }
 
-// readChip reads one hwmon chip's temperatures and fans. A chip whose
-// directory cannot be listed has nothing to show, and one input that does not
-// parse is skipped without its neighbours. A limit the chip does not set is
-// taken from its twin thermal zone, when it has one.
+// readChip reads one hwmon chip's temperatures and fans. One input that does
+// not parse is skipped without its neighbours, and named in unread; a chip
+// whose directory cannot be listed is named there whole, since what it would
+// have shown is not known (D-12). A fan that does not read is only skipped: no
+// line hangs on a fan. A limit the chip does not set is taken from its twin
+// thermal zone, when it has one.
 func readChip(
 	fsys fs.FS, chip sensorChip, twins map[string]tripLimits,
-) (temps []inventory.HardwareTemperature, fans []inventory.HardwareFan, name string) {
+) (temps []inventory.HardwareTemperature, fans []inventory.HardwareFan, unread []string, name string) {
 	name, _ = readTrimmed(fsys, chip.dir+"/name")
 	if name == "" {
 		name = fmt.Sprintf("hwmon%d", chip.index)
@@ -265,7 +279,7 @@ func readChip(
 
 	entries, err := fs.ReadDir(fsys, chip.dir)
 	if err != nil {
-		return nil, nil, name
+		return nil, nil, []string{name}, name
 	}
 	files := make(map[string]bool, len(entries))
 	for _, e := range entries {
@@ -274,13 +288,14 @@ func readChip(
 
 	for _, n := range capInputs(talos.InputsNamed(files, "temp")) {
 		prefix := fmt.Sprintf("%s/temp%d_", chip.dir, n)
-		celsius, ok := readMillidegrees(fsys, prefix+"input")
-		if !ok {
-			continue
-		}
 		label, _ := readTrimmed(fsys, prefix+"label")
 		if label == "" {
 			label = fmt.Sprintf("temp%d", n)
+		}
+		celsius, ok := readMillidegrees(fsys, prefix+"input")
+		if !ok {
+			unread = append(unread, name+" "+label)
+			continue
 		}
 		// The limits through the node path's own parser, over only the files
 		// the chip has: a limit at or below zero is a chip that sets none.
@@ -329,7 +344,7 @@ func readChip(
 		}
 		fans = append(fans, inventory.HardwareFan{Chip: name, Label: label, RPM: rpm})
 	}
-	return temps, fans, name
+	return temps, fans, unread, name
 }
 
 // capInputs keeps the first maxChipInputs of a chip's inputs.

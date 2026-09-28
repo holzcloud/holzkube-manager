@@ -81,9 +81,17 @@ func Assess(l Live) Health {
 	switch {
 	case !l.Sensors.Readable:
 		unreadable = append(unreadable, "Temperatures could not be read"+because(l.Sensors.Reason))
-	case l.Sensors.Value == nil || len(l.Sensors.Value.Temperatures) == 0:
+	case l.Sensors.Value == nil:
 		noSensors = true
 	default:
+		// A sensor that is there and could not be read is not a machine
+		// without one (D-12): only no temperature and nothing unread is.
+		for _, name := range l.Sensors.Value.Unread {
+			unreadable = append(unreadable, "Temperature "+name+" could not be read.")
+		}
+		if len(l.Sensors.Value.Temperatures) == 0 && len(l.Sensors.Value.Unread) == 0 {
+			noSensors = true
+		}
 		found = append(found, temperatureFindings(l.Sensors.Value.Temperatures)...)
 	}
 
