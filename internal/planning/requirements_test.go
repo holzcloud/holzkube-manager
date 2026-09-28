@@ -7,7 +7,14 @@ import (
 	"testing"
 )
 
-const requirementsPath = "../../.planning/REQUIREMENTS.md"
+// The v1.14 requirements, with their sixteen release blockers, are archived
+// since milestone v1.18 started a REQUIREMENTS.md of its own. The archive is
+// what the blocker check below reads; the current file is held to the same
+// bare-id rule by TestTheCurrentRequirementsAreReachableByTheTool.
+const (
+	requirementsPath        = "../../.planning/milestones/v1.14-REQUIREMENTS.md"
+	currentRequirementsPath = "../../.planning/REQUIREMENTS.md"
+)
 
 var (
 	checklistBlocker = regexp.MustCompile(`(?m)^- \[[ x]\] \*\*([A-Z0-9]+-\d+)\*\* 🚫`)
@@ -74,5 +81,34 @@ func TestTheTraceabilityTableIsReachableByTheTool(t *testing.T) {
 		if !want[id] {
 			t.Errorf("%s is marked a blocker in the table and not in the checklist", id)
 		}
+	}
+}
+
+// The planning tool reaches a row of the current milestone's traceability
+// table the same way it reached the v1.14 one (ledger 73), so the id cell of
+// every row there is bare as well.
+func TestTheCurrentRequirementsAreReachableByTheTool(t *testing.T) {
+	raw, err := os.ReadFile(currentRequirementsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(raw)
+	start := strings.Index(text, "| Requirement | Phase | Status |")
+	if start < 0 {
+		t.Fatal("no traceability table")
+	}
+	rows := 0
+	for _, line := range strings.Split(text[start:], "\n")[2:] {
+		if !strings.HasPrefix(line, "|") {
+			break
+		}
+		id := strings.TrimSpace(strings.Split(strings.Trim(line, "|"), "|")[0])
+		rows++
+		if !bareRequirement.MatchString(id) {
+			t.Errorf("id cell %q carries more than the id; the planning tool cannot reach this row", id)
+		}
+	}
+	if rows == 0 {
+		t.Fatal("the traceability table has no rows; the walk is not reaching it")
 	}
 }

@@ -1,16 +1,16 @@
 ---
 gsd_state_version: "1.0"
-milestone: v1.17
-status: Awaiting next milestone
-stopped_at: "GSD-Stand nachgezogen; ausgeliefert ist v0.1.0. Nächster Milestone noch nicht angelegt."
-last_updated: "2026-09-28T09:30:00.000Z"
+milestone: v1.18
+milestone_name: Host & Telefon
+status: planning
+last_updated: "2026-09-28T12:45:46.492Z"
 last_activity: 2026-09-28
-last_activity_desc: Milestones v1.14 bis v1.17 in MILESTONES.md eingetragen, v1.14 archiviert
 progress:
   total_phases: 0
   completed_phases: 0
   total_plans: 0
   completed_plans: 0
+  percent: 0
 ---
 
 # Project State
@@ -27,9 +27,10 @@ See: .planning/PROJECT.md
 
 ## Current Position
 
-Phase: — (kein aktiver Milestone)
-Status: Awaiting next milestone
-Nächster Schritt: `/gsd-new-milestone`
+Phase: Not started (defining requirements)
+Plan: —
+Status: Defining requirements
+Last activity: 2026-09-28 — Milestone v1.18 started
 
 ## Offen
 
