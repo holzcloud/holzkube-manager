@@ -30,9 +30,9 @@ var (
 		"total_bytes", "used_bytes", "cache_bytes", "available_bytes", "swap_total_bytes", "swap_used_bytes",
 	}
 	hardwareFilesystemKeys  = []string{"mount", "device", "size_bytes", "used_bytes"}
-	hardwareDiskKeys        = []string{"name", "model", "size_bytes", "read_bytes_per_sec", "write_bytes_per_sec", "temperature_c"}
+	hardwareDiskKeys        = []string{"name", "model", "size_bytes", "read_bytes_per_sec", "write_bytes_per_sec", "temperature_c", "temperature_warn_c", "temperature_danger_c"}
 	hardwareLinkKeys        = []string{"name", "up", "speed_mbit", "rx_bytes_per_sec", "tx_bytes_per_sec"}
-	hardwareTemperatureKeys = []string{"chip", "kind", "label", "celsius", "high_c", "critical_c"}
+	hardwareTemperatureKeys = []string{"chip", "kind", "label", "celsius", "high_c", "critical_c", "warn_c", "danger_c"}
 	hardwareFanKeys         = []string{"chip", "label", "rpm"}
 )
 
