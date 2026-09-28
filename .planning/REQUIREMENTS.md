@@ -45,12 +45,12 @@ damit er es am Ende auf einen Blick prüfen und umwerfen kann.
 
 ### Host-Monitoring (HMON)
 
-- [ ] **HMON-01**: Der Betreiber sieht live CPU-Auslastung, Load, Arbeitsspeicher und Swap des Hosts
+- [x] **HMON-01**: Der Betreiber sieht live CPU-Auslastung, Load, Arbeitsspeicher und Swap des Hosts
 - [ ] **HMON-02**: Der Betreiber sieht Belegung der Datenträger (mindestens das Dateisystem des Datenverzeichnisses und `/`)
 - [ ] **HMON-03**: Der Betreiber sieht die Temperaturen des Hosts (thermal zones / hwmon) und, wo vorhanden, Lüfter
 - [ ] **HMON-04**: Der Betreiber sieht den Durchsatz der Netzwerkschnittstellen
 - [ ] **HMON-05**: Zu CPU, Speicher, Temperatur und Netzwerk gibt es Verlaufsdiagramme über 1 h / 6 h / 24 h, die einen Neustart des Daemons überleben
-- [ ] **HMON-06**: Ein Wert, der wegen der Härtung der Unit nicht lesbar ist, wird als „nicht lesbar" mit der Ursache gezeigt, nie als 0
+- [x] **HMON-06**: Ein Wert, der wegen der Härtung der Unit nicht lesbar ist, wird als „nicht lesbar" mit der Ursache gezeigt, nie als 0
 - [ ] **HMON-07**: Überschreitet Temperatur oder Datenträgerbelegung eine Schwelle, zeigt der Host eine Warnung mit dem Grund
 
 ### Host-Aktionen (HACT)
@@ -89,12 +89,12 @@ damit er es am Ende auf einen Blick prüfen und umwerfen kann.
 | HOST-02 | Phase 11 | Pending |
 | HOST-03 | Phase 11 | Complete |
 | HOST-04 | Phase 12 | Pending |
-| HMON-01 | Phase 11 | Pending |
+| HMON-01 | Phase 11 | Complete |
 | HMON-02 | Phase 11 | Pending |
 | HMON-03 | Phase 11 | Pending |
 | HMON-04 | Phase 11 | Pending |
 | HMON-05 | Phase 12 | Pending |
-| HMON-06 | Phase 11 | Pending |
+| HMON-06 | Phase 11 | Complete |
 | HMON-07 | Phase 12 | Pending |
 | HACT-01 | Phase 13 | Pending |
 | HACT-02 | Phase 13 | Pending |
