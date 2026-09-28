@@ -1,7 +1,8 @@
 ---
 phase: "13"
 slug: "host-aktionen"
-status: draft
+status: approved
+reviewed_at: "2026-09-29"
 shadcn_initialized: true
 preset: "b4nI (radix-nova, neutral base, lucide, Manrope) — holzcloud-design tokens mapped in web/src/index.css"
 created: "2026-09-29"
@@ -459,3 +460,24 @@ No third-party registry (`components.json` `registries: {}`); the vetting gate d
 - [ ] Dimension 7 Inventory Provenance: PASS
 
 **Approval:** pending
+
+## Checker resolutions (orchestrator, 2026-09-29)
+
+Binding for the planner:
+
+1. **Buttons stay off until an order is final or the page is current.**
+   Reason 5 extends: the four buttons are disabled with a stated reason while
+   (a) the page waits for holzkube-manager to come back, (b) an `update` order
+   is started but not finished, and (c) the last poll failed (P11 stale state).
+   Copy: "holzkube-manager is not answering; host actions return when it does."
+   / "An update is running; wait for it to finish." — plus the existing
+   "An order is pending" line.
+2. **Footer labels:** "Keep running" instead of "Cancel" in the four
+   confirmation dialogs; "Dismiss status" on the order status box.
+3. **Inherited exceptions** (weight 500, the Button's 0.8rem, spacing 12/20/28/44)
+   are accepted as inherited; none may be newly authored.
+4. **Carried from 12-UI-REVIEW** (this phase touches /host and re-renders
+   host.png anyway): the sensor ▲ takes its colour from the value's severity
+   (`SEVERITY_COLOR[severity]`), not always `--viz-danger`; the wall's host
+   sentence puts the figure first so a 1600-px tile keeps the reading;
+   re-render host.png and wall.png.
