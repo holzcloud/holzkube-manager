@@ -98,9 +98,18 @@ type View struct {
 }
 
 // Device is what the machine is (HOST-01).
+//
+// Each value comes from a source that survives the unit's ProcSubset=pid (D-04):
+// the device tree or DMI under /sys, os-release, the online CPU list under /sys,
+// and uname(2) and clock_gettime(2) for the rest.
 type Device struct {
-	Hostname Reading[string] `json:"hostname"`
-	Kernel   Reading[string] `json:"kernel"`
+	Hostname      Reading[string] `json:"hostname"`
+	Model         Reading[string] `json:"model"`
+	Arch          Reading[Arch]   `json:"arch"`
+	Cores         Reading[int]    `json:"cores"`
+	OS            Reading[string] `json:"os"`
+	Kernel        Reading[string] `json:"kernel"`
+	UptimeSeconds Reading[int64]  `json:"uptime_seconds"`
 }
 
 // Arch is the architecture twice: as Go names it (what this binary was built
