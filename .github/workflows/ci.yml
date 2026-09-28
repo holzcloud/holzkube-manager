@@ -4,12 +4,16 @@
 name: CI
 
 on:
+  # Not on every push to main and not on pull requests: since 2026-09-28 the
+  # operator's Actions minutes are used up, and a run per push spends them on
+  # commits nobody releases. The gates run on the Pi before a push instead
+  # (`./bin/task ci`), and here only when a release is asked for -- either way
+  # below, and each runs the gates on the commit it releases before the
+  # `release` job may start.
   push:
-    branches: [main]
-    # Tags are built here as well as on main, so that a release cannot be cut
-    # from a commit that fails the gates below. See the `release` job.
+    # A pushed tag is built here, so that a release cannot be cut from a commit
+    # that fails the gates below. See the `release` job.
     tags: ['v*']
-  pull_request:
 
   # The second way to cut a release, for a party that can write a branch and
   # not a tag -- which is the situation an agent session runs in. The tag stays
