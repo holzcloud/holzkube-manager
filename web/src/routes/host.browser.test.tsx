@@ -16,14 +16,16 @@ import { HostView } from './host'
  *
  * jsdom performs no layout, so host.test.tsx can say that a class is present
  * but not that a 63-character hostname wraps instead of widening the page. This
- * file measures exactly two shapes the UI-SPEC left as backstops:
+ * file measures the shapes the UI-SPEC left as backstops:
  *
  *   1. an amd64 desktop: container and hardening notices, k10temp twice, an
  *      nvme with limits, an nct6798 with two temperatures and five fans (one
  *      stopped), acpitz, three physical interfaces and twelve virtual ones with
  *      the disclosure open, two filesystem rows;
  *   2. long identifiers: hostname, model, OS, kernel, data-directory path and a
- *      filesystem device, each longer than a phone is wide.
+ *      filesystem device, each longer than a phone is wide;
+ *   3. the Warning notice (Phase 12) with a 120-character mount path in a
+ *      warning and in the also-not-readable line.
  *
  * The page is rendered in a 390-px box inside a 390-px viewport, so the
  * breakpoints are the phone's. The rule measured is the one the phone suite
@@ -99,15 +101,23 @@ function shape({
   service = {},
   live = {},
   container = false,
+  health = {
+    state: 'ok',
+    summary: 'Temperatures and filesystems are below their thresholds.',
+    warnings: [],
+    unreadable: [],
+  },
 }: {
   device?: Record<string, unknown>
   service?: Record<string, unknown>
   live?: Record<string, unknown>
   container?: boolean
+  health?: Record<string, unknown>
 }): Host {
   return hostSchema.parse({
     observed_at: '2026-09-28T10:00:03Z',
     container,
+    health,
     device: {
       hostname: read('example-host'),
       model: read('Raspberry Pi 5 Model B Rev 1.0'),
@@ -279,6 +289,26 @@ function longIdentifiers(): Host {
   })
 }
 
+/**
+ * The warning notice with a mount path longer than a phone is wide, in a
+ * warning and in the also-not-readable line: one word the browser would not
+ * break of its own accord.
+ */
+function longWarning(): { host: Host; sentence: string } {
+  const mount = `/srv/${'m'.repeat(115)}` // 120
+  expect(mount).toHaveLength(120)
+  const sentence = `${mount} 97% used ≥ 80%`
+  const host = shape({
+    health: {
+      state: 'warn',
+      summary: '2 thresholds crossed.',
+      warnings: [sentence, 'cpu_thermal 82.1 °C ≥ 80 °C'],
+      unreadable: [`Usage of ${mount}/x could not be read: permission denied.`],
+    },
+  })
+  return { host, sentence }
+}
+
 function renderAtPhoneWidth(host: Host): HTMLElement {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   const { container } = render(
@@ -403,6 +433,16 @@ describe('/host at 390 px', () => {
     }
     expect(phone.textContent).toContain(host.service.data_dir.path)
     expect(phone.textContent).toContain(host.live.filesystems[0]?.device)
+    expect(overflowing(phone)).toEqual([])
+  })
+
+  it('wraps a 120-character mount path in the warning list instead of widening the page', () => {
+    const { host, sentence } = longWarning()
+    const phone = renderAtPhoneWidth(host)
+    expect(phone.getBoundingClientRect().width).toBe(PHONE_WIDTH)
+    // The shape is what it says it is: the notice is there with the long sentence.
+    expect(phone.textContent).toContain('Warning — 2 thresholds crossed')
+    expect([...phone.querySelectorAll('li')].some((li) => li.textContent === sentence)).toBe(true)
     expect(overflowing(phone)).toEqual([])
   })
 })

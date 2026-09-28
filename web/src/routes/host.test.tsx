@@ -198,6 +198,21 @@ function procSubsetLive() {
   }
 }
 
+/**
+ * The server's decision, written out by the test -- never worked out from the
+ * readings, which would put the browser's own rule back in through a test.
+ */
+function healthOf(
+  state: 'ok' | 'warn' | 'unknown',
+  summary: string,
+  warnings: string[] = [],
+  unreadable: string[] = [],
+) {
+  return { state, summary, warnings, unreadable }
+}
+
+const OK_SUMMARY = 'Temperatures and filesystems are below their thresholds.'
+
 function hostShape(
   overrides: Record<string, unknown> = {},
   device: Record<string, unknown> = {},
@@ -205,6 +220,7 @@ function hostShape(
   return hostSchema.parse({
     live: readableLive(),
     service: service(),
+    health: healthOf('ok', OK_SUMMARY),
     observed_at: '2026-09-28T10:00:03Z',
     container: false,
     device: {
@@ -293,6 +309,198 @@ describe('HostView', () => {
     const notice = screen.getByText(/holzkube-manager did not answer the latest request/)
     expect(notice).toHaveTextContent('Network down')
     expect(cellOf('Hostname').closest('.opacity-60')).not.toBeNull()
+  })
+})
+
+const THRESHOLD_RULE =
+  "A temperature warns at its chip's own limit, or at a default for its kind (80 °C for a processor) when the chip names none; a filesystem warns at 80% used."
+
+/** The mark on the header's state line. */
+function stateMark(): HTMLElement {
+  const marks = document.querySelectorAll<HTMLElement>('[data-host-state]')
+  expect(marks).toHaveLength(1)
+  return marks[0] as HTMLElement
+}
+
+/** The amber Warning notice, found by its heading; null when there is none. */
+function warningNotice(): HTMLElement | null {
+  const heading = screen.queryByText(/^Warning — \d+ thresholds? crossed$/)
+  return heading?.closest('div') ?? null
+}
+
+describe('the state line and the warning notice', () => {
+  it('ok: a filled dot, Healthy and the summary, and no amber notice', () => {
+    wrap(<HostView host={hostShape()} stale={null} />)
+
+    const mark = stateMark()
+    expect(mark.dataset.hostState).toBe('ok')
+    expect(mark.querySelector('.rounded-full:not(.border)')).not.toBeNull()
+    expect(mark.querySelector('svg')).toBeNull()
+    expect(mark).toHaveAttribute('title', OK_SUMMARY)
+    const line = mark.parentElement as HTMLElement
+    expect(within(line).getByText('Healthy')).toHaveAttribute('aria-live', 'polite')
+    expect(within(line).getByText(OK_SUMMARY)).toBeInTheDocument()
+    // The line form carries no sr-only word: the visible one follows it.
+    expect(line.querySelector('.sr-only')).toBeNull()
+    expect(warningNotice()).toBeNull()
+  })
+
+  it('warn with one warning: the triangle, Warning, and a notice with its one sentence', () => {
+    const health = healthOf('warn', '1 threshold crossed.', ['cpu_thermal 82.1 °C ≥ 80 °C'])
+    wrap(<HostView host={hostShape({ health })} stale={null} />)
+
+    const mark = stateMark()
+    expect(mark.dataset.hostState).toBe('warn')
+    expect(mark.querySelector('svg')).not.toBeNull()
+    const line = mark.parentElement as HTMLElement
+    expect(within(line).getByText('Warning')).toHaveAttribute('aria-live', 'polite')
+    expect(within(line).getByText('1 threshold crossed.')).toBeInTheDocument()
+
+    const notice = warningNotice()
+    if (notice === null) throw new Error('no warning notice')
+    expect(within(notice).getByText('Warning — 1 threshold crossed')).toBeInTheDocument()
+    expect(
+      within(notice)
+        .getAllByRole('listitem')
+        .map((li) => li.textContent),
+    ).toEqual(['cpu_thermal 82.1 °C ≥ 80 °C'])
+    expect(notice).toHaveTextContent(THRESHOLD_RULE)
+    expect(notice).not.toHaveTextContent('Also not readable')
+    // No button, no dismiss, no link.
+    expect(within(notice).queryByRole('button')).toBeNull()
+    expect(within(notice).queryByRole('link')).toBeNull()
+  })
+
+  it("lists several warnings in the server's order, never re-sorted", () => {
+    const warnings = [
+      'nvme Composite 88.0 °C ≥ 81.85 °C',
+      '/srv 97% used ≥ 80%',
+      'cpu_thermal 82.1 °C ≥ 80 °C',
+    ]
+    const health = healthOf('warn', '3 thresholds crossed.', warnings)
+    wrap(<HostView host={hostShape({ health })} stale={null} />)
+
+    const notice = warningNotice()
+    if (notice === null) throw new Error('no warning notice')
+    expect(within(notice).getByText('Warning — 3 thresholds crossed')).toBeInTheDocument()
+    expect(
+      within(notice)
+        .getAllByRole('listitem')
+        .map((li) => li.textContent),
+    ).toEqual(warnings)
+  })
+
+  it('warn plus unreadable values: the warnings, then Also not readable', () => {
+    const reason = 'Usage of /srv could not be read: permission denied.'
+    const health = healthOf('warn', '1 threshold crossed.', ['/ 91% used ≥ 80%'], [reason])
+    wrap(<HostView host={hostShape({ health })} stale={null} />)
+
+    const notice = warningNotice()
+    if (notice === null) throw new Error('no warning notice')
+    expect(within(notice).getByText(`Also not readable: ${reason}`)).toBeInTheDocument()
+  })
+
+  it('unknown: the hollow ring, Not readable, the reasons as summary, and no amber notice', () => {
+    const summary =
+      'Temperatures could not be read: permission denied. The last reading is older than 45 s.'
+    const health = healthOf(
+      'unknown',
+      summary,
+      [],
+      [
+        'Temperatures could not be read: permission denied.',
+        'The last reading is older than 45 s.',
+      ],
+    )
+    wrap(<HostView host={hostShape({ health })} stale={null} />)
+
+    const mark = stateMark()
+    expect(mark.dataset.hostState).toBe('unknown')
+    expect(mark.querySelector('.rounded-full.border')).not.toBeNull()
+    expect(mark.querySelector('svg')).toBeNull()
+    const line = mark.parentElement as HTMLElement
+    expect(within(line).getByText('Not readable')).toHaveAttribute('aria-live', 'polite')
+    expect(within(line).getByText(summary)).toBeInTheDocument()
+    // Not readable is never shown as healthy, and never as the amber warning.
+    expect(within(line).queryByText('Healthy')).toBeNull()
+    expect(warningNotice()).toBeNull()
+  })
+
+  it('puts the warning after the stale notice and before the container and hardening notices', () => {
+    const health = healthOf('warn', '1 threshold crossed.', ['cpu_thermal 82.1 °C ≥ 80 °C'])
+    wrap(
+      <HostView
+        host={hostShape({ health, container: true, live: procSubsetLive() })}
+        stale={new Error('Network down')}
+      />,
+    )
+
+    const order = [
+      screen.getByText(/holzkube-manager did not answer the latest request/),
+      warningNotice(),
+      screen.getByText(CONTAINER_SENTENCE),
+      screen.getByText(HARDENING_HEADLINE).closest('div'),
+    ]
+    for (let i = 1; i < order.length; i++) {
+      const before = order[i - 1] as HTMLElement
+      const after = order[i] as HTMLElement
+      expect(before.compareDocumentPosition(after) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    }
+    // The state line is not dimmed with the stale reading.
+    expect(stateMark().closest('.opacity-60')).toBeNull()
+  })
+
+  it('agrees with its filesystem meter at the 80 % boundary: amber and the warning at 80 %, neither at 79.99 %', () => {
+    const at = (used: number, available: number) =>
+      readableLive({
+        filesystems: [
+          {
+            ...mergedRoot(),
+            usage: read({ size_bytes: 10_500, used_bytes: used, available_bytes: available }),
+          },
+        ],
+      })
+    const warn = healthOf('warn', '1 threshold crossed.', ['/ 80% used ≥ 80%'])
+    const first = wrap(
+      <HostView host={hostShape({ live: at(80, 20), health: warn })} stale={null} />,
+    )
+
+    const meter = () => cardOf('Filesystems').querySelector<HTMLElement>('[data-severity]')
+    expect(meter()?.dataset.severity).toBe('warn')
+    expect(within(warningNotice() as HTMLElement).getByText('/ 80% used ≥ 80%')).toBeInTheDocument()
+    first.unmount()
+
+    wrap(<HostView host={hostShape({ live: at(7999, 2001) })} stale={null} />)
+    expect(meter()?.dataset.severity).toBe('ok')
+    expect(warningNotice()).toBeNull()
+  })
+
+  it('shows the cpu_thermal ▲ exactly when the notice names cpu_thermal', () => {
+    const hot = pi5Sensors()
+    ;(hot.temperatures[0] as { celsius: number }).celsius = 82.1
+    const health = healthOf('warn', '1 threshold crossed.', ['cpu_thermal 82.1 °C ≥ 80 °C'])
+    const first = wrap(
+      <HostView
+        host={hostShape({ live: readableLive({ sensors: read(hot) }), health })}
+        stale={null}
+      />,
+    )
+    const row = () =>
+      within(cardOf('Sensors')).getByText('cpu_thermal').closest('li') as HTMLElement
+    expect(row()).toHaveTextContent('▲')
+    expect(warningNotice()).toHaveTextContent('cpu_thermal')
+    first.unmount()
+
+    wrap(<HostView host={hostShape()} stale={null} />)
+    expect(row()).not.toHaveTextContent('▲')
+    expect(warningNotice()).toBeNull()
+  })
+
+  it('refuses an answer without health rather than calling it healthy', () => {
+    const host = hostShape()
+    const { health: _, ...withoutHealth } = host
+    expect(hostSchema.safeParse(withoutHealth).success).toBe(false)
+    expect(hostSchema.safeParse({ ...host, health: { summary: 'x' } }).success).toBe(false)
   })
 })
 
