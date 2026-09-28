@@ -3,6 +3,7 @@ package host
 import (
 	"context"
 	"errors"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -280,6 +281,67 @@ func TestDataDirSizeIsCached(t *testing.T) {
 	again := mustRead(t, "at 61 s", c.sizer.size(context.Background(), clock.now()))
 	if again.Bytes < first.Bytes+1<<20 || !again.MeasuredAt.Equal(clock.now()) {
 		t.Errorf("at 61 s: %+v, want a new walk with the new MiB (first was %d bytes)", again, first.Bytes)
+	}
+}
+
+// vanishingFS removes victims from disk right after it has listed dir, as a
+// rename by the store does between the walk's listing and its stat.
+type vanishingFS struct {
+	fs.FS
+	dir     string
+	victims []string
+}
+
+func (f vanishingFS) ReadDir(name string) ([]fs.DirEntry, error) {
+	entries, err := fs.ReadDir(f.FS, name)
+	if name == f.dir {
+		for _, v := range f.victims {
+			if rmErr := os.RemoveAll(v); rmErr != nil {
+				return nil, rmErr
+			}
+		}
+	}
+	return entries, err
+}
+
+// TestDataDirSizeSkipsVanishedEntries (WR-07): a file or directory listed and
+// gone before it is stat'ed or read is skipped, as du skips it. Returning the
+// first ENOENT used to fail the whole measurement for a minute.
+func TestDataDirSizeSkipsVanishedEntries(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS != "linux" {
+		t.Skip("statBlocks reads syscall.Stat_t on linux only")
+	}
+	if _, err := exec.LookPath("du"); err != nil {
+		t.Skip("du is not installed")
+	}
+
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "a-stays"), 5000)
+	writeFile(t, filepath.Join(dir, "b-renamed-away.tmp"), 7000)
+	writeFile(t, filepath.Join(dir, "c-removed-dir", "inner"), 9000)
+	writeFile(t, filepath.Join(dir, "d-stays", "e"), 11000)
+
+	fsys := vanishingFS{FS: os.DirFS("/"), dir: fsPath(dir), victims: []string{
+		filepath.Join(dir, "b-renamed-away.tmp"), filepath.Join(dir, "c-removed-dir"),
+	}}
+	c := New(Config{FS: fsys, Sys: fakeSys{}, Now: newLiveClock().now, DataDir: dir})
+	r := c.sizer.size(context.Background(), fixedNow)
+	if !r.Readable {
+		t.Fatalf("size = %+v, want readable: vanished entries are skipped, not a failed walk", r.Reason)
+	}
+
+	out, err := exec.Command("du", "-s", "-B1", dir).Output()
+	if err != nil {
+		t.Fatalf("du: %v", err)
+	}
+	field, _, _ := strings.Cut(string(out), "\t")
+	want, err := strconv.ParseUint(strings.TrimSpace(field), 10, 64)
+	if err != nil {
+		t.Fatalf("du printed %q: %v", out, err)
+	}
+	if r.Value.Bytes != want {
+		t.Errorf("size = %d, du -s -B1 of what remains says %d", r.Value.Bytes, want)
 	}
 }
 

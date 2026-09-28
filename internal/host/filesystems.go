@@ -248,14 +248,25 @@ func walkSize(ctx context.Context, fsys fs.FS, dir string) (uint64, error) {
 	}
 	seen := make(map[inode]struct{})
 	var total uint64
-	err := fs.WalkDir(fsys, name, func(_ string, d fs.DirEntry, err error) error {
+	err := fs.WalkDir(fsys, name, func(p string, d fs.DirEntry, err error) error {
+		// An entry listed and gone before it was stat'ed or read has vanished,
+		// and du skips it the same way: the store, the sessions and the audit
+		// log all write a temporary file and rename it, so this happens in
+		// normal operation, and one such file must not cost the whole
+		// measurement. The data directory itself missing is still an error.
 		if err != nil {
+			if p != name && errors.Is(err, fs.ErrNotExist) {
+				return nil
+			}
 			return err
 		}
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return ctxErr
 		}
 		info, err := d.Info()
+		if p != name && errors.Is(err, fs.ErrNotExist) {
+			return nil
+		}
 		if err != nil {
 			return err
 		}
