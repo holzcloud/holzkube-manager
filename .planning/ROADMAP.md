@@ -88,7 +88,7 @@ injiziert hat, ist kein Ergebnis.
   4. Hinterlegt der Update-Mechanismus, wann zuletzt gesucht wurde und welche Version verfügbar ist, zeigt die Seite beides; hinterlegt er nichts — der Stand der heute auf dem Pi installierten `holzkube-manager-update` —, sagt sie „nicht hinterlegt", statt eine Zeit oder eine Version zu erfinden. Was das Skript dafür künftig schreibt, liegt in `deploy/` und wird nicht installiert.
 
 **Research**: `/proc` unter `ProcSubset=pid` und `ProtectProc=invisible` — welche Dateien genau verschwinden und woran der Daemon das von einem echten Lesefehler unterscheidet; wo der Pi 5 Temperatur und Lüfter in `/sys` ablegt und wo ein amd64-Host.
-**Plans**: 6/7 plans executed
+**Plans**: 7/7 plans executed
 
 Plans:
 **Wave 1**
@@ -108,7 +108,7 @@ Plans:
 - [x] 11-06-PLAN.md — Netzwerk: physische Schnittstellen mit Durchsatz, virtuelle eingeklappt (HMON-04)
 
 **Wave 6** *(blocked on Wave 5 completion)*
-- [ ] 11-07-PLAN.md — Vertrag und Anleitung, 390-px-Browsermessung, Abgleich auf dem Pi gegen die Shell und `subset=pid`, `./bin/task ci`
+- [x] 11-07-PLAN.md — Vertrag und Anleitung, 390-px-Browsermessung, Abgleich auf dem Pi gegen die Shell und `subset=pid`, `./bin/task ci`
 
 **Cross-cutting constraints:**
 - Long host identifiers wrap and never widen the page at 390 px
@@ -170,7 +170,7 @@ Waves: 1 → {01} · 2 → {02, 03} · 3 → {04} · 4 → {05} · 5 → {06} ·
 
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
-| 11. Host-Seite — Gerät, Dienst, Live-Werte | v1.18 | 6/7 | In Progress|  |
+| 11. Host-Seite — Gerät, Dienst, Live-Werte | v1.18 | 7/7 | In Progress|  |
 | 12. Host wie ein Knoten — Verlauf, Warnung, Wand | v1.18 | 0/TBD | Not started | - |
 | 13. Host-Aktionen über einen root-eigenen Helfer | v1.18 | 0/TBD | Not started | - |
 | 14. Telefon — Tippziele, die ein Daumen trifft | v1.18 | 0/TBD | Not started | - |
