@@ -5,16 +5,16 @@ milestone_name: Host & Telefon
 current_phase: 12
 current_phase_name: Host wie ein Knoten — Verlauf, Warnung, Wand
 status: executing
-stopped_at: Completed 12-04-PLAN.md
-last_updated: "2026-09-28T20:53:27.365Z"
+stopped_at: Completed 12-05-PLAN.md
+last_updated: "2026-09-28T21:09:29.586Z"
 last_activity: 2026-09-28
 last_activity_desc: Phase 12 execution started
-state_head: 704ec1f1caa8ec782fea3854f6aec26b3d6a7f19
+state_head: d71a0d3656d38bde40c570871573880dca722a67
 progress:
   total_phases: 4
   completed_phases: 1
   total_plans: 15
-  completed_plans: 11
+  completed_plans: 12
   percent: 25
 ---
 
@@ -33,7 +33,7 @@ See: .planning/PROJECT.md (updated 2026-09-28)
 ## Current Position
 
 Phase: 12 (Host wie ein Knoten — Verlauf, Warnung, Wand) — EXECUTING
-Plan: 5 of 8
+Plan: 6 of 8
 Status: Ready to execute
 Last activity: 2026-09-28 — Phase 12 execution started
 
@@ -95,6 +95,9 @@ Siehe `PROJECT.md`, die `MILESTONE-*.md`-Dateien und für v1.18 den Abschnitt
 - [Phase 12]: 12-03: rx/tx recorded only with a rate window, >=1 physical link and every physical link rated; a host without physical links records no rx/tx
 - [Phase 12]: 12-03: the wall reads the sampler's snapshot (Latest), never the host; older than 3 x FineStep is unknown / not readable; host is null before the first sample
 - [Phase 12]: 12-04: the browser draws warn_c/danger_c as sent; temperatureSchema requires both with no default, the browser's limit table is deleted
+- [Phase 12]: 12-05: one set of chart blocks (charts/HardwareCharts) for a node and /host; a page places them, it does not own a copy
+- [Phase 12]: 12-05: a chart slot shows 'Not readable — no history' only when unreadable now (not rate.no-baseline) and no point in the window
+- [Phase 12]: 12-05: with usage not readable (no-baseline included) the 1-minute load is the Processor card's figure
 
 ### Blockers/Concerns
 
@@ -109,8 +112,8 @@ Siehe `PROJECT.md`, die `MILESTONE-*.md`-Dateien und für v1.18 den Abschnitt
 
 ## Session Continuity
 
-Last session: 2026-09-28T20:53:27.166Z
-Stopped at: Completed 12-04-PLAN.md
+Last session: 2026-09-28T21:09:29.498Z
+Stopped at: Completed 12-05-PLAN.md
 Resume file: None
 Next: `/gsd-plan-phase 11`
 
@@ -129,3 +132,4 @@ Next: `/gsd-plan-phase 11`
 | Phase 12 P02 | 18 min | 3 tasks | 17 files |
 | Phase 12 P03 | 18 min | 3 tasks | 12 files |
 | Phase 12 P04 | 9 min | 2 tasks | 8 files |
+| Phase 12 P05 | 14 min | 3 tasks | 6 files |
