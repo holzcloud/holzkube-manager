@@ -3282,7 +3282,17 @@
           "roles": ["root", "data directory"],
           "usage": { "readable": true, "value": { "size_bytes": 125260451840, "used_bytes": 28882735104, "available_bytes": 91212472320 } }
         }
-      ]
+      ],
+      "sensors": {
+        "readable": true,
+        "value": {
+          "temperatures": [
+            { "chip": "cpu_thermal", "kind": "cpu", "label": "temp1", "celsius": 64.4, "high_c": null, "critical_c": null },
+            { "chip": "rp1_adc", "kind": "other", "label": "temp1", "celsius": 55.4, "high_c": null, "critical_c": null }
+          ],
+          "fans": []
+        }
+      }
     }
   }
 }

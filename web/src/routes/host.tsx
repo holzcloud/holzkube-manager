@@ -3,6 +3,7 @@ import { createRoute } from '@tanstack/react-router'
 import type { ReactNode } from 'react'
 import { api, type Host, type Reason } from '@/api'
 import { Meter } from '@/components/charts/Meter'
+import { FanList, Sensors } from '@/components/charts/Sensors'
 import { ago } from '@/components/HealthField'
 import { HARDWARE_POLL_INTERVAL_MS } from '@/components/NodeHardware'
 import { Problem } from '@/components/Problem'
@@ -428,8 +429,49 @@ function LiveSection({ host }: { host: Host }) {
             <FilesystemsCard filesystems={host.live.filesystems} />
           </div>
         </div>
+        <SensorsCard sensors={host.live.sensors} />
       </div>
     </section>
+  )
+}
+
+/**
+ * The host's temperatures and fans (HMON-03), with the node page's own list and
+ * rows (D-13) -- without the sparkline column, since this page draws no curves
+ * yet. Voltages are never read, so never shown (D-08).
+ */
+function SensorsCard({ sensors }: { sensors: Host['live']['sensors'] }) {
+  return (
+    <Card className="h-fit">
+      <CardHeader>
+        <CardTitle className="text-base">Sensors</CardTitle>
+        <p className="text-sm text-muted-foreground">Temperatures and fans</p>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        {sensors.readable ? (
+          <>
+            <Sensors
+              temperatures={sensors.value.temperatures}
+              emptyText="This machine reports no temperature sensors."
+            />
+            <div>
+              <p className="mb-1 text-xs text-muted-foreground">Fans</p>
+              <FanList
+                fans={sensors.value.fans}
+                empty={
+                  <p className="text-sm text-muted-foreground">
+                    No fan reported. Nothing under /sys/class/hwmon on this machine has a fan speed
+                    input — either there is no fan, or its controller has no driver.
+                  </p>
+                }
+              />
+            </div>
+          </>
+        ) : (
+          <MissingValue reason={sensors.reason} />
+        )}
+      </CardContent>
+    </Card>
   )
 }
 

@@ -48,7 +48,33 @@ function readableLive(overrides: Record<string, unknown> = {}) {
       swap_used_bytes: 1498169344,
     }),
     filesystems: [mergedRoot()],
+    sensors: read(pi5Sensors()),
     ...overrides,
+  }
+}
+
+/** The Pi 5's sensors as the daemon reads them: the CPU and the RP1's ADC, no fan. */
+function pi5Sensors() {
+  return {
+    temperatures: [
+      {
+        chip: 'cpu_thermal',
+        kind: 'cpu',
+        label: 'temp1',
+        celsius: 64.4,
+        high_c: null,
+        critical_c: null,
+      },
+      {
+        chip: 'rp1_adc',
+        kind: 'other',
+        label: 'temp1',
+        celsius: 55.4,
+        high_c: null,
+        critical_c: null,
+      },
+    ],
+    fans: [],
   }
 }
 
@@ -103,6 +129,7 @@ function procSubsetLive() {
     },
     memory: hidden('hardening.proc-subset', HARDENING_MEMINFO),
     filesystems: [mergedRoot()],
+    sensors: read(pi5Sensors()),
   }
 }
 
@@ -672,6 +699,94 @@ describe('the Filesystems card', () => {
     expect(card).toHaveTextContent('permission denied')
     expect(within(card).getByText('25%')).toBeInTheDocument()
     expectNoDrawnZero(card)
+  })
+})
+
+const NO_FAN =
+  'No fan reported. Nothing under /sys/class/hwmon on this machine has a fan speed input — either there is no fan, or its controller has no driver.'
+
+describe('the Sensors card', () => {
+  it('on the Pi 5 shows the CPU and the ADC by kind, says no fan is reported, and draws no curve', () => {
+    wrap(<HostView host={hostShape()} stale={null} />)
+
+    const card = cardOf('Sensors')
+    const processor = within(card).getByText('Processor').parentElement as HTMLElement
+    expect(within(processor).getByText('cpu_thermal')).toBeInTheDocument()
+    expect(within(processor).getByText('64 °C')).toBeInTheDocument()
+    const other = within(card).getByText('Other').parentElement as HTMLElement
+    expect(within(other).getByText('rp1_adc')).toBeInTheDocument()
+    expect(within(other).getByText('55 °C')).toBeInTheDocument()
+
+    expect(within(card).getByText(NO_FAN)).toBeInTheDocument()
+    // No history on this page yet: no sparkline column, not a column of empty ones.
+    expect(card.querySelector('svg')).toBeNull()
+  })
+
+  it('on an amd64 board shows its fans, a stopped one as stopped, and marks a hot CPU critical', () => {
+    const live = readableLive({
+      sensors: read({
+        temperatures: [
+          {
+            chip: 'k10temp',
+            kind: 'cpu',
+            label: 'Tctl',
+            celsius: 96,
+            high_c: null,
+            critical_c: null,
+          },
+          {
+            chip: 'nct6798',
+            kind: 'board',
+            label: 'SYSTIN',
+            celsius: 36,
+            high_c: null,
+            critical_c: null,
+          },
+        ],
+        fans: [
+          { chip: 'nct6798', label: 'fan1', rpm: 1080 },
+          { chip: 'nct6798', label: 'fan2', rpm: 0 },
+        ],
+      }),
+    })
+    wrap(<HostView host={hostShape({ live })} stale={null} />)
+
+    const card = cardOf('Sensors')
+    expect(within(card).getByText('1080 RPM')).toBeInTheDocument()
+    expect(within(card).getByText('stopped')).toBeInTheDocument()
+    expect(within(card).queryByText(NO_FAN)).toBeNull()
+
+    const hot = within(card).getByText('Tctl').closest('li') as HTMLElement
+    expect(hot.getAttribute('data-severity')).toBe('danger')
+    expect(hot).toHaveTextContent('▲')
+    expect(within(hot).getByText(/critical/)).toHaveClass('sr-only')
+    expect(within(card).getByText('Mainboard')).toBeInTheDocument()
+  })
+
+  it('says the machine reports no temperature sensors, not an empty card', () => {
+    const live = readableLive({ sensors: read({ temperatures: [], fans: [] }) })
+    wrap(<HostView host={hostShape({ live })} stale={null} />)
+
+    const card = cardOf('Sensors')
+    expect(
+      within(card).getByText('This machine reports no temperature sensors.'),
+    ).toBeInTheDocument()
+    expect(within(card).getByText(NO_FAN)).toBeInTheDocument()
+  })
+
+  it('says Not readable with the reason when the sensors could not be listed', () => {
+    const live = readableLive({
+      sensors: hidden('read-failed', 'Could not read /sys/class/hwmon: permission denied'),
+    })
+    wrap(<HostView host={hostShape({ live })} stale={null} />)
+
+    const card = cardOf('Sensors')
+    expect(within(card).getByText('Not readable')).toBeInTheDocument()
+    expect(
+      within(card).getByText('Could not read /sys/class/hwmon: permission denied'),
+    ).toBeInTheDocument()
+    expect(within(card).queryByText(NO_FAN)).toBeNull()
+    expect(within(card).queryByText(/°C/)).toBeNull()
   })
 })
 
