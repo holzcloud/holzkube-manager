@@ -18,8 +18,24 @@ import (
 
 func celsius(c float64) *float64 { return &c }
 
+// kindLines are the per-kind defaults written out, so an expectation states
+// the number it expects rather than asking the function under test.
+var kindLines = map[string][2]float64{
+	"cpu": {80, 95}, "disk": {60, 70}, "board": {70, 85}, "gpu": {80, 95}, "other": {75, 90},
+}
+
+// temp is a temperature whose chip sets no limit: its lines are its kind's.
 func temp(chip, kind, label string, c float64) inventory.HardwareTemperature {
-	return inventory.HardwareTemperature{Chip: chip, Kind: kind, Label: label, Celsius: c}
+	lines := kindLines[kind]
+	return inventory.HardwareTemperature{
+		Chip: chip, Kind: kind, Label: label, Celsius: c, WarnC: lines[0], DangerC: lines[1],
+	}
+}
+
+// limited gives a temperature limits and the lines they make.
+func limited(t inventory.HardwareTemperature, high, crit *float64, warn, danger float64) inventory.HardwareTemperature {
+	t.HighC, t.CriticalC, t.WarnC, t.DangerC = high, crit, warn, danger
+	return t
 }
 
 func mustReadSensors(t *testing.T, fsys fs.FS) Sensors {
@@ -51,6 +67,7 @@ func describeTemps(ts []inventory.HardwareTemperature) string {
 		if t.CriticalC != nil {
 			limits += " crit " + trimFloat(*t.CriticalC)
 		}
+		limits += " warn " + trimFloat(t.WarnC) + " danger " + trimFloat(t.DangerC)
 		parts = append(parts, t.Chip+"/"+t.Label+" ("+t.Kind+") "+trimFloat(t.Celsius)+limits)
 	}
 	return "[" + strings.Join(parts, ", ") + "]"
@@ -70,7 +87,9 @@ func TestSensorsPi5(t *testing.T) {
 	// Exactly these two: no voltage input, no rpi_volt entry, and the thermal
 	// zone not listed a second time beside cpu_thermal.
 	assertTemperatures(t, s.Temperatures, []inventory.HardwareTemperature{
-		temp("cpu_thermal", "cpu", "temp1", 64.4),
+		// The CPU's chip sets no limit; its twin zone's critical trip is the
+		// red line, and its four active trips (fan stages) are none (D-07).
+		limited(temp("cpu_thermal", "cpu", "temp1", 64.4), nil, celsius(110), 80, 110),
 		temp("rp1_adc", "other", "temp1", 55.4),
 	})
 	for _, tc := range s.Temperatures {
@@ -91,8 +110,7 @@ func TestSensorsAMD64(t *testing.T) {
 
 	s := mustReadSensors(t, fixtureFS(t, "amd64"))
 
-	nvme := temp("nvme", "disk", "Composite", 38.8)
-	nvme.HighC, nvme.CriticalC = celsius(82), celsius(85)
+	nvme := limited(temp("nvme", "disk", "Composite", 38.8), celsius(82), celsius(85), 82, 85)
 	assertTemperatures(t, s.Temperatures, []inventory.HardwareTemperature{
 		temp("k10temp", "cpu", "Tctl", 45.2),
 		temp("k10temp", "cpu", "Tccd1", 47),
@@ -251,4 +269,144 @@ func liveSensors(t *testing.T, v View) map[string]any {
 		t.Fatalf("the answer has no live.sensors: %v", live)
 	}
 	return sensors
+}
+
+// zoneFS is a machine with one CPU hwmon chip and the chip's twin thermal zone
+// carrying the given trip points (type, millidegrees; an empty type is a trip
+// whose type file is missing).
+func zoneFS(chipFiles map[string]string, trips [][2]string) fstest.MapFS {
+	fsys := fstest.MapFS{
+		"sys/class/hwmon/hwmon0/name":          {Data: []byte("cpu_thermal\n")},
+		"sys/class/hwmon/hwmon0/temp1_input":   {Data: []byte("64400\n")},
+		"sys/class/thermal/thermal_zone0/type": {Data: []byte("cpu-thermal\n")},
+		"sys/class/thermal/thermal_zone0/temp": {Data: []byte("64400\n")},
+	}
+	for name, v := range chipFiles {
+		fsys["sys/class/hwmon/hwmon0/"+name] = &fstest.MapFile{Data: []byte(v + "\n")}
+	}
+	for n, trip := range trips {
+		prefix := "sys/class/thermal/thermal_zone0/trip_point_" + strconv.Itoa(n) + "_"
+		if trip[0] != "" {
+			fsys[prefix+"type"] = &fstest.MapFile{Data: []byte(trip[0] + "\n")}
+		}
+		fsys[prefix+"temp"] = &fstest.MapFile{Data: []byte(trip[1] + "\n")}
+	}
+	return fsys
+}
+
+// TestTripPoints is where the host's temperatures get their lines when the
+// chip sets none (D-07): from the twin thermal zone's passive or hot trip
+// (the kernel throttles there) and its critical trip (it shuts down there),
+// never from an active trip, which is a fan stage.
+func TestTripPoints(t *testing.T) {
+	t.Parallel()
+
+	cpu := func(high, crit *float64, warn, danger float64) []inventory.HardwareTemperature {
+		return []inventory.HardwareTemperature{
+			limited(temp("cpu_thermal", "cpu", "temp1", 64.4), high, crit, warn, danger),
+		}
+	}
+	// Sixteen fan stages, then a passive trip the cap must not reach.
+	seventeen := make([][2]string, 0, 17)
+	for n := range 16 {
+		seventeen = append(seventeen, [2]string{"active", strconv.Itoa(40000 + n*1000)})
+	}
+	seventeen = append(seventeen, [2]string{"passive", "60000"})
+
+	for _, tc := range []struct {
+		name string
+		fsys fs.FS
+		want []inventory.HardwareTemperature
+	}{
+		{
+			// The measured Pi 5: critical 110, four active trips at 50, 60,
+			// 67.5 and 75 °C. The CPU warns at its kind's 80, not at 50.
+			name: "the Pi 5",
+			fsys: fixtureFS(t, "pi5"),
+			want: []inventory.HardwareTemperature{
+				limited(temp("cpu_thermal", "cpu", "temp1", 64.4), nil, celsius(110), 80, 110),
+				temp("rp1_adc", "other", "temp1", 55.4),
+			},
+		},
+		{
+			name: "a chip without limits takes its twin zone's passive and critical trips",
+			fsys: zoneFS(nil, [][2]string{{"passive", "85000"}, {"critical", "105000"}}),
+			want: cpu(celsius(85), celsius(105), 85, 105),
+		},
+		{
+			name: "the chip's own high wins over the zone's passive trip",
+			fsys: zoneFS(map[string]string{"temp1_max": "70000"}, [][2]string{{"passive", "85000"}, {"critical", "105000"}}),
+			want: cpu(celsius(70), celsius(105), 70, 105),
+		},
+		{
+			name: "a hot trip counts like passive, and the lowest of each wins",
+			fsys: zoneFS(nil, [][2]string{
+				{"critical", "110000"}, {"passive", "90000"}, {"hot", "87500"}, {"critical", "105000"},
+			}),
+			want: cpu(celsius(87.5), celsius(105), 87.5, 105),
+		},
+		{
+			name: "active trips and trips without a type set no line",
+			fsys: zoneFS(nil, [][2]string{{"active", "50000"}, {"", "45000"}, {"active", "60000"}}),
+			want: cpu(nil, nil, 80, 95),
+		},
+		{
+			name: "a disabled trip at zero sets no line",
+			fsys: zoneFS(nil, [][2]string{{"critical", "0"}}),
+			want: cpu(nil, nil, 80, 95),
+		},
+		{
+			name: "at most sixteen trip points are read",
+			fsys: zoneFS(nil, seventeen),
+			want: cpu(nil, nil, 80, 95),
+		},
+		{
+			// No CPU chip in hwmon: the zone is the CPU's temperature, and its
+			// own trips are its lines.
+			name: "the zone fallback takes its own zone's trips",
+			fsys: fstest.MapFS{
+				"sys/class/thermal/thermal_zone0/type":              {Data: []byte("x86_pkg_temp\n")},
+				"sys/class/thermal/thermal_zone0/temp":              {Data: []byte("52000\n")},
+				"sys/class/thermal/thermal_zone0/trip_point_0_type": {Data: []byte("passive\n")},
+				"sys/class/thermal/thermal_zone0/trip_point_0_temp": {Data: []byte("85000\n")},
+				"sys/class/thermal/thermal_zone0/trip_point_1_type": {Data: []byte("critical\n")},
+				"sys/class/thermal/thermal_zone0/trip_point_1_temp": {Data: []byte("100000\n")},
+				"sys/class/thermal/thermal_zone0/trip_point_2_type": {Data: []byte("active\n")},
+				"sys/class/thermal/thermal_zone0/trip_point_2_temp": {Data: []byte("50000\n")},
+			},
+			want: []inventory.HardwareTemperature{
+				limited(temp("x86_pkg_temp", "cpu", "thermal_zone0", 52), celsius(85), celsius(100), 85, 100),
+			},
+		},
+		{
+			// With a CPU chip the zones are read only for their lines; not
+			// being able to list them leaves the chip's own and the kind's.
+			name: "an unlistable thermal class with a CPU chip keeps the chip's limits",
+			fsys: deniedDir{MapFS: zoneFS(
+				map[string]string{"temp1_max": "70000", "temp1_crit": "100000"},
+				[][2]string{{"passive", "60000"}, {"critical", "90000"}},
+			), dir: "sys/class/thermal"},
+			want: cpu(celsius(70), celsius(100), 70, 100),
+		},
+		{
+			name: "an unlistable thermal class with a CPU chip without limits gives the kind's",
+			fsys: deniedDir{MapFS: zoneFS(nil, [][2]string{{"critical", "90000"}}), dir: "sys/class/thermal"},
+			want: cpu(nil, nil, 80, 95),
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			assertTemperatures(t, mustReadSensors(t, tc.fsys).Temperatures, tc.want)
+		})
+	}
+
+	// Without a CPU chip the zones are the temperature, and a class that
+	// cannot be listed is "could not look", as before.
+	denied := deniedDir{MapFS: fstest.MapFS{
+		"sys/class/thermal/thermal_zone0/type": {Data: []byte("cpu-thermal\n")},
+		"sys/class/thermal/thermal_zone0/temp": {Data: []byte("52000\n")},
+	}, dir: "sys/class/thermal"}
+	if _, err := readSensors(denied); err == nil {
+		t.Error("readSensors with no CPU chip and an unlistable thermal class returned no error")
+	}
 }

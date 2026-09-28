@@ -27,6 +27,7 @@ const (
 	maxSensorChips  = 64
 	maxChipInputs   = 32
 	maxThermalZones = 64
+	maxTripPoints   = 16
 )
 
 // Sensors is the host's temperatures and fans (HMON-03).
@@ -52,6 +53,11 @@ type sensorChip struct {
 // fan*_input are read -- never a voltage -- and a thermal zone whose hwmon twin
 // is listed is not listed a second time.
 //
+// Every temperature carries where it turns amber and red (D-06, D-07): the
+// chip's own limits, else its thermal zone's trip points (see zoneTrips), else
+// its kind's default -- through inventory.TemperatureLimits, the rule the node
+// page uses.
+//
 // A missing class directory is a machine without that interface, which is an
 // empty list. Any other failure to list it is an error: the page cannot tell
 // "no sensors" from "could not look", and must not say the first when it is
@@ -67,10 +73,23 @@ func readSensors(fsys fs.FS) (Sensors, error) {
 		return Sensors{}, err
 	}
 
+	// The zones are read first, because an hwmon chip that sets no limits of
+	// its own takes its twin zone's. Whether a listing error matters is known
+	// only once the chips are read: see below.
+	zoneList, zoneErr := classEntries(fsys, thermalClass, "thermal_zone", maxThermalZones)
+	zones := readZones(fsys, zoneList)
+	twins := make(map[string]tripLimits, len(zones))
+	for _, z := range zones {
+		name := talos.ThermalTwinName(z.typ)
+		if _, seen := twins[name]; !seen {
+			twins[name] = z.limits
+		}
+	}
+
 	listed := map[string]bool{}
 	cpuTemps := false
 	for _, chip := range chips {
-		temps, fans, name := readChip(fsys, chip)
+		temps, fans, name := readChip(fsys, chip, twins)
 		if len(temps) == 0 && len(fans) == 0 {
 			// A voltage monitor, a battery, a power sensor: nothing this card
 			// shows. Left out rather than listed empty, as on the node page.
@@ -84,37 +103,119 @@ func readSensors(fsys fs.FS) (Sensors, error) {
 		out.Fans = append(out.Fans, fans...)
 	}
 
-	// The fallback for a machine whose CPU has no hwmon chip. Its trip points
-	// are never used as limits: a zone's critical trip sits far above where
-	// the firmware throttles, and a danger line there would say "fine" about a
-	// processor that is already slowing down.
+	// When a CPU chip reported, the zones were read only for their limits,
+	// and a zone directory that cannot be listed leaves every chip its own
+	// limits or its kind's defaults: "no limit found" is not "the sensors
+	// could not be read". When the zones are the CPU's only temperature, not
+	// being able to list them is exactly that, and is said.
 	if !cpuTemps {
-		zones, err := classEntries(fsys, thermalClass, "thermal_zone", maxThermalZones)
-		if err != nil {
-			return Sensors{}, err
+		if zoneErr != nil {
+			return Sensors{}, zoneErr
 		}
+		// The fallback for a machine whose CPU has no hwmon chip, with each
+		// zone's own trip points as its limits.
 		for _, z := range zones {
-			typ, ok := readTrimmed(fsys, z.dir+"/type")
-			if !ok || typ == "" {
-				continue
-			}
 			celsius, ok := readMillidegrees(fsys, z.dir+"/temp")
 			if !ok {
 				continue
 			}
-			if listed[talos.ThermalTwinName(typ)] {
+			if listed[talos.ThermalTwinName(z.typ)] {
 				continue
 			}
+			kind := string(talos.ClassifyChip(z.typ))
+			warn, danger := inventory.TemperatureLimits(kind, z.limits.high, z.limits.crit)
 			out.Temperatures = append(out.Temperatures, inventory.HardwareTemperature{
-				Chip:    typ,
-				Kind:    string(talos.ClassifyChip(typ)),
-				Label:   path.Base(z.dir),
-				Celsius: celsius,
+				Chip:      z.typ,
+				Kind:      kind,
+				Label:     path.Base(z.dir),
+				Celsius:   celsius,
+				HighC:     z.limits.high,
+				CriticalC: z.limits.crit,
+				WarnC:     warn,
+				DangerC:   danger,
 			})
 		}
 	}
 
 	return out, nil
+}
+
+// thermalZone is one /sys/class/thermal zone with a type, and the limits its
+// trip points set.
+type thermalZone struct {
+	dir    string
+	typ    string
+	limits tripLimits
+}
+
+// tripLimits are a zone's warning and critical lines, nil where it sets none.
+type tripLimits struct{ high, crit *float64 }
+
+// readZones reads the type and trip points of every listed zone. A zone
+// without a type is left out: it cannot be matched to anything, and its
+// temperature cannot be named.
+func readZones(fsys fs.FS, list []sensorChip) []thermalZone {
+	out := make([]thermalZone, 0, len(list))
+	for _, z := range list {
+		typ, ok := readTrimmed(fsys, z.dir+"/type")
+		if !ok || typ == "" {
+			continue
+		}
+		out = append(out, thermalZone{dir: z.dir, typ: typ, limits: zoneTrips(fsys, z.dir)})
+	}
+	return out
+}
+
+// zoneTrips is where a thermal zone's trip points put its lines (D-07).
+//
+// A passive or hot trip is where the kernel starts throttling the processor,
+// which is the warning; a critical trip is where it shuts the machine down,
+// which is danger. The lowest of each wins. An active trip is a fan stage and
+// never a line -- on a Raspberry Pi 5 the first is at 50 °C, and a warning
+// there would be on for good -- and a trip whose type cannot be read is not
+// guessed at. At most maxTripPoints trips are read, each through readTrimmed,
+// so a driver cannot make the walk read without end (T-12-05).
+func zoneTrips(fsys fs.FS, dir string) tripLimits {
+	entries, err := fs.ReadDir(fsys, dir)
+	if err != nil {
+		return tripLimits{}
+	}
+	files := make(map[string]bool, len(entries))
+	for _, e := range entries {
+		files[e.Name()] = true
+	}
+
+	var out tripLimits
+	for n := range maxTripPoints {
+		trip := fmt.Sprintf("trip_point_%d_", n)
+		if !files[trip+"type"] || !files[trip+"temp"] {
+			continue
+		}
+		prefix := dir + "/" + trip
+		typ, ok := readTrimmed(fsys, prefix+"type")
+		if !ok {
+			continue
+		}
+		var into **float64
+		switch typ {
+		case "passive", "hot":
+			into = &out.high
+		case "critical":
+			into = &out.crit
+		default:
+			continue
+		}
+		c, ok := readMillidegrees(fsys, prefix+"temp")
+		// A trip at or below zero is a disabled one, as a limit at or below
+		// zero is a chip that sets none.
+		if !ok || c <= 0 {
+			continue
+		}
+		if *into == nil || c < **into {
+			*into = &c
+		}
+	}
+	return out
 }
 
 // classEntries lists a /sys/class directory's <prefix>N entries in index
@@ -150,13 +251,17 @@ func classEntries(fsys fs.FS, class, prefix string, limit int) ([]sensorChip, er
 
 // readChip reads one hwmon chip's temperatures and fans. A chip whose
 // directory cannot be listed has nothing to show, and one input that does not
-// parse is skipped without its neighbours.
-func readChip(fsys fs.FS, chip sensorChip) (temps []inventory.HardwareTemperature, fans []inventory.HardwareFan, name string) {
+// parse is skipped without its neighbours. A limit the chip does not set is
+// taken from its twin thermal zone, when it has one.
+func readChip(
+	fsys fs.FS, chip sensorChip, twins map[string]tripLimits,
+) (temps []inventory.HardwareTemperature, fans []inventory.HardwareFan, name string) {
 	name, _ = readTrimmed(fsys, chip.dir+"/name")
 	if name == "" {
 		name = fmt.Sprintf("hwmon%d", chip.index)
 	}
 	kind := string(talos.ClassifyChip(name))
+	twin := twins[name]
 
 	entries, err := fs.ReadDir(fsys, chip.dir)
 	if err != nil {
@@ -188,13 +293,24 @@ func readChip(fsys fs.FS, chip sensorChip) (temps []inventory.HardwareTemperatur
 				limits[suffix] = raw
 			}
 		}
+		high := roundTenth(talos.Millidegrees(limits, "max"))
+		if high == nil {
+			high = twin.high
+		}
+		crit := roundTenth(talos.Millidegrees(limits, "crit"))
+		if crit == nil {
+			crit = twin.crit
+		}
+		warn, danger := inventory.TemperatureLimits(kind, high, crit)
 		temps = append(temps, inventory.HardwareTemperature{
 			Chip:      name,
 			Kind:      kind,
 			Label:     label,
 			Celsius:   celsius,
-			HighC:     roundTenth(talos.Millidegrees(limits, "max")),
-			CriticalC: roundTenth(talos.Millidegrees(limits, "crit")),
+			HighC:     high,
+			CriticalC: crit,
+			WarnC:     warn,
+			DangerC:   danger,
 		})
 	}
 
