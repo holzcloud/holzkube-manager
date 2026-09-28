@@ -159,16 +159,29 @@ and load, memory and swap, the root and data-directory filesystems,
 temperatures and fans, the network interfaces with their throughput). The page
 asks every 3 seconds. Everything is read by the daemon from its own machine as
 the request arrives -- files under `/sys`, `/etc/os-release` and `/proc`, and a
-few system calls -- without root, without starting a program, and without
-storing anything.
+few system calls -- without root and without starting a program.
+
+**The page keeps a day of history, as a node's page does.** The daemon's sampler
+reads the machine every 15 seconds, in the same pass that reads the nodes, and
+keeps the last 24 hours in the data directory. Processor, memory, network and
+every sensor draw their curve over **Live**, **1 h**, **6 h** and **24 h**, the
+same picker as on a node. The history survives a restart and an update: the
+curves before it are still there, and the minutes the service was not running
+are a gap in them. A value that could not be read at a sample is a gap too,
+never a 0. Network is the physical interfaces only; loopback, bridges and
+container links are left out, because they carry the same traffic twice.
 
 **Under a hardened unit, CPU usage, memory and swap say "Not readable" -- by
 design.** A systemd unit with `ProcSubset=pid`, as the reference installation
 runs it, hides `/proc/stat` and `/proc/meminfo` from the service; the page says
-why rather than drawing a 0.
+why rather than drawing a 0. What cannot be read cannot be recorded either, so
+the Processor and Memory charts say **"Not readable — no history"** instead of
+drawing an empty axis. Network and the sensors are not hidden and draw their
+curves as usual.
 Load is still exact, because it comes from `sysinfo(2)` when `/proc/loadavg` is
-hidden. To see the three hidden values, add one line to the unit's `[Service]`
-section, for instance with `systemctl edit holzkube-manager`:
+hidden. To see the three hidden values, and to give processor and memory a
+history from then on, add one line to the unit's `[Service]` section, for
+instance with `systemctl edit holzkube-manager`:
 
 ```ini
 [Service]
@@ -178,6 +191,35 @@ ProcSubset=all
 then `systemctl daemon-reload` and `systemctl restart holzkube-manager`.
 `ProtectProc=invisible` can stay as it is: it hides other users' processes, and
 the Host page does not read those.
+
+**The host warns when a temperature or a filesystem crosses its line.** Two
+things are rated:
+
+- **Temperatures**, each against the lines its own chip reports -- or, when the
+  chip reports none, its thermal zone's trip points -- and otherwise a default
+  for its kind (processor 80 / 95 °C, drive 60 / 70, board 70 / 85, graphics
+  80 / 95, anything else 75 / 90). On a Raspberry Pi 5 the processor warns at
+  80 °C and is critical at 110 °C, the zone's critical trip. The Pi's four fan
+  stages, from 50 °C up, are when the fan speeds up and never a warning line.
+- **Filesystems**, `/` and the data directory's, at 80 % of what `df` counts
+  (used plus available), exactly where the meter on the page turns amber.
+
+Processor and memory usage are not rated: nothing hangs a line on them, and
+under `ProcSubset=pid` they cannot be read, so a host judged on them would never
+be anything but grey. The thresholds are not configurable in this release.
+
+**Three states, in three places.** **Healthy** (a green dot) means every
+rated value was read and none crossed its line. **Warning** (an amber triangle)
+means at least one did; the page lists each crossed line with its value, the
+critical ones first. **Not readable** (a grey ring) means nothing crossed, but a
+temperature or a filesystem could not be read, so nobody can say the host is
+fine. A warning outranks "not readable", which outranks healthy. A machine with
+no temperature sensor, such as a virtual machine, is judged by its filesystems
+alone and says so.
+
+The state appears in the page's header, as the mark beside **Host** in the
+navigation (checked every 30 seconds while you are elsewhere), and on the wall
+(see "One screen for the IT office").
 
 **The hostname is the one the service started with.** A unit with
 `ProtectHostname=yes` gives the service its own copy of the hostname at
@@ -873,6 +915,15 @@ cluster's configuration.
 It is shown once — only its hash is kept — and it needs a label, because the
 question a revocation asks is *which screen was this*. The list says when each
 was last used, which answers the other one: is it still on a wall?
+
+**The machine holzkube-manager runs on is the first tile under Nodes**, marked
+"manager" with its state's short reason: "healthy", the first crossed line, or
+"not readable". It is not one of the cluster's nodes and is not counted in the
+headline. The tile comes from the daemon's last 15-second sample rather than a
+fresh read, so it may trail the Host page by up to one interval, and it turns
+grey when that sample is more than 45 seconds old: a sampler that stopped is
+not a host that is fine. The wall shows the name and state only; a wall link
+still cannot open the Host page.
 
 ## Kubernetes itself
 
