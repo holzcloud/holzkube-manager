@@ -523,14 +523,31 @@ func clusterWall(d httpapi.Deps) http.HandlerFunc {
 			writeKubernetesError(w, r, err)
 			return
 		}
-		// The curves ride on the wall's own answer rather than being fetched
-		// beside it: a wall link opens this route and no other, so a screen
-		// in a corridor could not ask the history routes for them.
-		writeJSON(w, http.StatusOK, struct {
-			kube.Wall
-			Trends wallTrends `json:"trends"`
-		}{Wall: wall, Trends: trendsForTheWall(r.Context(), d, model.ClusterID(r.PathValue("id")), now)})
+		writeJSON(w, http.StatusOK, newWallAnswer(wall,
+			trendsForTheWall(r.Context(), d, model.ClusterID(r.PathValue("id")), now),
+			hostForTheWall(d, now)))
 	}
+}
+
+// wallAnswer is the wall's one answer: the cluster as it answered, and beside
+// it what the screen shows that the cluster does not say.
+//
+// The curves and the host ride on this answer rather than being fetched beside
+// it: a wall link opens this route and no other, so a screen in a corridor
+// could not ask the history or host routes for them.
+type wallAnswer struct {
+	kube.Wall
+	Trends wallTrends `json:"trends"`
+	// Host is null without a host reader or before its first sample.
+	Host *wallHost `json:"host"`
+}
+
+// newWallAnswer puts the answer together. The cluster's nodes and summary are
+// passed through untouched: the host is not a Kubernetes node, and counting it
+// among them would change a cluster's figures by where its manager happens to
+// run (D-14).
+func newWallAnswer(wall kube.Wall, trends wallTrends, h *wallHost) wallAnswer {
+	return wallAnswer{Wall: wall, Trends: trends, Host: h}
 }
 
 // kubernetesInventory answers every namespace, its quotas, and the cluster's own

@@ -139,6 +139,11 @@ func TestAWallLinkOpensTheWallAndNothingElse(t *testing.T) {
 		"/api/v1/clusters/c-1/kubernetes",
 		"/api/v1/clusters/c-1/kubernetes/resources",
 		"/api/v1/clusters/c-1/kubernetes/access",
+		// The host's own routes: the wall shows the host's name, state and
+		// reason, and a screen in a corridor must not reach past that to
+		// its paths, versions and history (T-12-09).
+		"/api/v1/host",
+		"/api/v1/host/history?range=1h",
 	} {
 		status, raw := asTheScreen(t, h, http.MethodGet, path, token, nil)
 		if !refused(status) {

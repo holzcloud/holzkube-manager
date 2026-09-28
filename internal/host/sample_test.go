@@ -334,7 +334,7 @@ func TestSampleHasItsOwnBaseline(t *testing.T) {
 // hardenedHost is the production shape: ProcSubset=pid hiding CPU and memory,
 // one CPU sensor at 64.4 °C, and / at 23 % -- every value Assess rates is
 // readable and below its line.
-func hardenedHost(t *testing.T) (fs.FS, fakeSys) {
+func hardenedHost(t *testing.T) (overlayFS, fakeSys) {
 	t.Helper()
 	sys := tracerSys()
 	sys.loads = sysinfoLoads
@@ -455,8 +455,8 @@ func TestLatest(t *testing.T) {
 		t.Parallel()
 
 		fsys, sys := hardenedHost(t)
-		hot := fsys.(overlayFS)
-		hot.over = maps.Clone(hot.over)
+		hot := fsys
+		hot.over = maps.Clone(fsys.over)
 		hot.over["sys/class/hwmon/hwmon0/temp1_input"] = &fstest.MapFile{Data: []byte("88000\n")}
 		c := New(Config{FS: hot, Sys: sys, Now: newLiveClock().now})
 		if _, err := c.Sample(context.Background()); err != nil {
