@@ -204,6 +204,14 @@ fi
 # --help, eine unbekannte Option, die Weigerung ohne root und --rollback enden
 # oben und halten nichts fest.
 trap on_exit EXIT
+# Ein Signal beendet den Lauf ueber exit, mit 128 + Signalnummer. Ohne diese
+# Fallen laeuft die EXIT-Falle bei SIGTERM zwar auch, sieht in $? aber den
+# Status des letzten fertigen Befehls, meist 0 -- und ein Lauf, den
+# `systemctl stop`, ein Herunterfahren oder Strg-C mitten im Update beendet,
+# hielte nichts fest, waehrend die Seite den vorigen Lauf weiter anzeigt.
+trap 'exit 130' INT
+trap 'exit 143' TERM
+trap 'exit 129' HUP
 
 # Was installiert ist, steht fest, bevor irgendetwas das Netz fragt: auch ein
 # Lauf, der an der Release-Liste scheitert, soll sagen koennen, was lief.

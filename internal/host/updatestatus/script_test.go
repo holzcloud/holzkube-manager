@@ -12,7 +12,9 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"syscall"
 	"testing"
+	"time"
 )
 
 // The update script is tested by running it, not by reading it. Every case
@@ -116,7 +118,8 @@ func newScriptEnv(t *testing.T, installed string, checksumOK bool) *scriptEnv {
 	e.write(filepath.Join(e.stubs, "curl"), curlStub, 0o755)
 	e.write(filepath.Join(e.stubs, "systemctl"), systemctlStub, 0o755)
 	e.write(filepath.Join(e.stubs, "journalctl"), "#!/usr/bin/env bash\nexit 0\n", 0o755)
-	e.write(filepath.Join(e.stubs, "sleep"), "#!/usr/bin/env bash\nexit 0\n", 0o755)
+	e.write(filepath.Join(e.stubs, "sleep"),
+		"#!/usr/bin/env bash\nif [[ -n ${HKM_STUB_SLEEP_BLOCK:-} ]]; then touch \"$HKM_STUB_SLEEP_BLOCK\"; exec /bin/sleep 60; fi\nexit 0\n", 0o755)
 	return e
 }
 
@@ -162,6 +165,56 @@ func (e *scriptEnv) run(asRoot bool, args ...string) int {
 	cmd.Dir = e.dir
 	out, err := cmd.CombinedOutput()
 	e.t.Logf("update script %v (root=%v):\n%s", args, asRoot, out)
+	if err == nil {
+		return 0
+	}
+	var exitErr *exec.ExitError
+	if !errors.As(err, &exitErr) {
+		e.t.Fatalf("run the update script: %v", err)
+	}
+	return exitErr.ExitCode()
+}
+
+// runSignalled starts the script, waits until a stub has created ready, and
+// sends sig to the whole process group -- as systemctl stop does to the unit's
+// cgroup and a terminal does on Ctrl-C. It returns the exit code, -1 when the
+// script died of the signal itself.
+func (e *scriptEnv) runSignalled(asRoot bool, ready string, sig syscall.Signal, args ...string) int {
+	e.t.Helper()
+	var cmd *exec.Cmd
+	if asRoot {
+		cmd = exec.Command("unshare", append([]string{"--user", "--map-root-user", "bash", e.script}, args...)...)
+	} else {
+		cmd = exec.Command("bash", append([]string{e.script}, args...)...)
+	}
+	cmd.Env = e.env()
+	cmd.Dir = e.dir
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	var out bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &out, &out
+	if err := cmd.Start(); err != nil {
+		e.t.Fatalf("start the update script: %v", err)
+	}
+	pgid := cmd.Process.Pid
+	defer func() { _ = syscall.Kill(-pgid, syscall.SIGKILL) }()
+
+	deadline := time.Now().Add(20 * time.Second)
+	for {
+		if _, err := os.Stat(ready); err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			_ = syscall.Kill(-pgid, syscall.SIGKILL)
+			_ = cmd.Wait()
+			e.t.Fatalf("the script never reached the blocking stub:\n%s", out.String())
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if err := syscall.Kill(-pgid, sig); err != nil {
+		e.t.Fatalf("send %v: %v", sig, err)
+	}
+	err := cmd.Wait()
+	e.t.Logf("update script %v (root=%v, %v):\n%s", args, asRoot, sig, out.String())
 	if err == nil {
 		return 0
 	}
@@ -261,7 +314,9 @@ func releaseArchive(t *testing.T, daemon string) []byte {
 // curlStub answers the four kinds of request the script makes: the release
 // list, an asset download (-o), and the health check. HKM_STUB_LIST_FAIL and
 // HKM_STUB_HEALTHY steer it; HKM_STUB_PWD, when set, names a file each call
-// appends the directory it was run in to.
+// appends the directory it was run in to. HKM_STUB_LIST_BLOCK names a file the
+// release-list request creates before it blocks, so a test can tell when to
+// send its signal.
 const curlStub = `#!/usr/bin/env bash
 [[ -n ${HKM_STUB_PWD:-} ]] && pwd >> "$HKM_STUB_PWD"
 out="" url=""
@@ -275,6 +330,7 @@ while [[ $# -gt 0 ]]; do
 done
 case "$url" in
   */releases\?per_page=20)
+    if [[ -n ${HKM_STUB_LIST_BLOCK:-} ]]; then touch "$HKM_STUB_LIST_BLOCK"; exec /bin/sleep 60; fi
     [[ ${HKM_STUB_LIST_FAIL:-0} == 1 ]] && { echo '{"message":"stub: unavailable"}'; exit 22; }
     cat "$HKM_STUB_FIXTURES/releases.json" ;;
   */releases/assets/11|*/releases/assets/12) cp "$HKM_STUB_FIXTURES/archive.tar.gz" "$out" ;;
@@ -405,6 +461,26 @@ func TestUpdateScript(t *testing.T) {
 			}
 		}
 	})
+
+	// WR-04: a run ended by a signal is a failed run, and says so. Before the
+	// signal traps, the EXIT trap saw $? = 0, recorded nothing, and the page
+	// kept showing the previous run as if it were the latest.
+	for _, tc := range []struct {
+		sig  syscall.Signal
+		code int
+	}{{syscall.SIGTERM, 143}, {syscall.SIGINT, 130}, {syscall.SIGHUP, 129}} {
+		t.Run("check ended by "+tc.sig.String()+" records failed", func(t *testing.T) {
+			t.Parallel()
+			e := newScriptEnv(t, fakeInstalled, true)
+			ready := filepath.Join(e.dir, "list-requested")
+			e.extra = append(e.extra, "HKM_STUB_LIST_BLOCK="+ready)
+			rc := e.runSignalled(false, ready, tc.sig, "--check")
+			e.wantStatus(OutcomeFailed, ptr(fakeInstalled), nil)
+			if rc != tc.code {
+				t.Errorf("exit = %d, want %d", rc, tc.code)
+			}
+		})
+	}
 
 	for _, tc := range []struct {
 		name string
