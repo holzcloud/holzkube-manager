@@ -12,6 +12,27 @@ Gebaut für Homelab-/Lab-Betreiber, die Talos fahren und die volle Kontrolle üb
 
 Wenn alles andere scheitert: der Weg blanke Maschine → Image → Boot → Discovery → Config → Cluster-Join muss in der Oberfläche funktionieren.
 
+## Current Milestone: v1.18 Host & Telefon
+
+**Angelegt:** 2026-09-28, auf die Anweisung „Mach erst manager-pi und das
+telefon-ui. Alles mit gsd und ohne mich zu nerven bis zum ende". Die
+Entscheidungen, die sonst Rückfragen wären, sind in `REQUIREMENTS.md` unter
+„Entscheidungen" mit Begründung festgehalten.
+
+**Goal:** Das Gerät, auf dem holzkube-manager selbst läuft, ist in der
+Oberfläche sichtbar und bedienbar wie ein Knoten; und die Oberfläche ist auf
+einem Telefon ohne zu kleine Tippziele benutzbar, gehalten von einem Wächter.
+
+**Target features:**
+- Host-Übersicht: Gerät, Betriebssystem, Laufzeit, Dienst- und Update-Status
+- Host-Monitoring: CPU, Speicher, Datenträger, Temperatur, Netzwerk — live und im Verlauf
+- Host-Aktionen: Neustart, Herunterfahren, Dienst neu starten, Update jetzt suchen — ohne dem Daemon Root zu geben
+- Telefon: alle Bedienelemente ≥ 44 px bei 390 px Breite, und ein Wächter, der die Größe misst
+
+Die Out-of-Scope-Zeile „Eigene Monitoring-/Metrics-Pipeline" bleibt gültig:
+der Host-Verlauf nutzt die schon vorhandene `internal/history`, keine neue
+Pipeline.
+
 ## Requirements
 
 ### Validated
@@ -170,4 +191,4 @@ Dieses Dokument entwickelt sich an Phasenübergängen und Milestone-Grenzen.
 4. Context auf aktuellen Stand bringen
 
 ---
-*Last updated: 2026-09-11 at the close of milestone v1.14.*
+*Last updated: 2026-09-28 at the start of milestone v1.18.*

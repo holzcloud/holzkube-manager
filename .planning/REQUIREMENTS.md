@@ -1,395 +1,109 @@
-# Requirements: holzkube
+# Requirements: holzkube — Milestone v1.18 Host & Telefon
 
-**Defined:** 2026-08-27
+**Defined:** 2026-09-28
 **Core Value:** Eine neue Maschine wird komplett in der UI zum Cluster-Node — ohne `talosctl`, ohne Omni.
 
-> **Abnahmetest für v1 (binär):** Ein blanker Mini-PC wird ein gesunder Cluster-Node, ohne dass der Betreiber ein Terminal öffnet.
+Die Anforderungen von v1.14 mit ihren sechzehn Release-Blockern stehen in
+`milestones/v1.14-REQUIREMENTS.md`; OPS-05 bleibt dort offen.
 
-Die Requirements folgen der Phasenstruktur aus `.planning/research/SUMMARY.md`. Requirements mit **🚫** sind dort als *Release-Blocker* markiert — nicht als Nice-to-have.
+## Entscheidungen
 
----
+Der Betreiber hat diesen Milestone mit „ohne mich zu nerven bis zum ende"
+beauftragt. Was sonst eine Rückfrage wäre, ist hier entschieden und begründet,
+damit er es am Ende auf einen Blick prüfen und umwerfen kann.
 
-## v1 Requirements
+- **Der Daemon bekommt kein Root.** Die Produktions-Unit läuft als eigener
+  Benutzer ohne Capabilities, mit `NoNewPrivileges`, ohne `AF_UNIX` (also ohne
+  D-Bus) und mit `ProcSubset=pid`. Diese Härtung bleibt. Aktionen am Host
+  laufen über einen **Auftrag im Datenverzeichnis**, den eine root-eigene
+  systemd-Path-Unit abholt und mit einem festen Skript ausführt — dasselbe
+  Muster wie `holzkube-manager-update`. Der Daemon kann damit genau die
+  Aktionen auslösen, die das Skript kennt, und sonst nichts.
+- **Monitoring liest `/proc` und `/sys` direkt.** Unter `ProcSubset=pid` sind
+  `/proc/stat`, `/proc/meminfo` und `/proc/loadavg` unsichtbar. Die Oberfläche
+  sagt dann „nicht lesbar" und nennt die eine Zeile in der Unit, die es ändert
+  (`ProcSubset=all`), statt Nullen zu zeigen. `ProtectProc=invisible` bleibt:
+  fremde Prozesse bleiben unsichtbar.
+- **Der Verlauf nutzt `internal/history`**, dieselben Bereiche (1 h / 6 h /
+  24 h) und dieselben Diagramme wie ein Knoten. Keine neue Pipeline.
+- **Host-Aktionen sind zerstörend im Sinne von D-06:** Sudo-Fenster,
+  getippte Bestätigung (Hostname), Audit-Eintrag, Rolle mindestens Operator.
+- **Deployment-Dateien werden geliefert, nicht installiert.** Die neuen Units
+  und das Skript liegen in `deploy/`; sie auf dem Pi zu installieren und den
+  Dienst neu zu starten ist nach `CLAUDE.md` Sache des Betreibers.
+- **Telefon: Tabellen bleiben wischbar** (Entscheidung des Betreibers vom
+  2026-09-17, V2-UI-01); dieser Milestone ändert nur Tippzielgrößen.
 
-### Foundation (FOUND)
+## v1.18 Requirements
 
-- [x] **FOUND-01**: Betreiber startet ein einzelnes Binary; die Web-UI ist eingebettet, keine Runtime-Dependencies nötig
-- [x] **FOUND-02**: Betreiber meldet sich mit Benutzername und Passwort an (argon2id, Parameter mitgespeichert); die Session wird beim Login rotiert
-- [x] **FOUND-03**: Destruktive Aktionen verlangen erneute Passwort-Eingabe (sudo-mode), auch bei bestehender Session
-- [x] **FOUND-04**: Login ist gegen Brute-Force ratenbegrenzt
-- [x] **FOUND-05**: Server bindet standardmäßig auf `127.0.0.1` und spricht HTTPS mit selbst erzeugtem Zertifikat, wenn keines konfiguriert ist
-- [x] **FOUND-06**: Jede Mutation landet im Audit-Log (JSONL, täglich rotiert, Hash-Kette) — Intent vor der Aktion, Outcome danach
-- [x] **FOUND-07**: Aller Zustandszugriff läuft über ein Entity-Interface (`store.Machines().Get(...)`); Dateipfade sind oberhalb der Store-Implementierung unsichtbar
-- [x] **FOUND-08**: Gleichzeitige Schreibvorgänge korrumpieren keinen Zustand (atomare Writes, `flock`, Per-Entity-Mutex, `rev`-CAS)
-- [x] **FOUND-09**: Zustand trägt eine Schema-Version; Upgrades migrieren vorwärts und legen vorher ein Backup an
-- [x] **FOUND-10**: Alle Zustandsdateien liegen mit `0600` in einem `0700`-Verzeichnis; falsche Rechte werden beim Start bemängelt
-- [x] **FOUND-11**: API-Fehler kommen als RFC-9457 `problem+json` mit einer stabilen Fehlertaxonomie zurück
-- [x] **FOUND-12**: Betreiber kann das gesamte Binary mit `--dry-run` fahren; keine Mutation erreicht einen Node
+### Host-Übersicht (HOST)
 
-### Transport & Sandbox (TRANS)
+- [ ] **HOST-01**: Der Betreiber sieht auf einer eigenen Seite das Gerät, auf dem holzkube-manager läuft: Hostname, Modell, Architektur, Betriebssystem, Kernel, Laufzeit seit dem Boot
+- [ ] **HOST-02**: Der Betreiber sieht den Zustand des Dienstes selbst: laufende Version, Laufzeit des Prozesses, Größe und freier Platz des Datenverzeichnisses
+- [ ] **HOST-03**: Der Betreiber sieht, ob und wann zuletzt nach Updates gesucht wurde und welche Version verfügbar ist, soweit der Update-Mechanismus es hinterlegt
+- [ ] **HOST-04**: Der Host erscheint in der Navigation und auf der Wand wie ein Knoten, mit einem Zustand (gesund / Warnung / nicht lesbar)
 
-- [x] **TRANS-01**: holzkube spricht die Talos machine API direkt per gRPC/mTLS an Node-IPs
-- [x] **TRANS-02**: Der Transport liegt hinter **zwei** Interfaces — `Dialer` (Identität → dialbare Adresse) und `DiscoverySource` (Scan / manuell / Tunnel-Registrierung) — damit ein Tunnel-Transport später nachrüstbar ist, obwohl er die Kontaktrichtung umkehrt
-- [x] **TRANS-03**: Cluster-Clients (mTLS) und Maintenance-Clients (unauthentifiziert) sind getrennte Typen und nicht verwechselbar
-- [x] **TRANS-04**: Jeder Node-Aufruf hat ein erzwungenes Deadline; Retries gibt es nur für eine Allowlist lesender Operationen
-- [x] **TRANS-05**: Ein nicht erreichbarer Node blockiert weder die UI noch andere Nodes (Circuit Breaker, Fan-out pro Node)
-- [x] **TRANS-06** 🚫: `talossim` — ein In-Process-Fake-Talos-Node mit echten Protobufs, echtem mTLS und echtem In-Memory-COSI-State, gegen den der unveränderte Produktions-Client spricht
-- [x] **TRANS-07**: `talossim` kann Fehlerszenarien skripten: `go_silent(90s)`, `reject_apply`, `second_bootstrap_returns_AlreadyExists`, `flap_connection`, `slow_log_consumer`, `ip_changes_on_reboot`, `etcd_down`, `k8s_down`, `version_out_of_supported_range`
-- [x] **TRANS-08**: Contract-Tests laufen gegen Fake und gegen echten Talos, damit Fake-Drift auffällt
+### Host-Monitoring (HMON)
 
-### Image Factory (FACT)
+- [ ] **HMON-01**: Der Betreiber sieht live CPU-Auslastung, Load, Arbeitsspeicher und Swap des Hosts
+- [ ] **HMON-02**: Der Betreiber sieht Belegung der Datenträger (mindestens das Dateisystem des Datenverzeichnisses und `/`)
+- [ ] **HMON-03**: Der Betreiber sieht die Temperaturen des Hosts (thermal zones / hwmon) und, wo vorhanden, Lüfter
+- [ ] **HMON-04**: Der Betreiber sieht den Durchsatz der Netzwerkschnittstellen
+- [ ] **HMON-05**: Zu CPU, Speicher, Temperatur und Netzwerk gibt es Verlaufsdiagramme über 1 h / 6 h / 24 h, die einen Neustart des Daemons überleben
+- [ ] **HMON-06**: Ein Wert, der wegen der Härtung der Unit nicht lesbar ist, wird als „nicht lesbar" mit der Ursache gezeigt, nie als 0
+- [ ] **HMON-07**: Überschreitet Temperatur oder Datenträgerbelegung eine Schwelle, zeigt der Host eine Warnung mit dem Grund
 
-- [x] **FACT-01**: Betreiber stellt ein Schematic zusammen — System-Extensions, Kernel-Args, META — über einen versions-skopierten Extension-Katalog, kein Freitextfeld
-- [x] **FACT-02**: Extension-Namen werden **vor** dem POST validiert, und das Schematic gilt erst als brauchbar, nachdem ein Model-Build-Probe es bestätigt hat (ein POST liefert `200` auch für nicht existierende Extensions)
-- [x] **FACT-03**: Betreiber bekommt die exakten URLs für ISO, Installer und PXE, mit korrekt aufgelöstem, versionsabhängigem Installer-Repo-Namen und ohne hartkodierte Architektur
-- [x] **FACT-04**: Beim Autoren eines Schematics mit Kernel-Args oder META warnt die UI, dass `installer`/`initramfs` **nur** System-Extensions ehren — ISO und installiertes System driften sonst auseinander
-- [x] **FACT-05**: Pre-Release-Versionen sind herausgefiltert und nur explizit wählbar; bekannt kaputte Versionen sind ausgegraut
-- [x] **FACT-06**: Die Schematic-ID wird lokal vorab berechnet und persistiert
+### Host-Aktionen (HACT)
 
-### Inventar, Import & Health (INV)
+- [ ] **HACT-01**: Der Betreiber kann den Host neu starten
+- [ ] **HACT-02**: Der Betreiber kann den Host herunterfahren
+- [ ] **HACT-03**: Der Betreiber kann den Dienst holzkube-manager neu starten
+- [ ] **HACT-04**: Der Betreiber kann „jetzt nach Updates suchen" auslösen
+- [ ] **HACT-05**: Jede Host-Aktion verlangt Sudo-Fenster und getippten Hostnamen, läuft durch den Audit-Pfad und ist nur ab Rolle Operator erlaubt
+- [ ] **HACT-06**: Der Daemon führt eine Host-Aktion nie selbst aus: er legt einen Auftrag ab, den ein root-eigener Helfer aus einer festen Liste ausführt; ein unbekannter Auftrag wird verworfen und protokolliert
+- [ ] **HACT-07**: Ist der Helfer nicht installiert, sagt die Oberfläche das und nennt, was zu installieren ist, statt einen Auftrag abzulegen, den niemand abholt
+- [ ] **HACT-08**: `deploy/` enthält die Units, das Skript und eine Anleitung zur Installation des Helfers
 
-- [x] **INV-01** 🚫: Betreiber importiert seinen **bestehenden** Cluster — Secrets-Bundle von einem Control-Plane-Node, Fingerprint-Bestätigung, plus Konnektivitätsbeweis mit einem frisch ausgestellten Zertifikat
-- [x] **INV-02**: Betreiber kann alternativ einen neuen Cluster anlegen; `gen secrets` ist ausschließlich aus diesem Pfad erreichbar
-- [x] **INV-03** 🚫: Node-Records sind flach und **UUID-adressiert** (`SystemInformation.UUID`), mit `cluster_id` als nullbarem Feld — DHCP verschiebt IPs
-- [x] **INV-04** 🚫: Jeder Node-Record trägt seine Image-Factory-`schematic_id` ab dem ersten Schema — ohne sie sind Upgrades nicht sicher auslieferbar
-- [x] **INV-05** 🚫: Die Restlaufzeit des talosconfig-Client-Zertifikats ist sichtbar und warnt rechtzeitig (Talos rotiert Client-Certs **nicht**; Ablauf sperrt alle Nodes gleichzeitig aus)
-- [x] **INV-06**: Dashboard zeigt pro Node Health, Talos-Version, Kubernetes-Version, CPU/RAM, Disks, Netzwerk-Interfaces und Service-Status
-- [x] **INV-07** 🚫: Jedes gelesene Feld trägt sein `HealthLevel` und `stale_since`; Daten die nur `:6443` bräuchten, machen NODE-Level-Daten nicht unsichtbar
-- [x] **INV-08**: Bei totem Cluster bleibt die UI ehrlich — Node-Level-Daten weiter sichtbar, veraltete Werte als veraltet markiert, nie eine leere Seite
-- [x] **INV-09**: Ein unerreichbarer Node führt nie dazu, dass sein Inventar-Record gelöscht wird
-- [x] **INV-10**: Cluster-Übersicht zeigt Control-Plane vs Worker, etcd-Member und Cluster-Health
-- [x] **INV-11**: Die Talos↔Kubernetes-Kompatibilitätsmatrix liegt als Daten vor, inklusive "Abstand zum Rand"
-- [x] **INV-12**: Betreiber kann einen Cluster read-only sperren; gesperrte Cluster nehmen keine Mutationen an
-- [x] **INV-13**: Node-Status kommt aus COSI-Watches mit gejittertem Heartbeat, nicht aus blindem Polling
+### Telefon (MOB)
 
-### Jobs & Node-Aktionen (JOB)
+- [ ] **MOB-01**: Bei 390 px Breite hat jedes Bedienelement eine Tippfläche von mindestens 44 × 44 px (unterhalb `md`; Desktop unverändert)
+- [ ] **MOB-02**: Ein Wächter in der Layout-Prüfung misst die Tippzielgrößen auf allen Routen und wird rot, sobald ein Element darunter fällt
+- [ ] **MOB-03**: Die neue Host-Seite erfüllt MOB-01 und ist auf dem Telefon bedienbar
 
-- [x] **JOB-01**: Langlaufende Operationen sind persistierte Jobs; ein Neustart des Prozesses setzt sie fort oder parkt sie für einen Menschen
-- [x] **JOB-02**: Jeder Schritt mit Seiteneffekt hat eine gepaarte Read-only-"ist es passiert?"-Abfrage; Schritte ohne eine solche werden nie automatisch retryt
-- [x] **JOB-03**: Pro Cluster darf immer nur ein mutierender Job laufen (Lease)
-- [x] **JOB-04**: Betreiber kann einen Job an einer Schrittgrenze abbrechen; der Fortschritt ist live sichtbar
-- [x] **JOB-05**: Betreiber rebootet einen Node aus der UI
-- [x] **JOB-06**: Betreiber fährt einen Node herunter
-- [x] **JOB-07** 🚫: Reset zeigt vor dem Ausführen die Disks, die Wipe-Scope-Wahl und die Reboot-Kontrolle, stellt die **effektiven Flags** dar und verlangt das Tippen des Hostnamens — `talosctl reset` ist per Default maximal destruktiv (`--wipe-mode=all`, `--reboot=false`)
-- [x] **JOB-08**: Bestätigungen werden serverseitig durchgesetzt (Confirmation-Token), nicht nur im Browser
-- [x] **JOB-09**: Destruktive Endpoints antworten mit `202 Accepted` und einer Job-ID
+## Future Requirements
 
-### Konfiguration (CFG)
-
-- [x] **CFG-01**: Betreiber sieht die MachineConfig eines Nodes gerendert und roh
-- [x] **CFG-02** 🚫: Secrets sind serverseitig redigiert, bevor sie das Backend verlassen — dieselbe `redact`-Funktion für Config-View, Raw-Tab, Diff, API-Response und Audit-Log (`.machine.ca.key` steckt in der Antwort)
-- [x] **CFG-03**: Betreiber legt wiederverwendbare Config-Patches an; der Patch-Store ist versioniert und append-only (nur Strategic Merge, kein RFC 6902)
-- [x] **CFG-04**: Vor dem Anwenden zeigt holzkube ein **strukturelles** Diff der tatsächlich gemergten, gerenderten Configs — inklusive Listen-Wachstum und Duplikat-Erkennung
-- [x] **CFG-05**: Ein Patch zweimal angewendet erzeugt dasselbe Ergebnis (Idempotenz-Test pro Patch)
-- [x] **CFG-06**: Der nötige Apply-Modus wird aus der verifizierten Allowlist berechnet und dem Betreiber angezeigt
-- [x] **CFG-07**: Änderungen an `.machine.install` werden als "wirkt erst beim nächsten Install/Upgrade" gekennzeichnet — sie melden Erfolg und ändern nichts
-- [x] **CFG-08**: Ein zweiter `staged`-Apply wird abgelehnt, statt den ersten still zu verwerfen
-- [x] **CFG-09**: Bei Diffs an `.machine.network` empfiehlt die UI `--mode=try` mit sichtbarem 60-Sekunden-Countdown
-- [x] **CFG-10**: Betreiber kann eine Config validieren und im Dry-Run prüfen, bevor er sie anwendet
-- [x] **CFG-11**: Config-Generierung nutzt das importierte Secrets-Bundle und einen pro Cluster gepinnten Talos-Versions-Contract
-
-### Provisioning — der Core Value (PROV)
-
-- [x] **PROV-01**: Betreiber entdeckt Maschinen per Subnetz-Scan auf `:50000` mit begrenzter Nebenläufigkeit, plus manueller IP-Eingabe
-- [x] **PROV-02**: Ein bereits konfigurierter Node an der Ziel-IP wird als solcher gemeldet — nie als "nichts gefunden"
-- [x] **PROV-03**: Vor dem Anwenden zeigt holzkube UUID, MACs, Disks und Talos-Version der Maschine zur Identifikation
-- [x] **PROV-04**: Optionales `--cert-fingerprint`-Pinning wird angeboten, mit ehrlichem UI-Text dass Maintenance-Mode unauthentifiziert ist und der Fingerprint nur von der physischen Konsole kommt
-- [x] **PROV-05** 🚫: Unmittelbar vor dem Apply wird die UUID erneut verifiziert — die falsche Maschine zu treffen wischt Daten
-- [x] **PROV-06**: Betreiber wählt Rolle, Ziel-Cluster und Install-Disk; der Disk-Picker zeigt Größe, Modell, Seriennummer, Transport und markiert die System-Disk
-- [x] **PROV-07**: Bei geradzahliger Control-Plane-Anzahl warnt die UI (Quorum braucht 1/3/5)
-- [x] **PROV-08**: `.machine.install.image` wird automatisch aus **derselben** Schematic-ID gefüllt wie die ISO — sonst verschwinden die Extensions beim Install
-- [x] **PROV-09** 🚫: Die Wiederauftauch-Prüfung nach dem Disk-Install ist eine Drei-Wege-Probe mit verstrichener Zeit gegen ein erwartetes Budget — nie ein Spinner
-- [x] **PROV-10** 🚫: Doppelter etcd-Bootstrap ist strukturell unmöglich (Pre-Flight `EtcdMemberList`, `O_CREAT|O_EXCL`-Lease, fsynced Intent-Record, Talos' `AlreadyExists`), mit eigenem Recovery-Flow für den unklaren Fall
-- [x] **PROV-11**: Der Provisioning-Zustand wird pro Maschine persistiert; ein geschlossener Browser-Tab verliert den Job nicht
-- [x] **PROV-12**: Beim Wizard-Start warnt die UI, dass eine vorhandene Disk-Installation die ISO überschattet, und dass ohne DHCP kein Zero-Touch-Pfad existiert
-- [x] **PROV-13**: "Talos healthy, Kubernetes NotReady" wird vor der CNI-Installation als normal erklärt, nicht rot dargestellt
-
-### Streaming (STREAM)
-
-- [x] **STREAM-01**: Betreiber sieht Logs und `dmesg` eines Nodes live in der UI
-- [x] **STREAM-02**: Pro Tab läuft **eine** multiplexte SSE-Verbindung mit `Last-Event-ID`-Replay — nicht eine pro Panel (HTTP/1.1 deckelt bei ~6 Verbindungen pro Origin)
-- [x] **STREAM-03**: Ein langsamer Browser blockiert nie den Upstream-Reader; verworfene Daten werden als sichtbare Lücke markiert
-- [x] **STREAM-04**: Der Stream-Zustand ist explizit sichtbar — live / reconnecting / Node rebootet / getrennt
-
-### Upgrades & etcd (UPG)
-
-- [x] **UPG-01**: Betreiber fährt ein rollendes Talos-Upgrade über `LifecycleClient.Upgrade` (streaming), Node für Node
-- [x] **UPG-02** 🚫: Das Health-Gate schließt Learner aus, prüft Raft-Konvergenz und Alarme, verweigert bei ≤2 stimmberechtigten Membern, zeigt seine Eingaben an und wird **vor jedem** Node neu bewertet
-- [x] **UPG-03** 🚫: Ein Node mit unbekannter `schematic_id` wird nicht geupgradet; holzkube bietet an, sie vom Node zu lesen
-- [x] **UPG-04**: Kernel-Args-/GRUB-Drift blockiert den Ein-Klick-Pfad — die Upgrade-RPC kann Kernel-Args strukturell nicht tragen, also gibt es zwei Quellen der Wahrheit die synchron bleiben müssen
-- [x] **UPG-05**: Die nötige Kette an Zwischen-Minor-Versionen wird berechnet; es gibt keinen "latest"-Knopf und Pre-Releases sind gefiltert
-- [x] **UPG-06** 🚫: Ein Kubernetes-Forward-Kompatibilitäts-Gate blockiert Talos-Upgrades, die den Cluster stranden würden
-- [x] **UPG-07** 🚫: Nach jedem Upgrade wird deklariert-gegen-beobachtet verifiziert — "die API sagte OK" gilt nicht als Beweis
-- [x] **UPG-08**: Betreiber kann nach dem aktuellen Node stoppen; der UI-Text sagt ehrlich, was schon passiert ist
-- [x] **UPG-09**: Betreiber fährt ein Kubernetes-Upgrade
-- [x] **UPG-10**: Betreiber listet etcd-Member mit Hostname und UUID — nie mit rohen Hex-IDs
-- [x] **UPG-11**: Betreiber entfernt ein etcd-Member
-- [x] **UPG-12**: Betreiber zieht einen etcd-Snapshot, mit dokumentiertem Fallback ohne Quorum
-- [x] **UPG-13**: Betreiber entfernt einen Node aus dem Cluster (cordon/drain → reset → aus dem Inventar)
-- [x] **UPG-14**: Betreiber kann einen Node sperren, damit Upgrades ihn überspringen
-
-### Betrieb & Härtung (OPS)
-
-- [x] **OPS-01**: Betreiber sichert und restauriert den holzkube-Zustand per Subcommand
-- [x] **OPS-02**: Betreiber verifiziert die Integrität der Audit-Hash-Kette
-- [x] **OPS-03**: Die unterstützte Talos-Versionsrange (v1.12–v1.14) wird als getesteter Check durchgesetzt; RCs sind Opt-in
-- [x] **OPS-04**: holzkube läuft als Docker-/Compose-Setup mit non-root-Container und korrekten Volume-Rechten
-- [ ] **OPS-05** 🚫: Ein Verifikationsdurchlauf auf echter amd64-Hardware ist erfolgt
-
----
-
-## v2 Requirements
-
-Anerkannt, aber verschoben. Nicht in der aktuellen Roadmap.
-
-### Transport
-
-- **V2-TRANS-01**: SideroLink-artiger Tunnel-Transport, falls Nodes je das LAN verlassen (Interface ist reserviert)
-
-### Provisioning
-
-- **V2-PROV-01**: PXE/netboot — die PXE-Frontend-URL der Image Factory macht es zu einem URL-Tausch, wenn Schematics jetzt sauber modelliert sind
-- **V2-PROV-02**: BMC/IPMI/Redfish-Power-Control, falls die Hardware je BMCs bekommt
-
-### Zugang
-
-- **V2-AUTH-01**: OIDC/SSO gegen einen bestehenden IdP (Interface ist reserviert)
-- **V2-AUTH-02**: Mehrere Benutzer mit Rollen
-
-### Oberfläche
-
-- **V2-UI-01**: Die Weboberfläche muss auf einem Telefon bedienbar sein. Vom
-  Betreiber am 2026-09-15 als wichtiges Ziel benannt, und es passt zum Produkt:
-  wer eine Cluster-Karte anschaut, weil etwas kaputt ist, steht selten am
-  Schreibtisch — D-15 und der Zertifikats-Countdown existieren genau für den
-  Moment, in dem jemand schnell nachsieht.
-
-  **Ausgangslage, GEMESSEN** am 2026-09-17 in Chromium bei 390x844 gegen den
-  laufenden Daemon, jede Route angemeldet abgefahren. Die vorige Fassung dieses
-  Eintrags hatte sie nur aus dem Quelltext gelesen und traf die Zahl, aber nicht
-  die Schwere:
-
-  - Der Rahmen: `Sidebar` 224 px von 390, `main` 166 px, nach eigenem Padding
-    **118 px nutzbar**. 57 % eines Telefons für Navigation.
-  - **Die Seite scrollte nirgends seitwärts** (`scrollWidth` = 390 auf allen
-    zehn Routen). Das war die Annahme, die die Lesung falsch gemacht hat: es
-    sah nicht kaputt aus, es war nur eng — und dort, wo es nicht mehr eng
-    genug ging, verschwand der Inhalt.
-  - **22 Elemente waren abgeschnitten und damit unerreichbar**: 17 auf
-    `/settings`, darunter das ganze "New account"-Formular und der Knopf, der
-    ein Passwort ändert, und 5 auf dem Dashboard. Am Telefon kam ein Betreiber
-    an diese Funktionen nicht heran.
-  - Der Rest war per Wischen im eigenen Container erreichbar (`/images` 352,
-    `/audit` 62, `/clusters` 3) — unschön, nicht kaputt.
-
-  **Was am 2026-09-17 gebaut ist:** der Rahmen. Unterhalb `md` ist die Sidebar
-  eine Schublade über der Seite, der Header trägt den Griff dazu, Backdrop und
-  Links schließen sie, und `main` bekommt 16 statt 24 px Padding. Nachgemessen
-  an denselben zehn Routen: **abgeschnitten 22 → 0**, nutzbar **118 → 358 px**;
-  bei 768 px und 1280 px steht die Sidebar unverändert fest und der Griff ist
-  aus.
-
-  **Ebenfalls am 2026-09-17 nachgezogen, nachdem die Liste unten ihre ersten
-  drei Punkte verloren hat:**
-
-  - Der WÄCHTER hängt in der Kette, nicht als opt-in:
-    `web/scripts/layout-audit.mjs`, `task test:layout`, letzter Schritt von
-    `task ci` und von CI. Er fährt alle zehn Routen angemeldet bei 390 und
-    1280 px und wird rot, wenn ein Element rechts hinausragt und **kein
-    scrollbarer Vorfahr** es zurückholt. Die beiden Breiten sind die
-    Entscheidung des Betreibers vom selben Tag.
-  - Die Tippziel-Größen sind gemessen und an den Grundbausteinen behoben,
-    ausschließlich unterhalb `md` (Entscheidung des Betreibers: ein
-    Schreibtisch hat einen Zeiger, und eine Liste verliert echte Information,
-    wenn jede Zeile zwölf Pixel wächst). Bei 390 px: vorher 0 Elemente mit
-    44 px oder mehr und 10 unter 24 px, nachher **62 bei 44 px oder mehr und
-    0 unter 24 px**; bei 1280 px unverändert. Ledger 136.
-  - Die Tabellen bleiben wischbar (zweite Entscheidung des Betreibers), tragen
-    dafür jetzt einen Schatten an der rechten Kante, der nur erscheint, solange
-    rechts etwas ist, plus `aria-label` und Fokussierbarkeit.
-
-  **Was offen ist:**
-
-  - **10 Elemente liegen bei 390 px weiter zwischen 24 und 43 px.** Überwiegend
-    Icon-Knöpfe in dichten Listen.
-  - **Der Wächter misst Erreichbarkeit, NICHT Tippzielgröße.** Die Zahlen oben
-    sind von Hand gemessen, und dass sie so bleiben, hält derzeit nichts —
-    dieselbe Lage, aus der die Erreichbarkeit gekommen ist.
-  - Ob eine Tabelle auf einem Telefon zu Karten werden soll, bleibt eine
-    Gestaltungsfrage und keine Reparatur.
-  - Die Erwartungswerte fürs Warten (Fenster 62) liegen im `localStorage` eines
-    Browsers, sind also pro Gerät verschieden und auf einem frischen Gerät
-    zunächst gar nicht da. Der Server kennt diese Wartezeit nicht; eine
-    geschätzte Zahl wäre der Preis dafür gewesen, gar nichts zu sagen.
-
-### Schnittstellen
-
-- **V2-API-01**: `holzkubectl` CLI gegen dieselbe REST-API
-- **V2-API-02**: Prometheus-`/metrics`-Endpoint — exportieren, nie ingesten
-
-### Betrieb
-
-- **V2-OPS-01**: Support-Bundle-Export (`talosctl support`-Äquivalent)
-- **V2-OPS-02**: CA-Rotation (der Radius mit dem breitesten stillen Schaden im Produkt — Sichtbarkeit des Ablaufs kommt in v1, Rotation nicht)
-- **V2-OPS-03**: ARM64/SBC-Support — Schematics sind arch-parametrisiert, aber ungetestet
-
----
+- Host-Aktion „Rollback auf die vorige Version" (`holzkube-manager-update --rollback`)
+- Mehr als ein Host (ein zweiter Manager, ein Standby)
 
 ## Out of Scope
 
-| Feature | Grund |
-|---------|-------|
-| Workload-Management (Deployments, Pods, Helm) | k9s/Lens/Headlamp lösen das. Die Naht ist der Port: `:50000` gehört holzkube, `:6443` den anderen |
-| Eigene Metrics-/Monitoring-Pipeline | Keine Prometheus-Konkurrenz. Nur was die Talos-API direkt liefert |
-| Betrieb im Cluster selbst | Bewusst außerhalb — ein Management-Tool das mit dem Cluster stirbt ist genau im Fehlerfall nutzlos |
-| Managed-Kubernetes-Provider (EKS/GKE/AKS) | Talos-only |
-| Generischer YAML-Editor ohne Leitplanken | Der Wert liegt in Diff, Validierung und Apply-Modus-Berechnung, nicht im Textfeld |
-| RBAC | Single-Operator-Tool. Ein zweiter echter Benutzer wäre der Auslöser, nicht Vollständigkeit |
-| Read-only-Dashboard als v1-Ziel | `talos-pilot` löst das bereits im Terminal. Der verteidigbare Boden sind Provisioning, Upgrades, Inventar und Patches |
-
----
+- **Beliebige Befehle auf dem Host** — der Helfer kennt eine feste Liste; eine Shell im Browser wäre ein Root-Zugang über HTTP
+- **Paket-Updates des Betriebssystems (apt)** — Sache des Betriebssystems, nicht dieses Produkts
+- **Tabellen als Karten auf dem Telefon** — vom Betreiber am 2026-09-17 verworfen
 
 ## Traceability
 
-Gefüllt bei der Roadmap-Erstellung. Quelle: `.planning/ROADMAP.md`.
-
-**Phasen-Legende:**
-
-- Phase 1: Foundation Skeleton
-- Phase 2: Transport Seam, `talossim` & Image Factory
-- Phase 3: Inventar, Cluster-Import & Health
-- Phase 4: Walking Skeleton (Wegwerf) — *trägt absichtlich kein Requirement (Wegwerf-Gerüst)*
-- Phase 5: Streaming — *designierte Schnittlinie*
-- Phase 6: Jobs-Engine & Node-Aktionen
-- Phase 7: Config-Domain
-- Phase 8: Provisioning — der Core Value
-- Phase 9: Upgrades & etcd-Verwaltung
-- Phase 10: Härtung & echter Hardware-Durchlauf
-
-Requirements mit **🚫** sind Release-Blocker.
-
-| Requirement | Phase | Status | Blocker |
-|-------------|-------|--------|---------|
-| FOUND-01 | Phase 1 | Complete |  |
-| FOUND-02 | Phase 1 | Complete |  |
-| FOUND-03 | Phase 1 | Complete |  |
-| FOUND-04 | Phase 1 | Complete |  |
-| FOUND-05 | Phase 1 | Complete |  |
-| FOUND-06 | Phase 1 | Complete |  |
-| FOUND-07 | Phase 1 | Complete |  |
-| FOUND-08 | Phase 1 | Complete |  |
-| FOUND-09 | Phase 1 | Complete |  |
-| FOUND-10 | Phase 1 | Complete |  |
-| FOUND-11 | Phase 1 | Complete |  |
-| FOUND-12 | Phase 2 | Complete |  |
-| TRANS-01 | Phase 2 | Complete |  |
-| TRANS-02 | Phase 2 | Complete |  |
-| TRANS-03 | Phase 2 | Complete |  |
-| TRANS-04 | Phase 2 | Complete |  |
-| TRANS-05 | Phase 2 | Complete |  |
-| TRANS-06 | Phase 2 | Complete | 🚫 |
-| TRANS-07 | Phase 2 | Complete |  |
-| TRANS-08 | Phase 3 | Complete |  |
-| FACT-01 | Phase 2 | Complete |  |
-| FACT-02 | Phase 2 | Complete |  |
-| FACT-03 | Phase 2 | Complete |  |
-| FACT-04 | Phase 2 | Complete |  |
-| FACT-05 | Phase 2 | Complete |  |
-| FACT-06 | Phase 2 | Complete |  |
-| INV-01 | Phase 3 | Complete | 🚫 |
-| INV-02 | Phase 3 | Complete |  |
-| INV-03 | Phase 3 | Complete | 🚫 |
-| INV-04 | Phase 3 | Complete | 🚫 |
-| INV-05 | Phase 3 | Complete | 🚫 |
-| INV-06 | Phase 3 | Complete |  |
-| INV-07 | Phase 3 | Complete | 🚫 |
-| INV-08 | Phase 3 | Complete |  |
-| INV-09 | Phase 3 | Complete |  |
-| INV-10 | Phase 3 | Complete |  |
-| INV-11 | Phase 3 | Complete |  |
-| INV-12 | Phase 3 | Complete |  |
-| INV-13 | Phase 3 | Complete |  |
-| STREAM-01 | Phase 5 | Complete |  |
-| STREAM-02 | Phase 5 | Complete |  |
-| STREAM-03 | Phase 5 | Complete |  |
-| STREAM-04 | Phase 5 | Complete |  |
-| JOB-01 | Phase 6 | Complete |  |
-| JOB-02 | Phase 6 | Complete |  |
-| JOB-03 | Phase 6 | Complete |  |
-| JOB-04 | Phase 6 | Complete |  |
-| JOB-05 | Phase 6 | Complete |  |
-| JOB-06 | Phase 6 | Complete |  |
-| JOB-07 | Phase 6 | Complete | 🚫 |
-| JOB-08 | Phase 6 | Complete |  |
-| JOB-09 | Phase 6 | Complete |  |
-| CFG-01 | Phase 7 | Complete |  |
-| CFG-02 | Phase 7 | Complete | 🚫 |
-| CFG-03 | Phase 7 | Complete |  |
-| CFG-04 | Phase 7 | Complete |  |
-| CFG-05 | Phase 7 | Complete |  |
-| CFG-06 | Phase 7 | Complete |  |
-| CFG-07 | Phase 7 | Complete |  |
-| CFG-08 | Phase 7 | Complete |  |
-| CFG-09 | Phase 7 | Complete |  |
-| CFG-10 | Phase 7 | Complete |  |
-| CFG-11 | Phase 7 | Complete |  |
-| PROV-01 | Phase 8 | Complete |  |
-| PROV-02 | Phase 8 | Complete |  |
-| PROV-03 | Phase 8 | Complete |  |
-| PROV-04 | Phase 8 | Complete |  |
-| PROV-05 | Phase 8 | Complete | 🚫 |
-| PROV-06 | Phase 8 | Complete |  |
-| PROV-07 | Phase 8 | Complete |  |
-| PROV-08 | Phase 8 | Complete |  |
-| PROV-09 | Phase 8 | Complete | 🚫 |
-| PROV-10 | Phase 8 | Complete | 🚫 |
-| PROV-11 | Phase 8 | Complete |  |
-| PROV-12 | Phase 8 | Complete |  |
-| PROV-13 | Phase 8 | Complete |  |
-| UPG-01 | Phase 9 | Complete |  |
-| UPG-02 | Phase 9 | Complete | 🚫 |
-| UPG-03 | Phase 9 | Complete | 🚫 |
-| UPG-04 | Phase 9 | Complete |  |
-| UPG-05 | Phase 9 | Complete |  |
-| UPG-06 | Phase 9 | Complete | 🚫 |
-| UPG-07 | Phase 9 | Complete | 🚫 |
-| UPG-08 | Phase 9 | Complete |  |
-| UPG-09 | Phase 9 | Complete |  |
-| UPG-10 | Phase 9 | Complete |  |
-| UPG-11 | Phase 9 | Complete |  |
-| UPG-12 | Phase 9 | Complete |  |
-| UPG-13 | Phase 9 | Complete |  |
-| UPG-14 | Phase 9 | Complete |  |
-| OPS-01 | Phase 10 | Complete |  |
-| OPS-02 | Phase 10 | Complete |  |
-| OPS-03 | Phase 10 | Complete |  |
-| OPS-04 | Phase 10 | Complete (unbuilt, window 88) |  |
-| OPS-05 | Phase 10 | **Open — window 87** | 🚫 |
-
-**Verteilung pro Phase:**
-
-| Phase | Requirements | davon Release-Blocker |
-|-------|--------------|-----------------------|
-| Phase 1 — Foundation Skeleton | 11 | 0 |
-| Phase 2 — Transport Seam, `talossim` & Image Factory | 14 | 1 |
-| Phase 3 — Inventar, Cluster-Import & Health | 14 | 5 |
-| Phase 4 — Walking Skeleton (Wegwerf) | 0 | 0 |
-| Phase 5 — Streaming | 4 | 0 |
-| Phase 6 — Jobs-Engine & Node-Aktionen | 9 | 1 |
-| Phase 7 — Config-Domain | 11 | 1 |
-| Phase 8 — Provisioning — der Core Value | 13 | 3 |
-| Phase 9 — Upgrades & etcd-Verwaltung | 14 | 4 |
-| Phase 10 — Härtung & echter Hardware-Durchlauf | 5 | 1 |
-| **Summe** | **95** | **16** |
-
-**Coverage:**
-
-- v1 requirements: 95 total
-- Mapped to phases: 95
-- Unmapped: 0 ✓
-- Doppelt abgebildet: 0 ✓
-- Release-Blocker (🚫): 16 von 16 einer Phase zugeordnet ✓
-
----
-*Requirements defined: 2026-08-27*
-*Last updated: 2026-08-27 after roadmap creation (Traceability gefüllt)*
+| Requirement | Phase | Status |
+|-------------|-------|--------|
+| HOST-01 | — | Pending |
+| HOST-02 | — | Pending |
+| HOST-03 | — | Pending |
+| HOST-04 | — | Pending |
+| HMON-01 | — | Pending |
+| HMON-02 | — | Pending |
+| HMON-03 | — | Pending |
+| HMON-04 | — | Pending |
+| HMON-05 | — | Pending |
+| HMON-06 | — | Pending |
+| HMON-07 | — | Pending |
+| HACT-01 | — | Pending |
+| HACT-02 | — | Pending |
+| HACT-03 | — | Pending |
+| HACT-04 | — | Pending |
+| HACT-05 | — | Pending |
+| HACT-06 | — | Pending |
+| HACT-07 | — | Pending |
+| HACT-08 | — | Pending |
+| MOB-01 | — | Pending |
+| MOB-02 | — | Pending |
+| MOB-03 | — | Pending |
