@@ -587,14 +587,14 @@ const state = host.error ? 'unanswered' : host.data?.health.state // undefined �
 | A4 | The 12-px word-spacing collapse is partly font/hinting, not only `-0.015em` | Pitfall 9 | The fix might need `word-spacing` rather than letter-spacing — the measurement task decides |
 | A5 | `/api/v1/host` states from its own fresh reading while the wall uses the ≤ 15-s-old sampler snapshot; they may differ for up to one interval | Pattern 5/7 | A crossing is on the page up to 15 s before the wall; acceptable, stated in the guide |
 
-## Open Questions
+## Open Questions (RESOLVED)
 
-1. **The node page's per-disk temperature figure** (`NodeHardware.tsx` Storage card, `TEMPERATURE_DEFAULTS.disk`)
+1. RESOLVED (planner: drives get warn/danger from the same Go rule, 12-02/12-04) — **The node page's per-disk temperature figure** (`NodeHardware.tsx` Storage card, `TEMPERATURE_DEFAULTS.disk`)
    - What we know: it is a `HardwareDisk.temperature_c`, not a sensor row; D-06 speaks of sensors.
    - What's unclear: whether it must also come from the server.
    - Recommendation (decided): keep a single browser constant `DISK_TEMPERATURE = { warn: 60, danger: 70 }` for that figure only, with a comment pointing at the Go table and a Go test that asserts the Go `disk` defaults are 60/70 — or, cheaper and cleaner, add `warn_c`/`danger_c` to `HardwareDisk` from the same Go function. Planner picks the second if it fits the node plan; either keeps one source of numbers.
-2. **Two chips with the same name** (IN-05 from Phase 11): `temp:<chip>/<label>` keys collide, so two NVMe drives share one history series on the host. Not the Pi; carried, not fixed here.
-3. **Production sighting:** the Pi's real service still runs v0.1.0; host history, warning and tile on the real service are visible only after a release the operator cuts. Carry as a human item, as Phase 11 did.
+2. DEFERRED (carried, not fixed in this phase) — **Two chips with the same name** (IN-05 from Phase 11): `temp:<chip>/<label>` keys collide, so two NVMe drives share one history series on the host. Not the Pi; carried, not fixed here.
+3. DEFERRED (human item after the operator's next release) — **Production sighting:** the Pi's real service still runs v0.1.0; host history, warning and tile on the real service are visible only after a release the operator cuts. Carry as a human item, as Phase 11 did.
 
 ## Environment Availability
 
