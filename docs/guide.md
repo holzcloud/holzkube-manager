@@ -919,7 +919,8 @@ was last used, which answers the other one: is it still on a wall?
 
 **The machine holzkube-manager runs on is the first tile under Nodes**, marked
 "manager" with its state's short reason: "healthy", the first crossed line, or
-"not readable". It is not one of the cluster's nodes and is not counted in the
+"not readable". A full filesystem is named there as "/" or "data directory",
+never by the path it is mounted at. It is not one of the cluster's nodes and is not counted in the
 headline. The tile comes from the daemon's last 15-second sample rather than a
 fresh read, so it may trail the Host page by up to one interval, and it turns
 grey when that sample is more than 45 seconds old: a sampler that stopped is

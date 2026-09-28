@@ -5,6 +5,7 @@ import (
 	"math"
 	"math/bits"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -34,13 +35,20 @@ const (
 // Health is the host's state and the sentences that explain it.
 //
 // Warnings are worst first and Unreadable in reading order; both are never
-// null. The sentences are the server's (D-06): the browser and the wall print
-// them as they are.
+// null. The sentences are the server's (D-06): the browser prints them as they
+// are.
+//
+// Public is Warnings again, in the same order, fit for a wall link: a
+// filesystem is named by its role ("/", "data directory"), never by its path,
+// which can be a mount point or, without a mount table, the data directory
+// itself (T-12-08). The wall shows these and nothing else of the list; it is
+// not sent with the page's answer.
 type Health struct {
 	State      HealthState `json:"state"`
 	Summary    string      `json:"summary"`
 	Warnings   []string    `json:"warnings"`
 	Unreadable []string    `json:"unreadable"`
+	Public     []string    `json:"-"`
 }
 
 // filesystemWarnPercent is where a filesystem warns: 80 % of what df counts,
@@ -112,7 +120,7 @@ func Assess(l Live) Health {
 			unreadable = append(unreadable, "Usage of "+row.Mount+" reports no capacity.")
 			continue
 		}
-		if f, ok := filesystemFinding(row.Mount, *row.Usage.Value); ok {
+		if f, ok := filesystemFinding(row, *row.Usage.Value); ok {
 			found = append(found, f)
 		}
 	}
@@ -126,11 +134,13 @@ func Assess(l Live) Health {
 		return found[i].excess > found[j].excess
 	})
 	warnings := make([]string, 0, len(found))
+	public := make([]string, 0, len(found))
 	for _, f := range found {
 		warnings = append(warnings, f.sentence)
+		public = append(public, f.public)
 	}
 
-	h := Health{Warnings: warnings, Unreadable: unreadable}
+	h := Health{Warnings: warnings, Unreadable: unreadable, Public: public}
 	switch {
 	case len(warnings) > 0:
 		h.State = HealthWarn
@@ -156,6 +166,8 @@ func Assess(l Live) Health {
 // finding is one crossed line.
 type finding struct {
 	sentence string
+	// public is sentence without a path in it, for the wall.
+	public   string
 	critical bool
 	// excess is how far past its line the value is, relative to the line:
 	// (value - line) / line.
@@ -184,6 +196,8 @@ func temperatureFindings(temps []inventory.HardwareTemperature) []finding {
 		if f.critical {
 			f.sentence += ", critical"
 		}
+		// A chip's name and label are the driver's, never a path.
+		f.public = f.sentence
 		f.excess = relative(t.Celsius, line)
 		out = append(out, f)
 	}
@@ -195,7 +209,7 @@ func temperatureFindings(temps []inventory.HardwareTemperature) []finding {
 // Compared in integers, never on the rounded percent: df prints 79.01 % as
 // "80%", and a warning that disagreed with the meter at the line would make
 // one of them wrong.
-func filesystemFinding(mount string, u FSUsage) (finding, bool) {
+func filesystemFinding(row Filesystem, u FSUsage) (finding, bool) {
 	total := u.UsedBytes + u.AvailableBytes
 	// Assess has listed a zero or wrapped sum as unreadable already; the
 	// guard stays so that bits.Div64 can never panic here.
@@ -209,10 +223,26 @@ func filesystemFinding(mount string, u FSUsage) (finding, bool) {
 	if uh < th || (uh == th && ul < tl) {
 		return finding{}, false
 	}
+	used := fmt.Sprintf(" %d%% used ≥ %d%%", dfPercent(u.UsedBytes, total), filesystemWarnPercent)
 	return finding{
-		sentence: fmt.Sprintf("%s %d%% used ≥ %d%%", mount, dfPercent(u.UsedBytes, total), filesystemWarnPercent),
+		sentence: row.Mount + used,
+		public:   publicMount(row) + used,
 		excess:   relative(float64(u.UsedBytes)/float64(total)*100, filesystemWarnPercent),
 	}, true
+}
+
+// publicMount names a filesystem row on the wall: by its role, since its
+// mount point may be a path that says where the installation keeps its data.
+// The root row is "/" -- a path every machine has.
+func publicMount(row Filesystem) string {
+	switch {
+	case slices.Contains(row.Roles, roleRoot):
+		return "/"
+	case slices.Contains(row.Roles, roleDataDir):
+		return roleDataDir
+	default:
+		return "a filesystem"
+	}
 }
 
 // dfPercent is df's Use%: used / (used + available), rounded up to a whole

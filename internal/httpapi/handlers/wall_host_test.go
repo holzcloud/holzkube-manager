@@ -3,6 +3,7 @@ package handlers
 import (
 	"encoding/json"
 	"reflect"
+	"strings"
 	"testing"
 	"testing/fstest"
 	"time"
@@ -38,11 +39,12 @@ func TestTheWallsHost(t *testing.T) {
 	}{
 		{"fresh and ok", snap(fresh, "example-host", host.Health{State: host.HealthOK}),
 			wallHost{"example-host", host.HealthOK, "healthy"}},
-		{"one warning is the reason", snap(fresh, "example-host", host.Health{State: host.HealthWarn, Warnings: []string{"CPU 84.0 °C ≥ 80 °C"}}),
+		{"one warning is the reason", snap(fresh, "example-host", host.Health{State: host.HealthWarn, Warnings: []string{"CPU 84.0 °C ≥ 80 °C"}, Public: []string{"CPU 84.0 °C ≥ 80 °C"}}),
 			wallHost{"example-host", host.HealthWarn, "CPU 84.0 °C ≥ 80 °C"}},
 		{"three warnings: the first and a count", snap(fresh, "example-host", host.Health{
 			State:    host.HealthWarn,
 			Warnings: []string{"CPU 112.0 °C ≥ 110 °C, critical", "/ 91% used ≥ 80%", "rp1_adc 76.0 °C ≥ 75 °C"},
+			Public:   []string{"CPU 112.0 °C ≥ 110 °C, critical", "/ 91% used ≥ 80%", "rp1_adc 76.0 °C ≥ 75 °C"},
 		}), wallHost{"example-host", host.HealthWarn, "CPU 112.0 °C ≥ 110 °C, critical and 2 more"}},
 		{"unknown never shows its sentences", snap(fresh, "example-host", host.Health{State: host.HealthUnknown, Summary: unreadable[0], Unreadable: unreadable}),
 			wallHost{"example-host", host.HealthUnknown, "not readable"}},
@@ -54,6 +56,11 @@ func TestTheWallsHost(t *testing.T) {
 			wallHost{"example-host", host.HealthUnknown, "not readable"}},
 		{"no hostname", snap(fresh, "", host.Health{State: host.HealthOK}),
 			wallHost{"holzkube-manager host", host.HealthOK, "healthy"}},
+		// WR-02: Warnings name paths, and the tile never reads them -- not
+		// even when Public is missing.
+		{"a warning is never told from Warnings", snap(fresh, "example-host", host.Health{
+			State: host.HealthWarn, Summary: "1 threshold crossed.", Warnings: []string{"/mnt/ssd 91% used ≥ 80%"},
+		}), wallHost{"example-host", host.HealthWarn, "1 threshold crossed."}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
@@ -63,6 +70,40 @@ func TestTheWallsHost(t *testing.T) {
 			}
 		})
 	}
+
+	// WR-02: the data directory's own filesystem warns under its mount point
+	// on the page, and by its role on the wall -- through Assess, as the
+	// sampler takes it. A mount table that could not be read names the data
+	// directory's path itself, which is the same case.
+	t.Run("a filesystem's path never reaches the wall", func(t *testing.T) {
+		t.Parallel()
+
+		for _, mount := range []string{"/mnt/ssd", "/srv/data/holzkube-manager"} {
+			live := host.Live{
+				Sensors: host.Read(host.Sensors{}),
+				Filesystems: []host.Filesystem{
+					{Mount: "/", Roles: []string{"root"}, Usage: host.Read(host.FSUsage{UsedBytes: 10, AvailableBytes: 90})},
+					{Mount: mount, Roles: []string{"data directory"}, Usage: host.Read(host.FSUsage{UsedBytes: 91, AvailableBytes: 9})},
+				},
+			}
+			h := host.Assess(live)
+			if h.State != host.HealthWarn || len(h.Warnings) != 1 || !strings.Contains(h.Warnings[0], mount) {
+				t.Fatalf("%s: health = %+v, want a warning naming %s for the page", mount, h, mount)
+			}
+			got := wallHostFrom(host.Snapshot{At: fresh, Name: "example-host", Health: h}, now)
+			want := wallHost{"example-host", host.HealthWarn, "data directory 91% used ≥ 80%"}
+			if got == nil || *got != want {
+				t.Errorf("%s: wallHostFrom = %+v, want %+v", mount, got, want)
+			}
+			raw, err := json.Marshal(got)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if strings.Contains(string(raw), mount) {
+				t.Errorf("%s: the wall's answer carries the path: %s", mount, raw)
+			}
+		}
+	})
 
 	t.Run("no tile without a host reader or before its first sample", func(t *testing.T) {
 		t.Parallel()
