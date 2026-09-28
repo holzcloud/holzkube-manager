@@ -13,6 +13,7 @@ import {
   clustersSchema,
   clusterUsageSchema,
   hardwareSchema,
+  hostSchema,
   inventorySchema,
   jobsSchema,
   kubernetesOverviewSchema,
@@ -76,6 +77,7 @@ describe('the layout guard’s fixtures', () => {
     ['/api/v1/machines/m-cp-1/power', powerSchema],
     ['/api/v1/clusters/c-homelab/power', powerSchema],
     ['/api/v1/clusters/c-homelab/kubernetes/apps/media/Deployment/jellyfin/power', powerSchema],
+    ['/api/v1/host', hostSchema],
   ])('%s is something the product would accept', (path, schema) => {
     const parsed = schema.safeParse(fixtures[path])
     // The error is printed in full rather than as "expected true": a fixture

@@ -73,6 +73,8 @@ const ROUTES = [
   '/wall',
   '/nodes',
   '/nodes/m-cp-1',
+  // The machine holzkube-manager runs on, measured like every node page.
+  '/host',
   '/clusters',
   // The Kubernetes screen is ten pages since 2026-09-20, and each is measured.
   // Listing only '/kubernetes' would have measured the overview and called the
