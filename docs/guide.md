@@ -149,6 +149,48 @@ network is a different security proposition entirely.
 loopback**. The session cookie grants access to cluster PKI; it does not cross a
 home network in the clear.
 
+### The Host page
+
+**Host** in the navigation is the machine holzkube-manager itself runs on, not
+the cluster: what it is (hostname, model, architecture, cores, operating system,
+kernel, uptime), the service (version, how long it has run, the data directory
+and its size, the last update check), and how it is doing right now (CPU usage
+and load, memory and swap, the root and data-directory filesystems,
+temperatures and fans, the network interfaces with their throughput). The page
+asks every 3 seconds. Everything is read by the daemon from its own machine as
+the request arrives -- files under `/sys`, `/etc/os-release` and `/proc`, and a
+few system calls -- without root, without starting a program, and without
+storing anything.
+
+**Under a hardened unit, CPU usage, memory and swap say "Not readable" -- by
+design.** A systemd unit with `ProcSubset=pid`, as the reference installation
+runs it, hides `/proc/stat` and `/proc/meminfo` from the service; the page says
+why rather than drawing a 0.
+Load is still exact, because it comes from `sysinfo(2)` when `/proc/loadavg` is
+hidden. To see the three hidden values, add one line to the unit's `[Service]`
+section, for instance with `systemctl edit holzkube-manager`:
+
+```ini
+[Service]
+ProcSubset=all
+```
+
+then `systemctl daemon-reload` and `systemctl restart holzkube-manager`.
+`ProtectProc=invisible` can stay as it is: it hides other users' processes, and
+the Host page does not read those.
+
+**The hostname is the one the service started with.** A unit with
+`ProtectHostname=yes` gives the service its own copy of the hostname at
+start. A hostname changed on the machine afterwards appears on the page only
+after the service has been restarted.
+
+**"Update check" says "Not recorded" until the update script records its
+runs.** The status comes from a file the update script writes as root after
+each run (see `--update-status-file` above). The script installed before this
+feature does not write it; it replaces itself with the recording one after the
+next healthy update, and from the run after that on the page shows when it last
+checked, which versions it saw and what came of it.
+
 ## Signing in
 
 Two ways in, and which of them an address offers is configuration rather than a
