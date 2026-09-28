@@ -1273,11 +1273,13 @@ route does not serve from it.)
              "swap_total_bytes": 0, "swap_used_bytes": 0},
   "filesystems": [{"mount": "/var", "device": "/dev/sda6", "size_bytes": 0, "used_bytes": 0}],
   "disks": [{"name": "nvme0n1", "model": "Samsung SSD 980", "size_bytes": 0,
-             "read_bytes_per_sec": 0, "write_bytes_per_sec": 0, "temperature_c": 41.9}],
+             "read_bytes_per_sec": 0, "write_bytes_per_sec": 0, "temperature_c": 41.9,
+             "temperature_warn_c": 82.8, "temperature_danger_c": 84.8}],
   "network": [{"name": "eth0", "up": true, "speed_mbit": 1000,
                "rx_bytes_per_sec": 0, "tx_bytes_per_sec": 0}],
   "temperatures": [{"chip": "coretemp", "kind": "cpu", "label": "Package id 0",
-                    "celsius": 57.0, "high_c": 80.0, "critical_c": 100.0}],
+                    "celsius": 57.0, "high_c": 80.0, "critical_c": 100.0,
+                    "warn_c": 80.0, "danger_c": 100.0}],
   "fans": [{"chip": "nct6798", "label": "fan2", "rpm": 1080}],
   "sensors_notice": ""
 }
@@ -1285,8 +1287,18 @@ route does not serve from it.)
 
 - **Every array is present and never `null`**; empty is `[]`.
 - **`temperature_c`, `high_c` and `critical_c` are `null` when unknown** — a
-  drive with no sensor the kernel exposes, a chip that sets no limit. Nothing
-  else is ever `null`.
+  drive with no sensor the kernel exposes, a chip that sets no limit.
+  `temperature_warn_c` and `temperature_danger_c` are `null` exactly when
+  `temperature_c` is. Nothing else is ever `null`.
+- **Every temperature carries its two lines**, `warn_c` (amber) and `danger_c`
+  (red), and a drive carries the same pair of the sensor its figure is taken
+  from as `temperature_warn_c`/`temperature_danger_c`. The server draws them,
+  once, for every page that shows a temperature; a client prints them and never
+  works out its own. `danger_c` is the chip's `critical_c`, or the kind's
+  default; `warn_c` is the chip's `high_c` when that lies below `danger_c`, or
+  the kind's default, and never above `danger_c`. The defaults (warn / danger,
+  °C) are `cpu` 80 / 95, `disk` 60 / 70, `board` 70 / 85, `gpu` 80 / 95 and
+  `other` 75 / 90.
 - **Rates are computed between two counter readings**, and `rates_over_seconds`
   is the window. A request whose predecessor for the same machine is between
   0.5 s and 5 min old (and from the same boot) is measured against it, so an
@@ -1412,14 +1424,20 @@ way forever in an archive with no deletion path.
 ## The machine holzkube-manager runs on
 
 The one screen about the box beside the cluster rather than the cluster: on the
-reference installation a Raspberry Pi. Everything is read from this process's
+reference installation a Raspberry Pi. `GET /api/v1/host` reads this process's
 own namespace when the request arrives -- a few files under `/sys` and `/etc`,
-and `uname(2)`, `clock_gettime(2)`, `sysinfo(2)` and `statfs(2)` -- and nothing
-is stored.
+and `uname(2)`, `clock_gettime(2)`, `sysinfo(2)` and `statfs(2)` -- and stores
+nothing. What is kept is the history: the daemon's one sampler reads the same
+machine every fifteen seconds and keeps the last day of it, as it does for every
+node.
 
 | Method | Path | Destructive | Action | Notes |
 |---|---|---|---|---|
-| `GET` | `/api/v1/host` | no | — | this machine, its service and live readings; readers; not audited |
+| `GET` | `/api/v1/host` | no | — | this machine, its service, live readings and its state; readers; not audited |
+| `GET` | `/api/v1/host/history` | no | — | `?range=1h\|6h\|24h`; the host's last day, sampled every 15 s; readers; not audited; see below |
+
+Neither route is open to a wall link. The wall carries the host's name and
+state in its own answer instead; see "One screen for the IT office".
 
 Every value is a **reading**: `{"readable": true, "value": …}` or
 `{"readable": false, "reason": {"code": …, "message": …}}` -- never both, and
@@ -1490,7 +1508,8 @@ A full answer, from a Raspberry Pi under a systemd unit with
       "readable": true,
       "value": {
         "temperatures": [
-          { "chip": "cpu_thermal", "kind": "cpu", "label": "temp1", "celsius": 64.4, "high_c": null, "critical_c": null }
+          { "chip": "cpu_thermal", "kind": "cpu", "label": "temp1", "celsius": 64.4,
+            "high_c": null, "critical_c": 110.0, "warn_c": 80.0, "danger_c": 110.0 }
         ],
         "fans": []
       }
@@ -1507,6 +1526,12 @@ A full answer, from a Raspberry Pi under a systemd unit with
         ]
       }
     }
+  },
+  "health": {
+    "state": "ok",
+    "summary": "Temperatures and filesystems are below their thresholds.",
+    "warnings": [],
+    "unreadable": []
   }
 }
 ```
@@ -1541,11 +1566,12 @@ say why load is shown when CPU usage is not.
 | `up` (a link's) | neither `operstate` nor `flags` of the link could be read. Otherwise `true` when `operstate` is `up`; when it is `unknown` -- the loopback always, WireGuard/tun and some USB NICs -- when `flags` has `IFF_UP` set, as `ip link` shows it; `false` for every other state. Never `false` for "not read". |
 | `speed_mbit` | the link reports no speed: it is down (the kernel answers the read with `EINVAL`), or it is a kind of link that has none. |
 | `rx_bytes_per_sec`, `tx_bytes_per_sec` | this call has no rate for the link: the first read, a link that appeared since the previous call, or a counter that went backwards (the interface was recreated; both are then null). Never `0` for "unknown" -- `0` is an idle link. |
-| `high_c`, `critical_c` | the chip sets no such limit. Thermal zones never supply one: a zone's critical trip sits far above where the firmware throttles. |
+| `high_c`, `critical_c` | neither the chip nor its thermal zone sets such a limit. An hwmon chip that reports none takes its twin thermal zone's trip points: the lowest `passive` or `hot` trip is `high_c`, the lowest `critical` trip is `critical_c`. `active` trips are fan stages and never a limit -- a Raspberry Pi 5 has four of them, from 50 °C up, and a line there would be amber for good. A trip at or below 0 °C is a disabled one. At most 16 trips are read per zone. |
 | `installed`, `latest` (in `service.update.value`) | the update run ended as `failed` before it learned that version. For every other outcome both are set. |
 
 **Lists are never `null`**: `filesystems`, `roles`, `per_core`,
-`temperatures`, `fans`, `physical` and `virtual` are `[]` when empty. A machine
+`temperatures`, `fans`, `physical`, `virtual`, `health.warnings` and
+`health.unreadable` are `[]` when empty. A machine
 without `/sys/class/hwmon` or `/sys/class/net` answers readable empty lists;
 only a directory that exists and cannot be listed is `read-failed`.
 
@@ -1580,10 +1606,48 @@ only a directory that exists and cannot be listed is `read-failed`.
 - `live.network.physical` are the interfaces with a `device` link under
   `/sys/class/net/<name>/`; everything else -- loopback, bridges, veths -- is
   `virtual`. Both sorted by name. The listing stops at 512 interfaces.
+- `live.sensors.value.temperatures[]` carry `warn_c` and `danger_c`, never
+  `null`, by the rule under the node hardware view above: the chip's (or its
+  zone's) own limits, else the kind's default. On a Raspberry Pi 5 that is
+  `cpu_thermal` at warn 80 °C (the `cpu` default, because the zone has no
+  passive trip) and danger 110 °C (the zone's critical trip).
+
+**`health`: the host's state, decided here.** The page's header, the mark
+beside Host in the navigation and the wall's host tile all show this one
+decision; none of them works one out.
+
+| Key | Meaning |
+|---|---|
+| `state` | `ok`, `warn` or `unknown` -- the wall's own state words, so its tile takes the wall's colours |
+| `summary` | one sentence for the operator: "1 threshold crossed.", "{n} thresholds crossed.", the unreadable sentences joined, or one of two sentences for `ok` |
+| `warnings` | one sentence per crossed line, such as `"cpu_thermal 82.1 °C ≥ 80 °C"`, `"cpu_thermal 111.0 °C ≥ 110 °C, critical"` or `"/ 83% used ≥ 80%"`; **worst first**: every critical before every warning, then by how far past its line the value is, relative to the line; ties keep reading order |
+| `unreadable` | one sentence per rated value that could not be read, with the reason's own message, in reading order |
+
+- **What is rated, and where it crosses.** A temperature warns at its `warn_c`
+  and is critical at its `danger_c` (`>=` both). Every filesystem row -- `/`,
+  and the data directory's when it is a filesystem of its own -- warns at 80 %
+  of `used_bytes + available_bytes`, df's denominator, compared in integers,
+  never on a rounded percent; the sentence prints df's `Use%`. That is exactly
+  where the page's meter turns amber.
+- **What is not rated.** CPU usage, per-core usage and memory hang no line, and
+  under `ProcSubset=pid` they cannot be read at all; a host rated on them would
+  stay `unknown` for good. Their `hardening.proc-subset` never makes the state
+  `unknown`.
+- **The order of the states.** A warning outranks "not readable", which
+  outranks "ok": any crossed line is `warn`, and the unreadable values are
+  still listed beside it. With none crossed, any rated value that could not be
+  read -- the temperatures, or a filesystem's usage -- is `unknown`: nobody can
+  say the host is fine. Only a host whose every rated value was read and none
+  crossed is `ok`.
+- **A host with no temperature sensor** (a virtual machine) rates nothing
+  there. It is judged by its filesystems alone and its `ok` summary says so.
+- `health` is taken from the same reading as `live`, so the two never
+  disagree within one answer. The thresholds are not configurable.
 
 **Polling, auditing, upstream.** The route reads this process's own namespace on
 every call; nothing is stored and nothing is cached except the data-directory
-size. The page polls it every 3 s (`HARDWARE_POLL_INTERVAL_MS`), and CPU and
+size. (The history below is the sampler's, and this route neither writes nor
+reads it.) The page polls it every 3 s (`HARDWARE_POLL_INTERVAL_MS`), and CPU and
 network rates are the difference to the previous call's counters, which the
 daemon keeps in memory. It needs a session with the reader role, **is not
 audited** -- reading is not an action -- and **reaches no upstream**: no node,
@@ -1616,6 +1680,54 @@ field and the rule named -- never a partially filled status, never an invented
 time or version. The path is set with `--update-status-file`
 (`HOLZKUBE_MANAGER_UPDATE_STATUS_FILE`), default
 `/var/lib/holzkube-manager-update/status.json`.
+
+### GET /api/v1/host/history: the host's last day
+
+The daemon's one sampler -- the one that reads every node -- reads this machine
+first in every pass, every fifteen seconds, and keeps what it saw under the
+host's own subject beside the nodes', in the same file (`history/metrics.bin`
+in the data directory). The answer is a node's history answer, key for key:
+
+```json
+{"range": "1h", "step_seconds": 15,
+ "from": "2026-09-28T09:00:00Z", "to": "2026-09-28T10:00:00Z",
+ "series": {"rx": [[1790586000000, 187900], [1790586015000, 190200]],
+            "tx": [[1790586000000, 42100], [1790586015000, 41800]],
+            "temp:cpu_thermal/temp1": [[1790586000000, 64.4], [1790586015000, 64.9]],
+            "temp:rp1_adc/temp1": [[1790586000000, 51.2]]}}
+```
+
+- `range` is `1h` (the default), `6h` or `24h`, with the tiers and steps of
+  the node history: fifteen-second samples for the last hour, one-minute means
+  for the last day. Anything else is `400` Validation naming `range`.
+- **The keys are a node's keys**: `cpu` (usage %), `core:<n>` (%), `memory`
+  (used/total %), `rx` and `tx` (bytes/s), `temp:<chip>/<label>` (°C) and
+  `fan:<chip>/<label>` (rpm), chip and label exactly as `GET /api/v1/host`
+  writes them. There is no `read` or `write`: the host has no disk-throughput
+  reading.
+- **A value not readable at a sample is absent** -- no point for that step, a
+  gap, never a `0`. Under a unit with `ProcSubset=pid` there is therefore no
+  `cpu`, `core:<n>` or `memory` series at all; with `ProcSubset=all` they fill
+  from the next sample on. `series` is always an object, `{}` when nothing is
+  in the range, and a series with no point in it is left out.
+- **`rx` and `tx` are summed over the physical interfaces only** -- the ones
+  `GET /api/v1/host` lists under `physical`. Loopback, bridges and veths carry
+  the same traffic again and are never added. A step where any physical
+  interface has no rate is left out rather than summed without it; a machine
+  with no physical interface records neither.
+- **The rates have their own window.** The sampler measures CPU and network
+  against its own previous reading, fifteen seconds before; an open page,
+  polling every three seconds, does not shorten it, and the sampler does not
+  shorten the page's.
+- **Kept for 24 hours and through a restart.** The file is written at most
+  every thirty minutes and on shutdown, so a stop and start keeps every point
+  before the stop, and the time the daemon was not running is a gap. The host
+  is never dropped by the retention that forgets machines no longer in the
+  inventory; its points age out after a day like every other.
+- Readers; **not audited**; reads memory and reaches nothing. A wall link does
+  not open it. Before the sampler's first pass the answer is `200` with
+  `"series": {}`. An instance started without a history answers
+  `502 upstream.history-unavailable`.
 
 ## Cluster templates
 
@@ -2136,7 +2248,9 @@ INV-08 gives one layer down: an empty screen is a claim.
      "warnings":[{"object":"Pod/api-7c9","reason":"FailedScheduling",
                   "message":"0/3 nodes are available…","count":340,
                   "last_seen":"2026-09-20T09:58:00Z"}],
-     "summary":{"ok":4,"warn":2,"down":1,"stopped":1,"unknown":1}}
+     "summary":{"ok":4,"warn":2,"down":1,"stopped":1,"unknown":1},
+     "host":{"name":"manager-01.homelab.example","state":"warn",
+             "reason":"cpu_thermal 82.1 °C ≥ 80 °C"}}
 
 **One route for the whole screen**, and it is the most expensive read in this
 product. A wall makes the same call every few seconds for weeks; five routes
@@ -2209,6 +2323,31 @@ it must not.
 key names. This is the answer most likely to end up on a screen a visitor can
 see, and `RoleReader` — whose own definition names "the dashboard left open on a
 screen in the hallway" — is what it asks for.
+
+**`host` is the machine holzkube-manager runs on, beside the cluster and not in
+it.** `{name, state, reason}`, and nothing more:
+
+- It is the sampler's last snapshot of the host, never a read of its own: a
+  wall refreshing every few seconds on every screen costs the host nothing, and
+  the tile may trail `GET /api/v1/host` by up to one sampling interval.
+- `null` when the daemon has no host reader, or before the sampler's first
+  pass. A client then draws no host tile.
+- `state` is `health.state` of that snapshot: `ok`, `warn` or `unknown`. When
+  the snapshot is **older than 45 s** -- three sampling intervals -- the state
+  is `unknown` whatever it said: a sampler that stopped is not a host that is
+  fine.
+- `reason` is `healthy` for `ok`; for `warn` the first of `health.warnings`,
+  with ` and {n} more` when there are others; for `unknown`, stale or not, the
+  fixed words `not readable`. The unreadable sentences are never sent here:
+  they name paths and carry the kernel's errors.
+- `name` is the host's name as `uname(2)` gives it, or `holzkube-manager host`
+  when that could not be read.
+- **It is never in `nodes` and never counted in `summary`.** The host is not a
+  Kubernetes node, and counting it would change a cluster's figures by where
+  its manager happens to run.
+- Name, state and reason only -- no address, no version, no error text --
+  because a wall link opens this route and nothing else. The link still cannot
+  open `GET /api/v1/host` or `GET /api/v1/host/history`.
 
 ## Namespaces, quotas and the cluster's own kinds
 
