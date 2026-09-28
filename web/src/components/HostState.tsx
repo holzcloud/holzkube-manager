@@ -33,12 +33,12 @@ export const STATE_WORD: Record<HostState, string> = {
   unknown: 'Not readable',
 }
 
-/** The screen-reader words of the sidebar form: the link reads "Host — warning". */
+/** The screen-reader words of the sidebar form, after a space: the link reads "Host — warning". */
 const SIDEBAR_WORD: Record<HostMarkState, string> = {
-  ok: ' — healthy',
-  warn: ' — warning',
-  unknown: ' — not readable',
-  unanswered: ' — not readable, holzkube-manager did not answer',
+  ok: '— healthy',
+  warn: '— warning',
+  unknown: '— not readable',
+  unanswered: '— not readable, holzkube-manager did not answer',
 }
 
 export function HostStateMark({
@@ -79,7 +79,16 @@ export function HostStateMark({
           />
         )}
       </span>
-      {form === 'sidebar' && <span className="sr-only">{SIDEBAR_WORD[state]}</span>}
+      {/* The space is a text node of its own: an accessible name is put
+          together per element and trimmed, so a space inside the sr-only
+          span was lost ("Host— warning"). In the link's flex row a
+          whitespace-only text node takes no room. */}
+      {form === 'sidebar' && (
+        <>
+          {' '}
+          <span className="sr-only">{SIDEBAR_WORD[state]}</span>
+        </>
+      )}
     </>
   )
 }
