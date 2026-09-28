@@ -23,6 +23,7 @@ import (
 	"github.com/holzcloud/holzkube-manager/internal/auth/oidc"
 	"github.com/holzcloud/holzkube-manager/internal/config"
 	"github.com/holzcloud/holzkube-manager/internal/history"
+	"github.com/holzcloud/holzkube-manager/internal/host"
 	"github.com/holzcloud/holzkube-manager/internal/httpapi"
 	"github.com/holzcloud/holzkube-manager/internal/httpapi/handlers"
 	"github.com/holzcloud/holzkube-manager/internal/imagefactory"
@@ -542,6 +543,11 @@ func run(args []string) error {
 			slog.String("client_id", cfg.OIDCClientID))
 	}
 
+	// The machine this process runs on, read through the root filesystem and
+	// four syscalls. It opens nothing here: every read happens when the host
+	// page asks.
+	hostCollector := host.New(host.Config{FS: os.DirFS("/"), Sys: host.OS(), Now: time.Now})
+
 	deps := httpapi.Deps{
 		Store:      st,
 		Audit:      auditLog,
@@ -572,6 +578,7 @@ func run(args []string) error {
 		History:     historyStore,
 		Support:     supportCollector,
 		Metrics:     metricsExporter,
+		Host:        hostCollector,
 		// The per-cluster read-only lock, read by the route middleware rather
 		// than by each handler (D-22). Inside the literal for the reason the
 		// comment above states: Deps is copied by value into every …Routes
@@ -846,6 +853,7 @@ func routeTable(deps httpapi.Deps) []httpapi.Route {
 		handlers.HistoryRoutes(deps),
 		handlers.SupportRoutes(deps),
 		handlers.MetricsRoutes(deps),
+		handlers.HostRoutes(deps),
 	)
 }
 

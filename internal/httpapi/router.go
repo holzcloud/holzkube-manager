@@ -15,6 +15,7 @@ import (
 	"github.com/holzcloud/holzkube-manager/internal/auth"
 	"github.com/holzcloud/holzkube-manager/internal/auth/oidc"
 	"github.com/holzcloud/holzkube-manager/internal/history"
+	"github.com/holzcloud/holzkube-manager/internal/host"
 	"github.com/holzcloud/holzkube-manager/internal/httpapi/middleware"
 	"github.com/holzcloud/holzkube-manager/internal/imagefactory"
 	"github.com/holzcloud/holzkube-manager/internal/inventory"
@@ -240,6 +241,11 @@ type Deps struct {
 	// is what a scraper reads as "this target is down", the correct verdict
 	// for an instance that cannot say what its fleet looks like.
 	Metrics *metrics.Exporter
+
+	// Host reads the machine this process runs on: what it is, and how it and
+	// the service are doing. It is nil in a deployment that serves no host
+	// page; the route answers 502 rather than panicking if it is.
+	Host *host.Collector
 
 	// Support collects support bundles. It is nil in a deployment that offers
 	// none, and that handler answers 502 rather than panicking if it is.

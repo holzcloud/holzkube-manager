@@ -1409,6 +1409,26 @@ is not a missing code: it is every one of these failures arriving as
 `internal.unexpected` — which by contract carries no detail — and staying that
 way forever in an archive with no deletion path.
 
+## The machine holzkube-manager runs on
+
+The one screen about the box beside the cluster rather than the cluster: on the
+reference installation a Raspberry Pi. Everything is read from this process's
+own namespace when the request arrives -- a few files under `/sys` and `/etc`,
+and `uname(2)`, `clock_gettime(2)`, `sysinfo(2)` and `statfs(2)` -- and nothing
+is stored.
+
+| Method | Path | Destructive | Action | Notes |
+|---|---|---|---|---|
+| `GET` | `/api/v1/host` | no | — | this machine, its service and live readings; readers; not audited |
+
+Every value is a **reading**: `{"readable": true, "value": …}` or
+`{"readable": false, "reason": {"code": …, "message": …}}` -- never both, and
+never a `0` standing in for a value that could not be read. The reason codes are
+`hardening.proc-subset`, `read-failed`, `rate.no-baseline`,
+`update.not-recorded` and `unsupported`. One `observed_at` covers the whole
+answer. A daemon started without a host reader answers
+`502 upstream.host-unavailable`.
+
 ## Cluster templates
 
 Two routes, and **neither of them applies anything**. That is the scope and it

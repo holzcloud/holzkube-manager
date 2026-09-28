@@ -1801,6 +1801,10 @@ func TestEveryRouteThatReachesUpstreamHasABudgetRow(t *testing.T) {
 		// went, and why these are here rather than rows above.
 		"GET /api/v1/machines/{id}/hardware/history",
 		"GET /api/v1/clusters/{id}/kubernetes/apps/{namespace}/{kind}/{name}/history",
+		// The host page reads this process's own namespace -- a few files
+		// under /sys and /etc and four syscalls -- and reaches no node and no
+		// upstream service. Nothing it waits on is on the other end of a wire.
+		"GET /api/v1/host",
 	} {
 		noUpstream[r] = true
 	}
