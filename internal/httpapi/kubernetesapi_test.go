@@ -467,7 +467,7 @@ func TestCordonAndDrainReachTheCluster(t *testing.T) {
 // written before there was a third caller; this exists because the manifest and
 // proxy routes need exactly the same ground and a third copy would drift from
 // the other two before it drifted from the product.
-func adoptedClusterWithAPI(t *testing.T, opts kubesim.Options) (*harness, string, *kubesim.Server) {
+func adoptedClusterWithAPI(t *testing.T, opts kubesim.Options, extra ...harnessOpt) (*harness, string, *kubesim.Server) {
 	t.Helper()
 
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
@@ -502,7 +502,7 @@ func adoptedClusterWithAPI(t *testing.T, opts kubesim.Options) (*harness, string
 	}
 	t.Cleanup(func() { _ = sim.Close() })
 
-	h := newHarness(t,
+	h := newHarness(t, append([]harnessOpt{
 		withInventory(func(st *fsstore.Store) *inventory.Service {
 			return inventory.New(inventory.Deps{
 				Store:  st,
@@ -511,7 +511,7 @@ func adoptedClusterWithAPI(t *testing.T, opts kubesim.Options) (*harness, string
 			})
 		}),
 		withJobs(),
-	)
+	}, extra...)...)
 
 	if resp, raw := h.do(t, http.MethodPost, "/api/v1/setup", map[string]string{
 		"username": testUser, "password": testPass,
