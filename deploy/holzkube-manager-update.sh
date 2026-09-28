@@ -29,6 +29,19 @@
 #     Binary aus.
 set -euo pipefail
 
+# Wo dieses Skript liegt, bevor es das Verzeichnis wechselt: $0 darf relativ
+# sein (sudo ./holzkube-manager-update.sh), und nach dem cd zeigte es ins Leere
+# -- oder, schlimmer, auf eine andere Datei, die sich nach einem gesunden Update
+# mit dem neuen Skript ueberschreiben liesse.
+SELF=$(readlink -f "$0")
+# Nichts hier haengt vom Verzeichnis des Aufrufers ab, und es laeuft als root:
+# wer `sudo holzkube-manager-update` in /tmp oder einem fremden Checkout
+# aufruft, soll dort nichts ausfuehren, was ein anderer hingelegt hat. python3
+# laeuft zusaetzlich ueberall mit -I (isoliert): ohne das stellt `python3 -`
+# und `python3 -c` das aktuelle Verzeichnis an den Anfang von sys.path und
+# liest PYTHONPATH, und ein json.py oder datetime.py dort liefe als root.
+cd /
+
 # Pfade, die die Umgebung ueberschreiben darf. Im Betrieb setzt sie niemand:
 # die Unit nicht, und sudo verwirft sie mit env_reset. Es gibt sie fuer den
 # Test in internal/host/updatestatus, der eine Kopie dieses Skripts gegen
@@ -75,7 +88,7 @@ for arg in "$@"; do
     --check)    CHECK_ONLY=1 ;;
     --force)    FORCE=1 ;;
     --rollback) ROLLBACK=1 ;;
-    -h|--help)  sed -n '2,29p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help)  sed -n '2,29p' "$SELF" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "FEHLER: unbekannte Option $arg" >&2; exit 1 ;;
   esac
 done
@@ -125,7 +138,7 @@ record_status() {
   # Als root nur in ein Verzeichnis, das root gehoert. Die Pruefung laeuft in
   # python3, weil stat(1) auf Linux und BSD verschiedene Schalter hat.
   if [[ $EUID -eq 0 ]]; then
-    python3 -c 'import os, sys; sys.exit(0 if os.stat(sys.argv[1]).st_uid == 0 else 1)' "$dir" \
+    python3 -I -c 'import os, sys; sys.exit(0 if os.stat(sys.argv[1]).st_uid == 0 else 1)' "$dir" \
       || return 0
   fi
   # --check ohne root: nicht schreibbar heisst nichts festhalten.
@@ -135,7 +148,7 @@ record_status() {
   # Die Werte gehen als argv hinein und als JSON heraus. Tag-Namen kommen von
   # GitHub; sie in JSON-Text einzusetzen hiesse, GitHub die Syntax der Datei
   # bestimmen zu lassen.
-  if ! python3 - "$outcome" "${INSTALLED:-}" "${LATEST:-}" > "$tmp" <<'PY'
+  if ! python3 -I - "$outcome" "${INSTALLED:-}" "${LATEST:-}" > "$tmp" <<'PY'
 import datetime, json, sys
 outcome, installed, latest = sys.argv[1:4]
 json.dump({
@@ -261,7 +274,7 @@ download() {
 # hier der Normalfall.
 RELEASES_JSON=$(api "https://api.github.com/repos/$REPO/releases?per_page=20" 2>/dev/null) \
   || fail "die Release-Liste von $REPO ist nicht lesbar"
-LATEST_JSON=$(printf '%s' "$RELEASES_JSON" | python3 -c "
+LATEST_JSON=$(printf '%s' "$RELEASES_JSON" | python3 -I -c "
 import json,sys
 rs = json.load(sys.stdin)
 published = [r for r in rs if not r.get('draft')]
@@ -285,7 +298,7 @@ json.dump(published[0], sys.stdout)
 # Uebereinstimmung ist ein Fehler und keine Auswahl: lieber abbrechen und den
 # Grund nennen, als sich fuer eines von zweien zu entscheiden, ohne sagen zu
 # koennen warum.
-read -r TAG ASSET_ID ASSET_NAME SUMS_ID < <(printf '%s' "$LATEST_JSON" | python3 -c "
+read -r TAG ASSET_ID ASSET_NAME SUMS_ID < <(printf '%s' "$LATEST_JSON" | python3 -I -c "
 import json,sys
 r = json.load(sys.stdin)
 want = 'linux_${ARCH}.tar.gz'
@@ -397,7 +410,6 @@ if [[ $ok -eq 1 ]]; then
   # am Update-Weg -- wie die Umstellung auf Prereleases -- nie wieder Handarbeit
   # auf dem Host.
   if tar -xzf "$TMP/$ASSET_NAME" -C "$TMP" deploy/holzkube-manager-update.sh 2>/dev/null; then
-    SELF=$(readlink -f "$0")
     if ! cmp -s "$TMP/deploy/holzkube-manager-update.sh" "$SELF"; then
       install -o root -g root -m 0755 "$TMP/deploy/holzkube-manager-update.sh" "$SELF"
       log "Update-Skript erneuert: $SELF"

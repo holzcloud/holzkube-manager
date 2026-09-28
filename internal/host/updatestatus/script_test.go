@@ -260,8 +260,10 @@ func releaseArchive(t *testing.T, daemon string) []byte {
 
 // curlStub answers the four kinds of request the script makes: the release
 // list, an asset download (-o), and the health check. HKM_STUB_LIST_FAIL and
-// HKM_STUB_HEALTHY steer it.
+// HKM_STUB_HEALTHY steer it; HKM_STUB_PWD, when set, names a file each call
+// appends the directory it was run in to.
 const curlStub = `#!/usr/bin/env bash
+[[ -n ${HKM_STUB_PWD:-} ]] && pwd >> "$HKM_STUB_PWD"
 out="" url=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -356,13 +358,52 @@ func TestUpdateScript(t *testing.T) {
 		}
 		e := newScriptEnv(t, fakeInstalled, true)
 		// python3 stays itself for the release list (python3 -c) and fails
-		// for the status write (python3 - with the program on stdin).
+		// for the status write (python3 - with the program on stdin). The
+		// options before the program are skipped, whichever they are.
 		e.write(filepath.Join(e.stubs, "python3"),
-			"#!/usr/bin/env bash\n[[ ${1:-} == - ]] && exit 1\nexec "+python+" \"$@\"\n", 0o755)
+			"#!/usr/bin/env bash\nfor a in \"$@\"; do case $a in -) exit 1 ;; -c) break ;; esac; done\nexec "+python+" \"$@\"\n", 0o755)
 		if rc := e.run(false, "--check"); rc != 0 {
 			t.Fatalf("exit = %d, want 0 -- recording the status must never change the exit code", rc)
 		}
 		e.wantNoStatus(e.statusDir)
+	})
+
+	// CR-01: the script runs as root, and an operator runs it from wherever
+	// the shell happens to be. python3 - and python3 -c put the current
+	// directory first on sys.path and read PYTHONPATH, so a json.py or
+	// datetime.py another user left there would run as root. Both places get
+	// one here, each leaving a mark when imported; the script must import
+	// neither, and nothing it runs may run in the caller's directory.
+	t.Run("python3 imports nothing from the caller's directory or PYTHONPATH", func(t *testing.T) {
+		t.Parallel()
+		e := newScriptEnv(t, fakeInstalled, true)
+		marker := filepath.Join(e.dir, "hijacked")
+		pylib := filepath.Join(e.dir, "pylib")
+		for where, dir := range map[string]string{"cwd": e.dir, "PYTHONPATH": pylib} {
+			for _, mod := range []string{"json", "datetime"} {
+				e.write(filepath.Join(dir, mod+".py"),
+					"open("+pyQuote(marker)+", 'a').write("+pyQuote(where+" "+mod+"\n")+")\n", 0o644)
+			}
+		}
+		pwdLog := filepath.Join(e.dir, "curl-pwd")
+		e.extra = append(e.extra, "PYTHONPATH="+pylib, "HKM_STUB_PWD="+pwdLog)
+		rc := e.run(false, "--check")
+		if got, err := os.ReadFile(marker); err == nil {
+			t.Errorf("the script imported planted modules:\n%s", got)
+		}
+		if rc != 0 {
+			t.Fatalf("exit = %d, want 0", rc)
+		}
+		e.wantStatus(OutcomeAvailable, ptr(fakeInstalled), ptr(fakeRelease))
+		pwds, err := os.ReadFile(pwdLog)
+		if err != nil {
+			t.Fatalf("curl stub recorded no directory: %v", err)
+		}
+		for _, d := range strings.Fields(string(pwds)) {
+			if d != "/" {
+				t.Errorf("curl ran in %s, want / -- not the caller's directory", d)
+			}
+		}
 	})
 
 	for _, tc := range []struct {
@@ -517,4 +558,9 @@ func TestUpdateScriptAsRoot(t *testing.T) {
 			t.Fatalf("exit = %d, want 0", rc)
 		}
 	})
+}
+
+// pyQuote is s as a Python string literal.
+func pyQuote(s string) string {
+	return "'" + strings.NewReplacer(`\`, `\\`, `'`, `\'`, "\n", `\n`).Replace(s) + "'"
 }
