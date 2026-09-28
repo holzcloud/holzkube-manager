@@ -2,6 +2,7 @@ package inventory_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"math"
 	"strings"
@@ -143,6 +144,46 @@ func TestHardwareDiscoversClassifiesAndAttachesTheSensors(t *testing.T) {
 	nearPtr(t, "nvme1n1 temperature", diskNamed(t, v, "nvme1n1").TemperatureC, 44.9)
 	if c := diskNamed(t, v, "sda").TemperatureC; c != nil {
 		t.Errorf("sda has temperature %v; it has no sensor, so it must be null", *c)
+	}
+
+	// Every temperature carries the lines of the one rule (D-06), worked out
+	// from the same rounded limits the JSON carries.
+	for _, tt := range v.Temperatures {
+		warn, danger := inventory.TemperatureLimits(tt.Kind, tt.HighC, tt.CriticalC)
+		if tt.WarnC != warn || tt.DangerC != danger {
+			t.Errorf("%s %q has warn/danger %v/%v, want TemperatureLimits' %v/%v",
+				tt.Chip, tt.Label, tt.WarnC, tt.DangerC, warn, danger)
+		}
+	}
+	if pkg.WarnC != 80 || pkg.DangerC != 100 {
+		t.Errorf("Package id 0 warns at %v and is critical at %v, want the chip's own 80/100", pkg.WarnC, pkg.DangerC)
+	}
+	if systin := temperatureLabelled(t, v, "SYSTIN"); systin.WarnC != 70 || systin.DangerC != 85 {
+		t.Errorf("SYSTIN warns at %v and is critical at %v, want the board default 70/85", systin.WarnC, systin.DangerC)
+	}
+
+	// A drive's figure turns amber and red where the sensor it is taken from
+	// does, and a drive without a figure has no lines either.
+	for _, name := range []string{"nvme0n1", "nvme1n1"} {
+		d := diskNamed(t, v, name)
+		s := temperatureLabelled(t, v, name+" Composite")
+		if d.TemperatureWarnC == nil || d.TemperatureDangerC == nil {
+			t.Errorf("%s has a temperature but its limits are %v/%v", name, d.TemperatureWarnC, d.TemperatureDangerC)
+			continue
+		}
+		if *d.TemperatureWarnC != s.WarnC || *d.TemperatureDangerC != s.DangerC {
+			t.Errorf("%s turns amber/red at %v/%v, its Composite sensor at %v/%v",
+				name, *d.TemperatureWarnC, *d.TemperatureDangerC, s.WarnC, s.DangerC)
+		}
+	}
+	raw, err := json.Marshal(diskNamed(t, v, "sda"))
+	if err != nil {
+		t.Fatalf("marshal sda: %v", err)
+	}
+	for _, field := range []string{`"temperature_warn_c":null`, `"temperature_danger_c":null`} {
+		if !strings.Contains(string(raw), field) {
+			t.Errorf("sda without a temperature marshals as %s; want %s", raw, field)
+		}
 	}
 
 	// Fans, the stopped one included.

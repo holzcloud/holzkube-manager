@@ -173,6 +173,13 @@ type HardwareDisk struct {
 	// none for it -- a SATA drive without the drivetemp module -- or when it
 	// cannot be told which of two identical drives a sensor belongs to.
 	TemperatureC *float64 `json:"temperature_c"`
+
+	// TemperatureWarnC and TemperatureDangerC are where that figure turns
+	// amber and red: TemperatureLimits of the very sensor it is taken from, so
+	// the drive's figure and its row among the sensors change colour at the
+	// same number. Null exactly when TemperatureC is.
+	TemperatureWarnC   *float64 `json:"temperature_warn_c"`
+	TemperatureDangerC *float64 `json:"temperature_danger_c"`
 }
 
 // HardwareLink is one network interface.
@@ -199,6 +206,13 @@ type HardwareTemperature struct {
 	// HighC and CriticalC are the chip's own limits, null when it sets none.
 	HighC     *float64 `json:"high_c"`
 	CriticalC *float64 `json:"critical_c"`
+
+	// WarnC and DangerC are where the sensor turns amber and red: its chip's
+	// own limits, or its kind's default when it sets none. They come from
+	// TemperatureLimits, the one rule the node page, the host page and the
+	// host's state all use.
+	WarnC   float64 `json:"warn_c"`
+	DangerC float64 `json:"danger_c"`
 }
 
 // HardwareFan is one fan header.
@@ -538,7 +552,11 @@ func filesystemsView(mounts []talos.Mount) []HardwareFilesystem {
 // and network block devices.
 var virtualDiskPrefixes = []string{"loop", "ram", "zram", "dm-", "md", "nbd"}
 
-func disksView(devices []talos.BlockDevice, r hardwareRates, temps map[string]float64) []HardwareDisk {
+// diskTemperature is the reading a drive's figure is taken from, with the
+// limits of the sensor that took it.
+type diskTemperature struct{ celsius, warn, danger float64 }
+
+func disksView(devices []talos.BlockDevice, r hardwareRates, temps map[string]diskTemperature) []HardwareDisk {
 	out := make([]HardwareDisk, 0, len(devices))
 	for _, d := range devices {
 		if d.CDROM || hasAnyPrefix(d.Device, virtualDiskPrefixes) {
@@ -557,9 +575,11 @@ func disksView(devices []talos.BlockDevice, r hardwareRates, temps map[string]fl
 			ReadBytesPerSec:  math.Round(io.in),
 			WriteBytesPerSec: math.Round(io.out),
 		}
-		if c, ok := temps[d.Device]; ok {
-			c = round(c, 1)
+		if dt, ok := temps[d.Device]; ok {
+			c, warn, danger := round(dt.celsius, 1), dt.warn, dt.danger
 			disk.TemperatureC = &c
+			disk.TemperatureWarnC = &warn
+			disk.TemperatureDangerC = &danger
 		}
 		out = append(out, disk)
 	}
@@ -597,11 +617,11 @@ func networkView(links []talos.Link, r hardwareRates) []HardwareLink {
 // flattenSensors turns chips into the two flat lists the API carries, and
 // works out which drive each disk sensor belongs to.
 func flattenSensors(chips []talos.ChipReading, devices []talos.BlockDevice) (
-	temps []HardwareTemperature, fans []HardwareFan, diskTemps map[string]float64,
+	temps []HardwareTemperature, fans []HardwareFan, diskTemps map[string]diskTemperature,
 ) {
 	temps = make([]HardwareTemperature, 0)
 	fans = make([]HardwareFan, 0)
-	diskTemps = map[string]float64{}
+	diskTemps = map[string]diskTemperature{}
 	claimed := map[string]bool{}
 
 	for _, chip := range chips {
@@ -628,16 +648,23 @@ func flattenSensors(chips []talos.ChipReading, devices []talos.BlockDevice) (
 				}
 			}
 
+			// The limits of the rounded figures, the ones the JSON carries.
+			high, crit := roundPtr(t.High), roundPtr(t.Critical)
+			warn, danger := TemperatureLimits(string(chip.Kind), high, crit)
 			temps = append(temps, HardwareTemperature{
 				Chip:      chip.Name,
 				Kind:      string(chip.Kind),
 				Label:     label,
 				Celsius:   round(t.Celsius, 1),
-				HighC:     roundPtr(t.High),
-				CriticalC: roundPtr(t.Critical),
+				HighC:     high,
+				CriticalC: crit,
+				WarnC:     warn,
+				DangerC:   danger,
 			})
 			if i == primary && drive != "" {
-				diskTemps[drive] = t.Celsius
+				// Only a disk chip has a drive, so these are the disk
+				// kind's limits of this very sensor.
+				diskTemps[drive] = diskTemperature{celsius: t.Celsius, warn: warn, danger: danger}
 			}
 		}
 		for _, f := range chip.Fans {
