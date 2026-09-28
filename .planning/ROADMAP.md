@@ -128,7 +128,35 @@ Waves: 1 → {01} · 2 → {02, 03} · 3 → {04} · 4 → {05} · 5 → {06} ·
   3. Überschreitet die Temperatur oder die Belegung eines Datenträgers ihre Schwelle, zeigt der Host eine Warnung, die Wert und Schwelle nennt. Der Test dafür ist gegen eine entfernte Schwellenprüfung rot gesehen worden.
   4. Der Host steht in der Navigation und auf der Wand wie ein Knoten, mit genau einem von drei Zuständen — gesund, Warnung, nicht lesbar. Ein Host, dessen Werte nicht lesbar sind, erscheint dort nie als gesund, und der Test, der das hält, ist gegen einen Host rot gesehen worden, der es doch tat.
 
-**Plans**: TBD
+**Plans:** 8 plans
+
+Plans:
+**Wave 1**
+- [ ] 12-01-PLAN.md — Tracer: ein Host-Sensor über `Collector.Sample`, den einen Sampler (`host/local`), den Store und `GET /api/v1/host/history` bis zur Kurve auf `/host`; Wächter für Aufbewahrung, Inventar-Ausfall und Fehlerantworten (HMON-05)
+- [ ] 12-02-PLAN.md — Temperaturgrenzen als eine Go-Regel (`warn_c`/`danger_c` für Knoten und Host), Trip-Points des Pi (passive/hot/critical, nie active), `host.Assess` mit Sätzen und „nie gesund, wenn nicht lesbar" (HMON-07, HOST-04)
+
+**Wave 2** *(blocked on Wave 1 completion)*
+- [ ] 12-03-PLAN.md — Alle Werte im Verlauf mit eigenem Raten-Fenster des Samplers, Neustart-mit-Lücke-Test, `health` auf `/api/v1/host`, `host` in der Antwort der Wand (veraltet → nicht lesbar) (HMON-05, HOST-04, HMON-07)
+- [ ] 12-04-PLAN.md — Der Browser zeichnet die Grenzen des Servers; seine eigene Regel entfällt; Laufwerks-Temperatur und reduzierte Bewegung (HMON-07)
+
+**Wave 3** *(blocked on Wave 2 completion)*
+- [ ] 12-05-PLAN.md — Geteilte Diagrammblöcke aus `NodeHardware`, Verlauf auf `/host` über 1 h / 6 h / 24 h, „Not readable — no history", Texte; Checker-Auflagen 1, 2, 6 (HMON-05)
+
+**Wave 4** *(blocked on Wave 3 completion)*
+- [ ] 12-06-PLAN.md — Zustandszeile und Warnhinweis auf `/host`, Zustandsmarke in der Navigation, Host-Kachel als erste im Abschnitt „Nodes" der Wand (HOST-04, HMON-07)
+
+**Wave 5** *(blocked on Wave 4 completion)*
+- [ ] 12-07-PLAN.md — 12-px-Wortabstand gemessen und behoben, Verlaufs-Fixture für Layout-Prüfung und Bilder, README mit neuem `host.png` und `wall.png` (HMON-05, HMON-07, HOST-04)
+
+**Wave 6** *(blocked on Wave 5 completion)*
+- [ ] 12-08-PLAN.md — Vertrag und Anleitung; auf dem Pi: Verlauf über einen Neustart mit Lücke, nichts aufgezeichnet unter `subset=pid`, `./bin/task ci` (HMON-05, HMON-07, HOST-04)
+
+**Cross-cutting constraints:**
+- The warning list at 390 px wraps a long mount path instead of widening the page
+- The wall's host tile with a 26-character name fits at 390 px
+- A long warning sentence truncates on the wall tile and is complete on /host
+
+Waves: 1 → {01, 02} · 2 → {03, 04} · 3 → {05} · 4 → {06} · 5 → {07} · 6 → {08}
 **UI hint**: yes
 
 ### Phase 13: Host-Aktionen über einen root-eigenen Helfer
