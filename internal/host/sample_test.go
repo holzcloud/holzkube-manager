@@ -7,7 +7,9 @@ import (
 	"io/fs"
 	"maps"
 	"math"
+	"reflect"
 	"slices"
+	"strings"
 	"testing"
 	"testing/fstest"
 	"time"
@@ -327,4 +329,141 @@ func TestSampleHasItsOwnBaseline(t *testing.T) {
 	if u := sampled.CPU.Usage; !u.Readable || u.Value == nil || *u.Value != 50 {
 		t.Errorf("sampler at 19.5 s: usage = %+v, want 50 over its own window", u)
 	}
+}
+
+// hardenedHost is the production shape: ProcSubset=pid hiding CPU and memory,
+// one CPU sensor at 64.4 °C, and / at 23 % -- every value Assess rates is
+// readable and below its line.
+func hardenedHost(t *testing.T) (fs.FS, fakeSys) {
+	t.Helper()
+	sys := tracerSys()
+	sys.loads = sysinfoLoads
+	sys.statfs = map[string]FSStats{"/": piRootStatfs}
+	return overlayFS{FS: fixtureFS(t, "procsubset-pid"), over: sampleSensorsFS()}, sys
+}
+
+// TestReadCarriesHealth (D-06): the page's answer carries the host's state,
+// assessed from the very reading it carries, with lists that are never null.
+//
+// Fault injected and seen red: Read leaving Health zero (state "").
+func TestReadCarriesHealth(t *testing.T) {
+	t.Parallel()
+
+	t.Run("the Pi 5", func(t *testing.T) {
+		t.Parallel()
+
+		v := New(Config{FS: fixtureFS(t, "pi5"), Sys: tracerSys(), Now: newLiveClock().now}).Read(context.Background())
+		if !reflect.DeepEqual(v.Health, Assess(v.Live)) {
+			t.Errorf("health = %+v, want Assess of the same reading: %+v", v.Health, Assess(v.Live))
+		}
+		health, _ := marshalView(t, v)["health"].(map[string]any)
+		if s, _ := health["state"].(string); s != string(HealthOK) && s != string(HealthWarn) && s != string(HealthUnknown) {
+			t.Errorf("health.state on the wire = %v, want ok, warn or unknown", health["state"])
+		}
+		if s, _ := health["summary"].(string); s == "" {
+			t.Errorf("health.summary on the wire = %v, want a sentence", health["summary"])
+		}
+		for _, key := range []string{"warnings", "unreadable"} {
+			if _, isList := health[key].([]any); !isList {
+				t.Errorf("health.%s on the wire = %v, want a list (never null)", key, health[key])
+			}
+		}
+	})
+
+	t.Run("a hardened host is ok: CPU and memory are not rated", func(t *testing.T) {
+		t.Parallel()
+
+		fsys, sys := hardenedHost(t)
+		v := New(Config{FS: fsys, Sys: sys, Now: newLiveClock().now}).Read(context.Background())
+		if v.Health.State != HealthOK {
+			t.Errorf("health = %+v, want ok", v.Health)
+		}
+	})
+
+	t.Run("a platform with no readings", func(t *testing.T) {
+		t.Parallel()
+
+		v := New(Config{FS: fstest.MapFS{}, Sys: newUnsupportedSys(), Now: newLiveClock().now}).Read(context.Background())
+		if v.Health.State != HealthUnknown {
+			t.Errorf("state = %q, want unknown", v.Health.State)
+		}
+		for _, must := range []string{"Temperatures could not be read", "Usage of / could not be read"} {
+			if !strings.Contains(v.Health.Summary, must) {
+				t.Errorf("summary %q does not say %q", v.Health.Summary, must)
+			}
+		}
+	})
+}
+
+// TestLatest (D-11): the sampler leaves a timestamped snapshot the wall reads
+// without touching the host; before the first sample there is none.
+func TestLatest(t *testing.T) {
+	t.Parallel()
+
+	t.Run("nothing before the first sample, then the sample's", func(t *testing.T) {
+		t.Parallel()
+
+		fsys, sys := hardenedHost(t)
+		clock := newLiveClock()
+		c := New(Config{FS: fsys, Sys: sys, Now: clock.now})
+		if s, ok := c.Latest(); ok {
+			t.Fatalf("Latest before any Sample = %+v, true; want nothing", s)
+		}
+		// A page read is not a sample: the wall shows the sampler's view.
+		c.Read(context.Background())
+		if s, ok := c.Latest(); ok {
+			t.Fatalf("Latest after a page read = %+v, true; want nothing until the sampler ran", s)
+		}
+
+		clock.advance(15 * time.Second)
+		if _, err := c.Sample(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+		s, ok := c.Latest()
+		if !ok {
+			t.Fatal("Latest after a Sample: nothing")
+		}
+		if !s.At.Equal(clock.now()) {
+			t.Errorf("At = %v, want the collector's clock %v", s.At, clock.now())
+		}
+		if s.Name != "example-host" {
+			t.Errorf("Name = %q, want uname's nodename example-host", s.Name)
+		}
+		if want := Assess(c.sampleLive()); !reflect.DeepEqual(s.Health, want) {
+			t.Errorf("Health = %+v, want Assess of the sampled reading %+v", s.Health, want)
+		}
+		if s.Health.State != HealthOK {
+			t.Errorf("a hardened host below every line: state %q, want ok", s.Health.State)
+		}
+	})
+
+	t.Run("no name when uname cannot be read", func(t *testing.T) {
+		t.Parallel()
+
+		fsys, sys := hardenedHost(t)
+		sys.unameErr = errors.New("operation not permitted")
+		c := New(Config{FS: fsys, Sys: sys, Now: newLiveClock().now})
+		if _, err := c.Sample(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+		if s, _ := c.Latest(); s.Name != "" {
+			t.Errorf("Name = %q, want empty", s.Name)
+		}
+	})
+
+	t.Run("a hot host is warn in its snapshot", func(t *testing.T) {
+		t.Parallel()
+
+		fsys, sys := hardenedHost(t)
+		hot := fsys.(overlayFS)
+		hot.over = maps.Clone(hot.over)
+		hot.over["sys/class/hwmon/hwmon0/temp1_input"] = &fstest.MapFile{Data: []byte("88000\n")}
+		c := New(Config{FS: hot, Sys: sys, Now: newLiveClock().now})
+		if _, err := c.Sample(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+		if s, _ := c.Latest(); s.Health.State != HealthWarn || len(s.Health.Warnings) != 1 {
+			t.Errorf("health = %+v, want warn with the CPU's one warning", s.Health)
+		}
+	})
 }

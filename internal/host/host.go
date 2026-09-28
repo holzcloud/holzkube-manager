@@ -14,9 +14,10 @@
 //
 // # Every value is a reading
 //
-// The systemd unit this product ships sets ProcSubset=pid, which hides
-// /proc/stat and /proc/meminfo. A value that could not be read is therefore an
-// ordinary state, and it must never be drawn as a 0: 0 % CPU, 0 B of swap and
+// A systemd unit with ProcSubset=pid, as the reference installation runs the
+// daemon, hides /proc/stat and /proc/meminfo. (The repository ships no unit of
+// its own; the hardening is the operator's.) A value that could not be read is
+// therefore an ordinary state, and it must never be drawn as a 0: 0 % CPU, 0 B of swap and
 // 0 cores are all real readings that mean something else (D-02). So every value
 // is a Reading, which either carries a value or carries a Reason, and never
 // both.
@@ -104,6 +105,11 @@ type View struct {
 	Service Service `json:"service"`
 
 	Live Live `json:"live"`
+
+	// Health is Assess of Live: the one decision the page's header, the
+	// navigation and the wall show, made here so that none of them decides it
+	// again (D-06).
+	Health Health `json:"health"`
 }
 
 // Service is holzkube-manager itself on this machine (HOST-02, HOST-03).

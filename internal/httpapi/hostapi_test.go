@@ -74,6 +74,12 @@ func TestHostAPI(t *testing.T) {
 					Value    string `json:"value"`
 				} `json:"hostname"`
 			} `json:"device"`
+			Health struct {
+				State      string          `json:"state"`
+				Summary    string          `json:"summary"`
+				Warnings   json.RawMessage `json:"warnings"`
+				Unreadable json.RawMessage `json:"unreadable"`
+			} `json:"health"`
 		}
 		if err := json.Unmarshal(raw, &body); err != nil {
 			t.Fatalf("decode: %v (%s)", err, raw)
@@ -83,6 +89,22 @@ func TestHostAPI(t *testing.T) {
 		}
 		if _, err := time.Parse(time.RFC3339Nano, body.ObservedAt); err != nil {
 			t.Errorf("observed_at %q is not a timestamp: %v", body.ObservedAt, err)
+		}
+		// The server's one decision about the host (D-06), with lists that
+		// are lists even when empty.
+		switch host.HealthState(body.Health.State) {
+		case host.HealthOK, host.HealthWarn, host.HealthUnknown:
+		default:
+			t.Errorf("health.state = %q, want ok, warn or unknown (%s)", body.Health.State, raw)
+		}
+		if body.Health.Summary == "" {
+			t.Errorf("health.summary is empty (%s)", raw)
+		}
+		for name, list := range map[string]json.RawMessage{"warnings": body.Health.Warnings, "unreadable": body.Health.Unreadable} {
+			var items []string
+			if len(list) == 0 || list[0] != '[' || json.Unmarshal(list, &items) != nil {
+				t.Errorf("health.%s = %s, want an array", name, list)
+			}
 		}
 
 		if got, raw := reader.status(t, http.MethodGet, "/api/v1/host", nil); got != http.StatusOK {

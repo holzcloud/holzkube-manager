@@ -82,6 +82,9 @@ type Collector struct {
 	// while /host is open -- and the sampler's reads would shorten the page's
 	// windows in turn. Both slots are only touched under mu.
 	samplePrev *counters
+	// latest is what the last Sample saw, for the wall (see Latest). Nil
+	// until the first Sample.
+	latest *Snapshot
 
 	sizer *dirSizer
 }
@@ -129,6 +132,9 @@ func (c *Collector) Read(ctx context.Context) View {
 	v.Container = detectContainer(c.cfg.FS)
 	v.Service = c.readService(ctx, now, v.Container)
 	v.Live = c.readLive(&c.prev)
+	// From the same reading, so the page's markers, its meters and its header
+	// cannot disagree.
+	v.Health = Assess(v.Live)
 
 	return v
 }
@@ -159,6 +165,7 @@ func (c *Collector) readUnsupported(v View, now time.Time) View {
 		v.Service.UptimeSeconds = int64(now.Sub(c.cfg.Started) / time.Second)
 	}
 	v.Live = c.unsupportedLive()
+	v.Health = Assess(v.Live)
 	return v
 }
 

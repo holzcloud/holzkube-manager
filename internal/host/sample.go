@@ -3,6 +3,7 @@ package host
 import (
 	"context"
 	"strconv"
+	"time"
 )
 
 // Sample is the host's contribution to the metrics history: what the sampler
@@ -21,7 +22,44 @@ func (c *Collector) Sample(ctx context.Context) (map[string]float64, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	return HistoryValues(c.sampleLive()), nil
+	live := c.sampleLive()
+
+	name := ""
+	if u, err := c.cfg.Sys.Uname(); err == nil {
+		name = u.Nodename
+	}
+	snap := Snapshot{At: c.cfg.Now(), Name: name, Health: Assess(live)}
+	c.mu.Lock()
+	c.latest = &snap
+	c.mu.Unlock()
+
+	return HistoryValues(live), nil
+}
+
+// Snapshot is what the sampler's last pass saw of the host: when, under which
+// name, and in what state.
+type Snapshot struct {
+	// At is the Collector's clock when the sample was taken.
+	At time.Time
+	// Name is uname(2)'s nodename, or "" when it could not be read.
+	Name string
+	// Health is Assess of the reading the sample was taken from.
+	Health Health
+}
+
+// Latest is the sampler's last snapshot, and false before the first one.
+//
+// The wall reads this rather than reading the host on every request: a screen
+// refreshing every ten seconds costs the host nothing, and a sampler that
+// stalled shows as an old snapshot -- which the wall's reader turns grey (D-11)
+// -- instead of as a fresh green.
+func (c *Collector) Latest() (Snapshot, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.latest == nil {
+		return Snapshot{}, false
+	}
+	return *c.latest, true
 }
 
 // sampleLive is one Live reading against the sampler's own baseline slot.
