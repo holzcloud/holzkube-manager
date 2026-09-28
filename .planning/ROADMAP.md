@@ -128,7 +128,7 @@ Waves: 1 → {01} · 2 → {02, 03} · 3 → {04} · 4 → {05} · 5 → {06} ·
   3. Überschreitet die Temperatur oder die Belegung eines Datenträgers ihre Schwelle, zeigt der Host eine Warnung, die Wert und Schwelle nennt. Der Test dafür ist gegen eine entfernte Schwellenprüfung rot gesehen worden.
   4. Der Host steht in der Navigation und auf der Wand wie ein Knoten, mit genau einem von drei Zuständen — gesund, Warnung, nicht lesbar. Ein Host, dessen Werte nicht lesbar sind, erscheint dort nie als gesund, und der Test, der das hält, ist gegen einen Host rot gesehen worden, der es doch tat.
 
-**Plans:** 4/8 plans executed
+**Plans:** 5/8 plans executed
 
 Plans:
 **Wave 1**
@@ -140,7 +140,7 @@ Plans:
 - [x] 12-04-PLAN.md — Der Browser zeichnet die Grenzen des Servers; seine eigene Regel entfällt; Laufwerks-Temperatur und reduzierte Bewegung (HMON-07)
 
 **Wave 3** *(blocked on Wave 2 completion)*
-- [ ] 12-05-PLAN.md — Geteilte Diagrammblöcke aus `NodeHardware`, Verlauf auf `/host` über 1 h / 6 h / 24 h, „Not readable — no history", Texte; Checker-Auflagen 1, 2, 6 (HMON-05)
+- [x] 12-05-PLAN.md — Geteilte Diagrammblöcke aus `NodeHardware`, Verlauf auf `/host` über 1 h / 6 h / 24 h, „Not readable — no history", Texte; Checker-Auflagen 1, 2, 6 (HMON-05)
 
 **Wave 4** *(blocked on Wave 3 completion)*
 - [ ] 12-06-PLAN.md — Zustandszeile und Warnhinweis auf `/host`, Zustandsmarke in der Navigation, Host-Kachel als erste im Abschnitt „Nodes" der Wand (HOST-04, HMON-07)
@@ -199,6 +199,6 @@ Waves: 1 → {01, 02} · 2 → {03, 04} · 3 → {05} · 4 → {06} · 5 → {07
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
 | 11. Host-Seite — Gerät, Dienst, Live-Werte | v1.18 | 7/7 | Complete    | 2026-09-28 |
-| 12. Host wie ein Knoten — Verlauf, Warnung, Wand | v1.18 | 4/8 | In Progress|  |
+| 12. Host wie ein Knoten — Verlauf, Warnung, Wand | v1.18 | 5/8 | In Progress|  |
 | 13. Host-Aktionen über einen root-eigenen Helfer | v1.18 | 0/TBD | Not started | - |
 | 14. Telefon — Tippziele, die ein Daumen trifft | v1.18 | 0/TBD | Not started | - |
