@@ -42,8 +42,12 @@ did.
   disks and network, with the last 24 hours kept across restarts
 - **The machine it runs on** — the Host page: what the device is, which
   version runs and what the last update check found, and live CPU, memory,
-  filesystems, temperatures and network throughput; a value the service's
-  hardening hides says so instead of showing 0
+  filesystems, temperatures and network throughput, with 24 hours of history
+  kept across restarts and shown over 1 h, 6 h or 24 h like a node's; a warning
+  when a temperature or a filesystem crosses its threshold, naming the value and
+  the threshold; its state (healthy, warning, not readable) in the navigation
+  and as a tile on the wall; a value the service's hardening hides says so
+  instead of showing 0
 - **Apps** — everything that runs, grouped by what was installed, with its CPU
   and memory now and over the day
 - **Kubernetes** — workloads, pods and why one is broken, events, storage,
@@ -83,14 +87,17 @@ answer.
 
 ![How full the cluster is, per node](docs/screenshots/kubernetes.png)
 
-**The wall.** Every node and workload as a tile, how full the cluster is and
-the latest warnings. It never scrolls, and it always says how old its answer is.
+**The wall.** Every node and workload as a tile — the machine holzkube-manager
+runs on first among them — how full the cluster is and the latest warnings. It never scrolls, and it always says how old its answer is.
 
 ![The wall](docs/screenshots/wall.png)
 
 **Host.** The machine holzkube-manager itself runs on: what it is, the service
 and its last update check, and how it is doing right now. A value the service's
 hardening hides says so, and says which line shows it, instead of reading 0.
+Here the processor has run past its warning line: the notice says which value
+crossed which threshold, and the day's curves show it climbing — with a gap
+where the service was stopped, not a line drawn across it.
 
 ![The machine holzkube-manager runs on](docs/screenshots/host.png)
 

@@ -194,7 +194,18 @@ function live(path, body) {
       if (c.client_cert_days_left < 60) Object.assign(c, { client_cert_days_left: 64, client_cert_not_after: '2026-11-22T08:00:00Z' })
     }
   }
-  if (path.endsWith('/hardware') || path === '/api/v1/host') body.observed_at = now
+  if (path.endsWith('/hardware')) body.observed_at = now
+  // The host's reading, moved to now as a whole: every time in it keeps its
+  // distance to the reading, so "measured 23 s ago" stays 23 s and the service
+  // does not start after the machine booted.
+  if (path === '/api/v1/host') {
+    const shift = Date.now() - Date.parse(body.observed_at)
+    const moved = (t) => new Date(Date.parse(t) + shift).toISOString()
+    body.observed_at = moved(body.observed_at)
+    body.service.started_at = moved(body.service.started_at)
+    const size = body.service.data_dir.size
+    if (size.readable) size.value.measured_at = moved(size.value.measured_at)
+  }
   if (path.includes('/kubernetes/apps')) body.collected_at = now
   if (path.endsWith('/wall')) {
     body.generated_at = now
@@ -236,15 +247,28 @@ async function context(width, height, scale) {
   return { c, page }
 }
 
-async function shoot(page, route, file, { range, wait = 2500 } = {}) {
+// `through`: a selector the picture must reach to the bottom of. The window is
+// made that tall, so the picture shows what a page says further down -- /host's
+// curves sit below its notices and cards -- without a full page of everything.
+async function shoot(page, route, file, { range, wait = 2500, through } = {}) {
+  const viewport = page.viewportSize()
   await page.goto(base + route)
   await page.waitForTimeout(wait)
   if (range) {
     await page.getByRole('button', { name: range }).first().click()
     await page.waitForTimeout(2000)
   }
+  if (through) {
+    const box = await page.locator(through).boundingBox()
+    const height = Math.ceil(box.y + box.height + 16)
+    if (height > viewport.height) {
+      await page.setViewportSize({ width: viewport.width, height })
+      await page.waitForTimeout(1000)
+    }
+  }
   await page.mouse.move(0, 0)
   await page.screenshot({ path: join(shots, file) })
+  if (through) await page.setViewportSize(viewport)
 }
 
 const desk = await context(1440, 900, 1)
@@ -253,7 +277,7 @@ await shoot(desk.page, '/nodes/m-cp-1', 'node-hardware.png', { range: '24 h' })
 await shoot(desk.page, '/kubernetes/apps', 'apps.png')
 await shoot(desk.page, '/kubernetes/apps/media/Deployment/jellyfin', 'app-detail.png', { range: '24 h' })
 await shoot(desk.page, '/kubernetes', 'kubernetes.png')
-await shoot(desk.page, '/host', 'host.png', { range: '24 h' })
+await shoot(desk.page, '/host', 'host.png', { range: '24 h', through: 'section[aria-labelledby="host-readings"]' })
 await desk.c.close()
 
 const wall = await context(1600, 900, 1)
