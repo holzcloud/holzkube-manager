@@ -72,8 +72,16 @@ var noBaseline = Reason{Code: CodeNoBaseline, Message: "Waiting for a second rea
 type Collector struct {
 	cfg Config
 
-	mu   sync.Mutex
+	mu sync.Mutex
+	// prev is the page's baseline: what the last Read left for the next one.
 	prev *counters
+	// samplePrev is the sampler's own baseline, what the last Sample left for
+	// the next one. With one shared memo, a page polling every 3 s would
+	// shorten the sampler's 15-s window to whatever time had passed since its
+	// last poll -- the history's averages quietly turning into 3-s samples
+	// while /host is open -- and the sampler's reads would shorten the page's
+	// windows in turn. Both slots are only touched under mu.
+	samplePrev *counters
 
 	sizer *dirSizer
 }
@@ -120,7 +128,7 @@ func (c *Collector) Read(ctx context.Context) View {
 	v.Device = c.readDevice()
 	v.Container = detectContainer(c.cfg.FS)
 	v.Service = c.readService(ctx, now, v.Container)
-	v.Live = c.readLive()
+	v.Live = c.readLive(&c.prev)
 
 	return v
 }
@@ -150,7 +158,15 @@ func (c *Collector) readUnsupported(v View, now time.Time) View {
 	if !c.cfg.Started.IsZero() {
 		v.Service.UptimeSeconds = int64(now.Sub(c.cfg.Started) / time.Second)
 	}
-	v.Live = Live{
+	v.Live = c.unsupportedLive()
+	return v
+}
+
+// unsupportedLive is the Live section on a platform with no readings: every
+// value unsupported, the filesystem rows as statfs answers them there.
+func (c *Collector) unsupportedLive() Live {
+	r := reasonFor("", errUnsupported)
+	return Live{
 		CPU: CPU{
 			Usage:   Hidden[float64](r),
 			PerCore: Hidden[[]float64](r),
@@ -161,7 +177,6 @@ func (c *Collector) readUnsupported(v View, now time.Time) View {
 		Sensors:     Hidden[Sensors](r),
 		Network:     Hidden[Network](r),
 	}
-	return v
 }
 
 // The two sentences an absent status file is explained with (D-16). On a host
@@ -206,7 +221,10 @@ func (c *Collector) readService(ctx context.Context, now time.Time, container bo
 // readLive fills the Live section: CPU, load, memory and swap (HMON-01), the
 // filesystems of / and the data directory (HMON-02), the temperatures and
 // fans (HMON-03), and the network interfaces (HMON-04).
-func (c *Collector) readLive() Live {
+//
+// base is the baseline slot its rates are taken against and advance: &c.prev
+// for the page, &c.samplePrev for the sampler.
+func (c *Collector) readLive(base **counters) Live {
 	// The proof the hardening is in force (D-03). A mountinfo that cannot be
 	// read or parsed proves nothing, so every missing file is then reported as
 	// the read failure it is -- and no two paths are claimed to share a disk.
@@ -259,19 +277,20 @@ func (c *Collector) readLive() Live {
 	} else {
 		cur.cpu, cur.cores = &total, cores
 	}
-	c.rates(&live, cur, statReason, links, linkErr)
+	c.rates(base, &live, cur, statReason, links, linkErr)
 
 	return live
 }
 
 // rates computes the CPU percentages and the link throughputs against the
-// remembered previous read, over one window, and decides whether this read
-// becomes the next one's baseline.
-func (c *Collector) rates(live *Live, cur counters, statReason *Reason, links []linkSample, linkErr error) {
+// previous read remembered in base, over one window, and decides whether this
+// read becomes the next one's baseline there. base is one of the Collector's
+// slots and is only read and written under c.mu.
+func (c *Collector) rates(base **counters, live *Live, cur counters, statReason *Reason, links []linkSample, linkErr error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	prev := c.prev
+	prev := *base
 	var window time.Duration
 	usable := false
 	if prev != nil {
@@ -325,7 +344,7 @@ func (c *Collector) rates(live *Live, cur counters, statReason *Reason, links []
 	// compared: a process cannot outlive a reboot, and a boot time derived from
 	// CLOCK_BOOTTIME jitters enough to make every baseline look foreign.
 	if prev == nil || window < 0 || window >= minRateWindow {
-		c.prev = &cur
+		*base = &cur
 	}
 }
 

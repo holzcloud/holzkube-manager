@@ -4,10 +4,13 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"reflect"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/holzcloud/holzkube-manager/internal/model"
+	"github.com/holzcloud/holzkube-manager/internal/store/fsstore"
 )
 
 // The host's history (2026-09-28): the machine this daemon runs on, sampled in
@@ -215,4 +218,69 @@ func (r *subjectRecorder) lines(l slog.Level) []string {
 		}
 	}
 	return out
+}
+
+// TestTheHostHistorySurvivesARestartWithItsGap (success criterion 2): the
+// host's history written, flushed and read back is the same history -- and a
+// stretch in which its CPU could not be read comes back as a gap, with no
+// point and no 0, in every range, while the temperature it could read runs
+// straight through it.
+//
+// Fault injected and seen red: encodeLocked leaving the host/local subject out
+// of the file -- the reopened store had no host history at all.
+func TestTheHostHistorySurvivesARestartWithItsGap(t *testing.T) {
+	path := historyPath(t)
+	now := t0.Add(3 * time.Hour)
+	gapFrom, gapTo := t0.Add(20*time.Minute), t0.Add(40*time.Minute)
+	inGap := func(at time.Time) bool { return at.After(gapFrom) && at.Before(gapTo) }
+
+	before := Open(path, fsstore.ReadFile, fsstore.WriteFileAtomic, t0, quiet())
+	for at := t0; !at.After(now); at = at.Add(FineStep) {
+		sec := float64(at.Sub(t0) / time.Second)
+		values := map[string]float64{"temp:cpu_thermal/temp1": 50 + sec/1000}
+		if !inGap(at) {
+			values["cpu"] = 5 + sec/1000
+		}
+		before.Record(HostSubject(), at, values)
+	}
+	if err := before.Flush(now); err != nil {
+		t.Fatalf("Flush: %v", err)
+	}
+
+	after := Open(path, fsstore.ReadFile, fsstore.WriteFileAtomic, now, quiet())
+	want, got := allRanges(before, HostSubject(), now), allRanges(after, HostSubject(), now)
+	for r := range want {
+		if len(want[r].Series) == 0 {
+			t.Fatalf("%s: nothing to compare; the test recorded nothing", r)
+		}
+		if !reflect.DeepEqual(got[r], want[r]) {
+			t.Errorf("%s after a restart differs from before it:\n got %v\nwant %v", r, summary(got[r]), summary(want[r]))
+		}
+
+		if len(got[r].Series["cpu"]) == 0 {
+			t.Errorf("%s: no cpu series at all after the restart", r)
+		}
+		for _, p := range got[r].Series["cpu"] {
+			at := time.UnixMilli(int64(p[0]))
+			if inGap(at) {
+				t.Errorf("%s: a cpu point at %s, inside the stretch it was not read", r, at.Sub(t0))
+			}
+			if p[1] == 0 {
+				t.Errorf("%s: a cpu point of 0 at %s; an unread value is a gap, never a 0", r, at.Sub(t0))
+			}
+		}
+		// The 1-h range ends two hours after the stretch; the other two span it.
+		if r == Range1h {
+			continue
+		}
+		temps := 0
+		for _, p := range got[r].Series["temp:cpu_thermal/temp1"] {
+			if inGap(time.UnixMilli(int64(p[0]))) {
+				temps++
+			}
+		}
+		if want := int(gapTo.Sub(gapFrom)/(time.Duration(got[r].StepSeconds)*time.Second)) - 1; temps < want {
+			t.Errorf("%s: %d temperature points inside the stretch, want at least %d -- it was read all along", r, temps, want)
+		}
+	}
 }
