@@ -1,8 +1,8 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { render, screen, waitFor } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import type { ReactNode } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { api, type Wall } from '@/api'
+import { api, type Wall, wallSchema } from '@/api'
 import { WallView } from '@/routes/wall'
 
 /**
@@ -71,6 +71,7 @@ function wallAt(when: Date, overrides: Partial<Wall> = {}): Wall {
     warnings: [],
     summary: { ok: 2 },
     trends: { cluster: {}, nodes: {} },
+    host: null as Wall['host'],
     ...overrides,
   }
   // Unless a test says otherwise, the roll-up follows from the workloads.
@@ -526,5 +527,143 @@ describe('the wall', () => {
     // a moment ago, with its age on screen, beats nothing at all.
     await waitFor(() => expect(asked).toHaveBeenCalled())
     expect(screen.getByText('cp-1')).toBeInTheDocument()
+  })
+})
+
+const HOST_NAME = 'manager-01.homelab.example'
+const HOST_WARN = { name: HOST_NAME, state: 'warn', reason: 'cpu_thermal 82.1 °C ≥ 80 °C' }
+
+/** The host tile, or null when there is none. */
+function hostTile(container: HTMLElement): HTMLElement | null {
+  return container.querySelector<HTMLElement>('[data-kind="host"]')
+}
+
+describe('the host tile (D-14)', () => {
+  it('is the first tile of Nodes: its name, "manager · {reason}", and the state as the server sent it', async () => {
+    vi.spyOn(api.kubernetes, 'wall').mockResolvedValue(wallAt(new Date(), { host: HOST_WARN }))
+
+    const { container } = wrap(<WallView />)
+    await screen.findByText(HOST_NAME)
+
+    const tile = hostTile(container)
+    if (tile === null) throw new Error('no host tile')
+    expect(tile.dataset.state).toBe('warn')
+    expect(tile.className).toContain('bg-amber-700')
+    expect(tile).toHaveTextContent(HOST_NAME)
+    expect(within(tile).getByText('manager · cpu_thermal 82.1 °C ≥ 80 °C')).toBeInTheDocument()
+    // First among the nodes, and in the same grid as them.
+    const grid = tile.parentElement as HTMLElement
+    expect(grid.firstElementChild).toBe(tile)
+    expect(within(grid).getByText('cp-1')).toBeInTheDocument()
+  })
+
+  it("draws ok and unknown in the wall's own green and grey", async () => {
+    vi.spyOn(api.kubernetes, 'wall').mockResolvedValue(
+      wallAt(new Date(), { host: { name: HOST_NAME, state: 'ok', reason: 'healthy' } }),
+    )
+    const first = wrap(<WallView />)
+    await screen.findByText(HOST_NAME)
+    expect(hostTile(first.container)?.dataset.state).toBe('ok')
+    expect(hostTile(first.container)?.className).toContain('bg-green-700')
+    expect(screen.getByText('manager · healthy')).toBeInTheDocument()
+    first.unmount()
+
+    vi.spyOn(api.kubernetes, 'wall').mockResolvedValue(
+      wallAt(new Date(), { host: { name: HOST_NAME, state: 'unknown', reason: 'not readable' } }),
+    )
+    const second = wrap(<WallView />)
+    await screen.findByText(HOST_NAME)
+    expect(hostTile(second.container)?.dataset.state).toBe('unknown')
+    expect(hostTile(second.container)?.className).toContain('bg-zinc-600')
+    expect(screen.getByText('manager · not readable')).toBeInTheDocument()
+  })
+
+  it('draws no host tile when the answer has no host, and the nodes as before', async () => {
+    vi.spyOn(api.kubernetes, 'wall').mockResolvedValue(wallAt(new Date()))
+    const first = wrap(<WallView />)
+    await screen.findByText('cp-1')
+    expect(hostTile(first.container)).toBeNull()
+    expect(first.container.querySelectorAll('[data-state]').length).toBeGreaterThan(0)
+    first.unmount()
+
+    // An older daemon sends no host field at all.
+    const { host: _, ...older } = wallAt(new Date())
+    vi.spyOn(api.kubernetes, 'wall').mockResolvedValue(wallSchema.parse(older))
+    const second = wrap(<WallView />)
+    await screen.findByText('cp-1')
+    expect(hostTile(second.container)).toBeNull()
+  })
+
+  it("does not count the host among the cluster's nodes", async () => {
+    vi.spyOn(api.kubernetes, 'wall').mockResolvedValue(wallAt(new Date(), { host: HOST_WARN }))
+
+    wrap(<WallView />)
+
+    // The headline is the cluster's answer: one node, and the host's warning
+    // does not turn "Everything is running" into something else.
+    expect(
+      await screen.findByText(/^as of \d+s ago · 1 workload, 1 node · holzkube-manager alpha$/),
+    ).toBeInTheDocument()
+    expect(screen.getByText('Everything is running')).toBeInTheDocument()
+    // Nor is it named a second time under Needs attention.
+    expect(screen.queryByText('Needs attention')).toBeNull()
+  })
+
+  it('draws no curve on the host tile, even when a node shares its name', async () => {
+    const t = Date.now()
+    vi.spyOn(api.kubernetes, 'wall').mockResolvedValue(
+      wallAt(new Date(), {
+        host: HOST_WARN,
+        nodes: [{ kind: 'Node', namespace: '', name: HOST_NAME, state: 'ok', detail: 'ready' }],
+        trends: {
+          cluster: {},
+          nodes: {
+            [HOST_NAME]: [
+              [t - 15_000, 10],
+              [t, 12],
+            ],
+          },
+        },
+      }),
+    )
+
+    const { container } = wrap(<WallView />)
+    await screen.findAllByText(HOST_NAME)
+
+    const curves = screen.getAllByRole('img', { name: `${HOST_NAME} processor load, last hour` })
+    expect(curves).toHaveLength(1)
+    const tile = hostTile(container)
+    if (tile === null) throw new Error('no host tile')
+    expect(within(tile).queryByRole('img')).toBeNull()
+    // The node keeps its own.
+    const node = container.querySelector('[data-state="ok"]:not([data-kind])') as HTMLElement
+    expect(within(node).getByRole('img')).toBeInTheDocument()
+  })
+
+  it('sizes every tile of the section by the longest name, the host included', async () => {
+    vi.spyOn(api.kubernetes, 'wall').mockResolvedValue(
+      wallAt(new Date(), {
+        host: { name: HOST_NAME, state: 'ok', reason: 'healthy' },
+        nodes: [
+          { kind: 'Node', namespace: '', name: 'cp-1', state: 'ok', detail: 'ready' },
+          { kind: 'Node', namespace: '', name: 'cp-2', state: 'ok', detail: 'ready' },
+        ],
+      }),
+    )
+
+    const { container } = wrap(<WallView />)
+    await screen.findByText(HOST_NAME)
+
+    // A 26-character host name among two short node names: every tile in the
+    // section drops to the size a 26-character name fits at, and the grid
+    // takes the wide floor, so the section stays one size.
+    const grid = hostTile(container)?.parentElement as HTMLElement
+    const tiles = [...grid.children]
+    expect(tiles).toHaveLength(3)
+    for (const tile of tiles) {
+      expect(tile.className).toContain('md:text-[2.2vmin]')
+      expect(tile.className).not.toContain('md:text-[2.9vmin]')
+    }
+    expect(grid.className).toContain('minmax(16rem,1fr)')
   })
 })
