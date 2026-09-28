@@ -481,3 +481,7 @@ Binding for the planner:
    (`SEVERITY_COLOR[severity]`), not always `--viz-danger`; the wall's host
    sentence puts the figure first so a 1600-px tile keeps the reading;
    re-render host.png and wall.png.
+5. **Carried from 12-SECURITY residual 1:** on the thermal-zone fallback path,
+   a zone whose `type` cannot be read while no CPU chip reported must be named
+   in `Unread` (the host is then Not readable, never Healthy) — a small Go fix
+   with its red-first test, placed in whichever plan touches internal/host.
