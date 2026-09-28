@@ -385,9 +385,11 @@ function FilesystemsCard({ filesystems }: { filesystems: Host['live']['filesyste
               </div>
             )
           }
-          const { size_bytes: size, used_bytes: used, available_bytes: free } = f.usage.value
+          const { used_bytes: used, available_bytes: free } = f.usage.value
           // df's denominator: blocks reserved for root are neither used nor
-          // available, so used / size would read lower than df's Use%.
+          // available, so used / size would read lower than df's Use%. The
+          // figure, the bar, the caption and the server's 80 % rule all divide
+          // by this one number, so the caption names it ("usable").
           const ceiling = used + free
           return (
             <Meter
@@ -401,7 +403,7 @@ function FilesystemsCard({ filesystems }: { filesystems: Host['live']['filesyste
               danger={ceiling * 0.9}
               detail={
                 <>
-                  {formatBytes(used)} of {formatBytes(size)} · {formatBytes(free)} free
+                  {formatBytes(used)} of {formatBytes(ceiling)} usable · {formatBytes(free)} free
                   {f.device !== '' && (
                     <>
                       {' · '}
@@ -653,26 +655,42 @@ function ProcessorCard({
         <div className="min-w-0">
           <CardTitle className="text-base">Processor</CardTitle>
           {cores.readable && (
-            <p className="truncate text-sm text-muted-foreground">{cores.value} cores</p>
+            <p className="truncate text-sm text-muted-foreground">
+              {cores.value === 1 ? '1 core' : `${cores.value} cores`}
+            </p>
           )}
         </div>
+        {/* One strong figure where the eye lands, in every state: usage when it
+            was read; otherwise the 1-minute load, which survives the hardening
+            (it comes from sysinfo(2)), with usage said once below it, muted. */}
         <div className="text-right">
           {usage.readable ? (
-            <p className="font-semibold text-xl tabular-nums">{formatPercent(usage.value)}</p>
+            <>
+              <p className="font-semibold text-xl tabular-nums">{formatPercent(usage.value)}</p>
+              {load.readable ? (
+                <p className="text-xs text-muted-foreground tabular-nums">
+                  load {load.value.load1.toFixed(2)} · {load.value.load5.toFixed(2)} ·{' '}
+                  {load.value.load15.toFixed(2)}
+                </p>
+              ) : (
+                <MissingValue reason={load.reason} align="right" />
+              )}
+            </>
+          ) : load.readable ? (
+            <>
+              <p className="font-semibold text-xl tabular-nums">
+                load {load.value.load1.toFixed(2)}
+              </p>
+              <p className="text-xs text-muted-foreground tabular-nums">
+                5 min {load.value.load5.toFixed(2)} · 15 min {load.value.load15.toFixed(2)}
+              </p>
+              <MissingValue reason={usage.reason} align="right" />
+            </>
           ) : (
-            <MissingValue reason={usage.reason} align="right" />
-          )}
-          {/* Load survives the hardening (it comes from sysinfo(2)), so it is
-              shown whenever it was read, whatever happened to usage. */}
-          {load.readable ? (
-            <p className="text-xs text-muted-foreground tabular-nums">
-              load {load.value.load1.toFixed(2)} · {load.value.load5.toFixed(2)} ·{' '}
-              {load.value.load15.toFixed(2)}
-            </p>
-          ) : (
-            <p className="text-xs text-muted-foreground">
-              Load not readable: {reasonDetail(load.reason)}
-            </p>
+            <>
+              <MissingValue reason={usage.reason} align="right" />
+              <MissingValue reason={load.reason} align="right" />
+            </>
           )}
         </div>
       </CardHeader>
