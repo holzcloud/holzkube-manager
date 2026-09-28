@@ -126,6 +126,13 @@ record_status() {
   if [[ -z $outcome && $rc -ne 0 ]]; then
     outcome=failed
   fi
+  # Nur ein gescheiterter Lauf darf eine Version offen lassen; so liest es
+  # internal/host/updatestatus, und eine Datei, die der Leser verweigert,
+  # zeigte die Seite als "nicht lesbar" statt als das, was geschah. Wer nicht
+  # sagen kann, was installiert ist, hat nicht "aktualisiert".
+  if [[ -n $outcome && $outcome != failed && ( -z ${INSTALLED:-} || -z ${LATEST:-} ) ]]; then
+    outcome=failed
+  fi
   [[ -n $outcome && -n $dir ]] || return 0
 
   # Ein Symlink wird nicht verfolgt, von niemandem.
@@ -179,6 +186,11 @@ on_exit() {
   if [[ -n ${TMP:-} ]]; then
     rm -rf "$TMP"
   fi
+  # Festgehalten wird, was jetzt auf der Platte liegt, nicht was vor dem Lauf
+  # dort lag: ein Lauf, der nach dem install scheitert oder abgebrochen wird,
+  # hat das neue Binary schon hingelegt, und ein Rollback das vorige zurueck.
+  # Antwortet es nicht, ist die Version unbekannt -- leer, nicht die alte.
+  INSTALLED=$("$BIN" --version 2>/dev/null | awk '{print $NF}')
   record_status "$rc" >/dev/null 2>&1 || true
 }
 
@@ -213,10 +225,9 @@ trap 'exit 130' INT
 trap 'exit 143' TERM
 trap 'exit 129' HUP
 
-# Was installiert ist, steht fest, bevor irgendetwas das Netz fragt: auch ein
-# Lauf, der an der Release-Liste scheitert, soll sagen koennen, was lief.
+# Was vor dem Lauf installiert ist, fuer den Vergleich mit dem Release. Was
+# festgehalten wird, liest on_exit erst am Ende neu.
 LOCAL_VERSION=$("$BIN" --version 2>/dev/null | awk '{print $NF}' || echo "keine")
-[[ $LOCAL_VERSION == keine ]] || INSTALLED=$LOCAL_VERSION
 
 command -v curl    >/dev/null || fail "curl fehlt"
 command -v tar     >/dev/null || fail "tar fehlt"
@@ -423,7 +434,6 @@ if [[ $ok -eq 1 ]]; then
       log "Update-Skript erneuert: $SELF"
     fi
   fi
-  INSTALLED=$("$BIN" --version 2>/dev/null | awk '{print $NF}') || INSTALLED=""
   OUTCOME=updated
   log ""
   log "Aktualisiert auf $("$BIN" --version)."
