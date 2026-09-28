@@ -14,6 +14,7 @@ import (
 
 	"github.com/holzcloud/holzkube-manager/internal/history"
 	"github.com/holzcloud/holzkube-manager/internal/host"
+	"github.com/holzcloud/holzkube-manager/internal/httpapi"
 	"github.com/holzcloud/holzkube-manager/internal/inventory"
 	"github.com/holzcloud/holzkube-manager/internal/kube"
 	"github.com/holzcloud/holzkube-manager/internal/model"
@@ -272,7 +273,13 @@ func sampleHostOnce(t *testing.T, store *history.Store, collector *host.Collecto
 
 // TestHostHistoryAPI is the host's history end to end: the real collector
 // reading a sensor out of /sys, the real sampler filing it under host/local,
-// the real store, and the route answering it with the node's contract.
+// the real store, and the route answering it with the node's contract -- and
+// the node route's refusals: 401 without a session, 400 for a range that is
+// not one of the three, 502 without a store. A reader may read it, and reading
+// it writes nothing to the archive.
+//
+// Fault injected and seen red: hostHistory without historyRange, always
+// answering Range1h -- ?range=7d came back 200.
 func TestHostHistoryAPI(t *testing.T) {
 	t.Parallel()
 
@@ -313,4 +320,99 @@ func TestHostHistoryAPI(t *testing.T) {
 			t.Errorf("temp:cpu_thermal/temp1 = %v, want a point at 64.4", points)
 		}
 	})
+
+	t.Run("no session", func(t *testing.T) {
+		t.Parallel()
+
+		h := newHarness(t, withHistory(), withHost(collector))
+		resp, raw := h.do(t, http.MethodGet, "/api/v1/host/history?range=1h", nil)
+		if resp.StatusCode != http.StatusUnauthorized {
+			t.Fatalf("GET /api/v1/host/history without a session: %d, want 401 (%s)", resp.StatusCode, raw)
+		}
+	})
+
+	t.Run("a reader reads it before any sample, and nothing is audited", func(t *testing.T) {
+		t.Parallel()
+
+		h := newHarness(t, withHistory(), withHost(collector))
+		h.setupAndLogin(t)
+		if resp, raw := h.do(t, http.MethodPost, "/api/v1/auth/sudo",
+			map[string]string{"password": testPass}); resp.StatusCode != http.StatusNoContent {
+			t.Fatalf("sudo: %d (%s)", resp.StatusCode, raw)
+		}
+		if resp, raw := h.do(t, http.MethodPost, "/api/v1/users", map[string]string{
+			"username": "reader-account", "password": newAccountPass, "role": string(model.RoleReader),
+		}); resp.StatusCode != http.StatusCreated {
+			t.Fatalf("creating the reader: %d (%s)", resp.StatusCode, raw)
+		}
+		reader := h.asUser(t, "reader-account", newAccountPass)
+
+		before := len(h.auditPage(t, "").Items)
+
+		status, raw := reader.status(t, http.MethodGet, "/api/v1/host/history?range=6h", nil)
+		if status != http.StatusOK {
+			t.Fatalf("reader: %d, want 200 (%s)", status, raw)
+		}
+		var body any
+		if err := json.Unmarshal(raw, &body); err != nil {
+			t.Fatalf("decode: %v (%s)", err, raw)
+		}
+		if v := requireKeys(t, "/api/v1/host/history", body, historyKeys); v["range"] != "6h" {
+			t.Errorf("range = %v, want 6h", v["range"])
+		}
+		if !strings.Contains(string(raw), `"series":{}`) {
+			t.Errorf("a host never sampled answers %s; want \"series\":{}", raw)
+		}
+
+		if after := len(h.auditPage(t, "").Items); after != before {
+			t.Errorf("reading the host's history wrote to the archive: %d records before, %d after", before, after)
+		}
+	})
+
+	t.Run("a range that is not one of the three", func(t *testing.T) {
+		t.Parallel()
+
+		h := newHarness(t, withHistory(), withHost(collector))
+		h.setupAndLogin(t)
+		resp, raw := h.do(t, http.MethodGet, "/api/v1/host/history?range=7d", nil)
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Fatalf("range=7d: %d, want 400 (%s)", resp.StatusCode, raw)
+		}
+		p := decodeProblem(t, resp, raw)
+		if p.Type != httpapi.TypeValidation {
+			t.Errorf("type = %q, want %s", p.Type, httpapi.TypeValidation)
+		}
+		if len(p.Errors) != 1 || p.Errors[0].Field != "range" {
+			t.Errorf("errors = %+v, want one naming the field range", p.Errors)
+		}
+	})
+
+	t.Run("an instance without a history", func(t *testing.T) {
+		t.Parallel()
+
+		h := newHarness(t, withHost(collector))
+		h.setupAndLogin(t)
+		resp, raw := h.do(t, http.MethodGet, "/api/v1/host/history?range=1h", nil)
+		if resp.StatusCode != http.StatusBadGateway {
+			t.Fatalf("no store: %d, want 502 (%s)", resp.StatusCode, raw)
+		}
+		if p := decodeProblem(t, resp, raw); p.Code != "upstream.history-unavailable" {
+			t.Errorf("code = %q, want upstream.history-unavailable", p.Code)
+		}
+	})
+}
+
+// TestAMachineHistoryWithoutAStore is the node route's answer when the instance
+// keeps no history: the same 502 the host route gives, so the page says the
+// same thing for both.
+func TestAMachineHistoryWithoutAStore(t *testing.T) {
+	c := newInventoryHarnessWith(t, talossim.Options{})
+	resp, raw := c.do(t, http.MethodGet,
+		"/api/v1/machines/00000000-0000-0000-0000-000000000000/hardware/history?range=1h", nil)
+	if resp.StatusCode != http.StatusBadGateway {
+		t.Fatalf("no store: %d, want 502 (%s)", resp.StatusCode, raw)
+	}
+	if p := decodeProblem(t, resp, raw); p.Code != "upstream.history-unavailable" {
+		t.Errorf("code = %q, want upstream.history-unavailable", p.Code)
+	}
 }
