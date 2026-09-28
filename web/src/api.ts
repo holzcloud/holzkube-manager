@@ -2955,6 +2955,37 @@ export const hostSchema = z.object({
     kernel: reading(z.string()),
     uptime_seconds: reading(z.number()),
   }),
+  /**
+   * How the machine is doing right now (HMON-01). Under the production unit's
+   * ProcSubset=pid, usage, per_core and memory arrive not readable with
+   * `hardening.proc-subset`; load stays readable, from sysinfo(2).
+   */
+  live: z.object({
+    /** The window the rates were computed over; null before a second reading. */
+    rates_over_seconds: z.number().nullable(),
+    cpu: z.object({
+      usage: reading(z.number()),
+      per_core: reading(z.array(z.number()).nullish().transform(orEmpty)),
+      load: reading(
+        z.object({
+          load1: z.number(),
+          load5: z.number(),
+          load15: z.number(),
+          source: z.enum(['loadavg', 'sysinfo']),
+        }),
+      ),
+    }),
+    memory: reading(
+      z.object({
+        total_bytes: z.number(),
+        used_bytes: z.number(),
+        cache_bytes: z.number(),
+        available_bytes: z.number(),
+        swap_total_bytes: z.number(),
+        swap_used_bytes: z.number(),
+      }),
+    ),
+  }),
 })
 
 export type Host = z.infer<typeof hostSchema>
