@@ -2948,7 +2948,12 @@ export const hostSchema = z.object({
   container: z.boolean(),
   device: z.object({
     hostname: reading(z.string()),
+    model: reading(z.string()),
+    arch: reading(z.object({ goarch: z.string(), machine: z.string() })),
+    cores: reading(z.number()),
+    os: reading(z.string()),
     kernel: reading(z.string()),
+    uptime_seconds: reading(z.number()),
   }),
 })
 
