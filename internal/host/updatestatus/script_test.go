@@ -98,18 +98,7 @@ func newScriptEnv(t *testing.T, installed string, checksumOK bool) *scriptEnv {
 		t.Fatal(err)
 	}
 
-	// The release as GitHub would list it: both architectures, so the test
-	// passes on the Pi and on an amd64 runner alike.
-	archive := releaseArchive(t, fakeDaemon(fakeRelease))
-	e.write(filepath.Join(dir, "fixtures", "archive.tar.gz"), string(archive), 0o644)
-	sum := sha256.Sum256(archive)
-	hexSum := hex.EncodeToString(sum[:])
-	if !checksumOK {
-		hexSum = strings.Repeat("0", 64)
-	}
-	e.write(filepath.Join(dir, "fixtures", "checksums.txt"),
-		hexSum+"  holzkube-manager_"+fakeRelease+"_linux_arm64.tar.gz\n"+
-			hexSum+"  holzkube-manager_"+fakeRelease+"_linux_amd64.tar.gz\n", 0o644)
+	e.setRelease(fakeDaemon(fakeRelease), checksumOK)
 	e.write(filepath.Join(dir, "fixtures", "releases.json"), `[{"tag_name":"v`+fakeRelease+`","draft":false,"prerelease":true,"assets":[`+
 		`{"id":11,"name":"holzkube-manager_`+fakeRelease+`_linux_arm64.tar.gz"},`+
 		`{"id":12,"name":"holzkube-manager_`+fakeRelease+`_linux_amd64.tar.gz"},`+
@@ -121,6 +110,23 @@ func newScriptEnv(t *testing.T, installed string, checksumOK bool) *scriptEnv {
 	e.write(filepath.Join(e.stubs, "sleep"),
 		"#!/usr/bin/env bash\nif [[ -n ${HKM_STUB_SLEEP_BLOCK:-} ]]; then touch \"$HKM_STUB_SLEEP_BLOCK\"; exec /bin/sleep 60; fi\nexit 0\n", 0o755)
 	return e
+}
+
+// setRelease puts daemon into the release archive the curl stub serves. The
+// release is listed with both architectures, so the test passes on the Pi and
+// on an amd64 runner alike. checksumOK false writes a wrong sha256.
+func (e *scriptEnv) setRelease(daemon string, checksumOK bool) {
+	e.t.Helper()
+	archive := releaseArchive(e.t, daemon)
+	e.write(filepath.Join(e.dir, "fixtures", "archive.tar.gz"), string(archive), 0o644)
+	sum := sha256.Sum256(archive)
+	hexSum := hex.EncodeToString(sum[:])
+	if !checksumOK {
+		hexSum = strings.Repeat("0", 64)
+	}
+	e.write(filepath.Join(e.dir, "fixtures", "checksums.txt"),
+		hexSum+"  holzkube-manager_"+fakeRelease+"_linux_arm64.tar.gz\n"+
+			hexSum+"  holzkube-manager_"+fakeRelease+"_linux_amd64.tar.gz\n", 0o644)
 }
 
 func (e *scriptEnv) write(path, content string, mode os.FileMode) {
@@ -565,6 +571,56 @@ func TestUpdateScriptAsRoot(t *testing.T) {
 		if got := e.binVersion(); got != "holzkube-managerd "+fakeInstalled {
 			t.Errorf("installed binary answers %q, want the previous one back", got)
 		}
+	})
+
+	// WR-05: what is recorded as installed is what is on disk when the run
+	// ends, and a run that cannot say what that is has not "updated". Each of
+	// these used to record a version from before the run, or a null the
+	// daemon's own reader refuses for anything but failed.
+	t.Run("killed in the health loop records the binary it left installed", func(t *testing.T) {
+		t.Parallel()
+		e := newScriptEnv(t, fakeInstalled, true)
+		ready := filepath.Join(e.dir, "health-wait")
+		e.extra = append(e.extra, "HKM_STUB_HEALTHY=0", "HKM_STUB_SLEEP_BLOCK="+ready)
+		rc := e.runSignalled(true, ready, syscall.SIGTERM)
+		// The new binary is in place and nothing rolled it back.
+		e.wantStatus(OutcomeFailed, ptr(fakeRelease), ptr(fakeRelease))
+		if got := e.binVersion(); got != "holzkube-managerd "+fakeRelease {
+			t.Errorf("installed binary answers %q; the case assumes the kill came after the install", got)
+		}
+		if rc != 143 {
+			t.Errorf("exit = %d, want 143", rc)
+		}
+	})
+
+	t.Run("an update whose binary cannot say its version is failed", func(t *testing.T) {
+		t.Parallel()
+		e := newScriptEnv(t, fakeInstalled, true)
+		// Answers from the download directory, where the script checks it
+		// before installing, and not once installed.
+		e.setRelease("#!/bin/sh\ncase \"$0\" in */usr-local-bin/*) exit 1 ;; esac\n"+
+			"echo \"holzkube-managerd "+fakeRelease+"\"\n", true)
+		rc := e.run(true)
+		e.wantStatus(OutcomeFailed, nil, ptr(fakeRelease))
+		// The exit code stays the update's, whose health check passed; only
+		// the record is downgraded.
+		if rc != 0 {
+			t.Errorf("exit = %d, want 0", rc)
+		}
+	})
+
+	t.Run("rollback with no binary before the run records the one rolled back to", func(t *testing.T) {
+		t.Parallel()
+		e := newScriptEnv(t, fakeInstalled, true)
+		if err := os.Remove(e.bin); err != nil {
+			t.Fatal(err)
+		}
+		e.write(e.previous, fakeDaemon("0.0.9"), 0o755)
+		e.extra = append(e.extra, "HKM_STUB_HEALTHY=0")
+		if rc := e.run(true); rc != 1 {
+			t.Fatalf("exit = %d, want 1", rc)
+		}
+		e.wantStatus(OutcomeRolledBack, ptr("0.0.9"), ptr(fakeRelease))
 	})
 
 	t.Run("checksum mismatch", func(t *testing.T) {
