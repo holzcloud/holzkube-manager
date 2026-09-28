@@ -4,17 +4,17 @@ milestone: v1.18
 milestone_name: Host & Telefon
 current_phase: 12
 current_phase_name: Host wie ein Knoten — Verlauf, Warnung, Wand
-status: executing
-stopped_at: Completed 12-07-PLAN.md
-last_updated: "2026-09-28T21:56:46.017Z"
+status: verifying
+stopped_at: Completed 12-08-PLAN.md
+last_updated: "2026-09-28T22:39:23.961Z"
 last_activity: 2026-09-28
 last_activity_desc: Phase 12 execution started
-state_head: 7897eb64a3fb1b8e10eb55fea55e1883b3d3ede8
+state_head: 8f6a640d4f3c82150f499001744036f6f7a76f5a
 progress:
   total_phases: 4
   completed_phases: 1
   total_plans: 15
-  completed_plans: 14
+  completed_plans: 15
   percent: 25
 ---
 
@@ -34,7 +34,7 @@ See: .planning/PROJECT.md (updated 2026-09-28)
 
 Phase: 12 (Host wie ein Knoten — Verlauf, Warnung, Wand) — EXECUTING
 Plan: 8 of 8
-Status: Ready to execute
+Status: Phase complete — ready for verification
 Last activity: 2026-09-28 — Phase 12 execution started
 
 Progress: [███░░░░░░░] 25%
@@ -101,6 +101,7 @@ Siehe `PROJECT.md`, die `MILESTONE-*.md`-Dateien und für v1.18 den Abschnitt
 - [Phase 12]: 12-06: HostStateMark line form carries no sr-only word (the visible word follows it); sidebar words get their space as a separate text node
 - [Phase 12]: 12-px word space: --text-xs--letter-spacing: normal (the body's -0.015em is inherited as -0.24px); held by typography.browser.test.tsx
 - [Phase 12]: Layout audit and README renderer serve /api/v1/host/history from demo.json, ending at the fixture's observed_at
+- [Phase 12]: 12-08: TestEveryProblemCodeIsInTheContract sees only problem.go constants; string-literal codes (17 undocumented) deferred, not fixed
 
 ### Blockers/Concerns
 
@@ -115,8 +116,8 @@ Siehe `PROJECT.md`, die `MILESTONE-*.md`-Dateien und für v1.18 den Abschnitt
 
 ## Session Continuity
 
-Last session: 2026-09-28T21:56:45.803Z
-Stopped at: Completed 12-07-PLAN.md
+Last session: 2026-09-28T22:39:23.866Z
+Stopped at: Completed 12-08-PLAN.md
 Resume file: None
 Next: `/gsd-plan-phase 11`
 
@@ -138,3 +139,4 @@ Next: `/gsd-plan-phase 11`
 | Phase 12 P05 | 14 min | 3 tasks | 6 files |
 | Phase 12 P06 | 15 min | 3 tasks | 11 files |
 | Phase 12 P07 | 30 min | 3 tasks | 9 files |
+| Phase 12 P08 | 42 min | 2 tasks | 3 files |
