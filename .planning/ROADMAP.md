@@ -56,7 +56,7 @@ und Dialoge aus Phase 13 hat. Jede Phase ist eine senkrechte Scheibe — Lesen,
 API und Seite zusammen —, damit am Ende jeder Phase etwas im Browser steht, das
 der Betreiber prüfen kann, statt einer API, die niemand ansieht.
 
-- [ ] **Phase 11: Host-Seite — Gerät, Dienst, Live-Werte** - Der Betreiber öffnet `/host` und sieht das Gerät, den Dienst und dessen Live-Werte; was die Härtung verbirgt, heißt „nicht lesbar", nie 0
+- [x] **Phase 11: Host-Seite — Gerät, Dienst, Live-Werte** - Der Betreiber öffnet `/host` und sieht das Gerät, den Dienst und dessen Live-Werte; was die Härtung verbirgt, heißt „nicht lesbar", nie 0 (completed 2026-09-28)
 - [ ] **Phase 12: Host wie ein Knoten — Verlauf, Warnung, Wand** - Der Host hat Verlauf über 1 h / 6 h / 24 h, eine Warnung mit Grund und steht in Navigation und Wand mit einem Zustand
 - [ ] **Phase 13: Host-Aktionen über einen root-eigenen Helfer** - Neustart, Herunterfahren, Dienst-Neustart, Update-Suche — ohne dass der Daemon Root bekommt
 - [ ] **Phase 14: Telefon — Tippziele, die ein Daumen trifft** - Jedes Bedienelement ≥ 44 px bei 390 px, auch hinter einem Tipp und auf `/host`, gehalten von der Layout-Prüfung
@@ -88,7 +88,7 @@ injiziert hat, ist kein Ergebnis.
   4. Hinterlegt der Update-Mechanismus, wann zuletzt gesucht wurde und welche Version verfügbar ist, zeigt die Seite beides; hinterlegt er nichts — der Stand der heute auf dem Pi installierten `holzkube-manager-update` —, sagt sie „nicht hinterlegt", statt eine Zeit oder eine Version zu erfinden. Was das Skript dafür künftig schreibt, liegt in `deploy/` und wird nicht installiert.
 
 **Research**: `/proc` unter `ProcSubset=pid` und `ProtectProc=invisible` — welche Dateien genau verschwinden und woran der Daemon das von einem echten Lesefehler unterscheidet; wo der Pi 5 Temperatur und Lüfter in `/sys` ablegt und wo ein amd64-Host.
-**Plans**: 7/7 plans executed
+**Plans**: 7/7 plans complete
 
 Plans:
 **Wave 1**
@@ -170,7 +170,7 @@ Waves: 1 → {01} · 2 → {02, 03} · 3 → {04} · 4 → {05} · 5 → {06} ·
 
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
-| 11. Host-Seite — Gerät, Dienst, Live-Werte | v1.18 | 7/7 | In Progress|  |
+| 11. Host-Seite — Gerät, Dienst, Live-Werte | v1.18 | 7/7 | Complete    | 2026-09-28 |
 | 12. Host wie ein Knoten — Verlauf, Warnung, Wand | v1.18 | 0/TBD | Not started | - |
 | 13. Host-Aktionen über einen root-eigenen Helfer | v1.18 | 0/TBD | Not started | - |
 | 14. Telefon — Tippziele, die ein Daumen trifft | v1.18 | 0/TBD | Not started | - |
