@@ -6,9 +6,14 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"math"
 	"runtime"
 	"strings"
+	"sync"
 	"time"
+
+	"github.com/holzcloud/holzkube-manager/internal/inventory"
+	"github.com/holzcloud/holzkube-manager/internal/talos"
 )
 
 // The ceilings on every file this package reads (ASVS V5). Everything it opens
@@ -31,9 +36,41 @@ type Config struct {
 	Now func() time.Time
 }
 
+// minRateWindow and maxRateWindow bound when the previous reading may serve
+// as the baseline for a rate -- the inventory's values for the same question
+// about a node. Under half a second the counters have barely moved and the
+// percentage is noise; over five minutes it is an average nobody asked for.
+const (
+	minRateWindow = 500 * time.Millisecond
+	maxRateWindow = 5 * time.Minute
+)
+
+// noBaseline is what a rate says before there are two readings to take it
+// from (D-12). Never a 0: a CPU at 0 % is a reading, and the first answer after
+// start has not made one.
+var noBaseline = Reason{Code: CodeNoBaseline, Message: "Waiting for a second reading"}
+
 // Collector reads the host.
+//
+// It remembers the counters of its previous read, because a CPU percentage is
+// the difference between two of them (D-12). One Collector serves every
+// request, so two open tabs share one memo.
 type Collector struct {
 	cfg Config
+
+	mu   sync.Mutex
+	prev *counters
+}
+
+// counters is what one read leaves behind for the next one's rates.
+type counters struct {
+	// at is the Collector's clock as read -- with its monotonic reading, so a
+	// wall-clock step between two polls does not bend the window. It is never
+	// serialised.
+	at time.Time
+	// cpu is nil when /proc/stat could not be read; cores then too.
+	cpu   *talos.CPUTimes
+	cores []talos.CPUTimes
 }
 
 // New builds a Collector. It reads nothing until Read is called.
@@ -51,12 +88,136 @@ func New(cfg Config) *Collector {
 // every other section beside it. A failure of the whole answer is a failure to
 // reach the daemon at all, which the browser sees as exactly that.
 func (c *Collector) Read(context.Context) View {
-	v := View{ObservedAt: c.cfg.Now().UTC()}
+	now := c.cfg.Now()
+	v := View{ObservedAt: now.UTC()}
 
 	v.Device = c.readDevice()
 	v.Container = detectContainer(c.cfg.FS)
+	v.Live = c.readLive(now)
 
 	return v
+}
+
+// readLive fills the Live section: CPU, load, memory and swap (HMON-01).
+func (c *Collector) readLive(now time.Time) Live {
+	// The proof the hardening is in force (D-03). A mountinfo that cannot be
+	// read or parsed proves nothing, so every missing file is then reported as
+	// the read failure it is.
+	subsetPid := false
+	if raw, err := readBounded(c.cfg.FS, fsPath(pathMountinfo), maxMountinfo); err == nil {
+		if ms, err := parseMountinfo(raw); err == nil {
+			subsetPid = procSubsetPid(ms)
+		}
+	}
+
+	var live Live
+	live.Memory = c.readMemory(subsetPid)
+	live.CPU.Load = c.readLoad(subsetPid)
+
+	cur := counters{at: now}
+	var statReason *Reason
+	if raw, err := readBounded(c.cfg.FS, fsPath(pathProcStat), maxSmallFile); err != nil {
+		r := classify(pathProcStat, err, subsetPid)
+		statReason = &r
+	} else if total, cores, err := parseProcStat(raw); err != nil {
+		r := reasonFor(pathProcStat, err)
+		statReason = &r
+	} else {
+		cur.cpu, cur.cores = &total, cores
+	}
+	c.rates(&live, cur, statReason)
+
+	return live
+}
+
+// rates computes the CPU percentages against the remembered previous read and
+// decides whether this read becomes the next one's baseline.
+func (c *Collector) rates(live *Live, cur counters, statReason *Reason) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	prev := c.prev
+	var window time.Duration
+	usable := false
+	if prev != nil {
+		window = cur.at.Sub(prev.at)
+		usable = window >= minRateWindow && window <= maxRateWindow
+	}
+
+	switch {
+	case statReason != nil:
+		// Why the file is unreadable outranks "no baseline yet": the second
+		// would pass by itself, the first will not.
+		live.CPU.Usage = Hidden[float64](*statReason)
+		live.CPU.PerCore = Hidden[[]float64](*statReason)
+	case usable && prev.cpu != nil:
+		busy, _ := inventory.CPUPercent(*prev.cpu, *cur.cpu)
+		live.CPU.Usage = Read(busy)
+		if len(prev.cores) == len(cur.cores) {
+			perCore := make([]float64, len(cur.cores))
+			for i := range cur.cores {
+				perCore[i], _ = inventory.CPUPercent(prev.cores[i], cur.cores[i])
+			}
+			live.CPU.PerCore = Read(perCore)
+		} else {
+			// A core came online or went offline between the two reads: the
+			// indices no longer pair up, and a guess would put one core's time
+			// on another.
+			live.CPU.PerCore = Hidden[[]float64](noBaseline)
+		}
+	default:
+		live.CPU.Usage = Hidden[float64](noBaseline)
+		live.CPU.PerCore = Hidden[[]float64](noBaseline)
+	}
+
+	if usable {
+		secs := math.Round(window.Seconds()*10) / 10
+		live.RatesOverSeconds = &secs
+	}
+
+	// Two tabs polling 100 ms apart must not erase each other's baseline, so a
+	// read inside the minimum window leaves the memo alone. Boot times are not
+	// compared: a process cannot outlive a reboot, and a boot time derived from
+	// CLOCK_BOOTTIME jitters enough to make every baseline look foreign.
+	if prev == nil || window < 0 || window >= minRateWindow {
+		c.prev = &cur
+	}
+}
+
+// readMemory is memory and swap as free(1) counts them.
+func (c *Collector) readMemory(subsetPid bool) Reading[inventory.HardwareMemory] {
+	raw, err := readBounded(c.cfg.FS, fsPath(pathProcMeminfo), maxSmallFile)
+	if err != nil {
+		return Hidden[inventory.HardwareMemory](classify(pathProcMeminfo, err, subsetPid))
+	}
+	info, err := parseMeminfo(raw)
+	if err != nil {
+		return Hidden[inventory.HardwareMemory](reasonFor(pathProcMeminfo, err))
+	}
+	return Read(inventory.MemoryView(info))
+}
+
+// readLoad is the load average from /proc/loadavg, or -- when that cannot be
+// read, as under ProcSubset=pid -- from sysinfo(2), rendered to the same two
+// decimals the kernel prints (D-05).
+func (c *Collector) readLoad(subsetPid bool) Reading[Load] {
+	raw, err := readBounded(c.cfg.FS, fsPath(pathProcLoadavg), maxSmallFile)
+	if err == nil {
+		l, perr := parseLoadavg(raw)
+		if perr == nil {
+			return Read(l)
+		}
+		err = perr
+	}
+	if loads, serr := c.cfg.Sys.Loads(); serr == nil {
+		return Read(Load{
+			Load1:  loadFromSysinfo(loads.One),
+			Load5:  loadFromSysinfo(loads.Five),
+			Load15: loadFromSysinfo(loads.Fifteen),
+			Source: loadSourceSysinfo,
+		})
+	}
+	return Hidden[Load](classify(pathProcLoadavg, err, subsetPid))
 }
 
 // readDevice fills the Device card.
