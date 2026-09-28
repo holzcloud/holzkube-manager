@@ -45,3 +45,20 @@ func TestClassifyChipNamesWhatEachDriverMeasures(t *testing.T) {
 		}
 	}
 }
+
+// TestThermalTwinName pins the name a thermal zone's hwmon twin registers as.
+// The node path and the host path both skip a zone whose twin is listed, and
+// this is the one rule they share for it.
+func TestThermalTwinName(t *testing.T) {
+	t.Parallel()
+
+	for zone, want := range map[string]string{
+		"cpu-thermal":  "cpu_thermal",
+		"acpitz":       "acpitz",
+		"x86_pkg_temp": "x86_pkg_temp",
+	} {
+		if got := talos.ThermalTwinName(zone); got != want {
+			t.Errorf("ThermalTwinName(%q) = %q, want %q", zone, got, want)
+		}
+	}
+}

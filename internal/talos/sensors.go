@@ -345,7 +345,7 @@ func (c *ClusterClient) discoverSensors(ctx context.Context) (*SensorLayout, err
 
 	var chips []*chipDir
 	for _, e := range entries {
-		index, ok := numbered(e.name, "hwmon")
+		index, ok := Numbered(e.name, "hwmon")
 		if !ok {
 			continue
 		}
@@ -424,8 +424,8 @@ func (c *ClusterClient) discoverSensors(ctx context.Context) (*SensorLayout, err
 				}
 			}
 		} else {
-			chip.temps = inputsNamed(chip.files, "temp")
-			chip.fans = inputsNamed(chip.files, "fan")
+			chip.temps = InputsNamed(chip.files, "temp")
+			chip.fans = InputsNamed(chip.files, "fan")
 		}
 
 		for _, n := range chip.temps {
@@ -470,8 +470,8 @@ func (c *ClusterClient) discoverSensors(ctx context.Context) (*SensorLayout, err
 			sc.Temps = append(sc.Temps, TempInput{
 				Input:    prefix + "input",
 				Label:    label,
-				High:     millidegrees(labels, prefix+"max"),
-				Critical: millidegrees(labels, prefix+"crit"),
+				High:     Millidegrees(labels, prefix+"max"),
+				Critical: Millidegrees(labels, prefix+"crit"),
 			})
 		}
 		for _, n := range chip.fans {
@@ -526,7 +526,7 @@ func (c *ClusterClient) thermalZones(ctx context.Context, known []SensorChip) ([
 	var zones []zone
 	var paths []string
 	for _, e := range entries {
-		index, ok := numbered(e.name, "thermal_zone")
+		index, ok := Numbered(e.name, "thermal_zone")
 		if !ok {
 			continue
 		}
@@ -555,7 +555,7 @@ func (c *ClusterClient) thermalZones(ctx context.Context, known []SensorChip) ([
 		if _, ok := got[z.dir+"/temp"]; !ok {
 			continue
 		}
-		if have[strings.ReplaceAll(typ, "-", "_")] {
+		if have[ThermalTwinName(typ)] {
 			continue
 		}
 		out = append(out, SensorChip{
@@ -632,8 +632,8 @@ func (c *ClusterClient) readSensors(ctx context.Context, layout *SensorLayout) (
 	return readings, stale, nil
 }
 
-// inputsNamed returns the N of every <kind>N_input in a listing, in order.
-func inputsNamed(files map[string]bool, kind string) []int {
+// InputsNamed returns the N of every <kind>N_input in a listing, in order.
+func InputsNamed(files map[string]bool, kind string) []int {
 	var out []int
 	for name := range files {
 		rest, ok := strings.CutPrefix(name, kind)
@@ -654,8 +654,8 @@ func inputsNamed(files map[string]bool, kind string) []int {
 	return out
 }
 
-// numbered parses "hwmon12" as 12.
-func numbered(name, prefix string) (int, bool) {
+// Numbered parses "hwmon12" as 12.
+func Numbered(name, prefix string) (int, bool) {
 	digits, ok := strings.CutPrefix(name, prefix)
 	if !ok || digits == "" {
 		return 0, false
@@ -665,6 +665,17 @@ func numbered(name, prefix string) (int, bool) {
 		return 0, false
 	}
 	return n, true
+}
+
+// ThermalTwinName is the hwmon chip name a thermal zone's twin registers as.
+//
+// With CONFIG_THERMAL_HWMON the thermal framework gives every zone an hwmon
+// twin, named after the zone's type with '-' turned into '_' -- a Raspberry
+// Pi's "cpu-thermal" zone is the "cpu_thermal" chip. A zone whose twin is
+// already listed is the same sensor, and listing both would show one
+// temperature twice.
+func ThermalTwinName(zoneType string) string {
+	return strings.ReplaceAll(zoneType, "-", "_")
 }
 
 // linkTarget is the directory a class entry points at. Entries under
@@ -682,11 +693,11 @@ func linkTarget(class string, e dirEntry) string {
 	}
 }
 
-// millidegrees reads a threshold file as degrees Celsius, or nil when there is
+// Millidegrees reads a threshold file as degrees Celsius, or nil when there is
 // none. A threshold at or below zero is a chip that does not set one -- some
 // report 0, some a sentinel -- and a red line at 0 °C would be read as a
 // machine in trouble.
-func millidegrees(files map[string]string, p string) *float64 {
+func Millidegrees(files map[string]string, p string) *float64 {
 	raw, ok := files[p]
 	if !ok {
 		return nil
