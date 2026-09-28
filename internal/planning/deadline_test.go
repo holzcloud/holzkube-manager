@@ -26,7 +26,7 @@ import (
 //
 // A rule that is only a sentence in a document is a rule that holds until
 // somebody is busy. This is that sentence as a test.
-const deadlinePolicyPath = "../../.planning/phases/02-transport-seam-talossim-image-factory/02-CONTEXT.md"
+const deadlinePolicyPath = "../../.planning/milestones/v1.14-phases/02-transport-seam-talossim-image-factory/02-CONTEXT.md"
 
 // classRow matches the bolded class name that opens each row of the policy
 // table: "| **Fast read** | 10 s | ...". The name is taken from the document

@@ -30,7 +30,7 @@
 //
 // Usage:
 //
-//	walking-skeleton --node 10.5.0.2 --out .planning/phases/04-walking-skeleton/04-MEASUREMENTS.md
+//	walking-skeleton --node 10.5.0.2 --out .planning/milestones/v1.14-phases/04-walking-skeleton/04-MEASUREMENTS.md
 package main
 
 import (

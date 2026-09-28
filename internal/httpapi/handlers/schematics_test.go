@@ -2819,7 +2819,7 @@ func TestAssetsRouteResolvesPastASilentCandidateInOneBudget(t *testing.T) {
 // This is a mitigation and not a closure: there is still no re-probe route,
 // button or job, the recovery is a re-submission answered as an error, and a
 // probe that times out again leaves the record exactly as it was. See
-// .planning/phases/02-transport-seam-talossim-image-factory/02-DECISION-probe-budget.md.
+// .planning/milestones/v1.14-phases/02-transport-seam-talossim-image-factory/02-DECISION-probe-budget.md.
 
 // storeHook runs once, after a Schematics().Get has returned a record and
 // before its caller sees it. It is the only way to be *between* the handler's

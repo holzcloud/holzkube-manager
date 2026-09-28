@@ -532,7 +532,7 @@ const conflictDetail = "This schematic already exists. Its id is the hash of its
 // button or job; the recovery is a re-submission that is answered as an error
 // and is not discoverable from the saved list, and a probe that times out again
 // leaves the record exactly as it was. See
-// .planning/phases/02-transport-seam-talossim-image-factory/02-DECISION-probe-budget.md,
+// .planning/milestones/v1.14-phases/02-transport-seam-talossim-image-factory/02-DECISION-probe-budget.md,
 // whose Option 1 is where the structural answer lives and which was not taken.
 func refreshTheStoredVerdict(ctx context.Context, d httpapi.Deps, fresh model.Schematic) string {
 	stored, err := d.Store.Schematics().Get(ctx, fresh.ID)
