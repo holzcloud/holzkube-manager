@@ -5,16 +5,16 @@ milestone_name: Host & Telefon
 current_phase: 12
 current_phase_name: Host wie ein Knoten — Verlauf, Warnung, Wand
 status: executing
-stopped_at: Completed 12-01-PLAN.md
-last_updated: "2026-09-28T20:02:12.936Z"
+stopped_at: Completed 12-02-PLAN.md
+last_updated: "2026-09-28T20:22:24.365Z"
 last_activity: 2026-09-28
 last_activity_desc: Phase 12 execution started
-state_head: 37ded415fd55adf8b518b707338a0492be6e077e
+state_head: a66198fa2edfb92ae2f24687db83d34a8410f469
 progress:
   total_phases: 4
   completed_phases: 1
   total_plans: 15
-  completed_plans: 8
+  completed_plans: 9
   percent: 25
 ---
 
@@ -33,7 +33,7 @@ See: .planning/PROJECT.md (updated 2026-09-28)
 ## Current Position
 
 Phase: 12 (Host wie ein Knoten — Verlauf, Warnung, Wand) — EXECUTING
-Plan: 2 of 8
+Plan: 3 of 8
 Status: Ready to execute
 Last activity: 2026-09-28 — Phase 12 execution started
 
@@ -89,6 +89,9 @@ Siehe `PROJECT.md`, die `MILESTONE-*.md`-Dateien und für v1.18 den Abschnitt
 - [Phase 11]: 11-07: browser layout tests set the viewport, not only the box, and measure text runs as well as element boxes
 - [Phase 12]: 12-01: TestTheHostIsNeverForgotten pins the key host/local; HostSubject=machine/local alone cannot redden Retain since retained compares against HostSubject
 - [Phase 12]: 12-01: RangePicker sits under the Live heading in LiveSection; heading/copy rewrite left to plan 05
+- [Phase 12]: Temperature lines computed once in Go (inventory.TemperatureLimits) and sent as warn_c/danger_c; drives carry their sensor's pair
+- [Phase 12]: Host limits from the twin thermal zone: lowest passive/hot = high, lowest critical = crit, active trips never a line
+- [Phase 12]: host.Assess rates temperatures and filesystems only; any unreadable rated value is never ok
 
 ### Blockers/Concerns
 
@@ -103,8 +106,8 @@ Siehe `PROJECT.md`, die `MILESTONE-*.md`-Dateien und für v1.18 den Abschnitt
 
 ## Session Continuity
 
-Last session: 2026-09-28T20:02:12.847Z
-Stopped at: Completed 12-01-PLAN.md
+Last session: 2026-09-28T20:22:24.278Z
+Stopped at: Completed 12-02-PLAN.md
 Resume file: None
 Next: `/gsd-plan-phase 11`
 
@@ -120,3 +123,4 @@ Next: `/gsd-plan-phase 11`
 | Phase 11 P06 | 16 min | 2 tasks | 13 files |
 | Phase 11 P07 | 28 min | 3 tasks | 7 files |
 | Phase 12 P01 | 21min | 2 tasks | 13 files |
+| Phase 12 P02 | 18 min | 3 tasks | 17 files |
