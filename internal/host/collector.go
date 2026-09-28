@@ -157,8 +157,9 @@ func (c *Collector) readService(ctx context.Context, now time.Time, container bo
 	return s
 }
 
-// readLive fills the Live section: CPU, load, memory and swap (HMON-01), and
-// the filesystems of / and the data directory (HMON-02).
+// readLive fills the Live section: CPU, load, memory and swap (HMON-01), the
+// filesystems of / and the data directory (HMON-02), and the temperatures and
+// fans (HMON-03).
 func (c *Collector) readLive(now time.Time) Live {
 	// The proof the hardening is in force (D-03). A mountinfo that cannot be
 	// read or parsed proves nothing, so every missing file is then reported as
@@ -176,6 +177,11 @@ func (c *Collector) readLive(now time.Time) Live {
 	live.Memory = c.readMemory(subsetPid)
 	live.Filesystems = filesystems(mounts, c.cfg.DataDir, c.cfg.Sys)
 	live.CPU.Load = c.readLoad(subsetPid)
+	if sensors, err := readSensors(c.cfg.FS); err != nil {
+		live.Sensors = Hidden[Sensors](reasonFor(sensorsPath(err), err))
+	} else {
+		live.Sensors = Read(sensors)
+	}
 
 	cur := counters{at: now}
 	var statReason *Reason
@@ -245,6 +251,16 @@ func (c *Collector) rates(live *Live, cur counters, statReason *Reason) {
 	if prev == nil || window < 0 || window >= minRateWindow {
 		c.prev = &cur
 	}
+}
+
+// sensorsPath is the class directory a failed sensor walk names: the thermal
+// zones when that is where it failed, otherwise hwmon.
+func sensorsPath(err error) string {
+	var pe *fs.PathError
+	if errors.As(err, &pe) && strings.HasPrefix(pe.Path, thermalClass) {
+		return "/" + thermalClass
+	}
+	return "/" + hwmonClass
 }
 
 // readMemory is memory and swap as free(1) counts them.

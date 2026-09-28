@@ -155,6 +155,12 @@ type Live struct {
 	// Filesystems are / and the data directory's filesystem, one row when they
 	// are one filesystem (HMON-02, D-07). Never null.
 	Filesystems []Filesystem `json:"filesystems"`
+
+	// Sensors are the temperatures and fans from hwmon and, where the CPU has
+	// no hwmon chip, the thermal zones (HMON-03, D-08). Not readable only when
+	// /sys/class/hwmon exists and could not be listed; a machine without it
+	// reads as empty lists.
+	Sensors Reading[Sensors] `json:"sensors"`
 }
 
 // CPU is the processor's share of busy time and the run-queue average.
