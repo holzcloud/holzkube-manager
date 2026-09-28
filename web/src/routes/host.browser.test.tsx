@@ -63,6 +63,11 @@ const linkOf = (
   tx_bytes_per_sec: tx,
 })
 
+/**
+ * One temperature as the server sends it. `warn` and `danger` are the server's
+ * lines, written out per sensor -- never worked out here, which would be the
+ * browser's own rule again, in a test.
+ */
 const temp = (
   chip: string,
   kind: string,
@@ -70,6 +75,8 @@ const temp = (
   celsius: number,
   high: number | null,
   crit: number | null,
+  warn: number,
+  danger: number,
 ) => ({
   chip,
   kind,
@@ -77,6 +84,8 @@ const temp = (
   celsius,
   high_c: high,
   critical_c: crit,
+  warn_c: warn,
+  danger_c: danger,
 })
 
 const usage = {
@@ -143,7 +152,7 @@ function shape({
         },
       ],
       sensors: read({
-        temperatures: [temp('cpu_thermal', 'cpu', 'temp1', 64.4, null, null)],
+        temperatures: [temp('cpu_thermal', 'cpu', 'temp1', 64.4, null, 110, 80, 110)],
         fans: [],
       }),
       network: read({ physical: [linkOf('eth0', true, 1000, 187900, 42100)], virtual: [] }),
@@ -187,12 +196,12 @@ function amd64(): Host {
       ],
       sensors: read({
         temperatures: [
-          temp('k10temp', 'cpu', 'Tctl', 58.5, null, null),
-          temp('k10temp', 'cpu', 'Tccd1', 51.25, null, null),
-          temp('nvme', 'disk', 'Composite', 41.85, 81.85, 84.85),
-          temp('nct6798', 'board', 'SYSTIN', 34, 80, null),
-          temp('nct6798', 'board', 'AUXTIN0', 115, null, null),
-          temp('acpitz', 'other', 'temp1', 16.8, null, 20.8),
+          temp('k10temp', 'cpu', 'Tctl', 58.5, null, null, 80, 95),
+          temp('k10temp', 'cpu', 'Tccd1', 51.25, null, null, 80, 95),
+          temp('nvme', 'disk', 'Composite', 41.85, 81.85, 84.85, 81.85, 84.85),
+          temp('nct6798', 'board', 'SYSTIN', 34, 80, null, 80, 85),
+          temp('nct6798', 'board', 'AUXTIN0', 115, null, null, 70, 85),
+          temp('acpitz', 'other', 'temp1', 16.8, null, 20.8, 20.8, 20.8),
         ],
         fans: [
           { chip: 'nct6798', label: 'fan1', rpm: 1024 },

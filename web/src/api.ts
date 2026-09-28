@@ -1229,6 +1229,13 @@ const nullableNumber = z
  * host's answer both carry them (inventory.HardwareTemperature and
  * inventory.HardwareFan on the server). One schema each, so the two pages parse
  * the same JSON the same way and hand it to the same components.
+ *
+ * `warn_c` and `danger_c` are where the sensor turns amber and red, and the
+ * server decides both: from the chip's own limits when it reports them, from
+ * its kind's default when it does not (inventory.TemperatureLimits, the one
+ * rule the host's state uses too). They are required and have no default on
+ * purpose -- a default here would be a second rule, in the browser, that could
+ * disagree with the server's warning beside it (D-06).
  */
 export const temperatureSchema = z.object({
   chip: z.string().default(''),
@@ -1237,6 +1244,8 @@ export const temperatureSchema = z.object({
   celsius: z.number(),
   high_c: nullableNumber,
   critical_c: nullableNumber,
+  warn_c: z.number(),
+  danger_c: z.number(),
 })
 
 export type Temperature = z.infer<typeof temperatureSchema>

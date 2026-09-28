@@ -3,7 +3,6 @@ import { render, screen, within } from '@testing-library/react'
 import type { ReactNode } from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { api, type Hardware, hardwareSchema, type Machine } from '@/api'
-import { temperatureLimits } from '@/components/charts/Sensors'
 import { cpuTemperature, NodeHardware } from '@/components/NodeHardware'
 import { append, forget } from '@/hooks/useLiveSeries'
 import { formatBytes, formatCores, formatRate } from '@/lib/format'
@@ -52,8 +51,19 @@ const reading: Hardware = hardwareSchema.parse({
       celsius: 57,
       high_c: 80,
       critical_c: 100,
+      warn_c: 80,
+      danger_c: 100,
     },
-    { chip: 'coretemp', kind: 'cpu', label: 'Core 2', celsius: 100, high_c: 80, critical_c: 100 },
+    {
+      chip: 'coretemp',
+      kind: 'cpu',
+      label: 'Core 2',
+      celsius: 100,
+      high_c: 80,
+      critical_c: 100,
+      warn_c: 80,
+      danger_c: 100,
+    },
   ],
   fans: [
     { chip: 'nct6798', label: 'CPU_FAN', rpm: 1080 },
@@ -161,33 +171,7 @@ describe("the drive figure turns at the server's lines", () => {
   })
 })
 
-describe('temperature limits', () => {
-  it("prefer the chip's own numbers", () => {
-    expect(
-      temperatureLimits({
-        chip: 'x',
-        kind: 'cpu',
-        label: '',
-        celsius: 50,
-        high_c: 70,
-        critical_c: 90,
-      }),
-    ).toEqual({ warn: 70, danger: 90 })
-  })
-
-  it('fall back to the kind when the chip says nothing', () => {
-    expect(
-      temperatureLimits({
-        chip: 'x',
-        kind: 'disk',
-        label: '',
-        celsius: 50,
-        high_c: null,
-        critical_c: null,
-      }),
-    ).toEqual({ warn: 60, danger: 70 })
-  })
-
+describe('the processor temperature', () => {
   it('take the package reading as the processor temperature', () => {
     expect(cpuTemperature(reading)?.label).toBe('Package id 0')
   })

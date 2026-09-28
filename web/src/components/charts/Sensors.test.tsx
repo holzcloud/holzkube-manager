@@ -1,11 +1,12 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { render, screen } from '@testing-library/react'
+import { cleanup, render, screen, within } from '@testing-library/react'
 import type { ReactNode } from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { api, hardwareSchema, type Machine, type Temperature } from '@/api'
+import { api, hardwareSchema, hostSchema, type Machine, type Temperature } from '@/api'
 import { FanList, Sensors } from '@/components/charts/Sensors'
 import { NodeHardware } from '@/components/NodeHardware'
 import { forget } from '@/hooks/useLiveSeries'
+import demo from '../../../fixtures/demo.json'
 
 /**
  * The shared sensor list and fan rows (D-13). The node page draws each
@@ -26,6 +27,8 @@ const cpu: Temperature = {
   celsius: 64.4,
   high_c: null,
   critical_c: null,
+  warn_c: 80,
+  danger_c: 95,
 }
 
 afterEach(() => {
@@ -48,6 +51,76 @@ describe('Sensors', () => {
   it('says the page’s own sentence when there is no sensor', () => {
     render(<Sensors temperatures={[]} emptyText="This machine reports no temperature sensors." />)
     expect(screen.getByText('This machine reports no temperature sensors.')).toBeInTheDocument()
+  })
+})
+
+describe("the limits are the server's", () => {
+  /** One CPU sensor, its lines as the server sent them. */
+  function rowOf(celsius: number, warn_c: number, danger_c: number) {
+    render(
+      <Sensors
+        temperatures={[{ ...cpu, high_c: null, critical_c: null, celsius, warn_c, danger_c }]}
+        emptyText="none"
+      />,
+    )
+    return screen.getByText('temp1').closest('li') as HTMLElement
+  }
+
+  it('warns at 60 °C when the server says 55, below any CPU default', () => {
+    const row = rowOf(60, 55, 90)
+    expect(row.getAttribute('data-severity')).toBe('warn')
+    expect(within(row).getByText('high')).toHaveClass('sr-only')
+  })
+
+  it('stays calm at 85 °C when the server says 90, above any CPU default', () => {
+    const row = rowOf(85, 90, 100)
+    expect(row.getAttribute('data-severity')).toBe('ok')
+    expect(within(row).queryByText('▲')).toBeNull()
+  })
+
+  it('is critical at the danger line and past it', () => {
+    for (const celsius of [100, 104]) {
+      const row = rowOf(celsius, 90, 100)
+      expect(row.getAttribute('data-severity')).toBe('danger')
+      expect(within(row).getByText('critical')).toHaveClass('sr-only')
+      cleanup()
+    }
+  })
+
+  it('draws the sparkline up to the danger line', () => {
+    render(
+      <Sensors
+        temperatures={[{ ...cpu, celsius: 30, warn_c: 55, danger_c: 60 }]}
+        history={{
+          'temp:cpu_thermal/temp1': [
+            { t: 0, v: 60 },
+            { t: 1, v: 30 },
+          ],
+        }}
+        emptyText="none"
+      />,
+    )
+    // 22 px high with a 2 px margin: the danger line is y 2, half of it y 11.
+    const svg = screen.getByRole('img', { name: /temp1 temperature/ })
+    expect(svg.querySelectorAll('path')[1]?.getAttribute('d')).toBe('M0.0,2.0 L64.0,11.0')
+  })
+
+  it('refuses a temperature without its lines, on both pages', () => {
+    const fixtures = demo as Record<string, unknown>
+    const host = structuredClone(fixtures['/api/v1/host']) as {
+      live: { sensors: { value: { temperatures: Record<string, unknown>[] } } }
+    }
+    const hardware = structuredClone(fixtures['/api/v1/machines/m-cp-1/hardware']) as {
+      temperatures: Record<string, unknown>[]
+    }
+    // The control: as the server sends them, both parse.
+    expect(hostSchema.safeParse(host).success).toBe(true)
+    expect(hardwareSchema.safeParse(hardware).success).toBe(true)
+
+    delete host.live.sensors.value.temperatures[0]?.warn_c
+    delete hardware.temperatures[0]?.danger_c
+    expect(hostSchema.safeParse(host).success).toBe(false)
+    expect(hardwareSchema.safeParse(hardware).success).toBe(false)
   })
 })
 
