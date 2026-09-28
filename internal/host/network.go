@@ -16,8 +16,11 @@ const netClass = "sys/class/net"
 // maxLinks bounds the interfaces one read looks at (T-11-20). A host running
 // containers has a veth per container, and each interface costs five small
 // reads; far above any real machine, far below what a runaway could make it.
-// Listing is by name, so on a host over the limit the veths -- which sort
-// last -- are the ones not looked at.
+// The cut is by name and made before physical and virtual are told apart --
+// telling them apart costs a read per interface, which is what the bound is
+// there to limit. So on a host over the limit whatever sorts last is not
+// looked at, whatever it is: wlan0 sorts after veth*, and would be dropped
+// before them.
 const maxLinks = 512
 
 // Link is one network interface (HMON-04).
