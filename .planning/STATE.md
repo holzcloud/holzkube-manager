@@ -5,16 +5,16 @@ milestone_name: Host & Telefon
 current_phase: 11
 current_phase_name: Host-Seite — Gerät, Dienst, Live-Werte
 status: executing
-stopped_at: Roadmap v1.18 geschrieben (ROADMAP.md, STATE.md, Traceability in REQUIREMENTS.md), nicht committet
-last_updated: "2026-09-28T14:04:41.229Z"
+stopped_at: Completed 11-01-PLAN.md
+last_updated: "2026-09-28T14:46:19.875Z"
 last_activity: 2026-09-28
-last_activity_desc: "Roadmap für v1.18 angelegt: Phasen 11–14, 22 von 22 Anforderungen zugeordnet"
-state_head: 41b7875241067c3a65d081adbe6e082556e02088
+last_activity_desc: Phase 11 execution started
+state_head: 744998dc62e9ac6474bff30890098045e8495a0c
 progress:
   total_phases: 4
   completed_phases: 0
   total_plans: 7
-  completed_plans: 0
+  completed_plans: 1
   percent: 0
 ---
 
@@ -28,14 +28,14 @@ liegt unverändert in `milestones/STATE-2026-09-17.md`.
 See: .planning/PROJECT.md (updated 2026-09-28)
 
 **Core value:** Eine neue Maschine wird komplett in der UI zum Cluster-Node — ohne `talosctl`, ohne Omni.
-**Current focus:** Phase 11 — Host-Seite: Gerät, Dienst, Live-Werte (v1.18 Host & Telefon). Ausgeliefert ist v0.1.0 und läuft auf dem Pi.
+**Current focus:** Phase 11 — Host-Seite — Gerät, Dienst, Live-Werte
 
 ## Current Position
 
-Phase: 11 (Host-Seite — Gerät, Dienst, Live-Werte) — READY TO EXECUTE
-Plan: —
+Phase: 11 (Host-Seite — Gerät, Dienst, Live-Werte) — EXECUTING
+Plan: 2 of 7
 Status: Ready to execute
-Last activity: 2026-09-28 — Roadmap für v1.18 angelegt: Phasen 11–14, 22 von 22 Anforderungen zugeordnet
+Last activity: 2026-09-28 — Phase 11 execution started
 
 Progress: [░░░░░░░░░░] 0%
 
@@ -69,6 +69,10 @@ Siehe `PROJECT.md`, die `MILESTONE-*.md`-Dateien und für v1.18 den Abschnitt
   Phase endet mit etwas, das der Betreiber im Browser prüfen kann.
 - [v1.18 Roadmap]: Telefon zuletzt (Phase 14), weil `/host` seine Knöpfe und
   den Bestätigungsdialog erst mit Phase 13 hat und MOB-03 sie messen soll.
+- [Phase 11]: internal/host reads through fs.FS rooted at / plus a four-method Sys seam (uname, CLOCK_BOOTTIME, sysinfo, statfs); no os.ReadFile/os.Open, no exemption from the file-access guard
+- [Phase 11]: Reading[T] keeps its value behind a pointer tagged omitempty; health.Field is not reused because omitzero drops a readable 0
+- [Phase 11]: os-release escapes are unescaped inside either quote style (Python platform.freedesktop_os_release behaviour)
+- [Phase 11]: GET /api/v1/host: session + reader, not audited, not a wall-link route; collector built unconditionally in main
 
 ### Blockers/Concerns
 
@@ -83,7 +87,13 @@ Siehe `PROJECT.md`, die `MILESTONE-*.md`-Dateien und für v1.18 den Abschnitt
 
 ## Session Continuity
 
-Last session: 2026-09-28
-Stopped at: Roadmap v1.18 geschrieben (ROADMAP.md, STATE.md, Traceability in REQUIREMENTS.md), nicht committet
+Last session: 2026-09-28T14:46:19.806Z
+Stopped at: Completed 11-01-PLAN.md
 Resume file: None
 Next: `/gsd-plan-phase 11`
+
+## Performance Metrics
+
+| Plan | Duration | Tasks | Files |
+|------|----------|-------|-------|
+| Phase 11 P01 | 37min | 3 tasks | 32 files |
