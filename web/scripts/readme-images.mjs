@@ -131,6 +131,7 @@ function history(url) {
   const n = range === '1h' ? 240 : range === '6h' ? 360 : 1440
   const end = Date.now() - 5_000
   const mk = (f) => Array.from({ length: n }, (_, i) => [end - (n - 1 - i) * step, Math.round(f(i) * 10) / 10])
+  if (url.pathname === '/api/v1/host/history') return { range, step_seconds: step / 1000, from: '', to: '', series: hostHistory(n, mk) }
   const series = url.pathname.includes('/apps/')
     ? { cpu: mk((i) => wave(1300, 400, i)), memory: mk((i) => wave(1.9 * 2 ** 30, 1e8, i, 1)) }
     : Object.fromEntries([
@@ -149,6 +150,40 @@ function history(url) {
   return { range, step_seconds: step / 1000, from: '', to: '', series }
 }
 
+/**
+ * The host's history, from what the fixture's host can read: its unit hides
+ * /proc/stat and /proc/meminfo, so there is no cpu, memory or core:* curve --
+ * the page says "Not readable — no history" for those -- only the network and
+ * the two temperatures. Each ends at the fixture's reading, cpu_thermal climbing
+ * past its warning line in the last stretch, and a stretch in the middle has no
+ * points at all (the daemon was stopped), so the picture shows how a pause is
+ * drawn: a gap, not a line across it.
+ */
+function hostHistory(n, mk) {
+  const host = F['/api/v1/host']
+  const gapFrom = Math.round(n * 0.55)
+  const gapTo = gapFrom + Math.max(32, Math.round(n / 36))
+  const ending = (b, a, ph, last) => {
+    const off = last - wave(b, a, n - 1, ph)
+    return (i) => wave(b, a, i, ph) + off
+  }
+  const link = host.live.network.value.physical.find((l) => l.rx_bytes_per_sec !== null)
+  const climb = (i) => Math.min(1, Math.max(0, (i - n * 0.9) / (n * 0.1))) ** 0.7
+  const series = {
+    rx: mk(ending(1.5e5, 6e4, 2, link.rx_bytes_per_sec)),
+    tx: mk(ending(3.8e4, 1.4e4, 3, link.tx_bytes_per_sec)),
+  }
+  for (const t of host.live.sensors.value.temperatures) {
+    const f =
+      t.celsius >= t.warn_c
+        ? (i) => ending(61, 2.5, 1, 61)(i) + (t.celsius - 61) * climb(i)
+        : ending(t.celsius - 0.8, 0.8, 4, t.celsius)
+    series[`temp:${t.chip}/${t.label}`] = mk(f)
+  }
+  for (const key of Object.keys(series)) series[key] = series[key].filter((_, i) => i < gapFrom || i >= gapTo)
+  return series
+}
+
 function live(path, body) {
   const now = new Date().toISOString()
   // The fixture's second cluster has a certificate running out, which the
@@ -159,7 +194,7 @@ function live(path, body) {
       if (c.client_cert_days_left < 60) Object.assign(c, { client_cert_days_left: 64, client_cert_not_after: '2026-11-22T08:00:00Z' })
     }
   }
-  if (path.endsWith('/hardware')) body.observed_at = now
+  if (path.endsWith('/hardware') || path === '/api/v1/host') body.observed_at = now
   if (path.includes('/kubernetes/apps')) body.collected_at = now
   if (path.endsWith('/wall')) {
     body.generated_at = now
@@ -218,7 +253,7 @@ await shoot(desk.page, '/nodes/m-cp-1', 'node-hardware.png', { range: '24 h' })
 await shoot(desk.page, '/kubernetes/apps', 'apps.png')
 await shoot(desk.page, '/kubernetes/apps/media/Deployment/jellyfin', 'app-detail.png', { range: '24 h' })
 await shoot(desk.page, '/kubernetes', 'kubernetes.png')
-await shoot(desk.page, '/host', 'host.png')
+await shoot(desk.page, '/host', 'host.png', { range: '24 h' })
 await desk.c.close()
 
 const wall = await context(1600, 900, 1)
@@ -244,6 +279,10 @@ await strip.setContent(`<!doctype html><style>
 await strip.screenshot({ path: join(shots, 'phone.png'), omitBackground: true })
 
 await browser.close()
+// The daemon writes its metrics history into `dir` on SIGTERM; removing the
+// directory before it has exited races that write (ENOTEMPTY).
+const gone = new Promise((resolve) => daemon.once('exit', resolve))
 daemon.kill()
+await Promise.race([gone, new Promise((resolve) => setTimeout(resolve, 10_000))])
 await rm(dir, { recursive: true, force: true })
 console.log('wrote docs/brand/{banner,social}.png, web/public/*.png and docs/screenshots/*.png')

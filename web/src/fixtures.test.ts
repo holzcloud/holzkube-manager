@@ -13,6 +13,7 @@ import {
   clustersSchema,
   clusterUsageSchema,
   hardwareSchema,
+  historySchema,
   hostSchema,
   inventorySchema,
   jobsSchema,
@@ -78,6 +79,7 @@ describe('the layout guard’s fixtures', () => {
     ['/api/v1/clusters/c-homelab/power', powerSchema],
     ['/api/v1/clusters/c-homelab/kubernetes/apps/media/Deployment/jellyfin/power', powerSchema],
     ['/api/v1/host', hostSchema],
+    ['/api/v1/host/history', historySchema],
   ])('%s is something the product would accept', (path, schema) => {
     const parsed = schema.safeParse(fixtures[path])
     // The error is printed in full rather than as "expected true": a fixture
@@ -137,6 +139,42 @@ describe('the layout guard’s fixtures', () => {
     expect(cpu).toBeDefined()
     expect(cpu?.celsius ?? 0).toBeGreaterThanOrEqual(cpu?.warn_c ?? Number.POSITIVE_INFINITY)
     expect(host.health.warnings[0]).toMatch(/^cpu_thermal /)
+  })
+
+  it("draws the host's history from what the fixture's hardening leaves readable, with a gap", () => {
+    // Served by pathname to the layout audit and built from here by the README
+    // renderer. Without it the audit's request reaches its dev daemon, which
+    // records the machine the audit runs on -- the picture would then carry a
+    // real host's curves, and differ from run to run.
+    const history = historySchema.parse(fixtures['/api/v1/host/history'])
+    const host = hostSchema.parse(fixtures['/api/v1/host'])
+
+    // rx, tx and the two Pi temperatures only: the fixture's unit hides
+    // /proc/stat and /proc/meminfo, so a cpu, memory or core:* curve here would
+    // draw what the page itself says is "Not readable — no history".
+    const sensors = host.live.sensors.readable ? host.live.sensors.value.temperatures : []
+    expect(Object.keys(history.series).sort()).toEqual(
+      ['rx', 'tx', ...sensors.map((t) => `temp:${t.chip}/${t.label}`)].sort(),
+    )
+    expect(Object.keys(history.series).sort()).toEqual([
+      'rx',
+      'temp:cpu_thermal/temp1',
+      'temp:rp1_adc/temp1',
+      'tx',
+    ])
+
+    // /host ends its window at the reading's observed_at, so a point after it
+    // is one the chart cuts, and a history that never pauses cannot show that
+    // the chart draws a pause as a gap rather than a line across it.
+    const observed = Date.parse(host.observed_at)
+    for (const [key, points] of Object.entries(history.series)) {
+      expect(points.length, key).toBeGreaterThan(100)
+      expect(Math.max(...points.map(([t]) => t)), key).toBeLessThanOrEqual(observed)
+      const widest = Math.max(...points.slice(1).map(([t], i) => t - (points[i]?.[0] ?? t)))
+      expect(widest, key).toBeGreaterThanOrEqual(5 * 60_000)
+    }
+    // The curve ends at the reading the page shows, past its warning line.
+    expect(history.series['temp:cpu_thermal/temp1']?.at(-1)?.[1]).toBe(82.1)
   })
 
   it('uses values long enough to break a phone layout', () => {

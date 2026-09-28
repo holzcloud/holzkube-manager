@@ -680,7 +680,16 @@ try {
   }
 } finally {
   await browser?.close()
+  // Wait for the daemon to be gone before its directory is removed: since
+  // Phase 12 it writes its metrics history into that directory on SIGTERM, and
+  // a recursive rm racing that write fails with ENOTEMPTY -- a red audit after
+  // every route passed. Bounded, so a daemon that hangs cannot hang the gate.
+  const gone =
+    daemon.exitCode !== null || daemon.signalCode !== null
+      ? Promise.resolve()
+      : new Promise((resolve) => daemon.once('exit', resolve))
   daemon.kill('SIGTERM')
+  await Promise.race([gone, new Promise((resolve) => setTimeout(resolve, 10_000))])
   await rm(dir, { recursive: true, force: true })
 }
 
