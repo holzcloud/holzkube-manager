@@ -112,6 +112,55 @@ describe('NodeHardware', () => {
   })
 })
 
+describe("the drive figure turns at the server's lines", () => {
+  // Through the schema, so a drive's pair that the schema dropped would show.
+  function driveFigure(warn: number | null, danger: number | null, celsius: number | null) {
+    return hardwareSchema.parse({
+      ...reading,
+      disks: [
+        {
+          name: 'sda',
+          model: 'WD Red',
+          size_bytes: 4e12,
+          read_bytes_per_sec: 0,
+          write_bytes_per_sec: 0,
+          temperature_c: celsius,
+          temperature_warn_c: warn,
+          temperature_danger_c: danger,
+        },
+      ],
+    })
+  }
+
+  async function figureOf(h: Hardware) {
+    vi.spyOn(api.machines, 'hardware').mockResolvedValue(h)
+    wrap(<NodeHardware machine={machine} />)
+    const row = (await screen.findByText('sda')).closest('li') as HTMLElement
+    return row
+  }
+
+  it('says high past the warning line the server sent', async () => {
+    const row = await figureOf(driveFigure(60, 70, 65))
+    const figure = row.querySelector('[data-severity]')
+    expect(figure?.getAttribute('data-severity')).toBe('warn')
+    expect(figure?.textContent).toBe('65 °C — high')
+  })
+
+  it('stays calm below a warning line of 70, whatever a drive default would say', async () => {
+    const row = await figureOf(driveFigure(70, 80, 65))
+    const figure = row.querySelector('[data-severity]')
+    expect(figure?.getAttribute('data-severity')).toBe('ok')
+    expect(figure?.textContent).toBe('65 °C')
+    expect(within(row).queryByText(/high/)).toBeNull()
+  })
+
+  it('says a missing temperature in words, never as 0 °C', async () => {
+    const row = await figureOf(driveFigure(null, null, null))
+    expect(within(row).getByText('temperature not reported')).toBeInTheDocument()
+    expect(within(row).queryByText(/0 °C/)).toBeNull()
+  })
+})
+
 describe('temperature limits', () => {
   it("prefer the chip's own numbers", () => {
     expect(

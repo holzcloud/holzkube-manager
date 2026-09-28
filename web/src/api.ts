@@ -1294,6 +1294,12 @@ export const hardwareSchema = z.object({
         read_bytes_per_sec: z.number().default(0),
         write_bytes_per_sec: z.number().default(0),
         temperature_c: nullableNumber,
+        // Where the drive's figure turns amber and red: the server's pair for
+        // the very sensor the figure is taken from, so the figure and that
+        // sensor's row change colour at the same number. Null exactly when
+        // temperature_c is.
+        temperature_warn_c: nullableNumber,
+        temperature_danger_c: nullableNumber,
       }),
     )
     .nullish()

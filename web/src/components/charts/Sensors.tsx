@@ -149,7 +149,7 @@ export function FanList({ fans, empty }: { fans: Fan[]; empty: ReactNode }) {
               aria-hidden="true"
               className={
                 f.rpm > 0
-                  ? 'size-3.5 shrink-0 animate-spin [animation-duration:2s]'
+                  ? 'size-3.5 shrink-0 motion-safe:animate-spin [animation-duration:2s]'
                   : 'size-3.5 shrink-0 text-muted-foreground'
               }
             />
