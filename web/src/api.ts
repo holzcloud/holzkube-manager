@@ -2596,6 +2596,14 @@ export const wallSchema = z.object({
     })
     .nullish()
     .transform((v) => v ?? { cluster: {}, nodes: {} }),
+  /** The machine holzkube-manager runs on, as the wall shows it (D-14): the
+   * server's name, state and short reason, and nothing else -- a wall link
+   * opens this answer. Absent from an older daemon and null without a host
+   * reader; then the wall draws no host tile, never a placeholder. */
+  host: z
+    .object({ name: z.string(), state: z.string(), reason: z.string() })
+    .nullish()
+    .transform((v) => v ?? null),
 })
 
 export const wallLinkSchema = z.object({

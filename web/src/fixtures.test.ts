@@ -119,6 +119,26 @@ describe('the layout guard’s fixtures', () => {
     }
   })
 
+  it('puts the host on the wall and on /host in warning, the same host both times', () => {
+    // wallSchema takes `host` as nullish, so a fixture without it parses and
+    // the wall is drawn without the host tile -- the layout audit and the
+    // README picture would then miss the tile this phase adds, and pass.
+    const wall = wallSchema.parse(fixtures['/api/v1/clusters/c-homelab/wall'])
+    const host = hostSchema.parse(fixtures['/api/v1/host'])
+
+    expect(wall.host).not.toBeNull()
+    expect(wall.host?.state).toBe('warn')
+    expect(host.health.state).toBe('warn')
+    expect(host.device.hostname.readable && host.device.hostname.value).toBe(wall.host?.name)
+    // The ▲ and the notice agree: the sensor the warning names is past its line.
+    const cpu = host.live.sensors.readable
+      ? host.live.sensors.value.temperatures.find((t) => t.chip === 'cpu_thermal')
+      : undefined
+    expect(cpu).toBeDefined()
+    expect(cpu?.celsius ?? 0).toBeGreaterThanOrEqual(cpu?.warn_c ?? Number.POSITIVE_INFINITY)
+    expect(host.health.warnings[0]).toMatch(/^cpu_thermal /)
+  })
+
   it('uses values long enough to break a phone layout', () => {
     // Fixtures made of "foo" measure a layout nobody has. The screen the
     // operator photographed broke on a pod name and an image reference, so the

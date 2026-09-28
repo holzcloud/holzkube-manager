@@ -235,6 +235,25 @@ export function WallView() {
  */
 function LeftHalf({ wall, stale, ageMs }: { wall: Wall; stale: boolean; ageMs: number | null }) {
   const attention = wall.workloads.filter(needsAttention)
+  // The machine holzkube-manager runs on, first among the nodes (D-14): in the
+  // wall's own colours and words, and not one of the cluster's nodes -- the
+  // headline keeps counting wall.nodes, and "Needs attention" does not get it
+  // (it is on screen as the first tile already). Prepended rather than drawn
+  // on its own, so Named sizes every tile in the section from one count and
+  // one longest name. No host in the answer, no tile.
+  const nodeTiles: WallTile[] =
+    wall.host === null
+      ? wall.nodes
+      : [
+          {
+            kind: 'Host',
+            namespace: '',
+            name: wall.host.name,
+            state: wall.host.state,
+            detail: `manager · ${wall.host.reason}`,
+          },
+          ...wall.nodes,
+        ]
 
   return (
     <div className="flex min-h-0 min-w-0 flex-col gap-4 md:gap-[1.8vmin]">
@@ -244,7 +263,7 @@ function LeftHalf({ wall, stale, ageMs }: { wall: Wall; stale: boolean; ageMs: n
           cluster and each one is a machine they can walk over to; a wall that
           only mentioned a node once it had already failed would be a wall that
           never showed the thing it is most often consulted about. */}
-      <Named title="Nodes" tiles={wall.nodes} trends={wall.trends.nodes} />
+      <Named title="Nodes" tiles={nodeTiles} trends={wall.trends.nodes} />
       {/* And everything that is not running, named, large. Absent — not empty,
           not a zero — when there is nothing to name.
           It GROWS into whatever the column has left: a wall wants the biggest
@@ -463,6 +482,7 @@ function Named({
             // ambiguity that count exists to remove.
             data-row=""
             data-state={tile.state}
+            data-kind={tile.kind === 'Host' ? 'host' : undefined}
             className={`min-w-0 overflow-hidden rounded-[1vmin] px-3 py-2 ring-1 md:px-[1.3vmin] md:py-[1.1vmin] ${size} ${
               grow ? 'flex flex-col justify-center' : ''
             } ${TILE_COLOURS[tile.state] ?? TILE_COLOURS.unknown}`}
@@ -474,7 +494,9 @@ function Named({
             <p className="truncate opacity-80">
               {tile.namespace === '' ? tile.detail : `${tile.namespace} · ${tile.detail}`}
             </p>
-            {trends?.[tile.name] !== undefined && (
+            {/* A node's curve, never the host's: the host tile carries no
+                trend, and a node that shares its name must not lend it one. */}
+            {tile.kind !== 'Host' && trends?.[tile.name] !== undefined && (
               <NodeTrend points={trends[tile.name] ?? []} name={tile.name} />
             )}
           </div>
