@@ -1,11 +1,16 @@
 import { useQuery } from '@tanstack/react-query'
 import { Link } from '@tanstack/react-router'
 import { api, type Hardware, type Machine, type Temperature } from '@/api'
+import {
+  CoreList,
+  MemoryChart,
+  NetworkChart,
+  ProcessorChart,
+} from '@/components/charts/HardwareCharts'
 import { LiveChart } from '@/components/charts/LiveChart'
 import { Meter, severityOf } from '@/components/charts/Meter'
 import { RangePicker } from '@/components/charts/RangePicker'
-import { FanList, SEVERITY_COLOR, Sensors, sensorKey } from '@/components/charts/Sensors'
-import { Sparkline } from '@/components/charts/Sparkline'
+import { FanList, Sensors, sensorKey } from '@/components/charts/Sensors'
 import { Problem } from '@/components/Problem'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { merge, useChartRange } from '@/hooks/useChartRange'
@@ -141,42 +146,8 @@ export function NodeHardware({ machine }: { machine: Machine }) {
               </div>
             </CardHeader>
             <CardContent className="space-y-3">
-              <LiveChart
-                title="Processor load"
-                series={[{ key: 'cpu', label: 'Load', slot: 1, points: history.cpu ?? [] }]}
-                format={(v) => `${Math.round(v)}%`}
-                yMax={100}
-                height={160}
-                windowMs={chart.windowMs}
-              />
-              {h.cpu.per_core.length > 0 && (
-                <ul className="grid grid-cols-2 gap-x-4 gap-y-2 sm:grid-cols-3 xl:grid-cols-6">
-                  {h.cpu.per_core.map((usage, i) => {
-                    const severity = severityOf(usage, 75, 90)
-                    return (
-                      // biome-ignore lint/suspicious/noArrayIndexKey: the index IS the CPU's name
-                      <li key={i} className="min-w-0" data-severity={severity}>
-                        <p className="flex justify-between text-xs">
-                          <span className="text-muted-foreground">CPU {i}</span>
-                          <span className="tabular-nums">
-                            {formatPercent(usage)}
-                            {severity !== 'ok' && (
-                              <span className="text-[color:var(--viz-danger)]"> ▲</span>
-                            )}
-                          </span>
-                        </p>
-                        <Sparkline
-                          label={`CPU ${i} load`}
-                          points={history[`core:${i}`] ?? []}
-                          max={100}
-                          width={120}
-                          color={SEVERITY_COLOR[severity]}
-                        />
-                      </li>
-                    )
-                  })}
-                </ul>
-              )}
+              <ProcessorChart history={history} windowMs={chart.windowMs} />
+              {h.cpu.per_core.length > 0 && <CoreList perCore={h.cpu.per_core} history={history} />}
               {h.cpu.iowait_percent >= 1 && (
                 <p className="text-muted-foreground text-xs">
                   {formatPercent(h.cpu.iowait_percent)} of the time spent waiting for disks.
@@ -195,13 +166,7 @@ export function NodeHardware({ machine }: { machine: Machine }) {
                 <p className="font-semibold text-lg">{formatBytes(mem.used_bytes)}</p>
               </CardHeader>
               <CardContent className="space-y-3">
-                <LiveChart
-                  title="Memory in use"
-                  series={[{ key: 'memory', label: 'Used', slot: 1, points: history.memory ?? [] }]}
-                  format={(v) => `${Math.round(v)}%`}
-                  yMax={100}
-                  windowMs={chart.windowMs}
-                />
+                <MemoryChart history={history} windowMs={chart.windowMs} />
                 <p className="text-muted-foreground text-xs tabular-nums">
                   {formatBytes(mem.cache_bytes)} cache · {formatBytes(mem.available_bytes)}{' '}
                   available
@@ -246,15 +211,7 @@ export function NodeHardware({ machine }: { machine: Machine }) {
               </p>
             </CardHeader>
             <CardContent>
-              <LiveChart
-                title="Network throughput"
-                series={[
-                  { key: 'rx', label: 'Inbound', slot: 2, points: history.rx ?? [] },
-                  { key: 'tx', label: 'Outbound', slot: 1, points: history.tx ?? [] },
-                ]}
-                format={formatRate}
-                windowMs={chart.windowMs}
-              />
+              <NetworkChart history={history} windowMs={chart.windowMs} />
               <p className="sr-only">
                 Now: in {formatRate(totalRx)}, out {formatRate(totalTx)}.
               </p>
