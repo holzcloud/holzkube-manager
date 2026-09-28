@@ -17,7 +17,9 @@ import (
 // corridor. A name, a state and a short reason -- no address, no version, no
 // error text (T-12-08). An unreadable host says the fixed "not readable",
 // never the Unreadable sentences, which name paths and carry the kernel's
-// errors.
+// errors. A warning is told from Health.Public, never from Warnings: a
+// filesystem's warning names its mount point there, and the data directory's
+// can be any path on the machine.
 type wallHost struct {
 	Name   string           `json:"name"`
 	State  host.HealthState `json:"state"`
@@ -67,14 +69,14 @@ func wallHostFrom(s host.Snapshot, now time.Time) *wallHost {
 		out.State, out.Reason = host.HealthOK, "healthy"
 	case host.HealthWarn:
 		out.State = host.HealthWarn
-		if len(s.Health.Warnings) == 0 {
+		if len(s.Health.Public) == 0 {
 			// Assess never warns without a sentence; if it ever did, the tile
-			// still says something rather than nothing.
+			// still says something -- the count, which names nothing.
 			out.Reason = s.Health.Summary
 			break
 		}
-		out.Reason = s.Health.Warnings[0]
-		if more := len(s.Health.Warnings) - 1; more > 0 {
+		out.Reason = s.Health.Public[0]
+		if more := len(s.Health.Public) - 1; more > 0 {
 			out.Reason += " and " + strconv.Itoa(more) + " more"
 		}
 	default:

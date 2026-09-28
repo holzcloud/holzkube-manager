@@ -2345,9 +2345,12 @@ it.** `{name, state, reason}`, and nothing more:
   is `unknown` whatever it said: a sampler that stopped is not a host that is
   fine.
 - `reason` is `healthy` for `ok`; for `warn` the first of `health.warnings`,
-  with ` and {n} more` when there are others; for `unknown`, stale or not, the
-  fixed words `not readable`. The unreadable sentences are never sent here:
-  they name paths and carry the kernel's errors.
+  with ` and {n} more` when there are others -- except that a filesystem is
+  named by its role, `/` or `data directory`, never by its mount point
+  (`data directory 91% used ≥ 80%` where the page says `/mnt/ssd 91% used ≥
+  80%`); for `unknown`, stale or not, the fixed words `not readable`. The
+  unreadable sentences are never sent here: they name paths and carry the
+  kernel's errors.
 - `name` is the host's name as `uname(2)` gives it, or `holzkube-manager host`
   when that could not be read.
 - **It is never in `nodes` and never counted in `summary`.** The host is not a
