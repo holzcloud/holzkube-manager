@@ -20,5 +20,11 @@ func (osSys) BootTime() (time.Duration, error) { return 0, errUnsupported }
 func (osSys) Loads() (Loads, error)            { return Loads{}, errUnsupported }
 func (osSys) Statfs(string) (FSStats, error)   { return FSStats{}, errUnsupported }
 
+// unsupportedPlatform makes the collector read nothing here (WR-03). The
+// assertion keeps a darwin build from compiling without it.
+func (osSys) unsupportedPlatform() {}
+
+var _ unsupportedPlatform = osSys{}
+
 // statBlocks has nothing to read here; the size walk reports errUnsupported.
 func statBlocks(fs.FileInfo) (blocks int64, dev, ino uint64, ok bool) { return 0, 0, 0, false }

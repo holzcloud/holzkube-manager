@@ -9,6 +9,20 @@ import (
 // Linux. It becomes the reason code CodeUnsupported.
 var errUnsupported = errors.New("holzkube-manager reads the host on Linux only")
 
+// unsupportedPlatform is what a Sys implements on a platform this package has
+// no readings for at all. The collector then reads nothing: /sys, /proc and
+// /etc/os-release are Linux's, and on darwin their absence would come out as
+// readable empty lists ("no sensors", "no interfaces") and as read failures
+// naming files that never existed there -- claims about a machine nobody
+// looked at.
+type unsupportedPlatform interface{ unsupportedPlatform() }
+
+// platformUnsupported reports whether s is such a Sys.
+func platformUnsupported(s Sys) bool {
+	_, ok := s.(unsupportedPlatform)
+	return ok
+}
+
 // Uname is the part of uname(2) this package uses.
 type Uname struct {
 	Nodename string
