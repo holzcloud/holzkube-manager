@@ -108,6 +108,11 @@ func run(args []string) error {
 		return err
 	}
 
+	// When this process started serving, for the host page's "Running for"
+	// (HOST-02). Taken before anything else so the figure is the process's
+	// age, not the age of whatever finished initialising last.
+	started := time.Now()
+
 	// The level is behind a LevelVar because the level itself is configuration:
 	// the logger has to exist before --log-level has been resolved.
 	level := new(slog.LevelVar)
@@ -546,7 +551,24 @@ func run(args []string) error {
 	// The machine this process runs on, read through the root filesystem and
 	// four syscalls. It opens nothing here: every read happens when the host
 	// page asks.
-	hostCollector := host.New(host.Config{FS: os.DirFS("/"), Sys: host.OS(), Now: time.Now})
+	//
+	// The data directory is made absolute here because the collector resolves
+	// it against the root filesystem and the mount table, both of which name
+	// absolute paths only.
+	dataDirAbs, err := filepath.Abs(cfg.DataDir)
+	if err != nil {
+		return fmt.Errorf("resolve the data directory %s: %w", cfg.DataDir, err)
+	}
+	hostCollector := host.New(host.Config{
+		FS:  os.DirFS("/"),
+		Sys: host.OS(),
+		Now: time.Now,
+		// The same variable --version prints.
+		Version:          version,
+		Started:          started,
+		DataDir:          dataDirAbs,
+		UpdateStatusPath: cfg.UpdateStatusFile,
+	})
 
 	deps := httpapi.Deps{
 		Store:      st,
