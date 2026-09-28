@@ -4,13 +4,7 @@ import { api, type Hardware, type Machine, type Temperature } from '@/api'
 import { LiveChart } from '@/components/charts/LiveChart'
 import { Meter, severityOf } from '@/components/charts/Meter'
 import { RangePicker } from '@/components/charts/RangePicker'
-import {
-  FanList,
-  SEVERITY_COLOR,
-  Sensors,
-  sensorKey,
-  TEMPERATURE_DEFAULTS,
-} from '@/components/charts/Sensors'
+import { FanList, SEVERITY_COLOR, Sensors, sensorKey } from '@/components/charts/Sensors'
 import { Sparkline } from '@/components/charts/Sparkline'
 import { Problem } from '@/components/Problem'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -297,8 +291,8 @@ export function NodeHardware({ machine }: { machine: Machine }) {
                       ) : (
                         <TemperatureFigure
                           celsius={d.temperature_c}
-                          warn={TEMPERATURE_DEFAULTS.disk.warn}
-                          danger={TEMPERATURE_DEFAULTS.disk.danger}
+                          warn={d.temperature_warn_c ?? undefined}
+                          danger={d.temperature_danger_c ?? undefined}
                         />
                       )}
                     </span>
@@ -380,8 +374,9 @@ function TemperatureFigure({
   danger,
 }: {
   celsius: number
-  warn: number
-  danger: number
+  /** The server's lines; a missing one is no line, never a number made up here. */
+  warn?: number
+  danger?: number
 }) {
   const severity = severityOf(celsius, warn, danger)
   return (

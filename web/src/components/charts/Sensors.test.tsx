@@ -71,6 +71,28 @@ describe('FanList', () => {
   })
 })
 
+describe('the fan icon', () => {
+  function classesOf(el: Element | null | undefined): string[] {
+    return (el?.getAttribute('class') ?? '').split(/\s+/).filter(Boolean)
+  }
+
+  it('spins only for a reader who has not asked for reduced motion', () => {
+    const { container } = render(
+      <FanList
+        fans={[
+          { chip: 'nct6798', label: 'fan1', rpm: 1080 },
+          { chip: 'nct6798', label: 'fan2', rpm: 0 },
+        ]}
+        empty={null}
+      />,
+    )
+    const [turning, still] = Array.from(container.querySelectorAll('svg'))
+    expect(classesOf(turning)).toContain('motion-safe:animate-spin')
+    expect(classesOf(turning)).not.toContain('animate-spin')
+    expect(classesOf(still).some((c) => c.endsWith('animate-spin'))).toBe(false)
+  })
+})
+
 describe('the node page after the move', () => {
   it('keeps a sparkline beside every sensor', async () => {
     vi.spyOn(api.machines, 'hardware').mockResolvedValue(
