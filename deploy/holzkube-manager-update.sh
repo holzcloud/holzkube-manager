@@ -142,10 +142,15 @@ record_status() {
     [[ $EUID -eq 0 ]] || return 0
     install -d -o root -g root -m 0755 "$dir" || return 0
   fi
-  # Als root nur in ein Verzeichnis, das root gehoert. Die Pruefung laeuft in
-  # python3, weil stat(1) auf Linux und BSD verschiedene Schalter hat.
+  # Als root nur in ein Verzeichnis, das root gehoert und in das niemand sonst
+  # schreiben kann. Gehoert es root, ist aber gruppen- oder weltschreibbar,
+  # kann ein anderer die Datei von mktemp zwischen mktemp und der Umleitung
+  # unten gegen einen Symlink tauschen, und root schriebe dorthin, wo er zeigt
+  # -- auch mit Sticky-Bit, denn die Datei, die er tauschte, waere dann seine.
+  # Die Pruefung laeuft in python3, weil stat(1) auf Linux und BSD
+  # verschiedene Schalter hat, und mit lstat, damit sie keinem Symlink folgt.
   if [[ $EUID -eq 0 ]]; then
-    python3 -I -c 'import os, sys; sys.exit(0 if os.stat(sys.argv[1]).st_uid == 0 else 1)' "$dir" \
+    python3 -I -c 'import os, stat, sys; s = os.lstat(sys.argv[1]); sys.exit(0 if stat.S_ISDIR(s.st_mode) and s.st_uid == 0 and not s.st_mode & 0o022 else 1)' "$dir" \
       || return 0
   fi
   # --check ohne root: nicht schreibbar heisst nichts festhalten.
