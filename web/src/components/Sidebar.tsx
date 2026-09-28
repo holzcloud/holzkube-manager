@@ -3,6 +3,7 @@ import {
   ArrowUpCircle,
   Boxes,
   Container,
+  Cpu,
   Disc3,
   FileCog,
   HardDriveDownload,
@@ -70,6 +71,14 @@ export const NAV_AREAS: NavArea[] = [
     phase: null,
     description:
       'Every machine holzkube-manager knows about, with its Talos version, its role and an honest health state — including the machines that are not answering.',
+  },
+  {
+    path: '/host',
+    label: 'Host',
+    icon: Cpu,
+    phase: null,
+    description:
+      'The machine holzkube-manager itself runs on: what it is, how the service is doing, and its live readings — processor, memory, filesystems, temperatures and network.',
   },
   {
     path: '/clusters',

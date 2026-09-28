@@ -23,6 +23,7 @@ import (
 	"github.com/holzcloud/holzkube-manager/internal/audit"
 	"github.com/holzcloud/holzkube-manager/internal/auth"
 	"github.com/holzcloud/holzkube-manager/internal/history"
+	"github.com/holzcloud/holzkube-manager/internal/host"
 	"github.com/holzcloud/holzkube-manager/internal/httpapi"
 	"github.com/holzcloud/holzkube-manager/internal/httpapi/handlers"
 	"github.com/holzcloud/holzkube-manager/internal/imagefactory"
@@ -84,6 +85,7 @@ type harnessConfig struct {
 	upgrade              func(*harness) *upgrade.Service
 	power                bool
 	history              bool
+	host                 *host.Collector
 	allowedHosts         []string
 	factoryBase          string
 	wrapStore            func(store.Store) store.Store
@@ -175,6 +177,12 @@ func withPower() harnessOpt {
 // it: a test records into h.history, or runs a sampler over h.inv itself.
 func withHistory() harnessOpt {
 	return func(c *harnessConfig) { c.history = true }
+}
+
+// withHost adds the host reader and serves it. Without it the route is still
+// registered and answers 502, which is what a test of that answer needs.
+func withHost(c *host.Collector) harnessOpt {
+	return func(c2 *harnessConfig) { c2.host = c }
 }
 
 // withJobs adds the job engine, the confirmer and the node-action routes. It
@@ -413,6 +421,8 @@ func newHarness(t *testing.T, opts ...harnessOpt) *harness {
 		deps.History = h2.history
 	}
 
+	deps.Host = cfg.host
+
 	deps.Routes = slices.Concat(
 		handlers.SystemRoutes(deps),
 		handlers.MetricsRoutes(deps),
@@ -432,6 +442,7 @@ func newHarness(t *testing.T, opts ...harnessOpt) *harness {
 		handlers.KubernetesRoutes(deps),
 		handlers.PowerRoutes(deps),
 		handlers.HistoryRoutes(deps),
+		handlers.HostRoutes(deps),
 	)
 
 	srv := httptest.NewTLSServer(httpapi.New(deps))

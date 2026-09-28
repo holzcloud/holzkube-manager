@@ -3,6 +3,7 @@ import { authenticatedRoute, rootRoute } from '@/routes/__root'
 import { auditRoute } from '@/routes/audit'
 import { clustersRoute } from '@/routes/clusters'
 import { configRoute } from '@/routes/config'
+import { hostRoute } from '@/routes/host'
 import { imagesRoute } from '@/routes/images'
 import { indexRoute } from '@/routes/index'
 import { jobsRoute } from '@/routes/jobs'
@@ -49,6 +50,7 @@ const routeTree = rootRoute.addChildren([
     imagesRoute,
     nodesRoute,
     nodeDetailRoute,
+    hostRoute,
     clustersRoute,
     kubernetesRoute.addChildren([
       kubernetesOverviewRoute,

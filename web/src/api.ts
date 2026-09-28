@@ -2911,10 +2911,56 @@ export const applyResultSchema = z.object({
   details: z.string().default(''),
 })
 
+/**
+ * Why a value on the host page is not there (Phase 11, D-02).
+ *
+ * `code` is what the renderer branches on -- `hardening.proc-subset`,
+ * `read-failed`, `rate.no-baseline`, `update.not-recorded`, `unsupported` --
+ * and `message` is the server's sentence for the operator.
+ */
+export const reasonSchema = z.object({
+  code: z.string(),
+  message: z.string().default(''),
+})
+
+export type Reason = z.infer<typeof reasonSchema>
+
+/**
+ * One value on the host page: read, with a value, or not read, with a reason.
+ *
+ * Mirrors Go's host.Reading[T]. A union discriminated on `readable`, so that
+ * TypeScript refuses to format a value before the renderer has asked whether
+ * there is one -- `formatBytes` of an unread memory total would otherwise print
+ * "0 B", which is the exact lie D-02 forbids. For the same reason nothing inside
+ * a reading's value carries a `.default(0)`: a missing number is a parse error,
+ * never a zero.
+ */
+export function reading<T extends z.ZodType>(value: T) {
+  return z.discriminatedUnion('readable', [
+    z.object({ readable: z.literal(true), value }),
+    z.object({ readable: z.literal(false), reason: reasonSchema }),
+  ])
+}
+
+/** The machine holzkube-manager runs on: GET /api/v1/host (Phase 11). */
+export const hostSchema = z.object({
+  observed_at: z.string(),
+  container: z.boolean(),
+  device: z.object({
+    hostname: reading(z.string()),
+    kernel: reading(z.string()),
+  }),
+})
+
+export type Host = z.infer<typeof hostSchema>
+
 export const api = {
   /** The running build and its changelog. Behind the session gate, which is
    *  where the sidebar that shows it already is. */
   version: (): Promise<VersionInfo> => sendJSON('GET', '/api/v1/system/version', versionSchema),
+
+  /** The machine this daemon runs on, read now. Polled every 3 s by /host. */
+  host: (): Promise<Host> => sendJSON('GET', '/api/v1/host', hostSchema),
 
   status: (): Promise<SystemStatus> =>
     sendJSON('GET', '/api/v1/system/status', systemStatusSchema, undefined, {
