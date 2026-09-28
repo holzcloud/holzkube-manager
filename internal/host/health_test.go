@@ -214,6 +214,13 @@ func TestUnreadableIsNeverHealthy(t *testing.T) {
 	sensorStates := map[string]Reading[Sensors]{
 		"sensors readable":     sensorsRead(sensorAt("cpu_thermal", "temp1", 50, 80, 110)),
 		"sensors not readable": Hidden[Sensors](failed),
+		// Read, and every input that is there failed: not a machine without
+		// sensors (CR-01).
+		"sensors readable, every input failed": Read(Sensors{
+			Temperatures: []inventory.HardwareTemperature{},
+			Fans:         []inventory.HardwareFan{},
+			Unread:       []string{"cpu_thermal temp1"},
+		}),
 	}
 	rootStates := map[string]Filesystem{
 		"root readable":     fine,
@@ -232,7 +239,8 @@ func TestUnreadableIsNeverHealthy(t *testing.T) {
 				if data != nil {
 					rows = append(rows, *data)
 				}
-				unread := !sensors.Readable || !root.Usage.Readable || (data != nil && !data.Usage.Readable)
+				unread := !sensors.Readable || (sensors.Value != nil && len(sensors.Value.Unread) > 0) ||
+					!root.Usage.Readable || (data != nil && !data.Usage.Readable)
 
 				name := sn + ", " + rn + ", " + dn
 				h := Assess(hostLive(sensors, rows...))

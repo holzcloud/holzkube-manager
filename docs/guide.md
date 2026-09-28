@@ -215,7 +215,8 @@ critical ones first. **Not readable** (a grey ring) means nothing crossed, but a
 temperature or a filesystem could not be read, so nobody can say the host is
 fine. A warning outranks "not readable", which outranks healthy. A machine with
 no temperature sensor, such as a virtual machine, is judged by its filesystems
-alone and says so.
+alone and says so. A sensor that is there but does not answer is not the same
+thing: it is named as not readable.
 
 The state appears in the page's header, as the mark beside **Host** in the
 navigation (checked every 30 seconds while you are elsewhere), and on the wall
