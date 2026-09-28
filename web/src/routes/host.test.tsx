@@ -109,7 +109,9 @@ function pi5Sensors() {
         label: 'temp1',
         celsius: 64.4,
         high_c: null,
-        critical_c: null,
+        critical_c: 110,
+        warn_c: 80,
+        danger_c: 110,
       },
       {
         chip: 'rp1_adc',
@@ -118,6 +120,8 @@ function pi5Sensors() {
         celsius: 55.4,
         high_c: null,
         critical_c: null,
+        warn_c: 75,
+        danger_c: 90,
       },
     ],
     fans: [],
@@ -838,6 +842,8 @@ describe('the Sensors card', () => {
             celsius: 96,
             high_c: null,
             critical_c: null,
+            warn_c: 80,
+            danger_c: 95,
           },
           {
             chip: 'nct6798',
@@ -846,6 +852,8 @@ describe('the Sensors card', () => {
             celsius: 36,
             high_c: null,
             critical_c: null,
+            warn_c: 70,
+            danger_c: 85,
           },
         ],
         fans: [

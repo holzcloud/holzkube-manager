@@ -7,35 +7,15 @@ import { Sparkline } from '@/components/charts/Sparkline'
 /**
  * A machine's temperatures and fans, drawn the same way wherever they appear
  * (2026-09-28): a node's hardware page and the host page carry the same JSON
- * for a sensor, and one set of rules decides where it turns amber and red.
- * Moved here out of NodeHardware, not copied, so the two pages cannot drift.
- */
-
-/**
- * Where a temperature turns amber and where it turns red, when the chip does
- * not say.
+ * for a sensor and hand it to these components, so the two pages cannot drift.
  *
- * The chip's own `high` and `crit` win whenever it reports them: Intel's
- * TjMax, an NVMe drive's warning composite temperature, are the manufacturer's
- * numbers and better than any default. These are for chips that report only a
- * reading, and they are the conventional ones -- a desktop CPU at 80 °C is
- * working hard, a drive at 60 °C is past where its life shortens.
+ * Where a temperature turns amber and red is not decided here. The server sends
+ * both lines with every reading (`warn_c`, `danger_c`), worked out once in
+ * internal/inventory from the chip's own limits or its kind's default -- the
+ * same rule the host's state and its warnings are made from. This file only
+ * draws them, so the ▲ beside a sensor and the warning above it cannot
+ * disagree at the edge.
  */
-export const TEMPERATURE_DEFAULTS = {
-  cpu: { warn: 80, danger: 95 },
-  disk: { warn: 60, danger: 70 },
-  board: { warn: 70, danger: 85 },
-  gpu: { warn: 80, danger: 95 },
-  other: { warn: 75, danger: 90 },
-} as const satisfies Record<string, { warn: number; danger: number }>
-
-export function temperatureLimits(t: Temperature): { warn: number; danger: number } {
-  const fallback: { warn: number; danger: number } =
-    TEMPERATURE_DEFAULTS[t.kind as keyof typeof TEMPERATURE_DEFAULTS] ?? TEMPERATURE_DEFAULTS.other
-  const danger = t.critical_c ?? fallback.danger
-  const warn = t.high_c !== null && t.high_c < danger ? t.high_c : Math.min(fallback.warn, danger)
-  return { warn, danger }
-}
 
 export const KIND_LABEL: Record<string, string> = {
   cpu: 'Processor',
@@ -85,8 +65,7 @@ export function Sensors({
           <p className="mb-1 text-muted-foreground text-xs">{KIND_LABEL[g.kind] ?? g.kind}</p>
           <ul className="divide-y">
             {g.items.map((t) => {
-              const limits = temperatureLimits(t)
-              const severity = severityOf(t.celsius, limits.warn, limits.danger)
+              const severity = severityOf(t.celsius, t.warn_c, t.danger_c)
               return (
                 <li
                   key={sensorKey(t)}
@@ -101,7 +80,7 @@ export function Sensors({
                     <Sparkline
                       label={`${t.label || t.chip} temperature`}
                       points={history[`temp:${sensorKey(t)}`] ?? []}
-                      max={limits.danger}
+                      max={t.danger_c}
                       width={64}
                       height={22}
                       color={SEVERITY_COLOR[severity]}
