@@ -5,16 +5,16 @@ milestone_name: Host & Telefon
 current_phase: 12
 current_phase_name: Host wie ein Knoten — Verlauf, Warnung, Wand
 status: executing
-stopped_at: Phase 11 complete, ready to plan Phase 12
-last_updated: "2026-09-28T19:39:42.202Z"
+stopped_at: Completed 12-01-PLAN.md
+last_updated: "2026-09-28T20:02:12.936Z"
 last_activity: 2026-09-28
-last_activity_desc: Phase 11 complete, transitioned to Phase 12
-state_head: 80a0b6b39f15bed6178aaef93df3d4ee425a7d86
+last_activity_desc: Phase 12 execution started
+state_head: 37ded415fd55adf8b518b707338a0492be6e077e
 progress:
   total_phases: 4
   completed_phases: 1
   total_plans: 15
-  completed_plans: 7
+  completed_plans: 8
   percent: 25
 ---
 
@@ -28,14 +28,14 @@ liegt unverändert in `milestones/STATE-2026-09-17.md`.
 See: .planning/PROJECT.md (updated 2026-09-28)
 
 **Core value:** Eine neue Maschine wird komplett in der UI zum Cluster-Node — ohne `talosctl`, ohne Omni.
-**Current focus:** Phase 11 — Host-Seite — Gerät, Dienst, Live-Werte
+**Current focus:** Phase 12 — Host wie ein Knoten — Verlauf, Warnung, Wand
 
 ## Current Position
 
-Phase: 12 (Host wie ein Knoten — Verlauf, Warnung, Wand) — READY TO EXECUTE
-Plan: Not started
+Phase: 12 (Host wie ein Knoten — Verlauf, Warnung, Wand) — EXECUTING
+Plan: 2 of 8
 Status: Ready to execute
-Last activity: 2026-09-28 — Phase 11 complete, transitioned to Phase 12
+Last activity: 2026-09-28 — Phase 12 execution started
 
 Progress: [███░░░░░░░] 25%
 
@@ -87,6 +87,8 @@ Siehe `PROJECT.md`, die `MILESTONE-*.md`-Dateien und für v1.18 den Abschnitt
 - [Phase 11]: 11-06: link rates share the CPU memo's window and advance rule; null (never 0) for first read, a new link, or a backwards counter
 - [Phase 11]: 11-07: docs call it a unit with ProcSubset=pid as the reference installation runs it -- the repository ships no systemd unit
 - [Phase 11]: 11-07: browser layout tests set the viewport, not only the box, and measure text runs as well as element boxes
+- [Phase 12]: 12-01: TestTheHostIsNeverForgotten pins the key host/local; HostSubject=machine/local alone cannot redden Retain since retained compares against HostSubject
+- [Phase 12]: 12-01: RangePicker sits under the Live heading in LiveSection; heading/copy rewrite left to plan 05
 
 ### Blockers/Concerns
 
@@ -101,8 +103,8 @@ Siehe `PROJECT.md`, die `MILESTONE-*.md`-Dateien und für v1.18 den Abschnitt
 
 ## Session Continuity
 
-Last session: 2026-09-28T17:40:08.152Z
-Stopped at: Phase 11 complete, ready to plan Phase 12
+Last session: 2026-09-28T20:02:12.847Z
+Stopped at: Completed 12-01-PLAN.md
 Resume file: None
 Next: `/gsd-plan-phase 11`
 
@@ -117,3 +119,4 @@ Next: `/gsd-plan-phase 11`
 | Phase 11 P05 | 60min | 3 tasks | 60 files |
 | Phase 11 P06 | 16 min | 2 tasks | 13 files |
 | Phase 11 P07 | 28 min | 3 tasks | 7 files |
+| Phase 12 P01 | 21min | 2 tasks | 13 files |

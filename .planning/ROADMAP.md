@@ -128,11 +128,11 @@ Waves: 1 → {01} · 2 → {02, 03} · 3 → {04} · 4 → {05} · 5 → {06} ·
   3. Überschreitet die Temperatur oder die Belegung eines Datenträgers ihre Schwelle, zeigt der Host eine Warnung, die Wert und Schwelle nennt. Der Test dafür ist gegen eine entfernte Schwellenprüfung rot gesehen worden.
   4. Der Host steht in der Navigation und auf der Wand wie ein Knoten, mit genau einem von drei Zuständen — gesund, Warnung, nicht lesbar. Ein Host, dessen Werte nicht lesbar sind, erscheint dort nie als gesund, und der Test, der das hält, ist gegen einen Host rot gesehen worden, der es doch tat.
 
-**Plans:** 8 plans
+**Plans:** 1/8 plans executed
 
 Plans:
 **Wave 1**
-- [ ] 12-01-PLAN.md — Tracer: ein Host-Sensor über `Collector.Sample`, den einen Sampler (`host/local`), den Store und `GET /api/v1/host/history` bis zur Kurve auf `/host`; Wächter für Aufbewahrung, Inventar-Ausfall und Fehlerantworten (HMON-05)
+- [x] 12-01-PLAN.md — Tracer: ein Host-Sensor über `Collector.Sample`, den einen Sampler (`host/local`), den Store und `GET /api/v1/host/history` bis zur Kurve auf `/host`; Wächter für Aufbewahrung, Inventar-Ausfall und Fehlerantworten (HMON-05)
 - [ ] 12-02-PLAN.md — Temperaturgrenzen als eine Go-Regel (`warn_c`/`danger_c` für Knoten und Host), Trip-Points des Pi (passive/hot/critical, nie active), `host.Assess` mit Sätzen und „nie gesund, wenn nicht lesbar" (HMON-07, HOST-04)
 
 **Wave 2** *(blocked on Wave 1 completion)*
@@ -199,6 +199,6 @@ Waves: 1 → {01, 02} · 2 → {03, 04} · 3 → {05} · 4 → {06} · 5 → {07
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
 | 11. Host-Seite — Gerät, Dienst, Live-Werte | v1.18 | 7/7 | Complete    | 2026-09-28 |
-| 12. Host wie ein Knoten — Verlauf, Warnung, Wand | v1.18 | 0/TBD | Not started | - |
+| 12. Host wie ein Knoten — Verlauf, Warnung, Wand | v1.18 | 1/8 | In Progress|  |
 | 13. Host-Aktionen über einen root-eigenen Helfer | v1.18 | 0/TBD | Not started | - |
 | 14. Telefon — Tippziele, die ein Daumen trifft | v1.18 | 0/TBD | Not started | - |
