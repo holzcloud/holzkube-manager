@@ -44,8 +44,11 @@ itself.
 2. **Green here first.** `./bin/task ci`. This is the same gate CI runs, and
    finding a failure here costs a minute instead of a round trip.
 
-3. **Green there on the head commit.** Check the CI run for the exact SHA being
-   released. Not "main was green yesterday".
+3. **Green there on the head commit.** Since 2026-09-28 CI no longer runs on a
+   push to main (the Actions minutes ran out), so there is no push run to wait
+   for: the dispatch in step 7 runs the gates on the exact SHA itself, and the
+   Release job starts only after they pass. Step 2 is therefore the only check
+   before the dispatch, and it is not optional.
 
 4. **Pick the version.** Since 2026-09-26 the product is alpha and numbered
    from `v0.0.1` again; every release before that was deleted. Plain
