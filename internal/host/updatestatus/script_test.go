@@ -196,6 +196,9 @@ func (e *scriptEnv) runSignalled(asRoot bool, ready string, sig syscall.Signal, 
 	cmd.Env = e.env()
 	cmd.Dir = e.dir
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	// A blocking stub that outlived the signal would hold the output pipe
+	// for its whole sleep; Wait gives up on the pipe after this instead.
+	cmd.WaitDelay = 5 * time.Second
 	var out bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &out
 	if err := cmd.Start(); err != nil {
