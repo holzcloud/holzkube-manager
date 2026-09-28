@@ -4,17 +4,17 @@ milestone: v1.18
 milestone_name: Host & Telefon
 current_phase: 11
 current_phase_name: Host-Seite — Gerät, Dienst, Live-Werte
-status: executing
-stopped_at: Completed 11-06-PLAN.md
-last_updated: "2026-09-28T17:09:14.343Z"
+status: verifying
+stopped_at: Completed 11-07-PLAN.md
+last_updated: "2026-09-28T17:40:08.217Z"
 last_activity: 2026-09-28
 last_activity_desc: Phase 11 execution started
-state_head: d3eae877a312c9ed4c0b137b9a2c48ff6c24338d
+state_head: 61883f172f6a784022f1795b0c3bda3e43b179dd
 progress:
   total_phases: 4
   completed_phases: 0
   total_plans: 7
-  completed_plans: 6
+  completed_plans: 7
   percent: 0
 ---
 
@@ -34,7 +34,7 @@ See: .planning/PROJECT.md (updated 2026-09-28)
 
 Phase: 11 (Host-Seite — Gerät, Dienst, Live-Werte) — EXECUTING
 Plan: 7 of 7
-Status: Ready to execute
+Status: Phase complete — ready for verification
 Last activity: 2026-09-28 — Phase 11 execution started
 
 Progress: [░░░░░░░░░░] 0%
@@ -85,6 +85,8 @@ Siehe `PROJECT.md`, die `MILESTONE-*.md`-Dateien und für v1.18 den Abschnitt
 - [Phase 11]: Sensor list, fan rows and temperature limits live in web/src/components/charts/Sensors.tsx, shared by NodeHardware and /host; the sparkline column exists only when a history is passed
 - [Phase 11]: 11-06: physical interface = fs.Lstat(<if>/device) succeeds, never a name rule; the address file is never read
 - [Phase 11]: 11-06: link rates share the CPU memo's window and advance rule; null (never 0) for first read, a new link, or a backwards counter
+- [Phase 11]: 11-07: docs call it a unit with ProcSubset=pid as the reference installation runs it -- the repository ships no systemd unit
+- [Phase 11]: 11-07: browser layout tests set the viewport, not only the box, and measure text runs as well as element boxes
 
 ### Blockers/Concerns
 
@@ -99,8 +101,8 @@ Siehe `PROJECT.md`, die `MILESTONE-*.md`-Dateien und für v1.18 den Abschnitt
 
 ## Session Continuity
 
-Last session: 2026-09-28T17:09:14.282Z
-Stopped at: Completed 11-06-PLAN.md
+Last session: 2026-09-28T17:40:08.152Z
+Stopped at: Completed 11-07-PLAN.md
 Resume file: None
 Next: `/gsd-plan-phase 11`
 
@@ -114,3 +116,4 @@ Next: `/gsd-plan-phase 11`
 | Phase 11 P04 | 24min | 3 tasks | 16 files |
 | Phase 11 P05 | 60min | 3 tasks | 60 files |
 | Phase 11 P06 | 16 min | 2 tasks | 13 files |
+| Phase 11 P07 | 28 min | 3 tasks | 7 files |
