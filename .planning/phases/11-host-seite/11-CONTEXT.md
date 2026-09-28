@@ -60,10 +60,11 @@ ohnehin mitbringen (Phase 14).
   Betriebssystem aus `/etc/os-release` (`PRETTY_NAME`), Architektur aus
   `runtime.GOARCH` plus `uname -m`, Kernzahl aus
   `/sys/devices/system/cpu/online`.
-- **D-05:** CPU-Auslastung (`/proc/stat`), Load (`/proc/loadavg`), Speicher und
-  Swap (`/proc/meminfo`) werden aus `/proc` gelesen und stehen unter der
-  Produktions-Unit als „nicht lesbar" da — so, wie Erfolgskriterium 3 es
-  verlangt. Der Guard-Test läuft gegen den Fixture-Baum `procsubset-pid` und ist
+- **D-05:** CPU-Auslastung (`/proc/stat`), Speicher und Swap (`/proc/meminfo`)
+  werden aus `/proc` gelesen und stehen unter der Produktions-Unit als „nicht
+  lesbar" da. Load kommt aus `/proc/loadavg` und, wenn das verborgen ist, aus
+  `sysinfo(2)` — dieselben drei Werte, exakt (vom Orchestrator nachträglich
+  entschieden, Erfolgskriterium 3 entsprechend angepasst). Der Guard-Test läuft gegen den Fixture-Baum `procsubset-pid` und ist
   gegen eine wieder eingesetzte 0 rot zu sehen.
 
 ### Was die Seite zeigt
@@ -158,12 +159,10 @@ ohnehin mitbringen (Phase 14).
 
 Gewählt wurde jeweils die empfohlene Antwort; verworfen:
 
-- *Load, Speicher und Swap über `sysinfo(2)` lesen, das auch unter
-  `ProcSubset=pid` geht* — verworfen, weil Erfolgskriterium 3 Load und Speicher
-  ausdrücklich als „nicht lesbar" verlangt und `sysinfo` kein `MemAvailable`
-  und keinen Page-Cache kennt: „belegt" wäre um den Cache zu hoch, eine
-  plausible falsche Zahl. **Zur Prüfung durch den Betreiber vorgemerkt:** Load
-  allein wäre über `sysinfo` exakt lesbar.
+- *Speicher und Swap über `sysinfo(2)` lesen, das auch unter `ProcSubset=pid`
+  geht* — verworfen, weil `sysinfo` kein `MemAvailable` und keinen Page-Cache
+  kennt: „belegt" wäre um den Cache zu hoch, eine plausible falsche Zahl.
+  Load dagegen ist über `sysinfo` exakt und wird so gelesen (D-05).
 - *Unlesbarkeit am `ENOENT` allein erkennen* — verworfen, ein fehlendes `/proc`
   in einem exotischen Container wäre dann fälschlich „Härtung"; `subset=pid` im
   Mount ist der Beweis.
@@ -247,8 +246,6 @@ Gewählt wurde jeweils die empfohlene Antwort; verworfen:
 <deferred>
 ## Deferred Ideas
 
-- Load über `sysinfo(2)` auch unter `ProcSubset=pid` — zur Entscheidung des
-  Betreibers vorgemerkt (siehe „Ohne Rückfrage entschieden").
 - Eine Referenz-Unit `deploy/holzkube-manager.service` im Repository — nicht
   verlangt; die Anleitung in Phase 13 beschreibt nur die Helfer-Units.
 - Spannungen (`in*_input`) und Drosselungs-Flags des Pi (`vcgencmd
