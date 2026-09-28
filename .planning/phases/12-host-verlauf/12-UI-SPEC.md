@@ -334,7 +334,7 @@ verbatim. The exact sentences are decided here (CONTEXT discretion).
 | Number format in a warning | temperature with one decimal, threshold without decimals when whole; percent as df prints it (whole number, rounded up — the figure the Filesystems meter shows) |
 | Order | critical before warning, then by how far past the threshold (relative), largest first; the wall shows the first |
 | Also-not-readable line | Also not readable: {reasons} |
-| Threshold rule (notice footer) | A temperature warns at its chip's own limit, or at a default for its kind (80 °C for a processor) when the chip names none; a filesystem warns at 80% used. |
+| Threshold rule (notice footer) | A temperature warns at its chip's own limit, or at its thermal zone's trip point, or at a default for its kind (80 °C for a processor) when neither names one; a filesystem warns at 80% used. |
 | Wall tile, line 2 | manager · healthy / manager · {first warning} / manager · {first warning} and {n} more / manager · not readable |
 | Wall tile name | the hostname; "holzkube-manager host" when the hostname is not readable |
 | `h2` / line | Readings — "Read every 3 s while this page is open. holzkube-manager also records them every 15 s and keeps the last 24 hours, through a restart." |
