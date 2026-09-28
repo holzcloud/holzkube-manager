@@ -4,7 +4,9 @@ import type { ReactNode } from 'react'
 import { api, type Host, type Reason } from '@/api'
 import { HARDWARE_POLL_INTERVAL_MS } from '@/components/NodeHardware'
 import { Problem } from '@/components/Problem'
+import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { formatUptime } from '@/lib/format'
 import { authenticatedRoute } from '@/routes/__root'
 
 /**
@@ -72,10 +74,17 @@ export function HostView({ host, stale }: { host: Host; stale: unknown }) {
         </div>
       </header>
 
+      {/* Notices, in this order when they apply: stale, container, hardening. */}
       {isStale && (
         <p className="rounded-md border border-amber-600/40 bg-amber-600/10 px-3 py-2 text-sm text-amber-700 dark:text-amber-300">
           holzkube-manager did not answer the latest request. What you see is its reading from{' '}
           {observed.toLocaleTimeString()}. {stale instanceof Error ? stale.message : ''}
+        </p>
+      )}
+      {host.container && (
+        <p className="rounded-md border border-slate-500/40 bg-slate-500/10 px-3 py-2 text-sm text-slate-700 dark:text-slate-300">
+          holzkube-manager runs in a container. Kernel, CPU, memory and temperatures are the host's;
+          hostname, network and filesystems are the container's.
         </p>
       )}
 
@@ -87,8 +96,41 @@ export function HostView({ host, stale }: { host: Host; stale: unknown }) {
             </CardHeader>
             <CardContent>
               <dl className="grid grid-cols-1 md:grid-cols-[10rem_minmax(0,1fr)] gap-x-4 gap-y-2 text-sm">
-                <Row label="Hostname" reading={d.hostname} render={(v) => <Mono>{v}</Mono>} />
+                <Row
+                  label="Hostname"
+                  reading={d.hostname}
+                  render={(v) => (
+                    <>
+                      <Mono>{v}</Mono>
+                      {host.container && (
+                        <Badge variant="outline" className="ml-2">
+                          container
+                        </Badge>
+                      )}
+                    </>
+                  )}
+                />
+                <Row label="Model" reading={d.model} render={(v) => v} />
+                <Row
+                  label="Architecture"
+                  reading={d.arch}
+                  render={(v) => <Mono>{`${v.goarch} (${v.machine})`}</Mono>}
+                />
+                <Row label="Processor cores" reading={d.cores} render={(v) => `${v} online`} />
+                <Row label="Operating system" reading={d.os} render={(v) => v} />
                 <Row label="Kernel" reading={d.kernel} render={(v) => <Mono>{v}</Mono>} />
+                <Row
+                  label="Up since boot"
+                  reading={d.uptime_seconds}
+                  render={(v) => (
+                    <>
+                      {formatUptime(v)}{' '}
+                      <span className="text-xs text-muted-foreground">
+                        since {new Date(observed.getTime() - v * 1000).toLocaleString()}
+                      </span>
+                    </>
+                  )}
+                />
               </dl>
             </CardContent>
           </Card>

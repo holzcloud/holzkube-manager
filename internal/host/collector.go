@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"runtime"
 	"strings"
 	"time"
 )
@@ -52,21 +53,40 @@ func New(cfg Config) *Collector {
 func (c *Collector) Read(context.Context) View {
 	v := View{ObservedAt: c.cfg.Now().UTC()}
 
-	uname, err := c.cfg.Sys.Uname()
-	if err != nil {
-		reason := reasonFor("uname(2)", err)
-		v.Device.Hostname = Hidden[string](reason)
-		v.Device.Kernel = Hidden[string](reason)
-	} else {
-		v.Device.Hostname = Read(uname.Nodename)
-		v.Device.Kernel = Read(uname.Release)
-	}
-	v.Device.Model = readModel(c.cfg.FS)
-	v.Device.OS = readOSRelease(c.cfg.FS)
-	v.Device.Cores = readCores(c.cfg.FS)
+	v.Device = c.readDevice()
 	v.Container = detectContainer(c.cfg.FS)
 
 	return v
+}
+
+// readDevice fills the Device card.
+func (c *Collector) readDevice() Device {
+	var d Device
+
+	uname, err := c.cfg.Sys.Uname()
+	if err != nil {
+		reason := reasonFor("uname(2)", err)
+		d.Hostname = Hidden[string](reason)
+		d.Kernel = Hidden[string](reason)
+		d.Arch = Hidden[Arch](reason)
+	} else {
+		d.Hostname = Read(uname.Nodename)
+		d.Kernel = Read(uname.Release)
+		d.Arch = Read(Arch{GOARCH: runtime.GOARCH, Machine: uname.Machine})
+	}
+
+	// CLOCK_BOOTTIME, truncated to whole seconds. Never sysinfo(2)'s uptime,
+	// which rounds up (see Sys.BootTime).
+	if boot, err := c.cfg.Sys.BootTime(); err != nil {
+		d.UptimeSeconds = Hidden[int64](reasonFor("clock_gettime(CLOCK_BOOTTIME)", err))
+	} else {
+		d.UptimeSeconds = Read(int64(boot / time.Second))
+	}
+
+	d.Model = readModel(c.cfg.FS)
+	d.OS = readOSRelease(c.cfg.FS)
+	d.Cores = readCores(c.cfg.FS)
+	return d
 }
 
 // readBounded reads one file through fsys, refusing anything larger than limit.
