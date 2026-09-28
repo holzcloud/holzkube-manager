@@ -117,6 +117,10 @@ type Live struct {
 
 	CPU    CPU                               `json:"cpu"`
 	Memory Reading[inventory.HardwareMemory] `json:"memory"`
+
+	// Filesystems are / and the data directory's filesystem, one row when they
+	// are one filesystem (HMON-02, D-07). Never null.
+	Filesystems []Filesystem `json:"filesystems"`
 }
 
 // CPU is the processor's share of busy time and the run-queue average.

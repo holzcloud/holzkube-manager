@@ -3,6 +3,8 @@
 package host
 
 import (
+	"io/fs"
+	"syscall"
 	"time"
 
 	"golang.org/x/sys/unix"
@@ -65,4 +67,14 @@ func (osSys) Statfs(path string) (FSStats, error) {
 		Free:      uint64(st.Bfree),  //nolint:unconvert // uint32 on some 32-bit arches
 		Avail:     uint64(st.Bavail), //nolint:unconvert // uint32 on some 32-bit arches
 	}, nil
+}
+
+// statBlocks is what du(1) counts for one entry: its allocated 512-byte blocks,
+// and the device and inode that make a hard link count once.
+func statBlocks(fi fs.FileInfo) (blocks int64, dev, ino uint64, ok bool) {
+	st, isStat := fi.Sys().(*syscall.Stat_t)
+	if !isStat || st == nil {
+		return 0, 0, 0, false
+	}
+	return st.Blocks, uint64(st.Dev), st.Ino, true //nolint:unconvert,gosec // Dev is uint32 on some 32-bit arches
 }
