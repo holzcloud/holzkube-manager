@@ -664,6 +664,24 @@ func TestUpdateScriptAsRoot(t *testing.T) {
 		e.wantNoStatus(target)
 	})
 
+	// WR-06: owned by root is not enough. A root-owned directory others can
+	// write to lets them swap mktemp's file for a symlink before root writes
+	// it -- with the sticky bit too, since the swapped file would be theirs.
+	// Inside the user namespace the test's own directory is root's.
+	for _, mode := range []os.FileMode{0o777, 0o775, 0o757, 0o777 | os.ModeSticky} {
+		t.Run("status directory root-owned but mode "+mode.String(), func(t *testing.T) {
+			t.Parallel()
+			e := newScriptEnv(t, fakeInstalled, true)
+			if err := os.Chmod(e.statusDir, mode); err != nil {
+				t.Fatal(err)
+			}
+			if rc := e.run(true, "--check"); rc != 0 {
+				t.Fatalf("exit = %d, want 0 -- the refusal to record must not fail the run", rc)
+			}
+			e.wantNoStatus(e.statusDir)
+		})
+	}
+
 	// /tmp belongs to the host's root, which a user namespace maps to the
 	// overflow uid: from inside, it is a directory root does not own.
 	t.Run("status directory owned by another uid", func(t *testing.T) {
