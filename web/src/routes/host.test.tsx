@@ -769,6 +769,9 @@ describe('the Filesystems card', () => {
   })
 })
 
+/** The range picker's note when the recorded history could not be read. */
+const NO_HISTORY = 'No recorded history yet — the curves start with this page.'
+
 const NO_FAN =
   'No fan reported. Nothing under /sys/class/hwmon on this machine has a fan speed input — either there is no fan, or its controller has no driver.'
 
@@ -808,6 +811,20 @@ describe('the Sensors card', () => {
     for (const range of ['Live', '1 h', '6 h', '24 h']) {
       expect(screen.getByRole('button', { name: range })).toBeInTheDocument()
     }
+    // The history answered: nothing says it is missing.
+    expect(screen.queryByText(NO_HISTORY)).toBeNull()
+  })
+
+  it('says the history is missing when its request fails, and still draws each sensor from the live points', async () => {
+    vi.spyOn(api, 'hostHistory').mockRejectedValue(new Error('The server did not answer.'))
+    wrap(<HostView host={hostShape()} stale={null} />)
+
+    expect(await screen.findByText(NO_HISTORY)).toBeInTheDocument()
+    const card = cardOf('Sensors')
+    // One sparkline per sensor, from this page's own reading: the first point
+    // of a curve that continues with the page, not an empty column.
+    expect(within(card).getAllByRole('img', { name: /^temp1 temperature/ })).toHaveLength(2)
+    expect(within(card).getByText('64 °C')).toBeInTheDocument()
   })
 
   it('on an amd64 board shows its fans, a stopped one as stopped, and marks a hot CPU critical', () => {
