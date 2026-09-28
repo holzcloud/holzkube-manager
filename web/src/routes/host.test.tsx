@@ -1,8 +1,9 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { render, screen, within } from '@testing-library/react'
 import type { ReactNode } from 'react'
-import { afterEach, describe, expect, it, vi } from 'vitest'
-import { api, type Host, hostSchema } from '@/api'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { api, type History, type Host, historySchema, hostSchema } from '@/api'
+import { forget } from '@/hooks/useLiveSeries'
 import { formatBytes } from '@/lib/format'
 import { HostPage, HostView } from './host'
 
@@ -212,8 +213,28 @@ function cellOf(label: string): HTMLElement {
   return dd
 }
 
+/** A recorded history for the host, as GET /api/v1/host/history answers it. */
+function hostHistory(series: Record<string, [number, number][]> = {}): History {
+  return historySchema.parse({
+    range: '1h',
+    step_seconds: 15,
+    from: '2026-09-28T09:00:03Z',
+    to: '2026-09-28T10:00:03Z',
+    series,
+  })
+}
+
+// HostView asks for the recorded history from Phase 12 on. Every test answers
+// it -- empty unless the test says otherwise -- so none reaches the network,
+// and the page's live points are forgotten between tests as they would be
+// between page loads.
+beforeEach(() => {
+  vi.spyOn(api, 'hostHistory').mockResolvedValue(hostHistory())
+})
+
 afterEach(() => {
   vi.restoreAllMocks()
+  forget()
 })
 
 describe('HostView', () => {
@@ -752,7 +773,7 @@ const NO_FAN =
   'No fan reported. Nothing under /sys/class/hwmon on this machine has a fan speed input — either there is no fan, or its controller has no driver.'
 
 describe('the Sensors card', () => {
-  it('on the Pi 5 shows the CPU and the ADC by kind, says no fan is reported, and draws no curve', () => {
+  it('on the Pi 5 shows the CPU and the ADC by kind, says no fan is reported, and draws one curve per sensor', () => {
     wrap(<HostView host={hostShape()} stale={null} />)
 
     const card = cardOf('Sensors')
@@ -764,8 +785,29 @@ describe('the Sensors card', () => {
     expect(within(other).getByText('55 °C')).toBeInTheDocument()
 
     expect(within(card).getByText(NO_FAN)).toBeInTheDocument()
-    // No history on this page yet: no sparkline column, not a column of empty ones.
-    expect(card.querySelector('svg')).toBeNull()
+    // The sparkline column is on /host from Phase 12 on: one curve per sensor.
+    expect(within(card).getAllByRole('img', { name: /^temp1 temperature/ })).toHaveLength(2)
+  })
+
+  it("draws a sensor's recorded history as its sparkline, under the range picker", async () => {
+    const observed = Date.parse('2026-09-28T10:00:03Z')
+    vi.spyOn(api, 'hostHistory').mockResolvedValue(
+      hostHistory({
+        'temp:cpu_thermal/temp1': [
+          [observed - 60_000, 61.2],
+          [observed - 45_000, 62.8],
+          [observed - 30_000, 63.9],
+        ],
+      }),
+    )
+    wrap(<HostView host={hostShape()} stale={null} />)
+
+    const card = cardOf('Sensors')
+    expect(await within(card).findByRole('img', { name: 'temp1 temperature' })).toBeInTheDocument()
+    expect(api.hostHistory).toHaveBeenCalledWith('1h')
+    for (const range of ['Live', '1 h', '6 h', '24 h']) {
+      expect(screen.getByRole('button', { name: range })).toBeInTheDocument()
+    }
   })
 
   it('on an amd64 board shows its fans, a stopped one as stopped, and marks a hot CPU critical', () => {

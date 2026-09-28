@@ -46,6 +46,16 @@ import (
 // answers again, and not every fifteen seconds in between: a powered-off node
 // is the ordinary state of a homelab, and a journal with 5760 lines a day about
 // it is a journal nobody reads.
+//
+// # The host
+//
+// The machine this daemon runs on is sampled in the same pass, stamped with the
+// same instant and written to the same file with the same FlushIfDue as the
+// nodes (2026-09-28). No second ticker, no goroutine of its own, no second
+// file: a second loop would be a second pipeline, with its own failure modes
+// and its own idea of when "now" is. It is read before the inventory, because a
+// store that cannot list the machines says nothing about the one the daemon is
+// running on.
 
 // appsListAllowance is what the app read may spend beyond the kubelets' shared
 // ceiling: the seven list calls before it, against an API server that answers
@@ -81,6 +91,11 @@ type SamplerDeps struct {
 
 	// Apps is one cluster's apps list, over every namespace.
 	Apps func(ctx context.Context, cluster model.ClusterID) (kube.Apps, error)
+
+	// Host is the host's history values (host.Collector.Sample), keyed as a
+	// node's are. Optional: nil samples no host -- the tests of the fleet, and
+	// a daemon without a host reader.
+	Host func(ctx context.Context) (map[string]float64, error)
 }
 
 // Sampler fills a Store.
@@ -134,13 +149,20 @@ func (s *Sampler) Run(ctx context.Context) {
 	}
 }
 
-// pass is one round: the inventory, then every node and every cluster at once,
-// all stamped with the moment the pass began so that one pass is one slot.
+// pass is one round: the host, the inventory, then every node and every
+// cluster at once, all stamped with the moment the pass began so that one pass
+// is one slot.
 func (s *Sampler) pass(ctx context.Context) {
 	if ctx.Err() != nil {
 		return
 	}
 	at := s.deps.Now()
+
+	// Before the inventory, whose failure ends the pass: a store that cannot
+	// list the machines must not cost the host its history.
+	if s.deps.Host != nil {
+		s.sampleHost(ctx, at)
+	}
 
 	machines, clusters, err := s.deps.Inventory(ctx)
 	if err != nil {
@@ -196,6 +218,20 @@ func (s *Sampler) sampleMachine(ctx context.Context, id model.MachineID, at time
 	}
 	s.recovered(key, "a node answers the hardware read again")
 	s.deps.History.Record(key, at, HardwareValues(view))
+}
+
+// sampleHost records the host. A read that failed records nothing -- a gap,
+// never a zero -- and a value the host could not read is already absent from
+// the map, for the same reason.
+func (s *Sampler) sampleHost(ctx context.Context, at time.Time) {
+	key := HostSubject()
+	values, err := s.deps.Host(ctx)
+	if err != nil {
+		s.failed(key, "the host could not be read; its charts have a gap until it can", err)
+		return
+	}
+	s.recovered(key, "the host can be read again")
+	s.deps.History.Record(key, at, values)
 }
 
 func (s *Sampler) sampleCluster(ctx context.Context, id model.ClusterID, at time.Time) {

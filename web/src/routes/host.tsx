@@ -3,12 +3,15 @@ import { createRoute } from '@tanstack/react-router'
 import type { ReactNode } from 'react'
 import { api, type Host, type Link, type Reason } from '@/api'
 import { Meter } from '@/components/charts/Meter'
-import { FanList, Sensors } from '@/components/charts/Sensors'
+import { RangePicker } from '@/components/charts/RangePicker'
+import { FanList, Sensors, sensorKey } from '@/components/charts/Sensors'
 import { ago } from '@/components/HealthField'
 import { HARDWARE_POLL_INTERVAL_MS } from '@/components/NodeHardware'
 import { Problem } from '@/components/Problem'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { merge, useChartRange } from '@/hooks/useChartRange'
+import { type Series, useLiveSeries } from '@/hooks/useLiveSeries'
 import { formatBytes, formatPercent, formatRate, formatUptime } from '@/lib/format'
 import { authenticatedRoute } from '@/routes/__root'
 
@@ -68,6 +71,12 @@ export function HostView({ host, stale }: { host: Host; stale: unknown }) {
   const hidden = hiddenByHardening(host)
   const load = host.live.cpu.load
   const rates = host.live.rates_over_seconds
+
+  // The charts are the node page's (D-05): the daemon's recorded history for
+  // the range, with this page's own readings appended after its last point.
+  const chart = useChartRange(['host'], api.hostHistory)
+  const live = useLiveSeries('host', host, host.observed_at, hostHistoryValues)
+  const history = merge(chart.history.data, live, chart.windowMs, Date.parse(host.observed_at))
 
   return (
     <section className="space-y-5">
@@ -167,7 +176,7 @@ export function HostView({ host, stale }: { host: Host; stale: unknown }) {
           <ServiceCard host={host} observed={observed} />
         </div>
 
-        <LiveSection host={host} />
+        <LiveSection host={host} chart={chart} history={history} />
 
         <p className="text-xs text-muted-foreground">
           Read {observed.toLocaleTimeString()}, every 3 s while this page is open.
@@ -410,7 +419,15 @@ function dfPercent(used: number, available: number): string {
  * The Live block (HMON-01): figures and meters of the moment, no curves --
  * history is Phase 12's.
  */
-function LiveSection({ host }: { host: Host }) {
+function LiveSection({
+  host,
+  chart,
+  history,
+}: {
+  host: Host
+  chart: ReturnType<typeof useChartRange>
+  history: Series
+}) {
   return (
     <section aria-labelledby="host-live" className="space-y-4">
       <div>
@@ -421,6 +438,15 @@ function LiveSection({ host }: { host: Host }) {
           Read every 3 s while this page is open. Nothing on this page is stored.
         </p>
       </div>
+      <RangePicker
+        value={chart.range}
+        onChange={chart.setRange}
+        note={
+          chart.history.error
+            ? 'No recorded history yet — the curves start with this page.'
+            : undefined
+        }
+      />
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_20rem]">
         <div className="min-w-0 space-y-4">
           <ProcessorCard host={host} />
@@ -434,7 +460,7 @@ function LiveSection({ host }: { host: Host }) {
             waiting={host.live.rates_over_seconds === null}
           />
         </div>
-        <SensorsCard sensors={host.live.sensors} />
+        <SensorsCard sensors={host.live.sensors} history={history} />
       </div>
     </section>
   )
@@ -545,10 +571,11 @@ function rateOrDash(bytesPerSecond: number | null): string {
 
 /**
  * The host's temperatures and fans (HMON-03), with the node page's own list and
- * rows (D-13) -- without the sparkline column, since this page draws no curves
- * yet. Voltages are never read, so never shown (D-08).
+ * rows (D-13), and its sparkline column: the recorded history of each sensor
+ * spliced with this page's readings. Voltages are never read, so never shown
+ * (D-08).
  */
-function SensorsCard({ sensors }: { sensors: Host['live']['sensors'] }) {
+function SensorsCard({ sensors, history }: { sensors: Host['live']['sensors']; history: Series }) {
   return (
     <Card className="h-fit">
       <CardHeader>
@@ -560,6 +587,7 @@ function SensorsCard({ sensors }: { sensors: Host['live']['sensors'] }) {
           <>
             <Sensors
               temperatures={sensors.value.temperatures}
+              history={history}
               emptyText="This machine reports no temperature sensors."
             />
             <div>
@@ -745,6 +773,21 @@ function Row<T>({
  * everything else. The hardening reason gets its short form here; the full
  * explanation and the fix live in the notice at the top of the page.
  */
+/**
+ * The page's own readings as history values: the keys the daemon records under
+ * host/local (host.HistoryValues), so the two splice. A value that was not read
+ * writes no key -- never a 0 -- and the curve has a gap there.
+ */
+function hostHistoryValues(host: Host): Record<string, number> {
+  const values: Record<string, number> = {}
+  const sensors = host.live.sensors
+  if (sensors.readable) {
+    for (const t of sensors.value.temperatures) values[`temp:${sensorKey(t)}`] = t.celsius
+    for (const f of sensors.value.fans) values[`fan:${f.chip}/${f.label}`] = f.rpm
+  }
+  return values
+}
+
 export function MissingValue({ reason, align }: { reason: Reason; align?: 'right' }) {
   const alignment = align === 'right' ? 'text-right' : undefined
   if (reason.code === 'rate.no-baseline') {

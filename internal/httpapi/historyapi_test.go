@@ -9,9 +9,12 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"testing/fstest"
 	"time"
 
 	"github.com/holzcloud/holzkube-manager/internal/history"
+	"github.com/holzcloud/holzkube-manager/internal/host"
+	"github.com/holzcloud/holzkube-manager/internal/inventory"
 	"github.com/holzcloud/holzkube-manager/internal/kube"
 	"github.com/holzcloud/holzkube-manager/internal/model"
 	"github.com/holzcloud/holzkube-manager/internal/talossim"
@@ -25,7 +28,7 @@ import (
 
 var historyKeys = []string{"range", "step_seconds", "from", "to", "series"}
 
-func getHistory(t *testing.T, c *inventoryHarness, path string) (int, map[string]any, []byte) {
+func getHistory(t *testing.T, c *harness, path string) (int, map[string]any, []byte) {
 	t.Helper()
 	resp, raw := c.do(t, http.MethodGet, path, nil)
 	if resp.StatusCode != http.StatusOK {
@@ -93,7 +96,7 @@ func TestMachineHistoryAnswersTheContract(t *testing.T) {
 	base := "/api/v1/machines/" + id + "/hardware/history"
 
 	// Before anything was sampled: 200, and an object, never null.
-	status, v, raw := getHistory(t, c, base)
+	status, v, raw := getHistory(t, c.harness, base)
 	if status != http.StatusOK {
 		t.Fatalf("history before a sample: %d (%s)", status, raw)
 	}
@@ -112,7 +115,7 @@ func TestMachineHistoryAnswersTheContract(t *testing.T) {
 	}{
 		{"", "1h", 15}, {"?range=1h", "1h", 15}, {"?range=6h", "6h", 60}, {"?range=24h", "24h", 60},
 	} {
-		status, v, raw := getHistory(t, c, base+tc.query)
+		status, v, raw := getHistory(t, c.harness, base+tc.query)
 		if status != http.StatusOK {
 			t.Fatalf("%s: %d (%s)", tc.query, status, raw)
 		}
@@ -186,7 +189,7 @@ func TestAppHistoryKnowsWhichAppsExist(t *testing.T) {
 		return "/api/v1/clusters/" + cluster + "/kubernetes/apps/" + ns + "/" + kind + "/" + name + "/history"
 	}
 
-	if status, _, raw := getHistory(t, c, app("default", "Deployment", "web")); status != http.StatusOK ||
+	if status, _, raw := getHistory(t, c.harness, app("default", "Deployment", "web")); status != http.StatusOK ||
 		!strings.Contains(string(raw), `"series":{}`) {
 		t.Errorf("before any listing: %d (%s), want 200 and an empty object", status, raw)
 	}
@@ -198,7 +201,7 @@ func TestAppHistoryKnowsWhichAppsExist(t *testing.T) {
 		time.Now(), map[string]float64{"cpu": 120, "memory": 1 << 26})
 
 	// The kind is matched as the detail route matches it, without case.
-	status, v, raw := getHistory(t, c, app("default", "deployment", "web")+"?range=24h")
+	status, v, raw := getHistory(t, c.harness, app("default", "deployment", "web")+"?range=24h")
 	if status != http.StatusOK {
 		t.Fatalf("a listed app: %d (%s)", status, raw)
 	}
@@ -217,4 +220,97 @@ func TestAppHistoryKnowsWhichAppsExist(t *testing.T) {
 			t.Errorf("%s: %d (%s), want 404", name, resp.StatusCode, raw)
 		}
 	}
+}
+
+// hostSensorsFS is one hwmon chip of the host, the way the Pi's CPU sensor
+// sits in /sys: a driver name and one temperature, in millidegrees.
+func hostSensorsFS() fstest.MapFS {
+	return fstest.MapFS{
+		"sys/class/hwmon/hwmon0/name":        {Data: []byte("cpu_thermal\n")},
+		"sys/class/hwmon/hwmon0/temp1_input": {Data: []byte("64400\n")},
+	}
+}
+
+// sampleHostOnce runs the real sampler, with no machines on record, until the
+// host has a first sample, then stops it.
+func sampleHostOnce(t *testing.T, store *history.Store, collector *host.Collector) {
+	t.Helper()
+
+	s := history.NewSampler(history.SamplerDeps{
+		History: store,
+		Logger:  slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Inventory: func(context.Context) ([]model.Machine, []model.Cluster, error) {
+			return nil, nil, nil
+		},
+		Hardware: func(context.Context, model.MachineID) (inventory.HardwareView, error) {
+			return inventory.HardwareView{}, errors.New("no machines in this harness")
+		},
+		Apps: func(context.Context, model.ClusterID) (kube.Apps, error) {
+			return kube.Apps{}, errors.New("no Kubernetes API in this harness")
+		},
+		Host: collector.Sample,
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		s.Run(ctx)
+	}()
+	defer func() {
+		cancel()
+		<-done
+	}()
+
+	deadline := time.Now().Add(15 * time.Second)
+	for !store.Has(history.HostSubject()) {
+		if time.Now().After(deadline) {
+			t.Fatal("the sampler recorded nothing for the host")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+// TestHostHistoryAPI is the host's history end to end: the real collector
+// reading a sensor out of /sys, the real sampler filing it under host/local,
+// the real store, and the route answering it with the node's contract.
+func TestHostHistoryAPI(t *testing.T) {
+	t.Parallel()
+
+	collector := host.New(host.Config{
+		FS:  hostSensorsFS(),
+		Sys: hostSys{uname: host.Uname{Nodename: "example-host", Release: "6.18.50+rpt-rpi-2712", Machine: "aarch64"}},
+	})
+
+	t.Run("a sensor read on the host is served as its series", func(t *testing.T) {
+		t.Parallel()
+
+		h := newHarness(t, withHistory(), withHost(collector))
+		h.setupAndLogin(t)
+		sampleHostOnce(t, h.history, collector)
+
+		status, v, raw := getHistory(t, h, "/api/v1/host/history?range=1h")
+		if status != http.StatusOK {
+			t.Fatalf("GET /api/v1/host/history: %d (%s)", status, raw)
+		}
+		if v["range"] != "1h" || v["step_seconds"] != float64(15) {
+			t.Errorf("range %v step %v, want 1h and 15", v["range"], v["step_seconds"])
+		}
+		series, ok := v["series"].(map[string]any)
+		if !ok {
+			t.Fatalf("series is %T, want an object (%s)", v["series"], raw)
+		}
+		points := requireArray(t, "temp:cpu_thermal/temp1", series["temp:cpu_thermal/temp1"])
+		if len(points) == 0 {
+			t.Fatalf("no temp:cpu_thermal/temp1 point among %d series (%s)", len(series), raw)
+		}
+		found := false
+		for _, p := range points {
+			if pair, ok := p.([]any); ok && len(pair) == 2 && pair[1] == 64.4 {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("temp:cpu_thermal/temp1 = %v, want a point at 64.4", points)
+		}
+	})
 }

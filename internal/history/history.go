@@ -127,6 +127,15 @@ type View struct {
 // MachineSubject is the key a machine's hardware history is filed under.
 func MachineSubject(id model.MachineID) string { return "machine/" + string(id) }
 
+// HostSubject is the key the host's history is filed under: the one machine
+// this daemon runs on, sampled in the same pass as the nodes (2026-09-28).
+//
+// The host is not in the inventory, so Retain -- which deletes what the
+// inventory no longer holds -- never deletes it; Prune ages it out after a day
+// of silence like any subject, which is what a darwin build, that records
+// nothing, looks like.
+func HostSubject() string { return "host/local" }
+
 // AppSubject is the key an app's history is filed under. kind is the list's
 // spelling (kube.CanonicalAppKind), so "deployment" and "Deployment" in two
 // URLs are one app.
@@ -400,6 +409,12 @@ func (s *Store) Retain(machines map[model.MachineID]bool, clusters map[model.Clu
 }
 
 func retained(key string, machines map[model.MachineID]bool, clusters map[model.ClusterID]bool) bool {
+	// The host is kept by name. The default at the end would keep it too, but
+	// only by accident -- as a key this version does not know -- and an
+	// accident is not a contract.
+	if key == HostSubject() {
+		return true
+	}
 	if id, ok := strings.CutPrefix(key, "machine/"); ok {
 		return machines[model.MachineID(id)]
 	}

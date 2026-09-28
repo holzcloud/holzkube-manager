@@ -661,6 +661,7 @@ func run(args []string) error {
 			return machines, clusters, nil
 		},
 		Hardware: inv.Hardware,
+		Host:     hostCollector.Sample,
 		Apps: history.KubeApps(func(ctx context.Context, cluster model.ClusterID) (*kube.Client, error) {
 			return inv.KubeClient(ctx, cluster)
 		}, time.Now),
