@@ -1,8 +1,9 @@
 # Phase 11 deferred items
 
-- **README screenshot of /host (from 11-06).** CLAUDE.md asks for a screenshot in
-  "A look around" when a feature is a screen of its own. 11-06 added the README
-  bullet; the screenshot needs `/host` added to `web/scripts/readme-images.mjs`
-  and `task build && node web/scripts/readme-images.mjs`, which re-renders every
-  image in docs/screenshots and docs/brand. Better done once at phase end, after
-  11-07, than mid-phase. The demo fixture already carries the full /host shape.
+- ~~**README screenshot of /host (from 11-06).**~~ **Closed in 11-07.**
+  `web/scripts/readme-images.mjs` now shoots `/host` from the demo fixture into
+  `docs/screenshots/host.png`, and README's "A look around" shows it. Only that
+  image was committed: the script re-renders every picture, and the others were
+  put back, so they still show the navigation without the Host entry and the
+  version label of the build they were taken from. Re-rendering them all is a
+  separate, cosmetic change.

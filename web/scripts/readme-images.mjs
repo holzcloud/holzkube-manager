@@ -218,6 +218,7 @@ await shoot(desk.page, '/nodes/m-cp-1', 'node-hardware.png', { range: '24 h' })
 await shoot(desk.page, '/kubernetes/apps', 'apps.png')
 await shoot(desk.page, '/kubernetes/apps/media/Deployment/jellyfin', 'app-detail.png', { range: '24 h' })
 await shoot(desk.page, '/kubernetes', 'kubernetes.png')
+await shoot(desk.page, '/host', 'host.png')
 await desk.c.close()
 
 const wall = await context(1600, 900, 1)

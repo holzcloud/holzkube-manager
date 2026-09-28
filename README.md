@@ -88,6 +88,12 @@ the latest warnings. It never scrolls, and it always says how old its answer is.
 
 ![The wall](docs/screenshots/wall.png)
 
+**Host.** The machine holzkube-manager itself runs on: what it is, the service
+and its last update check, and how it is doing right now. A value the service's
+hardening hides says so, and says which line shows it, instead of reading 0.
+
+![The machine holzkube-manager runs on](docs/screenshots/host.png)
+
 **On a phone.** Every screen, one-handed.
 
 ![Three screens on a phone](docs/screenshots/phone.png)
