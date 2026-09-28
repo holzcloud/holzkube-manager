@@ -284,3 +284,73 @@ func TestTheHostHistorySurvivesARestartWithItsGap(t *testing.T) {
 		}
 	}
 }
+
+// TestAHungHostReadDoesNotStallThePass (WR-03): a host read that never returns
+// -- a statfs on a share that stopped answering -- costs the host its point in
+// this pass and nothing else. The nodes of the same pass are still recorded,
+// and shutdown still reaches its last write.
+//
+// Fault injected and seen red: sampleHost calling s.deps.Host inline again --
+// the pass never returned, and Run never came back from its cancel.
+func TestAHungHostReadDoesNotStallThePass(t *testing.T) {
+	release := make(chan struct{})
+	t.Cleanup(func() { close(release) })
+	hung := func(context.Context) (map[string]float64, error) {
+		// Deaf to its context, as a statfs in the kernel is.
+		<-release
+		return hostReading(), nil
+	}
+
+	t.Run("the pass", func(t *testing.T) {
+		f := newFleet("m1")
+		st := NewMemory()
+		c := &clock{now: t0}
+		s := hostSampler(f, st, c, nil, hung)
+		s.deps.HostBudget = 20 * time.Millisecond
+
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			s.pass(context.Background())
+		}()
+		select {
+		case <-done:
+		case <-time.After(5 * time.Second):
+			t.Fatal("a hung host read held up the pass")
+		}
+		if st.Has(HostSubject()) {
+			t.Error("the host has a point from a read that never finished")
+		}
+		if !st.Has(MachineSubject("m1")) {
+			t.Error("the node of the same pass was not recorded")
+		}
+	})
+
+	t.Run("shutdown", func(t *testing.T) {
+		f := newFleet("m1")
+		st := NewMemory()
+		c := &clock{now: t0}
+		s := hostSampler(f, st, c, nil, hung)
+		s.deps.HostBudget = 20 * time.Millisecond
+
+		ctx, cancel := context.WithCancel(context.Background())
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			s.Run(ctx)
+		}()
+		deadline := time.Now().Add(5 * time.Second)
+		for !st.Has(MachineSubject("m1")) {
+			if time.Now().After(deadline) {
+				t.Fatal("the first pass never recorded the node")
+			}
+			time.Sleep(time.Millisecond)
+		}
+		cancel()
+		select {
+		case <-done:
+		case <-time.After(5 * time.Second):
+			t.Fatal("Run did not return after its cancel while the host read hung")
+		}
+	})
+}
