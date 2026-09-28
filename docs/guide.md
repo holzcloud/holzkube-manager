@@ -168,7 +168,9 @@ every sensor draw their curve over **Live**, **1 h**, **6 h** and **24 h**, the
 same picker as on a node. The history survives a restart and an update: the
 curves before it are still there, and the minutes the service was not running
 are a gap in them. A value that could not be read at a sample is a gap too,
-never a 0. Network is the physical interfaces only; loopback, bridges and
+never a 0 -- even a single missing 15-second sample breaks the recorded curve.
+(The page's own 3-second readings, drawn after the record, are joined across a
+missed poll or two; they break once nothing arrived for 45 seconds.) Network is the physical interfaces only; loopback, bridges and
 container links are left out, because they carry the same traffic twice.
 
 **Under a hardened unit, CPU usage, memory and swap say "Not readable" -- by

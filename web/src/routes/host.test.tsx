@@ -878,6 +878,23 @@ describe('the charts', () => {
     expect(d.match(/M/g)).toHaveLength(2)
   })
 
+  // WR-04: one missing 15-s sample -- an update restart, one failed read --
+  // is a gap as well, not a line drawn across it for being short.
+  it('draws a single missing sample as a gap too', async () => {
+    vi.spyOn(api, 'hostHistory').mockResolvedValue(
+      hostHistory({ cpu: [...every15s(20, 5, 25), ...every15s(4.5, 0.25, 35)] }),
+    )
+    const { client } = wrap(<HostView host={hostShape()} stale={null} />)
+    await historySettled(client)
+    fireEvent.click(screen.getByRole('button', { name: '1 h' }))
+
+    const chart = await within(cardOf('Processor')).findByRole('img', {
+      name: 'Processor load, last 1 h',
+    })
+    const d = chart.querySelector('path[fill="none"]')?.getAttribute('d') ?? ''
+    expect(d.match(/M/g)).toHaveLength(2)
+  })
+
   it('adds no processor or memory point while the hardening hides them, poll after poll', async () => {
     const first = hostShape({ live: procSubsetLive() })
     const second = hostShape({ live: procSubsetLive(), observed_at: '2026-09-28T10:00:06Z' })

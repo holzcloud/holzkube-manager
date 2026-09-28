@@ -34,6 +34,13 @@ export function windowOf(range: ChartRange): number {
 /**
  * merge is the history for a key, then the live points after it, both cut to
  * the window ending at `now`. Exported for the test.
+ *
+ * The record is sampled in fixed slots of `step_seconds`, so a recorded point
+ * more than one slot after the one before it has an empty slot in between: the
+ * daemon was not running, or the value could not be read. That point is marked
+ * `gap` and the chart breaks there -- a line drawn across even one empty slot
+ * would be a reading nobody took (HMON-06). Half a step of slack keeps a
+ * rounding error from breaking a steady record.
  */
 export function merge(
   history: History | undefined,
@@ -44,8 +51,14 @@ export function merge(
   const out: Series = {}
   const keys = new Set([...Object.keys(history?.series ?? {}), ...Object.keys(live)])
   const cutoff = now - windowMs
+  const stepMs = (history?.step_seconds ?? 0) * 1000
   for (const key of keys) {
-    const recorded: Point[] = (history?.series[key] ?? []).map(([t, v]) => ({ t, v }))
+    const recorded: Point[] = (history?.series[key] ?? []).map(([t, v], i, all) => {
+      const prev = all[i - 1]
+      return prev !== undefined && stepMs > 0 && t - prev[0] > stepMs * 1.5
+        ? { t, v, gap: true }
+        : { t, v }
+    })
     const lastRecorded = recorded[recorded.length - 1]?.t ?? Number.NEGATIVE_INFINITY
     const fresh = (live[key] ?? []).filter((p) => p.t > lastRecorded)
     out[key] = [...recorded, ...fresh].filter((p) => p.t >= cutoff)

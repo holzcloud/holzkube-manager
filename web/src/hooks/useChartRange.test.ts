@@ -62,3 +62,47 @@ describe('a chart with a hole in it', () => {
     expect(spanLabel(24 * 60 * 60_000)).toBe('24 h')
   })
 })
+
+// WR-04: the record has fixed slots, so one empty slot is a gap -- not a line
+// drawn across it because it was shorter than the page's 45-s tolerance.
+describe('a recorded slot with nothing in it', () => {
+  it('breaks the curve at a single missing 15-s sample', () => {
+    const recorded = historySchema.parse({
+      range: '1h',
+      step_seconds: 15,
+      series: {
+        cpu: [
+          [now - 60_000, 1],
+          [now - 45_000, 2],
+          [now - 15_000, 3], // the slot at now - 30 s is empty
+          [now, 4],
+        ],
+      },
+    })
+    const out = merge(recorded, {}, 60 * 60_000, now)
+    expect(out.cpu?.map((p) => p.gap === true)).toEqual([false, false, true, false])
+    expect(segments(out.cpu ?? []).map((run) => run.length)).toEqual([2, 2])
+  })
+
+  it('breaks the 24-h curve at a single missing minute', () => {
+    const day = historySchema.parse({
+      range: '24h',
+      step_seconds: 60,
+      series: { cpu: [0, 60, 180, 240].map((s) => [now - 600_000 + s * 1000, 1]) },
+    })
+    const out = merge(day, {}, 24 * 60 * 60_000, now)
+    expect(segments(out.cpu ?? []).map((run) => run.length)).toEqual([2, 2])
+  })
+
+  it('keeps a steady record, and the page readings after it, as one line', () => {
+    const steady = historySchema.parse({
+      range: '1h',
+      step_seconds: 15,
+      series: { cpu: [0, 15, 30, 45].map((s) => [now - 60_000 + s * 1000, 1]) },
+    })
+    const live = { cpu: [3, 6, 12].map((s) => ({ t: now + s * 1000, v: 2 })) }
+    const out = merge(steady, live, 60 * 60_000, now + 12_000)
+    expect(out.cpu?.some((p) => p.gap === true)).toBe(false)
+    expect(segments(out.cpu ?? [])).toHaveLength(1)
+  })
+})

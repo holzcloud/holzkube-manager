@@ -3,6 +3,7 @@ import type { ReactNode } from 'react'
 import type { Fan, Temperature } from '@/api'
 import { severityOf } from '@/components/charts/Meter'
 import { Sparkline } from '@/components/charts/Sparkline'
+import type { Series } from '@/hooks/useLiveSeries'
 
 /**
  * A machine's temperatures and fans, drawn the same way wherever they appear
@@ -48,7 +49,7 @@ export function Sensors({
   emptyText,
 }: {
   temperatures: Temperature[]
-  history?: Record<string, { t: number; v: number }[]>
+  history?: Series
   /** The sentence shown when there is no temperature sensor at all. */
   emptyText: string
 }) {
