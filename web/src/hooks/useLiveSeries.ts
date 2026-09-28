@@ -50,6 +50,16 @@ export function append(
     const kept = points.filter((p) => p.t >= cutoff)
     next[name] = last !== undefined && last.t >= at ? kept : [...kept, { t: at, v: value }]
   }
+  // A key this reading does not carry keeps its past, cut to the window, and
+  // gets no point for now. A sensor that failed one read, or a CPU that turned
+  // unreadable, loses one point -- the chart shows the gap because no point
+  // exists for that time -- not its whole curve. Once all its points have aged
+  // out, the key is gone.
+  for (const [name, points] of Object.entries(current)) {
+    if (name in next) continue
+    const kept = points.filter((p) => p.t >= cutoff)
+    if (kept.length > 0) next[name] = kept
+  }
   store.set(key, next)
   return next
 }
