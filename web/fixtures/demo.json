@@ -3292,6 +3292,21 @@
           ],
           "fans": []
         }
+      },
+      "network": {
+        "readable": true,
+        "value": {
+          "physical": [
+            { "name": "eth0", "up": true, "speed_mbit": 1000, "rx_bytes_per_sec": 187900, "tx_bytes_per_sec": 42100 },
+            { "name": "wlan0", "up": false, "speed_mbit": null, "rx_bytes_per_sec": null, "tx_bytes_per_sec": null }
+          ],
+          "virtual": [
+            { "name": "br-0a1b2c3d4e5f", "up": true, "speed_mbit": 10000, "rx_bytes_per_sec": 410, "tx_bytes_per_sec": 260 },
+            { "name": "docker0", "up": true, "speed_mbit": 10000, "rx_bytes_per_sec": 320, "tx_bytes_per_sec": 180 },
+            { "name": "lo", "up": false, "speed_mbit": null, "rx_bytes_per_sec": 1210, "tx_bytes_per_sec": 1210 },
+            { "name": "veth1a2b3c4", "up": true, "speed_mbit": 10000, "rx_bytes_per_sec": 410, "tx_bytes_per_sec": 260 }
+          ]
+        }
       }
     }
   }

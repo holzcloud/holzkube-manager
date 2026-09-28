@@ -1,7 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { createRoute } from '@tanstack/react-router'
 import type { ReactNode } from 'react'
-import { api, type Host, type Reason } from '@/api'
+import { api, type Host, type Link, type Reason } from '@/api'
 import { Meter } from '@/components/charts/Meter'
 import { FanList, Sensors } from '@/components/charts/Sensors'
 import { ago } from '@/components/HealthField'
@@ -9,7 +9,7 @@ import { HARDWARE_POLL_INTERVAL_MS } from '@/components/NodeHardware'
 import { Problem } from '@/components/Problem'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { formatBytes, formatPercent, formatUptime } from '@/lib/format'
+import { formatBytes, formatPercent, formatRate, formatUptime } from '@/lib/format'
 import { authenticatedRoute } from '@/routes/__root'
 
 /**
@@ -428,11 +428,116 @@ function LiveSection({ host }: { host: Host }) {
             <MemoryCard memory={host.live.memory} />
             <FilesystemsCard filesystems={host.live.filesystems} />
           </div>
+          <NetworkCard
+            network={host.live.network}
+            container={host.container}
+            waiting={host.live.rates_over_seconds === null}
+          />
         </div>
         <SensorsCard sensors={host.live.sensors} />
       </div>
     </section>
   )
+}
+
+/**
+ * The interfaces (HMON-04, D-09): every physical one as a row with its state,
+ * speed and throughput; the virtual ones -- loopback, bridges, veths -- behind
+ * one disclosure, counted rather than dropped. A rate the server did not
+ * compute is "—": formatRate(0) would say "0 B/s", which is an idle link, not a
+ * missing reading (D-02).
+ */
+function NetworkCard({
+  network,
+  container,
+  waiting,
+}: {
+  network: Host['live']['network']
+  container: boolean
+  waiting: boolean
+}) {
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-base">
+          Network
+          {container && (
+            <Badge variant="outline" className="ml-2">
+              container
+            </Badge>
+          )}
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-2">
+        {network.readable ? (
+          <>
+            {network.value.physical.length > 0 ? (
+              <ul className="divide-y">
+                {network.value.physical.map((l) => (
+                  <LinkRow key={l.name} link={l} />
+                ))}
+              </ul>
+            ) : (
+              <p className="text-sm text-muted-foreground">No physical network interface found.</p>
+            )}
+            {network.value.virtual.length > 0 && (
+              <details className="group">
+                {/* min-h-11 is 44px at every width: the summary is the one
+                    control this page has, and it has to fit a thumb. */}
+                <summary className="flex min-h-11 cursor-pointer list-none items-center gap-2 text-sm text-muted-foreground marker:content-none">
+                  <span
+                    aria-hidden="true"
+                    className="shrink-0 text-xs transition-transform group-open:rotate-90"
+                  >
+                    ▶
+                  </span>
+                  {network.value.virtual.length}{' '}
+                  {network.value.virtual.length === 1 ? 'virtual interface' : 'virtual interfaces'}
+                </summary>
+                <ul className="divide-y">
+                  {network.value.virtual.map((l) => (
+                    <LinkRow key={l.name} link={l} />
+                  ))}
+                </ul>
+              </details>
+            )}
+            {waiting && (
+              <p className="text-xs text-muted-foreground">Waiting for a second reading</p>
+            )}
+          </>
+        ) : (
+          <MissingValue reason={network.reason} />
+        )}
+      </CardContent>
+    </Card>
+  )
+}
+
+function LinkRow({ link }: { link: Link }) {
+  const state = !link.up
+    ? ' · down'
+    : link.speed_mbit !== null
+      ? ` · up · ${link.speed_mbit} Mbit/s`
+      : ' · up'
+  return (
+    <li className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 py-2 text-sm">
+      <span className="min-w-0 break-words">
+        <span className="font-mono">{link.name}</span>
+        <span className="text-muted-foreground">{state}</span>
+      </span>
+      <span className="text-xs tabular-nums">
+        <span className="text-muted-foreground">in </span>
+        {rateOrDash(link.rx_bytes_per_sec)}
+        <span className="text-muted-foreground"> · out </span>
+        {rateOrDash(link.tx_bytes_per_sec)}
+      </span>
+    </li>
+  )
+}
+
+/** A rate, or "—" when this round has none. Branches before formatting. */
+function rateOrDash(bytesPerSecond: number | null): string {
+  return bytesPerSecond === null ? '—' : formatRate(bytesPerSecond)
 }
 
 /**
