@@ -304,9 +304,15 @@ await strip.screenshot({ path: join(shots, 'phone.png'), omitBackground: true })
 
 await browser.close()
 // The daemon writes its metrics history into `dir` on SIGTERM; removing the
-// directory before it has exited races that write (ENOTEMPTY).
-const gone = new Promise((resolve) => daemon.once('exit', resolve))
+// directory before it has exited races that write (ENOTEMPTY). A daemon that
+// has already exited emits no 'exit' again, so that is checked first, as
+// layout-audit.mjs does; and the bound's timer is unref'd, so that it does not
+// hold the script open for its ten seconds once the daemon is gone.
+const gone =
+  daemon.exitCode !== null || daemon.signalCode !== null
+    ? Promise.resolve()
+    : new Promise((resolve) => daemon.once('exit', resolve))
 daemon.kill()
-await Promise.race([gone, new Promise((resolve) => setTimeout(resolve, 10_000))])
+await Promise.race([gone, new Promise((resolve) => setTimeout(resolve, 10_000).unref())])
 await rm(dir, { recursive: true, force: true })
 console.log('wrote docs/brand/{banner,social}.png, web/public/*.png and docs/screenshots/*.png')
