@@ -128,7 +128,7 @@ Waves: 1 → {01} · 2 → {02, 03} · 3 → {04} · 4 → {05} · 5 → {06} ·
   3. Überschreitet die Temperatur oder die Belegung eines Datenträgers ihre Schwelle, zeigt der Host eine Warnung, die Wert und Schwelle nennt. Der Test dafür ist gegen eine entfernte Schwellenprüfung rot gesehen worden.
   4. Der Host steht in der Navigation und auf der Wand wie ein Knoten, mit genau einem von drei Zuständen — gesund, Warnung, nicht lesbar. Ein Host, dessen Werte nicht lesbar sind, erscheint dort nie als gesund, und der Test, der das hält, ist gegen einen Host rot gesehen worden, der es doch tat.
 
-**Plans:** 2/8 plans executed
+**Plans:** 3/8 plans executed
 
 Plans:
 **Wave 1**
@@ -136,7 +136,7 @@ Plans:
 - [x] 12-02-PLAN.md — Temperaturgrenzen als eine Go-Regel (`warn_c`/`danger_c` für Knoten und Host), Trip-Points des Pi (passive/hot/critical, nie active), `host.Assess` mit Sätzen und „nie gesund, wenn nicht lesbar" (HMON-07, HOST-04)
 
 **Wave 2** *(blocked on Wave 1 completion)*
-- [ ] 12-03-PLAN.md — Alle Werte im Verlauf mit eigenem Raten-Fenster des Samplers, Neustart-mit-Lücke-Test, `health` auf `/api/v1/host`, `host` in der Antwort der Wand (veraltet → nicht lesbar) (HMON-05, HOST-04, HMON-07)
+- [x] 12-03-PLAN.md — Alle Werte im Verlauf mit eigenem Raten-Fenster des Samplers, Neustart-mit-Lücke-Test, `health` auf `/api/v1/host`, `host` in der Antwort der Wand (veraltet → nicht lesbar) (HMON-05, HOST-04, HMON-07)
 - [ ] 12-04-PLAN.md — Der Browser zeichnet die Grenzen des Servers; seine eigene Regel entfällt; Laufwerks-Temperatur und reduzierte Bewegung (HMON-07)
 
 **Wave 3** *(blocked on Wave 2 completion)*
@@ -199,6 +199,6 @@ Waves: 1 → {01, 02} · 2 → {03, 04} · 3 → {05} · 4 → {06} · 5 → {07
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
 | 11. Host-Seite — Gerät, Dienst, Live-Werte | v1.18 | 7/7 | Complete    | 2026-09-28 |
-| 12. Host wie ein Knoten — Verlauf, Warnung, Wand | v1.18 | 2/8 | In Progress|  |
+| 12. Host wie ein Knoten — Verlauf, Warnung, Wand | v1.18 | 3/8 | In Progress|  |
 | 13. Host-Aktionen über einen root-eigenen Helfer | v1.18 | 0/TBD | Not started | - |
 | 14. Telefon — Tippziele, die ein Daumen trifft | v1.18 | 0/TBD | Not started | - |

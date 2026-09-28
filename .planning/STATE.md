@@ -5,16 +5,16 @@ milestone_name: Host & Telefon
 current_phase: 12
 current_phase_name: Host wie ein Knoten — Verlauf, Warnung, Wand
 status: executing
-stopped_at: Completed 12-02-PLAN.md
-last_updated: "2026-09-28T20:22:24.365Z"
+stopped_at: Completed 12-03-PLAN.md
+last_updated: "2026-09-28T20:42:33.457Z"
 last_activity: 2026-09-28
 last_activity_desc: Phase 12 execution started
-state_head: a66198fa2edfb92ae2f24687db83d34a8410f469
+state_head: 7dcfe1207929ec0bc6d5e665a8c1aa55bc06621b
 progress:
   total_phases: 4
   completed_phases: 1
   total_plans: 15
-  completed_plans: 9
+  completed_plans: 10
   percent: 25
 ---
 
@@ -33,7 +33,7 @@ See: .planning/PROJECT.md (updated 2026-09-28)
 ## Current Position
 
 Phase: 12 (Host wie ein Knoten — Verlauf, Warnung, Wand) — EXECUTING
-Plan: 3 of 8
+Plan: 4 of 8
 Status: Ready to execute
 Last activity: 2026-09-28 — Phase 12 execution started
 
@@ -92,6 +92,8 @@ Siehe `PROJECT.md`, die `MILESTONE-*.md`-Dateien und für v1.18 den Abschnitt
 - [Phase 12]: Temperature lines computed once in Go (inventory.TemperatureLimits) and sent as warn_c/danger_c; drives carry their sensor's pair
 - [Phase 12]: Host limits from the twin thermal zone: lowest passive/hot = high, lowest critical = crit, active trips never a line
 - [Phase 12]: host.Assess rates temperatures and filesystems only; any unreadable rated value is never ok
+- [Phase 12]: 12-03: rx/tx recorded only with a rate window, >=1 physical link and every physical link rated; a host without physical links records no rx/tx
+- [Phase 12]: 12-03: the wall reads the sampler's snapshot (Latest), never the host; older than 3 x FineStep is unknown / not readable; host is null before the first sample
 
 ### Blockers/Concerns
 
@@ -106,8 +108,8 @@ Siehe `PROJECT.md`, die `MILESTONE-*.md`-Dateien und für v1.18 den Abschnitt
 
 ## Session Continuity
 
-Last session: 2026-09-28T20:22:24.278Z
-Stopped at: Completed 12-02-PLAN.md
+Last session: 2026-09-28T20:42:33.369Z
+Stopped at: Completed 12-03-PLAN.md
 Resume file: None
 Next: `/gsd-plan-phase 11`
 
@@ -124,3 +126,4 @@ Next: `/gsd-plan-phase 11`
 | Phase 11 P07 | 28 min | 3 tasks | 7 files |
 | Phase 12 P01 | 21min | 2 tasks | 13 files |
 | Phase 12 P02 | 18 min | 3 tasks | 17 files |
+| Phase 12 P03 | 18 min | 3 tasks | 12 files |
