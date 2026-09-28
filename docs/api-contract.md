@@ -1503,7 +1503,7 @@ A full answer, from a Raspberry Pi under a systemd unit with
           { "name": "wlan0", "up": false, "speed_mbit": null, "rx_bytes_per_sec": null, "tx_bytes_per_sec": null }
         ],
         "virtual": [
-          { "name": "lo", "up": false, "speed_mbit": null, "rx_bytes_per_sec": 1210, "tx_bytes_per_sec": 1210 }
+          { "name": "lo", "up": true, "speed_mbit": null, "rx_bytes_per_sec": 1210, "tx_bytes_per_sec": 1210 }
         ]
       }
     }
@@ -1538,6 +1538,7 @@ say why load is shown when CPU usage is not.
 | Key | Null when |
 |---|---|
 | `live.rates_over_seconds` | there is no usable previous reading to compute a rate against. Otherwise the window every rate in this answer was taken over, to a tenth of a second. |
+| `up` (a link's) | neither `operstate` nor `flags` of the link could be read. Otherwise `true` when `operstate` is `up`; when it is `unknown` -- the loopback always, WireGuard/tun and some USB NICs -- when `flags` has `IFF_UP` set, as `ip link` shows it; `false` for every other state. Never `false` for "not read". |
 | `speed_mbit` | the link reports no speed: it is down (the kernel answers the read with `EINVAL`), or it is a kind of link that has none. |
 | `rx_bytes_per_sec`, `tx_bytes_per_sec` | this call has no rate for the link: the first read, a link that appeared since the previous call, or a counter that went backwards (the interface was recreated; both are then null). Never `0` for "unknown" -- `0` is an idle link. |
 | `high_c`, `critical_c` | the chip sets no such limit. Thermal zones never supply one: a zone's critical trip sits far above where the firmware throttles. |

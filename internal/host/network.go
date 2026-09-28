@@ -5,6 +5,7 @@ import (
 	"io/fs"
 	"sort"
 	"strconv"
+	"strings"
 
 	"github.com/holzcloud/holzkube-manager/internal/talos"
 )
@@ -27,7 +28,9 @@ const maxLinks = 512
 // null here, never 0, because 0 B/s is a reading of an idle link (D-02).
 type Link struct {
 	Name string `json:"name"`
-	Up   bool   `json:"up"`
+	// Up is whether the interface is up, null when neither its operational
+	// state nor its flags could be read -- a state nobody read is not "down".
+	Up *bool `json:"up"`
 	// SpeedMbit is the negotiated speed, null when the link reports none: it
 	// is down (the kernel then answers the read with EINVAL), or it is a kind
 	// of link that has no speed.
@@ -94,9 +97,7 @@ func readLinks(fsys fs.FS) ([]linkSample, error) {
 		if _, err := fs.Lstat(fsys, dir+"/device"); err == nil {
 			s.physical = true
 		}
-		if state, ok := readTrimmed(fsys, dir+"/operstate"); ok && state == "up" {
-			s.link.Up = true
-		}
+		s.link.Up = linkUp(fsys, dir)
 		// Any failure to read the speed means no speed. A down link answers
 		// the read with EINVAL (measured on the Pi 5's wlan0 and lo), and
 		// that is the link telling us it has none, not a broken read.
@@ -113,6 +114,35 @@ func readLinks(fsys fs.FS) ([]linkSample, error) {
 		out = append(out, s)
 	}
 	return out, nil
+}
+
+// iffUp is IFF_UP from <linux/if.h>: the interface is administratively up.
+const iffUp = 0x1
+
+// linkUp is whether the interface at dir is up.
+//
+// operstate answers it for every driver that reports carrier: "up" is up, and
+// "down", "lowerlayerdown", "dormant" and the rest are not. "unknown" is the
+// kernel saying it cannot tell -- the loopback always (measured on the Pi 5:
+// operstate unknown, flags 0x9), and tun/WireGuard and USB NICs without
+// carrier reporting -- and then the administrative flag IFF_UP is the answer,
+// as ip(8) shows UP for them. When neither file can be read the state is not
+// known, and says so as nil rather than as "down" (D-02).
+func linkUp(fsys fs.FS, dir string) *bool {
+	if state, ok := readTrimmed(fsys, dir+"/operstate"); ok && state != "" && state != "unknown" {
+		up := state == "up"
+		return &up
+	}
+	raw, ok := readTrimmed(fsys, dir+"/flags")
+	if !ok {
+		return nil
+	}
+	flags, err := strconv.ParseUint(strings.TrimPrefix(raw, "0x"), 16, 32)
+	if err != nil {
+		return nil
+	}
+	up := flags&iffUp != 0
+	return &up
 }
 
 // readCounter reads one byte counter.
