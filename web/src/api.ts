@@ -3037,6 +3037,17 @@ export const hostSchema = z.object({
       )
       .nullish()
       .transform(orEmpty),
+    /**
+     * Temperatures and fans (HMON-03), in the node page's element types.
+     * Not readable only when /sys/class/hwmon could not be listed; a machine
+     * without sensors is two empty lists.
+     */
+    sensors: reading(
+      z.object({
+        temperatures: z.array(temperatureSchema).nullish().transform(orEmpty),
+        fans: z.array(fanSchema).nullish().transform(orEmpty),
+      }),
+    ),
   }),
 })
 
