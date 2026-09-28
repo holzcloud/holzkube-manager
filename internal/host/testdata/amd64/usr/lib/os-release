@@ -1,0 +1,4 @@
+NAME='Example Linux'
+VERSION='42'
+PRETTY_NAME='Example Linux 42 \"Desk\"'
+ID=example

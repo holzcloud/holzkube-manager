@@ -61,6 +61,10 @@ func (c *Collector) Read(context.Context) View {
 		v.Device.Hostname = Read(uname.Nodename)
 		v.Device.Kernel = Read(uname.Release)
 	}
+	v.Device.Model = readModel(c.cfg.FS)
+	v.Device.OS = readOSRelease(c.cfg.FS)
+	v.Device.Cores = readCores(c.cfg.FS)
+	v.Container = detectContainer(c.cfg.FS)
 
 	return v
 }
