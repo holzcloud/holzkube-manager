@@ -61,8 +61,7 @@ der Betreiber prüfen kann, statt einer API, die niemand ansieht.
 - [ ] **Phase 13: Host-Aktionen über einen root-eigenen Helfer** - Neustart, Herunterfahren, Dienst-Neustart, Update-Suche — ohne dass der Daemon Root bekommt
 - [ ] **Phase 14: Telefon — Tippziele, die ein Daumen trifft** - Jedes Bedienelement ≥ 44 px bei 390 px, auch hinter einem Tipp und auf `/host`, gehalten von der Layout-Prüfung
 
-**Wo geprüft wird.** Sitzungen laufen auf dem Pi des Betreibers (aarch64,
-`homeserver-01`); arm64 wird dort nativ ausgeführt, und ein Bericht nennt das.
+**Wo geprüft wird.** Sitzungen laufen auf dem Pi des Betreibers (aarch64); arm64 wird dort nativ ausgeführt, und ein Bericht nennt das.
 Der Produktions-Daemon daneben wird für keine dieser Phasen ersetzt oder neu
 gestartet, und der Helfer aus Phase 13 wird nicht installiert — beides ist nach
 `CLAUDE.md` Sache des Betreibers. Geprüft wird gegen einen eigens gestarteten
@@ -85,7 +84,7 @@ injiziert hat, ist kein Ergebnis.
 
   1. Auf dem Pi zeigt `/host` Hostname, Modell, Architektur, Betriebssystem, Kernel und Laufzeit seit dem Boot, und dieselben Werte nennt die Shell auf derselben Maschine; daneben die laufende Version des Dienstes, die Laufzeit des Prozesses sowie Größe und freien Platz des Datenverzeichnisses.
   2. Die Seite zeigt live, ohne Neuladen: CPU-Auslastung, Load, Arbeitsspeicher und Swap; die Belegung von `/` und des Dateisystems, auf dem das Datenverzeichnis liegt; die Temperaturen aus thermal zones und hwmon und, wo vorhanden, die Lüfterdrehzahl; den Durchsatz je Netzwerkschnittstelle. Auf dem Pi stimmen die Werte mit dem überein, was `/proc` und `/sys` in der Shell zeigen.
-  3. Unter der Härtung der Produktions-Unit (`ProcSubset=pid`) stehen CPU, Load und Speicher als „nicht lesbar" da, mit der Ursache und der einen Zeile, die es ändert (`ProcSubset=all`) — nie als 0. Der Test, der das hält, ist gegen eine wieder eingesetzte 0 rot gesehen worden.
+  3. Unter der Härtung der Produktions-Unit (`ProcSubset=pid`) stehen CPU und Speicher als „nicht lesbar" da (Load kommt dann aus `sysinfo(2)` und bleibt exakt), mit der Ursache und der einen Zeile, die es ändert (`ProcSubset=all`) — nie als 0. Der Test, der das hält, ist gegen eine wieder eingesetzte 0 rot gesehen worden.
   4. Hinterlegt der Update-Mechanismus, wann zuletzt gesucht wurde und welche Version verfügbar ist, zeigt die Seite beides; hinterlegt er nichts — der Stand der heute auf dem Pi installierten `holzkube-manager-update` —, sagt sie „nicht hinterlegt", statt eine Zeit oder eine Version zu erfinden. Was das Skript dafür künftig schreibt, liegt in `deploy/` und wird nicht installiert.
 
 **Research**: `/proc` unter `ProcSubset=pid` und `ProtectProc=invisible` — welche Dateien genau verschwinden und woran der Daemon das von einem echten Lesefehler unterscheidet; wo der Pi 5 Temperatur und Lüfter in `/sys` ablegt und wo ein amd64-Host.
