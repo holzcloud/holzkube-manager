@@ -85,25 +85,30 @@ damit er es am Ende auf einen Blick prüfen und umwerfen kann.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| HOST-01 | — | Pending |
-| HOST-02 | — | Pending |
-| HOST-03 | — | Pending |
-| HOST-04 | — | Pending |
-| HMON-01 | — | Pending |
-| HMON-02 | — | Pending |
-| HMON-03 | — | Pending |
-| HMON-04 | — | Pending |
-| HMON-05 | — | Pending |
-| HMON-06 | — | Pending |
-| HMON-07 | — | Pending |
-| HACT-01 | — | Pending |
-| HACT-02 | — | Pending |
-| HACT-03 | — | Pending |
-| HACT-04 | — | Pending |
-| HACT-05 | — | Pending |
-| HACT-06 | — | Pending |
-| HACT-07 | — | Pending |
-| HACT-08 | — | Pending |
-| MOB-01 | — | Pending |
-| MOB-02 | — | Pending |
-| MOB-03 | — | Pending |
+| HOST-01 | Phase 11 | Pending |
+| HOST-02 | Phase 11 | Pending |
+| HOST-03 | Phase 11 | Pending |
+| HOST-04 | Phase 12 | Pending |
+| HMON-01 | Phase 11 | Pending |
+| HMON-02 | Phase 11 | Pending |
+| HMON-03 | Phase 11 | Pending |
+| HMON-04 | Phase 11 | Pending |
+| HMON-05 | Phase 12 | Pending |
+| HMON-06 | Phase 11 | Pending |
+| HMON-07 | Phase 12 | Pending |
+| HACT-01 | Phase 13 | Pending |
+| HACT-02 | Phase 13 | Pending |
+| HACT-03 | Phase 13 | Pending |
+| HACT-04 | Phase 13 | Pending |
+| HACT-05 | Phase 13 | Pending |
+| HACT-06 | Phase 13 | Pending |
+| HACT-07 | Phase 13 | Pending |
+| HACT-08 | Phase 13 | Pending |
+| MOB-01 | Phase 14 | Pending |
+| MOB-02 | Phase 14 | Pending |
+| MOB-03 | Phase 14 | Pending |
+
+**Coverage:** 22 von 22 v1.18-Anforderungen einer Phase zugeordnet, keine doppelt.
+
+---
+*Traceability gefüllt am 2026-09-28 mit der Roadmap für v1.18 (Phasen 11–14).*
