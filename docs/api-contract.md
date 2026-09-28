@@ -1723,6 +1723,12 @@ in the data directory). The answer is a node's history answer, key for key:
   the same traffic again and are never added. A step where any physical
   interface has no rate is left out rather than summed without it; a machine
   with no physical interface records neither.
+- **A host read that hangs is a gap, not a stall.** The sampler waits for
+  the host at most five seconds; a statfs on a share that stopped answering
+  then costs the host its point in that pass and nothing else -- the nodes'
+  history and the shutdown write go on. While that read is still stuck, the
+  next passes do not start another beside it, and the wall's host tile turns
+  grey as its snapshot ages.
 - **The rates have their own window.** The sampler measures CPU and network
   against its own previous reading, fifteen seconds before; an open page,
   polling every three seconds, does not shorten it, and the sampler does not

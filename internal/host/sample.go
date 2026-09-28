@@ -2,6 +2,7 @@ package host
 
 import (
 	"context"
+	"errors"
 	"strconv"
 	"time"
 )
@@ -18,10 +19,21 @@ import (
 // On a platform with no readings (a darwin build) it is an empty map and no
 // error: nothing is recorded, which is not a failure worth a log line on every
 // pass.
+//
+// One Sample runs at a time. The sampler stops waiting for a read that hangs
+// -- a statfs on a share that stopped answering -- but cannot stop the read;
+// a Sample started while that one is still stuck answers ErrSampleBusy at
+// once rather than hanging beside it, so a host whose disk hangs for an hour
+// holds one goroutine, not two hundred and forty.
 func (c *Collector) Sample(ctx context.Context) (map[string]float64, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
+	if !c.sampling.CompareAndSwap(false, true) {
+		return nil, ErrSampleBusy
+	}
+	defer c.sampling.Store(false)
+
 	live := c.sampleLive()
 
 	name := ""
@@ -35,6 +47,9 @@ func (c *Collector) Sample(ctx context.Context) (map[string]float64, error) {
 
 	return HistoryValues(live), nil
 }
+
+// ErrSampleBusy is Sample's answer while an earlier Sample has not returned.
+var ErrSampleBusy = errors.New("the previous host read has not finished; a filesystem or sysfs read is hanging")
 
 // Snapshot is what the sampler's last pass saw of the host: when, under which
 // name, and in what state.

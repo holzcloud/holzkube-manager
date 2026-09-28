@@ -467,3 +467,72 @@ func TestLatest(t *testing.T) {
 		}
 	})
 }
+
+// hangingSys is a machine whose statfs does not return until released, as a
+// hard-mounted share that stopped answering does not.
+type hangingSys struct {
+	fakeSys
+	entered chan struct{}
+	release chan struct{}
+}
+
+func (h hangingSys) Statfs(path string) (FSStats, error) {
+	select {
+	case h.entered <- struct{}{}:
+	default:
+	}
+	<-h.release
+	return h.fakeSys.Statfs(path)
+}
+
+// TestSampleRefusesWhileOneHangs (WR-03): the sampler stops waiting for a
+// Sample that hangs but cannot stop it. The next Sample must not hang beside
+// it: it answers ErrSampleBusy at once, and once the stuck one returns, a
+// Sample reads again.
+//
+// Fault injected and seen red: the guard in Sample removed -- the second
+// Sample hung in statfs beside the first.
+func TestSampleRefusesWhileOneHangs(t *testing.T) {
+	t.Parallel()
+
+	sys := hangingSys{
+		fakeSys: fakeSys{statfs: map[string]FSStats{"/": {Blocks: 100, Free: 50, Avail: 50, FrameSize: 1}}},
+		entered: make(chan struct{}, 1),
+		release: make(chan struct{}),
+	}
+	c := New(Config{FS: fstest.MapFS{}, Sys: sys, Now: newLiveClock().now})
+
+	first := make(chan error, 1)
+	go func() {
+		_, err := c.Sample(context.Background())
+		first <- err
+	}()
+	select {
+	case <-sys.entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the first Sample never reached statfs")
+	}
+
+	second := make(chan error, 1)
+	go func() {
+		_, err := c.Sample(context.Background())
+		second <- err
+	}()
+	select {
+	case err := <-second:
+		if !errors.Is(err, ErrSampleBusy) {
+			t.Errorf("the second Sample = %v, want ErrSampleBusy", err)
+		}
+	case <-time.After(5 * time.Second):
+		close(sys.release)
+		t.Fatal("the second Sample hung beside the first")
+	}
+
+	close(sys.release)
+	if err := <-first; err != nil {
+		t.Fatalf("the first Sample, released: %v", err)
+	}
+	if _, err := c.Sample(context.Background()); err != nil {
+		t.Errorf("a Sample after the stuck one returned: %v, want a reading", err)
+	}
+}

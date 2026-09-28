@@ -2,6 +2,7 @@ package history
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"strconv"
 	"strings"
@@ -56,6 +57,17 @@ import (
 // and its own idea of when "now" is. It is read before the inventory, because a
 // store that cannot list the machines says nothing about the one the daemon is
 // running on.
+//
+// It is read with a deadline, HostBudget, although every read in it is local:
+// statfs of the data directory, the sysfs walks and uname. Local is not the
+// same as prompt. A data directory on an NFS or SMB share that stopped
+// answering, or a USB disk that is failing, can block statfs for good, and a
+// read with no deadline would then hold up the pass -- every node's and every
+// cluster's history, not only the host's -- and Run with it, so that shutdown
+// never reached its last Flush. Past the deadline the pass goes on without the
+// host: a gap in its history, and a snapshot that ages until the wall turns it
+// grey. The read that hung is left to finish on its own; host.Collector.Sample
+// refuses to start another while it does, so hung reads cannot pile up.
 
 // appsListAllowance is what the app read may spend beyond the kubelets' shared
 // ceiling: the seven list calls before it, against an API server that answers
@@ -68,6 +80,11 @@ const appsListAllowance = 4 * time.Second
 // AppsBudget bounds one cluster's apps read in a pass. The hardware read
 // carries its own bound, inventory.HardwareBudget, inside Service.Hardware.
 const AppsBudget = kube.SummaryBudget + appsListAllowance
+
+// HostBudget bounds the host read in a pass. The reads take milliseconds on a
+// Pi; five seconds is room for a slow SD card and still leaves most of the
+// fifteen-second interval to the fleet.
+const HostBudget = 5 * time.Second
 
 // hardwareConcurrency is how many nodes are read at once. A homelab's handful
 // in one round; a larger fleet in several, all inside HardwareBudget each.
@@ -96,6 +113,9 @@ type SamplerDeps struct {
 	// node's are. Optional: nil samples no host -- the tests of the fleet, and
 	// a daemon without a host reader.
 	Host func(ctx context.Context) (map[string]float64, error)
+
+	// HostBudget is HostBudget unless a test says otherwise.
+	HostBudget time.Duration
 }
 
 // Sampler fills a Store.
@@ -116,6 +136,9 @@ func NewSampler(d SamplerDeps) *Sampler {
 	}
 	if d.Interval <= 0 {
 		d.Interval = FineStep
+	}
+	if d.HostBudget <= 0 {
+		d.HostBudget = HostBudget
 	}
 	return &Sampler{deps: d, failing: map[string]bool{}}
 }
@@ -223,9 +246,33 @@ func (s *Sampler) sampleMachine(ctx context.Context, id model.MachineID, at time
 // sampleHost records the host. A read that failed records nothing -- a gap,
 // never a zero -- and a value the host could not read is already absent from
 // the map, for the same reason.
+//
+// The read runs in a goroutine of its own and is waited for at most
+// HostBudget (see "The host" above): a statfs that hangs cannot be
+// interrupted, only stopped being waited for. The channel is buffered so that
+// the read, when it does return, is not left blocked on sending.
 func (s *Sampler) sampleHost(ctx context.Context, at time.Time) {
 	key := HostSubject()
-	values, err := s.deps.Host(ctx)
+
+	ctx, cancel := context.WithTimeout(ctx, s.deps.HostBudget)
+	defer cancel()
+	type result struct {
+		values map[string]float64
+		err    error
+	}
+	done := make(chan result, 1)
+	go func() {
+		values, err := s.deps.Host(ctx)
+		done <- result{values, err}
+	}()
+
+	var r result
+	select {
+	case r = <-done:
+	case <-ctx.Done():
+		r.err = fmt.Errorf("the host read did not finish within %s: %w", s.deps.HostBudget, ctx.Err())
+	}
+	values, err := r.values, r.err
 	if err != nil {
 		s.failed(key, "the host could not be read; its charts have a gap until it can", err)
 		return

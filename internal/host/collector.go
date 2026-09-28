@@ -10,6 +10,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/holzcloud/holzkube-manager/internal/host/updatestatus"
@@ -85,6 +86,8 @@ type Collector struct {
 	// latest is what the last Sample saw, for the wall (see Latest). Nil
 	// until the first Sample.
 	latest *Snapshot
+	// sampling is set while a Sample runs (see Sample).
+	sampling atomic.Bool
 
 	sizer *dirSizer
 }
