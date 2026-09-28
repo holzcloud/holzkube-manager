@@ -34,6 +34,11 @@ type Config struct {
 	Sys Sys
 	// Now is the clock ObservedAt comes from. Nil means time.Now.
 	Now func() time.Time
+
+	// DataDir is the daemon's data directory, absolute. Its filesystem is the
+	// second row of the Filesystems card, and its size is walked at most once a
+	// minute. Empty: only the root row, and no size.
+	DataDir string
 }
 
 // minRateWindow and maxRateWindow bound when the previous reading may serve
@@ -60,6 +65,8 @@ type Collector struct {
 
 	mu   sync.Mutex
 	prev *counters
+
+	sizer *dirSizer
 }
 
 // counters is what one read leaves behind for the next one's rates.
@@ -78,7 +85,7 @@ func New(cfg Config) *Collector {
 	if cfg.Now == nil {
 		cfg.Now = time.Now
 	}
-	return &Collector{cfg: cfg}
+	return &Collector{cfg: cfg, sizer: &dirSizer{fsys: cfg.FS, dir: cfg.DataDir}}
 }
 
 // Read takes one reading of the host.
@@ -98,20 +105,24 @@ func (c *Collector) Read(context.Context) View {
 	return v
 }
 
-// readLive fills the Live section: CPU, load, memory and swap (HMON-01).
+// readLive fills the Live section: CPU, load, memory and swap (HMON-01), and
+// the filesystems of / and the data directory (HMON-02).
 func (c *Collector) readLive(now time.Time) Live {
 	// The proof the hardening is in force (D-03). A mountinfo that cannot be
 	// read or parsed proves nothing, so every missing file is then reported as
-	// the read failure it is.
+	// the read failure it is -- and no two paths are claimed to share a disk.
 	subsetPid := false
+	var mounts []mountEntry
 	if raw, err := readBounded(c.cfg.FS, fsPath(pathMountinfo), maxMountinfo); err == nil {
 		if ms, err := parseMountinfo(raw); err == nil {
 			subsetPid = procSubsetPid(ms)
+			mounts = ms
 		}
 	}
 
 	var live Live
 	live.Memory = c.readMemory(subsetPid)
+	live.Filesystems = filesystems(mounts, c.cfg.DataDir, c.cfg.Sys)
 	live.CPU.Load = c.readLoad(subsetPid)
 
 	cur := counters{at: now}
