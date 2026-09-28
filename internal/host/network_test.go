@@ -68,7 +68,7 @@ func (f failingRead) Read([]byte) (int, error) {
 
 func intp(n int) *int           { return &n }
 func floatp(f float64) *float64 { return &f }
-func boolp(b bool) *bool         { return &b }
+func boolp(b bool) *bool        { return &b }
 func link(name string, up bool, speed *int) Link {
 	return Link{Name: name, Up: &up, SpeedMbit: speed}
 }
