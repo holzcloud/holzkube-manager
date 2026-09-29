@@ -204,6 +204,16 @@ describe('HostActions: the four buttons and the one reason they are off', () => 
     expectOffBecause('An update is running; wait for it to finish.')
   })
 
+  // WR-02: a restart or shutdown under way takes the host or the service away
+  // within seconds; a second order placed in them would outlive its process.
+  it.each(['reboot', 'poweroff', 'restart-service'] as const)(
+    'while a %s the helper started is not back: all off',
+    (action) => {
+      actions({ order: { action, phase: 'started' } })
+      expectOffBecause('The last host action is still under way; wait for it to finish.')
+    },
+  )
+
   it.each(['placed', 'picked-up'] as const)(
     'with an order %s and not answered: all off',
     (phase) => {

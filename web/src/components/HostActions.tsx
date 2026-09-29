@@ -153,6 +153,7 @@ export const REASON = {
   hostname: 'The hostname could not be read, so there is nothing to type to confirm a host action.',
   notAnswering: 'holzkube-manager is not answering; host actions return when it does.',
   updateRunning: 'An update is running; wait for it to finish.',
+  underWay: 'The last host action is still under way; wait for it to finish.',
   pending: 'An order is waiting for the helper. The next one can be placed when it is answered.',
 } as const
 
@@ -188,8 +189,11 @@ export function disabledReason(
     return REASON.notAnswering
   }
   if (order !== null) {
-    if (order.action === 'update' && order.phase === 'started') {
-      return REASON.updateRunning
+    // Started is not done: a restart or shutdown the helper has begun takes the
+    // host or the service away within seconds, and a second order placed in
+    // those seconds would outlive the process that placed it.
+    if (order.phase === 'started') {
+      return order.action === 'update' ? REASON.updateRunning : REASON.underWay
     }
     if (order.phase === 'placed' || order.phase === 'picked-up') {
       return REASON.pending

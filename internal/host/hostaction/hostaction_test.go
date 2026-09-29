@@ -401,10 +401,11 @@ func TestConcurrentPlace(t *testing.T) {
 }
 
 // TestCloseStopsThePickupTimer: after Close the process is going away; a timer
-// that fires anyway withdraws nothing (the next start's sweep will).
+// that fires anyway withdraws nothing more, and Close itself has already
+// withdrawn the order that still waited (WR-02).
 func TestCloseStopsThePickupTimer(t *testing.T) {
 	r := newRig(t, nil)
-	o := r.place(t, Reboot)
+	r.place(t, Reboot)
 	r.box.Close()
 
 	if n := r.timers.count(); n != 1 {
@@ -413,14 +414,63 @@ func TestCloseStopsThePickupTimer(t *testing.T) {
 	if !r.timers.timers[0].stopped {
 		t.Errorf("Close did not stop the pending pickup timer")
 	}
+	claims := r.claims.count()
 	r.timers.fire(t, 0)
-	if _, err := os.Lstat(r.orderPath()); err != nil {
-		t.Errorf("a timer firing after Close withdrew the order: %v", err)
+	if n := r.claims.count(); n != claims {
+		t.Errorf("a timer firing after Close claimed %d more files, want 0", n-claims)
 	}
-	if got := r.box.Order(); got == nil || got.ID != o.ID || got.State != StatePending {
-		t.Errorf("Order() = %+v, want %s pending", got, o.ID)
-	}
-	if n := r.claims.count(); n != 0 {
-		t.Errorf("%d claims after Close, want 0", n)
-	}
+}
+
+// TestCloseWithdrawsAWaitingOrder is WR-02: an order still in the slot when the
+// process ends must not outlive it. The next start's sweep comes too late --
+// the path unit fires at boot, before the daemon starts -- and the helper's age
+// window is only as good as a clock a Pi restores from a saved timestamp.
+//
+// Fault injected and seen red: Close only stopping the timer (the order stayed
+// in the slot, pending).
+func TestCloseWithdrawsAWaitingOrder(t *testing.T) {
+	t.Run("an order still waiting is withdrawn", func(t *testing.T) {
+		r := newRig(t, nil)
+		o := r.place(t, Reboot)
+		r.box.Close()
+
+		if left := r.leftovers(t); len(left) != 0 {
+			t.Errorf("after Close the data directory holds %v, want nothing", left)
+		}
+		if got := r.box.Order(); got == nil || got.ID != o.ID || got.State != StateWithdrawn {
+			t.Errorf("Order() after Close = %+v, want %s withdrawn", got, o.ID)
+		}
+		warns := r.logs.at(slog.LevelWarn)
+		if len(warns) != 1 || !strings.Contains(warns[0], o.ID) || !strings.Contains(warns[0], "nothing was done") {
+			t.Errorf("Close logged %q, want one warning naming %s and that nothing was done", warns, o.ID)
+		}
+	})
+
+	t.Run("an order the helper took is left to it", func(t *testing.T) {
+		r := newRig(t, nil)
+		o := r.place(t, RestartService)
+		if err := os.Remove(r.orderPath()); err != nil { // what the helper does first
+			t.Fatalf("remove: %v", err)
+		}
+		r.box.Close()
+		if n := r.claims.count(); n != 0 {
+			t.Errorf("Close claimed %d files after the helper took the order, want 0", n)
+		}
+		if got := r.box.Order(); got == nil || got.ID != o.ID || got.State != StatePickedUp {
+			t.Errorf("Order() = %+v, want %s picked-up", got, o.ID)
+		}
+		if w := r.logs.at(slog.LevelWarn); len(w) != 0 {
+			t.Errorf("Close after a pickup logged warnings: %q", w)
+		}
+	})
+
+	t.Run("closing twice claims once", func(t *testing.T) {
+		r := newRig(t, nil)
+		r.place(t, Update)
+		r.box.Close()
+		r.box.Close()
+		if n := r.claims.count(); n != 1 {
+			t.Errorf("two Closes claimed %d files, want 1", n)
+		}
+	})
 }
