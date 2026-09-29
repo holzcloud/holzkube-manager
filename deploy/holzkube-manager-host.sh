@@ -148,7 +148,9 @@ fi
 [[ $kind == regular ]] || reject "$kind"
 [[ -f $work/o ]] || reject "nicht lesbar"
 size=$(stat -c %s -- "$work/o")
-(( size <= 64 )) || reject "zu lang" "$size"
+# Gelesen wurden hoechstens 65 Byte; wie lang die Datei wirklich war, weiss
+# das Skript nicht, und das Journal soll keine erfundene Zahl tragen.
+(( size <= 64 )) || reject "zu lang" "mehr als 64"
 line=""
 IFS= read -r line < "$work/o" || reject "keine vollstaendige Zeile" "$size"
 # Genau eine Zeile und ihr Zeilenende, nichts davor, nichts danach.
@@ -158,7 +160,8 @@ action=${BASH_REMATCH[1]}
 id=${BASH_REMATCH[2]}
 
 now=$(date +%s)
-(( mtime <= now + MAX_SKEW && mtime >= now - MAX_AGE )) || reject "veraltet" "$size" "$id" "$action"
+(( mtime >= now - MAX_AGE )) || reject "veraltet" "$size" "$id" "$action"
+(( mtime <= now + MAX_SKEW )) || reject "aus der Zukunft" "$size" "$id" "$action"
 
 # Fest je Aktion. Aus dem Auftrag stammt nur die Wahl des Zweigs.
 case $action in
