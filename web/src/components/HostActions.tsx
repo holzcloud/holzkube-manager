@@ -302,9 +302,14 @@ function HostActionDialog({
     },
   })
 
+  // Blanks around the name do not count: the server compares the trimmed
+  // text (docs/api-contract.md), and a name pasted with a trailing space must
+  // not leave the button off with no reason given.
+  const matches = typed.trim() === hostname && hostname !== ''
+
   const submit = (e: FormEvent) => {
     e.preventDefault()
-    if (typed === hostname && hostname !== '' && !run.isPending) {
+    if (matches && !run.isPending) {
       run.mutate()
     }
   }
@@ -370,7 +375,7 @@ function HostActionDialog({
             <Button
               type="submit"
               variant={spec.destructive ? 'destructive' : 'default'}
-              disabled={typed !== hostname || hostname === '' || run.isPending}
+              disabled={!matches || run.isPending}
             >
               <Icon aria-hidden="true" className="size-4" />
               {run.isPending ? 'Working…' : HOST_ACTION_LABEL[action]}

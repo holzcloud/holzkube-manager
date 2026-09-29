@@ -367,6 +367,24 @@ describe('HostActions: one dialog per action', () => {
     expect(confirm).toBeEnabled()
   })
 
+  // IN-03: the server compares the text trimmed of surrounding blanks; the
+  // button must not stay off, with no reason given, for a name pasted with a
+  // trailing space.
+  it('takes the hostname with blanks around it, as the server does', async () => {
+    const confirmRoute = vi
+      .spyOn(api.hostActions, 'confirm')
+      .mockResolvedValue({ token: 'token-1', expires: '2026-09-28T10:10:05Z' })
+    vi.spyOn(api.hostActions, 'place').mockResolvedValue({ order: held })
+    actions()
+    await userEvent.click(screen.getByRole('button', { name: 'Restart host' }))
+    const dialog = screen.getByRole('dialog')
+    const confirm = within(dialog).getByRole('button', { name: 'Restart host' })
+    await userEvent.type(within(dialog).getByLabelText(/to confirm/), ' example-host ')
+    expect(confirm).toBeEnabled()
+    await userEvent.click(confirm)
+    await vi.waitFor(() => expect(confirmRoute).toHaveBeenCalledWith('reboot', ' example-host '))
+  })
+
   it.each(DIALOGS)(
     '$label: asks for a token with the typed hostname, places the order with it, and hands it on',
     async (c) => {
