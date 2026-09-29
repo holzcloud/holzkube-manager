@@ -255,7 +255,8 @@ Four buttons in the page's header act on the machine itself:
 **Who may press them, and what they ask for.** The operator role; a reader sees
 the four buttons switched off, with the reason beneath them. Each one opens its
 own dialog, and every one of the four asks you to type the machine's hostname --
-there is only one host, and it is the one this page runs on. Then the password,
+there is only one host, and it is the one this page runs on. What you typed
+places that one order, from that session, and no second. Then the password,
 unless you gave it within the sudo window -- five minutes unless
 `--sudo-window` says otherwise, the same as for every other destructive action;
 with a provider sign-in, the provider's login instead. Each action is recorded in the audit log as `host.reboot`,

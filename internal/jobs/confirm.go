@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -43,6 +44,12 @@ var (
 	// It is separate because the remedy differs: re-read the dialog, rather
 	// than "something is wrong".
 	ErrConfirmationExpired = errors.New("jobs: the confirmation has expired")
+
+	// ErrConfirmationUsed reports a single-use confirmation (IssueOnce)
+	// presented a second time. It wraps ErrConfirmationInvalid: to the client it is a
+	// token that does not open this request, and the remedy is the same --
+	// confirm again.
+	ErrConfirmationUsed = fmt.Errorf("%w: it has been used already", ErrConfirmationInvalid)
 )
 
 // ConfirmationTTL is how long a confirmation is good for.
@@ -56,6 +63,12 @@ const ConfirmationTTL = 10 * time.Minute
 type Confirmer struct {
 	key []byte
 	now func() time.Time
+
+	// mu guards spent: the nonces of the single-use tokens CheckOnce has let
+	// through, each with the moment its token expires, after which it is
+	// forgotten -- CheckOnce refuses the token by then anyway.
+	mu    sync.Mutex
+	spent map[string]time.Time
 }
 
 // NewConfirmer generates a signing key.
@@ -122,6 +135,78 @@ func (c *Confirmer) Check(token string, in Intent) error {
 	if c.now().After(time.Unix(unix, 0)) {
 		return ErrConfirmationExpired
 	}
+	return nil
+}
+
+// IssueOnce returns a single-use token for an intent: one CheckOnce lets it
+// through, and no second.
+//
+// Issue alone cannot give that. Its token is a function of the intent and the
+// expiry second, so two confirmations of the same intent in the same second
+// are the same token, and spending one would spend the other. A single-use
+// token carries a random nonce between its stamp and its signature, covered by
+// the signature and kept apart from Issue's tokens by the payload's "once:"
+// mark: Check refuses it, and CheckOnce refuses a token from Issue.
+func (c *Confirmer) IssueOnce(in Intent) (token string, expires time.Time) {
+	expires = c.now().Add(ConfirmationTTL).UTC()
+	nonce := rand.Text()
+	return fmt.Sprintf("%d.%s.%s", expires.Unix(), nonce, c.signOnce(strconv.FormatInt(expires.Unix(), 10), nonce, in)), expires
+}
+
+// signOnce is the signature of a single-use token.
+func (c *Confirmer) signOnce(stamp, nonce string, in Intent) string {
+	mac := hmac.New(sha256.New, c.key)
+	mac.Write([]byte(stamp + "|once:" + nonce + "|" + canonical(in)))
+	return base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
+}
+
+// CheckOnce verifies a token from IssueOnce against the intent the request
+// actually carries, like Check, and spends it.
+//
+// Check lets a token through as often as it is presented until it expires,
+// which is right where a token stands for a decision about a parameter set (a
+// reset retried after a timeout is the same reset). It is not right where
+// typing the confirmation is meant to happen every time: the host actions
+// (D-09), where one typed hostname must not place a second reboot minutes
+// later from a replayed request. A token that verifies is spent here, under
+// the same lock as the question whether it was spent before, so two requests
+// racing with one token get one success and one ErrConfirmationUsed. A refused
+// token is not spent.
+func (c *Confirmer) CheckOnce(token string, in Intent) error {
+	parts := strings.Split(token, ".")
+	if len(parts) != 3 {
+		return ErrConfirmationInvalid
+	}
+	stamp, nonce, sig := parts[0], parts[1], parts[2]
+	unix, err := strconv.ParseInt(stamp, 10, 64)
+	if err != nil || nonce == "" {
+		return ErrConfirmationInvalid
+	}
+	// Constant time, as in Check.
+	if !hmac.Equal([]byte(sig), []byte(c.signOnce(stamp, nonce, in))) {
+		return ErrConfirmationInvalid
+	}
+	expires := time.Unix(unix, 0)
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	now := c.now()
+	if now.After(expires) {
+		return ErrConfirmationExpired
+	}
+	// Forget what has expired: Check-style expiry refuses it from here on.
+	for n, at := range c.spent {
+		if now.After(at) {
+			delete(c.spent, n)
+		}
+	}
+	if _, used := c.spent[nonce]; used {
+		return ErrConfirmationUsed
+	}
+	if c.spent == nil {
+		c.spent = map[string]time.Time{}
+	}
+	c.spent[nonce] = expires
 	return nil
 }
 

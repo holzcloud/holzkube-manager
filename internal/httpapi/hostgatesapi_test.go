@@ -463,3 +463,67 @@ func TestHostConfirmGates(t *testing.T) {
 		}
 	})
 }
+
+// TestHostTokenOpensOneOrderInItsOwnSession is WR-05. D-09 asks for the
+// hostname to be typed every time; a token good for ten minutes, from any
+// session, quietly undid that -- one confirmation, replayed, placed a second
+// order without anybody typing again. The token now opens one order, and only
+// in the session that typed.
+//
+// Fault injected and seen red: the action route checking with Check (the
+// replay placed a second order), and the intent without the session (another
+// session's replay placed one).
+func TestHostTokenOpensOneOrderInItsOwnSession(t *testing.T) {
+	t.Parallel()
+
+	g := newHostGates(t, hostSys{uname: host.Uname{Nodename: exampleHostname, Machine: "aarch64"}})
+
+	// A second session of the same operator account, with its window open:
+	// nothing but the session differs.
+	other := g.asUser(t, gateOperator, newAccountPass)
+	if got, raw := other.status(t, http.MethodPost, "/api/v1/auth/sudo",
+		map[string]string{"password": newAccountPass}); got != http.StatusNoContent {
+		t.Fatalf("sudo: %d (%s)", got, raw)
+	}
+
+	tok := hostToken(t, g.operator, hostaction.Update)
+
+	got, raw := other.status(t, http.MethodPost, actionPath(hostaction.Update), map[string]string{"confirmation": tok})
+	if got != http.StatusForbidden || problemCode(raw) != httpapi.CodeConfirmationInvalid {
+		t.Errorf("another session with the token: %d %s, want 403 %s (%s)",
+			got, problemCode(raw), httpapi.CodeConfirmationInvalid, raw)
+	}
+	g.requireNoOrder(t, "another session with the token")
+
+	// The refusal above spent nothing: the session that typed still can.
+	got, raw = g.operator.status(t, http.MethodPost, actionPath(hostaction.Update), map[string]string{"confirmation": tok})
+	if got != http.StatusAccepted {
+		t.Fatalf("the typing session with its token: %d, want 202 (%s)", got, raw)
+	}
+	g.clearOrder(t)
+
+	got, raw = g.operator.status(t, http.MethodPost, actionPath(hostaction.Update), map[string]string{"confirmation": tok})
+	if got != http.StatusForbidden || problemCode(raw) != httpapi.CodeConfirmationInvalid {
+		t.Errorf("the same token a second time: %d %s, want 403 %s (%s)",
+			got, problemCode(raw), httpapi.CodeConfirmationInvalid, raw)
+	}
+	g.requireNoOrder(t, "the same token a second time")
+
+	// The sudo prompt does not spend it: the 428 comes before the handler,
+	// and the page replays the request with the same token after the
+	// password.
+	shutTok := hostToken(t, g.shut, hostaction.RestartService)
+	if got, raw := g.shut.status(t, http.MethodPost, actionPath(hostaction.RestartService),
+		map[string]string{"confirmation": shutTok}); got != http.StatusPreconditionRequired {
+		t.Fatalf("with the window shut: %d, want 428 (%s)", got, raw)
+	}
+	if got, raw := g.shut.status(t, http.MethodPost, "/api/v1/auth/sudo",
+		map[string]string{"password": newAccountPass}); got != http.StatusNoContent {
+		t.Fatalf("sudo: %d (%s)", got, raw)
+	}
+	if got, raw := g.shut.status(t, http.MethodPost, actionPath(hostaction.RestartService),
+		map[string]string{"confirmation": shutTok}); got != http.StatusAccepted {
+		t.Errorf("the replay after the password: %d, want 202 (%s)", got, raw)
+	}
+	g.clearOrder(t)
+}

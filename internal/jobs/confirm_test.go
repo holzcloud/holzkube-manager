@@ -2,6 +2,7 @@ package jobs_test
 
 import (
 	"errors"
+	"sync"
 	"testing"
 
 	"github.com/holzcloud/holzkube-manager/internal/jobs"
@@ -195,5 +196,101 @@ func TestResetOptionsHaveNoSafeDefault(t *testing.T) {
 	}
 	if ok.Mode != "user-disks" || !ok.Graceful || !ok.Reboot || len(ok.UserDisksToWipe) != 2 {
 		t.Fatalf("parsed options are %+v", ok)
+	}
+}
+
+// TestCheckOnceOpensOneRequest is WR-05: a host token stands for one typed
+// hostname and must open one order, not every order for ten minutes.
+//
+// Fault injected and seen red: CheckOnce not recording the spent token.
+func TestCheckOnceOpensOneRequest(t *testing.T) {
+	t.Parallel()
+
+	c := newConfirmer(t)
+	intent := jobs.Intent{Action: "host.reboot", Machine: "@host", Params: map[string]string{"session": "s1"}}
+	token, _ := c.IssueOnce(intent)
+
+	// A refusal spends nothing: the wrong intent first, then the right one.
+	other := jobs.Intent{Action: "host.reboot", Machine: "@host", Params: map[string]string{"session": "s2"}}
+	if err := c.CheckOnce(token, other); !errors.Is(err, jobs.ErrConfirmationInvalid) {
+		t.Fatalf("CheckOnce for another session = %v, want ErrConfirmationInvalid", err)
+	}
+	if err := c.CheckOnce(token, intent); err != nil {
+		t.Fatalf("first CheckOnce = %v, want nil", err)
+	}
+	err := c.CheckOnce(token, intent)
+	if !errors.Is(err, jobs.ErrConfirmationUsed) {
+		t.Fatalf("second CheckOnce = %v, want ErrConfirmationUsed", err)
+	}
+	if !errors.Is(err, jobs.ErrConfirmationInvalid) {
+		t.Errorf("ErrConfirmationUsed does not wrap ErrConfirmationInvalid: the routes would answer 500 rather than 403")
+	}
+
+	// Two confirmations of one intent in one second are two tokens: each
+	// opens its own request. (Issue's tokens would be identical.)
+	a, _ := c.IssueOnce(intent)
+	b, _ := c.IssueOnce(intent)
+	if a == b {
+		t.Fatalf("two single-use tokens for one intent are identical: %q", a)
+	}
+	if err := c.CheckOnce(a, intent); err != nil {
+		t.Errorf("CheckOnce(a) = %v, want nil", err)
+	}
+	if err := c.CheckOnce(b, intent); err != nil {
+		t.Errorf("CheckOnce(b) after a was spent = %v, want nil", err)
+	}
+
+	// The two kinds do not cross: a single-use token never passes Check, and
+	// a token from Issue never passes CheckOnce.
+	if err := c.Check(token, intent); !errors.Is(err, jobs.ErrConfirmationInvalid) {
+		t.Errorf("Check of a single-use token = %v, want ErrConfirmationInvalid", err)
+	}
+	plain, _ := c.Issue(intent)
+	if err := c.CheckOnce(plain, intent); !errors.Is(err, jobs.ErrConfirmationInvalid) {
+		t.Errorf("CheckOnce of a token from Issue = %v, want ErrConfirmationInvalid", err)
+	}
+
+	// Issue and Check are untouched: the node routes keep their tokens good
+	// until they expire.
+	if err := c.Check(plain, intent); err != nil {
+		t.Errorf("first Check = %v", err)
+	}
+	if err := c.Check(plain, intent); err != nil {
+		t.Errorf("second Check = %v, want nil: Check must stay stateless", err)
+	}
+}
+
+// TestCheckOnceUnderRace: many requests with one token, one success.
+func TestCheckOnceUnderRace(t *testing.T) {
+	t.Parallel()
+
+	c := newConfirmer(t)
+	intent := jobs.Intent{Action: "host.update", Machine: "@host"}
+	token, _ := c.IssueOnce(intent)
+
+	const n = 16
+	var wg sync.WaitGroup
+	results := make(chan error, n)
+	for range n {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			results <- c.CheckOnce(token, intent)
+		}()
+	}
+	wg.Wait()
+	close(results)
+	ok := 0
+	for err := range results {
+		switch {
+		case err == nil:
+			ok++
+		case errors.Is(err, jobs.ErrConfirmationUsed):
+		default:
+			t.Errorf("CheckOnce: %v", err)
+		}
+	}
+	if ok != 1 {
+		t.Errorf("%d of %d racing requests got through with one token, want exactly 1", ok, n)
 	}
 }

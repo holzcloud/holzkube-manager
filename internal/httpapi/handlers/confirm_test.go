@@ -152,7 +152,8 @@ func TestEveryConfirmedActionIsInTheTable(t *testing.T) {
 					return true
 				}
 				sel, ok := call.Fun.(*ast.SelectorExpr)
-				if !ok || sel.Sel.Name != "Check" {
+				// CheckOnce is Check that spends the token (the host routes).
+				if !ok || (sel.Sel.Name != "Check" && sel.Sel.Name != "CheckOnce") {
 					return true
 				}
 				if name == "host.go" {
