@@ -173,7 +173,7 @@ Waves: 1 → {01, 02} · 2 → {03, 04} · 3 → {05} · 4 → {06} · 5 → {07
   5. `deploy/` enthält Path-Unit, Service-Unit, Skript und eine Anleitung zur Installation; `systemd-analyze verify` nimmt die Units an, und die Anleitung verlangt keine Zeile weniger Härtung an der Unit des Daemons (`NoNewPrivileges`, kein `AF_UNIX`, `ProcSubset=pid` bleiben).
 
 **Research**: Path-Units — `PathChanged` gegen `PathModified` gegen `DirectoryNotEmpty`, und wie ein Auftrag, den der Daemon per Rename atomar ablegt, genau einmal abgeholt wird; wie der Daemon ohne D-Bus erkennt, ob der Helfer installiert ist.
-**Plans:** 9/9 plans executed
+**Plans:** 9/11 plans executed (2 gap-closure plans added)
 **UI hint**: yes
 
 Plans:
@@ -194,12 +194,16 @@ Plans:
 **Wave 4** *(blocked on Wave 3 completion)*
 - [x] 13-09-PLAN.md — Fixture im Zustand des Pi, Vertrag, Anleitung, README mit neuem `host.png` und `wall.png`; `./bin/task ci` auf dem Pi, Produktionsdienst unberührt, nichts installiert (HACT-01..08)
 
+**Gap closure** *(aus 13-UAT / 13-VERIFICATION)*
+- [ ] 13-10-PLAN.md — G-13-2: `Detect` meldet „not enabled" nur, wenn beide Unit-Dateien da sind; Fixture, Vertrag, Seitentests und `host.png` mit zwei Einträgen für eine leere Maschine (HACT-07)
+- [ ] 13-11-PLAN.md — G-13-3: „Check for updates and install" bricht bei 390 px in seinem Knopf um (Tailwind erzeugte `max-md:whitespace-normal` nie); Passprüfung je Knopf und Desktop-Form im Browser-Test, `./bin/task ci` (HACT-01..04)
+
 **Cross-cutting constraints:**
 - A 40-character hostname wraps inside the host action dialog at 390 px
 - A /host page that did not place the reboot order shows the waiting notice, not the stale notice
 - Nothing is installed on the operator's host and the production service is never restarted; the helper ships in `deploy/` only
 
-Waves: 1 → {01, 02} · 2 → {03, 04, 05, 06} · 3 → {07, 08} · 4 → {09}
+Waves: 1 → {01, 02} · 2 → {03, 04, 05, 06} · 3 → {07, 08} · 4 → {09} · gap closure: {10} → {11}
 
 ### Phase 14: Telefon — Tippziele, die ein Daumen trifft
 
