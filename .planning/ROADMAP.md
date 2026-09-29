@@ -173,13 +173,13 @@ Waves: 1 → {01, 02} · 2 → {03, 04} · 3 → {05} · 4 → {06} · 5 → {07
   5. `deploy/` enthält Path-Unit, Service-Unit, Skript und eine Anleitung zur Installation; `systemd-analyze verify` nimmt die Units an, und die Anleitung verlangt keine Zeile weniger Härtung an der Unit des Daemons (`NoNewPrivileges`, kein `AF_UNIX`, `ProcSubset=pid` bleiben).
 
 **Research**: Path-Units — `PathChanged` gegen `PathModified` gegen `DirectoryNotEmpty`, und wie ein Auftrag, den der Daemon per Rename atomar ablegt, genau einmal abgeholt wird; wie der Daemon ohne D-Bus erkennt, ob der Helfer installiert ist.
-**Plans:** 1/9 plans executed
+**Plans:** 2/9 plans executed
 **UI hint**: yes
 
 Plans:
 **Wave 1**
 - [x] 13-01-PLAN.md — Tracer: „Check for updates and install" vom Knopf über Bestätigung, Sudo, Audit, Auftragsdatei (`fsstore.PlaceNew`), Root-Skript unter `unshare` und strengen Ergebnisleser zurück auf die Seite; Tabelle der Tipp-Pflicht (HACT-04, HACT-05, HACT-06)
-- [ ] 13-02-PLAN.md — Aus Phase 12 übernommen: Thermal-Zone ohne lesbaren Typ nie „gesund", Satz der Wand mit der Zahl zuerst, ▲ in der Farbe seiner Schwere (HOST-04, HMON-07)
+- [x] 13-02-PLAN.md — Aus Phase 12 übernommen: Thermal-Zone ohne lesbaren Typ nie „gesund", Satz der Wand mit der Zahl zuerst, ▲ in der Farbe seiner Schwere (HOST-04, HMON-07)
 
 **Wave 2** *(blocked on Wave 1 completion)*
 - [ ] 13-03-PLAN.md — Die vier Sperren je Aktion einzeln rot gesehen: Sudo-Fenster, getippter Hostname, Rolle Operator, Audit-Eintrag; Tokens an `@host` gebunden (HACT-01..05)
@@ -225,5 +225,5 @@ Waves: 1 → {01, 02} · 2 → {03, 04, 05, 06} · 3 → {07, 08} · 4 → {09}
 |-------|-----------|----------------|--------|-----------|
 | 11. Host-Seite — Gerät, Dienst, Live-Werte | v1.18 | 7/7 | Complete    | 2026-09-28 |
 | 12. Host wie ein Knoten — Verlauf, Warnung, Wand | v1.18 | 8/8 | Complete    | 2026-09-29 |
-| 13. Host-Aktionen über einen root-eigenen Helfer | v1.18 | 1/9 | In Progress|  |
+| 13. Host-Aktionen über einen root-eigenen Helfer | v1.18 | 2/9 | In Progress|  |
 | 14. Telefon — Tippziele, die ein Daumen trifft | v1.18 | 0/TBD | Not started | - |

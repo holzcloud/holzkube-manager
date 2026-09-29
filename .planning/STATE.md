@@ -5,16 +5,16 @@ milestone_name: Host & Telefon
 current_phase: 13
 current_phase_name: Host-Aktionen über einen root-eigenen Helfer
 status: executing
-stopped_at: Completed 13-01-PLAN.md
-last_updated: "2026-09-29T01:05:05.384Z"
+stopped_at: Completed 13-02-PLAN.md
+last_updated: "2026-09-29T01:20:07.697Z"
 last_activity: 2026-09-29
 last_activity_desc: Phase 13 execution started
-state_head: cbff04115b3a48960fc50c0a79fe4e6ebd3a2c0d
+state_head: 356c3b40c337639d79c292af7e33d78bb4fd50f8
 progress:
   total_phases: 4
   completed_phases: 2
   total_plans: 24
-  completed_plans: 16
+  completed_plans: 17
   percent: 50
 ---
 
@@ -33,7 +33,7 @@ See: .planning/PROJECT.md (updated 2026-09-28)
 ## Current Position
 
 Phase: 13 (Host-Aktionen über einen root-eigenen Helfer) — EXECUTING
-Plan: 2 of 9
+Plan: 3 of 9
 Status: Ready to execute
 Last activity: 2026-09-29 — Phase 13 execution started
 
@@ -104,6 +104,8 @@ Siehe `PROJECT.md`, die `MILESTONE-*.md`-Dateien und für v1.18 den Abschnitt
 - [Phase 12]: 12-08: TestEveryProblemCodeIsInTheContract sees only problem.go constants; string-literal codes (17 undocumented) deferred, not fixed
 - [Phase 13]: 13-01: hostaction.ReadResult accepts '- -' with rejected and failed (never started): the helper writes '- - failed' when it cannot remove the order; 13-04's reader table must refuse '-' only with started
 - [Phase 13]: 13-01: host token intent is {Action: host.<a>, Machine: @host}, rebuilt from the route; hostTypedPhrase is separate from typedPhrase and all four require typing
+- [Phase 13]: Wall host sentences are figure first (Health.Public); page Warnings stay name first
+- [Phase 13]: An untyped fallback thermal zone is named in Unread by its directory name
 
 ### Blockers/Concerns
 
@@ -118,8 +120,8 @@ Siehe `PROJECT.md`, die `MILESTONE-*.md`-Dateien und für v1.18 den Abschnitt
 
 ## Session Continuity
 
-Last session: 2026-09-29T01:05:05.266Z
-Stopped at: Completed 13-01-PLAN.md
+Last session: 2026-09-29T01:20:07.579Z
+Stopped at: Completed 13-02-PLAN.md
 Resume file: None
 Next: `/gsd-plan-phase 11`
 
@@ -143,3 +145,4 @@ Next: `/gsd-plan-phase 11`
 | Phase 12 P07 | 30 min | 3 tasks | 9 files |
 | Phase 12 P08 | 42 min | 2 tasks | 3 files |
 | Phase 13 P01 | 32min | 2 tasks | 21 files |
+| Phase 13 P02 | 13min | 2 tasks | 8 files |
