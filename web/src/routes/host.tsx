@@ -13,7 +13,13 @@ import { Meter } from '@/components/charts/Meter'
 import { RangePicker } from '@/components/charts/RangePicker'
 import { FanList, Sensors, sensorKey } from '@/components/charts/Sensors'
 import { ago } from '@/components/HealthField'
-import { HostActions, HostOrderStatus, orderPhase } from '@/components/HostActions'
+import {
+  followedOrder,
+  HostActions,
+  HostOrderStatus,
+  orderPhase,
+  outcomeSentence,
+} from '@/components/HostActions'
 import { HostStateMark, STATE_WORD } from '@/components/HostState'
 import { HARDWARE_POLL_INTERVAL_MS } from '@/components/NodeHardware'
 import { Problem } from '@/components/Problem'
@@ -100,9 +106,18 @@ export function HostView({
   const load = host.live.cpu.load
   const rates = host.live.rates_over_seconds
   const health = host.health
-  // The order this page placed, held until the page is left: the status box
-  // follows it through the host answer's order and result (Phase 13).
+  // The order this page placed, held until the page is left or its status is
+  // dismissed: the status box follows it through the host answer's order and
+  // result (Phase 13). Without one, the box follows the daemon's last order --
+  // placed from another page, perhaps -- so a second operator's page says the
+  // same thing as the first's.
   const [held, setHeld] = useState<HostOrder | null>(null)
+  const [dismissed, setDismissed] = useState<ReadonlySet<string>>(() => new Set())
+  const followed = followedOrder(held, host, dismissed)
+  const phase = followed === null ? null : orderPhase(followed.order, host, isStale)
+  // Losing the connection while the host restarts is the expected consequence
+  // of the operator's own click, not a fault: it replaces the stale notice.
+  const waitingFor = phase === 'waiting' ? (followed?.order.action ?? null) : null
 
   // The charts are the node page's (D-05): the daemon's recorded history for
   // the range, with this page's own readings appended after its last point.
@@ -135,20 +150,40 @@ export function HostView({
           host={host}
           sessionRole={sessionRole}
           pollFailed={isStale}
-          order={held === null ? null : { action: held.action, phase: orderPhase(held, host) }}
+          order={
+            followed === null || phase === null ? null : { action: followed.order.action, phase }
+          }
           onPlaced={setHeld}
         />
       </header>
 
-      {/* Notices, in this order when they apply: the order this page placed,
-          stale, warning, container, hardening. The order comes first: it is
-          what the operator just did. Stale then says the rest may be old. */}
-      {held !== null && <HostOrderStatus host={host} held={held} />}
-      {isStale && (
-        <p className="rounded-md border border-amber-600/40 bg-amber-600/10 px-3 py-2 text-sm text-amber-700 dark:text-amber-300">
-          holzkube-manager did not answer the latest request. What you see is its reading from{' '}
-          {observed.toLocaleTimeString()}. {stale instanceof Error ? stale.message : ''}
+      {/* Notices, in this order when they apply: the order status, stale or
+          waiting, warning, container, hardening, helper. The order comes
+          first: it is what the operator just did. Stale then says the rest
+          may be old -- or, while the host restarts at the operator's word,
+          waiting says that this is expected. Never both. */}
+      {followed !== null && phase !== null && (
+        <HostOrderStatus
+          host={host}
+          followed={followed}
+          phase={phase}
+          takeFocus={followed.from === 'held'}
+          onDismiss={() => setDismissed((d) => new Set(d).add(followed.order.id))}
+        />
+      )}
+      {waitingFor !== null ? (
+        <p className="rounded-md border border-slate-500/40 bg-slate-500/10 px-3 py-2 text-sm text-slate-700 dark:text-slate-300">
+          {waitingFor === 'poweroff'
+            ? 'The host is shut down. holzkube-manager answers again once somebody switches the machine on; this page keeps asking every 3 s.'
+            : 'Waiting for holzkube-manager to come back. This page keeps asking every 3 s.'}
         </p>
+      ) : (
+        isStale && (
+          <p className="rounded-md border border-amber-600/40 bg-amber-600/10 px-3 py-2 text-sm text-amber-700 dark:text-amber-300">
+            holzkube-manager did not answer the latest request. What you see is its reading from{' '}
+            {observed.toLocaleTimeString()}. {stale instanceof Error ? stale.message : ''}
+          </p>
+        )
       )}
       {health.state === 'warn' && <WarningNotice health={health} />}
       {host.container && (
@@ -351,8 +386,6 @@ function ServiceCard({ host, observed }: { host: Host; observed: Date }) {
   )
 }
 
-type UpdateStatus = Extract<Host['service']['update'], { readable: true }>['value']
-
 /**
  * The update row (HOST-03, D-16): what the script recorded, or the server's
  * sentence for why there is nothing. Every time and version on it is one the
@@ -403,25 +436,6 @@ function UpdateCheck({
       )}
     </>
   )
-}
-
-function outcomeSentence(u: UpdateStatus): string {
-  switch (u.outcome) {
-    case 'current':
-      return 'Up to date.'
-    case 'available':
-      return u.latest !== null ? `${u.latest} is available.` : 'A newer release is available.'
-    case 'updated':
-      return u.installed !== null ? `Updated to ${u.installed}.` : 'Updated.'
-    case 'rolled-back':
-      return u.latest !== null && u.installed !== null
-        ? `The update to ${u.latest} was rolled back; ${u.installed} is installed.`
-        : 'The update was rolled back.'
-    case 'failed':
-      return u.installed !== null
-        ? `The last update run failed; ${u.installed} is still installed.`
-        : 'The last update run failed.'
-  }
 }
 
 /** A version without its tag's leading "v": v0.1.0 and 0.1.0 are one release. */

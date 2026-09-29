@@ -1,5 +1,6 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import type { ReactNode } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
@@ -1562,6 +1563,236 @@ describe('the complete Pi 5 page', () => {
 
     expect(screen.queryByText(HARDENING_HEADLINE)).toBeNull()
     expect(screen.getByText(/Rates are over the last 3\.0 s\./)).toBeInTheDocument()
+  })
+})
+
+const ORDER_ID = '3f9c2a7b1d4e8f60'
+const STALE_SENTENCE = /holzkube-manager did not answer the latest request/
+const WAITING = 'Waiting for holzkube-manager to come back. This page keeps asking every 3 s.'
+const WAITING_POWEROFF =
+  'The host is shut down. holzkube-manager answers again once somebody switches the machine on; this page keeps asking every 3 s.'
+
+/** An order the daemon placed at 09:59:50, read at 10:00:03. */
+function orderOf(action: string, state = 'picked-up') {
+  return { id: ORDER_ID, action, placed_at: '2026-09-28T09:59:50Z', state }
+}
+
+function startedFor(action: string) {
+  return read({ id: ORDER_ID, action, outcome: 'started', at: '2026-09-28T09:59:51Z' })
+}
+
+describe('the order status and the waiting notice', () => {
+  it('puts the status box first, before the stale and the warning notices', () => {
+    const health = healthOf('warn', '1 threshold crossed.', ['cpu_thermal 82.1 °C ≥ 80 °C'])
+    wrap(
+      <HostView
+        host={hostShape({
+          health,
+          actions: helperInstalled({ order: orderOf('restart-service', 'pending') }),
+        })}
+        stale={new Error('Network down')}
+      />,
+    )
+
+    const box = screen.getByRole('status')
+    expect(box).toHaveTextContent('Restart service — order placed.')
+    // A pending order and a failed poll: the host was not told to go away, so
+    // this is the amber stale notice, not the waiting one.
+    const stale = screen.getByText(STALE_SENTENCE)
+    expect(box.compareDocumentPosition(stale) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(
+      stale.compareDocumentPosition(warningNotice() as HTMLElement) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy()
+  })
+
+  it.each([
+    ['restart-service', WAITING],
+    ['update', WAITING],
+    ['reboot', WAITING],
+    ['poweroff', WAITING_POWEROFF],
+  ])(
+    'a started %s and a failed poll: the waiting notice instead of the stale one, the body still dimmed',
+    (action, sentence) => {
+      wrap(
+        <HostView
+          host={hostShape({
+            actions: helperInstalled({ order: orderOf(action), result: startedFor(action) }),
+          })}
+          stale={new Error('Network down')}
+          sessionRole="operator"
+        />,
+      )
+
+      const waiting = screen.getByText(sentence)
+      expect(waiting).toHaveClass('border-slate-500/40')
+      expect(screen.queryByText(STALE_SENTENCE)).toBeNull()
+      expect(cellOf('Hostname').closest('.opacity-60')).not.toBeNull()
+      expect(
+        screen.getByText('holzkube-manager is not answering; host actions return when it does.'),
+      ).toBeInTheDocument()
+    },
+  )
+
+  it('a picked-up order and a failed poll: waiting too', () => {
+    wrap(
+      <HostView
+        host={hostShape({ actions: helperInstalled({ order: orderOf('reboot') }) })}
+        stale={new Error('Network down')}
+      />,
+    )
+    expect(screen.getByText(WAITING)).toBeInTheDocument()
+    expect(screen.queryByText(STALE_SENTENCE)).toBeNull()
+  })
+
+  it('a failed poll without an order under way: the stale notice, never the waiting one', () => {
+    wrap(
+      <HostView
+        host={hostShape({
+          actions: helperInstalled({
+            order: orderOf('reboot'),
+            result: read({
+              id: ORDER_ID,
+              action: 'reboot',
+              outcome: 'rejected',
+              at: '2026-09-28T09:59:51Z',
+            }),
+          }),
+        })}
+        stale={new Error('Network down')}
+      />,
+    )
+    expect(screen.getByText(STALE_SENTENCE)).toBeInTheDocument()
+    expect(screen.queryByText(WAITING)).toBeNull()
+  })
+
+  it('the page answering again: no waiting notice, the box says the host is back', () => {
+    // Read at 10:00:03 after 60 s up: booted at 09:59:03 -- before the order
+    // at 09:59:50 it would still be "started", so the order here is older.
+    const host = hostShape(
+      {
+        actions: helperInstalled({
+          order: null,
+          result: read({
+            id: ORDER_ID,
+            action: 'reboot',
+            outcome: 'started',
+            at: '2026-09-28T09:58:00Z',
+          }),
+        }),
+      },
+      { uptime_seconds: read(60) },
+    )
+    wrap(<HostView host={host} stale={null} />)
+
+    expect(screen.queryByText(WAITING)).toBeNull()
+    expect(screen.queryByText(STALE_SENTENCE)).toBeNull()
+    expect(screen.getByRole('status')).toHaveTextContent(
+      'Restart host — done. The host restarted and holzkube-manager is back; up since',
+    )
+  })
+
+  it("says waiting on a page that did not place the order: the second operator's page", () => {
+    // Nothing held here: the order is only in the last reading.
+    wrap(
+      <HostView
+        host={hostShape({
+          actions: helperInstalled({ order: orderOf('reboot'), result: startedFor('reboot') }),
+        })}
+        stale={new Error('Network down')}
+        sessionRole="operator"
+      />,
+    )
+    expect(screen.getByRole('status')).toHaveTextContent(
+      'Restart host — started. The host is restarting.',
+    )
+    expect(screen.getByText(WAITING)).toBeInTheDocument()
+    expect(screen.queryByText(STALE_SENTENCE)).toBeNull()
+    // Not placed here, so the box does not take focus from wherever it is.
+    expect(screen.getByRole('status')).not.toHaveFocus()
+  })
+
+  it('shows no box for an order read more than 15 minutes after it was placed', () => {
+    const old = { ...orderOf('reboot'), placed_at: '2026-09-28T09:44:00Z' }
+    wrap(<HostView host={hostShape({ actions: helperInstalled({ order: old }) })} stale={null} />)
+    expect(screen.queryByRole('status')).toBeNull()
+  })
+
+  it('Dismiss status removes the box for that order for the life of the page', async () => {
+    const rejected = read({
+      id: ORDER_ID,
+      action: 'reboot',
+      outcome: 'rejected',
+      at: '2026-09-28T09:59:51Z',
+    })
+    const host = hostShape({
+      actions: helperInstalled({ order: orderOf('reboot'), result: rejected }),
+    })
+    const page = wrap(<HostView host={host} stale={null} />)
+
+    await userEvent.click(screen.getByRole('button', { name: 'Dismiss status' }))
+    expect(screen.queryByRole('status')).toBeNull()
+    // The next poll says the same: still dismissed.
+    page.rerender(
+      <HostView
+        host={hostShape({
+          actions: helperInstalled({ order: orderOf('reboot'), result: rejected }),
+        })}
+        stale={null}
+      />,
+    )
+    expect(screen.queryByRole('status')).toBeNull()
+    // A new order is a new box.
+    page.rerender(
+      <HostView
+        host={hostShape({
+          actions: helperInstalled({
+            order: { ...orderOf('update', 'pending'), id: '0123456789abcdef' },
+            result: rejected,
+          }),
+        })}
+        stale={null}
+      />,
+    )
+    expect(screen.getByRole('status')).toHaveTextContent(
+      'Check for updates and install — order placed.',
+    )
+  })
+
+  it('after an order is placed, the dialog closes and focus lands on the status box', async () => {
+    const placed = {
+      id: ORDER_ID,
+      action: 'reboot' as const,
+      placed_at: '2026-09-28T10:00:02Z',
+      state: 'pending' as const,
+    }
+    vi.spyOn(api.hostActions, 'confirm').mockResolvedValue({
+      token: 'token-1',
+      expires: '2026-09-28T10:10:02Z',
+    })
+    vi.spyOn(api.hostActions, 'place').mockResolvedValue({ order: placed })
+    wrap(
+      <HostView
+        host={hostShape({ actions: helperInstalled() })}
+        stale={null}
+        sessionRole="operator"
+      />,
+    )
+
+    await userEvent.click(screen.getByRole('button', { name: 'Restart host' }))
+    await userEvent.type(screen.getByLabelText(/to confirm/), 'example-host')
+    await userEvent.click(
+      within(screen.getByRole('dialog')).getByRole('button', { name: 'Restart host' }),
+    )
+
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    const box = await screen.findByRole('status')
+    expect(box).toHaveTextContent('Restart host — order placed.')
+    await waitFor(() => expect(box).toHaveFocus())
+    // Settled, and still there: nothing handed focus back to the trigger.
+    await new Promise((r) => setTimeout(r, 20))
+    expect(box).toHaveFocus()
+    expect(screen.getByRole('button', { name: 'Restart host' })).toBeDisabled()
   })
 })
 

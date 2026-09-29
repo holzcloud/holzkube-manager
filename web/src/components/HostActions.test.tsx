@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { api, type Host, type HostAction, type HostOrder, hostSchema } from '@/api'
 import {
   type FollowedOrder,
+  followedOrder,
   HostActions,
   HostOrderStatus,
   orderPhase,
@@ -539,48 +540,525 @@ describe('HostActions: the password step', () => {
   })
 })
 
-describe('HostOrderStatus', () => {
-  it('says the order waits for the helper while the file is there', () => {
-    const host = hostWith({ order: held, result: noResult })
-    wrap(<HostOrderStatus host={host} held={held} />)
+/** A result for the order `id`, as the helper records it. */
+const resultFor = (
+  id: string,
+  action: HostAction,
+  outcome: string,
+  at = '2026-09-28T10:00:06Z',
+) => ({
+  readable: true,
+  value: { id, action, outcome, at },
+})
 
-    const box = screen.getByRole('status')
-    expect(box).toHaveTextContent(
-      'Check for updates and install — order placed. Waiting for the helper to pick it up.',
-    )
-    expect(box).toHaveTextContent(`Order ${ID} · placed`)
-  })
-
-  it("says what the helper did once its result names this order's id", () => {
-    const host = hostWith({
-      order: { ...held, state: 'picked-up' },
-      result: {
-        readable: true,
-        value: { id: ID, action: 'update', outcome: 'started', at: '2026-09-28T10:00:06Z' },
-      },
-    })
-    wrap(<HostOrderStatus host={host} held={held} />)
-
-    expect(screen.getByRole('status')).toHaveTextContent(
-      'Check for updates and install — started. If a newer release exists it is installed and ' +
-        'holzkube-manager restarts; the outcome appears here and under Update check.',
-    )
-  })
-
-  it("never takes another order's result for this one", () => {
-    const other = {
+/**
+ * A host answer at a later moment: read at `observed`, the process started at
+ * `started`, the machine up for `uptime` seconds, and the update status as
+ * given (not recorded unless named).
+ */
+function later(
+  actions: Record<string, unknown>,
+  {
+    observed = '2026-09-28T10:05:00Z',
+    started = '2026-09-28T08:00:00Z',
+    uptime = 26090,
+    update,
+  }: {
+    observed?: string
+    started?: string
+    uptime?: number
+    update?: Record<string, unknown>
+  } = {},
+): Host {
+  const host = hostWith(actions, { observed_at: observed })
+  host.service.started_at = started
+  host.device.uptime_seconds = { readable: true, value: uptime }
+  if (update !== undefined) {
+    host.service.update = hostSchema.shape.service.shape.update.parse({
       readable: true,
-      value: {
-        id: '0000000000000000',
-        action: 'update',
-        outcome: 'rejected',
-        at: '2026-09-28T10:00:06Z',
-      },
-    }
+      value: update,
+    })
+  }
+  return host
+}
+
+const order = (action: HostAction, state: HostOrder['state'] = 'picked-up'): HostOrder => ({
+  id: ID,
+  action,
+  placed_at: '2026-09-28T10:00:05Z',
+  state,
+})
+
+describe('orderPhase: every phase from server fields', () => {
+  type Row = [string, HostOrder, Host, boolean, string]
+  const rows: Row[] = [
+    [
+      'the file is there',
+      order('reboot', 'pending'),
+      later({ order: order('reboot', 'pending') }),
+      false,
+      'placed',
+    ],
+    [
+      'not reported yet: as placed',
+      order('reboot', 'pending'),
+      later({ order: null }),
+      false,
+      'placed',
+    ],
+    [
+      'the file is gone, nothing recorded',
+      order('reboot', 'pending'),
+      later({ order: order('reboot') }),
+      false,
+      'picked-up',
+    ],
+    [
+      'withdrawn after 10 s',
+      order('reboot', 'pending'),
+      later({ order: order('reboot', 'withdrawn') }),
+      false,
+      'not-picked-up',
+    ],
+    [
+      'picked up, then no answer',
+      order('reboot'),
+      later({ order: order('reboot') }),
+      true,
+      'waiting',
+    ],
+    [
+      'placed, then no answer: still placed',
+      order('reboot', 'pending'),
+      later({ order: order('reboot', 'pending') }),
+      true,
+      'placed',
+    ],
+    [
+      'rejected',
+      order('reboot'),
+      later({ order: order('reboot'), result: resultFor(ID, 'reboot', 'rejected') }),
+      false,
+      'rejected',
+    ],
+    [
+      'failed',
+      order('poweroff'),
+      later({ order: order('poweroff'), result: resultFor(ID, 'poweroff', 'failed') }),
+      false,
+      'failed',
+    ],
+    [
+      "another order's result",
+      order('reboot'),
+      later({
+        order: order('reboot'),
+        result: resultFor('0000000000000000', 'reboot', 'rejected'),
+      }),
+      false,
+      'picked-up',
+    ],
+    [
+      'restart service started, same process',
+      order('restart-service'),
+      later({
+        order: order('restart-service'),
+        result: resultFor(ID, 'restart-service', 'started'),
+      }),
+      false,
+      'started',
+    ],
+    [
+      'restart service started, no answer',
+      order('restart-service'),
+      later({
+        order: order('restart-service'),
+        result: resultFor(ID, 'restart-service', 'started'),
+      }),
+      true,
+      'waiting',
+    ],
+    [
+      'restart service, a process started after the order',
+      order('restart-service'),
+      later(
+        { order: null, result: resultFor(ID, 'restart-service', 'started') },
+        { started: '2026-09-28T10:00:20Z' },
+      ),
+      false,
+      'back',
+    ],
+    [
+      'update started, nothing newer',
+      order('update'),
+      later({ order: order('update'), result: resultFor(ID, 'update', 'started') }),
+      false,
+      'started',
+    ],
+    [
+      'update, a process started after the order, no status',
+      order('update'),
+      later(
+        { order: null, result: resultFor(ID, 'update', 'started') },
+        { started: '2026-09-28T10:00:40Z' },
+      ),
+      false,
+      'back',
+    ],
+    [
+      'update, the status newer than the order: finished, before back',
+      order('update'),
+      later(
+        { order: null, result: resultFor(ID, 'update', 'started') },
+        {
+          started: '2026-09-28T10:00:40Z',
+          update: {
+            checked_at: '2026-09-28T10:00:45Z',
+            installed: 'v0.2.0',
+            latest: 'v0.2.0',
+            outcome: 'updated',
+          },
+        },
+      ),
+      false,
+      'update-finished',
+    ],
+    [
+      'update, a status older than the order does not finish it',
+      order('update'),
+      later(
+        { order: order('update'), result: resultFor(ID, 'update', 'started') },
+        {
+          update: {
+            checked_at: '2026-09-28T09:00:00Z',
+            installed: 'v0.1.0',
+            latest: 'v0.1.0',
+            outcome: 'current',
+          },
+        },
+      ),
+      false,
+      'started',
+    ],
+    [
+      'restart host, booted before the order',
+      order('reboot'),
+      later({ order: order('reboot'), result: resultFor(ID, 'reboot', 'started') }),
+      false,
+      'started',
+    ],
+    [
+      'restart host, no answer',
+      order('reboot'),
+      later({ order: order('reboot'), result: resultFor(ID, 'reboot', 'started') }),
+      true,
+      'waiting',
+    ],
+    // Read at 10:05:00 after 60 s up: booted 10:04:00, after the order.
+    [
+      'restart host, booted after the order',
+      order('reboot'),
+      later({ order: null, result: resultFor(ID, 'reboot', 'started') }, { uptime: 60 }),
+      false,
+      'back',
+    ],
+    [
+      'shut down host, switched on again',
+      order('poweroff'),
+      later({ order: null, result: resultFor(ID, 'poweroff', 'started') }, { uptime: 60 }),
+      false,
+      'back',
+    ],
+    [
+      'shut down host, no answer',
+      order('poweroff'),
+      later({ order: order('poweroff'), result: resultFor(ID, 'poweroff', 'started') }),
+      true,
+      'waiting',
+    ],
+  ]
+  it.each(rows)('%s', (_, o, host, pollFailed, want) => {
+    expect(orderPhase(o, host, pollFailed)).toBe(want)
+  })
+
+  it('never calls a host back whose uptime could not be read', () => {
+    const host = later({ order: null, result: resultFor(ID, 'reboot', 'started') })
+    host.device.uptime_seconds = { readable: false, reason: { code: 'read-failed', message: 'x' } }
+    expect(orderPhase(order('reboot'), host)).toBe('started')
+  })
+})
+
+describe('followedOrder: which order the box follows', () => {
+  const none: ReadonlySet<string> = new Set()
+
+  it('the one this page placed, first', () => {
+    const other = { ...order('reboot', 'pending'), id: '1111111111111111' }
+    expect(followedOrder(held, later({ order: other }), none)).toEqual({
+      order: held,
+      from: 'held',
+    })
+  })
+
+  it("else the daemon's order, within 15 minutes of the reading", () => {
+    expect(followedOrder(null, later({ order: order('reboot') }), none)).toEqual({
+      order: order('reboot'),
+      from: 'order',
+    })
+    // Read 16 minutes after it was placed: yesterday's news.
     expect(
-      orderPhase(held, hostWith({ order: { ...held, state: 'picked-up' }, result: other })),
-    ).toBe('picked-up')
-    // An answer from before the daemon reported the order: as it was placed.
-    expect(orderPhase(held, hostWith({ order: null, result: noResult }))).toBe('placed')
+      followedOrder(
+        null,
+        later({ order: order('reboot') }, { observed: '2026-09-28T10:16:06Z' }),
+        none,
+      ),
+    ).toBeNull()
+  })
+
+  it("else the helper's result that names an order, within 15 minutes", () => {
+    expect(
+      followedOrder(null, later({ order: null, result: resultFor(ID, 'reboot', 'started') }), none),
+    ).toEqual({
+      order: { id: ID, action: 'reboot', placed_at: '2026-09-28T10:00:06Z', state: 'picked-up' },
+      from: 'result',
+    })
+    const unnamed = {
+      readable: true,
+      value: { id: '', action: '', outcome: 'rejected', at: '2026-09-28T10:00:06Z' },
+    }
+    expect(followedOrder(null, later({ order: null, result: unnamed }), none)).toBeNull()
+  })
+
+  it('never one that was dismissed, whichever way it comes back', () => {
+    const gone = new Set([ID])
+    expect(followedOrder(held, later({ order: order('update') }), gone)).toBeNull()
+    expect(
+      followedOrder(null, later({ order: null, result: resultFor(ID, 'update', 'failed') }), gone),
+    ).toBeNull()
+  })
+})
+
+const SLATE = 'border-slate-500/40'
+const EMERALD = 'border-emerald-600/40'
+const RED = 'border-red-600/40'
+
+function status(
+  host: Host,
+  o: HostOrder,
+  phase: ReturnType<typeof orderPhase>,
+  extra: Partial<{
+    from: 'held' | 'order' | 'result'
+    takeFocus: boolean
+    onDismiss: () => void
+  }> = {},
+) {
+  return wrap(
+    <HostOrderStatus
+      host={host}
+      followed={{ order: o, from: extra.from ?? 'held' }}
+      phase={phase}
+      takeFocus={extra.takeFocus ?? false}
+      onDismiss={extra.onDismiss ?? (() => undefined)}
+    />,
+  )
+}
+
+describe('HostOrderStatus', () => {
+  type Row = [string, HostOrder, Host, ReturnType<typeof orderPhase>, string, string, boolean]
+  const updated = {
+    checked_at: '2026-09-28T10:00:45Z',
+    installed: 'v0.2.0',
+    latest: 'v0.2.0',
+    outcome: 'updated',
+  }
+  const failedUpdate = {
+    checked_at: '2026-09-28T10:00:45Z',
+    installed: 'v0.1.0',
+    latest: 'v0.2.0',
+    outcome: 'failed',
+  }
+  const rows: Row[] = [
+    [
+      'placed',
+      order('update', 'pending'),
+      later({}),
+      'placed',
+      'Check for updates and install — order placed. Waiting for the helper to pick it up.',
+      SLATE,
+      false,
+    ],
+    [
+      'picked up',
+      order('reboot'),
+      later({}),
+      'picked-up',
+      'Restart host — the helper picked up the order.',
+      SLATE,
+      false,
+    ],
+    [
+      'started, update',
+      order('update'),
+      later({}),
+      'started',
+      'Check for updates and install — started. If a newer release exists it is installed and holzkube-manager restarts; the outcome appears here and under Update check.',
+      SLATE,
+      false,
+    ],
+    [
+      'started, restart service',
+      order('restart-service'),
+      later({}),
+      'started',
+      'Restart service — started. holzkube-manager is restarting.',
+      SLATE,
+      false,
+    ],
+    [
+      'started, restart host',
+      order('reboot'),
+      later({}),
+      'started',
+      'Restart host — started. The host is restarting.',
+      SLATE,
+      false,
+    ],
+    [
+      'started, shut down host',
+      order('poweroff'),
+      later({}),
+      'started',
+      'Shut down host — started. The host is shutting down.',
+      SLATE,
+      false,
+    ],
+    [
+      'waiting keeps the last sentence',
+      order('reboot'),
+      later({ result: resultFor(ID, 'reboot', 'started') }),
+      'waiting',
+      'Restart host — started. The host is restarting.',
+      SLATE,
+      false,
+    ],
+    [
+      'rejected',
+      order('reboot'),
+      later({}),
+      'rejected',
+      'Restart host — the helper rejected the order, so nothing was done. journalctl -u holzkube-manager-host says why.',
+      RED,
+      true,
+    ],
+    [
+      'failed',
+      order('poweroff'),
+      later({}),
+      'failed',
+      'Shut down host — the helper could not carry it out. journalctl -u holzkube-manager-host says why.',
+      RED,
+      true,
+    ],
+    [
+      'not picked up',
+      order('reboot', 'withdrawn'),
+      later({}),
+      'not-picked-up',
+      'Restart host — the helper did not pick up the order within 10 s, so holzkube-manager withdrew it. Nothing was done. Check that the helper is running: systemctl status holzkube-manager-host.path',
+      RED,
+      true,
+    ],
+    [
+      'back, restart service',
+      order('restart-service'),
+      later({}, { started: '2026-09-28T10:00:20Z' }),
+      'back',
+      `Restart service — done. holzkube-manager is back, running 0.1.0 since ${new Date('2026-09-28T10:00:20Z').toLocaleTimeString()}.`,
+      EMERALD,
+      true,
+    ],
+    [
+      'back, update',
+      order('update'),
+      later({}, { started: '2026-09-28T10:00:40Z' }),
+      'back',
+      'Check for updates and install — done. holzkube-manager is back, running 0.1.0.',
+      EMERALD,
+      true,
+    ],
+    [
+      'back, restart host',
+      order('reboot'),
+      later({}, { uptime: 60 }),
+      'back',
+      `Restart host — done. The host restarted and holzkube-manager is back; up since ${new Date('2026-09-28T10:04:00Z').toLocaleTimeString()}.`,
+      EMERALD,
+      true,
+    ],
+    [
+      'back, shut down host',
+      order('poweroff'),
+      later({}, { uptime: 60 }),
+      'back',
+      `Shut down host — the host was switched on again and holzkube-manager is back; up since ${new Date('2026-09-28T10:04:00Z').toLocaleTimeString()}.`,
+      EMERALD,
+      true,
+    ],
+    [
+      'update finished, updated',
+      order('update'),
+      later({}, { update: updated }),
+      'update-finished',
+      'Check for updates and install — finished. Updated to v0.2.0.',
+      EMERALD,
+      true,
+    ],
+    [
+      'update finished, failed',
+      order('update'),
+      later({}, { update: failedUpdate }),
+      'update-finished',
+      'Check for updates and install — finished. The last update run failed; v0.1.0 is still installed.',
+      RED,
+      true,
+    ],
+  ]
+
+  it.each(rows)(
+    '%s: its sentence, its colour, and Dismiss status only when final',
+    (_, o, host, phase, sentence, colour, final) => {
+      status(host, o, phase)
+      const box = screen.getByRole('status')
+      expect(box.querySelector('p')?.textContent).toBe(sentence)
+      expect(box).toHaveClass(colour)
+      expect(box).toHaveTextContent(
+        `Order ${ID} · placed ${new Date(o.placed_at).toLocaleTimeString()}`,
+      )
+      expect(within(box).queryByRole('button', { name: 'Dismiss status' }) !== null).toBe(final)
+    },
+  )
+
+  it('says a command in a sentence as code', () => {
+    status(later({}), order('reboot', 'withdrawn'), 'not-picked-up')
+    expect(screen.getByText('systemctl status holzkube-manager-host.path').tagName).toBe('CODE')
+  })
+
+  it('says when the helper recorded an order it only knows from the result', () => {
+    status(later({}), order('reboot'), 'started', { from: 'result' })
+    expect(screen.getByRole('status')).toHaveTextContent(`Order ${ID} · recorded`)
+  })
+
+  it('Dismiss status hands the dismissal on', async () => {
+    const onDismiss = vi.fn()
+    status(later({}), order('reboot'), 'rejected', { onDismiss })
+    await userEvent.click(screen.getByRole('button', { name: 'Dismiss status' }))
+    expect(onDismiss).toHaveBeenCalledOnce()
+  })
+
+  it('takes focus only when told to: an order this page just placed', () => {
+    const { unmount } = status(later({}), order('reboot'), 'placed', { takeFocus: false })
+    expect(screen.getByRole('status')).not.toHaveFocus()
+    unmount()
+    status(later({}), order('reboot'), 'placed', { takeFocus: true })
+    expect(screen.getByRole('status')).toHaveFocus()
   })
 })
