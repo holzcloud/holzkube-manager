@@ -1,6 +1,8 @@
 package handlers
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"net/http"
 	"strings"
@@ -61,6 +63,17 @@ import (
 // rebuilds exactly that intent from its own path, never from the token. A
 // token for a node reboot therefore never opens the host reboot, and the other
 // way round.
+//
+// **And to the session, and it opens one order (WR-05).** D-09 asks for the
+// hostname to be typed every time, and a token good for ten minutes would
+// quietly undo that: one confirmation, replayed by a stale tab, a script or
+// another operator holding it, would place a second reboot without anybody
+// typing again. So the intent also names the session that typed (a digest of
+// its id, never the id itself); the confirm route issues it with
+// Confirmer.IssueOnce, and the action route checks it with CheckOnce, which
+// spends it. The sudo prompt a 428 opens does not spend it: the sudo gate
+// answers before the handler, and the replay after the password finds the
+// token unspent.
 //
 // They too reach nothing upstream: they write one file in the data directory,
 // and budget_test.go lists them for that reason.
@@ -156,8 +169,29 @@ func hostActionsConfigured(d httpapi.Deps) *httpapi.Problem {
 	case d.Confirmer == nil:
 		return httpapi.Upstream("upstream.host-unavailable",
 			"This instance was started without confirmations, so it cannot take host actions.")
+	case d.Auth == nil:
+		return httpapi.Upstream("upstream.host-unavailable",
+			"This instance was started without sessions, so it cannot take host actions.")
 	}
 	return nil
+}
+
+// hostIntent is what a host token is issued for and checked against: the
+// action, the host, and the session that typed the hostname. The session is a
+// digest of its id: the id is a credential, and the intent is only ever
+// hashed, but it need not be there even so. ok is false when the request
+// carries no session, which a route that requires one never sees.
+func hostIntent(d httpapi.Deps, r *http.Request, action string) (in jobs.Intent, ok bool) {
+	sid := d.Auth.SessionID(r.Context())
+	if sid == "" {
+		return jobs.Intent{}, false
+	}
+	sum := sha256.Sum256([]byte(sid))
+	return jobs.Intent{
+		Action:  action,
+		Machine: hostIntentTarget,
+		Params:  map[string]string{"session": hex.EncodeToString(sum[:])},
+	}, true
 }
 
 // The details of the two refusals, the UI-SPEC's server sentences verbatim.
@@ -222,7 +256,15 @@ func confirmHostAction(d httpapi.Deps) http.HandlerFunc {
 			}
 		}
 
-		token, expires := d.Confirmer.Issue(jobs.Intent{Action: body.Action, Machine: hostIntentTarget})
+		intent, ok := hostIntent(d, r, body.Action)
+		if !ok {
+			httpapi.WriteProblem(w, r, httpapi.Upstream("upstream.host-unavailable",
+				"This request carries no session to bind the confirmation to."))
+			return
+		}
+		// Single use (WR-05): IssueOnce's token carries a nonce, so two
+		// confirmations in one second are two tokens, each for one order.
+		token, expires := d.Confirmer.IssueOnce(intent)
 
 		writeJSON(w, http.StatusOK, map[string]any{
 			"token":   token,
@@ -258,12 +300,16 @@ func hostAction(d httpapi.Deps, a hostaction.Action) http.HandlerFunc {
 			return
 		}
 
-		// The intent is rebuilt from the route, never read out of the token:
-		// the action is this route's, and the target is the host.
-		if err := d.Confirmer.Check(body.Confirmation, jobs.Intent{
-			Action:  hostActionName(a),
-			Machine: hostIntentTarget,
-		}); err != nil {
+		// The intent is rebuilt from the route and the session, never read
+		// out of the token: the action is this route's, the target is the
+		// host, and the session is the one this request came with. CheckOnce
+		// spends the token: a second order needs the hostname typed again.
+		intent, ok := hostIntent(d, r, hostActionName(a))
+		if !ok {
+			writeJobError(w, r, d, jobs.ErrConfirmationInvalid)
+			return
+		}
+		if err := d.Confirmer.CheckOnce(body.Confirmation, intent); err != nil {
 			writeJobError(w, r, d, err)
 			return
 		}

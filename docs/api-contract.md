@@ -1718,14 +1718,21 @@ not match the hostname"), and a hostname that cannot be read is `422` with no
 token. Success is `200`:
 
 ```json
-{"token": "1790586600.Zm9v…", "expires": "2026-09-28T10:10:03Z", "action": "host.update"}
+{"token": "1790586600.K7QX….Zm9v…", "expires": "2026-09-28T10:10:03Z", "action": "host.update"}
 ```
 
-The token is bound to the action and to the host: it is issued for the intent
-`{action: host.<action>, machine: "@host"}`, and the action route rebuilds that
-intent from its own path. `@host` can be no machine's id, so a node's
-confirmation never opens a host action and a host confirmation never opens a
-node's. The route requires a session and the operator role, is audited as
+The token is bound to the action, to the host and to the session that typed:
+it is issued for the intent `{action: host.<action>, machine: "@host"}` with a
+digest of the session's id, and the action route rebuilds that intent from its
+own path and the session the request comes with. `@host` can be no machine's
+id, so a node's confirmation never opens a host action and a host confirmation
+never opens a node's. **It opens one order.** Every host action asks for the
+hostname every time, so a host token is spent by the action route that accepts
+it: presented again -- a replayed request, a second tab -- or from another
+session, it is `403 forbidden.confirmation-invalid`, and the hostname has to be
+typed again. A request the sudo gate answers with `428` does not reach the
+check, so the replay after the password finds the token unspent. (A node's
+confirmation is unchanged: good for any number of requests until it expires.) The route requires a session and the operator role, is audited as
 `action.confirm` with the action (never with `typed`), and is not destructive:
 it changes nothing.
 
@@ -1753,7 +1760,7 @@ answered; the `202` is written before the helper can act.
 | `409` | `conflict.host-order-pending` | an order still waits for the helper. There is one slot and no queue: the second order is refused and the first stays exactly as it was. Detail: "Another host action is still waiting for the helper. Wait for it to be answered, then try again." |
 | `428` | `sudo.required` | the action routes only: the session's sudo window is not open. The client asks for the password again and replays the request with the same token. |
 | `403` | `forbidden.role` | the session is a reader's. |
-| `403` | `forbidden.confirmation-invalid`, `forbidden.confirmation-expired` | the action routes only: the token is not for this action on this host, or it is too old. |
+| `403` | `forbidden.confirmation-invalid`, `forbidden.confirmation-expired` | the action routes only: the token is not for this action on this host, was issued to another session, has been used already, or is too old. |
 | `502` | `upstream.host-unavailable` | the daemon was started without a host reader, host actions or confirmations. |
 
 The two refusals about the machine, container and helper, come before the body
