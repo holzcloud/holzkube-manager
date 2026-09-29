@@ -29,8 +29,10 @@
 #     CAP_DAC_OVERRIDE. Eine engere Grenze machte "reboot" still kaputt.
 #   - RestrictAddressFamilies=AF_UNIX: systemctl spricht mit PID 1 und logind
 #     ueber Unix-Sockets, und mit nichts sonst.
-#   - Kein Environment=: die Variablen, die das Skript liest, gibt es nur fuer
-#     die Tests.
+#   - Kein Environment=: HOLZKUBE_MANAGER_HOST_ORDER setzt nur ein Drop-in,
+#     wenn das Datenverzeichnis des Daemons ein anderes ist
+#     (deploy/HOST-HELPER.md); HOLZKUBE_MANAGER_HOST_STATE_DIR und
+#     HOLZKUBE_MANAGER_SYSTEMCTL gibt es nur fuer die Tests.
 [Unit]
 Description=holzkube-manager - einen Host-Auftrag ausfuehren
 Documentation=https://github.com/holzcloud/holzkube-manager/blob/main/deploy/HOST-HELPER.md

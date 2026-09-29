@@ -49,15 +49,21 @@ export PATH=/usr/sbin:/usr/bin:/sbin:/bin
 # "last" wird 0644, damit der Daemon es lesen kann, und nichts mehr.
 umask 022
 
-# Pfade, die die Umgebung ueberschreiben darf. Im Betrieb setzt sie niemand:
-# die Unit setzt kein Environment=. Es gibt sie fuer den Test in
-# internal/httpapi (und internal/host/hostaction), der eine Kopie dieses
-# Skripts als root in einem User-Namespace laufen laesst und dabei weder die
-# Pfade dieses Hosts noch sein echtes systemctl erreichen darf:
+# Pfade, die die Umgebung ueberschreiben darf. Die ausgelieferte Unit setzt
+# keines davon.
 #
 #   HOLZKUBE_MANAGER_HOST_ORDER      /var/lib/holzkube-manager/host-order
 #   HOLZKUBE_MANAGER_HOST_STATE_DIR  /var/lib/holzkube-manager-host
 #   HOLZKUBE_MANAGER_SYSTEMCTL       systemctl
+#
+# HOLZKUBE_MANAGER_HOST_ORDER ist auch eine Schnittstelle fuer den Betrieb: ein
+# Daemon mit anderem Datenverzeichnis braucht ein Drop-in, das sie setzt
+# (deploy/HOST-HELPER.md, "A data directory other than
+# /var/lib/holzkube-manager"). Die beiden anderen gibt es nur fuer die Tests in
+# internal/host/hostaction und internal/httpapi, die eine Kopie dieses Skripts
+# als root in einem User-Namespace laufen lassen und dabei weder die Pfade
+# dieses Hosts noch sein echtes systemctl erreichen duerfen; im Betrieb setzt
+# sie niemand.
 ORDER=${HOLZKUBE_MANAGER_HOST_ORDER:-/var/lib/holzkube-manager/host-order}
 STATE_DIR=${HOLZKUBE_MANAGER_HOST_STATE_DIR:-/var/lib/holzkube-manager-host}
 SYSTEMCTL=${HOLZKUBE_MANAGER_SYSTEMCTL:-systemctl}
