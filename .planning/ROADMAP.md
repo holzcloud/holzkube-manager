@@ -57,7 +57,7 @@ API und Seite zusammen —, damit am Ende jeder Phase etwas im Browser steht, da
 der Betreiber prüfen kann, statt einer API, die niemand ansieht.
 
 - [x] **Phase 11: Host-Seite — Gerät, Dienst, Live-Werte** - Der Betreiber öffnet `/host` und sieht das Gerät, den Dienst und dessen Live-Werte; was die Härtung verbirgt, heißt „nicht lesbar", nie 0 (completed 2026-09-28)
-- [ ] **Phase 12: Host wie ein Knoten — Verlauf, Warnung, Wand** - Der Host hat Verlauf über 1 h / 6 h / 24 h, eine Warnung mit Grund und steht in Navigation und Wand mit einem Zustand
+- [x] **Phase 12: Host wie ein Knoten — Verlauf, Warnung, Wand** - Der Host hat Verlauf über 1 h / 6 h / 24 h, eine Warnung mit Grund und steht in Navigation und Wand mit einem Zustand (completed 2026-09-29)
 - [ ] **Phase 13: Host-Aktionen über einen root-eigenen Helfer** - Neustart, Herunterfahren, Dienst-Neustart, Update-Suche — ohne dass der Daemon Root bekommt
 - [ ] **Phase 14: Telefon — Tippziele, die ein Daumen trifft** - Jedes Bedienelement ≥ 44 px bei 390 px, auch hinter einem Tipp und auf `/host`, gehalten von der Layout-Prüfung
 
@@ -128,7 +128,7 @@ Waves: 1 → {01} · 2 → {02, 03} · 3 → {04} · 4 → {05} · 5 → {06} ·
   3. Überschreitet die Temperatur oder die Belegung eines Datenträgers ihre Schwelle, zeigt der Host eine Warnung, die Wert und Schwelle nennt. Der Test dafür ist gegen eine entfernte Schwellenprüfung rot gesehen worden.
   4. Der Host steht in der Navigation und auf der Wand wie ein Knoten, mit genau einem von drei Zuständen — gesund, Warnung, nicht lesbar. Ein Host, dessen Werte nicht lesbar sind, erscheint dort nie als gesund, und der Test, der das hält, ist gegen einen Host rot gesehen worden, der es doch tat.
 
-**Plans:** 8/8 plans executed
+**Plans:** 8/8 plans complete
 
 Plans:
 **Wave 1**
@@ -173,8 +173,33 @@ Waves: 1 → {01, 02} · 2 → {03, 04} · 3 → {05} · 4 → {06} · 5 → {07
   5. `deploy/` enthält Path-Unit, Service-Unit, Skript und eine Anleitung zur Installation; `systemd-analyze verify` nimmt die Units an, und die Anleitung verlangt keine Zeile weniger Härtung an der Unit des Daemons (`NoNewPrivileges`, kein `AF_UNIX`, `ProcSubset=pid` bleiben).
 
 **Research**: Path-Units — `PathChanged` gegen `PathModified` gegen `DirectoryNotEmpty`, und wie ein Auftrag, den der Daemon per Rename atomar ablegt, genau einmal abgeholt wird; wie der Daemon ohne D-Bus erkennt, ob der Helfer installiert ist.
-**Plans**: TBD
+**Plans:** 9 plans
 **UI hint**: yes
+
+Plans:
+**Wave 1**
+- [ ] 13-01-PLAN.md — Tracer: „Check for updates and install" vom Knopf über Bestätigung, Sudo, Audit, Auftragsdatei (`fsstore.PlaceNew`), Root-Skript unter `unshare` und strengen Ergebnisleser zurück auf die Seite; Tabelle der Tipp-Pflicht (HACT-04, HACT-05, HACT-06)
+- [ ] 13-02-PLAN.md — Aus Phase 12 übernommen: Thermal-Zone ohne lesbaren Typ nie „gesund", Satz der Wand mit der Zahl zuerst, ▲ in der Farbe seiner Schwere (HOST-04, HMON-07)
+
+**Wave 2** *(blocked on Wave 1 completion)*
+- [ ] 13-03-PLAN.md — Die vier Sperren je Aktion einzeln rot gesehen: Sudo-Fenster, getippter Hostname, Rolle Operator, Audit-Eintrag; Tokens an `@host` gebunden (HACT-01..05)
+- [ ] 13-04-PLAN.md — Das Helfer-Skript als Matrix: vier Aufträge, alles andere verworfen ohne Inhalt im Journal, Symlink/FIFO/veraltet, Verbrauch vor dem Handeln; Leser und Schreiber ein Format (HACT-01..04, HACT-06)
+- [ ] 13-05-PLAN.md — Der Daemon schreibt eine Datei und sonst nichts: Wächter gegen jeden Prozessstart, Rückzug nach 10 s und beim Start, `fsstore.Claim` (HACT-06, HACT-07)
+- [ ] 13-06-PLAN.md — Helfer installiert? Drei Dateien ohne D-Bus, 409 ohne Auftrag bei fehlendem Helfer oder im Container, `actions` mit Fehlendem und Installationsbefehlen (HACT-07)
+
+**Wave 3** *(blocked on Wave 2 completion)*
+- [ ] 13-07-PLAN.md — `deploy/`: Path- und Service-Unit, `HOST-HELPER.md`, Release-Archiv; `systemd-analyze verify` nach Ausgabe geprüft, Anleitung = Seite, Härtung des Daemons unverändert, Update-Skript liefert den Helfer nie (HACT-08)
+- [ ] 13-08-PLAN.md — Die Seite: vier Aktionen mit Dialog, Gründe für gesperrte Knöpfe, Auftragsstatus bis „zurück", Warte-Hinweis statt Fehlerseite, Helfer-Hinweis, 390 px gemessen (HACT-01..05, HACT-07)
+
+**Wave 4** *(blocked on Wave 3 completion)*
+- [ ] 13-09-PLAN.md — Fixture im Zustand des Pi, Vertrag, Anleitung, README mit neuem `host.png` und `wall.png`; `./bin/task ci` auf dem Pi, Produktionsdienst unberührt, nichts installiert (HACT-01..08)
+
+**Cross-cutting constraints:**
+- A 40-character hostname wraps inside the host action dialog at 390 px
+- A /host page that did not place the reboot order shows the waiting notice, not the stale notice
+- Nothing is installed on the operator's host and the production service is never restarted; the helper ships in `deploy/` only
+
+Waves: 1 → {01, 02} · 2 → {03, 04, 05, 06} · 3 → {07, 08} · 4 → {09}
 
 ### Phase 14: Telefon — Tippziele, die ein Daumen trifft
 
@@ -199,6 +224,6 @@ Waves: 1 → {01, 02} · 2 → {03, 04} · 3 → {05} · 4 → {06} · 5 → {07
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
 | 11. Host-Seite — Gerät, Dienst, Live-Werte | v1.18 | 7/7 | Complete    | 2026-09-28 |
-| 12. Host wie ein Knoten — Verlauf, Warnung, Wand | v1.18 | 8/8 | In Progress|  |
-| 13. Host-Aktionen über einen root-eigenen Helfer | v1.18 | 0/TBD | Not started | - |
+| 12. Host wie ein Knoten — Verlauf, Warnung, Wand | v1.18 | 8/8 | Complete    | 2026-09-29 |
+| 13. Host-Aktionen über einen root-eigenen Helfer | v1.18 | 0/9 | Planned | - |
 | 14. Telefon — Tippziele, die ein Daumen trifft | v1.18 | 0/TBD | Not started | - |
