@@ -5,16 +5,16 @@ milestone_name: Host & Telefon
 current_phase: 13
 current_phase_name: Host-Aktionen über einen root-eigenen Helfer
 status: executing
-stopped_at: Completed 13-06-PLAN.md
-last_updated: "2026-09-29T02:27:12.529Z"
+stopped_at: Completed 13-07-PLAN.md
+last_updated: "2026-09-29T02:42:36.066Z"
 last_activity: 2026-09-29
 last_activity_desc: Phase 13 execution started
-state_head: 57f64034109544bb288b0df659eefbd181c98ddf
+state_head: ec3ec02ec8096c1e00d8e47e98785c2b16746423
 progress:
   total_phases: 4
   completed_phases: 2
   total_plans: 24
-  completed_plans: 21
+  completed_plans: 22
   percent: 50
 ---
 
@@ -33,7 +33,7 @@ See: .planning/PROJECT.md (updated 2026-09-28)
 ## Current Position
 
 Phase: 13 (Host-Aktionen über einen root-eigenen Helfer) — EXECUTING
-Plan: 7 of 9
+Plan: 8 of 9
 Status: Ready to execute
 Last activity: 2026-09-29 — Phase 13 execution started
 
@@ -113,6 +113,8 @@ Siehe `PROJECT.md`, die `MILESTONE-*.md`-Dateien und für v1.18 den Abschnitt
 - [Phase 13]: 13-05: the process guard's AST half resolves import aliases and refuses dot imports of os/syscall/x/sys/unix
 - [Phase 13]: 13-05: withdrawal claims by rename (fsstore.Claim); the pickup timer re-checks id and closed under the Box's mutex
 - [Phase 13]: 13-06: helper detection reads the files systemd reads (no D-Bus); both host routes refuse container first, then helper missing, before Check and Place
+- [Phase 13]: 13-07: the helper's units are verified by systemd-analyze output (any output fails), with a ProtectHom=true negative control in the same test
+- [Phase 13]: 13-07: HOST-HELPER.md's drop-in for another data directory adds ReadWritePaths, or the consuming rm fails
 
 ### Blockers/Concerns
 
@@ -127,8 +129,8 @@ Siehe `PROJECT.md`, die `MILESTONE-*.md`-Dateien und für v1.18 den Abschnitt
 
 ## Session Continuity
 
-Last session: 2026-09-29T02:27:12.397Z
-Stopped at: Completed 13-06-PLAN.md
+Last session: 2026-09-29T02:42:35.830Z
+Stopped at: Completed 13-07-PLAN.md
 Resume file: None
 Next: `/gsd-plan-phase 11`
 
@@ -157,3 +159,4 @@ Next: `/gsd-plan-phase 11`
 | Phase 13 P04 | 9min | 2 tasks | 4 files |
 | Phase 13 P05 | 18min | 3 tasks | 6 files |
 | Phase 13 P06 | 19min | 3 tasks | 11 files |
+| Phase 13 P07 | 14min | 2 tasks | 5 files |
