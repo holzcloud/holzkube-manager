@@ -49,6 +49,7 @@ export const HOST_ACTION_LABEL: Record<HostAction, string> = {
 }
 
 const SLATE = 'border-slate-500/40 bg-slate-500/10 text-slate-700 dark:text-slate-300'
+const EMERALD = 'border-emerald-600/40 bg-emerald-600/10 text-emerald-700 dark:text-emerald-300'
 const RED = 'border-red-600/40 bg-red-600/10 text-red-700 dark:text-red-300'
 
 /** The hostname as the dialogs show it: one word a phone may break anywhere. */
@@ -370,23 +371,171 @@ function HostActionDialog({
   )
 }
 
-/** Where an order stands, as the page tells it. */
-export type OrderPhase = 'placed' | 'picked-up' | 'started' | 'rejected' | 'failed'
+/**
+ * Where an order stands, as the page tells it (UI-SPEC "The order status box").
+ * Every phase is read off server fields -- the order's state, the helper's
+ * result for its id, the process start, the boot time, the update status --
+ * so the page never says an action is done that the host did not report.
+ */
+export type OrderPhase =
+  | 'placed'
+  | 'picked-up'
+  | 'started'
+  | 'rejected'
+  | 'failed'
+  | 'not-picked-up'
+  | 'waiting'
+  | 'back'
+  | 'update-finished'
+
+/** The phases after which nothing more will happen to the order. */
+const FINAL: ReadonlySet<OrderPhase> = new Set([
+  'rejected',
+  'failed',
+  'not-picked-up',
+  'back',
+  'update-finished',
+])
+
+export function isFinal(phase: OrderPhase): boolean {
+  return FINAL.has(phase)
+}
+
+type UpdateStatus = Extract<Host['service']['update'], { readable: true }>['value']
 
 /**
- * The phase of the order this page placed (`held`), from the host answer: the
- * helper's result for that id when there is one; otherwise the order's state
- * as the daemon reports it -- or, before the daemon has reported the order at
- * all, as the placement answered it.
+ * When the machine last booted, by the server's own clock: the reading's time
+ * minus the uptime it read. Null when the uptime could not be read.
  */
-export function orderPhase(held: HostOrder, host: Host): OrderPhase {
+function bootTime(host: Host): number | null {
+  const up = host.device.uptime_seconds
+  return up.readable ? Date.parse(host.observed_at) - up.value * 1000 : null
+}
+
+/**
+ * The phase of `order` in the host answer `host`; `pollFailed` is whether the
+ * latest poll failed, so that `host` is the last reading before it.
+ *
+ * - no result for this id yet: the order's state as the daemon reports it (or,
+ *   before it has, as the placement answered it) -- pending is placed,
+ *   withdrawn is not picked up, picked-up is picked up, or waiting while the
+ *   host does not answer;
+ * - the helper's result for this id: rejected or failed as it says; started
+ *   becomes update finished once the update status is newer than the order,
+ *   back once the process started (restart service, update) or the machine
+ *   booted (restart host, shut down host) after it, waiting while the host
+ *   does not answer, and started until then.
+ *
+ * "Update finished" is asked first: an update that installed a release also
+ * restarted the process, and its own sentence says which it was.
+ */
+export function orderPhase(order: HostOrder, host: Host, pollFailed = false): OrderPhase {
   const result = host.actions.result
-  if (result.readable && result.value.id === held.id) {
+  const reported = host.actions.order
+  if (!result.readable || result.value.id !== order.id) {
+    const state = reported !== null && reported.id === order.id ? reported.state : order.state
+    if (state === 'pending') {
+      return 'placed'
+    }
+    if (state === 'withdrawn') {
+      return 'not-picked-up'
+    }
+    return pollFailed ? 'waiting' : 'picked-up'
+  }
+  if (result.value.outcome !== 'started') {
     return result.value.outcome
   }
+  const placed = Date.parse(order.placed_at)
+  const update = host.service.update
+  if (
+    order.action === 'update' &&
+    update.readable &&
+    Date.parse(update.value.checked_at) > placed
+  ) {
+    return 'update-finished'
+  }
+  if (pollFailed) {
+    return 'waiting'
+  }
+  if (order.action === 'restart-service' || order.action === 'update') {
+    if (Date.parse(host.service.started_at) > placed) {
+      return 'back'
+    }
+  } else {
+    const boot = bootTime(host)
+    if (boot !== null && boot > placed) {
+      return 'back'
+    }
+  }
+  return 'started'
+}
+
+/** How long an order the page did not place is still worth a status box. */
+export const ORDER_SHOWN_FOR_MS = 15 * 60 * 1000
+
+/** The order the status box follows, and where the page learned of it. */
+export type Followed = {
+  order: HostOrder
+  /**
+   * `held`: this page placed it. `order`: the daemon's last order. `result`:
+   * only the helper's record is left (the daemon restarted since) -- its time
+   * is when the helper recorded it, not when the order was placed.
+   */
+  from: 'held' | 'order' | 'result'
+}
+
+/**
+ * Which order the status box follows: the one this page placed, until
+ * dismissed; else the daemon's last order; else the helper's last result that
+ * names an order -- those two only within 15 minutes of the reading, so a
+ * reload the next day is not greeted by yesterday's reboot. A dismissed id
+ * stays dismissed, whichever way it comes back.
+ */
+export function followedOrder(
+  held: HostOrder | null,
+  host: Host,
+  dismissed: ReadonlySet<string>,
+): Followed | null {
+  if (held !== null && !dismissed.has(held.id)) {
+    return { order: held, from: 'held' }
+  }
+  const now = Date.parse(host.observed_at)
+  const recent = (at: string) => now - Date.parse(at) <= ORDER_SHOWN_FOR_MS
   const reported = host.actions.order
-  const state = reported !== null && reported.id === held.id ? reported.state : held.state
-  return state === 'pending' ? 'placed' : 'picked-up'
+  if (reported !== null && !dismissed.has(reported.id) && recent(reported.placed_at)) {
+    return { order: reported, from: 'order' }
+  }
+  const result = host.actions.result
+  if (result.readable) {
+    const { id, action, at } = result.value
+    if (id !== '' && action !== '' && !dismissed.has(id) && recent(at)) {
+      return { order: { id, action, placed_at: at, state: 'picked-up' }, from: 'result' }
+    }
+  }
+  return null
+}
+
+/**
+ * The update status as one sentence -- the Service card's "Update check" and
+ * the status box's "update finished" both say this one.
+ */
+export function outcomeSentence(u: UpdateStatus): string {
+  switch (u.outcome) {
+    case 'current':
+      return 'Up to date.'
+    case 'available':
+      return u.latest !== null ? `${u.latest} is available.` : 'A newer release is available.'
+    case 'updated':
+      return u.installed !== null ? `Updated to ${u.installed}.` : 'Updated.'
+    case 'rolled-back':
+      return u.latest !== null && u.installed !== null
+        ? `The update to ${u.latest} was rolled back; ${u.installed} is installed.`
+        : 'The update was rolled back.'
+    case 'failed':
+      return u.installed !== null
+        ? `The last update run failed; ${u.installed} is still installed.`
+        : 'The last update run failed.'
+  }
 }
 
 const STARTED: Record<HostAction, string> = {
@@ -397,66 +546,137 @@ const STARTED: Record<HostAction, string> = {
   poweroff: 'started. The host is shutting down.',
 }
 
-function phaseSentence(phase: OrderPhase, action: HostAction) {
+const JOURNAL = <code className="font-mono text-xs">journalctl -u holzkube-manager-host</code>
+
+function timeOf(ms: number): string {
+  return new Date(ms).toLocaleTimeString()
+}
+
+function phaseSentence(phase: OrderPhase, order: HostOrder, host: Host): ReactNode {
+  const result = host.actions.result
   switch (phase) {
     case 'placed':
       return 'order placed. Waiting for the helper to pick it up.'
     case 'picked-up':
       return 'the helper picked up the order.'
     case 'started':
-      return STARTED[action]
+      return STARTED[order.action]
+    case 'waiting':
+      // The box keeps saying what was last known; the waiting notice below
+      // says that the page is waiting.
+      return result.readable && result.value.id === order.id
+        ? STARTED[order.action]
+        : 'the helper picked up the order.'
     case 'rejected':
-      return (
-        <>
-          the helper rejected the order, so nothing was done.{' '}
-          <code className="font-mono text-xs">journalctl -u holzkube-manager-host</code> says why.
-        </>
-      )
+      return <>the helper rejected the order, so nothing was done. {JOURNAL} says why.</>
     case 'failed':
+      return <>the helper could not carry it out. {JOURNAL} says why.</>
+    case 'not-picked-up':
       return (
         <>
-          the helper could not carry it out.{' '}
-          <code className="font-mono text-xs">journalctl -u holzkube-manager-host</code> says why.
+          the helper did not pick up the order within 10 s, so holzkube-manager withdrew it. Nothing
+          was done. Check that the helper is running:{' '}
+          <code className="font-mono text-xs">systemctl status holzkube-manager-host.path</code>
         </>
       )
+    case 'update-finished': {
+      const u = host.service.update
+      return u.readable ? `finished. ${outcomeSentence(u.value)}` : 'finished.'
+    }
+    case 'back': {
+      const version = host.service.version
+      const boot = bootTime(host)
+      switch (order.action) {
+        case 'restart-service':
+          return `done. holzkube-manager is back, running ${version} since ${timeOf(
+            Date.parse(host.service.started_at),
+          )}.`
+        case 'update':
+          return `done. holzkube-manager is back, running ${version}.`
+        case 'reboot':
+          return `done. The host restarted and holzkube-manager is back; up since ${
+            boot === null ? '' : timeOf(boot)
+          }.`
+        case 'poweroff':
+          return `the host was switched on again and holzkube-manager is back; up since ${
+            boot === null ? '' : timeOf(boot)
+          }.`
+      }
+    }
+  }
+}
+
+/** The box's colour set: slate under way, emerald done, red when nothing (good) happened. */
+function phaseColour(phase: OrderPhase, host: Host): string {
+  switch (phase) {
+    case 'back':
+      return EMERALD
+    case 'update-finished': {
+      const u = host.service.update
+      return u.readable && (u.value.outcome === 'current' || u.value.outcome === 'updated')
+        ? EMERALD
+        : RED
+    }
+    case 'rejected':
+    case 'failed':
+    case 'not-picked-up':
+      return RED
+    default:
+      return SLATE
   }
 }
 
 /**
- * The order status box: first in the page's notice stack while this page holds
- * an order it placed. It takes focus when a new order arrives, because the
- * dialog that placed it has closed and its trigger is off.
+ * The order status box: first in the page's notice stack while there is an
+ * order to follow. Only the phase sentence changes, so the polite status role
+ * announces each transition once. It takes focus once, when this page has
+ * just placed the order -- the dialog that placed it has closed and its
+ * trigger is off -- and never on a later poll or for an order it only found.
  */
-export function HostOrderStatus({ host, held }: { host: Host; held: HostOrder }) {
-  const phase = orderPhase(held, host)
+export function HostOrderStatus({
+  host,
+  followed,
+  phase,
+  takeFocus,
+  onDismiss,
+}: {
+  host: Host
+  followed: Followed
+  phase: OrderPhase
+  takeFocus: boolean
+  onDismiss: () => void
+}) {
   const box = useRef<HTMLDivElement>(null)
+  const { order } = followed
 
-  // Once per order: a new id is a new order to follow; the 3-s polls of the
-  // same order must not pull focus back every time.
-  const id = held.id
+  const id = order.id
   useEffect(() => {
-    if (id !== '') {
+    if (takeFocus && id !== '') {
       box.current?.focus()
     }
-  }, [id])
+  }, [id, takeFocus])
 
   return (
     <div
       ref={box}
       role="status"
       tabIndex={-1}
-      className={`rounded-md border px-3 py-2 text-sm ${
-        phase === 'rejected' || phase === 'failed' ? RED : SLATE
-      }`}
+      className={`rounded-md border px-3 py-2 text-sm ${phaseColour(phase, host)}`}
     >
       <p>
-        <span className="font-semibold">{HOST_ACTION_LABEL[held.action]}</span> —{' '}
-        {phaseSentence(phase, held.action)}
+        <span className="font-semibold">{HOST_ACTION_LABEL[order.action]}</span> —{' '}
+        {phaseSentence(phase, order, host)}
       </p>
       <p className="mt-1 text-xs tabular-nums">
-        Order <span className="font-mono">{held.id}</span> · placed{' '}
-        {new Date(held.placed_at).toLocaleTimeString()}
+        Order <span className="font-mono">{order.id}</span> ·{' '}
+        {followed.from === 'result' ? 'recorded' : 'placed'}{' '}
+        {new Date(order.placed_at).toLocaleTimeString()}
       </p>
+      {isFinal(phase) && (
+        <Button variant="ghost" size="sm" className="mt-2" onClick={onDismiss}>
+          Dismiss status
+        </Button>
+      )}
     </div>
   )
 }
