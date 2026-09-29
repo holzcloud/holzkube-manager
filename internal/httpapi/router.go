@@ -16,6 +16,7 @@ import (
 	"github.com/holzcloud/holzkube-manager/internal/auth/oidc"
 	"github.com/holzcloud/holzkube-manager/internal/history"
 	"github.com/holzcloud/holzkube-manager/internal/host"
+	"github.com/holzcloud/holzkube-manager/internal/host/hostaction"
 	"github.com/holzcloud/holzkube-manager/internal/httpapi/middleware"
 	"github.com/holzcloud/holzkube-manager/internal/imagefactory"
 	"github.com/holzcloud/holzkube-manager/internal/inventory"
@@ -246,6 +247,12 @@ type Deps struct {
 	// the service are doing. It is nil in a deployment that serves no host
 	// page; the route answers 502 rather than panicking if it is.
 	Host *host.Collector
+
+	// HostActions is the one slot the four host actions place their orders
+	// in; the root helper, not this process, carries them out. It is nil in a
+	// deployment that offers no host actions, and the host confirm and action
+	// routes answer 502 rather than panicking if it is.
+	HostActions *hostaction.Box
 
 	// Support collects support bundles. It is nil in a deployment that offers
 	// none, and that handler answers 502 rather than panicking if it is.

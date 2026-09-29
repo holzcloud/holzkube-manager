@@ -1808,6 +1808,14 @@ func TestEveryRouteThatReachesUpstreamHasABudgetRow(t *testing.T) {
 		// under /sys and /etc and four syscalls -- and reaches no node and no
 		// upstream service. Nothing it waits on is on the other end of a wire.
 		"GET /api/v1/host",
+		// The host actions write one file in the data directory -- the order
+		// the root helper picks up -- and reach no node and no upstream
+		// service. The helper, not this process, does the rest.
+		"POST /api/v1/host/confirm",
+		"POST /api/v1/host/actions/reboot",
+		"POST /api/v1/host/actions/poweroff",
+		"POST /api/v1/host/actions/restart-service",
+		"POST /api/v1/host/actions/update",
 	} {
 		noUpstream[r] = true
 	}

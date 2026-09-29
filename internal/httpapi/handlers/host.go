@@ -1,9 +1,14 @@
 package handlers
 
 import (
+	"errors"
 	"net/http"
+	"strings"
+	"time"
 
+	"github.com/holzcloud/holzkube-manager/internal/host/hostaction"
 	"github.com/holzcloud/holzkube-manager/internal/httpapi"
+	"github.com/holzcloud/holzkube-manager/internal/jobs"
 	"github.com/holzcloud/holzkube-manager/internal/model"
 )
 
@@ -28,10 +33,72 @@ import (
 // from this process's own namespace, through a handful of files and four
 // syscalls (internal/host). That is why it is in budget_test.go's list of
 // routes that reach nothing.
+//
+// # The host actions (HACT-01..08, Phase 13)
+//
+// Five more routes: POST /api/v1/host/confirm, and one
+// POST /api/v1/host/actions/<action> for each of reboot, poweroff,
+// restart-service and update. None of them does what it names. The daemon
+// runs unprivileged and stays hardened; an action route places a one-line
+// order in the data directory (internal/host/hostaction), and a root-owned
+// helper, deploy/holzkube-manager-host.sh, carries it out. Nothing in this file
+// starts a process.
+//
+// **The action routes are destructive (D-06, D-07).** They restart or switch
+// off the machine every cluster's secrets live on, or the service itself, so
+// each one requires a session, the operator role and an open sudo window, and
+// each carries its own audit Action, host.<action>, written before the
+// handler runs. The body is only the confirmation token, which never belongs in
+// an archive kept for ever, so the allowlist records no parameter of them.
+//
+// **The confirm route is operator and not destructive**, like the node one: it
+// changes nothing, it issues a token -- and only to somebody who typed the
+// hostname (D-08). Every host action requires typing (D-09), unlike a node
+// reboot: there is one host, and it is the machine this page runs on.
+//
+// **The token is bound to the host.** The confirm route issues it for
+// {Action: host.<action>, Machine: hostIntentTarget}, and the action route
+// rebuilds exactly that intent from its own path, never from the token. A
+// token for a node reboot therefore never opens the host reboot, and the other
+// way round.
+//
+// They too reach nothing upstream: they write one file in the data directory,
+// and budget_test.go lists them for that reason.
 
-// HostRoutes serves the host page's one read.
+// hostIntentTarget is the Machine field of every host action's confirmation
+// intent. A machine id is a UUID, and the inventory's pseudo ids use prefixes
+// (unadopted:, adopting:, member:, endpoint:, manual:), none with an "@" -- so
+// no node's token can name it (D-08).
+const hostIntentTarget = "@host"
+
+// hostActionName is the audit Action and the confirmation's action of one host
+// action: host.reboot, host.poweroff, host.restart-service, host.update.
+func hostActionName(a hostaction.Action) string {
+	return "host." + string(a)
+}
+
+// hostTypedPhrase says, for every host action the host confirm route will
+// issue a token for, whether the operator has to type the hostname first. All
+// four do (D-09): the node rule -- reboot and shutdown without typing, so that
+// typing still means something where it matters -- does not carry over,
+// because there is exactly one host and it is the machine this page runs on;
+// after the click it is gone.
+//
+// It is its own table and deliberately not merged into typedPhrase: that one
+// is the node confirm route's, and an entry there would make
+// POST /api/v1/machines/{id}/confirm issue host-action tokens.
+// TestEveryHostActionRequiresTyping holds both halves.
+var hostTypedPhrase = map[string]bool{
+	hostActionName(hostaction.Reboot):         true,
+	hostActionName(hostaction.Poweroff):       true,
+	hostActionName(hostaction.RestartService): true,
+	hostActionName(hostaction.Update):         true,
+}
+
+// HostRoutes serves the host page's read, the host confirm route and the four
+// host action routes.
 func HostRoutes(d httpapi.Deps) []httpapi.Route {
-	return []httpapi.Route{
+	routes := []httpapi.Route{
 		{
 			Method:          http.MethodGet,
 			Pattern:         "/api/v1/host",
@@ -39,6 +106,143 @@ func HostRoutes(d httpapi.Deps) []httpapi.Route {
 			MinRole:         model.RoleReader,
 			Handler:         handler(readHost(d)),
 		},
+		{
+			Method:          http.MethodPost,
+			Pattern:         "/api/v1/host/confirm",
+			RequiresSession: true,
+			MinRole:         model.RoleOperator,
+			Action:          "action.confirm",
+			Handler:         handler(confirmHostAction(d)),
+		},
+	}
+	for _, a := range hostaction.Actions() {
+		routes = append(routes, httpapi.Route{
+			Method:          http.MethodPost,
+			Pattern:         "/api/v1/host/actions/" + string(a),
+			RequiresSession: true,
+			MinRole:         model.RoleOperator,
+			Destructive:     true,
+			Action:          hostActionName(a),
+			Handler:         handler(hostAction(d, a)),
+		})
+	}
+	return routes
+}
+
+// hostActionsConfigured is the problem for an instance that cannot take host
+// orders, or nil.
+func hostActionsConfigured(d httpapi.Deps) *httpapi.Problem {
+	switch {
+	case d.Host == nil:
+		return httpapi.Upstream("upstream.host-unavailable",
+			"This instance was started without a host reader, so it cannot take host actions.")
+	case d.HostActions == nil:
+		return httpapi.Upstream("upstream.host-unavailable",
+			"This instance was started without host actions.")
+	case d.Confirmer == nil:
+		return httpapi.Upstream("upstream.host-unavailable",
+			"This instance was started without confirmations, so it cannot take host actions.")
+	}
+	return nil
+}
+
+// confirmHostAction hands out a token for one host action, to somebody who
+// typed this machine's hostname.
+func confirmHostAction(d httpapi.Deps) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if p := hostActionsConfigured(d); p != nil {
+			httpapi.WriteProblem(w, r, p)
+			return
+		}
+
+		var body struct {
+			Action string `json:"action"`
+			// Typed is what the operator typed into the dialog. It is checked
+			// here, once, so that a client that skipped the dialog gets no
+			// token at all.
+			Typed string `json:"typed"`
+		}
+		if err := decodeJSON(w, r, &body); err != nil {
+			httpapi.WriteProblem(w, r, decodeProblem(err))
+			return
+		}
+
+		needsPhrase, known := hostTypedPhrase[body.Action]
+		if !known {
+			httpapi.WriteProblem(w, r, httpapi.Validation(
+				"This instance issues host confirmations for its four host actions and that is not one of them.",
+				httpapi.FieldError{Field: "action", Reason: "not a confirmable host action"}))
+			return
+		}
+
+		if needsPhrase {
+			// Read now, not from the page's last answer: the name the operator
+			// typed is compared with the name the machine has.
+			hostname, err := d.Host.Hostname()
+			if err != nil || hostname == "" {
+				httpapi.WriteProblem(w, r, httpapi.Validation(
+					"The hostname could not be read, so there is nothing to type to confirm a host action."))
+				return
+			}
+			if strings.TrimSpace(body.Typed) != hostname {
+				httpapi.WriteProblem(w, r, httpapi.Validation(
+					"Type this machine's hostname exactly to confirm.",
+					httpapi.FieldError{Field: "typed", Reason: "does not match the hostname"}))
+				return
+			}
+		}
+
+		token, expires := d.Confirmer.Issue(jobs.Intent{Action: body.Action, Machine: hostIntentTarget})
+
+		writeJSON(w, http.StatusOK, map[string]any{
+			"token":   token,
+			"expires": expires.Format(time.RFC3339),
+			"action":  body.Action,
+		})
+	}
+}
+
+// hostAction places the order for one host action.
+func hostAction(d httpapi.Deps, a hostaction.Action) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if p := hostActionsConfigured(d); p != nil {
+			httpapi.WriteProblem(w, r, p)
+			return
+		}
+
+		var body struct {
+			Confirmation string `json:"confirmation"`
+		}
+		if err := decodeJSON(w, r, &body); err != nil {
+			httpapi.WriteProblem(w, r, decodeProblem(err))
+			return
+		}
+
+		// The intent is rebuilt from the route, never read out of the token:
+		// the action is this route's, and the target is the host.
+		if err := d.Confirmer.Check(body.Confirmation, jobs.Intent{
+			Action:  hostActionName(a),
+			Machine: hostIntentTarget,
+		}); err != nil {
+			writeJobError(w, r, d, err)
+			return
+		}
+
+		order, err := d.HostActions.Place(a)
+		if errors.Is(err, hostaction.ErrPending) {
+			httpapi.WriteProblem(w, r, httpapi.Conflict(httpapi.CodeHostOrderPending,
+				"Another host action is still waiting for the helper. Wait for it to be answered, then try again."))
+			return
+		}
+		if err != nil {
+			httpapi.WriteInternal(w, r, d.Logger, err)
+			return
+		}
+
+		// 202: the order is placed and nothing has happened yet. For
+		// restart-service and update the helper ends this very process, which
+		// is why the answer is written before the helper can act.
+		writeJSON(w, http.StatusAccepted, map[string]any{"order": order})
 	}
 }
 

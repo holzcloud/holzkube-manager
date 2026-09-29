@@ -24,6 +24,7 @@ import (
 	"github.com/holzcloud/holzkube-manager/internal/config"
 	"github.com/holzcloud/holzkube-manager/internal/history"
 	"github.com/holzcloud/holzkube-manager/internal/host"
+	"github.com/holzcloud/holzkube-manager/internal/host/hostaction"
 	"github.com/holzcloud/holzkube-manager/internal/httpapi"
 	"github.com/holzcloud/holzkube-manager/internal/httpapi/handlers"
 	"github.com/holzcloud/holzkube-manager/internal/imagefactory"
@@ -559,8 +560,24 @@ func run(args []string) error {
 	if err != nil {
 		return fmt.Errorf("resolve the data directory %s: %w", cfg.DataDir, err)
 	}
+	rootFS := os.DirFS("/")
+
+	// The host actions' one slot (Phase 13). This process only ever places a
+	// one-line order in its data directory -- through fsstore, like every
+	// other write there -- and reads back what the root helper recorded in its
+	// own directory. It starts nothing: deploy/holzkube-manager-host.sh, run
+	// by a root path unit, does the rest.
+	hostActions := hostaction.NewBox(hostaction.Config{
+		FS:      rootFS,
+		DataDir: dataDirAbs,
+		Place:   fsstore.PlaceNew,
+		Now:     time.Now,
+		Logger:  logger,
+	})
+	defer hostActions.Close()
+
 	hostCollector := host.New(host.Config{
-		FS:  os.DirFS("/"),
+		FS:  rootFS,
 		Sys: host.OS(),
 		Now: time.Now,
 		// The same variable --version prints.
@@ -568,6 +585,7 @@ func run(args []string) error {
 		Started:          started,
 		DataDir:          dataDirAbs,
 		UpdateStatusPath: cfg.UpdateStatusFile,
+		Actions:          hostActions,
 	})
 
 	deps := httpapi.Deps{
@@ -601,6 +619,7 @@ func run(args []string) error {
 		Support:     supportCollector,
 		Metrics:     metricsExporter,
 		Host:        hostCollector,
+		HostActions: hostActions,
 		// The per-cluster read-only lock, read by the route middleware rather
 		// than by each handler (D-22). Inside the literal for the reason the
 		// comment above states: Deps is copied by value into every …Routes

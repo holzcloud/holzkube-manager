@@ -6,10 +6,10 @@ current_phase: 13
 current_phase_name: Host-Aktionen über einen root-eigenen Helfer
 status: executing
 stopped_at: Phase 12 complete, ready to plan Phase 13
-last_updated: "2026-09-29T00:31:33.156Z"
+last_updated: "2026-09-29T00:31:56.058Z"
 last_activity: 2026-09-29
-last_activity_desc: Phase 12 complete, transitioned to Phase 13
-state_head: 6ff2c29a3b5b2f74e75402c2b7d764bc8a7283da
+last_activity_desc: Phase 13 execution started
+state_head: ef4648a4165144bd7927014bb136d2e68607c1d6
 progress:
   total_phases: 4
   completed_phases: 2
@@ -28,14 +28,14 @@ liegt unverändert in `milestones/STATE-2026-09-17.md`.
 See: .planning/PROJECT.md (updated 2026-09-28)
 
 **Core value:** Eine neue Maschine wird komplett in der UI zum Cluster-Node — ohne `talosctl`, ohne Omni.
-**Current focus:** Phase 12 — Host wie ein Knoten — Verlauf, Warnung, Wand
+**Current focus:** Phase 13 — Host-Aktionen über einen root-eigenen Helfer
 
 ## Current Position
 
-Phase: 13 (Host-Aktionen über einen root-eigenen Helfer) — READY TO EXECUTE
-Plan: Not started
-Status: Ready to execute
-Last activity: 2026-09-29 — Phase 12 complete, transitioned to Phase 13
+Phase: 13 (Host-Aktionen über einen root-eigenen Helfer) — EXECUTING
+Plan: 1 of 9
+Status: Executing Phase 13
+Last activity: 2026-09-29 — Phase 13 execution started
 
 Progress: [█████░░░░░] 50%
 

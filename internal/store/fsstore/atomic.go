@@ -3,6 +3,7 @@ package fsstore
 import (
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sync/atomic"
@@ -169,6 +170,73 @@ func removeAndSync(path string) error {
 // be mid-write when the power goes.
 func WriteFileAtomic(path string, data []byte) error {
 	return writeAtomic(path, data)
+}
+
+// PlaceNew puts a new file at path only if nothing is there yet: either the
+// whole of data appears under path, or -- when path is taken -- nothing changes
+// and the error wraps fs.ErrExist.
+//
+// It is the one-slot primitive of the host actions (internal/host/hostaction):
+// the daemon leaves a one-line order for the root helper, and a second order
+// while the first still waits is refused, never queued and never swapped in.
+//
+// It lives here for the same reason WriteFileAtomic does: the data directory is
+// reached through this package and nowhere else
+// (TestNoDirectFileAccessOutsideFsstore), and the sequence is the store's crash
+// contract -- a temporary carrying the prefix the startup sweep removes, the
+// 0600 mode Guard insists on, the two fsyncs.
+//
+// It ends in link(2) and not in rename(2), and that is the whole difference to
+// writeAtomic. A rename replaces whatever lies at path, so "refuse if taken"
+// would have to be a check followed by the rename -- and two requests, or two
+// processes, can both pass the check. A link fails with EEXIST when the name
+// exists, atomically, in the kernel. The temporary name is removed afterwards in
+// every case; on success the file lives on under path alone.
+func PlaceNew(path string, data []byte) (err error) {
+	dir := filepath.Dir(path)
+
+	tmp, err := os.CreateTemp(dir, tempPrefix+"*")
+	if err != nil {
+		return fmt.Errorf("create temp file in %s: %w", dir, err)
+	}
+	tmpName := tmp.Name()
+	closed := false
+	defer func() {
+		if !closed {
+			_ = tmp.Close()
+		}
+		// The temporary is never the result: on success path holds a second
+		// link to the same inode, on failure there is nothing to keep.
+		_ = os.Remove(tmpName)
+	}()
+
+	if err = tmp.Chmod(filePerm); err != nil {
+		return fmt.Errorf("chmod temp file: %w", err)
+	}
+	if _, err = tmp.Write(data); err != nil {
+		return fmt.Errorf("write temp file: %w", err)
+	}
+	if err = tmp.Sync(); err != nil {
+		return fmt.Errorf("fsync temp file: %w", err)
+	}
+	closed = true
+	if err = tmp.Close(); err != nil {
+		return fmt.Errorf("close temp file: %w", err)
+	}
+
+	if err = os.Link(tmpName, path); err != nil {
+		if errors.Is(err, fs.ErrExist) {
+			return fmt.Errorf("%s is already there: %w", path, fs.ErrExist)
+		}
+		return fmt.Errorf("link into place: %w", err)
+	}
+	if err = os.Remove(tmpName); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return fmt.Errorf("remove temp file: %w", err)
+	}
+	if err = fsyncDir(dir); err != nil {
+		return fmt.Errorf("fsync directory: %w", err)
+	}
+	return nil
 }
 
 // ReadFile is WriteFileAtomic's other half: the one read of a file kept beside

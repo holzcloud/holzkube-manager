@@ -666,6 +666,12 @@ const ACTION_LABELS: ReadonlyArray<{
       'password again before it runs. Nothing is lost if it fails: the certificate is proved ' +
       'against a node before it replaces the one in use',
   },
+  // The four host actions (Phase 13). The machine these take away is the one
+  // this page runs on, so the prompt names which of the four it is.
+  { match: /^\/api\/v1\/host\/actions\/reboot$/, action: 'Restart this host' },
+  { match: /^\/api\/v1\/host\/actions\/poweroff$/, action: 'Shut this host down' },
+  { match: /^\/api\/v1\/host\/actions\/restart-service$/, action: 'Restart holzkube-manager' },
+  { match: /^\/api\/v1\/host\/actions\/update$/, action: 'Check for updates and install' },
 ]
 
 function challengeFor(path: string): { action: string; because?: string } {
@@ -2987,6 +2993,50 @@ export const linkSchema = z.object({
 
 export type Link = z.infer<typeof linkSchema>
 
+/** The four host actions (Phase 13), as the order file and the routes name them. */
+export type HostAction = 'reboot' | 'poweroff' | 'restart-service' | 'update'
+
+const hostActionSchema = z.enum(['reboot', 'poweroff', 'restart-service', 'update'])
+
+/**
+ * Each host action's route, written out: the patterns carry no parameter, so
+ * the reachability guard looks for each path literally under web/src.
+ */
+export const HOST_ACTION_PATHS: Record<HostAction, string> = {
+  reboot: '/api/v1/host/actions/reboot',
+  poweroff: '/api/v1/host/actions/poweroff',
+  'restart-service': '/api/v1/host/actions/restart-service',
+  update: '/api/v1/host/actions/update',
+}
+
+/**
+ * The last order this daemon placed for the root helper. `state` is `pending`
+ * while the order file is there and `picked-up` once the helper took it; a
+ * string rather than an enum, so a later state (withdrawn) does not make an
+ * older page refuse the whole host answer.
+ */
+export const hostOrderSchema = z.object({
+  id: z.string(),
+  action: hostActionSchema,
+  placed_at: z.string(),
+  state: z.string(),
+})
+
+export type HostOrder = z.infer<typeof hostOrderSchema>
+
+/**
+ * What the helper recorded about the last order it handled. `id` and `action`
+ * are empty strings for an order it could not trust enough to repeat.
+ */
+export const hostResultSchema = z.object({
+  id: z.string(),
+  action: z.union([hostActionSchema, z.literal('')]),
+  outcome: z.enum(['started', 'rejected', 'failed']),
+  at: z.string(),
+})
+
+export type HostResult = z.infer<typeof hostResultSchema>
+
 /** The machine holzkube-manager runs on: GET /api/v1/host (Phase 11). */
 export const hostSchema = z.object({
   observed_at: z.string(),
@@ -3116,6 +3166,27 @@ export const hostSchema = z.object({
     warnings: z.array(z.string()).nullish().transform(orEmpty),
     unreadable: z.array(z.string()).nullish().transform(orEmpty),
   }),
+  /**
+   * The host actions (Phase 13): the last order this daemon placed, and what
+   * the root helper last recorded. Defaulted so an answer from a daemon that
+   * predates host actions still parses: no order, and a result that is not
+   * readable -- never an invented one.
+   */
+  actions: z
+    .object({
+      order: hostOrderSchema.nullable(),
+      result: reading(hostResultSchema),
+    })
+    .default({
+      order: null,
+      result: {
+        readable: false,
+        reason: {
+          code: 'host-action.no-result',
+          message: 'This holzkube-manager does not report host actions.',
+        },
+      },
+    }),
 })
 
 export type Host = z.infer<typeof hostSchema>
@@ -3133,6 +3204,25 @@ export const api = {
   /** What the daemon recorded about the host over the range, every 15 s. */
   hostHistory: (range: HistoryRange): Promise<History> =>
     sendJSON('GET', `/api/v1/host/history?range=${range}`, historySchema),
+
+  /**
+   * The four host actions (Phase 13). The daemon carries none of them out: it
+   * places an order for a root-owned helper. Every one needs the hostname
+   * typed (confirm), then the token and an open sudo window (place) -- a 428
+   * there opens the password prompt through the shared interceptor and
+   * replays the request.
+   */
+  hostActions: {
+    confirm: (action: HostAction, typed: string): Promise<{ token: string; expires: string }> =>
+      sendJSON('POST', '/api/v1/host/confirm', confirmationSchema, {
+        action: `host.${action}`,
+        typed,
+      }),
+    place: (action: HostAction, confirmation: string): Promise<{ order: HostOrder }> =>
+      sendJSON('POST', HOST_ACTION_PATHS[action], z.object({ order: hostOrderSchema }), {
+        confirmation,
+      }),
+  },
 
   status: (): Promise<SystemStatus> =>
     sendJSON('GET', '/api/v1/system/status', systemStatusSchema, undefined, {

@@ -1435,15 +1435,20 @@ node.
 |---|---|---|---|---|
 | `GET` | `/api/v1/host` | no | — | this machine, its service, live readings and its state; readers; not audited |
 | `GET` | `/api/v1/host/history` | no | — | `?range=1h\|6h\|24h`; the host's last day, sampled every 15 s; readers; not audited; see below |
+| `POST` | `/api/v1/host/confirm` | no | `action.confirm` | `{action, typed}`; a token for one host action, only for the typed hostname; operators; see "Host actions" |
+| `POST` | `/api/v1/host/actions/reboot` | yes | `host.reboot` | `{confirmation}`; places the order `reboot <id>` for the root helper; operators; `202 {order}` |
+| `POST` | `/api/v1/host/actions/poweroff` | yes | `host.poweroff` | as above, `poweroff <id>` |
+| `POST` | `/api/v1/host/actions/restart-service` | yes | `host.restart-service` | as above, `restart-service <id>` |
+| `POST` | `/api/v1/host/actions/update` | yes | `host.update` | as above, `update <id>` |
 
-Neither route is open to a wall link. The wall carries the host's name and
+None of these routes is open to a wall link. The wall carries the host's name and
 state in its own answer instead; see "One screen for the IT office".
 
 Every value is a **reading**: `{"readable": true, "value": …}` or
 `{"readable": false, "reason": {"code": …, "message": …}}` -- never both, and
 never a `0` standing in for a value that could not be read. The reason codes are
 `hardening.proc-subset`, `read-failed`, `rate.no-baseline`,
-`update.not-recorded` and `unsupported`. One `observed_at` covers the whole
+`update.not-recorded`, `unsupported` and `host-action.no-result`. One `observed_at` covers the whole
 answer. A daemon started without a host reader answers
 `502 upstream.host-unavailable`.
 
@@ -1551,6 +1556,7 @@ branch on:
 | `rate.no-baseline` | CPU usage and per-core usage need two readings of `/proc/stat` taken between 0.5 s and 5 minutes apart, and there is no such pair: the first call after the daemon started, a call less than 0.5 s after the previous one, or one more than 5 minutes after it. Per-core usage alone says so when a core came online or went offline between the two readings. |
 | `update.not-recorded` | `service.update` only: the status file does not exist, because the installed update script predates it or has not run yet -- or the daemon runs in a container, where the host's update timer does not run. A state, not a fault. |
 | `unsupported` | this platform has no such source at all: a darwin build, where none of the Linux interfaces exist. |
+| `host-action.no-result` | `actions.result` only: the host helper has recorded no order on this machine yet, or this instance was started without host actions. A state, not a fault. |
 
 **Load survives the hardening.** `live.cpu.load` comes from `/proc/loadavg` when
 it is readable (`"source": "loadavg"`) and otherwise from `sysinfo(2)`
@@ -1688,6 +1694,105 @@ field and the rule named -- never a partially filled status, never an invented
 time or version. The path is set with `--update-status-file`
 (`HOLZKUBE_MANAGER_UPDATE_STATUS_FILE`), default
 `/var/lib/holzkube-manager-update/status.json`.
+
+### Host actions: an order for a root helper
+
+Four actions on the host page: restart the host (`reboot`), shut it down
+(`poweroff`), restart holzkube-manager (`restart-service`), and run the update
+the hourly timer runs (`update`: it looks for a newer release and installs it if
+there is one). **The daemon carries out none of them.** It runs unprivileged
+under its hardened unit, and an action route places a one-line order in the
+data directory; a root-owned helper started by a systemd path unit --
+`deploy/holzkube-manager-host.sh` -- consumes the order, runs one fixed
+`systemctl` command for it, and records what came of it in its own directory.
+
+**Confirming.** `POST /api/v1/host/confirm` takes
+`{"action": "host.update", "typed": "example-host"}`. `action` is one of
+`host.reboot`, `host.poweroff`, `host.restart-service` and `host.update`;
+anything else is `422` naming `action` ("not a confirmable host action").
+**Every host action requires typing the hostname** -- unlike a node's reboot
+and shutdown, because there is exactly one host and it is the machine this page
+runs on. `typed`, trimmed of surrounding blanks, is compared with the hostname
+`uname(2)` reports at that moment; a mismatch is `422` naming `typed` ("does
+not match the hostname"), and a hostname that cannot be read is `422` with no
+token. Success is `200`:
+
+```json
+{"token": "1790586600.Zm9v…", "expires": "2026-09-28T10:10:03Z", "action": "host.update"}
+```
+
+The token is bound to the action and to the host: it is issued for the intent
+`{action: host.<action>, machine: "@host"}`, and the action route rebuilds that
+intent from its own path. `@host` can be no machine's id, so a node's
+confirmation never opens a host action and a host confirmation never opens a
+node's. The route requires a session and the operator role, is audited as
+`action.confirm` with the action (never with `typed`), and is not destructive:
+it changes nothing.
+
+**Placing.** `POST /api/v1/host/actions/{reboot|poweroff|restart-service|update}`
+takes `{"confirmation": "<token>"}`. Each route requires a session, the
+operator role and an open sudo window (`428 sudo.required` otherwise), and is
+audited under its own action, `host.reboot` … `host.update`, with no parameter
+recorded: the body is only the token. A token for a different action or for a
+node is `403 confirmation.invalid`, an old one `403 confirmation.expired`.
+Success is `202` -- the order is placed and nothing has happened yet:
+
+```json
+{"order": {"id": "3f9c2a7b1d4e8f60", "action": "update", "placed_at": "2026-09-28T10:00:05Z", "state": "pending"}}
+```
+
+For `restart-service` and `update` the helper ends the very process that
+answered; the `202` is written before the helper can act.
+
+| Status | Code | When |
+|---|---|---|
+| `409` | `conflict.host-order-pending` | an order still waits for the helper. There is one slot and no queue: the second order is refused and the first stays exactly as it was. |
+| `502` | `upstream.host-unavailable` | the daemon was started without a host reader, host actions or confirmations. |
+
+**The order file.** `<data directory>/host-order`, mode `0600`, holding exactly
+one line and nothing else -- no user, no time, no parameter; who asked is in the
+audit log:
+
+```
+update 3f9c2a7b1d4e8f60
+```
+
+The action is one of the four words, the id 16 lowercase hex characters from a
+cryptographic random source, then one newline. It is placed exclusively: written
+to a temporary name in the same directory, flushed, then linked to `host-order`,
+which fails when the name is taken -- that failure is the `409`. The helper
+accepts nothing but `^(reboot|poweroff|restart-service|update) [0-9a-f]{16}$`
+on exactly one line of at most 64 bytes, removes the order **before** it acts,
+and records its outcome in `/var/lib/holzkube-manager-host/last`, a directory
+root owns -- never in the daemon's:
+
+```
+3f9c2a7b1d4e8f60 update started 2026-09-28T10:00:06Z
+```
+
+Four fields: the id, the action, `started`, `rejected` or `failed`, and an
+RFC 3339 time in UTC. An order the helper could not trust has `-` for both id
+and action (`- - rejected …`, or `- - failed …` when it could not remove the
+order); a `started` one always has both.
+
+**In `GET /api/v1/host`: `actions`.**
+
+```json
+"actions": {
+  "order": {"id": "3f9c2a7b1d4e8f60", "action": "update", "placed_at": "2026-09-28T10:00:05Z", "state": "picked-up"},
+  "result": {"readable": true, "value": {"id": "3f9c2a7b1d4e8f60", "action": "update", "outcome": "started", "at": "2026-09-28T10:00:06Z"}}
+}
+```
+
+- `order` is the last order this process placed since it started, or `null`.
+  `state` is `pending` while the order file is still there and `picked-up`
+  once it is gone -- the helper removes an order before it acts, so what came of
+  it is `result`.
+- `result` is a reading of the helper's `last` file: `host-action.no-result`
+  when there is none, `read-failed` when it is not exactly the line above (the
+  message names the rule, never the file's bytes; at most 128 bytes are read).
+  An `id` and `action` of `-` are sent as empty strings. A client matches
+  `result.value.id` against the order it placed.
 
 ### GET /api/v1/host/history: the host's last day
 

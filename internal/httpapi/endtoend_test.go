@@ -24,6 +24,7 @@ import (
 	"github.com/holzcloud/holzkube-manager/internal/auth"
 	"github.com/holzcloud/holzkube-manager/internal/history"
 	"github.com/holzcloud/holzkube-manager/internal/host"
+	"github.com/holzcloud/holzkube-manager/internal/host/hostaction"
 	"github.com/holzcloud/holzkube-manager/internal/httpapi"
 	"github.com/holzcloud/holzkube-manager/internal/httpapi/handlers"
 	"github.com/holzcloud/holzkube-manager/internal/imagefactory"
@@ -61,6 +62,12 @@ type harness struct {
 	jobs    *jobs.Engine
 	history *history.Store
 
+	// confirmer is the one the routes check tokens with: set by withJobs, and
+	// by withHostActions when withJobs was not given. A test that needs a
+	// token no route would issue -- a node's, to try on a host route -- issues
+	// it here.
+	confirmer *jobs.Confirmer
+
 	// bootstrap is the etcd lease directory, shared by the provisioning
 	// service and the job steps. One per harness, for the reason the lease
 	// exists at all.
@@ -86,6 +93,8 @@ type harnessConfig struct {
 	power                bool
 	history              bool
 	host                 *host.Collector
+	hostOver             func(box *hostaction.Box) *host.Collector
+	hostActions          func(dataDir string) *hostaction.Box
 	allowedHosts         []string
 	factoryBase          string
 	wrapStore            func(store.Store) store.Store
@@ -183,6 +192,22 @@ func withHistory() harnessOpt {
 // registered and answers 502, which is what a test of that answer needs.
 func withHost(c *host.Collector) harnessOpt {
 	return func(c2 *harnessConfig) { c2.host = c }
+}
+
+// withHostActions adds the host actions' order slot, built by build against the
+// harness's own data directory -- the directory the store holds, as in the
+// composition root -- and closed with the harness. It brings a confirmer when
+// withJobs did not, because the host confirm and action routes need one and
+// nothing else of the job engine.
+func withHostActions(build func(dataDir string) *hostaction.Box) harnessOpt {
+	return func(c *harnessConfig) { c.hostActions = build }
+}
+
+// withHostOver adds a host reader that is built after the host actions' slot,
+// so that GET /api/v1/host reads the same Box the action routes place into --
+// as the composition root wires it. It takes precedence over withHost.
+func withHostOver(build func(box *hostaction.Box) *host.Collector) harnessOpt {
+	return func(c *harnessConfig) { c.hostOver = build }
 }
 
 // withJobs adds the job engine, the confirmer and the node-action routes. It
@@ -356,6 +381,7 @@ func newHarness(t *testing.T, opts ...harnessOpt) *harness {
 		deps.Jobs = engine
 		deps.Confirmer = confirmer
 		h2.jobs = engine
+		h2.confirmer = confirmer
 	}
 
 	if cfg.config {
@@ -422,6 +448,22 @@ func newHarness(t *testing.T, opts ...harnessOpt) *harness {
 	}
 
 	deps.Host = cfg.host
+	if cfg.hostActions != nil {
+		box := cfg.hostActions(dir)
+		t.Cleanup(box.Close)
+		deps.HostActions = box
+		if deps.Confirmer == nil {
+			confirmer, err := jobs.NewConfirmer()
+			if err != nil {
+				t.Fatalf("NewConfirmer: %v", err)
+			}
+			deps.Confirmer = confirmer
+			h2.confirmer = confirmer
+		}
+		if cfg.hostOver != nil {
+			deps.Host = cfg.hostOver(box)
+		}
+	}
 
 	deps.Routes = slices.Concat(
 		handlers.SystemRoutes(deps),
