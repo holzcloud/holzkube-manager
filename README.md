@@ -102,8 +102,8 @@ Here the processor has run past its warning line: the notice says which value
 crossed which threshold, and the day's curves show it climbing — with a gap
 where the service was stopped, not a line drawn across it. The four host
 actions sit in the header, switched off here: the helper that carries them out
-is not installed yet, and the notice at the bottom names what is missing and
-the commands that install it.
+is not installed yet, and the notice below the hardening note names what is
+missing and the commands that install it.
 
 ![The machine holzkube-manager runs on](docs/screenshots/host.png)
 

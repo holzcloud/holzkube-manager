@@ -272,7 +272,7 @@ of exactly four, removes it, and runs the one fixed `systemctl` command for it.
 It records what came of it in its own directory, `/var/lib/holzkube-manager-host`,
 where the page reads it. **`deploy/HOST-HELPER.md` installs it**, step by step,
 and says how to check it works and how to remove it again. Until it is
-installed the buttons stay off, and a notice at the bottom of the page names
+installed the buttons stay off, and a notice under the header names
 exactly which of its files are missing and shows the four commands that install
 it. The release update never installs or replaces the helper: new root code on
 the machine is the operator's decision.

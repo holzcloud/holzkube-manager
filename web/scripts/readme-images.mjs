@@ -259,6 +259,13 @@ async function shoot(page, route, file, { range, wait = 2500, through } = {}) {
     await page.waitForTimeout(2000)
   }
   if (through) {
+    // Clicking the range button scrolls it into view; on a page taller than the
+    // window that leaves the top -- /host's header and its actions -- out of
+    // the picture. Measured from the top, so box.y is the page's own offset.
+    await page.evaluate(() => {
+      window.scrollTo(0, 0)
+      for (const el of document.querySelectorAll('*')) if (el.scrollTop > 0) el.scrollTop = 0
+    })
     const box = await page.locator(through).boundingBox()
     const height = Math.ceil(box.y + box.height + 16)
     if (height > viewport.height) {
