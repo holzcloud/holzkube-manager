@@ -567,10 +567,16 @@ func run(args []string) error {
 	// other write there -- and reads back what the root helper recorded in its
 	// own directory. It starts nothing: deploy/holzkube-manager-host.sh, run
 	// by a root path unit, does the rest.
+	//
+	// Claim is what withdraws an order nobody picked up within 10 s, and any
+	// order a previous process left (D-13). NewBox does the latter before it
+	// returns, after fsstore.Open's sweep above has run, so a claim a killed
+	// process left half done is already gone.
 	hostActions := hostaction.NewBox(hostaction.Config{
 		FS:      rootFS,
 		DataDir: dataDirAbs,
 		Place:   fsstore.PlaceNew,
+		Claim:   fsstore.Claim,
 		Now:     time.Now,
 		Logger:  logger,
 	})

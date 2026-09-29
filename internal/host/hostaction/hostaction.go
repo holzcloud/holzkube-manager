@@ -26,6 +26,16 @@
 // waits is refused (ErrPending), atomically in the kernel rather than by a
 // check this process makes first.
 //
+// # No order is left lying
+//
+// An order nobody picks up is not harmless: the helper might be installed but
+// stopped, and whoever starts it later would carry out a reboot nobody asked
+// for any more. So the Box withdraws an order the helper has not taken within
+// DefaultPickupTimeout (D-13), and withdraws any order it finds when it is
+// built -- that one was placed by a previous process (R9). Withdrawing is a
+// claim through fsstore.Claim: a rename, so whoever acts first, the helper or
+// this process, owns the order, and the other sees it gone (R8).
+//
 // Nothing in this package opens, writes, renames or removes a file: the
 // file-access guard (TestNoDirectFileAccessOutsideFsstore) scans it, and the
 // daemon's writes to its data directory go through fsstore. It asks only
@@ -43,6 +53,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strconv"
 	"sync"
 	"time"
 )
@@ -107,7 +118,16 @@ const (
 	// StatePickedUp is an order whose file is gone. The helper consumes an order
 	// before it acts, so gone means taken -- what came of it is the result.
 	StatePickedUp OrderState = "picked-up"
+	// StateWithdrawn is an order this process took back because the helper had
+	// not picked it up within the pickup timeout (D-13). Nothing was done.
+	StateWithdrawn OrderState = "withdrawn"
 )
+
+// DefaultPickupTimeout is how long an order may wait for the helper before the
+// Box withdraws it (D-13). The path unit starts the helper within a second of
+// the order appearing; ten seconds without a pickup means no helper is
+// watching.
+const DefaultPickupTimeout = 10 * time.Second
 
 // Order is the last order this process placed.
 type Order struct {
@@ -135,6 +155,22 @@ type Config struct {
 	// Place puts data at path only if nothing is there, and fails with an
 	// error wrapping fs.ErrExist otherwise. Production: fsstore.PlaceNew.
 	Place func(path string, data []byte) error
+	// Claim takes the file at path out of its name, returns what it held and
+	// removes it, and fails with an error wrapping fs.ErrNotExist when nothing
+	// is there. Production: fsstore.Claim.
+	//
+	// It is what withdraws orders: the one the helper did not pick up within
+	// PickupTimeout, and any order present when the Box is built. A Box without
+	// Claim never withdraws and never sweeps -- no timer is armed, so none can
+	// call a nil function. The API tests build such Boxes; the daemon never
+	// does.
+	Claim func(path, tag string) ([]byte, error)
+	// PickupTimeout is how long an order may wait before it is withdrawn. Zero
+	// means DefaultPickupTimeout.
+	PickupTimeout time.Duration
+	// AfterFunc arms a timer that calls f once after d and returns the function
+	// that stops it. Nil means time.AfterFunc; tests fire timers by hand.
+	AfterFunc func(d time.Duration, f func()) (stop func() bool)
 	// Now is the clock the placement time comes from. Nil means time.Now.
 	Now func() time.Time
 	// Rand is where order ids come from. Nil means crypto/rand.Reader.
@@ -147,11 +183,25 @@ type Config struct {
 type Box struct {
 	cfg Config
 
+	// mu is held across a placement and across a withdrawal. That is what keeps
+	// an old order's timer from claiming a newer order: the timer looks at
+	// last under the same lock the newer Place set it under, and gives up
+	// unless last is still its own order.
 	mu   sync.Mutex
 	last *Order
+	// stop stops the pickup timer of the last order, if one is armed.
+	stop   func() bool
+	closed bool
 }
 
-// NewBox builds a Box. It touches nothing until Place is called.
+// NewBox builds a Box.
+//
+// With Claim configured it withdraws, before it returns, any order already in
+// the slot: this process has not placed one yet, so it was placed by a
+// previous process, and it must not wait for a helper started later (R9). The
+// helper's own age window is the first net -- it may run at boot before this
+// daemon does -- and this is the second. A Box without Claim touches nothing
+// until Place is called.
 func NewBox(cfg Config) *Box {
 	if cfg.ResultPath == "" {
 		cfg.ResultPath = DefaultResultPath
@@ -165,7 +215,46 @@ func NewBox(cfg Config) *Box {
 	if cfg.Logger == nil {
 		cfg.Logger = slog.New(slog.DiscardHandler)
 	}
-	return &Box{cfg: cfg}
+	if cfg.PickupTimeout <= 0 {
+		cfg.PickupTimeout = DefaultPickupTimeout
+	}
+	if cfg.AfterFunc == nil {
+		cfg.AfterFunc = func(d time.Duration, f func()) func() bool {
+			return time.AfterFunc(d, f).Stop
+		}
+	}
+	b := &Box{cfg: cfg}
+
+	if p := b.orderPath(); p != ReferenceOrderPath {
+		// A log line rather than a page sentence: the shipped path unit watches
+		// ReferenceOrderPath only, so every order from this daemon would be
+		// withdrawn after the pickup timeout unless the helper was told where
+		// to look.
+		cfg.Logger.Info("host orders are placed outside the path the shipped helper watches; "+
+			"install the drop-in described in deploy/HOST-HELPER.md or every order is withdrawn",
+			"order_path", p, "helper_watches", ReferenceOrderPath)
+	}
+
+	if cfg.Claim != nil {
+		b.sweep()
+	}
+	return b
+}
+
+// sweep withdraws an order left by a previous process. Only the byte count is
+// logged: the content is whatever the file held, and it is not this process's
+// to repeat.
+func (b *Box) sweep() {
+	data, err := b.cfg.Claim(b.orderPath(), "startup")
+	switch {
+	case err == nil:
+		b.cfg.Logger.Warn("a host order from before this start was withdrawn; nothing was done",
+			"path", b.orderPath(), "bytes", len(data))
+	case errors.Is(err, fs.ErrNotExist):
+		// The ordinary start: no order waits.
+	default:
+		b.cfg.Logger.Error("could not withdraw a host order from before this start", "path", b.orderPath(), "err", err)
+	}
 }
 
 // orderPath is the absolute path of the slot.
@@ -206,7 +295,48 @@ func (b *Box) Place(a Action) (Order, error) {
 	o := Order{ID: id, Action: a, PlacedAt: b.cfg.Now().UTC(), State: StatePending}
 	b.last = &o
 	b.cfg.Logger.Info("host order placed", "id", id, "action", string(a))
+
+	if b.cfg.Claim != nil && !b.closed {
+		// The previous order's file was gone, or this placement would have
+		// failed; its timer has nothing left to do.
+		if b.stop != nil {
+			b.stop()
+		}
+		b.stop = b.cfg.AfterFunc(b.cfg.PickupTimeout, func() { b.withdraw(id) })
+	}
 	return o, nil
+}
+
+// withdraw is the pickup timer of the order id. It claims the order only while
+// that order is still the last one and not settled: it runs under the mutex
+// Place sets last under, so an old timer that fires late finds a newer order
+// in last and leaves it alone.
+func (b *Box) withdraw(id string) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	if b.closed || b.last == nil || b.last.ID != id || b.last.State == StateWithdrawn {
+		return
+	}
+	_, err := b.cfg.Claim(b.orderPath(), "withdrawn-"+id)
+	switch {
+	case err == nil:
+		b.last.State = StateWithdrawn
+		b.cfg.Logger.Warn("host order withdrawn: the helper did not pick up the order within "+
+			seconds(b.cfg.PickupTimeout)+"; check `systemctl status holzkube-manager-host.path`",
+			"id", id, "action", string(b.last.Action))
+	case errors.Is(err, fs.ErrNotExist):
+		// The helper took it: the ordinary case, nothing to do.
+	default:
+		// The state stays with Order()'s Lstat: an order still there reads
+		// pending, which is the truth.
+		b.cfg.Logger.Error("could not withdraw a host order", "id", id, "action", string(b.last.Action), "err", err)
+	}
+}
+
+// seconds renders d as "10 s".
+func seconds(d time.Duration) string {
+	return strconv.FormatFloat(d.Seconds(), 'f', -1, 64) + " s"
 }
 
 // Order returns the last order this process placed, with its state as of now,
@@ -219,6 +349,11 @@ func (b *Box) Order() *Order {
 		return nil
 	}
 	o := *b.last
+	if o.State == StateWithdrawn {
+		// Settled: the file is gone because this process claimed it, and an
+		// Lstat would call that picked up.
+		return &o
+	}
 	// Lstat, not Stat: the question is whether the name is there, not what a
 	// link planted there would point at.
 	if _, err := os.Lstat(b.orderPath()); err == nil {
@@ -234,5 +369,14 @@ func (b *Box) Result() (Result, error) {
 	return ReadResult(b.cfg.FS, b.cfg.ResultPath)
 }
 
-// Close releases what the Box holds. It holds nothing yet.
-func (b *Box) Close() {}
+// Close stops the pending pickup timer. A timer that fires anyway afterwards
+// withdraws nothing.
+func (b *Box) Close() {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.closed = true
+	if b.stop != nil {
+		b.stop()
+		b.stop = nil
+	}
+}
