@@ -58,9 +58,9 @@ damit er es am Ende auf einen Blick prüfen und umwerfen kann.
 - [ ] **HACT-01**: Der Betreiber kann den Host neu starten
 - [ ] **HACT-02**: Der Betreiber kann den Host herunterfahren
 - [ ] **HACT-03**: Der Betreiber kann den Dienst holzkube-manager neu starten
-- [ ] **HACT-04**: Der Betreiber kann „jetzt nach Updates suchen" auslösen
-- [ ] **HACT-05**: Jede Host-Aktion verlangt Sudo-Fenster und getippten Hostnamen, läuft durch den Audit-Pfad und ist nur ab Rolle Operator erlaubt
-- [ ] **HACT-06**: Der Daemon führt eine Host-Aktion nie selbst aus: er legt einen Auftrag ab, den ein root-eigener Helfer aus einer festen Liste ausführt; ein unbekannter Auftrag wird verworfen und protokolliert
+- [x] **HACT-04**: Der Betreiber kann „jetzt nach Updates suchen" auslösen
+- [x] **HACT-05**: Jede Host-Aktion verlangt Sudo-Fenster und getippten Hostnamen, läuft durch den Audit-Pfad und ist nur ab Rolle Operator erlaubt
+- [x] **HACT-06**: Der Daemon führt eine Host-Aktion nie selbst aus: er legt einen Auftrag ab, den ein root-eigener Helfer aus einer festen Liste ausführt; ein unbekannter Auftrag wird verworfen und protokolliert
 - [ ] **HACT-07**: Ist der Helfer nicht installiert, sagt die Oberfläche das und nennt, was zu installieren ist, statt einen Auftrag abzulegen, den niemand abholt
 - [ ] **HACT-08**: `deploy/` enthält die Units, das Skript und eine Anleitung zur Installation des Helfers
 
@@ -99,9 +99,9 @@ damit er es am Ende auf einen Blick prüfen und umwerfen kann.
 | HACT-01 | Phase 13 | Pending |
 | HACT-02 | Phase 13 | Pending |
 | HACT-03 | Phase 13 | Pending |
-| HACT-04 | Phase 13 | Pending |
-| HACT-05 | Phase 13 | Pending |
-| HACT-06 | Phase 13 | Pending |
+| HACT-04 | Phase 13 | Complete |
+| HACT-05 | Phase 13 | Complete |
+| HACT-06 | Phase 13 | Complete |
 | HACT-07 | Phase 13 | Pending |
 | HACT-08 | Phase 13 | Pending |
 | MOB-01 | Phase 14 | Pending |
