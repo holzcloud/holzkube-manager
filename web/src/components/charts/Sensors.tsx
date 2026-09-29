@@ -89,8 +89,11 @@ export function Sensors({
                   )}
                   <span className="w-16 shrink-0 text-right font-medium text-sm tabular-nums">
                     {t.celsius.toFixed(0)} °C
+                    {/* Amber for a warning, red only past the danger line: the
+                        mark agrees with the notice, the sparkline and the
+                        sidebar, which all take their colour from here. */}
                     {severity !== 'ok' && (
-                      <span className="text-[color:var(--viz-danger)]">
+                      <span style={{ color: SEVERITY_COLOR[severity] }}>
                         {' '}
                         ▲
                         <span className="sr-only">

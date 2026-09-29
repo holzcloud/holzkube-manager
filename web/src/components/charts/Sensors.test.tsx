@@ -66,6 +66,28 @@ describe("the limits are the server's", () => {
     return screen.getByText('temp1').closest('li') as HTMLElement
   }
 
+  /**
+   * The colour of a row's ▲. It is the severity's, through the same
+   * SEVERITY_COLOR the sparkline and the sidebar use: a ▲ that said red for
+   * a warning disagreed with the amber notice above it (12-UI-REVIEW,
+   * 13-UI-SPEC checker resolution 4).
+   */
+  function markColor(row: HTMLElement): string {
+    return within(row).getByText('▲').style.color
+  }
+
+  it('marks a warning with an amber ▲, never the danger red', () => {
+    const row = rowOf(85, 80, 95)
+    expect(row.getAttribute('data-severity')).toBe('warn')
+    expect(markColor(row)).toBe('var(--viz-warn)')
+  })
+
+  it('marks a reading past the danger line with a red ▲', () => {
+    const row = rowOf(96, 80, 95)
+    expect(row.getAttribute('data-severity')).toBe('danger')
+    expect(markColor(row)).toBe('var(--viz-danger)')
+  })
+
   it('warns at 60 °C when the server says 55, below any CPU default', () => {
     const row = rowOf(60, 55, 90)
     expect(row.getAttribute('data-severity')).toBe('warn')
