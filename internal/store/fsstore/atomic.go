@@ -3,9 +3,11 @@ package fsstore
 import (
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sync/atomic"
 
 	"github.com/holzcloud/holzkube-manager/internal/store"
@@ -237,6 +239,81 @@ func PlaceNew(path string, data []byte) (err error) {
 		return fmt.Errorf("fsync directory: %w", err)
 	}
 	return nil
+}
+
+// claimTag is what may follow the claim prefix: lowercase letters, digits and
+// dashes, so the claimed name can never leave the directory or look like
+// anything but a claim.
+var claimTag = regexp.MustCompile(`^[a-z0-9-]{1,64}$`)
+
+// claimLimit is the most Claim reads back. A host order is one short line; a
+// file larger than this is not one, and the claim still removes it.
+const claimLimit = 4 << 10
+
+// claimPath is the name a claimed file lives under between the rename and the
+// remove: in the same directory, carrying the temp prefix.
+func claimPath(path, tag string) string {
+	return filepath.Join(filepath.Dir(path), tempPrefix+"claim-"+tag)
+}
+
+// Claim takes the file at path out of its name, reads it, and removes it. It
+// returns what the file held (at most 4 KiB), and an error wrapping
+// fs.ErrNotExist when nothing was at path.
+//
+// It is PlaceNew's other half and the daemon's way of withdrawing a host order
+// nobody picked up (internal/host/hostaction). The root helper consumes the
+// same file, so whoever acts first must own it. A stat followed by a remove
+// cannot say that: the helper can read the order between the two, and both
+// sides would then believe they had it. A rename is one syscall -- whoever
+// renames first owns the order, and the loser sees ENOENT.
+//
+// The claimed name carries the temp prefix, so a process killed between the
+// rename and the remove leaves a file the startup sweep removes, never one a
+// helper would read. tag names the claim (lowercase letters, digits, dashes,
+// at most 64) and is refused otherwise, before anything moves.
+func Claim(path, tag string) ([]byte, error) {
+	if !claimTag.MatchString(tag) {
+		return nil, fmt.Errorf("fsstore: claim tag %q is not [a-z0-9-]{1,64}", tag)
+	}
+	claimed := claimPath(path, tag)
+
+	if err := os.Rename(path, claimed); err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil, fmt.Errorf("claim %s: nothing is there: %w", path, fs.ErrNotExist)
+		}
+		return nil, fmt.Errorf("claim %s: %w", path, err)
+	}
+
+	data, readErr := readClaimed(claimed)
+	if err := removeAndSync(claimed); err != nil {
+		return nil, errors.Join(readErr, fmt.Errorf("remove claimed %s: %w", claimed, err))
+	}
+	if readErr != nil {
+		return nil, readErr
+	}
+	return data, nil
+}
+
+// readClaimed reads a claimed file, but only a regular one: a link planted
+// under the order's name is removed by the claim, never followed.
+func readClaimed(path string) ([]byte, error) {
+	info, err := os.Lstat(path)
+	if err != nil {
+		return nil, fmt.Errorf("inspect claimed file: %w", err)
+	}
+	if !info.Mode().IsRegular() {
+		return nil, fmt.Errorf("claimed file is not a regular file (%s)", info.Mode().Type())
+	}
+	f, err := os.Open(path) //nolint:gosec // the claim name this package built, inside the data directory
+	if err != nil {
+		return nil, fmt.Errorf("open claimed file: %w", err)
+	}
+	defer f.Close()
+	data, err := io.ReadAll(io.LimitReader(f, claimLimit))
+	if err != nil {
+		return nil, fmt.Errorf("read claimed file: %w", err)
+	}
+	return data, nil
 }
 
 // ReadFile is WriteFileAtomic's other half: the one read of a file kept beside
