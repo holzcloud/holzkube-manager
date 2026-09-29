@@ -11,6 +11,7 @@ import (
 	"github.com/holzcloud/holzkube-manager/internal/history"
 	"github.com/holzcloud/holzkube-manager/internal/host"
 	"github.com/holzcloud/holzkube-manager/internal/httpapi"
+	"github.com/holzcloud/holzkube-manager/internal/inventory"
 	"github.com/holzcloud/holzkube-manager/internal/kube"
 )
 
@@ -39,13 +40,13 @@ func TestTheWallsHost(t *testing.T) {
 	}{
 		{"fresh and ok", snap(fresh, "example-host", host.Health{State: host.HealthOK}),
 			wallHost{"example-host", host.HealthOK, "healthy"}},
-		{"one warning is the reason", snap(fresh, "example-host", host.Health{State: host.HealthWarn, Warnings: []string{"CPU 84.0 °C ≥ 80 °C"}, Public: []string{"CPU 84.0 °C ≥ 80 °C"}}),
-			wallHost{"example-host", host.HealthWarn, "CPU 84.0 °C ≥ 80 °C"}},
+		{"one warning is the reason", snap(fresh, "example-host", host.Health{State: host.HealthWarn, Warnings: []string{"CPU 84.0 °C ≥ 80 °C"}, Public: []string{"84.0 °C ≥ 80 °C · CPU"}}),
+			wallHost{"example-host", host.HealthWarn, "84.0 °C ≥ 80 °C · CPU"}},
 		{"three warnings: the first and a count", snap(fresh, "example-host", host.Health{
 			State:    host.HealthWarn,
 			Warnings: []string{"CPU 112.0 °C ≥ 110 °C, critical", "/ 91% used ≥ 80%", "rp1_adc 76.0 °C ≥ 75 °C"},
-			Public:   []string{"CPU 112.0 °C ≥ 110 °C, critical", "/ 91% used ≥ 80%", "rp1_adc 76.0 °C ≥ 75 °C"},
-		}), wallHost{"example-host", host.HealthWarn, "CPU 112.0 °C ≥ 110 °C, critical and 2 more"}},
+			Public:   []string{"112.0 °C ≥ 110 °C, critical · CPU", "91% used ≥ 80% · /", "76.0 °C ≥ 75 °C · rp1_adc"},
+		}), wallHost{"example-host", host.HealthWarn, "112.0 °C ≥ 110 °C, critical · CPU and 2 more"}},
 		{"unknown never shows its sentences", snap(fresh, "example-host", host.Health{State: host.HealthUnknown, Summary: unreadable[0], Unreadable: unreadable}),
 			wallHost{"example-host", host.HealthUnknown, "not readable"}},
 		{"exactly three passes old is still current", snap(now.Add(-3*history.FineStep), "example-host", host.Health{State: host.HealthOK}),
@@ -91,7 +92,9 @@ func TestTheWallsHost(t *testing.T) {
 				t.Fatalf("%s: health = %+v, want a warning naming %s for the page", mount, h, mount)
 			}
 			got := wallHostFrom(host.Snapshot{At: fresh, Name: "example-host", Health: h}, now)
-			want := wallHost{"example-host", host.HealthWarn, "data directory 91% used ≥ 80%"}
+			// Figure first (13-UI-SPEC checker resolution 4), the role
+			// after it, the path nowhere.
+			want := wallHost{"example-host", host.HealthWarn, "91% used ≥ 80% · data directory"}
 			if got == nil || *got != want {
 				t.Errorf("%s: wallHostFrom = %+v, want %+v", mount, got, want)
 			}
@@ -102,6 +105,27 @@ func TestTheWallsHost(t *testing.T) {
 			if strings.Contains(string(raw), mount) {
 				t.Errorf("%s: the wall's answer carries the path: %s", mount, raw)
 			}
+		}
+	})
+
+	// 13-UI-SPEC checker resolution 4: a 1600-px tile cut
+	// "manager · cpu_thermal 8…" and lost the only fact it had. Through
+	// Assess, the reading leads and the sensor's name follows.
+	t.Run("a temperature reaches the wall figure first", func(t *testing.T) {
+		t.Parallel()
+
+		live := host.Live{
+			Sensors: host.Read(host.Sensors{Temperatures: []inventory.HardwareTemperature{
+				{Chip: "cpu_thermal", Kind: "cpu", Label: "temp1", Celsius: 112, WarnC: 80, DangerC: 110},
+			}}),
+			Filesystems: []host.Filesystem{
+				{Mount: "/", Roles: []string{"root"}, Usage: host.Read(host.FSUsage{UsedBytes: 10, AvailableBytes: 90})},
+			},
+		}
+		got := wallHostFrom(host.Snapshot{At: fresh, Name: "example-host", Health: host.Assess(live)}, now)
+		want := wallHost{"example-host", host.HealthWarn, "112.0 °C ≥ 110 °C, critical · cpu_thermal"}
+		if got == nil || *got != want {
+			t.Errorf("wallHostFrom = %+v, want %+v", got, want)
 		}
 	})
 
@@ -141,7 +165,7 @@ func TestTheWallsHost(t *testing.T) {
 			return out
 		}
 
-		got := answer(&wallHost{Name: "example-host", State: host.HealthWarn, Reason: "/ 91% used ≥ 80%"})
+		got := answer(&wallHost{Name: "example-host", State: host.HealthWarn, Reason: "91% used ≥ 80% · /"})
 		var nodes []kube.Tile
 		if err := json.Unmarshal(got["nodes"], &nodes); err != nil || len(nodes) != 2 {
 			t.Errorf("nodes = %s, want the cluster's two", got["nodes"])
