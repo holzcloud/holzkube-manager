@@ -296,7 +296,13 @@ header follows the order from start to end:
   order -- the helper's path unit is stopped or was never enabled. holzkube-manager
   takes the order back so that nobody starting the helper later carries out a
   restart that was no longer wanted; nothing was done. `systemctl status
-  holzkube-manager-host.path` shows what the unit is doing.
+  holzkube-manager-host.path` shows what the unit is doing;
+- **no answer** means the page stopped waiting: the helper took the order but
+  recorded nothing within a minute, or an action it started was not reported
+  done within 15 minutes -- the host did not restart, no finished update
+  appeared. The buttons come back and the box can be dismissed;
+  `journalctl -u holzkube-manager-host` (for an update,
+  `journalctl -u holzkube-manager-update`) says what happened.
 
 One order at a time: while one waits for the helper, and while a restart or
 shutdown it started is still under way, the buttons are off, and a second

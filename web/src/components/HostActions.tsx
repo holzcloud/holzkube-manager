@@ -398,6 +398,7 @@ export type OrderPhase =
   | 'waiting'
   | 'back'
   | 'update-finished'
+  | 'no-answer'
 
 /** The phases after which nothing more will happen to the order. */
 const FINAL: ReadonlySet<OrderPhase> = new Set([
@@ -406,7 +407,26 @@ const FINAL: ReadonlySet<OrderPhase> = new Set([
   'not-picked-up',
   'back',
   'update-finished',
+  'no-answer',
 ])
+
+/**
+ * How long after its placement an order may go without the helper's result
+ * before the page stops waiting for one. The daemon withdraws an order nobody
+ * took within 10 s, and the helper records "started" before it acts, so a
+ * minute without either is not an answer still on its way: the helper took the
+ * order and recorded nothing (killed, its state directory full, its result
+ * unreadable), and nothing will change without somebody looking.
+ */
+export const RESULT_WITHIN_MS = 60 * 1000
+
+/**
+ * How long a started order may go without the host saying it is done -- the
+ * update status newer than the order, the process or the machine started
+ * after it -- before the page stops waiting. An update that downloads and
+ * installs a release is the longest of the four; a Pi reboots in a minute.
+ */
+export const STARTED_WITHIN_MS = 15 * 60 * 1000
 
 export function isFinal(phase: OrderPhase): boolean {
   return FINAL.has(phase)
@@ -430,7 +450,8 @@ function bootTime(host: Host): number | null {
  * - no result for this id yet: the order's state as the daemon reports it (or,
  *   before it has, as the placement answered it) -- pending is placed,
  *   withdrawn is not picked up, picked-up is picked up, or waiting while the
- *   host does not answer;
+ *   host does not answer; and no answer once RESULT_WITHIN_MS have passed
+ *   without the daemon reporting the file still there;
  * - the helper's result for this id: rejected or failed as it says; started
  *   becomes update finished once the update status is newer than the order,
  *   back once the process started (restart service, update) or the machine
@@ -443,15 +464,27 @@ function bootTime(host: Host): number | null {
 export function orderPhase(order: HostOrder, host: Host, pollFailed = false): OrderPhase {
   const result = host.actions.result
   const reported = host.actions.order
+  const elapsed = Date.parse(host.observed_at) - Date.parse(order.placed_at)
   if (!result.readable || result.value.id !== order.id) {
-    const state = reported !== null && reported.id === order.id ? reported.state : order.state
-    if (state === 'pending') {
-      return 'placed'
-    }
+    const known = reported !== null && reported.id === order.id
+    const state = known ? reported.state : order.state
     if (state === 'withdrawn') {
       return 'not-picked-up'
     }
-    return pollFailed ? 'waiting' : 'picked-up'
+    // The daemon says the file is there right now: that is the truth, however
+    // long it has been.
+    if (state === 'pending' && (known || pollFailed)) {
+      return 'placed'
+    }
+    if (pollFailed) {
+      return 'waiting'
+    }
+    // Neither picked up and answered nor withdrawn, and nobody will say more:
+    // stop waiting, so that the buttons come back and the box can be dismissed.
+    if (elapsed > RESULT_WITHIN_MS) {
+      return 'no-answer'
+    }
+    return state === 'pending' ? 'placed' : 'picked-up'
   }
   if (result.value.outcome !== 'started') {
     return result.value.outcome
@@ -477,6 +510,9 @@ export function orderPhase(order: HostOrder, host: Host, pollFailed = false): Or
     if (boot !== null && boot > placed) {
       return 'back'
     }
+  }
+  if (elapsed > STARTED_WITHIN_MS) {
+    return 'no-answer'
   }
   return 'started'
 }
@@ -558,6 +594,26 @@ const STARTED: Record<HostAction, string> = {
 }
 
 const JOURNAL = <code className="font-mono text-xs">journalctl -u holzkube-manager-host</code>
+const UPDATE_JOURNAL = (
+  <code className="font-mono text-xs">journalctl -u holzkube-manager-update</code>
+)
+
+/** A started order the host never reported done: what did not happen. */
+const NOT_DONE: Record<HostAction, ReactNode> = {
+  update: (
+    <>
+      started, but no finished update was reported within 15 min. {UPDATE_JOURNAL} says what
+      happened.
+    </>
+  ),
+  'restart-service': (
+    <>
+      started, but holzkube-manager has not restarted within 15 min. {JOURNAL} says what happened.
+    </>
+  ),
+  reboot: <>started, but the host has not restarted within 15 min. {JOURNAL} says what happened.</>,
+  poweroff: <>started, but the host is still running after 15 min. {JOURNAL} says what happened.</>,
+}
 
 function timeOf(ms: number): string {
   return new Date(ms).toLocaleTimeString()
@@ -594,6 +650,15 @@ function phaseSentence(phase: OrderPhase, order: HostOrder, host: Host): ReactNo
       const u = host.service.update
       return u.readable ? `finished. ${outcomeSentence(u.value)}` : 'finished.'
     }
+    case 'no-answer':
+      return result.readable && result.value.id === order.id ? (
+        NOT_DONE[order.action]
+      ) : (
+        <>
+          no answer: the helper recorded nothing for this order within 1 min. {JOURNAL} says what
+          happened.
+        </>
+      )
     case 'back': {
       const version = host.service.version
       const boot = bootTime(host)
@@ -631,6 +696,7 @@ function phaseColour(phase: OrderPhase, host: Host): string {
     case 'rejected':
     case 'failed':
     case 'not-picked-up':
+    case 'no-answer':
       return RED
     default:
       return SLATE
