@@ -5,16 +5,16 @@ milestone_name: Host & Telefon
 current_phase: 13
 current_phase_name: Host-Aktionen über einen root-eigenen Helfer
 status: executing
-stopped_at: Phase 12 complete, ready to plan Phase 13
-last_updated: "2026-09-29T00:31:56.058Z"
+stopped_at: Completed 13-01-PLAN.md
+last_updated: "2026-09-29T01:05:05.384Z"
 last_activity: 2026-09-29
 last_activity_desc: Phase 13 execution started
-state_head: ef4648a4165144bd7927014bb136d2e68607c1d6
+state_head: cbff04115b3a48960fc50c0a79fe4e6ebd3a2c0d
 progress:
   total_phases: 4
   completed_phases: 2
   total_plans: 24
-  completed_plans: 15
+  completed_plans: 16
   percent: 50
 ---
 
@@ -33,8 +33,8 @@ See: .planning/PROJECT.md (updated 2026-09-28)
 ## Current Position
 
 Phase: 13 (Host-Aktionen über einen root-eigenen Helfer) — EXECUTING
-Plan: 1 of 9
-Status: Executing Phase 13
+Plan: 2 of 9
+Status: Ready to execute
 Last activity: 2026-09-29 — Phase 13 execution started
 
 Progress: [█████░░░░░] 50%
@@ -102,6 +102,8 @@ Siehe `PROJECT.md`, die `MILESTONE-*.md`-Dateien und für v1.18 den Abschnitt
 - [Phase 12]: 12-px word space: --text-xs--letter-spacing: normal (the body's -0.015em is inherited as -0.24px); held by typography.browser.test.tsx
 - [Phase 12]: Layout audit and README renderer serve /api/v1/host/history from demo.json, ending at the fixture's observed_at
 - [Phase 12]: 12-08: TestEveryProblemCodeIsInTheContract sees only problem.go constants; string-literal codes (17 undocumented) deferred, not fixed
+- [Phase 13]: 13-01: hostaction.ReadResult accepts '- -' with rejected and failed (never started): the helper writes '- - failed' when it cannot remove the order; 13-04's reader table must refuse '-' only with started
+- [Phase 13]: 13-01: host token intent is {Action: host.<a>, Machine: @host}, rebuilt from the route; hostTypedPhrase is separate from typedPhrase and all four require typing
 
 ### Blockers/Concerns
 
@@ -116,8 +118,8 @@ Siehe `PROJECT.md`, die `MILESTONE-*.md`-Dateien und für v1.18 den Abschnitt
 
 ## Session Continuity
 
-Last session: 2026-09-28T22:39:23.866Z
-Stopped at: Phase 12 complete, ready to plan Phase 13
+Last session: 2026-09-29T01:05:05.266Z
+Stopped at: Completed 13-01-PLAN.md
 Resume file: None
 Next: `/gsd-plan-phase 11`
 
@@ -140,3 +142,4 @@ Next: `/gsd-plan-phase 11`
 | Phase 12 P06 | 15 min | 3 tasks | 11 files |
 | Phase 12 P07 | 30 min | 3 tasks | 9 files |
 | Phase 12 P08 | 42 min | 2 tasks | 3 files |
+| Phase 13 P01 | 32min | 2 tasks | 21 files |
