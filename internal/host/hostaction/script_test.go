@@ -3,6 +3,7 @@ package hostaction
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io/fs"
 	"os"
 	"os/exec"
@@ -315,19 +316,40 @@ func (e *hostScriptEnv) wantNoTemporaries() {
 	}
 }
 
-// requireHostNamespace skips, naming what unshare said, when an unprivileged
-// user namespace cannot be made here. On the Pi it was measured working, so
-// there the root matrix runs.
+// noUserNamespace is the variable that lets the root matrix be skipped
+// knowingly where no unprivileged user namespace can be made.
+const noUserNamespace = "HOLZKUBE_MANAGER_NO_USERNS"
+
+// requireHostNamespace fails, naming what unshare said, when an unprivileged
+// user namespace cannot be made here -- unless noUserNamespace=1 says to skip
+// knowingly, and then the test reports SKIPPED, not verified (WR-06). A plain
+// skip was an unperformed measurement reported as green: `go test` without -v
+// prints "ok" for a package whose root matrix never ran, and that is the
+// default on Ubuntu 23.10 and later (kernel.apparmor_restrict_unprivileged_userns)
+// and in many containers. On the Pi it was measured working, so there the root
+// matrix runs.
 func requireHostNamespace(t *testing.T) {
 	t.Helper()
 	requireHostScriptTools(t)
 	if _, err := exec.LookPath("unshare"); err != nil {
-		t.Skip("unshare (util-linux) is not installed")
+		noNamespace(t, "unshare (util-linux) is not installed")
 	}
 	out, err := exec.Command("unshare", "--user", "--map-root-user", "id", "-u").CombinedOutput()
 	if err != nil || strings.TrimSpace(string(out)) != "0" {
-		t.Skipf("no unprivileged user namespace here: %v: %s", err, out)
+		noNamespace(t, fmt.Sprintf("no unprivileged user namespace here: %v: %s", err, out))
 	}
+}
+
+// noNamespace ends a root-matrix test that cannot run: a failure, or with
+// noUserNamespace=1 a skip that says it verified nothing.
+func noNamespace(t *testing.T, why string) {
+	t.Helper()
+	if os.Getenv(noUserNamespace) == "1" {
+		t.Skipf("SKIPPED, not verified: %s; the helper script's root matrix did not run", why)
+	}
+	t.Fatalf("%s, so the helper script's root matrix cannot run. Allow unprivileged user namespaces "+
+		"(on Ubuntu: sysctl kernel.apparmor_restrict_unprivileged_userns=0), or set %s=1 to skip "+
+		"this knowingly -- the test then reports SKIPPED, not verified.", why, noUserNamespace)
 }
 
 // Fixed ids: the script records what it read, and the test compares.

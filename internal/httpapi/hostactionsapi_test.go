@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io/fs"
 	"net/http"
 	"os"
@@ -103,22 +104,37 @@ var helperOverrides = []string{
 	"HOLZKUBE_MANAGER_SYSTEMCTL",
 }
 
-// requireRootNamespace skips, visibly, when root cannot be had in an
-// unprivileged user namespace here. On the Pi it was measured working, so there
-// the root run happens.
+// noUserNamespace is the variable that lets the root round trip be skipped
+// knowingly where no unprivileged user namespace can be made.
+const noUserNamespace = "HOLZKUBE_MANAGER_NO_USERNS"
+
+// requireRootNamespace fails when root cannot be had in an unprivileged user
+// namespace on Linux -- unless noUserNamespace=1 says to skip knowingly, and
+// then the test reports SKIPPED, not verified (WR-06): a plain skip let
+// `go test` print "ok" for a round trip that never ran. On the Pi it was
+// measured working, so there the root run happens.
 func requireRootNamespace(t *testing.T) {
 	t.Helper()
 	if runtime.GOOS != "linux" {
 		t.Skipf("the host helper targets Linux hosts; this is %s", runtime.GOOS)
 	}
+	fail := func(why string) {
+		t.Helper()
+		if os.Getenv(noUserNamespace) == "1" {
+			t.Skipf("SKIPPED, not verified: %s; the host helper round trip did not run", why)
+		}
+		t.Fatalf("%s, so the host helper round trip cannot run. Allow unprivileged user namespaces "+
+			"(on Ubuntu: sysctl kernel.apparmor_restrict_unprivileged_userns=0), or set %s=1 to skip "+
+			"this knowingly -- the test then reports SKIPPED, not verified.", why, noUserNamespace)
+	}
 	for _, tool := range []string{"bash", "unshare", "dd", "stat"} {
 		if _, err := exec.LookPath(tool); err != nil {
-			t.Skipf("%s is not installed here; the round trip needs it", tool)
+			fail(tool + " is not installed here; the round trip needs it")
 		}
 	}
 	out, err := exec.Command("unshare", "--user", "--map-root-user", "id", "-u").CombinedOutput()
 	if err != nil || strings.TrimSpace(string(out)) != "0" {
-		t.Skipf("no unprivileged user namespace here: %v: %s", err, out)
+		fail(fmt.Sprintf("no unprivileged user namespace here: %v: %s", err, out))
 	}
 }
 
