@@ -62,7 +62,7 @@ damit er es am Ende auf einen Blick prüfen und umwerfen kann.
 - [x] **HACT-05**: Jede Host-Aktion verlangt Sudo-Fenster und getippten Hostnamen, läuft durch den Audit-Pfad und ist nur ab Rolle Operator erlaubt
 - [x] **HACT-06**: Der Daemon führt eine Host-Aktion nie selbst aus: er legt einen Auftrag ab, den ein root-eigener Helfer aus einer festen Liste ausführt; ein unbekannter Auftrag wird verworfen und protokolliert
 - [ ] **HACT-07**: Ist der Helfer nicht installiert, sagt die Oberfläche das und nennt, was zu installieren ist, statt einen Auftrag abzulegen, den niemand abholt
-- [ ] **HACT-08**: `deploy/` enthält die Units, das Skript und eine Anleitung zur Installation des Helfers
+- [x] **HACT-08**: `deploy/` enthält die Units, das Skript und eine Anleitung zur Installation des Helfers
 
 ### Telefon (MOB)
 
@@ -103,7 +103,7 @@ damit er es am Ende auf einen Blick prüfen und umwerfen kann.
 | HACT-05 | Phase 13 | Complete |
 | HACT-06 | Phase 13 | Complete |
 | HACT-07 | Phase 13 | Pending |
-| HACT-08 | Phase 13 | Pending |
+| HACT-08 | Phase 13 | Complete |
 | MOB-01 | Phase 14 | Pending |
 | MOB-02 | Phase 14 | Pending |
 | MOB-03 | Phase 14 | Pending |
