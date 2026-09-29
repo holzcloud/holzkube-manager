@@ -1,0 +1,63 @@
+# holzkube-manager-host.service -- fuehrt genau einen Host-Auftrag aus, als root.
+#
+# Gestartet nur von holzkube-manager-host.path, wenn der Daemon einen Auftrag
+# abgelegt hat; das Skript (deploy/holzkube-manager-host.sh) verbraucht ihn,
+# bevor es etwas tut, und kennt nur vier feste Befehle.
+#
+# Installiert wird er von niemandem ausser dem Betreiber, von Hand, aus dem
+# Release-Archiv: deploy/HOST-HELPER.md. Das Update-Skript fasst ihn nicht an.
+#
+# Warum die Zeilen so sind, wie sie sind:
+#
+#   - Kein [Install]: nur die Path-Unit startet ihn. Aktiviert, liefe er bei
+#     jedem Booten einmal ohne Auftrag.
+#   - Kein RemainAfterExit=: ein oneshot, der danach "active" bliebe, wuerde
+#     nie ein zweites Mal gestartet, und der zweite Auftrag liefe nie.
+#   - ReadWritePaths=-/var/lib/holzkube-manager: ohne das macht
+#     ProtectSystem=strict das Datenverzeichnis des Daemons schreibgeschuetzt,
+#     das rm, das den Auftrag verbraucht, scheitert, der Auftrag bleibt liegen,
+#     und nach fuenf Laeufen in zehn Sekunden ist die Path-Unit tot
+#     (unit-start-limit-hit). Das "-" laesst den Dienst auch starten, wenn das
+#     Verzeichnis fehlt.
+#   - TimeoutStartSec=3min: ein oneshot hat sonst keine Startgrenze, und
+#     "restart-service" wartet, bis der Daemon gestoppt ist (bis zu 90 s).
+#   - StateDirectory= mit 0755 und UMask=0022: "last" muss der Daemon lesen
+#     koennen, der als anderer Benutzer laeuft.
+#   - Weder CapabilityBoundingSet= noch SystemCallFilter=: logind erlaubt root
+#     den Neustart ueber polkit oder CAP_SYS_BOOT, und in das 0700-Verzeichnis
+#     des Daemons, das einem anderen Benutzer gehoert, kommt root nur mit
+#     CAP_DAC_OVERRIDE. Eine engere Grenze machte "reboot" still kaputt.
+#   - RestrictAddressFamilies=AF_UNIX: systemctl spricht mit PID 1 und logind
+#     ueber Unix-Sockets, und mit nichts sonst.
+#   - Kein Environment=: die Variablen, die das Skript liest, gibt es nur fuer
+#     die Tests.
+[Unit]
+Description=holzkube-manager - einen Host-Auftrag ausfuehren
+Documentation=https://github.com/holzcloud/holzkube-manager/blob/main/deploy/HOST-HELPER.md
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/holzkube-manager-host
+TimeoutStartSec=3min
+StateDirectory=holzkube-manager-host
+StateDirectoryMode=0755
+ReadWritePaths=-/var/lib/holzkube-manager
+UMask=0022
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+RestrictAddressFamilies=AF_UNIX
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+SystemCallArchitectures=native

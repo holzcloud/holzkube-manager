@@ -1,0 +1,24 @@
+# holzkube-manager-host.path -- wartet auf einen Host-Auftrag des Daemons.
+#
+# holzkube-managerd legt fuer die vier Aktionen seiner Host-Seite eine Zeile
+# nach /var/lib/holzkube-manager/host-order. Sobald die Datei da ist, startet
+# diese Unit holzkube-manager-host.service, und der fuehrt den Auftrag als root
+# aus (deploy/holzkube-manager-host.sh). Bis dahin laeuft kein Prozess: PID 1
+# beobachtet den Pfad selbst.
+#
+# Installiert wird sie von niemandem ausser dem Betreiber, von Hand, aus dem
+# Release-Archiv: deploy/HOST-HELPER.md. Das Update-Skript fasst sie nicht an.
+#
+# Kein MakeDirectory=: es legte ein fehlendes Datenverzeichnis als root 0755 an,
+# und der Daemon verweigerte danach den Start, weil das Verzeichnis nicht ihm
+# gehoert.
+[Unit]
+Description=holzkube-manager - auf Host-Auftraege warten
+Documentation=https://github.com/holzcloud/holzkube-manager/blob/main/deploy/HOST-HELPER.md
+
+[Path]
+PathExists=/var/lib/holzkube-manager/host-order
+Unit=holzkube-manager-host.service
+
+[Install]
+WantedBy=paths.target
