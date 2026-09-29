@@ -173,7 +173,7 @@ Waves: 1 → {01, 02} · 2 → {03, 04} · 3 → {05} · 4 → {06} · 5 → {07
   5. `deploy/` enthält Path-Unit, Service-Unit, Skript und eine Anleitung zur Installation; `systemd-analyze verify` nimmt die Units an, und die Anleitung verlangt keine Zeile weniger Härtung an der Unit des Daemons (`NoNewPrivileges`, kein `AF_UNIX`, `ProcSubset=pid` bleiben).
 
 **Research**: Path-Units — `PathChanged` gegen `PathModified` gegen `DirectoryNotEmpty`, und wie ein Auftrag, den der Daemon per Rename atomar ablegt, genau einmal abgeholt wird; wie der Daemon ohne D-Bus erkennt, ob der Helfer installiert ist.
-**Plans:** 3/9 plans executed
+**Plans:** 4/9 plans executed
 **UI hint**: yes
 
 Plans:
@@ -183,7 +183,7 @@ Plans:
 
 **Wave 2** *(blocked on Wave 1 completion)*
 - [x] 13-03-PLAN.md — Die vier Sperren je Aktion einzeln rot gesehen: Sudo-Fenster, getippter Hostname, Rolle Operator, Audit-Eintrag; Tokens an `@host` gebunden (HACT-01..05)
-- [ ] 13-04-PLAN.md — Das Helfer-Skript als Matrix: vier Aufträge, alles andere verworfen ohne Inhalt im Journal, Symlink/FIFO/veraltet, Verbrauch vor dem Handeln; Leser und Schreiber ein Format (HACT-01..04, HACT-06)
+- [x] 13-04-PLAN.md — Das Helfer-Skript als Matrix: vier Aufträge, alles andere verworfen ohne Inhalt im Journal, Symlink/FIFO/veraltet, Verbrauch vor dem Handeln; Leser und Schreiber ein Format (HACT-01..04, HACT-06)
 - [ ] 13-05-PLAN.md — Der Daemon schreibt eine Datei und sonst nichts: Wächter gegen jeden Prozessstart, Rückzug nach 10 s und beim Start, `fsstore.Claim` (HACT-06, HACT-07)
 - [ ] 13-06-PLAN.md — Helfer installiert? Drei Dateien ohne D-Bus, 409 ohne Auftrag bei fehlendem Helfer oder im Container, `actions` mit Fehlendem und Installationsbefehlen (HACT-07)
 
@@ -225,5 +225,5 @@ Waves: 1 → {01, 02} · 2 → {03, 04, 05, 06} · 3 → {07, 08} · 4 → {09}
 |-------|-----------|----------------|--------|-----------|
 | 11. Host-Seite — Gerät, Dienst, Live-Werte | v1.18 | 7/7 | Complete    | 2026-09-28 |
 | 12. Host wie ein Knoten — Verlauf, Warnung, Wand | v1.18 | 8/8 | Complete    | 2026-09-29 |
-| 13. Host-Aktionen über einen root-eigenen Helfer | v1.18 | 3/9 | In Progress|  |
+| 13. Host-Aktionen über einen root-eigenen Helfer | v1.18 | 4/9 | In Progress|  |
 | 14. Telefon — Tippziele, die ein Daumen trifft | v1.18 | 0/TBD | Not started | - |

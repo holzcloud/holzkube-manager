@@ -43,7 +43,8 @@ key-decisions:
   - "ReadResult requires an absolute path (leading slash); a relative one was silently read although the doc and the error say absolute"
   - "The script's work directory follows TMPDIR, which the test points into its own temp dir, so a run killed by the timeout leaves nothing in the host's /tmp"
 
-requirements-completed: [HACT-01, HACT-02, HACT-03, HACT-04, HACT-06]
+requirements-completed: []
+requirements-advanced: [HACT-01, HACT-02, HACT-03, HACT-04, HACT-06]
 
 duration: 9min
 completed: 2026-09-29
@@ -156,6 +157,7 @@ Two fixes were seen red before they existed, because the tests were written firs
 **Total deviations:** 4 auto-fixed (3 bugs, 1 hygiene). **Impact:** the journal and the reader now say only what is true. The script's structure (consume, validate, record, act) and its German comments are unchanged.
 
 Notes:
+- HACT-01..03 stay **Pending** in REQUIREMENTS.md, although `requirements.mark-complete` ticked them from this plan's frontmatter and that tick was reverted. The helper now provably runs reboot, poweroff and restart, but the operator cannot trigger them until 13-08 adds the buttons. HACT-04 and HACT-06 were already complete (13-01).
 - As the dispatch note said, the reader table refuses `-` only with `started`. `- - failed` is an accepted row, following 13-01 deviation 1.
 - The matrix has 20 refused-shape subtests: 16 in the table, plus the symlink, the FIFO, stale and future. The plan's "18 malformed shapes" figure is covered.
 
