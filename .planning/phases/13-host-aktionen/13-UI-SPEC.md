@@ -485,3 +485,11 @@ Binding for the planner:
    a zone whose `type` cannot be read while no CPU chip reported must be named
    in `Unread` (the host is then Not readable, never Healthy) — a small Go fix
    with its red-first test, placed in whichever plan touches internal/host.
+
+## Additions from the code-review fixes (13-REVIEW-FIX, 2026-09-29)
+
+- New final order phase **"no answer"** (60 s after placing without a result
+  while the order file is gone, or 15 min after a started action without
+  "back"/"finished"), with **Dismiss status**; the buttons return.
+- New disabled reason **"under way"**: while a started reboot, poweroff or
+  restart-service order is not back, the four buttons stay off.
