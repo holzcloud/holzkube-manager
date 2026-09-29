@@ -409,3 +409,20 @@ model, not a registry change.
 - [ ] Dimension 7 Inventory Provenance: PASS
 
 **Approval:** pending
+
+## Carried from 13-UI-REVIEW (orchestrator, 2026-09-29)
+
+Binding for the planner — this phase edits the dialogs anyway:
+
+1. **Focus on cancel.** `HostActions.tsx` prevents the dialog's
+   `onCloseAutoFocus` only after an order was placed; "Keep running", Esc and
+   the close X return focus to the (still enabled) trigger.
+2. **An open dialog follows the reason line.** When a disabling reason appears
+   while a host-action dialog is open, the dialog's confirm is disabled and
+   shows that reason.
+3. **"up since ."** — when the boot time is unknown, the "back" sentence leaves
+   the clause out.
+4. Minor, ride along: the host-level pair stands 16 px from the service pair
+   (not 32); the waiting notice is a polite live region; an old `Problem`
+   clears when the typed text changes; the "no answer" phase and "recorded"
+   meta line enter the Copywriting table.
