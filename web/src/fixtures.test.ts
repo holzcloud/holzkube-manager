@@ -139,6 +139,25 @@ describe('the layout guard’s fixtures', () => {
     expect(cpu).toBeDefined()
     expect(cpu?.celsius ?? 0).toBeGreaterThanOrEqual(cpu?.warn_c ?? Number.POSITIVE_INFINITY)
     expect(host.health.warnings[0]).toMatch(/^cpu_thermal /)
+    // The wall's sentence is the server's public one, figure first: a narrow
+    // tile cuts the end, and the end is only the sensor's name. The page's
+    // warnings keep the name first.
+    expect(wall.host?.reason).toBe(`${cpu?.celsius.toFixed(1)} °C ≥ ${cpu?.warn_c} °C · cpu_thermal`)
+  })
+
+  it('shows /host with the helper not installed, the widest the page gets', () => {
+    // hostSchema defaults `actions` to "not available, nothing missing", so a
+    // fixture without it parses -- and the README picture and the layout audit
+    // would then show no helper notice, the block that is widest at 390 px.
+    // The commands themselves are held to the Go side by
+    // TestTheFixtureShowsTheRealInstallCommands.
+    const host = hostSchema.parse(fixtures['/api/v1/host'])
+
+    expect(host.container).toBe(false)
+    expect(host.actions.available).toBe(false)
+    expect(host.actions.missing.map((m) => m.item)).toEqual(['script', 'path-unit', 'not-enabled'])
+    expect(host.actions.install_commands.length).toBeGreaterThanOrEqual(1)
+    expect(host.actions.order).toBeNull()
   })
 
   it("draws the host's history from what the fixture's hardening leaves readable, with a gap", () => {

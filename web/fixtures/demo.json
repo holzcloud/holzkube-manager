@@ -1658,7 +1658,7 @@
     "host": {
       "name": "manager-01.homelab.example",
       "state": "warn",
-      "reason": "cpu_thermal 82.1 °C ≥ 80 °C"
+      "reason": "82.1 °C ≥ 80 °C · cpu_thermal"
     },
     "nodes": [
       {
@@ -3337,6 +3337,25 @@
       "summary": "1 threshold crossed.",
       "warnings": ["cpu_thermal 82.1 °C ≥ 80 °C"],
       "unreadable": []
+    },
+    "actions": {
+      "order": null,
+      "result": {
+        "readable": false,
+        "reason": { "code": "host-action.no-result", "message": "The holzkube-manager-host helper has not recorded an order on this machine." }
+      },
+      "available": false,
+      "missing": [
+        { "item": "script", "path": "/usr/local/sbin/holzkube-manager-host" },
+        { "item": "path-unit", "path": "/etc/systemd/system/holzkube-manager-host.path" },
+        { "item": "not-enabled", "path": "/etc/systemd/system/paths.target.wants/holzkube-manager-host.path" }
+      ],
+      "install_commands": [
+        "sudo install -o root -g root -m 0755 deploy/holzkube-manager-host.sh /usr/local/sbin/holzkube-manager-host",
+        "sudo install -o root -g root -m 0644 deploy/holzkube-manager-host.path deploy/holzkube-manager-host.service /etc/systemd/system/",
+        "sudo systemctl daemon-reload",
+        "sudo systemctl enable --now holzkube-manager-host.path"
+      ]
     }
   },
   "/api/v1/host/history": {

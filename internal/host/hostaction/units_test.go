@@ -3,14 +3,17 @@ package hostaction
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
+	"testing/fstest"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -33,7 +36,9 @@ import (
 //     hardening as unchanged and asks for none of it to go;
 //   - TestTheArchiveCarriesTheHelper: the release archive has all of it;
 //   - TestTheUpdateScriptDoesNotShipTheHelper: the root script that replaces
-//     itself does not start carrying other root code.
+//     itself does not start carrying other root code;
+//   - TestTheFixtureShowsTheRealInstallCommands: the fixture the README's
+//     picture of /host is rendered from shows these commands and paths.
 //
 // Nothing here installs anything: the units are verified as copies in a
 // temporary directory, and no command addresses the system manager.
@@ -598,5 +603,88 @@ func TestTheUpdateScriptDoesNotShipTheHelper(t *testing.T) {
 		if strings.Contains(line, "holzkube-manager-host") || strings.Contains(line, "HOST-HELPER") {
 			t.Errorf("%s:%d names the host helper: %s\nThe update script must not install or replace it (D-19).", shippedUpdater, i+1, strings.TrimSpace(line))
 		}
+	}
+}
+
+// demoFixture is the file the README's pictures and the layout audit are
+// rendered from.
+var demoFixture = filepath.Join("..", "..", "..", "web", "fixtures", "demo.json")
+
+// TestTheFixtureShowsTheRealInstallCommands: the README's picture of /host is
+// rendered from web/fixtures/demo.json, and the fixture shows the helper as
+// the operator's machine has it until it is installed -- not available, all
+// three pieces missing, the commands that install it. Were the fixture to keep
+// a copy of commands this package no longer has, the picture would show an
+// operator lines the guide does not have. So the fixture's missing list is
+// what Detect reports on a machine with nothing installed, and its commands
+// are InstallCommands, byte for byte.
+func TestTheFixtureShowsTheRealInstallCommands(t *testing.T) {
+	t.Parallel()
+
+	data, err := os.ReadFile(demoFixture)
+	if err != nil {
+		t.Fatalf("read the fixture: %v", err)
+	}
+	var fixtures map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fixtures); err != nil {
+		t.Fatalf("decode the fixture: %v", err)
+	}
+	raw, ok := fixtures["/api/v1/host"]
+	if !ok {
+		t.Fatalf("the fixture has no /api/v1/host")
+	}
+	var host struct {
+		Actions *struct {
+			Order           json.RawMessage `json:"order"`
+			Available       *bool           `json:"available"`
+			Missing         []Missing       `json:"missing"`
+			InstallCommands []string        `json:"install_commands"`
+			Result          struct {
+				Readable bool `json:"readable"`
+				Reason   *struct {
+					Code string `json:"code"`
+				} `json:"reason"`
+			} `json:"result"`
+		} `json:"actions"`
+	}
+	if err := json.Unmarshal(raw, &host); err != nil {
+		t.Fatalf("decode the fixture's /api/v1/host: %v", err)
+	}
+	a := host.Actions
+	if a == nil {
+		t.Fatalf("the fixture's /api/v1/host has no actions: the page would parse the default and show no helper notice")
+	}
+
+	if got, want := strings.Join(a.InstallCommands, "\n"), strings.Join(InstallCommands, "\n"); got != want {
+		t.Errorf("the fixture's install_commands differ from InstallCommands.\nfixture:\n%q\nInstallCommands:\n%q", got, want)
+	}
+
+	// Nothing installed: what Detect reports on an empty machine, in its order.
+	want := Detect(fstest.MapFS{})
+	if len(want) != 3 {
+		t.Fatalf("Detect on an empty machine reports %d pieces, want 3: %v", len(want), want)
+	}
+	if !slices.Equal(a.Missing, want) {
+		t.Errorf("the fixture's missing list is %v, want what Detect reports with nothing installed: %v", a.Missing, want)
+	}
+	for _, m := range a.Missing {
+		switch m.Path {
+		case HelperScriptPath, PathUnitPath, ServiceUnitPath, WantsLinkPath:
+		default:
+			t.Errorf("the fixture names %s, which is none of the helper's paths", m.Path)
+		}
+	}
+
+	switch {
+	case a.Available == nil:
+		t.Errorf("the fixture's actions has no available, want false: the helper is not installed")
+	case *a.Available:
+		t.Errorf("the fixture's actions.available is true, want false: the helper is not installed")
+	}
+	if o := strings.TrimSpace(string(a.Order)); o != "null" {
+		t.Errorf("the fixture's actions.order is %s, want null: nothing was placed", o)
+	}
+	if a.Result.Readable || a.Result.Reason == nil || a.Result.Reason.Code != "host-action.no-result" {
+		t.Errorf("the fixture's actions.result is not the no-result reading the server sends when the helper recorded nothing")
 	}
 }

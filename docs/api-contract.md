@@ -1626,7 +1626,7 @@ decision; none of them works one out.
 |---|---|
 | `state` | `ok`, `warn` or `unknown` -- the wall's own state words, so its tile takes the wall's colours |
 | `summary` | one sentence for the operator: "1 threshold crossed.", "{n} thresholds crossed.", the unreadable sentences joined, or one of two sentences for `ok` |
-| `warnings` | one sentence per crossed line, such as `"cpu_thermal 82.1 °C ≥ 80 °C"`, `"cpu_thermal 111.0 °C ≥ 110 °C, critical"` or `"/ 83% used ≥ 80%"`; **worst first**: every critical before every warning, then by how far past its line the value is, relative to the line; ties keep reading order |
+| `warnings` | one sentence per crossed line, **name first**, such as `"cpu_thermal 82.1 °C ≥ 80 °C"`, `"cpu_thermal 111.0 °C ≥ 110 °C, critical"` or `"/ 83% used ≥ 80%"`; **worst first**: every critical before every warning, then by how far past its line the value is, relative to the line; ties keep reading order. The wall's host tile carries the same finding in the other order, figure first (`"82.1 °C ≥ 80 °C · cpu_thermal"`), and with a filesystem named by its role; see "One screen for the IT office" |
 | `unreadable` | one sentence per rated value that could not be read, with the reason's own message, in reading order |
 
 - **What is rated, and where it crosses.** A temperature warns at its `warn_c`
@@ -1734,7 +1734,9 @@ takes `{"confirmation": "<token>"}`. Each route requires a session, the
 operator role and an open sudo window (`428 sudo.required` otherwise), and is
 audited under its own action, `host.reboot` … `host.update`, with no parameter
 recorded: the body is only the token. A token for a different action or for a
-node is `403 confirmation.invalid`, an old one `403 confirmation.expired`.
+node is `403 forbidden.confirmation-invalid`, an old one
+`403 forbidden.confirmation-expired`. A session without the operator role is
+`403 forbidden.role` on the confirm route and on all four action routes.
 Success is `202` -- the order is placed and nothing has happened yet:
 
 ```json
@@ -1746,10 +1748,17 @@ answered; the `202` is written before the helper can act.
 
 | Status | Code | When |
 |---|---|---|
-| `409` | `conflict.host-in-container` | the daemon runs in a container. There are host actions only with the systemd installation; the confirm route refuses too, and nothing is placed. Asked first. |
-| `409` | `conflict.host-helper-missing` | the root helper is not installed completely (see `actions.missing` below). The confirm route refuses too, and the action route refuses before it looks at the token: nothing is placed. |
-| `409` | `conflict.host-order-pending` | an order still waits for the helper. There is one slot and no queue: the second order is refused and the first stays exactly as it was. |
+| `409` | `conflict.host-in-container` | the daemon runs in a container. There are host actions only with the systemd installation; the confirm route refuses too, and nothing is placed. Asked first. Detail: "Host actions are only available with the systemd installation." |
+| `409` | `conflict.host-helper-missing` | the root helper is not installed completely (see `actions.missing` below). The confirm route refuses too, and the action route refuses before it looks at the token: nothing is placed. Detail: "The holzkube-manager-host helper is not installed, so no order was placed. The Host page says what to install." |
+| `409` | `conflict.host-order-pending` | an order still waits for the helper. There is one slot and no queue: the second order is refused and the first stays exactly as it was. Detail: "Another host action is still waiting for the helper. Wait for it to be answered, then try again." |
+| `428` | `sudo.required` | the action routes only: the session's sudo window is not open. The client asks for the password again and replays the request with the same token. |
+| `403` | `forbidden.role` | the session is a reader's. |
+| `403` | `forbidden.confirmation-invalid`, `forbidden.confirmation-expired` | the action routes only: the token is not for this action on this host, or it is too old. |
 | `502` | `upstream.host-unavailable` | the daemon was started without a host reader, host actions or confirmations. |
+
+The two refusals about the machine, container and helper, come before the body
+is read, on both routes: a client that has not been told yet learns it before
+the operator has typed anything that would be thrown away.
 
 **The order file.** `<data directory>/host-order`, mode `0600`, holding exactly
 one line and nothing else -- no user, no time, no parameter; who asked is in the
@@ -1775,7 +1784,29 @@ root owns -- never in the daemon's:
 Four fields: the id, the action, `started`, `rejected` or `failed`, and an
 RFC 3339 time in UTC. An order the helper could not trust has `-` for both id
 and action (`- - rejected …`, or `- - failed …` when it could not remove the
-order); a `started` one always has both.
+order); a `started` one always has both. The file is `0644` in the helper's own
+state directory (`StateDirectory=holzkube-manager-host`, `0755`), so the
+unprivileged daemon can read it and not write it.
+
+**No order is left lying.** An order nobody picks up is not harmless: the
+helper may be installed but stopped, and whoever started it later would carry
+out a reboot nobody asked for any more. So:
+
+- **The 10-s withdrawal.** An order the helper has not taken within **10 s**
+  of being placed is withdrawn by the daemon: it claims the file by renaming
+  it -- one syscall, so whoever acts first, the helper or the daemon, owns the
+  order and the other finds it gone -- and removes it. Nothing was done. The
+  order's `state` is then `withdrawn` and stays so, and the daemon logs a
+  warning naming `systemctl status holzkube-manager-host.path`. The path unit
+  starts the helper within a second of the order appearing; ten seconds
+  without a pickup means nothing is watching.
+- **The startup withdrawal.** A daemon that finds an order in the slot when it
+  starts withdraws it the same way before it serves: it has placed none yet,
+  so that one is a previous process's, and it must not wait for a helper
+  started later. The log records that it happened and the file's size, never
+  its content. The helper has its own net for the same case: it rejects an
+  order older than its age window, which covers a helper that runs at boot
+  before the daemon does.
 
 **In `GET /api/v1/host`: `actions`.**
 
@@ -1794,10 +1825,12 @@ order); a `started` one always has both.
 }
 ```
 
-- `order` is the last order this process placed since it started, or `null`.
-  `state` is `pending` while the order file is still there and `picked-up`
-  once it is gone -- the helper removes an order before it acts, so what came of
-  it is `result`.
+- `order` is the last order this process placed since it started, or `null`:
+  `{id, action, placed_at, state}`. `state` is `pending` while the order file
+  is still there, `picked-up` once it is gone -- the helper removes an order
+  before it acts, so what came of it is `result` -- and `withdrawn` when the
+  daemon took it back after 10 s without a pickup (above). `withdrawn` is
+  final: nothing was done, and no later answer calls that order picked up.
 - `result` is a reading of the helper's `last` file: `host-action.no-result`
   when there is none, `read-failed` when it is not exactly the line above (the
   message names the rule, never the file's bytes; at most 128 bytes are read).
@@ -1826,6 +1859,26 @@ order); a `started` one always has both.
 - `install_commands` are the commands that install the helper, run from an
   unpacked release archive: the same four lines as `deploy/HOST-HELPER.md`,
   always sent.
+
+On a machine where the helper is not installed -- every installation until its
+operator installs it -- the same object reads:
+
+```json
+"actions": {
+  "order": null,
+  "result": {"readable": false, "reason": {"code": "host-action.no-result", "message": "The holzkube-manager-host helper has not recorded an order on this machine."}},
+  "available": false,
+  "missing": [
+    {"item": "script", "path": "/usr/local/sbin/holzkube-manager-host"},
+    {"item": "path-unit", "path": "/etc/systemd/system/holzkube-manager-host.path"},
+    {"item": "not-enabled", "path": "/etc/systemd/system/paths.target.wants/holzkube-manager-host.path"}
+  ],
+  "install_commands": ["…the four lines above…"]
+}
+```
+
+A daemon started without host actions sends `available: false`, `missing: []`
+and the result reason "This instance was started without host actions."
 
 ### GET /api/v1/host/history: the host's last day
 
@@ -2402,7 +2455,7 @@ INV-08 gives one layer down: an empty screen is a claim.
                   "last_seen":"2026-09-20T09:58:00Z"}],
      "summary":{"ok":4,"warn":2,"down":1,"stopped":1,"unknown":1},
      "host":{"name":"manager-01.homelab.example","state":"warn",
-             "reason":"cpu_thermal 82.1 °C ≥ 80 °C"}}
+             "reason":"82.1 °C ≥ 80 °C · cpu_thermal"}}
 
 **One route for the whole screen**, and it is the most expensive read in this
 product. A wall makes the same call every few seconds for weeks; five routes
@@ -2488,13 +2541,18 @@ it.** `{name, state, reason}`, and nothing more:
   the snapshot is **older than 45 s** -- three sampling intervals -- the state
   is `unknown` whatever it said: a sampler that stopped is not a host that is
   fine.
-- `reason` is `healthy` for `ok`; for `warn` the first of `health.warnings`,
-  with ` and {n} more` when there are others -- except that a filesystem is
-  named by its role, `/` or `data directory`, never by its mount point
-  (`data directory 91% used ≥ 80%` where the page says `/mnt/ssd 91% used ≥
-  80%`); for `unknown`, stale or not, the fixed words `not readable`. The
-  unreadable sentences are never sent here: they name paths and carry the
-  kernel's errors.
+- `reason` is `healthy` for `ok`; for `warn` the first of the crossed lines,
+  with ` and {n} more` when there are others, in its **public** wording:
+  **the figure first, then ` · ` and the name** -- `82.1 °C ≥ 80 °C ·
+  cpu_thermal`, `111.0 °C ≥ 110 °C, critical · cpu_thermal`, `91% used ≥
+  80% · data directory` -- where the page's `health.warnings` put the name
+  first (`cpu_thermal 82.1 °C ≥ 80 °C`). The wall's tile is one line that
+  truncates, and cut at the end it still carries the figure; the name is the
+  part a reader can do without. A filesystem is named by its role, `/` or
+  `data directory`, never by its mount point (the page says `/mnt/ssd 91%
+  used ≥ 80%`). For `unknown`, stale or not, the fixed words `not readable`.
+  The unreadable sentences are never sent here: they name paths and carry
+  the kernel's errors.
 - `name` is the host's name as `uname(2)` gives it, or `holzkube-manager host`
   when that could not be read.
 - **It is never in `nodes` and never counted in `summary`.** The host is not a
