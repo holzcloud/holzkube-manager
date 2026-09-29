@@ -203,6 +203,9 @@ type Box struct {
 	// stop stops the pickup timer of the last order, if one is armed.
 	stop   func() bool
 	closed bool
+	// statErr is the last error Order()'s Lstat logged, so that a lasting
+	// one is logged once rather than on every poll.
+	statErr string
 }
 
 // NewBox builds a Box.
@@ -384,11 +387,25 @@ func (b *Box) Order() *Order {
 		return &o
 	}
 	// Lstat, not Stat: the question is whether the name is there, not what a
-	// link planted there would point at.
-	if _, err := os.Lstat(b.orderPath()); err == nil {
+	// link planted there would point at. Only "not there" means the helper
+	// took it; an error that is not an answer (EACCES, EIO) leaves the order
+	// pending, as far as anybody can tell, and is logged once, not every
+	// time the page asks.
+	_, err := os.Lstat(b.orderPath())
+	switch {
+	case err == nil:
 		o.State = StatePending
-	} else {
+		b.statErr = ""
+	case errors.Is(err, fs.ErrNotExist):
 		o.State = StatePickedUp
+		b.statErr = ""
+	default:
+		o.State = StatePending
+		if err.Error() != b.statErr {
+			b.statErr = err.Error()
+			b.cfg.Logger.Error("could not tell whether the host order is still waiting; it is reported pending",
+				"id", o.ID, "err", err)
+		}
 	}
 	return &o
 }

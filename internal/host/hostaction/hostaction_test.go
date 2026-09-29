@@ -593,3 +593,40 @@ func TestWithdrawWhoseTidyingFailed(t *testing.T) {
 		}
 	})
 }
+
+// TestOrderStateWhenTheSlotCannotBeRead is IN-04: only "not there" means the
+// helper took the order. An Lstat that fails for another reason (EACCES here)
+// is no answer, and calling it picked up would tell the page the helper had
+// the order while it may still wait in the slot.
+//
+// Fault injected and seen red: every Lstat error read as picked-up.
+func TestOrderStateWhenTheSlotCannotBeRead(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root reads a 0000 directory; the refusal cannot be made here")
+	}
+	r := newRig(t, nil)
+	o := r.place(t, Update)
+	if err := os.Chmod(r.dir, 0o000); err != nil {
+		t.Fatalf("chmod: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(r.dir, 0o700) })
+
+	for range 3 {
+		if got := r.box.Order(); got == nil || got.ID != o.ID || got.State != StatePending {
+			t.Fatalf("Order() with the slot unreadable = %+v, want %s pending", got, o.ID)
+		}
+	}
+	if errs := r.logs.at(slog.LevelError); len(errs) != 1 || !strings.Contains(errs[0], "permission denied") {
+		t.Errorf("three polls logged %q, want the error once", errs)
+	}
+
+	if err := os.Chmod(r.dir, 0o700); err != nil {
+		t.Fatalf("chmod: %v", err)
+	}
+	if err := os.Remove(r.orderPath()); err != nil {
+		t.Fatalf("remove: %v", err)
+	}
+	if got := r.box.Order(); got == nil || got.State != StatePickedUp {
+		t.Errorf("Order() once the slot reads empty = %+v, want picked-up", got)
+	}
+}
