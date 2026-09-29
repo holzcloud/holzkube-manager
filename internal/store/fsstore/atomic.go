@@ -194,7 +194,39 @@ func WriteFileAtomic(path string, data []byte) error {
 // processes, can both pass the check. A link fails with EEXIST when the name
 // exists, atomically, in the kernel. The temporary name is removed afterwards in
 // every case; on success the file lives on under path alone.
-func PlaceNew(path string, data []byte) (err error) {
+//
+// Once the link has succeeded the order is live -- the helper may already be
+// carrying it out -- so nothing that fails after it may read as "not placed":
+// such an error wraps ErrTookEffect, and the caller treats the file as placed.
+func PlaceNew(path string, data []byte) error {
+	return placeNew(path, data, settlePlaced)
+}
+
+// ErrTookEffect marks an error that came after the change itself had taken
+// effect: PlaceNew's link had put the file in place, or Claim's rename had
+// taken it out of its name. Only the tidying after it failed -- removing a
+// temporary, flushing the directory, reading or removing the claimed file --
+// and the caller must go on as if the operation had succeeded, reporting the
+// error rather than undoing its own bookkeeping. errors.Is on it is asked
+// before any other test of the error: a claimed file that vanished before it
+// was read wraps fs.ErrNotExist too, and was taken all the same.
+var ErrTookEffect = errors.New("fsstore: the change took effect; what failed came after it")
+
+// settlePlaced is what PlaceNew does after the link: drop the temporary name
+// and flush the directory entry.
+func settlePlaced(tmpName, dir string) error {
+	if err := os.Remove(tmpName); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return fmt.Errorf("remove temp file: %w", err)
+	}
+	if err := fsyncDir(dir); err != nil {
+		return fmt.Errorf("fsync directory: %w", err)
+	}
+	return nil
+}
+
+// placeNew is PlaceNew with its after-link step handed in, so a test can make
+// that step fail.
+func placeNew(path string, data []byte, settle func(tmpName, dir string) error) (err error) {
 	dir := filepath.Dir(path)
 
 	tmp, err := os.CreateTemp(dir, tempPrefix+"*")
@@ -232,11 +264,8 @@ func PlaceNew(path string, data []byte) (err error) {
 		}
 		return fmt.Errorf("link into place: %w", err)
 	}
-	if err = os.Remove(tmpName); err != nil && !errors.Is(err, fs.ErrNotExist) {
-		return fmt.Errorf("remove temp file: %w", err)
-	}
-	if err = fsyncDir(dir); err != nil {
-		return fmt.Errorf("fsync directory: %w", err)
+	if err = settle(tmpName, dir); err != nil {
+		return fmt.Errorf("%s is in place, but %w: %w", path, err, ErrTookEffect)
 	}
 	return nil
 }
@@ -271,7 +300,16 @@ func claimPath(path, tag string) string {
 // rename and the remove leaves a file the startup sweep removes, never one a
 // helper would read. tag names the claim (lowercase letters, digits, dashes,
 // at most 64) and is refused otherwise, before anything moves.
+//
+// Once the rename has succeeded the file is this caller's, whatever happens to
+// it afterwards: a read or a remove that fails then returns an error wrapping
+// ErrTookEffect, never one that reads as "nothing was claimed".
 func Claim(path, tag string) ([]byte, error) {
+	return claim(path, tag, removeAndSync)
+}
+
+// claim is Claim with its remove step handed in, so a test can make it fail.
+func claim(path, tag string, remove func(string) error) ([]byte, error) {
 	if !claimTag.MatchString(tag) {
 		return nil, fmt.Errorf("fsstore: claim tag %q is not [a-z0-9-]{1,64}", tag)
 	}
@@ -285,11 +323,12 @@ func Claim(path, tag string) ([]byte, error) {
 	}
 
 	data, readErr := readClaimed(claimed)
-	if err := removeAndSync(claimed); err != nil {
-		return nil, errors.Join(readErr, fmt.Errorf("remove claimed %s: %w", claimed, err))
+	if err := remove(claimed); err != nil {
+		return data, fmt.Errorf("claimed %s, but: %w: %w", path,
+			errors.Join(readErr, fmt.Errorf("remove claimed %s: %w", claimed, err)), ErrTookEffect)
 	}
 	if readErr != nil {
-		return nil, readErr
+		return nil, fmt.Errorf("claimed %s, but: %w: %w", path, readErr, ErrTookEffect)
 	}
 	return data, nil
 }

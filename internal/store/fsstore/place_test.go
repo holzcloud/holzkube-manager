@@ -154,3 +154,86 @@ func TestClaim(t *testing.T) {
 		}
 	})
 }
+
+// TestPlaceNewAfterTheLink is WR-03: once the link has put the order in place,
+// it is live -- the helper may already be carrying it out. A failure after it
+// (removing the temporary, flushing the directory) must not read as "not
+// placed", or the caller reports a failed action, arms no pickup timer, and
+// the order lies there unwatched.
+//
+// Fault injected and seen red: returning the after-link error unmarked.
+func TestPlaceNewAfterTheLink(t *testing.T) {
+	dir := dataDir(t)
+	path := filepath.Join(dir, "host-order")
+	want := []byte("reboot 0123456789abcdef\n")
+	boom := errors.New("fsync directory: input/output error")
+
+	err := placeNew(path, want, func(string, string) error { return boom })
+	if !errors.Is(err, ErrTookEffect) {
+		t.Fatalf("placeNew with a failing after-link step = %v, want an error wrapping ErrTookEffect", err)
+	}
+	if !errors.Is(err, boom) {
+		t.Errorf("the error %v does not carry what failed", err)
+	}
+	if errors.Is(err, fs.ErrExist) {
+		t.Errorf("the error %v reads as a taken slot", err)
+	}
+	if got, readErr := os.ReadFile(path); readErr != nil || !bytes.Equal(got, want) {
+		t.Errorf("the order is %q (%v), want it in place", got, readErr)
+	}
+}
+
+// TestClaimAfterTheRename is WR-03's other half: once the rename has taken the
+// file out of its name, the claim owns it. A read or a remove that fails
+// afterwards must not read as "nothing was claimed" -- the caller would leave
+// its order "pending", and then report as picked up an order nobody picked up.
+//
+// Fault injected and seen red: returning the after-rename error unmarked.
+func TestClaimAfterTheRename(t *testing.T) {
+	t.Run("the remove fails", func(t *testing.T) {
+		dir := dataDir(t)
+		path := filepath.Join(dir, "host-order")
+		want := []byte("update 0123456789abcdef\n")
+		if err := PlaceNew(path, want); err != nil {
+			t.Fatalf("PlaceNew: %v", err)
+		}
+		boom := errors.New("remove: input/output error")
+		got, err := claim(path, "withdrawn-0123456789abcdef", func(string) error { return boom })
+		if !errors.Is(err, ErrTookEffect) || !errors.Is(err, boom) {
+			t.Fatalf("claim with a failing remove = %v, want an error wrapping ErrTookEffect and the cause", err)
+		}
+		if !bytes.Equal(got, want) {
+			t.Errorf("claim returned %q, want what it read, %q", got, want)
+		}
+		if _, err := os.Lstat(path); !errors.Is(err, fs.ErrNotExist) {
+			t.Errorf("the order is still under its name (Lstat: %v)", err)
+		}
+	})
+
+	// Only the daemon's own user can plant a link there; the claim takes it
+	// out of the name and removes it, and never follows it.
+	t.Run("the claimed name is a link", func(t *testing.T) {
+		dir := dataDir(t)
+		path := filepath.Join(dir, "host-order")
+		target := filepath.Join(t.TempDir(), "elsewhere")
+		if err := os.WriteFile(target, []byte("keep\n"), 0o600); err != nil {
+			t.Fatalf("write: %v", err)
+		}
+		if err := os.Symlink(target, path); err != nil {
+			t.Fatalf("symlink: %v", err)
+		}
+		_, err := Claim(path, "startup")
+		if !errors.Is(err, ErrTookEffect) {
+			t.Fatalf("Claim of a link = %v, want an error wrapping ErrTookEffect", err)
+		}
+		if _, err := os.Lstat(path); !errors.Is(err, fs.ErrNotExist) {
+			t.Errorf("the link is still under the order's name (Lstat: %v)", err)
+		}
+		if left := tempFilesIn(t, dir); len(left) != 0 {
+			t.Errorf("the claim left %v", left)
+		}
+		if got, err := os.ReadFile(target); err != nil || string(got) != "keep\n" {
+			t.Errorf("the link's target was touched: %q, %v", got, err)
+		}
+	})
+}

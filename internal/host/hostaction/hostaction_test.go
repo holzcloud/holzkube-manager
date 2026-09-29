@@ -474,3 +474,122 @@ func TestCloseWithdrawsAWaitingOrder(t *testing.T) {
 		}
 	})
 }
+
+// tookEffect wraps fsstore's functions so that they do what they do and then
+// report a failure of the tidying after it, as fsstore does when removing a
+// temporary or flushing the directory fails (WR-03).
+func tookEffect(err error) error {
+	return fmt.Errorf("fsync directory: input/output error: %w", errors.Join(err, fsstore.ErrTookEffect))
+}
+
+// TestPlaceWhoseTidyingFailed is WR-03: once the link has succeeded the order
+// is live, and the helper may already be carrying it out. A failure after it
+// must not answer "failed" -- the operator would be told nothing happened
+// while the host reboots -- and above all the order must get its pickup timer,
+// or one nobody picks up lies there until the next start.
+//
+// Fault injected and seen red: Place treating the error as a failed placement.
+func TestPlaceWhoseTidyingFailed(t *testing.T) {
+	dir := t.TempDir()
+	timers := &manualTimers{}
+	logs := &logRecorder{}
+	box := NewBox(Config{
+		DataDir: dir,
+		Place: func(path string, data []byte) error {
+			if err := fsstore.PlaceNew(path, data); err != nil {
+				return err
+			}
+			return tookEffect(nil)
+		},
+		Claim:     fsstore.Claim,
+		AfterFunc: timers.afterFunc,
+		Logger:    slog.New(logs),
+	})
+	defer box.Close()
+
+	o, err := box.Place(Reboot)
+	if err != nil {
+		t.Fatalf("Place = %v, want the order: it is in place", err)
+	}
+	if got := box.Order(); got == nil || got.ID != o.ID || got.State != StatePending {
+		t.Errorf("Order() = %+v, want %s pending", got, o.ID)
+	}
+	if n := timers.count(); n != 1 {
+		t.Fatalf("%d pickup timers armed, want 1: a live order must be withdrawn if nobody takes it", n)
+	}
+	timers.fire(t, 0)
+	if got := box.Order(); got == nil || got.State != StateWithdrawn {
+		t.Errorf("Order() after the timer = %+v, want withdrawn", got)
+	}
+	if errs := logs.at(slog.LevelError); len(errs) != 1 || !strings.Contains(errs[0], "input/output error") {
+		t.Errorf("the tidying failure was logged as %q, want one error naming it", errs)
+	}
+}
+
+// TestWithdrawWhoseTidyingFailed: once the claim's rename has succeeded the
+// order is withdrawn, whatever the read or remove after it says. Reporting it
+// "could not withdraw" left the state to Order()'s Lstat, which found the name
+// gone and said "picked-up" for an order nobody picked up -- and the page then
+// waited for a helper answer that could never come.
+//
+// Fault injected and seen red: the three claim sites treating the error as a
+// failed claim.
+func TestWithdrawWhoseTidyingFailed(t *testing.T) {
+	claimThenFail := func(path, tag string) ([]byte, error) {
+		data, err := fsstore.Claim(path, tag)
+		if err != nil {
+			return data, err
+		}
+		return data, tookEffect(nil)
+	}
+	newBox := func(t *testing.T, dir string) (*Box, *manualTimers, *logRecorder) {
+		t.Helper()
+		timers := &manualTimers{}
+		logs := &logRecorder{}
+		box := NewBox(Config{
+			DataDir:   dir,
+			Place:     fsstore.PlaceNew,
+			Claim:     claimThenFail,
+			AfterFunc: timers.afterFunc,
+			Logger:    slog.New(logs),
+		})
+		return box, timers, logs
+	}
+
+	t.Run("the pickup timer", func(t *testing.T) {
+		box, timers, _ := newBox(t, t.TempDir())
+		defer box.Close()
+		o, err := box.Place(Poweroff)
+		if err != nil {
+			t.Fatalf("Place: %v", err)
+		}
+		timers.fire(t, 0)
+		if got := box.Order(); got == nil || got.ID != o.ID || got.State != StateWithdrawn {
+			t.Errorf("Order() = %+v, want %s withdrawn", got, o.ID)
+		}
+	})
+
+	t.Run("close", func(t *testing.T) {
+		box, _, _ := newBox(t, t.TempDir())
+		o, err := box.Place(Poweroff)
+		if err != nil {
+			t.Fatalf("Place: %v", err)
+		}
+		box.Close()
+		if got := box.Order(); got == nil || got.ID != o.ID || got.State != StateWithdrawn {
+			t.Errorf("Order() after Close = %+v, want %s withdrawn", got, o.ID)
+		}
+	})
+
+	t.Run("the startup sweep", func(t *testing.T) {
+		dir := t.TempDir()
+		if err := fsstore.PlaceNew(filepath.Join(dir, OrderFileName), []byte("reboot 0123456789abcdef\n")); err != nil {
+			t.Fatalf("PlaceNew: %v", err)
+		}
+		box, _, logs := newBox(t, dir)
+		defer box.Close()
+		if w := logs.at(slog.LevelWarn); len(w) != 1 || !strings.Contains(w[0], "was withdrawn") {
+			t.Errorf("the sweep warned %q, want that the order was withdrawn", w)
+		}
+	})
+}
