@@ -142,7 +142,9 @@ describe('the layout guard’s fixtures', () => {
     // The wall's sentence is the server's public one, figure first: a narrow
     // tile cuts the end, and the end is only the sensor's name. The page's
     // warnings keep the name first.
-    expect(wall.host?.reason).toBe(`${cpu?.celsius.toFixed(1)} °C ≥ ${cpu?.warn_c} °C · cpu_thermal`)
+    expect(wall.host?.reason).toBe(
+      `${cpu?.celsius.toFixed(1)} °C ≥ ${cpu?.warn_c} °C · cpu_thermal`,
+    )
   })
 
   it('shows /host with the helper not installed, the widest the page gets', () => {
