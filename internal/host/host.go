@@ -33,6 +33,7 @@ package host
 import (
 	"time"
 
+	"github.com/holzcloud/holzkube-manager/internal/host/hostaction"
 	"github.com/holzcloud/holzkube-manager/internal/host/updatestatus"
 	"github.com/holzcloud/holzkube-manager/internal/inventory"
 )
@@ -65,6 +66,11 @@ const (
 	// CodeUnsupported: this platform has no such source at all (the daemon
 	// also builds for darwin, where none of the Linux interfaces exist).
 	CodeUnsupported = "unsupported"
+
+	// CodeNoResult: the host helper has recorded no order yet -- or this
+	// instance runs without host actions. Not an error: there is nothing to
+	// read yet.
+	CodeNoResult = "host-action.no-result"
 )
 
 // Reading is one value that was either read or not.
@@ -110,6 +116,22 @@ type View struct {
 	// navigation and the wall show, made here so that none of them decides it
 	// again (D-06).
 	Health Health `json:"health"`
+
+	// Actions is where the host actions stand: the last order this process
+	// placed and what the root helper last recorded (HACT-01..08, D-05).
+	Actions Actions `json:"actions"`
+}
+
+// Actions is the host actions' part of the answer.
+//
+// Order is this process's own fact -- what it placed and whether the order
+// file is still there -- and is null when it placed none since it started.
+// Result comes from the helper's state directory, outside the process, and is
+// a reading like every other: host-action.no-result when the helper has
+// recorded nothing, read-failed when its file is not what the helper writes.
+type Actions struct {
+	Order  *hostaction.Order          `json:"order"`
+	Result Reading[hostaction.Result] `json:"result"`
 }
 
 // Service is holzkube-manager itself on this machine (HOST-02, HOST-03).

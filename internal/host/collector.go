@@ -13,6 +13,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/holzcloud/holzkube-manager/internal/host/hostaction"
 	"github.com/holzcloud/holzkube-manager/internal/host/updatestatus"
 	"github.com/holzcloud/holzkube-manager/internal/inventory"
 	"github.com/holzcloud/holzkube-manager/internal/talos"
@@ -49,6 +50,10 @@ type Config struct {
 	// UpdateStatusPath is the absolute path of the update script's status
 	// file (--update-status-file). Empty means updatestatus.DefaultPath.
 	UpdateStatusPath string
+
+	// Actions is the host actions' order slot. Nil: this instance runs
+	// without host actions, and the answer says so.
+	Actions *hostaction.Box
 }
 
 // minRateWindow and maxRateWindow bound when the previous reading may serve
@@ -138,6 +143,7 @@ func (c *Collector) Read(ctx context.Context) View {
 	// From the same reading, so the page's markers, its meters and its header
 	// cannot disagree.
 	v.Health = Assess(v.Live)
+	v.Actions = c.readActions()
 
 	return v
 }
@@ -169,7 +175,57 @@ func (c *Collector) readUnsupported(v View, now time.Time) View {
 	}
 	v.Live = c.unsupportedLive()
 	v.Health = Assess(v.Live)
+	// No helper result is read here either: the helper is a systemd unit on
+	// a Linux host, and a darwin build has nothing to ask. The order is this
+	// process's own fact and stays.
+	v.Actions = Actions{Result: Hidden[hostaction.Result](r)}
+	if c.cfg.Actions != nil {
+		v.Actions.Order = c.cfg.Actions.Order()
+	}
 	return v
+}
+
+// The sentences the helper's result is explained with when there is none.
+const (
+	noActionsMessage       = "This instance was started without host actions."
+	noResultMessage        = "The holzkube-manager-host helper has not recorded an order on this machine."
+	resultUnreadablePrefix = "The helper's result file could not be read: "
+)
+
+// readActions fills the host actions' part of the answer: the last order this
+// process placed, and what the helper last recorded. The reader's error names
+// the rule a file broke, never its bytes, so it can be shown.
+func (c *Collector) readActions() Actions {
+	box := c.cfg.Actions
+	if box == nil {
+		return Actions{Result: Hidden[hostaction.Result](Reason{Code: CodeNoResult, Message: noActionsMessage})}
+	}
+	a := Actions{Order: box.Order()}
+	result, err := box.Result()
+	switch {
+	case errors.Is(err, hostaction.ErrNoResult):
+		a.Result = Hidden[hostaction.Result](Reason{Code: CodeNoResult, Message: noResultMessage})
+	case err != nil:
+		a.Result = Hidden[hostaction.Result](Reason{Code: CodeReadFailed, Message: resultUnreadablePrefix + err.Error()})
+	default:
+		a.Result = Read(result)
+	}
+	return a
+}
+
+// Hostname is this machine's name as uname(2) reports it now -- read fresh on
+// every call, because the host confirm route compares what the operator typed
+// against it (D-08), and a name remembered from an earlier read could be one
+// the machine no longer has.
+func (c *Collector) Hostname() (string, error) {
+	if platformUnsupported(c.cfg.Sys) {
+		return "", errUnsupported
+	}
+	u, err := c.cfg.Sys.Uname()
+	if err != nil {
+		return "", err
+	}
+	return u.Nodename, nil
 }
 
 // unsupportedLive is the Live section on a platform with no readings: every

@@ -165,6 +165,7 @@ var nullableKeys = map[string]string{
 	"speed_mbit":         "null when the link reports no speed -- down, or a kind of link without one",
 	"rx_bytes_per_sec":   "null when this round has no rate for the link (D-02, D-12)",
 	"tx_bytes_per_sec":   "null when this round has no rate for the link (D-02, D-12)",
+	"order":              "null while this process has placed no host order since it started (Phase 13)",
 }
 
 func TestNoNulls(t *testing.T) {
@@ -270,10 +271,10 @@ func TestUnsupportedPlatformReadsNothing(t *testing.T) {
 			}
 		}
 		walk("", wire)
-		// device 7, service 2, live cpu 3 + memory + sensors + network, and
-		// the two filesystem rows.
-		if readings != 17 {
-			t.Errorf("round %d: %d readings on the page, want 17", round, readings)
+		// device 7, service 2, live cpu 3 + memory + sensors + network, the
+		// two filesystem rows, and the host helper's result.
+		if readings != 18 {
+			t.Errorf("round %d: %d readings on the page, want 18", round, readings)
 		}
 		svc, _ := wire["service"].(map[string]any)
 		if svc["version"] != "0.1.0" || svc["uptime_seconds"] != 3600.0 {

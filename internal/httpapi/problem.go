@@ -152,6 +152,12 @@ const (
 	// will do, not about what was typed.
 	CodeExecRefused = "conflict.exec-refused"
 
+	// CodeHostOrderPending: a host action was asked for while the previous
+	// order still waits for the root helper. There is one slot and no queue
+	// (Phase 13 D-02): the second order is refused, the first stays as it
+	// was, and the client says to wait for the first to be answered.
+	CodeHostOrderPending = "conflict.host-order-pending"
+
 	// CodeRefusedKind: an object of a kind this product will not render. Today
 	// that is Secret and only Secret: its data is base64 rather than
 	// encryption, so showing it would put the credential on the screen. A

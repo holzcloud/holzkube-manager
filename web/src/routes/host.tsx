@@ -1,8 +1,8 @@
 import { useQuery } from '@tanstack/react-query'
 import { createRoute } from '@tanstack/react-router'
 import { AlertTriangle } from 'lucide-react'
-import type { ReactNode } from 'react'
-import { api, type Host, type HostHealth, type Link, type Reason } from '@/api'
+import { type ReactNode, useState } from 'react'
+import { api, type Host, type HostHealth, type HostOrder, type Link, type Reason } from '@/api'
 import {
   CoreList,
   MemoryChart,
@@ -13,6 +13,7 @@ import { Meter } from '@/components/charts/Meter'
 import { RangePicker } from '@/components/charts/RangePicker'
 import { FanList, Sensors, sensorKey } from '@/components/charts/Sensors'
 import { ago } from '@/components/HealthField'
+import { HostActions, HostOrderStatus } from '@/components/HostActions'
 import { HostStateMark, STATE_WORD } from '@/components/HostState'
 import { HARDWARE_POLL_INTERVAL_MS } from '@/components/NodeHardware'
 import { Problem } from '@/components/Problem'
@@ -86,6 +87,9 @@ export function HostView({ host, stale }: { host: Host; stale: unknown }) {
   const load = host.live.cpu.load
   const rates = host.live.rates_over_seconds
   const health = host.health
+  // The order this page placed, held until the page is left: the status box
+  // follows it through the host answer's order and result (Phase 13).
+  const [held, setHeld] = useState<HostOrder | null>(null)
 
   // The charts are the node page's (D-05): the daemon's recorded history for
   // the range, with this page's own readings appended after its last point.
@@ -113,10 +117,14 @@ export function HostView({ host, stale }: { host: Host; stale: unknown }) {
             <span className="text-muted-foreground">{health.summary}</span>
           </p>
         </div>
+        {/* The slot Phase 11 left for the host actions. */}
+        <HostActions host={host} onPlaced={setHeld} />
       </header>
 
-      {/* Notices, in this order when they apply: stale, warning, container,
-          hardening. Stale stays first: it says the warning itself may be old. */}
+      {/* Notices, in this order when they apply: the order this page placed,
+          stale, warning, container, hardening. The order comes first: it is
+          what the operator just did. Stale then says the rest may be old. */}
+      {held !== null && <HostOrderStatus host={host} held={held} />}
       {isStale && (
         <p className="rounded-md border border-amber-600/40 bg-amber-600/10 px-3 py-2 text-sm text-amber-700 dark:text-amber-300">
           holzkube-manager did not answer the latest request. What you see is its reading from{' '}
