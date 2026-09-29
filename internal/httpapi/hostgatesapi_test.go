@@ -202,9 +202,9 @@ func TestHostActionGates(t *testing.T) {
 				got, problemCode(raw), httpapi.CodeForbiddenRole, raw)
 		}
 		for _, a := range hostaction.Actions() {
-			// A valid token and an open window: nothing but the role is
-			// missing.
-			tok, _ := g.confirmer.Issue(jobs.Intent{Action: "host." + string(a), Machine: hostTarget})
+			// A valid token -- the reader's own session's -- and an open
+			// window: nothing but the role is missing.
+			tok := sessionHostToken(t, g.confirmer, g.reader.srv, g.reader.client, "host."+string(a))
 			got, raw := g.reader.status(t, http.MethodPost, actionPath(a), map[string]string{"confirmation": tok})
 			if got != http.StatusForbidden || problemCode(raw) != httpapi.CodeForbiddenRole {
 				t.Errorf("reader on %s: %d %s, want 403 %s (%s)",
