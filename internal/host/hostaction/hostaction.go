@@ -57,6 +57,8 @@ import (
 	"strconv"
 	"sync"
 	"time"
+
+	"github.com/holzcloud/holzkube-manager/internal/store/fsstore"
 )
 
 // Action is one of the four host actions. Its string is what the order file
@@ -156,10 +158,16 @@ type Config struct {
 	ResultPath string
 	// Place puts data at path only if nothing is there, and fails with an
 	// error wrapping fs.ErrExist otherwise. Production: fsstore.PlaceNew.
+	//
+	// An error wrapping fsstore.ErrTookEffect means the order was placed and
+	// only the tidying after it failed: the Box treats it as placed -- it is
+	// live, the helper may already be carrying it out -- and logs the error.
 	Place func(path string, data []byte) error
 	// Claim takes the file at path out of its name, returns what it held and
 	// removes it, and fails with an error wrapping fs.ErrNotExist when nothing
-	// is there. Production: fsstore.Claim.
+	// is there. Production: fsstore.Claim. An error wrapping
+	// fsstore.ErrTookEffect means the file was taken and only the read or the
+	// remove after it failed: the order is withdrawn all the same.
 	//
 	// It is what withdraws orders: the one the helper did not pick up within
 	// PickupTimeout, any order present when the Box is built, and the last
@@ -250,9 +258,10 @@ func NewBox(cfg Config) *Box {
 func (b *Box) sweep() {
 	data, err := b.cfg.Claim(b.orderPath(), "startup")
 	switch {
-	case err == nil:
+	case err == nil || errors.Is(err, fsstore.ErrTookEffect):
 		b.cfg.Logger.Warn("a host order from before this start was withdrawn; nothing was done",
 			"path", b.orderPath(), "bytes", len(data))
+		logTidyingError(b.cfg.Logger, err)
 	case errors.Is(err, fs.ErrNotExist):
 		// The ordinary start: no order waits.
 	default:
@@ -288,10 +297,17 @@ func (b *Box) Place(a Action) (Order, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	if err := b.cfg.Place(b.orderPath(), data); err != nil {
-		if errors.Is(err, fs.ErrExist) {
-			return Order{}, ErrPending
-		}
+	err := b.cfg.Place(b.orderPath(), data)
+	switch {
+	case err == nil:
+	case errors.Is(err, fsstore.ErrTookEffect):
+		// Placed: the link succeeded, only the tidying after it did not. The
+		// order is live, so it gets its state and its pickup timer like any
+		// other; answering "failed" here would leave it lying unwatched.
+		logTidyingError(b.cfg.Logger, err)
+	case errors.Is(err, fs.ErrExist):
+		return Order{}, ErrPending
+	default:
 		return Order{}, fmt.Errorf("hostaction: place the order: %w", err)
 	}
 
@@ -323,17 +339,27 @@ func (b *Box) withdraw(id string) {
 	}
 	_, err := b.cfg.Claim(b.orderPath(), "withdrawn-"+id)
 	switch {
-	case err == nil:
+	case err == nil || errors.Is(err, fsstore.ErrTookEffect):
 		b.last.State = StateWithdrawn
 		b.cfg.Logger.Warn("host order withdrawn: the helper did not pick up the order within "+
 			seconds(b.cfg.PickupTimeout)+"; check `systemctl status holzkube-manager-host.path`",
 			"id", id, "action", string(b.last.Action))
+		logTidyingError(b.cfg.Logger, err)
 	case errors.Is(err, fs.ErrNotExist):
 		// The helper took it: the ordinary case, nothing to do.
 	default:
 		// The state stays with Order()'s Lstat: an order still there reads
 		// pending, which is the truth.
 		b.cfg.Logger.Error("could not withdraw a host order", "id", id, "action", string(b.last.Action), "err", err)
+	}
+}
+
+// logTidyingError logs what failed after a placement or a claim had already
+// taken effect (fsstore.ErrTookEffect), and nothing for a nil error. The
+// temp-prefixed leftovers it can mean are removed by the store's startup sweep.
+func logTidyingError(l *slog.Logger, err error) {
+	if err != nil {
+		l.Error("a host order file was placed or taken, but the tidying after it failed", "err", err)
 	}
 }
 
@@ -391,10 +417,11 @@ func (b *Box) Close() {
 	if !b.closed && b.cfg.Claim != nil && b.last != nil && b.last.State != StateWithdrawn {
 		_, err := b.cfg.Claim(b.orderPath(), "shutdown-"+b.last.ID)
 		switch {
-		case err == nil:
+		case err == nil || errors.Is(err, fsstore.ErrTookEffect):
 			b.last.State = StateWithdrawn
 			b.cfg.Logger.Warn("host order withdrawn: holzkube-manager stopped before the helper picked it up; nothing was done",
 				"id", b.last.ID, "action", string(b.last.Action))
+			logTidyingError(b.cfg.Logger, err)
 		case errors.Is(err, fs.ErrNotExist):
 			// The helper took it, or the timer withdrew it: nothing waits.
 		default:
