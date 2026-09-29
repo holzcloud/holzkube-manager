@@ -78,6 +78,14 @@ archives:
       # host after a healthy update, so a change to the update path needs no
       # hand work on the host.
       - deploy/holzkube-manager-update.sh
+      # The host helper travels so the operator can install it from the
+      # archive (deploy/HOST-HELPER.md). Unlike the update script, nothing
+      # installs or replaces it: putting root code on the host is the
+      # operator's decision every time, and the update script never names it.
+      - deploy/holzkube-manager-host.sh
+      - deploy/holzkube-manager-host.path
+      - deploy/holzkube-manager-host.service
+      - deploy/HOST-HELPER.md
       # The Markdown only: docs/ also holds the README's screenshots and the
       # brand images, which are megabytes nobody installing a daemon needs.
       - docs/*.md
