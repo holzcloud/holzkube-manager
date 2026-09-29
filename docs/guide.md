@@ -236,6 +236,83 @@ feature does not write it; it replaces itself with the recording one after the
 next healthy update, and from the run after that on the page shows when it last
 checked, which versions it saw and what came of it.
 
+#### Host actions
+
+Four buttons in the page's header act on the machine itself:
+
+- **Check for updates and install** runs the same update the hourly timer runs
+  (`holzkube-manager-update.service`): it looks for a newer release and, if
+  there is one, installs it and restarts holzkube-manager. If there is none,
+  nothing changes. It is not a check that only looks -- that is why the button
+  says "and install". What came of it appears in the status box and under
+  **Update check**.
+- **Restart service** restarts holzkube-manager. The machine and everything
+  else on it keep running.
+- **Restart host** restarts the whole machine, and everything running on it.
+- **Shut down host** switches the whole machine off. Nothing on the page can
+  switch it back on: somebody has to power it on by hand.
+
+**Who may press them, and what they ask for.** The operator role; a reader sees
+the four buttons switched off, with the reason beneath them. Each one opens its
+own dialog, and every one of the four asks you to type the machine's hostname --
+there is only one host, and it is the one this page runs on. Then the password,
+unless you gave it within the sudo window -- five minutes unless
+`--sudo-window` says otherwise, the same as for every other destructive action;
+with a provider sign-in, the provider's login instead. Each action is recorded in the audit log as `host.reboot`,
+`host.poweroff`, `host.restart-service` or `host.update`, and the typed
+confirmation as `action.confirm`.
+
+**holzkube-manager does none of this itself.** The service keeps every line of
+its hardening: no root, no capability, no way to reach systemd over D-Bus. A
+button only leaves a one-line order in the data directory
+(`/var/lib/holzkube-manager/host-order`). A small root-owned helper that you
+install once -- a script and two systemd units, in `deploy/` in every release
+archive -- is started by systemd when the order appears, checks that it is one
+of exactly four, removes it, and runs the one fixed `systemctl` command for it.
+It records what came of it in its own directory, `/var/lib/holzkube-manager-host`,
+where the page reads it. **`deploy/HOST-HELPER.md` installs it**, step by step,
+and says how to check it works and how to remove it again. Until it is
+installed the buttons stay off, and a notice at the bottom of the page names
+exactly which of its files are missing and shows the four commands that install
+it. The release update never installs or replaces the helper: new root code on
+the machine is the operator's decision.
+
+**What the page shows once you have pressed one.** A status box under the
+header follows the order from start to end:
+
+- placed, waiting for the helper to pick it up; then picked up; then started;
+- for **Restart service**, **Restart host** and a **Check for updates and
+  install** that finds a newer release, the page loses its connection. It keeps
+  asking every 3 seconds and says **"Waiting for holzkube-manager to come
+  back."** in place of the usual "not answering" notice -- also on another
+  operator's page that did not place the order. When holzkube-manager answers
+  again the box says it is back, with the version it runs and since when (the
+  boot time for a host restart);
+- **Shut down host** says the host is shut down, and that holzkube-manager
+  answers again once somebody switches the machine on;
+- **rejected** or **failed** means the helper did nothing, or could not do it;
+  `journalctl -u holzkube-manager-host` says why;
+- **not picked up within 10 s, withdrawn** means nothing was watching for the
+  order -- the helper's path unit is stopped or was never enabled. holzkube-manager
+  takes the order back so that nobody starting the helper later carries out a
+  restart that was no longer wanted; nothing was done. `systemctl status
+  holzkube-manager-host.path` shows what the unit is doing.
+
+One order at a time: while one waits for the helper, the buttons are off and a
+second one is refused. An order left over when holzkube-manager starts -- from
+a process that ended before the helper took it -- is withdrawn too, never
+carried out late.
+
+**Not in a container.** A container has no host of its own to restart, switch
+off or update, so there the four buttons stay off and say so; host actions
+exist only with the systemd installation.
+
+**A data directory other than `/var/lib/holzkube-manager`** needs one more
+step: the helper's path unit watches that path, and the drop-ins in
+`deploy/HOST-HELPER.md` ("A data directory other than /var/lib/holzkube-manager")
+point it and the helper at yours. Without them every order is withdrawn after
+10 seconds, and the service's log says so at start.
+
 ## Signing in
 
 Two ways in, and which of them an address offers is configuration rather than a
