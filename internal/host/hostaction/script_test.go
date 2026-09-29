@@ -65,6 +65,8 @@ type hostScriptEnv struct {
 	stateDir string
 	stub     string
 	stubLog  string
+	// extraEnv is added to the run's environment (the claim-race hooks).
+	extraEnv []string
 }
 
 func requireHostScriptTools(t *testing.T) {
@@ -159,7 +161,7 @@ func (e *hostScriptEnv) setAge(d time.Duration) {
 // env is the whole environment of a run: nothing from the test process leaks
 // in, so neither the host's paths nor its systemctl can reach the script.
 func (e *hostScriptEnv) env() []string {
-	return []string{
+	return append([]string{
 		"PATH=/usr/sbin:/usr/bin:/sbin:/bin",
 		"HOME=" + e.dir,
 		// The script's work directory (mktemp -d) goes here too, so a run
@@ -170,7 +172,7 @@ func (e *hostScriptEnv) env() []string {
 		"HOLZKUBE_MANAGER_HOST_STATE_DIR=" + e.stateDir,
 		"HOLZKUBE_MANAGER_SYSTEMCTL=" + e.stub,
 		stubLogVar + "=" + e.stubLog,
-	}
+	}, e.extraEnv...)
 }
 
 // run executes the copy -- as root inside a user namespace when asRoot -- and
@@ -253,6 +255,23 @@ func (e *hostScriptEnv) wantOrder(present bool) {
 		e.t.Errorf("the order is still there, want it consumed")
 	case !present && !errors.Is(err, fs.ErrNotExist):
 		e.t.Errorf("lstat the order: %v", err)
+	}
+	if !present {
+		e.wantNoHelperClaim()
+	}
+}
+
+// helperClaimGlob matches the name the script renames the order to before it
+// reads it (WR-01).
+const helperClaimGlob = ".holzkube-manager-tmp-helper-claim-*"
+
+// wantNoHelperClaim asserts the script removed the order under its claim name
+// too: nothing it took is left in the daemon's directory.
+func (e *hostScriptEnv) wantNoHelperClaim() {
+	e.t.Helper()
+	left, _ := filepath.Glob(filepath.Join(e.dataDir, helperClaimGlob))
+	if len(left) != 0 {
+		e.t.Errorf("the script left its claim in the data directory: %v", left)
 	}
 }
 
@@ -529,8 +548,8 @@ func TestHostScriptAsRoot(t *testing.T) {
 		})
 	}
 
-	// Only a compromised daemon can put a directory there. rm -f cannot remove
-	// it, so the script records failed and does not act; root never runs
+	// Only a compromised daemon can put a directory there. The script neither
+	// takes nor removes it, records failed and does not act; root never runs
 	// rm -r in a directory another user owns. systemd's start limit then stops
 	// the path unit (RESEARCH Pitfall 4, measured), and the daemon's 10-s
 	// withdrawal and HOST-HELPER.md name the recovery.
@@ -582,4 +601,120 @@ func TestHostScriptAsRoot(t *testing.T) {
 			t.Errorf("the script wrote through the link: %v", entries)
 		}
 	})
+}
+
+// raceHooks is sourced by bash before the script (BASH_ENV) and wraps one
+// command in a function -- a function wins over any PATH, the script's fixed
+// one included. Just before the first call of that command it plays the
+// daemon's withdrawal (fsstore.Claim: a rename of the order to its own claim
+// name) and, when HKM_RACE_NEXT is set, the next placement: a new order under
+// the order's name. It records whether the daemon's rename took the order.
+const raceHooks = `__hkm_daemon() {
+  [ -e "$HKM_RACE_DONE" ] && return 0
+  : > "$HKM_RACE_DONE"
+  if command mv -T -- "$HOLZKUBE_MANAGER_HOST_ORDER" "$HKM_RACE_TAKEN" 2>/dev/null; then
+    printf won > "$HKM_RACE_DONE"
+  fi
+  if [ -n "${HKM_RACE_NEXT:-}" ]; then
+    printf '%s\n' "$HKM_RACE_NEXT" > "$HKM_RACE_TAKEN.next"
+    command mv -T -- "$HKM_RACE_TAKEN.next" "$HOLZKUBE_MANAGER_HOST_ORDER"
+  fi
+  return 0
+}
+`
+
+// TestHostScriptClaimRace is WR-01: the daemon withdraws an order by renaming
+// it, and whoever renames first must own it. Before the fix the script read the
+// order and then ran "rm -f", which succeeds on a name that is already gone --
+// so an order the daemon had withdrawn (and reported "nothing was done") was
+// carried out anyway, and a newer order that had meanwhile been placed under
+// the name was deleted without a trace.
+//
+// The daemon's rename is played just before each command the script runs on
+// the order, in turn. Whatever the interleaving, exactly one side owns A: the
+// daemon (A is never carried out) or the script (A is carried out). And B, the
+// newer order, is never lost: it is carried out, or it still waits.
+//
+// Fault injected and seen red: the old read-then-"rm -f" consumption. With the
+// daemon's rename landing between dd and rm, the script rebooted anyway, and
+// deleted B.
+func TestHostScriptClaimRace(t *testing.T) {
+	t.Parallel()
+	requireHostNamespace(t)
+
+	const (
+		idA   = idReboot
+		idB   = idRestart
+		argvA = "reboot"
+		argvB = "restart holzkube-manager.service"
+	)
+	for _, before := range []string{"stat", "mv", "dd", "rm"} {
+		for _, withB := range []bool{false, true} {
+			name := "the daemon claims before " + before
+			if withB {
+				name += ", then a newer order is placed"
+			}
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+				e := newHostScriptEnv(t, false)
+				hooks := filepath.Join(e.dir, "race-hooks.sh")
+				done := filepath.Join(e.dir, "race-done")
+				taken := filepath.Join(e.dataDir, ".holzkube-manager-tmp-claim-withdrawn-"+idA)
+				e.write(hooks, []byte(raceHooks+before+`() { __hkm_daemon; command `+before+` "$@"; }`+"\n"), 0o644)
+				e.extraEnv = []string{"BASH_ENV=" + hooks, "HKM_RACE_DONE=" + done, "HKM_RACE_TAKEN=" + taken}
+				if withB {
+					e.extraEnv = append(e.extraEnv, "HKM_RACE_NEXT=restart-service "+idB)
+				}
+				e.writeOrder("reboot " + idA + "\n")
+
+				rc, _ := e.run(true)
+
+				marker, err := os.ReadFile(done)
+				if err != nil {
+					t.Fatalf("the hook never ran before %s -- this case measured nothing: %v", before, err)
+				}
+				daemonWon := string(marker) == "won"
+				var calls []string
+				for _, l := range strings.Split(strings.TrimSpace(e.calls()), "\n") {
+					if l != "" && l != orderStillThere {
+						calls = append(calls, l)
+					}
+				}
+				ranA := false
+				ranB := false
+				for _, c := range calls {
+					switch c {
+					case argvA:
+						ranA = true
+					case argvB:
+						ranB = true
+					default:
+						t.Errorf("systemctl called with %q", c)
+					}
+				}
+				if len(calls) > 1 {
+					t.Errorf("one run carried out %d orders: %q", len(calls), calls)
+				}
+				if daemonWon && ranA {
+					t.Errorf("the daemon withdrew A before %s, and the script carried A out anyway (exit %d)", before, rc)
+				}
+				if !daemonWon && !ranA {
+					t.Errorf("the script took A before %s, and did not carry it out (exit %d)", before, rc)
+				}
+				if withB {
+					got, err := os.ReadFile(e.order)
+					bWaits := err == nil && string(got) == "restart-service "+idB+"\n"
+					if ranB == bWaits {
+						t.Errorf("B carried out = %v, B still waiting = %v: want exactly one -- a newer order must never be lost", ranB, bWaits)
+					}
+				} else if _, err := os.Lstat(e.order); !errors.Is(err, fs.ErrNotExist) {
+					t.Errorf("something is left under the order's name: %v", err)
+				}
+				e.wantNoHelperClaim()
+				if !daemonWon && rc != 0 {
+					t.Errorf("exit = %d, want 0", rc)
+				}
+			})
+		}
+	}
 }

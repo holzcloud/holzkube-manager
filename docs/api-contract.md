@@ -1773,8 +1773,10 @@ cryptographic random source, then one newline. It is placed exclusively: written
 to a temporary name in the same directory, flushed, then linked to `host-order`,
 which fails when the name is taken -- that failure is the `409`. The helper
 accepts nothing but `^(reboot|poweroff|restart-service|update) [0-9a-f]{16}$`
-on exactly one line of at most 64 bytes, removes the order **before** it acts,
-and records its outcome in `/var/lib/holzkube-manager-host/last`, a directory
+on exactly one line of at most 64 bytes, takes the order **before** it reads
+it -- a rename to a name of its own in the same directory, the same kind of
+claim the daemon's withdrawal makes, so exactly one of the two owns an order --
+removes it before it acts, and records its outcome in `/var/lib/holzkube-manager-host/last`, a directory
 root owns -- never in the daemon's:
 
 ```
@@ -1794,8 +1796,9 @@ out a reboot nobody asked for any more. So:
 
 - **The 10-s withdrawal.** An order the helper has not taken within **10 s**
   of being placed is withdrawn by the daemon: it claims the file by renaming
-  it -- one syscall, so whoever acts first, the helper or the daemon, owns the
-  order and the other finds it gone -- and removes it. Nothing was done. The
+  it -- one syscall, and the helper takes an order by a rename as well, so
+  whoever acts first, the helper or the daemon, owns the order and the other
+  finds it gone -- and removes it. Nothing was done. The
   order's `state` is then `withdrawn` and stays so, and the daemon logs a
   warning naming `systemctl status holzkube-manager-host.path`. The path unit
   starts the helper within a second of the order appearing; ten seconds

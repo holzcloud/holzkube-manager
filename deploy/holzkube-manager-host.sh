@@ -23,10 +23,11 @@
 #
 # Was dieses Skript ausdruecklich NICHT anfasst:
 #
-#   - Das Datenverzeichnis des Daemons, bis auf genau einen Namen: es entfernt
-#     den Auftrag (rm folgt keinem Symlink) und schreibt dort nichts. Das
-#     Verzeichnis gehoert einem anderen Benutzer, und root, das dort schriebe,
-#     schriebe dorthin, wo dessen Symlink hinzeigt.
+#   - Das Datenverzeichnis des Daemons, bis auf den Auftrag: es nimmt ihn per
+#     rename(2) unter einen eigenen Namen im selben Verzeichnis und entfernt
+#     ihn dort (weder rename noch rm folgen einem Symlink); es schreibt dort
+#     nichts. Das Verzeichnis gehoert einem anderen Benutzer, und root, das
+#     dort schriebe, schriebe dorthin, wo dessen Symlink hinzeigt.
 #   - Irgendetwas ausser seinem eigenen Zustandsverzeichnis
 #     (/var/lib/holzkube-manager-host, StateDirectory der Unit). Dort steht in
 #     "last", was aus dem letzten Auftrag wurde:
@@ -111,35 +112,59 @@ if [[ ! -e $ORDER && ! -L $ORDER ]]; then
   exit 0
 fi
 
-# Nur fuer den protokollierten Grund. Entschieden wird nicht hier: zwischen
-# dieser Pruefung und dem Lesen kann der Name getauscht werden.
-kind=regular
-if [[ -L $ORDER ]]; then
-  kind=symlink
-elif [[ ! -f $ORDER ]]; then
-  kind=not-regular
+# Ein Verzeichnis unter dem Namen des Auftrags legt nur ein kompromittierter
+# Daemon an. root entfernt es nicht (kein rm -r im Verzeichnis eines anderen
+# Benutzers) und handelt nicht.
+if [[ -d $ORDER && ! -L $ORDER ]]; then
+  log "FEHLER: Auftrag nicht entfernbar"
+  record - - failed
+  exit 1
 fi
-mtime=$(stat -c %Y -- "$ORDER" 2>/dev/null || echo 0)
 
-work=$(mktemp -d)
-trap 'rm -rf -- "$work"' EXIT
-
-# Das einzige Lesen: O_NOFOLLOW gegen einen untergeschobenen Symlink,
-# O_NONBLOCK gegen ein FIFO, hoechstens 65 Byte -- eins mehr als ein Auftrag
-# lang sein darf, damit ein zu langer als zu lang erkannt wird.
-if ! dd if="$ORDER" of="$work/o" iflag=nofollow,nonblock bs=65 count=1 status=none 2>/dev/null; then
+# Uebernehmen, bevor irgendetwas gelesen wird: ein rename(2) auf einen eigenen
+# Namen im selben Verzeichnis. Der Daemon zieht einen Auftrag, den niemand
+# abholt, genauso zurueck -- er benennt ihn um --, und rename ist ein einziger
+# Systemaufruf: wer zuerst umbenennt, dem gehoert der Auftrag, und der andere
+# findet den Namen leer. Ein "rm -f" nach dem Lesen saehe das nicht: es meldet
+# auch dann Erfolg, wenn der Daemon den Auftrag schon zurueckgezogen hat, und
+# es loeschte einen neueren Auftrag, der inzwischen unter dem Namen liegt.
+# rename folgt keinem Symlink; die Vorsilbe .holzkube-manager-tmp- sieht die
+# Path-Unit nicht, und der Daemon raeumt sie beim Start weg.
+CLAIM="$(dirname -- "$ORDER")/.holzkube-manager-tmp-helper-claim-$$"
+if ! mv -f -T -- "$ORDER" "$CLAIM" 2>/dev/null; then
   if [[ ! -e $ORDER && ! -L $ORDER ]]; then
     # Der Daemon hat ihn zurueckgezogen, bevor er hier ankam. Das ist kein
     # verworfener Auftrag, und "last" bleibt, wie es ist.
     log "Auftrag vor der Abholung zurueckgezogen"
     exit 0
   fi
+  log "FEHLER: Auftrag nicht entfernbar"
+  record - - failed
+  exit 1
 fi
 
-# Verbrauchen, bevor irgendetwas geschieht: ein Reboot darf den Auftrag nach
-# dem Boot nicht noch einmal finden, und die Path-Unit soll nicht erneut
-# feuern.
-if ! rm -f -- "$ORDER"; then
+# Ab hier gehoert der Auftrag diesem Lauf. Die Art nur fuer den
+# protokollierten Grund; entschieden wird beim Lesen.
+kind=regular
+if [[ -L $CLAIM ]]; then
+  kind=symlink
+elif [[ ! -f $CLAIM ]]; then
+  kind=not-regular
+fi
+mtime=$(stat -c %Y -- "$CLAIM" 2>/dev/null || echo 0)
+
+work=$(mktemp -d)
+trap 'rm -rf -- "$work"' EXIT
+
+# Das einzige Lesen: O_NOFOLLOW gegen einen untergeschobenen Symlink,
+# O_NONBLOCK gegen ein FIFO, hoechstens 65 Byte -- eins mehr als ein Auftrag
+# lang sein darf, damit ein zu langer als zu lang erkannt wird. Scheitert es,
+# fehlt $work/o, und der Auftrag wird unten verworfen.
+dd if="$CLAIM" of="$work/o" iflag=nofollow,nonblock bs=65 count=1 status=none 2>/dev/null || :
+
+# Verbrauchen, bevor irgendetwas geschieht: der Name des Auftrags ist schon
+# frei, jetzt geht auch die Datei. Ein Reboot findet danach nichts mehr.
+if ! rm -f -- "$CLAIM"; then
   log "FEHLER: Auftrag nicht entfernbar"
   record - - failed
   exit 1
