@@ -531,7 +531,9 @@ describe('the wall', () => {
 })
 
 const HOST_NAME = 'manager-01.homelab.example'
-const HOST_WARN = { name: HOST_NAME, state: 'warn', reason: 'cpu_thermal 82.1 °C ≥ 80 °C' }
+// The server's reason verbatim: figure first, so a tile that truncates keeps
+// the reading (13-UI-SPEC checker resolution 4).
+const HOST_WARN = { name: HOST_NAME, state: 'warn', reason: '82.1 °C ≥ 80 °C · cpu_thermal' }
 
 /** The host tile, or null when there is none. */
 function hostTile(container: HTMLElement): HTMLElement | null {
@@ -550,7 +552,7 @@ describe('the host tile (D-14)', () => {
     expect(tile.dataset.state).toBe('warn')
     expect(tile.className).toContain('bg-amber-700')
     expect(tile).toHaveTextContent(HOST_NAME)
-    expect(within(tile).getByText('manager · cpu_thermal 82.1 °C ≥ 80 °C')).toBeInTheDocument()
+    expect(within(tile).getByText('manager · 82.1 °C ≥ 80 °C · cpu_thermal')).toBeInTheDocument()
     // First among the nodes, and in the same grid as them.
     const grid = tile.parentElement as HTMLElement
     expect(grid.firstElementChild).toBe(tile)
