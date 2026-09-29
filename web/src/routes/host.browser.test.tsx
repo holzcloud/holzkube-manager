@@ -1,5 +1,6 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { cleanup, render } from '@testing-library/react'
+import { cleanup, render, screen, within } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { page } from 'vitest/browser'
 import { api, type Host, historySchema, hostSchema } from '@/api'
@@ -39,6 +40,26 @@ vi.mock('@/routes/__root', () => ({
 }))
 
 const PHONE_WIDTH = 390
+
+/** The host actions with the helper installed and nothing placed (Phase 13). */
+const HELPER_INSTALLED = {
+  order: null,
+  result: {
+    readable: false,
+    reason: { code: 'host-action.no-result', message: 'The helper has recorded nothing yet.' },
+  },
+  available: true,
+  missing: [],
+  install_commands: [],
+}
+
+/** The commands the server sends to install the helper (hostaction.InstallCommands). */
+const INSTALL_COMMANDS = [
+  'sudo install -o root -g root -m 0755 deploy/holzkube-manager-host.sh /usr/local/sbin/holzkube-manager-host',
+  'sudo install -o root -g root -m 0644 deploy/holzkube-manager-host.path deploy/holzkube-manager-host.service /etc/systemd/system/',
+  'sudo systemctl daemon-reload',
+  'sudo systemctl enable --now holzkube-manager-host.path',
+]
 
 const read = <T,>(value: T) => ({ readable: true as const, value })
 const hidden = (code: string, message: string) => ({
@@ -101,6 +122,7 @@ function shape({
   service = {},
   live = {},
   container = false,
+  actions,
   health = {
     state: 'ok',
     summary: 'Temperatures and filesystems are below their thresholds.',
@@ -112,12 +134,14 @@ function shape({
   service?: Record<string, unknown>
   live?: Record<string, unknown>
   container?: boolean
+  actions?: Record<string, unknown>
   health?: Record<string, unknown>
 }): Host {
   return hostSchema.parse({
     observed_at: '2026-09-28T10:00:03Z',
     container,
     health,
+    actions,
     device: {
       hostname: read('example-host'),
       model: read('Raspberry Pi 5 Model B Rev 1.0'),
@@ -309,12 +333,12 @@ function longWarning(): { host: Host; sentence: string } {
   return { host, sentence }
 }
 
-function renderAtPhoneWidth(host: Host): HTMLElement {
+function renderAtPhoneWidth(host: Host, sessionRole?: string): HTMLElement {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   const { container } = render(
     <QueryClientProvider client={client}>
       <div data-testid="phone" style={{ width: `${PHONE_WIDTH}px` }}>
-        <HostView host={host} stale={null} />
+        <HostView host={host} stale={null} sessionRole={sessionRole} />
       </div>
     </QueryClientProvider>,
   )
@@ -444,5 +468,98 @@ describe('/host at 390 px', () => {
     expect(phone.textContent).toContain('Warning — 2 thresholds crossed')
     expect([...phone.querySelectorAll('li')].some((li) => li.textContent === sentence)).toBe(true)
     expect(overflowing(phone)).toEqual([])
+  })
+
+  it('lays the four host actions out as two rows of two, each a thumb wide and tall', () => {
+    const phone = renderAtPhoneWidth(shape({ actions: HELPER_INSTALLED }), 'operator')
+    const group = within(phone).getByRole('group', { name: 'Host actions' })
+    const buttons = within(group).getAllByRole('button')
+    expect(buttons.map((b) => b.textContent)).toEqual([
+      'Check for updates and install',
+      'Restart service',
+      'Restart host',
+      'Shut down host',
+    ])
+    const boxes = buttons.map((b) => b.getBoundingClientRect())
+    for (const [k, r] of boxes.entries()) {
+      expect(r.height, `${buttons[k]?.textContent} height`).toBeGreaterThanOrEqual(44)
+      expect(r.width, `${buttons[k]?.textContent} width`).toBeGreaterThanOrEqual(150)
+    }
+    const [update, service, reboot, poweroff] = boxes as [DOMRect, DOMRect, DOMRect, DOMRect]
+    // Row 1 is this service, row 2 the machine; left column, right column.
+    expect(service.top).toBe(update.top)
+    expect(poweroff.top).toBe(reboot.top)
+    expect(reboot.top).toBeGreaterThanOrEqual(update.bottom)
+    expect(reboot.left).toBe(update.left)
+    expect(poweroff.left).toBe(service.left)
+    expect(service.left).toBeGreaterThanOrEqual(update.right)
+    // The label is visible, not only an icon.
+    for (const b of buttons) {
+      expect(b.getBoundingClientRect().width).toBeGreaterThan(44)
+    }
+    expect(overflowing(phone)).toEqual([])
+  })
+
+  it('fits the helper notice: three missing pieces, the commands scroll inside their own box', () => {
+    const phone = renderAtPhoneWidth(
+      shape({
+        actions: {
+          ...HELPER_INSTALLED,
+          available: false,
+          missing: [
+            { item: 'script', path: '/usr/local/sbin/holzkube-manager-host' },
+            { item: 'path-unit', path: '/etc/systemd/system/holzkube-manager-host.path' },
+            {
+              item: 'not-enabled',
+              path: '/etc/systemd/system/paths.target.wants/holzkube-manager-host.path',
+            },
+          ],
+          install_commands: INSTALL_COMMANDS,
+        },
+      }),
+      'admin',
+    )
+    expect(phone.getBoundingClientRect().width).toBe(PHONE_WIDTH)
+    expect(phone.textContent).toContain('Host actions need the helper, which is not installed')
+    expect(phone.querySelectorAll('li').length).toBeGreaterThanOrEqual(3)
+    const pre = phone.querySelector('pre')
+    if (pre === null) throw new Error('no commands block')
+    expect(pre.textContent).toBe(INSTALL_COMMANDS.join('\n'))
+    // The longest command is wider than a phone: it scrolls inside the block.
+    expect(pre.scrollWidth).toBeGreaterThan(pre.clientWidth)
+    expect(pre.getBoundingClientRect().right).toBeLessThanOrEqual(PHONE_WIDTH + 0.5)
+    expect(overflowing(phone)).toEqual([])
+  })
+
+  it('wraps a 40-character hostname inside the Restart host dialog', async () => {
+    const hostname = 'example-host-with-a-forty-character-name'
+    expect(hostname).toHaveLength(40)
+    renderAtPhoneWidth(
+      shape({ actions: HELPER_INSTALLED, device: { hostname: read(hostname) } }),
+      'operator',
+    )
+    await userEvent.click(screen.getByRole('button', { name: 'Restart host' }))
+    const dialog = await screen.findByRole('dialog')
+    const box = dialog.getBoundingClientRect()
+    expect(box.left).toBeGreaterThanOrEqual(0)
+    expect(box.right).toBeLessThanOrEqual(PHONE_WIDTH + 0.5)
+
+    const title = within(dialog).getByRole('heading', { name: `Restart ${hostname}?` })
+    const label = dialog.querySelector<HTMLElement>('label[for="host-action-confirm"]')
+    if (label === null) throw new Error('no label for the typed field')
+    expect(label.textContent).toBe(`Type ${hostname} to confirm`)
+    for (const el of [title, label]) {
+      const range = document.createRange()
+      range.selectNodeContents(el)
+      const rects = [...range.getClientRects()]
+      expect(rects.length).toBeGreaterThan(0)
+      for (const r of rects) {
+        expect(r.left, describeEl(el)).toBeGreaterThanOrEqual(box.left - 0.5)
+        expect(r.right, describeEl(el)).toBeLessThanOrEqual(box.right + 0.5)
+      }
+    }
+    // It did wrap: the name spans more than one line somewhere.
+    const name = within(title).getByText(hostname)
+    expect(name.getClientRects().length).toBeGreaterThan(1)
   })
 })

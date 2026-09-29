@@ -8,7 +8,14 @@ import {
   RotateCw,
 } from 'lucide-react'
 import { type FormEvent, Fragment, type ReactNode, useEffect, useRef, useState } from 'react'
-import { api, type Host, type HostAction, type HostOrder, roleAtLeast } from '@/api'
+import {
+  api,
+  type Host,
+  type HostAction,
+  type HostHelperMissing,
+  type HostOrder,
+  roleAtLeast,
+} from '@/api'
 import { Problem } from '@/components/Problem'
 import { Button } from '@/components/ui/button'
 import {
@@ -677,6 +684,64 @@ export function HostOrderStatus({
           Dismiss status
         </Button>
       )}
+    </div>
+  )
+}
+
+const DEPLOY = (file: string) => <code className="font-mono text-xs">{file}</code>
+
+/** What each missing piece is and where it comes from (UI-SPEC "Missing" rows). */
+const MISSING_SENTENCE: Record<HostHelperMissing['item'], ReactNode> = {
+  script: <>the helper script, from {DEPLOY('deploy/holzkube-manager-host.sh')}</>,
+  'path-unit': (
+    <>
+      the unit that watches for orders, from {DEPLOY('deploy/holzkube-manager-host.path')} (with{' '}
+      {DEPLOY('holzkube-manager-host.service')} beside it)
+    </>
+  ),
+  'not-enabled': <>{DEPLOY('holzkube-manager-host.path')} is installed but not enabled</>,
+}
+
+/**
+ * The helper is not installed (HACT-07, D-12): what is missing, in the
+ * server's order and only what is missing, and the commands that install it --
+ * the server's copy, which the install guide is held to byte for byte. The
+ * commands are selectable text and there is no copy button: the clipboard is
+ * refused outside a secure origin, which is where this product often runs.
+ * No button, no dismiss: it goes when a poll says the helper is installed.
+ */
+export function HostHelperNotice({
+  missing,
+  commands,
+}: {
+  missing: HostHelperMissing[]
+  commands: string[]
+}) {
+  return (
+    <div className={`rounded-md border px-3 py-2 text-sm ${SLATE}`}>
+      <p className="font-semibold">Host actions need the helper, which is not installed</p>
+      <p className="mt-1">
+        holzkube-manager never restarts or shuts down this machine itself. A small root-owned helper
+        does, and it knows exactly four orders. Until it is installed, the four buttons above stay
+        off.
+      </p>
+      <ul className="mt-2 space-y-1">
+        {missing.map((m) => (
+          <li key={m.item}>
+            <span className="font-mono break-all">{m.path}</span> — {MISSING_SENTENCE[m.item]}
+          </li>
+        ))}
+      </ul>
+      {commands.length > 0 && (
+        <pre className="mt-2 overflow-x-auto rounded-sm bg-muted px-2 py-1 font-mono text-xs">
+          {commands.join('\n')}
+        </pre>
+      )}
+      <p className="mt-2 text-xs">
+        The files are in {DEPLOY('deploy/')} in the release archive;{' '}
+        {DEPLOY('deploy/HOST-HELPER.md')} explains each step. The service's own unit keeps every
+        line of its hardening.
+      </p>
     </div>
   )
 }
