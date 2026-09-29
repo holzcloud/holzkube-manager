@@ -1,8 +1,12 @@
 package httpapi_test
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"io/fs"
 	"net/http"
+	"net/url"
 	"os"
 	"reflect"
 	"strings"
@@ -10,6 +14,7 @@ import (
 	"testing"
 	"testing/fstest"
 
+	"github.com/holzcloud/holzkube-manager/internal/auth"
 	"github.com/holzcloud/holzkube-manager/internal/host"
 	"github.com/holzcloud/holzkube-manager/internal/host/hostaction"
 	"github.com/holzcloud/holzkube-manager/internal/jobs"
@@ -92,7 +97,7 @@ func requireRefused(t *testing.T, h *harness, code string) {
 	}
 
 	for _, a := range hostaction.Actions() {
-		tok, _ := h.confirmer.Issue(jobs.Intent{Action: "host." + string(a), Machine: hostTarget})
+		tok := sessionHostToken(t, h.confirmer, h.srv.URL, h.client, "host."+string(a))
 		path := "/api/v1/host/actions/" + string(a)
 		resp, raw := h.do(t, http.MethodPost, path, map[string]string{"confirmation": tok})
 		if resp.StatusCode != http.StatusConflict {
@@ -198,15 +203,31 @@ func TestHostActionsNeedTheHelper(t *testing.T) {
 			"action": "host.update", "typed": "example-host",
 		})
 		if resp.StatusCode != http.StatusOK {
-			t.Errorf("installed: POST /api/v1/host/confirm: %d, want 200 (%s)", resp.StatusCode, raw)
+			t.Fatalf("installed: POST /api/v1/host/confirm: %d, want 200 (%s)", resp.StatusCode, raw)
 		}
-		tok, _ := h.confirmer.Issue(jobs.Intent{Action: "host.update", Machine: hostTarget})
-		resp, raw = h.do(t, http.MethodPost, "/api/v1/host/actions/update", map[string]string{"confirmation": tok})
+		var confirmed struct {
+			Token string `json:"token"`
+		}
+		if err := json.Unmarshal(raw, &confirmed); err != nil || confirmed.Token == "" {
+			t.Fatalf("installed: confirm answer %s: %v", raw, err)
+		}
+		resp, raw = h.do(t, http.MethodPost, "/api/v1/host/actions/update", map[string]string{"confirmation": confirmed.Token})
 		if resp.StatusCode != http.StatusAccepted {
 			t.Errorf("installed: POST /api/v1/host/actions/update: %d, want 202 (%s)", resp.StatusCode, raw)
 		}
 		if _, err := os.Lstat(h.dataDir + "/" + hostaction.OrderFileName); err != nil {
 			t.Errorf("installed: no order was placed: %v", err)
+		}
+
+		// sessionHostToken's tokens are what the refusals above are tried
+		// with; this is the proof that the route would take one.
+		if err := os.Remove(h.dataDir + "/" + hostaction.OrderFileName); err != nil {
+			t.Fatal(err)
+		}
+		tok := sessionHostToken(t, h.confirmer, h.srv.URL, h.client, "host.update")
+		resp, raw = h.do(t, http.MethodPost, "/api/v1/host/actions/update", map[string]string{"confirmation": tok})
+		if resp.StatusCode != http.StatusAccepted {
+			t.Errorf("installed: a sessionHostToken token: %d, want 202 (%s)", resp.StatusCode, raw)
 		}
 	})
 }
@@ -230,4 +251,34 @@ func TestHostActionsInAContainer(t *testing.T) {
 	if len(v.Actions.Missing) != 0 {
 		t.Errorf("actions.missing = %+v, want nothing: the helper's files are all there", v.Actions.Missing)
 	}
+}
+
+// sessionHostToken issues a host token exactly as the confirm route would for
+// the session in client's cookie jar: single use, bound to the action, the
+// host and a digest of the session id (WR-05). It is for the tests whose
+// confirm route refuses before it would hand one out, so that the action
+// route is tried with a token that is valid in every respect but the one the
+// test is about.
+func sessionHostToken(t *testing.T, confirmer *jobs.Confirmer, base string, client *http.Client, action string) string {
+	t.Helper()
+	u, err := url.Parse(base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if client.Jar == nil {
+		t.Fatal("the client keeps no cookies, so it has no session to bind a host token to")
+	}
+	for _, c := range client.Jar.Cookies(u) {
+		if c.Name == auth.CookieName {
+			sum := sha256.Sum256([]byte(c.Value))
+			tok, _ := confirmer.IssueOnce(jobs.Intent{
+				Action:  action,
+				Machine: hostTarget,
+				Params:  map[string]string{"session": hex.EncodeToString(sum[:])},
+			})
+			return tok
+		}
+	}
+	t.Fatalf("no %s cookie for %s", auth.CookieName, base)
+	return ""
 }
