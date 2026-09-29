@@ -5,16 +5,16 @@ milestone_name: Host & Telefon
 current_phase: 13
 current_phase_name: Host-Aktionen über einen root-eigenen Helfer
 status: executing
-stopped_at: Completed 13-03-PLAN.md
-last_updated: "2026-09-29T01:35:13.358Z"
+stopped_at: Completed 13-04-PLAN.md
+last_updated: "2026-09-29T01:45:29.076Z"
 last_activity: 2026-09-29
 last_activity_desc: Phase 13 execution started
-state_head: fe6ff01b0a64c729fdd3006c5d98de4a4de72c2a
+state_head: 69e0f9f6709c94f9d717ce64dccf5bddee720c4c
 progress:
   total_phases: 4
   completed_phases: 2
   total_plans: 24
-  completed_plans: 18
+  completed_plans: 19
   percent: 50
 ---
 
@@ -33,7 +33,7 @@ See: .planning/PROJECT.md (updated 2026-09-28)
 ## Current Position
 
 Phase: 13 (Host-Aktionen über einen root-eigenen Helfer) — EXECUTING
-Plan: 4 of 9
+Plan: 5 of 9
 Status: Ready to execute
 Last activity: 2026-09-29 — Phase 13 execution started
 
@@ -107,6 +107,9 @@ Siehe `PROJECT.md`, die `MILESTONE-*.md`-Dateien und für v1.18 den Abschnitt
 - [Phase 13]: Wall host sentences are figure first (Health.Public); page Warnings stay name first
 - [Phase 13]: An untyped fallback thermal zone is named in Unread by its directory name
 - [Phase 13]: 13-03: the audit redactor keeps a non-allowlisted key with <redacted>; host-action audit tests assert the value, not key absence
+- [Phase 13]: 13-04: an oversize order is journalled as 'zu lang (mehr als 64 Byte)' -- the helper reads at most 65 bytes and states no length it did not measure
+- [Phase 13]: 13-04: the helper's age window names two reasons, 'veraltet' (>60 s old) and 'aus der Zukunft' (>5 s ahead)
+- [Phase 13]: 13-04: ReadResult requires an absolute path; a relative one is refused
 
 ### Blockers/Concerns
 
@@ -121,8 +124,8 @@ Siehe `PROJECT.md`, die `MILESTONE-*.md`-Dateien und für v1.18 den Abschnitt
 
 ## Session Continuity
 
-Last session: 2026-09-29T01:35:13.153Z
-Stopped at: Completed 13-03-PLAN.md
+Last session: 2026-09-29T01:45:28.956Z
+Stopped at: Completed 13-04-PLAN.md
 Resume file: None
 Next: `/gsd-plan-phase 11`
 
@@ -148,3 +151,4 @@ Next: `/gsd-plan-phase 11`
 | Phase 13 P01 | 32min | 2 tasks | 21 files |
 | Phase 13 P02 | 13min | 2 tasks | 8 files |
 | Phase 13 P03 | 14 min | 2 tasks | 1 files |
+| Phase 13 P04 | 9min | 2 tasks | 4 files |
