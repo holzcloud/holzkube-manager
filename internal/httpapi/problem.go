@@ -158,6 +158,21 @@ const (
 	// was, and the client says to wait for the first to be answered.
 	CodeHostOrderPending = "conflict.host-order-pending"
 
+	// CodeHostHelperMissing: a host action was asked for while the root
+	// helper that carries it out is not installed completely (Phase 13 D-12).
+	// A conflict rather than a validation failure: the request is well
+	// formed, and this machine is not in a state that can carry it out. No
+	// order was placed; GET /api/v1/host names what is missing and the
+	// commands that install it.
+	CodeHostHelperMissing = "conflict.host-helper-missing"
+
+	// CodeHostInContainer: a host action was asked for while the daemon runs
+	// in a container (Phase 13 D-14). A conflict for the same reason: the
+	// request is well formed, and a container has no host of its own to
+	// restart, switch off or update -- host actions exist only with the
+	// systemd installation.
+	CodeHostInContainer = "conflict.host-in-container"
+
 	// CodeRefusedKind: an object of a kind this product will not render. Today
 	// that is Secret and only Secret: its data is base64 rather than
 	// encryption, so showing it would put the credential on the screen. A

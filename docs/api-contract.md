@@ -1746,6 +1746,8 @@ answered; the `202` is written before the helper can act.
 
 | Status | Code | When |
 |---|---|---|
+| `409` | `conflict.host-in-container` | the daemon runs in a container. There are host actions only with the systemd installation; the confirm route refuses too, and nothing is placed. Asked first. |
+| `409` | `conflict.host-helper-missing` | the root helper is not installed completely (see `actions.missing` below). The confirm route refuses too, and the action route refuses before it looks at the token: nothing is placed. |
 | `409` | `conflict.host-order-pending` | an order still waits for the helper. There is one slot and no queue: the second order is refused and the first stays exactly as it was. |
 | `502` | `upstream.host-unavailable` | the daemon was started without a host reader, host actions or confirmations. |
 
@@ -1780,7 +1782,15 @@ order); a `started` one always has both.
 ```json
 "actions": {
   "order": {"id": "3f9c2a7b1d4e8f60", "action": "update", "placed_at": "2026-09-28T10:00:05Z", "state": "picked-up"},
-  "result": {"readable": true, "value": {"id": "3f9c2a7b1d4e8f60", "action": "update", "outcome": "started", "at": "2026-09-28T10:00:06Z"}}
+  "result": {"readable": true, "value": {"id": "3f9c2a7b1d4e8f60", "action": "update", "outcome": "started", "at": "2026-09-28T10:00:06Z"}},
+  "available": true,
+  "missing": [],
+  "install_commands": [
+    "sudo install -o root -g root -m 0755 deploy/holzkube-manager-host.sh /usr/local/sbin/holzkube-manager-host",
+    "sudo install -o root -g root -m 0644 deploy/holzkube-manager-host.path deploy/holzkube-manager-host.service /etc/systemd/system/",
+    "sudo systemctl daemon-reload",
+    "sudo systemctl enable --now holzkube-manager-host.path"
+  ]
 }
 ```
 
@@ -1793,6 +1803,29 @@ order); a `started` one always has both.
   message names the rule, never the file's bytes; at most 128 bytes are read).
   An `id` and `action` of `-` are sent as empty strings. A client matches
   `result.value.id` against the order it placed.
+- `available` is whether a host action can be placed at all: `false` when the
+  daemon runs in a container (`container` is `true`), when anything in
+  `missing` is listed, or when the daemon was started without host actions.
+  The action routes refuse with `409` exactly when it is `false`, so a client
+  that offers the actions only when it is `true` is never refused for this.
+- `missing` lists what of the root helper is not installed, never `null`, in
+  this order, each item `{"item": …, "path": …}`:
+  - `script`, path `/usr/local/sbin/holzkube-manager-host`: absent, or not a
+    regular executable file owned by root and writable by nobody else;
+  - `path-unit`, path `/etc/systemd/system/holzkube-manager-host.path` or
+    `/etc/systemd/system/holzkube-manager-host.service`, whichever of the two
+    unit files is absent or not a regular file (one item for the pair);
+  - `not-enabled`, path
+    `/etc/systemd/system/paths.target.wants/holzkube-manager-host.path`: the
+    units are there but the path unit is not enabled.
+
+  The daemon reads these files and asks systemd nothing -- its unit gives it no
+  way to reach systemd, and that hardening stays. A path unit that is enabled
+  but stopped therefore reads as installed; an order then is withdrawn after
+  10 s, and the daemon's log names `systemctl status holzkube-manager-host.path`.
+- `install_commands` are the commands that install the helper, run from an
+  unpacked release archive: the same four lines as `deploy/HOST-HELPER.md`,
+  always sent.
 
 ### GET /api/v1/host/history: the host's last day
 
