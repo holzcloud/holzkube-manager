@@ -31,8 +31,9 @@
 // An order nobody picks up is not harmless: the helper might be installed but
 // stopped, and whoever starts it later would carry out a reboot nobody asked
 // for any more. So the Box withdraws an order the helper has not taken within
-// DefaultPickupTimeout (D-13), and withdraws any order it finds when it is
-// built -- that one was placed by a previous process (R9). Withdrawing is a
+// DefaultPickupTimeout (D-13), withdraws any order it finds when it is
+// built -- that one was placed by a previous process (R9) -- and withdraws its
+// own last order if it still waits when the process ends (Close). Withdrawing is a
 // claim through fsstore.Claim: a rename, so whoever acts first, the helper or
 // this process, owns the order, and the other sees it gone (R8).
 //
@@ -119,7 +120,8 @@ const (
 	// before it acts, so gone means taken -- what came of it is the result.
 	StatePickedUp OrderState = "picked-up"
 	// StateWithdrawn is an order this process took back because the helper had
-	// not picked it up within the pickup timeout (D-13). Nothing was done.
+	// not picked it up within the pickup timeout (D-13), or because the process
+	// was stopping. Nothing was done.
 	StateWithdrawn OrderState = "withdrawn"
 )
 
@@ -160,7 +162,8 @@ type Config struct {
 	// is there. Production: fsstore.Claim.
 	//
 	// It is what withdraws orders: the one the helper did not pick up within
-	// PickupTimeout, and any order present when the Box is built. A Box without
+	// PickupTimeout, any order present when the Box is built, and the last
+	// order if it still waits when the Box is closed. A Box without
 	// Claim never withdraws and never sweeps -- no timer is armed, so none can
 	// call a nil function. The API tests build such Boxes; the daemon never
 	// does.
@@ -369,14 +372,35 @@ func (b *Box) Result() (Result, error) {
 	return ReadResult(b.cfg.FS, b.cfg.ResultPath)
 }
 
-// Close stops the pending pickup timer. A timer that fires anyway afterwards
-// withdraws nothing.
+// Close stops the pending pickup timer and withdraws the last order if it
+// still waits. A timer that fires anyway afterwards withdraws nothing.
+//
+// The withdrawal is not left to the next start's sweep: the helper can run
+// before this daemon does -- the path unit fires at boot, long before the
+// daemon starts -- and an order left in the slot when the process ends would
+// then be guarded only by the helper's age window, which is measured against a
+// wall clock a Pi restores from a saved timestamp. An order the helper has
+// already taken is gone, and the claim finds nothing.
 func (b *Box) Close() {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	b.closed = true
 	if b.stop != nil {
 		b.stop()
 		b.stop = nil
 	}
+	if !b.closed && b.cfg.Claim != nil && b.last != nil && b.last.State != StateWithdrawn {
+		_, err := b.cfg.Claim(b.orderPath(), "shutdown-"+b.last.ID)
+		switch {
+		case err == nil:
+			b.last.State = StateWithdrawn
+			b.cfg.Logger.Warn("host order withdrawn: holzkube-manager stopped before the helper picked it up; nothing was done",
+				"id", b.last.ID, "action", string(b.last.Action))
+		case errors.Is(err, fs.ErrNotExist):
+			// The helper took it, or the timer withdrew it: nothing waits.
+		default:
+			b.cfg.Logger.Error("could not withdraw a host order at shutdown",
+				"id", b.last.ID, "action", string(b.last.Action), "err", err)
+		}
+	}
+	b.closed = true
 }

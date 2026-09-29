@@ -298,10 +298,16 @@ header follows the order from start to end:
   restart that was no longer wanted; nothing was done. `systemctl status
   holzkube-manager-host.path` shows what the unit is doing.
 
-One order at a time: while one waits for the helper, the buttons are off and a
-second one is refused. An order left over when holzkube-manager starts -- from
-a process that ended before the helper took it -- is withdrawn too, never
-carried out late.
+One order at a time: while one waits for the helper, and while a restart or
+shutdown it started is still under way, the buttons are off, and a second
+order is refused. An order that still waits when holzkube-manager stops is
+withdrawn as it stops, and one it finds when it starts is withdrawn too. The
+helper can run at boot before holzkube-manager does, though, and for an order
+that was left behind all the same -- a power cut in the seconds before the
+helper took it -- the net is the helper's age window: it rejects an order older
+than a minute. That window is measured against the machine's clock, which a
+board without a battery-backed clock restores from a saved time at boot, so it
+is a net and not a guarantee.
 
 **Not in a container.** A container has no host of its own to restart, switch
 off or update, so there the four buttons stay off and say so; host actions

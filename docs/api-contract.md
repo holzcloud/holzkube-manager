@@ -1803,6 +1803,10 @@ out a reboot nobody asked for any more. So:
   warning naming `systemctl status holzkube-manager-host.path`. The path unit
   starts the helper within a second of the order appearing; ten seconds
   without a pickup means nothing is watching.
+- **The shutdown withdrawal.** A daemon that stops while its last order still
+  waits withdraws it the same way as it stops, and logs that nothing was done:
+  at boot the helper can run before the daemon starts, so the startup
+  withdrawal below would come too late for it.
 - **The startup withdrawal.** A daemon that finds an order in the slot when it
   starts withdraws it the same way before it serves: it has placed none yet,
   so that one is a previous process's, and it must not wait for a helper
