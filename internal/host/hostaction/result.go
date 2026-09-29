@@ -75,8 +75,8 @@ var idPattern = regexp.MustCompile(`^[0-9a-f]{16}$`)
 // An absent file is ErrNoResult. Everything that is not exactly what the
 // script writes is an error that names the rule, alongside the zero Result.
 func ReadResult(fsys fs.FS, path string) (Result, error) {
-	name := strings.TrimPrefix(path, "/")
-	if !fs.ValidPath(name) {
+	name, absolute := strings.CutPrefix(path, "/")
+	if !absolute || !fs.ValidPath(name) {
 		return Result{}, fmt.Errorf("the host helper's result path %s is not a clean absolute path", path)
 	}
 
