@@ -8,6 +8,7 @@ import (
 	"io/fs"
 	"math"
 	"runtime"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -143,9 +144,20 @@ func (c *Collector) Read(ctx context.Context) View {
 	// From the same reading, so the page's markers, its meters and its header
 	// cannot disagree.
 	v.Health = Assess(v.Live)
-	v.Actions = c.readActions()
+	v.Actions = c.readActions(v.Container)
 
 	return v
+}
+
+// InContainer reports whether this process runs in a container (D-17), read
+// now through the Collector's FS: the host action routes refuse there (D-14).
+// False on a platform this package has no readings for, where Read says
+// container false as well.
+func (c *Collector) InContainer() bool {
+	if platformUnsupported(c.cfg.Sys) {
+		return false
+	}
+	return detectContainer(c.cfg.FS)
 }
 
 // readUnsupported is the answer on a platform with no readings (a darwin
@@ -178,9 +190,16 @@ func (c *Collector) readUnsupported(v View, now time.Time) View {
 	// No helper result is read here either: the helper is a systemd unit on
 	// a Linux host, and a darwin build has nothing to ask. The order is this
 	// process's own fact and stays.
-	v.Actions = Actions{Result: Hidden[hostaction.Result](r)}
+	// Nor are actions available: there is no systemd to carry them out. What
+	// is missing and how to install it are stated all the same.
+	v.Actions = Actions{
+		Result:          Hidden[hostaction.Result](r),
+		Missing:         []hostaction.Missing{},
+		InstallCommands: slices.Clone(hostaction.InstallCommands),
+	}
 	if c.cfg.Actions != nil {
 		v.Actions.Order = c.cfg.Actions.Order()
+		v.Actions.Missing = c.cfg.Actions.Missing()
 	}
 	return v
 }
@@ -193,14 +212,29 @@ const (
 )
 
 // readActions fills the host actions' part of the answer: the last order this
-// process placed, and what the helper last recorded. The reader's error names
-// the rule a file broke, never its bytes, so it can be shown.
-func (c *Collector) readActions() Actions {
+// process placed, what the helper last recorded, and whether an action can be
+// placed at all -- with what is missing and how to install it. The reader's
+// error names the rule a file broke, never its bytes, so it can be shown.
+//
+// Available is decided here and by the same two questions the routes ask
+// (InContainer, the Box's Missing), so the page never offers a button the
+// server then refuses.
+func (c *Collector) readActions(container bool) Actions {
 	box := c.cfg.Actions
 	if box == nil {
-		return Actions{Result: Hidden[hostaction.Result](Reason{Code: CodeNoResult, Message: noActionsMessage})}
+		return Actions{
+			Result:          Hidden[hostaction.Result](Reason{Code: CodeNoResult, Message: noActionsMessage}),
+			Missing:         []hostaction.Missing{},
+			InstallCommands: slices.Clone(hostaction.InstallCommands),
+		}
 	}
-	a := Actions{Order: box.Order()}
+	missing := box.Missing()
+	a := Actions{
+		Order:           box.Order(),
+		Available:       !container && len(missing) == 0,
+		Missing:         missing,
+		InstallCommands: slices.Clone(hostaction.InstallCommands),
+	}
 	result, err := box.Result()
 	switch {
 	case errors.Is(err, hostaction.ErrNoResult):

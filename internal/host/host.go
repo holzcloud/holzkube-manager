@@ -132,6 +132,21 @@ type View struct {
 type Actions struct {
 	Order  *hostaction.Order          `json:"order"`
 	Result Reading[hostaction.Result] `json:"result"`
+
+	// Available is whether this machine can carry out a host action at all:
+	// the daemon does not run in a container (D-14), the helper is installed
+	// completely (Missing is empty), and this instance was started with host
+	// actions. The routes refuse exactly when it is false.
+	Available bool `json:"available"`
+	// Missing lists the pieces of the helper that are not installed, in the
+	// order hostaction.Detect reports them (script, path-unit, not-enabled).
+	// Never null: empty when the helper is installed, and when this instance
+	// has no host actions to ask for.
+	Missing []hostaction.Missing `json:"missing"`
+	// InstallCommands are the commands that install the helper, exactly
+	// hostaction.InstallCommands -- the page shows them, it does not keep a
+	// copy of its own.
+	InstallCommands []string `json:"install_commands"`
 }
 
 // Service is holzkube-manager itself on this machine (HOST-02, HOST-03).
