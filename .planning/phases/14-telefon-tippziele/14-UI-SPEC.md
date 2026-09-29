@@ -1,7 +1,8 @@
 ---
 phase: "14"
 slug: "telefon-tippziele"
-status: draft
+status: approved
+reviewed_at: "2026-09-29"
 shadcn_initialized: true
 preset: "b4nI (radix-nova, neutral base, lucide, Manrope) — holzcloud-design tokens mapped in web/src/index.css"
 created: "2026-09-29"
@@ -80,7 +81,7 @@ single places"):
 | `web/src/components/Sidebar.tsx` | the navigation `Link`s (`py-1.5 text-sm`, ~32 px) | add `max-md:min-h-11`; the `nav` adds `max-md:overflow-y-auto` (see "Mobile navigation") |
 | `web/src/components/WhatsNew.tsx` | the version button in the sidebar (`text-xs`, ~16 px) | add `max-md:flex max-md:min-h-11 max-md:items-center` |
 | `web/src/components/WhatsNew.tsx` | the release chips in the panel (`px-2.5 py-1 text-sm`, ~30 px) | add `max-md:min-h-11 max-md:px-3` |
-| `web/src/components/NodeActions.tsx` | Reset dialog: flag checkboxes (`<label className="flex items-start gap-2">`) and the disk rows (bare `input` with `aria-label`) | the established pattern of `NodeSchedulingActions.tsx`: `label` gets `max-md:min-h-11`, the checkbox `max-md:mt-2.5 max-md:size-6`. Each disk row becomes a `<label>` around its checkbox and its text, so the row is the target (the audit already measures a checkbox through its label). |
+| `web/src/components/NodeActions.tsx` | Reset dialog: flag checkboxes (`<label className="flex items-start gap-2">`) and the disk rows (bare `input` with `aria-label`) | the established pattern of `NodeSchedulingActions.tsx`: `label` gets `max-md:min-h-11`, the checkbox `max-md:mt-3 max-md:size-6`. Each disk row becomes a `<label>` around its checkbox and its text, so the row is the target (the audit already measures a checkbox through its label). |
 | any other place the first red run names | whatever it is | the same two tools, in this order: `max-md:min-h-11` / `max-md:size-11` on the element's own box; for a row of chips or a checkbox, the label or chip grows, never the icon |
 
 ---
@@ -285,8 +286,9 @@ Exceptions:
   number (2026-09-17). Not on the 8-point grid by design; it is a target size, not a gap.
 - **12px** — `max-md:px-3` on Button `xs` and the What's new chips (the value Button `sm` already
   uses below `md`).
-- **10px** — `max-md:mt-2.5` on a checkbox inside a 44 px label, inherited verbatim from
-  `NodeSchedulingActions.tsx` (centres a 24 px box on a 20 px first line in a 44 px row).
+- *(checker fix)* The 24 px checkbox inside a 44 px label uses `max-md:mt-3` (12 px, on the
+  4-px grid) — here and, for consistency, in `NodeSchedulingActions.tsx`, whose `mt-2.5` changes
+  to `mt-3` in the same plan.
 - **0px** — `max-md:top-0 max-md:right-0` on the dialog close X and the toast close: the offset
   that keeps the icon's centre where it is today.
 
@@ -426,3 +428,13 @@ Binding for the planner — this phase edits the dialogs anyway:
    (not 32); the waiting notice is a polite live region; an old `Problem`
    clears when the typed text changes; the "no answer" phase and "recorded"
    meta line enter the Copywriting table.
+
+### Copy for the carried 13-UI-REVIEW items (checker fix)
+
+| State | Copy (verbatim) | Way out |
+|---|---|---|
+| Order status "no answer" (no result for this order) | "no answer: the helper recorded nothing for this order within 1 min. `journalctl -u holzkube-manager-host` says what happened." (already in code) | **Dismiss status**; the buttons return |
+| Order known only from the helper's result | meta line "recorded {time}" instead of "placed {time}" | — |
+| Reboot "back", boot time unknown | "done. The host restarted and holzkube-manager is back." | — |
+| Poweroff "back", boot time unknown | "the host was switched on again and holzkube-manager is back." | — |
+| Open dialog after a disabling reason appears | the reason line's own sentence, shown above the confirm, which is disabled | **Keep running** |
