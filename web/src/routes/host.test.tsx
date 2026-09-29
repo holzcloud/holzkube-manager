@@ -1796,6 +1796,122 @@ describe('the order status and the waiting notice', () => {
   })
 })
 
+const INSTALL_COMMANDS = [
+  'sudo install -o root -g root -m 0755 deploy/holzkube-manager-host.sh /usr/local/sbin/holzkube-manager-host',
+  'sudo install -o root -g root -m 0644 deploy/holzkube-manager-host.path deploy/holzkube-manager-host.service /etc/systemd/system/',
+  'sudo systemctl daemon-reload',
+  'sudo systemctl enable --now holzkube-manager-host.path',
+]
+const HELPER_HEADING = 'Host actions need the helper, which is not installed'
+const SCRIPT = { item: 'script', path: '/usr/local/sbin/holzkube-manager-host' }
+const PATH_UNIT = { item: 'path-unit', path: '/etc/systemd/system/holzkube-manager-host.path' }
+const NOT_ENABLED = {
+  item: 'not-enabled',
+  path: '/etc/systemd/system/paths.target.wants/holzkube-manager-host.path',
+}
+
+function helperMissing(missing: unknown[]) {
+  return helperInstalled({ available: false, missing, install_commands: INSTALL_COMMANDS })
+}
+
+function helperNotice(): HTMLElement | null {
+  return screen.queryByText(HELPER_HEADING)?.closest('div') ?? null
+}
+
+describe('the helper notice', () => {
+  it.each([
+    [1, [SCRIPT]],
+    [2, [SCRIPT, PATH_UNIT]],
+    [3, [SCRIPT, PATH_UNIT, NOT_ENABLED]],
+  ])("lists %i missing piece(s), in the server's order, and the install commands", (n, missing) => {
+    wrap(<HostView host={hostShape({ actions: helperMissing(missing) })} stale={null} />)
+
+    const notice = helperNotice()
+    if (notice === null) throw new Error('no helper notice')
+    expect(notice).toHaveClass('border-slate-500/40')
+    expect(notice).toHaveTextContent(
+      'holzkube-manager never restarts or shuts down this machine itself. A small root-owned helper does, and it knows exactly four orders. Until it is installed, the four buttons above stay off.',
+    )
+    const items = within(notice).getAllByRole('listitem')
+    expect(items).toHaveLength(n)
+    items.forEach((li, k) => {
+      const path = (missing[k] as { path: string }).path
+      expect(li.textContent?.startsWith(`${path} — `)).toBe(true)
+      expect(within(li).getByText(path)).toHaveClass('font-mono', 'break-all')
+    })
+    const pre = notice.querySelector('pre')
+    expect(pre?.textContent).toBe(INSTALL_COMMANDS.join('\n'))
+    expect(pre).toHaveClass('overflow-x-auto')
+    expect(notice).toHaveTextContent(
+      "The files are in deploy/ in the release archive; deploy/HOST-HELPER.md explains each step. The service's own unit keeps every line of its hardening.",
+    )
+    // Nothing to press here: the note goes when the helper is installed.
+    expect(within(notice).queryByRole('button')).toBeNull()
+  })
+
+  it('says what each piece is and where it comes from', () => {
+    wrap(
+      <HostView
+        host={hostShape({ actions: helperMissing([SCRIPT, PATH_UNIT, NOT_ENABLED]) })}
+        stale={null}
+      />,
+    )
+    const items = within(helperNotice() as HTMLElement).getAllByRole('listitem')
+    expect(items.map((li) => li.textContent)).toEqual([
+      '/usr/local/sbin/holzkube-manager-host — the helper script, from deploy/holzkube-manager-host.sh',
+      '/etc/systemd/system/holzkube-manager-host.path — the unit that watches for orders, from deploy/holzkube-manager-host.path (with holzkube-manager-host.service beside it)',
+      '/etc/systemd/system/paths.target.wants/holzkube-manager-host.path — holzkube-manager-host.path is installed but not enabled',
+    ])
+  })
+
+  it('shows nothing when nothing is missing', () => {
+    wrap(<HostView host={hostShape({ actions: helperInstalled() })} stale={null} />)
+    expect(helperNotice()).toBeNull()
+  })
+
+  it('shows nothing in a container: the container notice already says why', () => {
+    wrap(
+      <HostView
+        host={hostShape({ container: true, actions: helperMissing([SCRIPT]) })}
+        stale={null}
+      />,
+    )
+    expect(helperNotice()).toBeNull()
+    expect(
+      screen.getByText('Host actions are only available with the systemd installation.'),
+    ).toBeInTheDocument()
+  })
+
+  it('comes last in the notice stack', () => {
+    const health = healthOf('warn', '1 threshold crossed.', ['cpu_thermal 82.1 °C ≥ 80 °C'])
+    wrap(
+      <HostView
+        host={hostShape({
+          health,
+          live: procSubsetLive(),
+          actions: {
+            ...helperMissing([SCRIPT]),
+            order: orderOf('reboot', 'withdrawn'),
+          },
+        })}
+        stale={new Error('Network down')}
+      />,
+    )
+    const order = [
+      screen.getByRole('status'),
+      screen.getByText(STALE_SENTENCE),
+      warningNotice(),
+      screen.getByText(HARDENING_HEADLINE).closest('div'),
+      helperNotice(),
+    ]
+    for (let k = 1; k < order.length; k++) {
+      const before = order[k - 1] as HTMLElement
+      const after = order[k] as HTMLElement
+      expect(before.compareDocumentPosition(after) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    }
+  })
+})
+
 describe('HostPage', () => {
   // The page reads the session's role for the host actions (D-16). Answered
   // here, so no test reaches the network for it.

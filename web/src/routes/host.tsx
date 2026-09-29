@@ -16,6 +16,7 @@ import { ago } from '@/components/HealthField'
 import {
   followedOrder,
   HostActions,
+  HostHelperNotice,
   HostOrderStatus,
   orderPhase,
   outcomeSentence,
@@ -216,6 +217,9 @@ export function HostView({
             remain hidden either way.
           </p>
         </div>
+      )}
+      {!host.container && host.actions.missing.length > 0 && (
+        <HostHelperNotice missing={host.actions.missing} commands={host.actions.install_commands} />
       )}
 
       <div className={isStale ? 'space-y-5 opacity-60' : 'space-y-5'}>
