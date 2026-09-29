@@ -224,6 +224,14 @@ describe('HostActions: the four buttons and the one reason they are off', () => 
     },
   )
 
+  it('once the page stopped waiting for an answer, offers them again (WR-04)', () => {
+    actions({ order: { action: 'reboot', phase: 'no-answer' } })
+    expect(reasonLine()).toBeNull()
+    for (const b of headerButtons()) {
+      expect(b).toBeEnabled()
+    }
+  })
+
   it('once the helper answered an order that is not an update, offers them again', () => {
     actions({ order: { action: 'restart-service', phase: 'rejected' } })
     for (const b of headerButtons()) {
@@ -592,6 +600,10 @@ function later(
   return host
 }
 
+/** Readings 25 s and 15 min 1 s after the order below was placed. */
+const SOON = '2026-09-28T10:00:30Z'
+const LATE = '2026-09-28T10:15:06Z'
+
 const order = (action: HostAction, state: HostOrder['state'] = 'picked-up'): HostOrder => ({
   id: ID,
   action,
@@ -612,16 +624,45 @@ describe('orderPhase: every phase from server fields', () => {
     [
       'not reported yet: as placed',
       order('reboot', 'pending'),
-      later({ order: null }),
+      later({ order: null }, { observed: SOON }),
       false,
       'placed',
     ],
     [
       'the file is gone, nothing recorded',
       order('reboot', 'pending'),
-      later({ order: order('reboot') }),
+      later({ order: order('reboot') }, { observed: SOON }),
       false,
       'picked-up',
+    ],
+    // WR-04: a picked-up order nobody answers must not lock the page for ever.
+    [
+      'the file is gone, nothing recorded for a minute',
+      order('reboot', 'pending'),
+      later({ order: order('reboot') }),
+      false,
+      'no-answer',
+    ],
+    [
+      'never reported, a minute on (the daemon restarted)',
+      order('reboot', 'pending'),
+      later({ order: null }),
+      false,
+      'no-answer',
+    ],
+    [
+      'the daemon says the file is still there: placed, however long',
+      order('reboot', 'pending'),
+      later({ order: order('reboot', 'pending') }),
+      false,
+      'placed',
+    ],
+    [
+      'the result unreadable, a minute on',
+      order('update'),
+      later({ order: order('update'), result: noResult }),
+      false,
+      'no-answer',
     ],
     [
       'withdrawn after 10 s',
@@ -661,10 +702,13 @@ describe('orderPhase: every phase from server fields', () => {
     [
       "another order's result",
       order('reboot'),
-      later({
-        order: order('reboot'),
-        result: resultFor('0000000000000000', 'reboot', 'rejected'),
-      }),
+      later(
+        {
+          order: order('reboot'),
+          result: resultFor('0000000000000000', 'reboot', 'rejected'),
+        },
+        { observed: SOON },
+      ),
       false,
       'picked-up',
     ],
@@ -785,6 +829,47 @@ describe('orderPhase: every phase from server fields', () => {
       later({ order: order('poweroff'), result: resultFor(ID, 'poweroff', 'started') }),
       true,
       'waiting',
+    ],
+    // WR-04: started, and 15 minutes later still not done.
+    [
+      'update started, 15 min without a newer status',
+      order('update'),
+      later(
+        { order: order('update'), result: resultFor(ID, 'update', 'started') },
+        { observed: LATE },
+      ),
+      false,
+      'no-answer',
+    ],
+    [
+      'restart host started, 15 min and not rebooted',
+      order('reboot'),
+      later(
+        { order: order('reboot'), result: resultFor(ID, 'reboot', 'started') },
+        { observed: LATE },
+      ),
+      false,
+      'no-answer',
+    ],
+    [
+      'restart host started, 15 min, no answer: still waiting',
+      order('reboot'),
+      later(
+        { order: order('reboot'), result: resultFor(ID, 'reboot', 'started') },
+        { observed: LATE },
+      ),
+      true,
+      'waiting',
+    ],
+    [
+      'shut down host, switched on again a day later: back, not no answer',
+      order('poweroff'),
+      later(
+        { order: null, result: resultFor(ID, 'poweroff', 'started') },
+        { observed: '2026-09-29T10:05:00Z', uptime: 60 },
+      ),
+      false,
+      'back',
     ],
   ]
   it.each(rows)('%s', (_, o, host, pollFailed, want) => {
@@ -1020,6 +1105,51 @@ describe('HostOrderStatus', () => {
       'update-finished',
       'Check for updates and install — finished. Updated to v0.2.0.',
       EMERALD,
+      true,
+    ],
+    [
+      'no answer, nothing recorded',
+      order('reboot'),
+      later({}),
+      'no-answer',
+      'Restart host — no answer: the helper recorded nothing for this order within 1 min. journalctl -u holzkube-manager-host says what happened.',
+      RED,
+      true,
+    ],
+    [
+      'no answer, update started',
+      order('update'),
+      later({ result: resultFor(ID, 'update', 'started') }, { observed: LATE }),
+      'no-answer',
+      'Check for updates and install — started, but no finished update was reported within 15 min. journalctl -u holzkube-manager-update says what happened.',
+      RED,
+      true,
+    ],
+    [
+      'no answer, restart service started',
+      order('restart-service'),
+      later({ result: resultFor(ID, 'restart-service', 'started') }, { observed: LATE }),
+      'no-answer',
+      'Restart service — started, but holzkube-manager has not restarted within 15 min. journalctl -u holzkube-manager-host says what happened.',
+      RED,
+      true,
+    ],
+    [
+      'no answer, restart host started',
+      order('reboot'),
+      later({ result: resultFor(ID, 'reboot', 'started') }, { observed: LATE }),
+      'no-answer',
+      'Restart host — started, but the host has not restarted within 15 min. journalctl -u holzkube-manager-host says what happened.',
+      RED,
+      true,
+    ],
+    [
+      'no answer, shut down host started',
+      order('poweroff'),
+      later({ result: resultFor(ID, 'poweroff', 'started') }, { observed: LATE }),
+      'no-answer',
+      'Shut down host — started, but the host is still running after 15 min. journalctl -u holzkube-manager-host says what happened.',
+      RED,
       true,
     ],
     [
