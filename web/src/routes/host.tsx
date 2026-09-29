@@ -13,7 +13,7 @@ import { Meter } from '@/components/charts/Meter'
 import { RangePicker } from '@/components/charts/RangePicker'
 import { FanList, Sensors, sensorKey } from '@/components/charts/Sensors'
 import { ago } from '@/components/HealthField'
-import { HostActions, HostOrderStatus } from '@/components/HostActions'
+import { HostActions, HostOrderStatus, orderPhase } from '@/components/HostActions'
 import { HostStateMark, STATE_WORD } from '@/components/HostState'
 import { HARDWARE_POLL_INTERVAL_MS } from '@/components/NodeHardware'
 import { Problem } from '@/components/Problem'
@@ -21,6 +21,7 @@ import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { merge, useChartRange } from '@/hooks/useChartRange'
 import { type Series, useLiveSeries } from '@/hooks/useLiveSeries'
+import { useSession } from '@/hooks/useSession'
 import { formatBytes, formatPercent, formatRate, formatUptime } from '@/lib/format'
 import { authenticatedRoute } from '@/routes/__root'
 
@@ -49,6 +50,9 @@ import { authenticatedRoute } from '@/routes/__root'
 type Reading<T> = { readable: true; value: T } | { readable: false; reason: Reason }
 
 export function HostPage() {
+  // The role decides only whether the buttons are offered (D-16); the action
+  // routes' operator floor is the lock.
+  const role = useSession().me?.role
   const query = useQuery({
     queryKey: ['host'],
     queryFn: api.host,
@@ -76,10 +80,19 @@ export function HostPage() {
     return <p className="text-sm text-muted-foreground">Reading the host…</p>
   }
 
-  return <HostView host={query.data} stale={query.error ?? null} />
+  return <HostView host={query.data} stale={query.error ?? null} sessionRole={role} />
 }
 
-export function HostView({ host, stale }: { host: Host; stale: unknown }) {
+export function HostView({
+  host,
+  stale,
+  sessionRole,
+}: {
+  host: Host
+  stale: unknown
+  /** The session's role; without one the host actions are not offered. */
+  sessionRole?: string
+}) {
   const isStale = stale !== null && stale !== undefined
   const observed = new Date(host.observed_at)
   const d = host.device
@@ -118,7 +131,13 @@ export function HostView({ host, stale }: { host: Host; stale: unknown }) {
           </p>
         </div>
         {/* The slot Phase 11 left for the host actions. */}
-        <HostActions host={host} onPlaced={setHeld} />
+        <HostActions
+          host={host}
+          sessionRole={sessionRole}
+          pollFailed={isStale}
+          order={held === null ? null : { action: held.action, phase: orderPhase(held, host) }}
+          onPlaced={setHeld}
+        />
       </header>
 
       {/* Notices, in this order when they apply: the order this page placed,

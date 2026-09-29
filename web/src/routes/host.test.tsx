@@ -2,7 +2,15 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import type { ReactNode } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { api, type History, type Host, historySchema, hostSchema } from '@/api'
+import {
+  api,
+  type History,
+  type Host,
+  historySchema,
+  hostSchema,
+  type Me,
+  type SystemStatus,
+} from '@/api'
 import { forget } from '@/hooks/useLiveSeries'
 import { formatBytes } from '@/lib/format'
 import { HostPage, HostView } from './host'
@@ -235,6 +243,18 @@ function hostShape(
     },
     ...overrides,
   })
+}
+
+/** The host actions with the helper installed and nothing placed. */
+function helperInstalled(overrides: Record<string, unknown> = {}) {
+  return {
+    order: null,
+    result: hidden('host-action.no-result', 'The helper has recorded nothing yet.'),
+    available: true,
+    missing: [],
+    install_commands: [],
+    ...overrides,
+  }
 }
 
 /** The dd that follows the dt with this label. */
@@ -1546,6 +1566,21 @@ describe('the complete Pi 5 page', () => {
 })
 
 describe('HostPage', () => {
+  // The page reads the session's role for the host actions (D-16). Answered
+  // here, so no test reaches the network for it.
+  beforeEach(() => {
+    vi.spyOn(api, 'status').mockResolvedValue({
+      setup_required: false,
+    } as unknown as SystemStatus)
+    vi.spyOn(api, 'me').mockResolvedValue({
+      id: 'u1',
+      username: 'reader-1',
+      dry_run: false,
+      role: 'reader',
+      sso: false,
+    } as unknown as Me)
+  })
+
   it('says it is reading before the first answer, and shows no cards', () => {
     vi.spyOn(api, 'host').mockReturnValue(new Promise<Host>(() => {}))
     wrap(<HostPage />)
@@ -1569,5 +1604,36 @@ describe('HostPage', () => {
     wrap(<HostPage />)
 
     expect(await screen.findByText('example-host')).toBeInTheDocument()
+  })
+
+  it("hands the session's role to the host actions: a reader is told why they are off", async () => {
+    vi.spyOn(api, 'host').mockResolvedValue(hostShape({ actions: helperInstalled() }))
+    wrap(<HostPage />)
+
+    expect(
+      await screen.findByText(
+        'Host actions need the operator role. You are signed in as a reader.',
+      ),
+    ).toBeInTheDocument()
+    for (const b of within(screen.getByRole('group', { name: 'Host actions' })).getAllByRole(
+      'button',
+    )) {
+      expect(b).toBeDisabled()
+    }
+  })
+
+  it('offers the host actions once the session says operator', async () => {
+    vi.spyOn(api, 'me').mockResolvedValue({
+      id: 'u2',
+      username: 'operator-1',
+      dry_run: false,
+      role: 'operator',
+      sso: false,
+    } as unknown as Me)
+    vi.spyOn(api, 'host').mockResolvedValue(hostShape({ actions: helperInstalled() }))
+    wrap(<HostPage />)
+
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Restart host' })).toBeEnabled())
+    expect(document.getElementById('host-actions-reason')).toBeNull()
   })
 })

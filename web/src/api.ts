@@ -3011,15 +3011,16 @@ export const HOST_ACTION_PATHS: Record<HostAction, string> = {
 
 /**
  * The last order this daemon placed for the root helper. `state` is `pending`
- * while the order file is there and `picked-up` once the helper took it; a
- * string rather than an enum, so a later state (withdrawn) does not make an
- * older page refuse the whole host answer.
+ * while the order file is there, `picked-up` once the helper took it, and
+ * `withdrawn` when nobody took it within 10 s and the daemon took it back
+ * (D-13). The page is served by the daemon it talks to, so the three are the
+ * whole list.
  */
 export const hostOrderSchema = z.object({
   id: z.string(),
   action: hostActionSchema,
   placed_at: z.string(),
-  state: z.string(),
+  state: z.enum(['pending', 'picked-up', 'withdrawn']),
 })
 
 export type HostOrder = z.infer<typeof hostOrderSchema>
@@ -3036,6 +3037,18 @@ export const hostResultSchema = z.object({
 })
 
 export type HostResult = z.infer<typeof hostResultSchema>
+
+/**
+ * One piece of the helper that is not installed (D-12), with the path the
+ * daemon looked at: the script, the path unit (with its service beside it),
+ * or the path unit installed but not enabled.
+ */
+export const hostHelperMissingSchema = z.object({
+  item: z.enum(['script', 'path-unit', 'not-enabled']),
+  path: z.string(),
+})
+
+export type HostHelperMissing = z.infer<typeof hostHelperMissingSchema>
 
 /** The machine holzkube-manager runs on: GET /api/v1/host (Phase 11). */
 export const hostSchema = z.object({
@@ -3167,17 +3180,26 @@ export const hostSchema = z.object({
     unreadable: z.array(z.string()).nullish().transform(orEmpty),
   }),
   /**
-   * The host actions (Phase 13): the last order this daemon placed, and what
-   * the root helper last recorded. Defaulted so an answer from a daemon that
-   * predates host actions still parses: no order, and a result that is not
-   * readable -- never an invented one.
+   * The host actions (Phase 13): the last order this daemon placed, what the
+   * root helper last recorded, whether an action can be carried out at all
+   * (not in a container, helper installed -- the routes refuse exactly when
+   * `available` is false), which pieces of the helper are missing in the
+   * server's order, and the commands that install it. Defaulted so an answer
+   * from a daemon that predates host actions still parses: no order, a result
+   * that is not readable -- never an invented one -- and nothing available.
    */
   actions: z
     .object({
       order: hostOrderSchema.nullable(),
       result: reading(hostResultSchema),
+      available: z.boolean(),
+      missing: z.array(hostHelperMissingSchema).nullish().transform(orEmpty),
+      install_commands: z.array(z.string()).nullish().transform(orEmpty),
     })
     .default({
+      available: false,
+      missing: [],
+      install_commands: [],
       order: null,
       result: {
         readable: false,
