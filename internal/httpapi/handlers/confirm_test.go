@@ -14,6 +14,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/holzcloud/holzkube-manager/internal/host/hostaction"
 	"github.com/holzcloud/holzkube-manager/internal/model"
 )
 
@@ -60,6 +61,49 @@ func TestEveryConfirmableActionDecidesOnTypedPhrase(t *testing.T) {
 	}
 }
 
+// TestEveryHostActionRequiresTyping holds the host confirm route's own table
+// (Phase 13, D-09).
+//
+// Every host action requires typing the hostname -- unlike a node's reboot and
+// shutdown -- because there is exactly one host and it is the machine this page
+// runs on: after the click it is gone. So hostTypedPhrase has exactly one entry
+// per hostaction.Actions(), and every one is true.
+//
+// And it is a separate table for a reason this test holds too: typedPhrase is
+// the node confirm route's, and a host action there would make
+// POST /api/v1/machines/{id}/confirm issue host-action tokens.
+func TestEveryHostActionRequiresTyping(t *testing.T) {
+	t.Parallel()
+
+	for _, a := range hostaction.Actions() {
+		name := hostActionName(a)
+		needs, known := hostTypedPhrase[name]
+		if !known {
+			t.Errorf("%s has no entry in hostTypedPhrase, so the host confirm route refuses it and "+
+				"its button can never work", name)
+			continue
+		}
+		if !needs {
+			t.Errorf("hostTypedPhrase[%s] = false: a host action without the typed hostname. Every "+
+				"host action takes away the machine this page runs on (D-09)", name)
+		}
+	}
+	if got, want := len(hostTypedPhrase), len(hostaction.Actions()); got != want {
+		t.Errorf("hostTypedPhrase has %d entries and there are %d host actions; an entry for no "+
+			"action is a token the host confirm route issues for nothing", got, want)
+	}
+
+	for action := range typedPhrase {
+		if strings.HasPrefix(action, "host.") {
+			t.Errorf("typedPhrase carries %q: the node confirm route would issue a token for a "+
+				"host action. Host actions belong in hostTypedPhrase alone", action)
+		}
+		if _, ok := hostTypedPhrase[action]; ok {
+			t.Errorf("%q is in both typedPhrase and hostTypedPhrase", action)
+		}
+	}
+}
+
 // TestEveryConfirmedActionIsInTheTable is the half a hand-written list cannot
 // hold on its own.
 //
@@ -84,6 +128,11 @@ func TestEveryConfirmedActionIsInTheTable(t *testing.T) {
 
 	fset := token.NewFileSet()
 	checked := map[string]bool{}
+	// hostChecks counts the Check call sites in host.go on their own. Their
+	// action is `hostActionName(a)`, which actionValue cannot resolve, so
+	// without this count a host action route that stopped checking its token
+	// would leave this test exactly as green as before.
+	hostChecks := 0
 
 	for _, entry := range entries {
 		name := entry.Name()
@@ -105,6 +154,9 @@ func TestEveryConfirmedActionIsInTheTable(t *testing.T) {
 				sel, ok := call.Fun.(*ast.SelectorExpr)
 				if !ok || sel.Sel.Name != "Check" {
 					return true
+				}
+				if name == "host.go" {
+					hostChecks++
 				}
 				// The second argument is the jobs.Intent literal; its Action
 				// field is what the token has to have been issued for.
@@ -134,6 +186,10 @@ func TestEveryConfirmedActionIsInTheTable(t *testing.T) {
 	if len(checked) == 0 {
 		t.Fatal("no Confirmer.Check call sites were found, so this test proves nothing")
 	}
+	if hostChecks == 0 {
+		t.Error("no Confirmer.Check call site was found in host.go: the host action routes place " +
+			"an order without checking the confirmation token they are handed")
+	}
 
 	for action := range checked {
 		// The provisioning and upgrade paths issue their tokens from their own
@@ -141,6 +197,15 @@ func TestEveryConfirmedActionIsInTheTable(t *testing.T) {
 		// target version. They are machine- and cluster-scoped respectively
 		// and do not go through the machine confirm route at all.
 		if action == "node.provision" || strings.HasPrefix(action, "cluster.upgrade-") {
+			continue
+		}
+		// A host action's token comes from the host confirm route, whose table
+		// is hostTypedPhrase; typedPhrase must not know it.
+		if strings.HasPrefix(action, "host.") {
+			if _, ok := hostTypedPhrase[action]; !ok {
+				t.Errorf("%s is checked against a confirmation token and has no entry in "+
+					"hostTypedPhrase, so the host confirm route refuses to issue it", action)
+			}
 			continue
 		}
 		if _, ok := typedPhrase[action]; !ok {
@@ -153,6 +218,11 @@ func TestEveryConfirmedActionIsInTheTable(t *testing.T) {
 
 // actionValue resolves the handful of expression shapes an Action field takes
 // in this package: a string literal, a named constant, or a conversion of one.
+//
+// A call expression stays unresolved -- which is every host action site,
+// `hostActionName(a)`. Those are covered by TestEveryHostActionRequiresTyping,
+// which walks the actions themselves, and by the hostChecks count above, which
+// notices a host route that stopped checking at all.
 func actionValue(e ast.Expr) string {
 	switch v := e.(type) {
 	case *ast.BasicLit:
