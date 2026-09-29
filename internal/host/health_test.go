@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"testing/fstest"
 
 	"github.com/holzcloud/holzkube-manager/internal/inventory"
 )
@@ -40,6 +41,13 @@ func fsRow(mount string, used, available uint64) Filesystem {
 		Mount: mount, Roles: []string{"root"},
 		Usage: Read(FSUsage{SizeBytes: used + available, UsedBytes: used, AvailableBytes: available}),
 	}
+}
+
+// fsData is a filesystem that is the data directory's own, not /.
+func fsData(mount string, used, available uint64) Filesystem {
+	row := fsRow(mount, used, available)
+	row.Roles = []string{"data directory"}
+	return row
 }
 
 func fsHidden(mount string, r Reason) Filesystem {
@@ -77,13 +85,18 @@ func TestAssessWarns(t *testing.T) {
 		live     Live
 		state    HealthState
 		warnings []string
-		summary  string
+		// public is the wall's form of warnings: the figure first, so a
+		// tile that cuts the sentence keeps the reading (13-UI-SPEC checker
+		// resolution 4), and a filesystem by its role, never its path.
+		public  []string
+		summary string
 	}{
 		{
 			name:     "a CPU past its warning line",
 			live:     hostLive(sensorsRead(sensorAt("cpu_thermal", "temp1", 82.1, 80, 110)), fine),
 			state:    HealthWarn,
 			warnings: []string{"cpu_thermal 82.1 °C ≥ 80 °C"},
+			public:   []string{"82.1 °C ≥ 80 °C · cpu_thermal"},
 			summary:  "1 threshold crossed.",
 		},
 		{
@@ -91,6 +104,7 @@ func TestAssessWarns(t *testing.T) {
 			live:     hostLive(sensorsRead(sensorAt("cpu_thermal", "temp1", 80, 80, 110)), fine),
 			state:    HealthWarn,
 			warnings: []string{"cpu_thermal 80.0 °C ≥ 80 °C"},
+			public:   []string{"80.0 °C ≥ 80 °C · cpu_thermal"},
 			summary:  "1 threshold crossed.",
 		},
 		{
@@ -98,6 +112,7 @@ func TestAssessWarns(t *testing.T) {
 			live:     hostLive(sensorsRead(sensorAt("cpu_thermal", "temp1", 79.9, 80, 110)), fine),
 			state:    HealthOK,
 			warnings: []string{},
+			public:   []string{},
 			summary:  "Temperatures and filesystems are below their thresholds.",
 		},
 		{
@@ -114,6 +129,11 @@ func TestAssessWarns(t *testing.T) {
 				"cpu_thermal 112.0 °C ≥ 110 °C, critical",
 				"k10temp Tctl 90.0 °C ≥ 80 °C",
 			},
+			public: []string{
+				"99.0 °C ≥ 85.5 °C, critical · nct6798 SYSTIN",
+				"112.0 °C ≥ 110 °C, critical · cpu_thermal",
+				"90.0 °C ≥ 80 °C · k10temp Tctl",
+			},
 			summary: "3 thresholds crossed.",
 		},
 		{
@@ -121,6 +141,7 @@ func TestAssessWarns(t *testing.T) {
 			live:     hostLive(sensorsRead(), fsRow("/", 80, 20)),
 			state:    HealthWarn,
 			warnings: []string{"/ 80% used ≥ 80%"},
+			public:   []string{"80% used ≥ 80% · /"},
 			summary:  "1 threshold crossed.",
 		},
 		{
@@ -129,6 +150,7 @@ func TestAssessWarns(t *testing.T) {
 			live:     hostLive(sensorsRead(), fsRow("/", 7999, 2001)),
 			state:    HealthOK,
 			warnings: []string{},
+			public:   []string{},
 			summary: "Filesystems are below 80%. This machine reports no temperature sensors, " +
 				"so it is judged by its filesystems alone.",
 		},
@@ -142,6 +164,7 @@ func TestAssessWarns(t *testing.T) {
 			}),
 			state:    HealthWarn,
 			warnings: []string{"/ 80% used ≥ 80%"},
+			public:   []string{"80% used ≥ 80% · /"},
 			summary:  "1 threshold crossed.",
 		},
 		{
@@ -149,18 +172,26 @@ func TestAssessWarns(t *testing.T) {
 			live:     hostLive(sensorsRead(), fsRow("/", 9001, 999)),
 			state:    HealthWarn,
 			warnings: []string{"/ 91% used ≥ 80%"},
+			public:   []string{"91% used ≥ 80% · /"},
 			summary:  "1 threshold crossed.",
 		},
 		{
 			name: "temperatures and filesystems order by relative excess",
 			live: hostLive(sensorsRead(
 				sensorAt("cpu_thermal", "temp1", 82.1, 80, 110), // 2.6 % past
-			), fsRow("/", 95, 5), fsRow("/var/lib/holzkube-manager", 85, 15)), // 18.75 % and 6.25 % past
+			), fsRow("/", 95, 5), fsData("/var/lib/holzkube-manager", 85, 15)), // 18.75 % and 6.25 % past
 			state: HealthWarn,
 			warnings: []string{
 				"/ 95% used ≥ 80%",
 				"/var/lib/holzkube-manager 85% used ≥ 80%",
 				"cpu_thermal 82.1 °C ≥ 80 °C",
+			},
+			// The data directory's warning names its path on the page and
+			// its role on the wall (T-12-08).
+			public: []string{
+				"95% used ≥ 80% · /",
+				"85% used ≥ 80% · data directory",
+				"82.1 °C ≥ 80 °C · cpu_thermal",
 			},
 			summary: "3 thresholds crossed.",
 		},
@@ -172,6 +203,7 @@ func TestAssessWarns(t *testing.T) {
 			), fine),
 			state:    HealthWarn,
 			warnings: []string{"k10temp Tccd1 88.0 °C ≥ 80 °C", "k10temp Tctl 88.0 °C ≥ 80 °C"},
+			public:   []string{"88.0 °C ≥ 80 °C · k10temp Tccd1", "88.0 °C ≥ 80 °C · k10temp Tctl"},
 			summary:  "2 thresholds crossed.",
 		},
 		{
@@ -184,6 +216,7 @@ func TestAssessWarns(t *testing.T) {
 			), fine),
 			state:    HealthWarn,
 			warnings: []string{"nct6798 temp2 72.0 °C ≥ 70 °C"},
+			public:   []string{"72.0 °C ≥ 70 °C · nct6798 temp2"},
 			summary:  "1 threshold crossed.",
 		},
 	} {
@@ -195,6 +228,9 @@ func TestAssessWarns(t *testing.T) {
 			}
 			if !reflect.DeepEqual(h.Warnings, tc.warnings) {
 				t.Errorf("warnings:\n got  %q\n want %q", h.Warnings, tc.warnings)
+			}
+			if !reflect.DeepEqual(h.Public, tc.public) {
+				t.Errorf("public:\n got  %q\n want %q", h.Public, tc.public)
 			}
 			if h.Summary != tc.summary {
 				t.Errorf("summary = %q, want %q", h.Summary, tc.summary)
@@ -268,6 +304,24 @@ func TestUnreadableIsNeverHealthy(t *testing.T) {
 			}
 		}
 	}
+
+	// 12-SECURITY residual 1, through readSensors as the collector takes it:
+	// a machine whose only temperature is a thermal zone that cannot be named
+	// is not a machine without sensors.
+	t.Run("a fallback zone without a type", func(t *testing.T) {
+		t.Parallel()
+		s, err := readSensors(fstest.MapFS{
+			"sys/class/thermal/thermal_zone0/temp": {Data: []byte("52000\n")},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		h := Assess(hostLive(Read(s), fine))
+		want := []string{"Temperature thermal_zone0 could not be read."}
+		if h.State != HealthUnknown || !reflect.DeepEqual(h.Unreadable, want) {
+			t.Errorf("= %+v, want unknown with %q", h, want)
+		}
+	})
 
 	t.Run("the sentences", func(t *testing.T) {
 		t.Parallel()

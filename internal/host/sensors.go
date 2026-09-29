@@ -39,11 +39,11 @@ const (
 //
 // Unread names every temperature that is there and could not be read: an
 // input that failed or did not parse, a chip whose directory could not be
-// listed, a fallback zone whose temp failed. It is what keeps "this machine
-// has no temperature sensor" apart from "its sensors could not be read" (D-12):
-// without it, a host whose every input failed would read as a machine with
-// none, and be judged healthy. It is not sent: Assess turns it into the
-// Unreadable sentences the page shows.
+// listed, a fallback zone whose temp failed or whose type could not be read.
+// It is what keeps "this machine has no temperature sensor" apart from "its
+// sensors could not be read" (D-12): without it, a host whose every input
+// failed would read as a machine with none, and be judged healthy. It is not
+// sent: Assess turns it into the Unreadable sentences the page shows.
 type Sensors struct {
 	Temperatures []inventory.HardwareTemperature `json:"temperatures"`
 	Fans         []inventory.HardwareFan         `json:"fans"`
@@ -86,7 +86,7 @@ func readSensors(fsys fs.FS) (Sensors, error) {
 	// its own takes its twin zone's. Whether a listing error matters is known
 	// only once the chips are read: see below.
 	zoneList, zoneErr := classEntries(fsys, thermalClass, "thermal_zone", maxThermalZones)
-	zones := readZones(fsys, zoneList)
+	zones, untyped := readZones(fsys, zoneList)
 	twins := make(map[string]tripLimits, len(zones))
 	for _, z := range zones {
 		name := talos.ThermalTwinName(z.typ)
@@ -122,6 +122,11 @@ func readSensors(fsys fs.FS) (Sensors, error) {
 		if zoneErr != nil {
 			return Sensors{}, zoneErr
 		}
+		// A zone that is there and cannot be named is still the CPU's only
+		// temperature. Dropping it made a machine whose every input failed
+		// read Healthy (T-12-06, 12-SECURITY residual 1): it is named by its
+		// directory, which is all that is known of it.
+		out.Unread = append(out.Unread, untyped...)
 		// The fallback for a machine whose CPU has no hwmon chip, with each
 		// zone's own trip points as its limits.
 		for _, z := range zones {
@@ -164,18 +169,21 @@ type thermalZone struct {
 type tripLimits struct{ high, crit *float64 }
 
 // readZones reads the type and trip points of every listed zone. A zone
-// without a type is left out: it cannot be matched to anything, and its
-// temperature cannot be named.
-func readZones(fsys fs.FS, list []sensorChip) []thermalZone {
-	out := make([]thermalZone, 0, len(list))
+// without a type -- its file missing, unreadable or empty -- is not among the
+// zones: it cannot be matched to anything, and its temperature cannot be
+// named. Its directory's name is returned in untyped instead, so that the
+// fallback path can say it is there and was not read.
+func readZones(fsys fs.FS, list []sensorChip) (out []thermalZone, untyped []string) {
+	out = make([]thermalZone, 0, len(list))
 	for _, z := range list {
 		typ, ok := readTrimmed(fsys, z.dir+"/type")
 		if !ok || typ == "" {
+			untyped = append(untyped, path.Base(z.dir))
 			continue
 		}
 		out = append(out, thermalZone{dir: z.dir, typ: typ, limits: zoneTrips(fsys, z.dir)})
 	}
-	return out
+	return out, untyped
 }
 
 // zoneTrips is where a thermal zone's trip points put its lines (D-07).

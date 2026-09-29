@@ -43,6 +43,13 @@ const (
 // which can be a mount point or, without a mount table, the data directory
 // itself (T-12-08). The wall shows these and nothing else of the list; it is
 // not sent with the page's answer.
+//
+// Its sentences put the figure first and the name after it --
+// "82.1 °C ≥ 80 °C · cpu_thermal", "91% used ≥ 80% · data directory" --
+// where Warnings put the name first. The wall's tile is one line that
+// truncates: at 1600 px it cut "manager · cpu_thermal 8…" and lost the only
+// fact it had (12-UI-REVIEW). The page shows the whole list and keeps the
+// name first.
 type Health struct {
 	State      HealthState `json:"state"`
 	Summary    string      `json:"summary"`
@@ -166,7 +173,8 @@ func Assess(l Live) Health {
 // finding is one crossed line.
 type finding struct {
 	sentence string
-	// public is sentence without a path in it, for the wall.
+	// public is sentence for the wall: without a path in it, and with the
+	// figure before the name.
 	public   string
 	critical bool
 	// excess is how far past its line the value is, relative to the line:
@@ -191,13 +199,15 @@ func temperatureFindings(temps []inventory.HardwareTemperature) []finding {
 		if f.critical {
 			line = t.DangerC
 		}
-		f.sentence = fmt.Sprintf("%s %s °C ≥ %s °C", sensorName(t, perChip[t.Chip]),
-			strconv.FormatFloat(t.Celsius, 'f', 1, 64), formatLine(line))
+		name := sensorName(t, perChip[t.Chip])
+		figure := fmt.Sprintf("%s °C ≥ %s °C", strconv.FormatFloat(t.Celsius, 'f', 1, 64), formatLine(line))
 		if f.critical {
-			f.sentence += ", critical"
+			figure += ", critical"
 		}
-		// A chip's name and label are the driver's, never a path.
-		f.public = f.sentence
+		f.sentence = name + " " + figure
+		// Figure first for the wall. A chip's name and label are the
+		// driver's, never a path.
+		f.public = figure + " · " + name
 		f.excess = relative(t.Celsius, line)
 		out = append(out, f)
 	}
@@ -223,10 +233,10 @@ func filesystemFinding(row Filesystem, u FSUsage) (finding, bool) {
 	if uh < th || (uh == th && ul < tl) {
 		return finding{}, false
 	}
-	used := fmt.Sprintf(" %d%% used ≥ %d%%", dfPercent(u.UsedBytes, total), filesystemWarnPercent)
+	used := fmt.Sprintf("%d%% used ≥ %d%%", dfPercent(u.UsedBytes, total), filesystemWarnPercent)
 	return finding{
-		sentence: row.Mount + used,
-		public:   publicMount(row) + used,
+		sentence: row.Mount + " " + used,
+		public:   used + " · " + publicMount(row),
 		excess:   relative(float64(u.UsedBytes)/float64(total)*100, filesystemWarnPercent),
 	}, true
 }

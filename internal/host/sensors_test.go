@@ -308,6 +308,26 @@ func TestSensorsThatFailAreNotNone(t *testing.T) {
 			}, dir: "sys/class/hwmon/hwmon0"},
 			want: []string{"k10temp"},
 		},
+		{
+			// 12-SECURITY residual 1: on the fallback path a zone that is
+			// there and cannot be named is still the CPU's only temperature.
+			// Dropping it made a machine whose every input failed Healthy.
+			name: "a fallback zone without a type file",
+			fsys: fstest.MapFS{
+				"sys/class/thermal/thermal_zone0/temp": {Data: []byte("52000\n")},
+			},
+			want: []string{"thermal_zone0"},
+		},
+		{
+			name: "a fallback zone with an empty type beside one that reads",
+			fsys: fstest.MapFS{
+				"sys/class/thermal/thermal_zone0/type": {Data: []byte("cpu-thermal\n")},
+				"sys/class/thermal/thermal_zone0/temp": {Data: []byte("52000\n")},
+				"sys/class/thermal/thermal_zone1/type": {Data: []byte("\n")},
+				"sys/class/thermal/thermal_zone1/temp": {Data: []byte("48000\n")},
+			},
+			want: []string{"thermal_zone1"},
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
@@ -342,6 +362,17 @@ func TestSensorsThatFailAreNotNone(t *testing.T) {
 	}
 	if strings.Contains(strings.ToLower(string(raw)), "unread") {
 		t.Errorf("sensors on the wire carry Unread: %s", raw)
+	}
+
+	// When a CPU chip reported, the zones are read only for their limits: an
+	// untyped zone there costs a limit nobody could match, not a temperature.
+	s = mustReadSensors(t, fstest.MapFS{
+		"sys/class/hwmon/hwmon0/name":          {Data: []byte("cpu_thermal\n")},
+		"sys/class/hwmon/hwmon0/temp1_input":   {Data: []byte("49600\n")},
+		"sys/class/thermal/thermal_zone0/temp": {Data: []byte("49600\n")},
+	})
+	if len(s.Unread) != 0 {
+		t.Errorf("a CPU chip that reads and an untyped zone: unread = %q, want none", s.Unread)
 	}
 }
 
