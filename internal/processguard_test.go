@@ -42,6 +42,29 @@ var processStartSelectors = map[string]map[string]bool{
 // any package that exports them (syscall, x/sys/unix) through Syscall.
 var execSyscallNames = map[string]bool{"SYS_EXECVE": true, "SYS_EXECVEAT": true}
 
+// rawSyscallPackages and rawSyscallFuncs are the calls that take a system call
+// by number. Named, the number is checked against execSyscallNames; as a
+// literal or a variable -- 59 is execve on amd64, 221 on arm64 -- it could be
+// anything, so only a named SYS_ constant is let through (IN-01).
+var (
+	rawSyscallPackages = map[string]bool{"syscall": true, "golang.org/x/sys/unix": true}
+	rawSyscallFuncs    = map[string]bool{
+		"Syscall": true, "Syscall6": true, "RawSyscall": true, "RawSyscall6": true,
+		"SyscallNoError": true, "RawSyscallNoError": true,
+	}
+)
+
+// namedSyscall reports whether e names a SYS_ constant, bare or selected.
+func namedSyscall(e ast.Expr) bool {
+	switch x := e.(type) {
+	case *ast.Ident:
+		return strings.HasPrefix(x.Name, "SYS_")
+	case *ast.SelectorExpr:
+		return strings.HasPrefix(x.Sel.Name, "SYS_")
+	}
+	return false
+}
+
 // TestTheDaemonStartsNoProcess: no path from the daemon to a new process.
 //
 // It is two halves because each misses what the other sees. `go list` sees
@@ -56,7 +79,13 @@ var execSyscallNames = map[string]bool{"SYS_EXECVE": true, "SYS_EXECVEAT": true}
 // Faults injected and seen red, each as a new non-test file in internal/host:
 // exec.Command("systemctl", "reboot").Run() -- both halves red (F7); a
 // syscall.ForkExec with no os/exec import -- the AST half red, the go-list
-// half green (F8), which is why the AST half exists.
+// half green (F8), which is why the AST half exists; a
+// unix.Syscall(221, ...) and a //go:linkname -- the AST half red (IN-01).
+//
+// What it cannot see it refuses: a //go:linkname (which reaches any function
+// of the runtime, os.StartProcess's internals included), cgo (import "C"),
+// assembly (.s files), and a raw system call whose number is not a named SYS_
+// constant.
 func TestTheDaemonStartsNoProcess(t *testing.T) {
 	t.Run("own packages in the daemon import no os/exec", func(t *testing.T) {
 		lines := goList(t, "-deps", "-f", `{{.ImportPath}} {{join .Imports " "}}`, "./cmd/holzkube-managerd")
@@ -101,11 +130,15 @@ func TestTheDaemonStartsNoProcess(t *testing.T) {
 					}
 					return nil
 				}
+				if strings.HasSuffix(p, ".s") {
+					violations = append(violations, rel+": assembly, which this guard cannot read")
+					return nil
+				}
 				if !strings.HasSuffix(p, ".go") || strings.HasSuffix(p, "_test.go") {
 					return nil
 				}
 				fset := token.NewFileSet()
-				file, err := parser.ParseFile(fset, p, nil, parser.SkipObjectResolution)
+				file, err := parser.ParseFile(fset, p, nil, parser.SkipObjectResolution|parser.ParseComments)
 				if err != nil {
 					return fmt.Errorf("parse %s: %w", rel, err)
 				}
@@ -133,7 +166,10 @@ func TestTheDaemonStartsNoProcess(t *testing.T) {
 // processStarts reports every way file has to start a process: the os/exec
 // import under any name, the calls in processStartSelectors under any import
 // name, the execve system call numbers, and a dot import of a package that
-// holds such a call (it would hide the call from the selector check).
+// holds such a call (it would hide the call from the selector check) -- and
+// the ways around all of these it cannot follow: a //go:linkname directive,
+// cgo, and a raw system call by a number that is not a named SYS_ constant.
+// file must be parsed with parser.ParseComments, or the directive is missed.
 func processStarts(fset *token.FileSet, file *ast.File) []string {
 	var out []string
 	report := func(pos token.Pos, what string) {
@@ -154,11 +190,35 @@ func processStarts(fset *token.FileSet, file *ast.File) []string {
 		switch {
 		case p == "os/exec":
 			report(spec.Pos(), `imports "os/exec"`)
+		case p == "C":
+			report(spec.Pos(), `imports "C" (cgo), whose C code this guard cannot read`)
 		case name == "." && processStartSelectors[p] != nil:
 			report(spec.Pos(), fmt.Sprintf("dot-imports %q, which hides its process calls from this guard", p))
 		}
 		local[name] = p
 	}
+
+	for _, group := range file.Comments {
+		for _, c := range group.List {
+			if strings.HasPrefix(c.Text, "//go:linkname") {
+				report(c.Pos(), "has a //go:linkname directive, which reaches past every name this guard checks")
+			}
+		}
+	}
+
+	// A raw system call is let through only as a call whose number is a named
+	// SYS_ constant; the constant itself is checked below. Any other use of
+	// the function -- a literal number, a variable, the function as a value --
+	// is reported.
+	namedCalls := map[*ast.SelectorExpr]bool{}
+	ast.Inspect(file, func(n ast.Node) bool {
+		if call, ok := n.(*ast.CallExpr); ok {
+			if sel, ok := call.Fun.(*ast.SelectorExpr); ok && len(call.Args) > 0 && namedSyscall(call.Args[0]) {
+				namedCalls[sel] = true
+			}
+		}
+		return true
+	})
 
 	ast.Inspect(file, func(n ast.Node) bool {
 		switch x := n.(type) {
@@ -166,6 +226,10 @@ func processStarts(fset *token.FileSet, file *ast.File) []string {
 			if pkg, ok := x.X.(*ast.Ident); ok {
 				if names := processStartSelectors[local[pkg.Name]]; names[x.Sel.Name] {
 					report(x.Pos(), fmt.Sprintf("uses %s.%s", local[pkg.Name], x.Sel.Name))
+				}
+				if rawSyscallPackages[local[pkg.Name]] && rawSyscallFuncs[x.Sel.Name] && !namedCalls[x] {
+					report(x.Pos(), fmt.Sprintf("uses %s.%s with a system call number that is not a named SYS_ constant",
+						local[pkg.Name], x.Sel.Name))
 				}
 			}
 		case *ast.Ident:
@@ -226,16 +290,40 @@ func f() { syscall.Syscall6(syscall.SYS_EXECVEAT, 0, 0, 0, 0, 0, 0) }`, "names S
 		{"a dot import of syscall", `package p
 import . "syscall"
 func f() { _, _ = ForkExec("/usr/bin/systemctl", nil, nil) }`, `dot-imports "syscall"`},
+		// IN-01: the ways around the names above.
+		{"execve by its arm64 number", `package p
+import "golang.org/x/sys/unix"
+func f() { unix.Syscall(221, 0, 0, 0) }`, "uses golang.org/x/sys/unix.Syscall with a system call number"},
+		{"execve by its amd64 number, raw", `package p
+import "syscall"
+func f() { syscall.RawSyscall(59, 0, 0, 0) }`, "uses syscall.RawSyscall with a system call number"},
+		{"a system call number in a variable", `package p
+import "golang.org/x/sys/unix"
+var n uintptr = 221
+func f() { unix.Syscall6(n, 0, 0, 0, 0, 0, 0) }`, "uses golang.org/x/sys/unix.Syscall6 with a system call number"},
+		{"Syscall as a value", `package p
+import "syscall"
+var call = syscall.Syscall`, "uses syscall.Syscall with a system call number"},
+		{"a go:linkname", `package p
+import _ "unsafe"
+//go:linkname forkExec syscall.forkExec
+func forkExec(argv0 string, argv []string, attr *byte) (pid int, err error)`, "//go:linkname"},
+		{"cgo", `package p
+// #include <unistd.h>
+import "C"
+func f() { C.execv(nil, nil) }`, `imports "C"`},
 		{"clean", `package p
 import (
 	"database/sql"
 	"os"
 	"syscall"
 )
+// A comment that talks about go:linkname is not the directive.
 func f(db *sql.DB) {
 	_, _ = db.Exec("select 1")
 	_ = os.Getenv("HOME")
 	_ = syscall.Getpid()
+	_, _, _ = syscall.Syscall(syscall.SYS_GETPID, 0, 0, 0)
 	exec := "a word, not a package"
 	_ = exec
 }`, ""},
@@ -243,7 +331,7 @@ func f(db *sql.DB) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			fset := token.NewFileSet()
-			file, err := parser.ParseFile(fset, tc.name+".go", tc.src, parser.SkipObjectResolution)
+			file, err := parser.ParseFile(fset, tc.name+".go", tc.src, parser.SkipObjectResolution|parser.ParseComments)
 			if err != nil {
 				t.Fatalf("parse: %v", err)
 			}
