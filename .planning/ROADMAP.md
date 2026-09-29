@@ -173,7 +173,7 @@ Waves: 1 → {01, 02} · 2 → {03, 04} · 3 → {05} · 4 → {06} · 5 → {07
   5. `deploy/` enthält Path-Unit, Service-Unit, Skript und eine Anleitung zur Installation; `systemd-analyze verify` nimmt die Units an, und die Anleitung verlangt keine Zeile weniger Härtung an der Unit des Daemons (`NoNewPrivileges`, kein `AF_UNIX`, `ProcSubset=pid` bleiben).
 
 **Research**: Path-Units — `PathChanged` gegen `PathModified` gegen `DirectoryNotEmpty`, und wie ein Auftrag, den der Daemon per Rename atomar ablegt, genau einmal abgeholt wird; wie der Daemon ohne D-Bus erkennt, ob der Helfer installiert ist.
-**Plans:** 7/9 plans executed
+**Plans:** 8/9 plans executed
 **UI hint**: yes
 
 Plans:
@@ -189,7 +189,7 @@ Plans:
 
 **Wave 3** *(blocked on Wave 2 completion)*
 - [x] 13-07-PLAN.md — `deploy/`: Path- und Service-Unit, `HOST-HELPER.md`, Release-Archiv; `systemd-analyze verify` nach Ausgabe geprüft, Anleitung = Seite, Härtung des Daemons unverändert, Update-Skript liefert den Helfer nie (HACT-08)
-- [ ] 13-08-PLAN.md — Die Seite: vier Aktionen mit Dialog, Gründe für gesperrte Knöpfe, Auftragsstatus bis „zurück", Warte-Hinweis statt Fehlerseite, Helfer-Hinweis, 390 px gemessen (HACT-01..05, HACT-07)
+- [x] 13-08-PLAN.md — Die Seite: vier Aktionen mit Dialog, Gründe für gesperrte Knöpfe, Auftragsstatus bis „zurück", Warte-Hinweis statt Fehlerseite, Helfer-Hinweis, 390 px gemessen (HACT-01..05, HACT-07)
 
 **Wave 4** *(blocked on Wave 3 completion)*
 - [ ] 13-09-PLAN.md — Fixture im Zustand des Pi, Vertrag, Anleitung, README mit neuem `host.png` und `wall.png`; `./bin/task ci` auf dem Pi, Produktionsdienst unberührt, nichts installiert (HACT-01..08)
@@ -225,5 +225,5 @@ Waves: 1 → {01, 02} · 2 → {03, 04, 05, 06} · 3 → {07, 08} · 4 → {09}
 |-------|-----------|----------------|--------|-----------|
 | 11. Host-Seite — Gerät, Dienst, Live-Werte | v1.18 | 7/7 | Complete    | 2026-09-28 |
 | 12. Host wie ein Knoten — Verlauf, Warnung, Wand | v1.18 | 8/8 | Complete    | 2026-09-29 |
-| 13. Host-Aktionen über einen root-eigenen Helfer | v1.18 | 7/9 | In Progress|  |
+| 13. Host-Aktionen über einen root-eigenen Helfer | v1.18 | 8/9 | In Progress|  |
 | 14. Telefon — Tippziele, die ein Daumen trifft | v1.18 | 0/TBD | Not started | - |
