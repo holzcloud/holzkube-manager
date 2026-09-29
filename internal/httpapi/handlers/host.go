@@ -64,6 +64,20 @@ import (
 //
 // They too reach nothing upstream: they write one file in the data directory,
 // and budget_test.go lists them for that reason.
+//
+// **Refused before anything else when nothing can carry them out (D-12,
+// D-14).** Both the confirm route and every action route ask, right after the
+// nil guards, whether the daemon runs in a container (409
+// conflict.host-in-container) and whether the helper is installed completely
+// (409 conflict.host-helper-missing) -- in that order, because in a container
+// there is no helper to install and the install commands would be the wrong
+// advice. The action route asks before Confirmer.Check and before Place: a
+// missing helper never gets as far as the order file, so an order nobody would
+// pick up is not placed in the first place (the Box's 10-s withdrawal is the
+// second net, for a helper that is installed but not running). The confirm
+// route asks too, so the dialog is refused before the operator has typed for
+// nothing. Both questions are the ones GET /api/v1/host answers in
+// actions.available, so the page and the routes cannot disagree.
 
 // hostIntentTarget is the Machine field of every host action's confirmation
 // intent. A machine id is a UUID, and the inventory's pseudo ids use prefixes
@@ -146,12 +160,28 @@ func hostActionsConfigured(d httpapi.Deps) *httpapi.Problem {
 	return nil
 }
 
+// The details of the two refusals, the UI-SPEC's server sentences verbatim.
+const (
+	hostInContainerDetail   = "Host actions are only available with the systemd installation."
+	hostHelperMissingDetail = "The holzkube-manager-host helper is not installed, so no order was placed. The Host page says what to install."
+)
+
 // confirmHostAction hands out a token for one host action, to somebody who
 // typed this machine's hostname.
 func confirmHostAction(d httpapi.Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if p := hostActionsConfigured(d); p != nil {
 			httpapi.WriteProblem(w, r, p)
+			return
+		}
+		// Refused before the body is read: see "Refused before anything else"
+		// above. In a container first, where installing is the wrong advice.
+		if d.Host.InContainer() {
+			httpapi.WriteProblem(w, r, httpapi.Conflict(httpapi.CodeHostInContainer, hostInContainerDetail))
+			return
+		}
+		if len(d.HostActions.Missing()) > 0 {
+			httpapi.WriteProblem(w, r, httpapi.Conflict(httpapi.CodeHostHelperMissing, hostHelperMissingDetail))
 			return
 		}
 
@@ -207,6 +237,16 @@ func hostAction(d httpapi.Deps, a hostaction.Action) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if p := hostActionsConfigured(d); p != nil {
 			httpapi.WriteProblem(w, r, p)
+			return
+		}
+		// Before the token and before Place: with no helper to pick it up,
+		// no order is placed at all.
+		if d.Host.InContainer() {
+			httpapi.WriteProblem(w, r, httpapi.Conflict(httpapi.CodeHostInContainer, hostInContainerDetail))
+			return
+		}
+		if len(d.HostActions.Missing()) > 0 {
+			httpapi.WriteProblem(w, r, httpapi.Conflict(httpapi.CodeHostHelperMissing, hostHelperMissingDetail))
 			return
 		}
 
