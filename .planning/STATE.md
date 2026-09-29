@@ -4,17 +4,17 @@ milestone: v1.18
 milestone_name: Host & Telefon
 current_phase: 13
 current_phase_name: Host-Aktionen über einen root-eigenen Helfer
-status: executing
-stopped_at: Completed 13-08-PLAN.md
-last_updated: "2026-09-29T03:09:07.163Z"
+status: verifying
+stopped_at: Completed 13-09-PLAN.md
+last_updated: "2026-09-29T03:56:06.422Z"
 last_activity: 2026-09-29
 last_activity_desc: Phase 13 execution started
-state_head: 834eb8a8aeddda2e7dd5579183148e4f159681b7
+state_head: 8f36495890a801442313f6ec1b30a1cd138d3a33
 progress:
   total_phases: 4
   completed_phases: 2
   total_plans: 24
-  completed_plans: 23
+  completed_plans: 24
   percent: 50
 ---
 
@@ -34,7 +34,7 @@ See: .planning/PROJECT.md (updated 2026-09-28)
 
 Phase: 13 (Host-Aktionen über einen root-eigenen Helfer) — EXECUTING
 Plan: 9 of 9
-Status: Ready to execute
+Status: Phase complete — ready for verification
 Last activity: 2026-09-29 — Phase 13 execution started
 
 Progress: [█████░░░░░] 50%
@@ -116,6 +116,8 @@ Siehe `PROJECT.md`, die `MILESTONE-*.md`-Dateien und für v1.18 den Abschnitt
 - [Phase 13]: 13-07: the helper's units are verified by systemd-analyze output (any output fails), with a ProtectHom=true negative control in the same test
 - [Phase 13]: 13-07: HOST-HELPER.md's drop-in for another data directory adds ReadWritePaths, or the consuming rm fails
 - [Phase 13]: 13-08: HostActions/HostView take sessionRole (biome reads role= as ARIA); the status box follows the held order until dismissed, else the daemon's order or the helper's result within 15 min of observed_at
+- [Phase 13]: 13-09: the fixture's helper-missing actions are held to InstallCommands and Detect by TestTheFixtureShowsTheRealInstallCommands
+- [Phase 13]: 13-09: readme-images.mjs scrolls to the top before measuring a tall shot
 
 ### Blockers/Concerns
 
@@ -130,8 +132,8 @@ Siehe `PROJECT.md`, die `MILESTONE-*.md`-Dateien und für v1.18 den Abschnitt
 
 ## Session Continuity
 
-Last session: 2026-09-29T03:09:06.825Z
-Stopped at: Completed 13-08-PLAN.md
+Last session: 2026-09-29T03:56:06.126Z
+Stopped at: Completed 13-09-PLAN.md
 Resume file: None
 Next: `/gsd-plan-phase 11`
 
@@ -162,3 +164,4 @@ Next: `/gsd-plan-phase 11`
 | Phase 13 P06 | 19min | 3 tasks | 11 files |
 | Phase 13 P07 | 14min | 2 tasks | 5 files |
 | Phase 13 P08 | 24 min | 3 tasks | 6 files |
+| Phase 13 P09 | 45min | 2 tasks | 9 files |
