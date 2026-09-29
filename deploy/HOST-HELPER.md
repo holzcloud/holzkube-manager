@@ -139,9 +139,12 @@ Environment=HOLZKUBE_MANAGER_HOST_ORDER=/srv/holzkube-manager/host-order
 ReadWritePaths=-/srv/holzkube-manager
 ```
 
-The `ReadWritePaths=` line lets the script remove the order it has taken; the
-service is otherwise read-only on that path, and an order it cannot remove it
-does not carry out.
+The `ReadWritePaths=` line lets the script take the order (a rename in that
+directory) and remove it; the service is otherwise read-only on that path, and
+an order it cannot take it does not carry out. `HOLZKUBE_MANAGER_HOST_ORDER` is
+the one variable of the script meant to be set here; the script's other two
+(`HOLZKUBE_MANAGER_HOST_STATE_DIR`, `HOLZKUBE_MANAGER_SYSTEMCTL`) exist for its
+tests and are left alone.
 
 ## Results and reasons
 
