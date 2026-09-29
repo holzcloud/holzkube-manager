@@ -5,16 +5,16 @@ milestone_name: Host & Telefon
 current_phase: 13
 current_phase_name: Host-Aktionen über einen root-eigenen Helfer
 status: executing
-stopped_at: Completed 13-04-PLAN.md
-last_updated: "2026-09-29T01:45:29.076Z"
+stopped_at: Completed 13-05-PLAN.md
+last_updated: "2026-09-29T02:05:33.630Z"
 last_activity: 2026-09-29
 last_activity_desc: Phase 13 execution started
-state_head: 69e0f9f6709c94f9d717ce64dccf5bddee720c4c
+state_head: 2c307d55692ed5ea915033b669bdf3bc3f7dc70a
 progress:
   total_phases: 4
   completed_phases: 2
   total_plans: 24
-  completed_plans: 19
+  completed_plans: 20
   percent: 50
 ---
 
@@ -33,7 +33,7 @@ See: .planning/PROJECT.md (updated 2026-09-28)
 ## Current Position
 
 Phase: 13 (Host-Aktionen über einen root-eigenen Helfer) — EXECUTING
-Plan: 5 of 9
+Plan: 6 of 9
 Status: Ready to execute
 Last activity: 2026-09-29 — Phase 13 execution started
 
@@ -110,6 +110,8 @@ Siehe `PROJECT.md`, die `MILESTONE-*.md`-Dateien und für v1.18 den Abschnitt
 - [Phase 13]: 13-04: an oversize order is journalled as 'zu lang (mehr als 64 Byte)' -- the helper reads at most 65 bytes and states no length it did not measure
 - [Phase 13]: 13-04: the helper's age window names two reasons, 'veraltet' (>60 s old) and 'aus der Zukunft' (>5 s ahead)
 - [Phase 13]: 13-04: ReadResult requires an absolute path; a relative one is refused
+- [Phase 13]: 13-05: the process guard's AST half resolves import aliases and refuses dot imports of os/syscall/x/sys/unix
+- [Phase 13]: 13-05: withdrawal claims by rename (fsstore.Claim); the pickup timer re-checks id and closed under the Box's mutex
 
 ### Blockers/Concerns
 
@@ -124,8 +126,8 @@ Siehe `PROJECT.md`, die `MILESTONE-*.md`-Dateien und für v1.18 den Abschnitt
 
 ## Session Continuity
 
-Last session: 2026-09-29T01:45:28.956Z
-Stopped at: Completed 13-04-PLAN.md
+Last session: 2026-09-29T02:05:33.504Z
+Stopped at: Completed 13-05-PLAN.md
 Resume file: None
 Next: `/gsd-plan-phase 11`
 
@@ -152,3 +154,4 @@ Next: `/gsd-plan-phase 11`
 | Phase 13 P02 | 13min | 2 tasks | 8 files |
 | Phase 13 P03 | 14 min | 2 tasks | 1 files |
 | Phase 13 P04 | 9min | 2 tasks | 4 files |
+| Phase 13 P05 | 18min | 3 tasks | 6 files |

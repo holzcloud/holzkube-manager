@@ -46,7 +46,7 @@ key-decisions:
   - "Place stops the previous order's timer when it places a new one (the previous file must have been gone); the callback's id check is what actually protects the newer order, and the test fires the old timer anyway"
   - "The path-mismatch info line is logged by every NewBox, with or without Claim; only the sweep and the timer depend on Claim"
 
-requirements-completed: [HACT-06, HACT-07]
+requirements-completed: [HACT-06]
 
 duration: 18min
 completed: 2026-09-29
@@ -125,6 +125,11 @@ Both injected `smuggle.go` files compiled (`go build ./internal/host` ok) before
 - **Fix:** A `Fatalf` on the timer count first. Committed with Task 2.
 
 Also: the Task 2 tests were written after the Box code, not before; the red evidence for them is the four injections above (F16 and three more), each seen failing from `go test`'s exit code.
+
+## Requirements
+
+- HACT-06 (the daemon never carries out an action itself): held by TestTheDaemonStartsNoProcess, F7/F8 seen red.
+- HACT-07: only its second half here -- no order is left for a helper started later (10-s withdrawal, startup sweep). Its first half, the page saying the helper is missing and what to install, is 13-06 and 13-08, so HACT-07 was left open in REQUIREMENTS.md (the tool had marked it complete; reverted).
 
 ## Known Stubs
 
