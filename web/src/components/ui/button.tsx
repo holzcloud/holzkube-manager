@@ -27,16 +27,19 @@ const buttonVariants = cva(
           // control sat between 24 and 43 and not one was 44 or more. Above md
           // the 32px control stays, because a desk has a pointer and a list of
           // rows loses real information when each one grows twelve pixels.
+          // The small variants join because the dialog close X is icon-sm, and a
+          // variant unused today gets the phone size too, so its first use
+          // cannot bring back a small target.
           'h-8 max-md:h-11 gap-1.5 px-2.5 max-md:px-3.5 has-data-[icon=inline-end]:pr-2 has-data-[icon=inline-start]:pl-2',
-        xs: "h-6 gap-1 rounded-[min(var(--radius-md),10px)] px-2 text-xs in-data-[slot=button-group]:rounded-lg has-data-[icon=inline-end]:pr-1.5 has-data-[icon=inline-start]:pl-1.5 [&_svg:not([class*='size-'])]:size-3",
+        xs: "h-6 max-md:h-11 gap-1 rounded-[min(var(--radius-md),10px)] px-2 max-md:px-3 text-xs in-data-[slot=button-group]:rounded-lg has-data-[icon=inline-end]:pr-1.5 has-data-[icon=inline-start]:pl-1.5 [&_svg:not([class*='size-'])]:size-3",
         sm: "h-7 max-md:h-11 gap-1 rounded-[min(var(--radius-md),12px)] px-2.5 max-md:px-3 text-[0.8rem] in-data-[slot=button-group]:rounded-lg has-data-[icon=inline-end]:pr-1.5 has-data-[icon=inline-start]:pl-1.5 [&_svg:not([class*='size-'])]:size-3.5",
         lg: 'h-9 max-md:h-11 gap-1.5 px-2.5 max-md:px-3.5 has-data-[icon=inline-end]:pr-2 has-data-[icon=inline-start]:pl-2',
         icon: 'size-8 max-md:size-11',
         'icon-xs':
-          "size-6 rounded-[min(var(--radius-md),10px)] in-data-[slot=button-group]:rounded-lg [&_svg:not([class*='size-'])]:size-3",
+          "size-6 max-md:size-11 rounded-[min(var(--radius-md),10px)] in-data-[slot=button-group]:rounded-lg [&_svg:not([class*='size-'])]:size-3",
         'icon-sm':
-          'size-7 rounded-[min(var(--radius-md),12px)] in-data-[slot=button-group]:rounded-lg',
-        'icon-lg': 'size-9',
+          'size-7 max-md:size-11 rounded-[min(var(--radius-md),12px)] in-data-[slot=button-group]:rounded-lg',
+        'icon-lg': 'size-9 max-md:size-11',
       },
     },
     defaultVariants: {
