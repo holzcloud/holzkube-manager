@@ -53,8 +53,9 @@ import { cn } from '@/lib/utils'
  *
  * Everything the block decides -- whether the buttons are on, and if not, why
  * -- is drawn from that one answer and the session's role. The server is the
- * lock (the routes refuse a reader, a container, a missing helper and a second
- * order); the page only never offers what the route will refuse.
+ * lock (the routes refuse a reader, a container, a missing helper, a second
+ * order, and the check to a helper too old for it); the page only never offers
+ * what the route will refuse.
  */
 
 /** Each action's label, as its button, its status box and its dialog name it. */
@@ -183,6 +184,8 @@ export const REASON = {
   container: 'Host actions are only available with the systemd installation.',
   helper:
     'Host actions need the holzkube-manager-host helper, which is not installed. The note below says what to install.',
+  helperOutdated:
+    'Check for updates needs a newer holzkube-manager-host helper. The note below says how to reinstall it.',
   reader: 'Host actions need the operator role. You are signed in as a reader.',
   hostname: 'The hostname could not be read, so there is nothing to type to confirm a host action.',
   notAnswering: 'holzkube-manager is not answering; host actions return when it does.',
@@ -201,6 +204,10 @@ export const REASON = {
  * `available` is the server's own verdict (container, helper installed); the
  * helper reason stands for it once the container has been ruled out, because
  * the routes refuse exactly when it is false and the page must not offer more.
+ *
+ * One reason applies to the check alone, and is not asked here: an installed
+ * helper older than the check (`actions.outdated`), which carries out the four
+ * other orders. actionReason adds it, after every reason here (D-15, D-16).
  */
 export function disabledReason(
   host: Host,
@@ -246,6 +253,25 @@ export function disabledReason(
   return null
 }
 
+/**
+ * Why one button is off: the group's reason if there is one, else, for the
+ * check, an installed helper too old for it -- the routes refuse the check
+ * then (409 conflict.host-helper-outdated), and only the check.
+ */
+export function actionReason(
+  action: HostAction,
+  groupReason: string | null,
+  host: Host,
+): string | null {
+  if (groupReason !== null) {
+    return groupReason
+  }
+  if (action === 'check-update' && host.actions.outdated.length > 0) {
+    return REASON.helperOutdated
+  }
+  return null
+}
+
 export function HostActions({
   host,
   sessionRole,
@@ -270,6 +296,9 @@ export function HostActions({
   const reasonLine = useRef<HTMLParagraphElement | null>(null)
   const hostname = host.device.hostname.readable ? host.device.hostname.value : ''
   const reason = disabledReason(host, sessionRole, pollFailed, order)
+  // The one line under the group: the group's reason, else the check's own.
+  // No other button has one of its own, so there is never more than one.
+  const line = reason ?? actionReason('check-update', null, host)
 
   return (
     <div className="flex flex-col items-end gap-1 max-md:w-full max-md:items-stretch">
@@ -278,7 +307,7 @@ export function HostActions({
           min-content width, which would push the phone grid past the edge. */}
       <fieldset
         aria-label="Host actions"
-        aria-describedby={reason === null ? undefined : 'host-actions-reason'}
+        aria-describedby={line === null ? undefined : 'host-actions-reason'}
         className="m-0 flex min-w-0 flex-wrap gap-2 border-0 p-0 max-md:grid max-md:grid-cols-2"
       >
         {HOST_ACTIONS.map((action) => {
@@ -306,7 +335,7 @@ export function HostActions({
                   // pair and the machine pair keep their two rows of two.
                   action === 'check-update' && 'max-md:col-span-2',
                 )}
-                disabled={reason !== null}
+                disabled={actionReason(action, reason, host) !== null}
                 onClick={(e) => {
                   opener.current = e.currentTarget
                   setPending(action)
@@ -319,7 +348,7 @@ export function HostActions({
           )
         })}
       </fieldset>
-      {reason !== null && (
+      {line !== null && (
         // tabIndex -1: not a tab stop, but focusable from script, for the
         // cancel that finds its opener turned off.
         <p
@@ -328,14 +357,14 @@ export function HostActions({
           tabIndex={-1}
           className="text-xs text-muted-foreground md:text-right"
         >
-          {reason}
+          {line}
         </p>
       )}
       {pending !== null && (
         <HostActionDialog
           action={pending}
           hostname={hostname}
-          reason={reason}
+          reason={actionReason(pending, reason, host)}
           opener={opener}
           reasonLine={reasonLine}
           onClose={() => setPending(null)}
@@ -361,9 +390,10 @@ function HostActionDialog({
   action: HostAction
   hostname: string
   /**
-   * The group's reason, followed while the dialog is open: a failed poll,
-   * another order or a role change arriving now turns the confirm off, because
-   * the route would refuse it. The server stays the lock (409/403).
+   * This action's reason (actionReason), followed while the dialog is open: a
+   * failed poll, another order, a role change or, for the check, an older
+   * helper arriving now turns the confirm off, because the route would refuse
+   * it. The server stays the lock (409/403).
    */
   reason: string | null
   /** The button that opened the dialog, which a cancel gives focus back to. */
