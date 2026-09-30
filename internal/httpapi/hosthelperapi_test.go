@@ -75,6 +75,7 @@ type hostHelperView struct {
 	Actions   struct {
 		Available       *bool                `json:"available"`
 		Missing         []hostaction.Missing `json:"missing"`
+		Outdated        []hostaction.Missing `json:"outdated"`
 		InstallCommands []string             `json:"install_commands"`
 	} `json:"actions"`
 }
@@ -139,6 +140,9 @@ func readHelperView(t *testing.T, h *harness) hostHelperView {
 	if v.Actions.Missing == nil {
 		t.Error("actions.missing is null or absent; the page reads a list")
 	}
+	if v.Actions.Outdated == nil {
+		t.Error("actions.outdated is null or absent; the page reads a list")
+	}
 	if !reflect.DeepEqual(v.Actions.InstallCommands, hostaction.InstallCommands) {
 		t.Errorf("actions.install_commands = %q, want hostaction.InstallCommands %q",
 			v.Actions.InstallCommands, hostaction.InstallCommands)
@@ -202,9 +206,9 @@ func TestHostActionsNeedTheHelper(t *testing.T) {
 		h := hostHelperHarness(t, helperState(t, nil), fstest.MapFS{})
 
 		v := readHelperView(t, h)
-		if !*v.Actions.Available || len(v.Actions.Missing) != 0 {
-			t.Errorf("installed: actions = available %v, missing %+v; want available and nothing missing",
-				*v.Actions.Available, v.Actions.Missing)
+		if !*v.Actions.Available || len(v.Actions.Missing) != 0 || len(v.Actions.Outdated) != 0 {
+			t.Errorf("installed: actions = available %v, missing %+v, outdated %+v; want available, nothing missing or outdated",
+				*v.Actions.Available, v.Actions.Missing, v.Actions.Outdated)
 		}
 		resp, raw := h.do(t, http.MethodPost, "/api/v1/host/confirm", map[string]string{
 			"action": "host.update", "typed": "example-host",
@@ -288,4 +292,131 @@ func sessionHostToken(t *testing.T, confirmer *jobs.Confirmer, base string, clie
 	}
 	t.Fatalf("no %s cookie for %s", auth.CookieName, base)
 	return ""
+}
+
+// olderHelperScript is the helper as it was before the check, frozen at
+// 8b64a06 by 13-13: installed completely, and it refuses check-update.
+func olderHelperScript(t *testing.T) *fstest.MapFile {
+	t.Helper()
+	b, err := os.ReadFile("../host/hostaction/testdata/holzkube-manager-host-before-check.sh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return &fstest.MapFile{Data: b, Mode: 0o755, Sys: &syscall.Stat_t{Uid: 0, Gid: 0}}
+}
+
+// requireCheckRefused asks the confirm route for host.check-update and the
+// check's action route with a valid token, and wants 409 code from both, no
+// token handed out and nothing placed.
+func requireCheckRefused(t *testing.T, h *harness, code string) {
+	t.Helper()
+
+	resp, raw := h.do(t, http.MethodPost, "/api/v1/host/confirm", map[string]string{
+		"action": "host.check-update", "typed": "example-host",
+	})
+	if resp.StatusCode != http.StatusConflict {
+		t.Errorf("POST /api/v1/host/confirm for host.check-update: %d, want 409 %s (%s)", resp.StatusCode, code, raw)
+	} else if p := decodeProblem(t, resp, raw); p.Code != code {
+		t.Errorf("POST /api/v1/host/confirm for host.check-update: code %q, want %q", p.Code, code)
+	}
+	if strings.Contains(string(raw), `"token"`) {
+		t.Errorf("POST /api/v1/host/confirm for host.check-update handed out a token: %s", raw)
+	}
+
+	tok := sessionHostToken(t, h.confirmer, h.srv.URL, h.client, "host.check-update")
+	const path = "/api/v1/host/actions/check-update"
+	resp, raw = h.do(t, http.MethodPost, path, map[string]string{"confirmation": tok})
+	if resp.StatusCode != http.StatusConflict {
+		t.Errorf("POST %s with a valid host token: %d, want 409 %s (%s)", path, resp.StatusCode, code, raw)
+	} else if p := decodeProblem(t, resp, raw); p.Code != code {
+		t.Errorf("POST %s: code %q, want %q", path, p.Code, code)
+	}
+	requireNothingPlaced(t, h, path)
+}
+
+// TestHostCheckNeedsANewerHelper: a helper installed completely but too old
+// for the check -- its script names no check-update on the marker line, or
+// the check unit is not there -- keeps the four older orders and is never
+// handed a check (D-12, D-14, HACT-04). The routes refuse the check with 409
+// before a token is issued or checked and before Place; reboot still goes
+// through. And the refusals keep their order: container, missing, outdated.
+func TestHostCheckNeedsANewerHelper(t *testing.T) {
+	t.Parallel()
+
+	scriptOutdated := hostaction.Missing{Item: hostaction.OutdatedScript, Path: hostaction.HelperScriptPath}
+	checkUnit := hostaction.Missing{Item: hostaction.OutdatedCheckUnit, Path: hostaction.UpdateCheckUnitPath}
+
+	cases := []struct {
+		name string
+		edit func(t *testing.T, m fstest.MapFS)
+		want []hostaction.Missing
+	}{
+		{"the helper before the check", func(t *testing.T, m fstest.MapFS) {
+			m[helperScriptName] = olderHelperScript(t)
+		}, []hostaction.Missing{scriptOutdated}},
+		{"no check unit", func(_ *testing.T, m fstest.MapFS) { delete(m, helperCheckUnit) }, []hostaction.Missing{checkUnit}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			h := hostHelperHarness(t, helperState(t, func(m fstest.MapFS) { tc.edit(t, m) }), fstest.MapFS{})
+
+			v := readHelperView(t, h)
+			if !*v.Actions.Available || len(v.Actions.Missing) != 0 {
+				t.Errorf("actions = available %v, missing %+v; want available and nothing missing: the four older orders work",
+					*v.Actions.Available, v.Actions.Missing)
+			}
+			if !reflect.DeepEqual(v.Actions.Outdated, tc.want) {
+				t.Errorf("actions.outdated = %+v, want %+v", v.Actions.Outdated, tc.want)
+			}
+
+			requireCheckRefused(t, h, "conflict.host-helper-outdated")
+
+			// The control: reboot confirms and places over the same helper.
+			resp, raw := h.do(t, http.MethodPost, "/api/v1/host/confirm", map[string]string{
+				"action": "host.reboot", "typed": "example-host",
+			})
+			if resp.StatusCode != http.StatusOK {
+				t.Fatalf("POST /api/v1/host/confirm for host.reboot: %d, want 200 (%s)", resp.StatusCode, raw)
+			}
+			var confirmed struct {
+				Token string `json:"token"`
+			}
+			if err := json.Unmarshal(raw, &confirmed); err != nil || confirmed.Token == "" {
+				t.Fatalf("confirm answer %s: %v", raw, err)
+			}
+			resp, raw = h.do(t, http.MethodPost, "/api/v1/host/actions/reboot", map[string]string{"confirmation": confirmed.Token})
+			if resp.StatusCode != http.StatusAccepted {
+				t.Errorf("POST /api/v1/host/actions/reboot: %d, want 202 (%s)", resp.StatusCode, raw)
+			}
+			if _, err := os.Lstat(h.dataDir + "/" + hostaction.OrderFileName); err != nil {
+				t.Errorf("no reboot order was placed: %v", err)
+			}
+		})
+	}
+
+	// In a container the container's refusal comes first, whatever the
+	// helper's age.
+	t.Run("in a container", func(t *testing.T) {
+		t.Parallel()
+		older := helperState(t, func(m fstest.MapFS) { m[helperScriptName] = olderHelperScript(t) })
+		h := hostHelperHarness(t, older, fstest.MapFS{".dockerenv": {}})
+		requireCheckRefused(t, h, "conflict.host-in-container")
+	})
+
+	// With a piece missing the missing refusal comes first: the install
+	// commands install the newer script too.
+	t.Run("missing and older", func(t *testing.T) {
+		t.Parallel()
+		older := helperState(t, func(m fstest.MapFS) {
+			m[helperScriptName] = olderHelperScript(t)
+			delete(m, helperWantsLink)
+		})
+		h := hostHelperHarness(t, older, fstest.MapFS{})
+		requireCheckRefused(t, h, "conflict.host-helper-missing")
+		if v := readHelperView(t, h); len(v.Actions.Outdated) != 0 {
+			t.Errorf("actions.outdated = %+v while missing is %+v; want nothing until the helper is installed",
+				v.Actions.Outdated, v.Actions.Missing)
+		}
+	})
 }

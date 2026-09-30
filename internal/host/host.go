@@ -143,6 +143,15 @@ type Actions struct {
 	// Never null: empty when the helper is installed, and when this instance
 	// has no host actions to ask for.
 	Missing []hostaction.Missing `json:"missing"`
+	// Outdated lists what the check for updates needs that is not there, in
+	// the order hostaction.Outdated reports it: script-outdated, the
+	// installed helper script names no check-update on its marker line and
+	// would refuse the order; check-unit, the unit the helper starts for the
+	// check is not installed. The four older orders do not need either, so
+	// Available stays as it is; only the check is refused. Never null, and
+	// empty while anything is Missing: the install commands install
+	// everything, the newer script and the check unit with it.
+	Outdated []hostaction.Missing `json:"outdated"`
 	// InstallCommands are the commands that install the helper, exactly
 	// hostaction.InstallCommands -- the page shows them, it does not keep a
 	// copy of its own.

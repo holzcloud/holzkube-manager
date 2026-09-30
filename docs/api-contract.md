@@ -1770,6 +1770,7 @@ the service keeps running.
 |---|---|---|
 | `409` | `conflict.host-in-container` | the daemon runs in a container. There are host actions only with the systemd installation; the confirm route refuses too, and nothing is placed. Asked first. Detail: "Host actions are only available with the systemd installation." |
 | `409` | `conflict.host-helper-missing` | the root helper is not installed completely (see `actions.missing` below). The confirm route refuses too, and the action route refuses before it looks at the token: nothing is placed. Detail: "The holzkube-manager-host helper is not installed, so no order was placed. The Host page says what to install." |
+| `409` | `conflict.host-helper-outdated` | `check-update` only: the helper is installed but older than this daemon (see `actions.outdated` below) -- its script does not carry out the check, or the check unit is not installed. The confirm route refuses `host.check-update` before the hostname is compared, and the action route refuses before it looks at the token: no token, nothing placed. The four other actions still go through. Asked after the two above. Detail: "The installed holzkube-manager-host helper does not carry out an update check yet, so no order was placed. The Host page says what to reinstall." |
 | `409` | `conflict.host-order-pending` | an order still waits for the helper. There is one slot and no queue: the second order is refused and the first stays exactly as it was. Detail: "Another host action is still waiting for the helper. Wait for it to be answered, then try again." |
 | `428` | `sudo.required` | the action routes only: the session's sudo window is not open. The client asks for the password again and replays the request with the same token. |
 | `403` | `forbidden.role` | the session is a reader's. |
@@ -1778,7 +1779,9 @@ the service keeps running.
 
 The two refusals about the machine, container and helper, come before the body
 is read, on both routes: a client that has not been told yet learns it before
-the operator has typed anything that would be thrown away.
+the operator has typed anything that would be thrown away. The check's own
+refusal, an older helper, comes after them: on the action route before the body,
+on the confirm route as soon as the body names the check.
 
 **The order file.** `<data directory>/host-order`, mode `0600`, holding exactly
 one line and nothing else -- no user, no time, no parameter; who asked is in the
@@ -1843,6 +1846,7 @@ out a reboot nobody asked for any more. So:
   "result": {"readable": true, "value": {"id": "3f9c2a7b1d4e8f60", "action": "update", "outcome": "started", "at": "2026-09-28T10:00:06Z"}},
   "available": true,
   "missing": [],
+  "outdated": [],
   "install_commands": [
     "sudo install -o root -g root -m 0755 deploy/holzkube-manager-host.sh /usr/local/sbin/holzkube-manager-host",
     "sudo install -o root -g root -m 0644 deploy/holzkube-manager-host.path deploy/holzkube-manager-host.service deploy/holzkube-manager-update-check.service /etc/systemd/system/",
@@ -1888,6 +1892,29 @@ out a reboot nobody asked for any more. So:
   way to reach systemd, and that hardening stays. A path unit that is enabled
   but stopped therefore reads as installed; an order then is withdrawn after
   10 s, and the daemon's log names `systemctl status holzkube-manager-host.path`.
+- `outdated` lists what `check-update` needs that an installed helper does not
+  have, never `null`, in this order, each item `{"item": …, "path": …}`:
+  - `script-outdated`, path `/usr/local/sbin/holzkube-manager-host`: the
+    installed script does not name `check-update` on its marker line, so it
+    would refuse the order;
+  - `check-unit`, path
+    `/etc/systemd/system/holzkube-manager-update-check.service`: the unit the
+    helper starts for the check is absent or not a regular file.
+
+  It is empty while anything is in `missing` -- the install commands install
+  everything, the newer script and the check unit with it -- and when the
+  daemon was started without host actions. The four other actions need
+  neither, so `available` does not change: with `outdated` not empty only the
+  check is refused.
+
+  The marker line is the one line of the script that begins
+  `# holzkube-manager-host orders: ` and names, separated by spaces, the orders
+  the script carries out. The daemon reads it from the installed script, at
+  most 64 KiB and only once the script is one `missing` calls installed; a
+  script without that line, with two, or larger than that counts as the helper
+  that knows `reboot`, `poweroff`, `restart-service` and `update`. The line only
+  decides what is offered: the helper itself refuses every word it does not
+  know.
 - `install_commands` are the commands that install the helper, run from an
   unpacked release archive: the same four lines as `deploy/HOST-HELPER.md`,
   always sent.
@@ -1904,12 +1931,27 @@ operator installs it -- the same object reads:
     {"item": "script", "path": "/usr/local/sbin/holzkube-manager-host"},
     {"item": "path-unit", "path": "/etc/systemd/system/holzkube-manager-host.path"}
   ],
+  "outdated": [],
   "install_commands": ["…the four lines above…"]
 }
 ```
 
-A daemon started without host actions sends `available: false`, `missing: []`
-and the result reason "This instance was started without host actions."
+With a helper installed before the check existed, the four older actions are
+offered and the check is not:
+
+```json
+"actions": {
+  "available": true,
+  "missing": [],
+  "outdated": [
+    {"item": "script-outdated", "path": "/usr/local/sbin/holzkube-manager-host"}
+  ]
+}
+```
+
+A daemon started without host actions sends `available: false`, `missing: []`,
+`outdated: []` and the result reason "This instance was started without host
+actions."
 
 ### GET /api/v1/host/history: the host's last day
 

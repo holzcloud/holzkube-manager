@@ -92,6 +92,18 @@ import (
 // route asks too, so the dialog is refused before the operator has typed for
 // nothing. Both questions are the ones GET /api/v1/host answers in
 // actions.available, so the page and the routes cannot disagree.
+//
+// The check alone is asked a third question, after those two: whether the
+// installed helper is new enough for it (409 conflict.host-helper-outdated).
+// A helper installed before check-update existed carries out the four older
+// orders and refuses the fifth; hostaction.Outdated reads that from the
+// installed script's marker line and the check unit's file, and it is what
+// GET /api/v1/host answers in actions.outdated. The action route asks it
+// before the body and the token, the confirm route once it knows the action
+// is the check and before the hostname is compared -- so no token is issued
+// for a check the helper would refuse, and no order is placed. The helper's own
+// refusal of every word it does not know stays the lock; this keeps the page
+// and the routes from offering what it would refuse.
 
 // hostIntentTarget is the Machine field of every host action's confirmation
 // intent. A machine id is a UUID, and the inventory's pseudo ids use prefixes
@@ -201,10 +213,13 @@ func hostIntent(d httpapi.Deps, r *http.Request, action string) (in jobs.Intent,
 	}, true
 }
 
-// The details of the two refusals, the UI-SPEC's server sentences verbatim.
+// The details of the refusals, the UI-SPEC's server sentences verbatim.
 const (
 	hostInContainerDetail   = "Host actions are only available with the systemd installation."
 	hostHelperMissingDetail = "The holzkube-manager-host helper is not installed, so no order was placed. The Host page says what to install."
+	// hostHelperOutdatedDetail is the check's own refusal: the four older
+	// orders still go through.
+	hostHelperOutdatedDetail = "The installed holzkube-manager-host helper does not carry out an update check yet, so no order was placed. The Host page says what to reinstall."
 )
 
 // confirmHostAction hands out a token for one host action, to somebody who
@@ -243,6 +258,12 @@ func confirmHostAction(d httpapi.Deps) http.HandlerFunc {
 			httpapi.WriteProblem(w, r, httpapi.Validation(
 				"This instance issues host confirmations for its five host actions and that is not one of them.",
 				httpapi.FieldError{Field: "action", Reason: "not a confirmable host action"}))
+			return
+		}
+		// The check, before anything is typed against: no token for an order
+		// the installed helper would refuse.
+		if body.Action == hostActionName(hostaction.CheckUpdate) && len(d.HostActions.Outdated()) > 0 {
+			httpapi.WriteProblem(w, r, httpapi.Conflict(httpapi.CodeHostHelperOutdated, hostHelperOutdatedDetail))
 			return
 		}
 
@@ -296,6 +317,11 @@ func hostAction(d httpapi.Deps, a hostaction.Action) http.HandlerFunc {
 		}
 		if len(d.HostActions.Missing()) > 0 {
 			httpapi.WriteProblem(w, r, httpapi.Conflict(httpapi.CodeHostHelperMissing, hostHelperMissingDetail))
+			return
+		}
+		// The check alone: an older helper refuses it, so it is not placed.
+		if a == hostaction.CheckUpdate && len(d.HostActions.Outdated()) > 0 {
+			httpapi.WriteProblem(w, r, httpapi.Conflict(httpapi.CodeHostHelperOutdated, hostHelperOutdatedDetail))
 			return
 		}
 

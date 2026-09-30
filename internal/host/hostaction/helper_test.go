@@ -2,7 +2,9 @@ package hostaction
 
 import (
 	"io/fs"
+	"os"
 	"reflect"
+	"slices"
 	"strings"
 	"syscall"
 	"testing"
@@ -208,5 +210,129 @@ func TestInstallCommandsAreTheGuidesBlock(t *testing.T) {
 		if !strings.HasPrefix(p, "/etc/systemd/system/") {
 			t.Errorf("%s is not where the second command installs the units", p)
 		}
+	}
+}
+
+// shippedScriptBytes and olderScript are the helper's bytes as this release
+// ships them and as they were before check-update existed (frozen at 8b64a06).
+func shippedScriptBytes(t *testing.T) []byte {
+	t.Helper()
+	b, err := os.ReadFile(shippedScript)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return b
+}
+
+func olderScript(t *testing.T) []byte {
+	t.Helper()
+	b, err := os.ReadFile(olderHelper)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return b
+}
+
+// rootScript serves data as the helper script Detect calls installed:
+// regular, 0755, owned by uid 0.
+func rootScript(data []byte) *fstest.MapFile {
+	return &fstest.MapFile{Data: data, Mode: 0o755, Sys: &syscall.Stat_t{Uid: 0, Gid: 0}}
+}
+
+// checkUnit is the check unit as the install commands put it there.
+func checkUnit() *fstest.MapFile {
+	return &fstest.MapFile{Data: []byte("[Service]\nType=oneshot\n"), Mode: 0o644}
+}
+
+// TestKnownOrders: the daemon learns which orders the installed helper carries
+// out from the one marker line, and a helper without it is the helper of
+// 13-01, which knows the first four (D-12: read from the file, no D-Bus).
+func TestKnownOrders(t *testing.T) {
+	t.Parallel()
+
+	five := Actions()
+	four := []Action{Reboot, Poweroff, RestartService, Update}
+	shipped := shippedScriptBytes(t)
+
+	over := func(data []byte) fs.FS {
+		return fstest.MapFS{fsName(HelperScriptPath): rootScript(data)}
+	}
+	marker := func(words string) []byte {
+		return []byte("#!/usr/bin/env bash\n" + HelperOrdersMarker + words + "\nexit 0\n")
+	}
+	tooLarge := append(slices.Clone(shipped), []byte("# "+strings.Repeat("x", MaxHelperScriptSize)+"\n")...)
+
+	cases := []struct {
+		name string
+		fsys fs.FS
+		want []Action
+	}{
+		{"the shipped script", over(shipped), five},
+		{"the helper before the check, byte for byte", over(olderScript(t)), four},
+		{"a word this daemon does not know is ignored", over(marker("reboot halt poweroff restart-service update check-update")), five},
+		{"a marker without check-update, in its own order", over(marker("update reboot restart-service poweroff")), four},
+		{"two marker lines", over(append(marker("reboot poweroff restart-service update check-update"),
+			[]byte(HelperOrdersMarker+"reboot poweroff restart-service update check-update\n")...)), four},
+		{"the marker only inside a line", over([]byte("#!/usr/bin/env bash\necho '" + HelperOrdersMarker + "check-update'\n")), four},
+		{"larger than MaxHelperScriptSize", over(tooLarge), four},
+		{"no script", fstest.MapFS{}, four},
+		{"the script is a directory", fstest.MapFS{fsName(HelperScriptPath): {Mode: fs.ModeDir | 0o755, Sys: &syscall.Stat_t{}}}, four},
+		// Read only once Detect would call it root's: a script somebody
+		// else may change says nothing about what root runs.
+		{"the shipped script owned by uid 1000", fstest.MapFS{fsName(HelperScriptPath): {
+			Data: shipped, Mode: 0o755, Sys: &syscall.Stat_t{Uid: 1000},
+		}}, four},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if got := KnownOrders(tc.fsys); !reflect.DeepEqual(got, tc.want) {
+				t.Errorf("KnownOrders = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestOutdated: what the check needs that is not there -- a helper that knows
+// the order, and the unit it starts -- script first, never nil.
+func TestOutdated(t *testing.T) {
+	t.Parallel()
+
+	script := Missing{Item: OutdatedScript, Path: HelperScriptPath}
+	unit := Missing{Item: OutdatedCheckUnit, Path: UpdateCheckUnitPath}
+	shipped, older := shippedScriptBytes(t), olderScript(t)
+
+	with := func(data []byte, u *fstest.MapFile) fstest.MapFS {
+		m := fstest.MapFS{fsName(HelperScriptPath): rootScript(data)}
+		if u != nil {
+			m[fsName(UpdateCheckUnitPath)] = u
+		}
+		return m
+	}
+	cases := []struct {
+		name string
+		fsys fstest.MapFS
+		want []Missing
+	}{
+		{"the shipped script and the check unit", with(shipped, checkUnit()), []Missing{}},
+		{"the helper before the check", with(older, checkUnit()), []Missing{script}},
+		{"the shipped script, no check unit", with(shipped, nil), []Missing{unit}},
+		{"the shipped script, a directory for the check unit", with(shipped, &fstest.MapFile{Mode: fs.ModeDir | 0o755}), []Missing{unit}},
+		{"the helper before the check, no check unit", with(older, nil), []Missing{script, unit}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got := Outdated(tc.fsys)
+			if got == nil {
+				t.Fatal("Outdated returned nil; the answer's outdated must be a list, never null")
+			}
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Errorf("Outdated = %+v, want %+v", got, tc.want)
+			}
+			if box := NewBox(Config{FS: tc.fsys, DataDir: t.TempDir()}).Outdated(); !reflect.DeepEqual(box, tc.want) {
+				t.Errorf("Box.Outdated = %+v, want %+v", box, tc.want)
+			}
+		})
 	}
 }

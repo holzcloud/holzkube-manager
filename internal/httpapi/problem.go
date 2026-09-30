@@ -166,6 +166,15 @@ const (
 	// commands that install it.
 	CodeHostHelperMissing = "conflict.host-helper-missing"
 
+	// CodeHostHelperOutdated: the check for updates was asked for while the
+	// installed root helper is older than this daemon -- its script names no
+	// check-update, or the check unit it starts is not installed (Phase 13
+	// D-12). A conflict for the same reason as a missing helper: the request is
+	// well formed, and the helper on this machine would refuse it. No order was
+	// placed; the four older host actions still work, and the Host page says
+	// what to reinstall.
+	CodeHostHelperOutdated = "conflict.host-helper-outdated"
+
 	// CodeHostInContainer: a host action was asked for while the daemon runs
 	// in a container (Phase 13 D-14). A conflict for the same reason: the
 	// request is well formed, and a container has no host of its own to

@@ -37,6 +37,7 @@ const (
 	helperPathUnit    = "etc/systemd/system/holzkube-manager-host.path"
 	helperServiceUnit = "etc/systemd/system/holzkube-manager-host.service"
 	helperWantsLink   = "etc/systemd/system/paths.target.wants/holzkube-manager-host.path"
+	helperCheckUnit   = "etc/systemd/system/holzkube-manager-update-check.service"
 	helperStateDir    = "var/lib/holzkube-manager-host"
 )
 
@@ -64,9 +65,10 @@ func (o overlayFS) Lstat(name string) (fs.FileInfo, error) { return fs.Lstat(o.p
 func (o overlayFS) ReadLink(name string) (string, error) { return fs.ReadLink(o.pick(name), name) }
 
 // installedHelperFS is a root filesystem on which the helper is installed the
-// way deploy/HOST-HELPER.md installs it: the script regular, 0755 and owned by
-// uid 0, both unit files, and the path unit enabled (its paths.target.wants
-// symlink). Everything else -- the helper's state directory in particular --
+// way deploy/HOST-HELPER.md installs it: the script -- the shipped script's own
+// bytes, so the daemon reads the marker line this release ships -- regular,
+// 0755 and owned by uid 0, both unit files, the path unit enabled (its
+// paths.target.wants symlink), and the check unit. Everything else -- the helper's state directory in particular --
 // is a real temporary directory, returned as stateDir, which the script run
 // writes into and the Box reads back through fsys.
 func installedHelperFS(t *testing.T) (fsys fs.FS, stateDir string) {
@@ -83,9 +85,13 @@ func installedHelperFS(t *testing.T) (fsys fs.FS, stateDir string) {
 		t.Fatal(err)
 	}
 
+	script, err := os.ReadFile("../../deploy/holzkube-manager-host.sh")
+	if err != nil {
+		t.Fatal(err)
+	}
 	fixed := fstest.MapFS{
 		helperScriptName: {
-			Data:    []byte("#!/usr/bin/env bash\n"),
+			Data:    script,
 			Mode:    0o755,
 			ModTime: time.Now(),
 			Sys:     &syscall.Stat_t{Uid: 0, Gid: 0},
@@ -93,6 +99,7 @@ func installedHelperFS(t *testing.T) (fsys fs.FS, stateDir string) {
 		helperPathUnit:    {Data: []byte("[Path]\nPathExists=" + hostaction.ReferenceOrderPath + "\n"), Mode: 0o644},
 		helperServiceUnit: {Data: []byte("[Service]\nType=oneshot\n"), Mode: 0o644},
 		helperWantsLink:   {Data: []byte("/" + helperPathUnit), Mode: fs.ModeSymlink | 0o777},
+		helperCheckUnit:   {Data: []byte("[Service]\nType=oneshot\nExecStart=" + hostaction.UpdateScriptPath + " --check\n"), Mode: 0o644},
 	}
 	return overlayFS{fixed: fixed, disk: os.DirFS(root)}, stateDir
 }
