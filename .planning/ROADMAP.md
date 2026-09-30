@@ -218,7 +218,34 @@ Waves: 1 → {01, 02} · 2 → {03, 04, 05, 06} · 3 → {07, 08} · 4 → {09} 
   4. `/host` mit seinen Aktionen und dem Bestätigungsdialog besteht die Prüfung bei 390 px, und auf einem Telefon lässt sich der Host ansehen und eine Aktion bis zur getippten Bestätigung führen, ohne zu zoomen.
 
 **Ausgangslage**: `web/scripts/layout-audit.mjs` misst Tippziele unter 44 px bei 390 px seit e2bd690 (2026-09-18) und läuft in `task ci` mit; laut 400e1d4 bestanden am 2026-09-26 alle Routen. Die Zeile „kein Wächter für Tippzielgrößen" in `STATE.md` stammte aus der Übergabe vom 2026-09-17. Was der Wächter nicht misst: Er klickt nach dem Login nichts an, sieht also keinen Dialog, kein Menü und die mobile Navigation nicht, und seine Routen sind eine Hand-Liste. Das ist die Arbeit dieser Phase, neben `/host`.
-**Plans**: TBD
+**Plans:** 7 plans
+
+Plans:
+**Wave 1**
+- [ ] 14-01-PLAN.md — Tracer: Routenliste = Blätter des echten `routeTree` (`layout-routes.json`, Wächter `layoutRoutes.test.ts` vor dem Browser im npm-Skript), erster Öffner Sudo-Dialog über das echte 428, Anfrage-Monitor (`EXECUTED`); Wächter und Öffner-Regeln rot gesehen (MOB-02)
+- [ ] 14-02-PLAN.md — Aus 13-UI-REVIEW übernommen: Fokus zurück beim Abbrechen, offener Dialog folgt dem Grund, „back" ohne „up since .", Paare 16 px, höfliche Warte-Meldung (MOB-03)
+
+**Wave 2** *(blocked on Wave 1 completion)*
+- [ ] 14-03-PLAN.md — Die übrigen acht Öffner (Navigation mit CUT OFF, What's new, Power-Menü und -Bestätigung, Reset, Select, /host mit Helfer), gesperrte Knöpfe gemessen, Fixtures für Helfer und Reset-Vorschau; erster erweiterter Lauf rot als Befund (MOB-02, MOB-03)
+
+**Wave 3** *(blocked on Wave 2 completion)*
+- [ ] 14-04-PLAN.md — D-08: `LAYOUT_DUMP` und Vergleicher, Rauschboden 0 gemessen, Vorher-Dump vor der ersten Klassenänderung (MOB-01)
+
+**Wave 4** *(blocked on Wave 3 completion)*
+- [ ] 14-05-PLAN.md — Bausteine unter `md`: Button-Kleingrößen, Dialog-X, Menü- und Select-Einträge, Toast-Schließen mit Browser-Test (MOB-01)
+
+**Wave 5** *(blocked on Wave 4 completion)*
+- [ ] 14-06-PLAN.md — Einzelstellen: Navigation (scrollt), What's new, Reset-Dialog; `./bin/task test:layout` grün (MOB-01, MOB-03)
+
+**Wave 6** *(blocked on Wave 5 completion)*
+- [ ] 14-07-PLAN.md — Drei Rot-Checks einzeln (D-10), Nachher-Dump = 0 Unterschiede (D-08), README und Anleitung, `./bin/task ci` auf dem Pi, Handtest protokolliert (D-11), „nach 13-12 wiederholen" (MOB-01, MOB-02, MOB-03)
+
+**Cross-cutting constraints:**
+- Every size change is a `max-md:` class written as a whitespace-bounded literal; 1280 px is compared once before and after (D-08), with no checked-in baseline
+- The audit opens and measures, never confirms: no typed confirmation, no sudo password, EXECUTED fails any 2xx on an action request
+- Nothing is installed on the operator's host and the production service is never restarted; dumps and logs live outside the repository
+
+Waves: 1 → {01, 02} · 2 → {03} · 3 → {04} · 4 → {05} · 5 → {06} · 6 → {07}
 **UI hint**: yes
 
 ## Progress
@@ -230,4 +257,4 @@ Waves: 1 → {01, 02} · 2 → {03, 04, 05, 06} · 3 → {07, 08} · 4 → {09} 
 | 11. Host-Seite — Gerät, Dienst, Live-Werte | v1.18 | 7/7 | Complete    | 2026-09-28 |
 | 12. Host wie ein Knoten — Verlauf, Warnung, Wand | v1.18 | 8/8 | Complete    | 2026-09-29 |
 | 13. Host-Aktionen über einen root-eigenen Helfer | v1.18 | 11/11 | In Progress|  |
-| 14. Telefon — Tippziele, die ein Daumen trifft | v1.18 | 0/TBD | Not started | - |
+| 14. Telefon — Tippziele, die ein Daumen trifft | v1.18 | 0/7 | Planned | - |
