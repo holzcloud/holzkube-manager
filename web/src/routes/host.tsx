@@ -172,24 +172,26 @@ export function HostView({
           onDismiss={() => setDismissed((d) => new Set(d).add(followed.order.id))}
         />
       )}
-      {waitingFor !== null ? (
-        // A polite live region without a role: the order box above is the one
-        // status on the page, and a second would make it ambiguous.
-        <p
-          aria-live="polite"
-          className="rounded-md border border-slate-500/40 bg-slate-500/10 px-3 py-2 text-sm text-slate-700 dark:text-slate-300"
-        >
-          {waitingFor === 'poweroff'
-            ? 'The host is shut down. holzkube-manager answers again once somebody switches the machine on; this page keeps asking every 3 s.'
-            : 'Waiting for holzkube-manager to come back. This page keeps asking every 3 s.'}
-        </p>
-      ) : (
-        isStale && (
-          <p className="rounded-md border border-amber-600/40 bg-amber-600/10 px-3 py-2 text-sm text-amber-700 dark:text-amber-300">
-            holzkube-manager did not answer the latest request. What you see is its reading from{' '}
-            {observed.toLocaleTimeString()}. {stale instanceof Error ? stale.message : ''}
+      {/* A polite live region without a role: the order box above is the one
+          status on the page, and a second would make it ambiguous. It is
+          always mounted and only its text comes and goes (14-REVIEW WR-03): a
+          screen reader announces a change inside a region it already knows,
+          and generally not a region that appears with its text. Empty, it has
+          no height, and its margin collapses into its neighbours'. */}
+      <div aria-live="polite">
+        {waitingFor !== null && (
+          <p className="rounded-md border border-slate-500/40 bg-slate-500/10 px-3 py-2 text-sm text-slate-700 dark:text-slate-300">
+            {waitingFor === 'poweroff'
+              ? 'The host is shut down. holzkube-manager answers again once somebody switches the machine on; this page keeps asking every 3 s.'
+              : 'Waiting for holzkube-manager to come back. This page keeps asking every 3 s.'}
           </p>
-        )
+        )}
+      </div>
+      {waitingFor === null && isStale && (
+        <p className="rounded-md border border-amber-600/40 bg-amber-600/10 px-3 py-2 text-sm text-amber-700 dark:text-amber-300">
+          holzkube-manager did not answer the latest request. What you see is its reading from{' '}
+          {observed.toLocaleTimeString()}. {stale instanceof Error ? stale.message : ''}
+        </p>
       )}
       {health.state === 'warn' && <WarningNotice health={health} />}
       {host.container && (
