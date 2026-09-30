@@ -5,16 +5,16 @@ milestone_name: Host & Telefon
 current_phase: 14
 current_phase_name: telefon-tippziele
 status: verifying
-stopped_at: Completed 13-13-PLAN.md
-last_updated: "2026-09-30T15:05:08.068Z"
+stopped_at: Completed 13-14-PLAN.md
+last_updated: "2026-09-30T15:27:03.614Z"
 last_activity: 2026-09-30
 last_activity_desc: Phase 14 execution started
-state_head: ed3db0149486413a64e7c0f934adc6c3b5ee36e6
+state_head: f97c2dfb6e696403994b94a43fc8dbff996b51a7
 progress:
   total_phases: 4
   completed_phases: 2
   total_plans: 37
-  completed_plans: 35
+  completed_plans: 36
   percent: 50
 ---
 
@@ -146,6 +146,8 @@ Siehe `PROJECT.md`, die `MILESTONE-*.md`-Dateien und für v1.18 den Abschnitt
 - [Phase 13]: 13-12: a finished check is emerald for current and available, red only for failed; orderPhase compares checked_at with the placement truncated to the second
 - [Phase 13]: 13-13: The helper names its orders on one marker line '# holzkube-manager-host orders: ' plus the words; no line means the first four (reboot poweroff restart-service update). Additive: a later order is a new word
 - [Phase 13]: 13-13: The check unit is held to the helper service's sandbox except RestrictAddressFamilies (reaches GitHub) and ReadWritePaths (writes only its StateDirectory), with an empty CapabilityBoundingSet and a start limit below the helper's
+- [Phase 13]: 13-14: KnownOrders reads the installed helper's marker line only after Detect's ownership rule and bounded at 64 KiB; no marker, two markers or too large counts as the four orders of 13-01
+- [Phase 13]: 13-14: actions.outdated (script-outdated, check-unit) is asked only while nothing is missing; available unchanged; both host routes refuse check-update with 409 conflict.host-helper-outdated after container and missing, before token and Place
 
 ### Blockers/Concerns
 
@@ -160,8 +162,8 @@ Siehe `PROJECT.md`, die `MILESTONE-*.md`-Dateien und für v1.18 den Abschnitt
 
 ## Session Continuity
 
-Last session: 2026-09-30T15:05:07.898Z
-Stopped at: Completed 13-13-PLAN.md
+Last session: 2026-09-30T15:27:03.162Z
+Stopped at: Completed 13-14-PLAN.md
 Resume file: None
 Next: `/gsd-plan-phase 11`
 
@@ -204,3 +206,4 @@ Next: `/gsd-plan-phase 11`
 | Phase 14 P07 | 50min | 3 tasks | 2 files |
 | Phase 13 P12 | 33min | 2 tasks | 16 files |
 | Phase 13 P13 | 23min | 2 tasks | 15 files |
+| Phase 13 P14 | 20min | 2 tasks | 15 files |
