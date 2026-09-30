@@ -70,6 +70,28 @@ const FIXTURES = JSON.parse(
   readFileSync(fileURLToPath(new URL('../fixtures/demo.json', import.meta.url)), 'utf8'),
 )
 
+/**
+ * /host as it is with the helper installed and nothing placed: the demo host
+ * with only its `actions` replaced, served to the two /host openers alone.
+ *
+ * The default /api/v1/host answer stays helper-missing, because that notice is
+ * the widest the route gets and the README picture shows it. With it, though,
+ * the four buttons are disabled and the dialog never opens, so the phone user
+ * who HAS the helper is the one nobody measured. The variant is a file of its
+ * own, web/fixtures/host-helper-installed.json, and src/fixtures.test.ts parses
+ * the same merge with hostSchema: a variant written only into this script
+ * would be the one fixture no schema checks (ledger 149).
+ */
+const HOST_HELPER_INSTALLED = {
+  ...FIXTURES['/api/v1/host'],
+  actions: JSON.parse(
+    readFileSync(
+      fileURLToPath(new URL('../fixtures/host-helper-installed.json', import.meta.url)),
+      'utf8',
+    ),
+  ),
+}
+
 const WIDTHS = [390, 1280]
 
 /**
@@ -130,12 +152,27 @@ const SIGNED_IN = ROUTE_ENTRIES.filter((e) => e.when === undefined)
  * the destructive actions this product is full of, and what opens would depend
  * on the order things were clicked in. Each opener names its route, the widths
  * it is measured at, the steps that open it (each with the name a missing
- * control is reported by), the selector of what opened, and optionally a close
- * step (Escape when absent) and a per-opener override of GET answers
- * (`fixture`, keyed by API path like web/fixtures/demo.json).
+ * control is reported by), the selector of what opened, and optionally:
+ * - `close`: `{ name, run(page) }`, Escape when absent;
+ * - `fixture`: a per-opener override of GET answers, keyed by API path like
+ *   web/fixtures/demo.json. Each path gets a page route of its own, installed
+ *   before the page loads (a page route beats the context's) and removed after
+ *   the close; non-GET requests pass through it untouched;
+ * - `check(page, opened, w, label)`: a check of its own after the measurement,
+ *   returning how many ways it failed;
+ * - `enabled`: for a state with no open steps -- one the route already shows
+ *   under its override -- the sentence printed when not one control inside
+ *   `expect` is enabled, which means the override never reached the page. Such
+ *   a state has nothing to close, so its close check is skipped.
  *
  * Opened states are measured scoped to what opened, after its animation has
  * finished, and must close again. The runner is further down (runOpener).
+ *
+ * NONE OF THEM CONFIRMS ANYTHING. The Power confirmation, the Reset dialog and
+ * the host action dialog are opened, measured and closed: nothing is typed into
+ * their confirmation fields and no confirm button in them is addressed. A Power
+ * confirmation would reach the handler, a Reset would be a Reset, and the host
+ * action chain would place an order. The request monitor is the proof.
  */
 const OPENERS = [
   /**
@@ -181,7 +218,178 @@ const OPENERS = [
     ],
     expect: '[role="dialog"]:has-text("Confirm your password")',
   },
+  /**
+   * The phone's navigation drawer. Not a Radix dialog: nothing closes it on
+   * Escape, and the backdrop's centre is covered by the drawer, so it is closed
+   * the way a thumb closes it -- a tap on the backdrop beside the drawer. No
+   * Escape handler is added to the drawer for the audit's sake: that would be a
+   * behaviour change, and this phase changes tap targets only.
+   *
+   * Its own check: slid fully in, and every entry reachable. Thirteen areas at
+   * 44px plus the brand, What's new and the notices come to about the height of
+   * a 390x844 phone, and a drawer taller than the screen that does not scroll
+   * has its last entries out of reach -- CUT OFF, not a skip.
+   */
+  {
+    name: 'Navigation',
+    route: '/',
+    widths: [390],
+    open: [
+      {
+        name: 'Open the navigation',
+        locate: (p) => p.getByRole('button', { name: 'Open the navigation', exact: true }),
+      },
+    ],
+    expect: 'nav[aria-label="Main navigation"]',
+    check: checkDrawer,
+    close: {
+      name: 'a tap on "Close the navigation" beside the drawer',
+      run: (p) =>
+        p
+          .getByRole('button', { name: 'Close the navigation', exact: true })
+          .click({ position: { x: 370, y: 400 }, timeout: 5_000 }),
+    },
+  },
+  /**
+   * The release notes. On a phone the version button lives in the drawer, so
+   * the drawer is opened first; on a desk it is in the permanent sidebar.
+   */
+  {
+    name: "What's new",
+    route: '/',
+    widths: [390, 1280],
+    open: (width) => [
+      ...(width === TOUCH_WIDTH
+        ? [
+            {
+              name: 'Open the navigation',
+              locate: (p) => p.getByRole('button', { name: 'Open the navigation', exact: true }),
+            },
+          ]
+        : []),
+      {
+        name: 'the version button titled "What changed in this release"',
+        locate: (p) => p.getByTitle('What changed in this release', { exact: true }),
+      },
+    ],
+    expect: `[role="dialog"]:has-text("What's New")`,
+  },
+  /** The node's Power menu, its unavailable items included (measured disabled). */
+  {
+    name: 'Power menu',
+    route: '/nodes/m-cp-1',
+    widths: [390, 1280],
+    open: [{ name: 'Power: …', locate: powerTrigger }],
+    expect: '[role="menu"]',
+  },
+  /**
+   * The confirmation a Power item opens, from its first available item. Opened,
+   * measured and closed: its confirm button is never pressed, because on this
+   * route a non-forced action is not behind sudo and would reach the handler.
+   */
+  {
+    name: 'Power confirmation',
+    route: '/nodes/m-cp-1',
+    widths: [390, 1280],
+    open: [
+      { name: 'Power: …', locate: powerTrigger },
+      {
+        name: 'the first available Power item',
+        locate: (p) => p.locator('[role="menu"] [role="menuitem"]:not([data-disabled])').first(),
+      },
+    ],
+    expect: '[role="dialog"]',
+  },
+  /**
+   * The Reset dialog with its disk rows: the default mode needs disks, and
+   * demo.json answers m-cp-1's reset preview as the server builds it. Nothing
+   * is typed into #reset-confirm and its confirm button is never pressed.
+   */
+  {
+    name: 'Reset dialog',
+    route: '/nodes/m-cp-1',
+    widths: [390, 1280],
+    open: [
+      {
+        name: 'Reset',
+        locate: (p) => p.getByRole('button', { name: 'Reset', exact: true }),
+      },
+    ],
+    expect: '[role="dialog"]:has(input[type="checkbox"])',
+  },
+  /** A Radix Select list: its options are `role="option"` rows. */
+  {
+    name: 'Select list',
+    route: '/audit',
+    widths: [390, 1280],
+    open: [{ name: '#audit-action', locate: (p) => p.locator('#audit-action') }],
+    expect: '[role="listbox"]',
+  },
+  /**
+   * /host's action group as a phone user with the helper meets it: every button
+   * enabled. Nothing to open -- the route already shows it under the override --
+   * and every button in the group is measured whatever their number, so a fifth
+   * host action is measured without a change here.
+   */
+  {
+    name: 'Host actions (helper installed)',
+    route: '/host',
+    widths: [390, 1280],
+    fixture: { '/api/v1/host': HOST_HELPER_INSTALLED },
+    open: [],
+    expect: 'fieldset[aria-label="Host actions"]',
+    enabled: 'the helper-installed answer did not reach the page',
+  },
+  /**
+   * The host action dialog with its typed-hostname field. Nothing is typed into
+   * #host-action-confirm, so its confirm button stays disabled and is measured
+   * disabled; no confirm and no order is ever sent. A disabled "Restart host"
+   * means the override did not apply, and the 5 s click timeout says so.
+   */
+  {
+    name: 'Host action dialog',
+    route: '/host',
+    widths: [390, 1280],
+    fixture: { '/api/v1/host': HOST_HELPER_INSTALLED },
+    open: [
+      {
+        name: 'Restart host',
+        locate: (p) => p.getByRole('button', { name: 'Restart host', exact: true }),
+      },
+    ],
+    expect: '[role="dialog"]:has(#host-action-confirm)',
+  },
 ]
+
+/** The node's Power trigger: its accessible name is "Power: <node name>". */
+function powerTrigger(p) {
+  return p.getByRole('button', { name: /^Power: / })
+}
+
+/**
+ * The drawer's own check, after it has finished sliding: fully in, and not
+ * taller than the screen without scrolling.
+ */
+async function checkDrawer(_page, opened, w, label) {
+  const m = await opened.evaluate((nav) => ({
+    left: nav.getBoundingClientRect().left,
+    scrollHeight: nav.scrollHeight,
+    clientHeight: nav.clientHeight,
+    overflowY: getComputedStyle(nav).overflowY,
+  }))
+  let found = 0
+  if (Math.abs(m.left) > 0.5) {
+    found += 1
+    console.error(`  OPENER    ${w}  ${label} -- the drawer did not slide in`)
+  }
+  if (m.scrollHeight > m.clientHeight + 1 && m.overflowY !== 'auto' && m.overflowY !== 'scroll') {
+    found += 1
+    console.error(
+      `  CUT OFF   ${w}  ${label} -- the drawer is ${m.scrollHeight}px tall in ${m.clientHeight}px and does not scroll`,
+    )
+  }
+  return found
+}
 
 /**
  * The daemon this measures, and why it is built here rather than found here.
@@ -288,19 +496,6 @@ const findClipped = (root, vw) => {
 }
 
 /**
- * Finds every control a thumb cannot hit.
- *
- * The operator's decision of 2026-09-17: 44px below `md`, the desk left alone.
- * WCAG 2.5.8 asks for 24; 44 is what Apple and Material name for fingers, and
- * a cluster page is read one-handed while something is broken.
- *
- * The exemptions are not softenings, they are the artefacts the first
- * measurement of this was mostly made of: a hidden native <select> behind a
- * Radix trigger (the visible target is the button, and it is measured), and a
- * link inside a sentence, which WCAG 2.5.8 exempts by name because growing it
- * to 44px wrecks the line it sits in. Anything else counts.
- */
-/**
  * Finds a fixed pane that scrolls SIDEWAYS.
  *
  * findClipped forgives anything inside a sideways-scrolling ancestor, on the
@@ -354,6 +549,35 @@ const findSidewaysPanes = (root) => {
   return out
 }
 
+/**
+ * Finds every control a thumb cannot hit.
+ *
+ * The operator's decision of 2026-09-17: 44px below `md`, the desk left alone.
+ * WCAG 2.5.8 asks for 24; 44 is what Apple and Material name for fingers, and
+ * a cluster page is read one-handed while something is broken.
+ *
+ * DISABLED CONTROLS ARE MEASURED. A disabled control becomes enabled without a
+ * layout change -- the four /host buttons the moment the helper is installed, a
+ * confirm button the moment the hostname is typed -- and the size it has then
+ * is the size it has now. Skipping them measured the screen in the one state
+ * nobody acts in and left the buttons that matter unmeasured.
+ *
+ * What is skipped, all of it, each for a reason that is about the element not
+ * being a target at all (D-09) -- not a softening of the size rule:
+ * - `visibility: hidden` and `display: none`: not on the screen, nothing to hit
+ *   (the shut drawer is `visibility: hidden`).
+ * - `aria-hidden="true"` on the element itself: a decorative copy the product
+ *   has taken out of the accessibility tree on purpose; only the element's own
+ *   attribute counts, an ancestor's does not.
+ * - a zero-sized box: the hidden native <select> a Radix trigger keeps for form
+ *   semantics. The visible target is the trigger beside it, measured on its own.
+ * - a link inside a sentence, which WCAG 2.5.8 exempts by name because growing
+ *   it to 44px wrecks the line it sits in. It still counts as measured.
+ * Anything else counts. A new exemption goes on this list with its reason.
+ *
+ * Each finding carries the element's `data-slot` and `data-size` when it has
+ * them, so a line says which primitive to raise rather than which screen.
+ */
 const findSmallTargets = (root, min) => {
   const SELECTOR = [
     'button',
@@ -380,7 +604,6 @@ const findSmallTargets = (root, min) => {
     const style = getComputedStyle(el)
     if (style.visibility === 'hidden' || style.display === 'none') continue
     if (el.getAttribute('aria-hidden') === 'true') continue
-    if (el.hasAttribute('disabled')) continue
 
     // The box that is actually tapped. A checkbox inside a <label> is not the
     // target: clicking anywhere on the label toggles it, so the label is what
@@ -415,6 +638,14 @@ const findSmallTargets = (root, min) => {
         .replace(/\s+/g, ' ')
         .slice(0, 34),
       cls: (el.getAttribute('class') ?? '').slice(0, 50),
+      // The primitive it came from: the element's own slot, or its label's
+      // when the label is the target and the element names none.
+      primitive: [
+        el.getAttribute('data-slot') ?? target.getAttribute('data-slot'),
+        el.getAttribute('data-size') ?? target.getAttribute('data-size'),
+      ]
+        .filter((x) => x !== null && x !== '')
+        .join(' '),
     })
   }
   return { small: out, measured }
@@ -693,7 +924,10 @@ try {
       found += 1
       console.error(`  SMALL     ${w}  ${label}  (${small.length})`)
       for (const c of small) {
-        console.error(`              <${c.tag}>${c.via} ${c.w}x${c.h} "${c.label}" .${c.cls}`)
+        const primitive = c.primitive === '' ? '' : ` [${c.primitive}]`
+        console.error(
+          `              <${c.tag}>${c.via} ${c.w}x${c.h}${primitive} "${c.label}" .${c.cls}`,
+        )
       }
     }
     if (clipped.length > 0) {
@@ -810,19 +1044,23 @@ try {
   async function runOpener(context, opener, width) {
     const label = `${opener.route} · ${opener.name}`
     const page = await context.newPage()
-    if (opener.fixture !== undefined) {
-      // A page route beats the context's, so this overrides only what it names.
-      await page.route('**/api/v1/**', (route) => {
-        const path = new URL(route.request().url()).pathname
-        const body = opener.fixture[path]
-        if (route.request().method() !== 'GET' || body === undefined) return route.fallback()
+    // One page route per overridden path, installed before the page loads and
+    // kept for the whole opener: /host polls every 3 s, and an override that
+    // lapsed mid-opener would flip the page back to the default answer. A page
+    // route beats the context's, so this replaces only what it names; any
+    // method other than GET passes through to the context and the daemon.
+    const overrides = Object.entries(opener.fixture ?? {}).map(([path, body]) => ({
+      match: (url) => url.pathname === path,
+      handler: (route) => {
+        if (route.request().method() !== 'GET') return route.fallback()
         return route.fulfill({
           status: 200,
           contentType: 'application/json; charset=utf-8',
           body: JSON.stringify(body),
         })
-      })
-    }
+      },
+    }))
+    for (const o of overrides) await page.route(o.match, o.handler)
     const stopWatching = watchRequests(page)
     let outcome
     let executed = 0
@@ -830,6 +1068,7 @@ try {
       outcome = await openMeasureClose(page, opener, width, label)
     } finally {
       executed = stopWatching()
+      for (const o of overrides) await page.unroute(o.match, o.handler)
       await page.close()
     }
     const found = outcome.found + executed
@@ -844,9 +1083,15 @@ try {
   async function openMeasureClose(page, opener, width, label) {
     const w = `${String(width).padStart(4)}px`
     await settle(page, opener.route)
-    for (const step of opener.open) {
+    const steps = typeof opener.open === 'function' ? opener.open(width) : opener.open
+    for (const step of steps) {
       const target = step.locate(page)
-      if ((await target.count()) === 0) {
+      // Waited for rather than counted at once: a menu item exists only after
+      // the click before it has rendered the menu, and a list of Power actions
+      // only once the page has asked what is possible.
+      try {
+        await target.first().waitFor({ state: 'attached', timeout: 5_000 })
+      } catch {
         console.error(`  OPENER    ${w}  ${label} -- no control named "${step.name}" to open it`)
         return { found: 1 }
       }
@@ -872,10 +1117,28 @@ try {
     // Measured once it has stopped moving: getBoundingClientRect includes the
     // transform, and a 44px button reads about 42px during zoom-in-95.
     await opened.evaluate(animationsDone)
+
+    // A state with no open steps is what the route shows under the opener's
+    // override. Not one enabled control in it means the override never reached
+    // the page, and measuring the default answer under this name would call
+    // the enabled buttons measured when nobody saw them.
+    if (opener.enabled !== undefined) {
+      const enabled = await opened.evaluate(
+        (root) =>
+          [...root.querySelectorAll('button, input, select, textarea, [role="button"]')].filter(
+            (el) => !el.disabled && el.getAttribute('aria-disabled') !== 'true',
+          ).length,
+      )
+      if (enabled === 0) {
+        console.error(`  OPENER    ${w}  ${label} -- ${opener.enabled}`)
+        return { found: 1 }
+      }
+    }
     measuredOpeners.add(opener.name)
 
     const result = await scan(opened, width)
     let found = report(label, width, result)
+    if (opener.check !== undefined) found += await opener.check(page, opened, w, label)
     // Zero is red at both widths: a dialog with no control in it cannot be
     // closed by a thumb, and "measured nothing" printed as a count nobody reads
     // is the empty-output-is-green shape. The desk pass measures reach only, so
@@ -887,12 +1150,16 @@ try {
       console.error(`  EMPTY     ${w}  ${label} -- opened, but not one control in it was measured`)
     }
 
-    await (opener.close ?? ((p) => p.keyboard.press('Escape')))(page)
+    // Nothing was opened, so nothing is closed: the state is the route itself.
+    if (steps.length === 0) return { found, measured }
+
+    const close = opener.close ?? { name: 'Escape', run: (p) => p.keyboard.press('Escape') }
     try {
+      await close.run(page)
       await opened.waitFor({ state: 'hidden', timeout: 5_000 })
     } catch {
       found += 1
-      console.error(`  OPENER    ${w}  ${label} -- still open after Escape`)
+      console.error(`  OPENER    ${w}  ${label} -- still open after ${close.name}`)
     }
     return { found, measured }
   }
