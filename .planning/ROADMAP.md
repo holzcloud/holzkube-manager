@@ -218,7 +218,7 @@ Waves: 1 → {01, 02} · 2 → {03, 04, 05, 06} · 3 → {07, 08} · 4 → {09} 
   4. `/host` mit seinen Aktionen und dem Bestätigungsdialog besteht die Prüfung bei 390 px, und auf einem Telefon lässt sich der Host ansehen und eine Aktion bis zur getippten Bestätigung führen, ohne zu zoomen.
 
 **Ausgangslage**: `web/scripts/layout-audit.mjs` misst Tippziele unter 44 px bei 390 px seit e2bd690 (2026-09-18) und läuft in `task ci` mit; laut 400e1d4 bestanden am 2026-09-26 alle Routen. Die Zeile „kein Wächter für Tippzielgrößen" in `STATE.md` stammte aus der Übergabe vom 2026-09-17. Was der Wächter nicht misst: Er klickt nach dem Login nichts an, sieht also keinen Dialog, kein Menü und die mobile Navigation nicht, und seine Routen sind eine Hand-Liste. Das ist die Arbeit dieser Phase, neben `/host`.
-**Plans:** 6/7 plans executed
+**Plans:** 7/7 plans executed
 
 Plans:
 **Wave 1**
@@ -238,7 +238,7 @@ Plans:
 - [x] 14-06-PLAN.md — Einzelstellen: Navigation (scrollt), What's new, Reset-Dialog; `./bin/task test:layout` grün (MOB-01, MOB-03)
 
 **Wave 6** *(blocked on Wave 5 completion)*
-- [ ] 14-07-PLAN.md — Drei Rot-Checks einzeln (D-10), Nachher-Dump = 0 Unterschiede (D-08), README und Anleitung, `./bin/task ci` auf dem Pi, Handtest protokolliert (D-11), „nach 13-12 wiederholen" (MOB-01, MOB-02, MOB-03)
+- [x] 14-07-PLAN.md — Drei Rot-Checks einzeln (D-10), Nachher-Dump = 0 Unterschiede (D-08), README und Anleitung, `./bin/task ci` auf dem Pi, Handtest protokolliert (D-11), „nach 13-12 wiederholen" (MOB-01, MOB-02, MOB-03)
 
 **Cross-cutting constraints:**
 - Every size change is a `max-md:` class written as a whitespace-bounded literal; 1280 px is compared once before and after (D-08), with no checked-in baseline
@@ -257,4 +257,4 @@ Waves: 1 → {01, 02} · 2 → {03} · 3 → {04} · 4 → {05} · 5 → {06} ·
 | 11. Host-Seite — Gerät, Dienst, Live-Werte | v1.18 | 7/7 | Complete    | 2026-09-28 |
 | 12. Host wie ein Knoten — Verlauf, Warnung, Wand | v1.18 | 8/8 | Complete    | 2026-09-29 |
 | 13. Host-Aktionen über einen root-eigenen Helfer | v1.18 | 11/11 | In Progress|  |
-| 14. Telefon — Tippziele, die ein Daumen trifft | v1.18 | 6/7 | In Progress|  |
+| 14. Telefon — Tippziele, die ein Daumen trifft | v1.18 | 7/7 | In Progress|  |
