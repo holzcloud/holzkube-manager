@@ -641,6 +641,50 @@ describe('/host at 390 px', () => {
     expect(overflowing(phone)).toEqual([])
   })
 
+  it('fits the older-helper notice with both pieces: the check off, the other four on', () => {
+    const phone = renderAtPhoneWidth(
+      shape({
+        actions: {
+          ...HELPER_INSTALLED,
+          outdated: [
+            { item: 'script-outdated', path: '/usr/local/sbin/holzkube-manager-host' },
+            {
+              item: 'check-unit',
+              path: '/etc/systemd/system/holzkube-manager-update-check.service',
+            },
+          ],
+          install_commands: INSTALL_COMMANDS,
+        },
+      }),
+      'operator',
+    )
+    expect(phone.getBoundingClientRect().width).toBe(PHONE_WIDTH)
+    expect(phone.textContent).not.toContain('Host actions need the helper, which is not installed')
+    const notice = [...phone.querySelectorAll('div')].find(
+      (d) => d.firstElementChild?.textContent === 'Check for updates needs a newer helper',
+    )
+    if (notice === undefined) throw new Error('no older-helper notice')
+    expect(notice.querySelectorAll('li').length).toBe(2)
+    expect(notice.getBoundingClientRect().right).toBeLessThanOrEqual(PHONE_WIDTH + 0.5)
+    const pre = notice.querySelector('pre')
+    if (pre === null) throw new Error('no commands block')
+    expect(pre.textContent).toBe(INSTALL_COMMANDS.join('\n'))
+    // The longest command is wider than a phone: it scrolls inside the block.
+    expect(pre.scrollWidth).toBeGreaterThan(pre.clientWidth)
+    expect(pre.getBoundingClientRect().right).toBeLessThanOrEqual(PHONE_WIDTH + 0.5)
+    const group = within(phone).getByRole('group', { name: 'Host actions' })
+    const buttons = within(group).getAllByRole('button')
+    expect(buttons.map((b) => [b.textContent, (b as HTMLButtonElement).disabled])).toEqual([
+      ['Check for updates', true],
+      ['Check for updates and install', false],
+      ['Restart service', false],
+      ['Restart host', false],
+      ['Shut down host', false],
+    ])
+    expect(spillsPastItsButton(group)).toEqual([])
+    expect(overflowing(phone)).toEqual([])
+  })
+
   it('wraps a 40-character hostname inside the Restart host dialog', async () => {
     const hostname = 'example-host-with-a-forty-character-name'
     expect(hostname).toHaveLength(40)

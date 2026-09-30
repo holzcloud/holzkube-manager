@@ -22,6 +22,7 @@ import {
   type Host,
   type HostAction,
   type HostHelperMissing,
+  type HostHelperOutdated,
   type HostOrder,
   roleAtLeast,
 } from '@/api'
@@ -1019,33 +1020,46 @@ const MISSING_SENTENCE: Record<HostHelperMissing['item'], ReactNode> = {
   'not-enabled': <>{DEPLOY('holzkube-manager-host.path')} is installed but not enabled</>,
 }
 
+/** What each outdated piece is and where the new one comes from (13-14, D-12). */
+const OUTDATED_SENTENCE: Record<HostHelperOutdated['item'], ReactNode> = {
+  'script-outdated': (
+    <>
+      the installed helper script does not know the order check-update; the new one is{' '}
+      {DEPLOY('deploy/holzkube-manager-host.sh')}
+    </>
+  ),
+  'check-unit': (
+    <>the unit the check runs, from {DEPLOY('deploy/holzkube-manager-update-check.service')}</>
+  ),
+}
+
 /**
- * The helper is not installed (HACT-07, D-12): what is missing, in the
- * server's order and only what is missing, and the commands that install it --
- * the server's copy, which the install guide is held to byte for byte. The
- * commands are selectable text and there is no copy button: the clipboard is
- * refused outside a secure origin, which is where this product often runs.
- * No button, no dismiss: it goes when a poll says the helper is installed.
+ * The frame both helper notices share: the slate box, the heading and the
+ * explanation, one line per piece in the server's order with its path, the
+ * install commands, and where the files are. The commands are selectable text
+ * and there is no copy button: the clipboard is refused outside a secure
+ * origin, which is where this product often runs. No button, no dismiss: the
+ * notice goes when a poll says there is nothing left to install.
  */
-export function HostHelperNotice({
-  missing,
+function HelperInstallNotice({
+  heading,
+  explanation,
+  pieces,
   commands,
 }: {
-  missing: HostHelperMissing[]
+  heading: string
+  explanation: string
+  pieces: { key: string; path: string; sentence: ReactNode }[]
   commands: string[]
 }) {
   return (
     <div className={`rounded-md border px-3 py-2 text-sm ${SLATE}`}>
-      <p className="font-semibold">Host actions need the helper, which is not installed</p>
-      <p className="mt-1">
-        holzkube-manager never restarts or shuts down this machine itself. A small root-owned helper
-        does, and it knows exactly four orders. Until it is installed, the four buttons above stay
-        off.
-      </p>
+      <p className="font-semibold">{heading}</p>
+      <p className="mt-1">{explanation}</p>
       <ul className="mt-2 space-y-1">
-        {missing.map((m) => (
-          <li key={m.item}>
-            <span className="font-mono break-all">{m.path}</span> — {MISSING_SENTENCE[m.item]}
+        {pieces.map((p) => (
+          <li key={p.key}>
+            <span className="font-mono break-all">{p.path}</span> — {p.sentence}
           </li>
         ))}
       </ul>
@@ -1060,5 +1074,59 @@ export function HostHelperNotice({
         line of its hardening.
       </p>
     </div>
+  )
+}
+
+/**
+ * The helper is not installed (HACT-07, D-12): what is missing, in the
+ * server's order and only what is missing, and the commands that install it --
+ * the server's copy, which the install guide is held to byte for byte.
+ */
+export function HostHelperNotice({
+  missing,
+  commands,
+}: {
+  missing: HostHelperMissing[]
+  commands: string[]
+}) {
+  return (
+    <HelperInstallNotice
+      heading="Host actions need the helper, which is not installed"
+      explanation="holzkube-manager never restarts or shuts down this machine itself. A small root-owned helper does, and it knows exactly five orders. Until it is installed, the five buttons above stay off."
+      pieces={missing.map((m) => ({
+        key: m.item,
+        path: m.path,
+        sentence: MISSING_SENTENCE[m.item],
+      }))}
+      commands={commands}
+    />
+  )
+}
+
+/**
+ * The helper is installed but older than the check for updates (13-14, D-15):
+ * the four other orders work, and the check's button is off. What the check
+ * needs and the installed helper lacks, in the server's order, and the same
+ * install commands -- installing the helper again from this release brings
+ * the newer script and the check unit together.
+ */
+export function HostHelperOutdatedNotice({
+  outdated,
+  commands,
+}: {
+  outdated: HostHelperOutdated[]
+  commands: string[]
+}) {
+  return (
+    <HelperInstallNotice
+      heading="Check for updates needs a newer helper"
+      explanation="The holzkube-manager-host helper installed here is older than this holzkube-manager. It carries out the other four orders, and their buttons work. Installing the helper again from this release adds the update check, which only looks and installs nothing."
+      pieces={outdated.map((o) => ({
+        key: o.item,
+        path: o.path,
+        sentence: OUTDATED_SENTENCE[o.item],
+      }))}
+      commands={commands}
+    />
   )
 }

@@ -1874,7 +1874,7 @@ describe('the helper notice', () => {
     if (notice === null) throw new Error('no helper notice')
     expect(notice).toHaveClass('border-slate-500/40')
     expect(notice).toHaveTextContent(
-      'holzkube-manager never restarts or shuts down this machine itself. A small root-owned helper does, and it knows exactly four orders. Until it is installed, the four buttons above stay off.',
+      'holzkube-manager never restarts or shuts down this machine itself. A small root-owned helper does, and it knows exactly five orders. Until it is installed, the five buttons above stay off.',
     )
     const items = within(notice).getAllByRole('listitem')
     expect(items).toHaveLength(n)
@@ -1951,6 +1951,120 @@ describe('the helper notice', () => {
       warningNotice(),
       screen.getByText(HARDENING_HEADLINE).closest('div'),
       helperNotice(),
+    ]
+    for (let k = 1; k < order.length; k++) {
+      const before = order[k - 1] as HTMLElement
+      const after = order[k] as HTMLElement
+      expect(before.compareDocumentPosition(after) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    }
+  })
+})
+
+const OLDER_HEADING = 'Check for updates needs a newer helper'
+const SCRIPT_OUTDATED = { item: 'script-outdated', path: '/usr/local/sbin/holzkube-manager-host' }
+const CHECK_UNIT = {
+  item: 'check-unit',
+  path: '/etc/systemd/system/holzkube-manager-update-check.service',
+}
+const SCRIPT_OUTDATED_LINE =
+  '/usr/local/sbin/holzkube-manager-host — the installed helper script does not know the order check-update; the new one is deploy/holzkube-manager-host.sh'
+const CHECK_UNIT_LINE =
+  '/etc/systemd/system/holzkube-manager-update-check.service — the unit the check runs, from deploy/holzkube-manager-update-check.service'
+
+/** An installed helper older than the check (13-14): the four other orders work. */
+function helperOutdated(outdated: unknown[]) {
+  return helperInstalled({ outdated, install_commands: INSTALL_COMMANDS })
+}
+
+function olderNotice(): HTMLElement | null {
+  return screen.queryByText(OLDER_HEADING)?.closest('div') ?? null
+}
+
+describe('the older-helper notice', () => {
+  it.each([
+    ['the script', [SCRIPT_OUTDATED], [SCRIPT_OUTDATED_LINE]],
+    ['the check unit', [CHECK_UNIT], [CHECK_UNIT_LINE]],
+    ['both, script first', [SCRIPT_OUTDATED, CHECK_UNIT], [SCRIPT_OUTDATED_LINE, CHECK_UNIT_LINE]],
+  ])('names what to reinstall (%s) and the install commands', (_, outdated, lines) => {
+    wrap(<HostView host={hostShape({ actions: helperOutdated(outdated) })} stale={null} />)
+
+    const notice = olderNotice()
+    if (notice === null) throw new Error('no older-helper notice')
+    expect(notice).toHaveClass('border-slate-500/40')
+    expect(notice).toHaveTextContent(
+      'The holzkube-manager-host helper installed here is older than this holzkube-manager. It carries out the other four orders, and their buttons work. Installing the helper again from this release adds the update check, which only looks and installs nothing.',
+    )
+    const items = within(notice).getAllByRole('listitem')
+    expect(items.map((li) => li.textContent)).toEqual(lines)
+    items.forEach((li, k) => {
+      const path = (outdated[k] as { path: string }).path
+      expect(within(li).getByText(path)).toHaveClass('font-mono', 'break-all')
+    })
+    const pre = notice.querySelector('pre')
+    expect(pre?.textContent).toBe(INSTALL_COMMANDS.join('\n'))
+    expect(pre).toHaveClass('overflow-x-auto')
+    expect(notice).toHaveTextContent(
+      "The files are in deploy/ in the release archive; deploy/HOST-HELPER.md explains each step. The service's own unit keeps every line of its hardening.",
+    )
+    expect(within(notice).queryByRole('button')).toBeNull()
+    expect(helperNotice()).toBeNull()
+  })
+
+  it('shows nothing when nothing is outdated', () => {
+    wrap(<HostView host={hostShape({ actions: helperOutdated([]) })} stale={null} />)
+    expect(olderNotice()).toBeNull()
+  })
+
+  it('never beside the helper notice: while anything is missing, that one says it', () => {
+    wrap(
+      <HostView
+        host={hostShape({
+          actions: helperInstalled({
+            available: false,
+            missing: [SCRIPT],
+            outdated: [CHECK_UNIT],
+            install_commands: INSTALL_COMMANDS,
+          }),
+        })}
+        stale={null}
+      />,
+    )
+    expect(helperNotice()).not.toBeNull()
+    expect(olderNotice()).toBeNull()
+    expect(document.querySelectorAll('pre')).toHaveLength(1)
+  })
+
+  it('shows nothing in a container: the container notice already says why', () => {
+    wrap(
+      <HostView
+        host={hostShape({ container: true, actions: helperOutdated([SCRIPT_OUTDATED]) })}
+        stale={null}
+      />,
+    )
+    expect(olderNotice()).toBeNull()
+  })
+
+  it('comes last in the notice stack', () => {
+    const health = healthOf('warn', '1 threshold crossed.', ['cpu_thermal 82.1 °C ≥ 80 °C'])
+    wrap(
+      <HostView
+        host={hostShape({
+          health,
+          live: procSubsetLive(),
+          actions: {
+            ...helperOutdated([SCRIPT_OUTDATED, CHECK_UNIT]),
+            order: orderOf('reboot', 'withdrawn'),
+          },
+        })}
+        stale={new Error('Network down')}
+      />,
+    )
+    const order = [
+      screen.getByRole('status'),
+      screen.getByText(STALE_SENTENCE),
+      warningNotice(),
+      screen.getByText(HARDENING_HEADLINE).closest('div'),
+      olderNotice(),
     ]
     for (let k = 1; k < order.length; k++) {
       const before = order[k - 1] as HTMLElement
