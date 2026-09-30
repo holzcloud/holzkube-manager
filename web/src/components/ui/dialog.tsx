@@ -56,9 +56,16 @@ function DialogContent({
         {...props}
       >
         {children}
+        {/* Below md the button is 44px (icon-sm). A 28px box at 8px and a
+            44px box at 0px both centre the X 22px from the corner, so the
+            icon stays put and the tappable square grows into the corner. */}
         {showCloseButton && (
           <DialogPrimitive.Close data-slot="dialog-close" asChild>
-            <Button variant="ghost" className="absolute top-2 right-2" size="icon-sm">
+            <Button
+              variant="ghost"
+              className="absolute top-2 right-2 max-md:top-0 max-md:right-0"
+              size="icon-sm"
+            >
               <XIcon />
               <span className="sr-only">Close</span>
             </Button>
@@ -69,9 +76,16 @@ function DialogContent({
   )
 }
 
+// max-md:pr-8 keeps the title and description out from under the 44px close
+// square below md (the dialog's 16px padding plus 32px). It applies also where
+// a dialog has no X: a conditional would make the header know about a sibling.
 function DialogHeader({ className, ...props }: React.ComponentProps<'div'>) {
   return (
-    <div data-slot="dialog-header" className={cn('flex flex-col gap-2', className)} {...props} />
+    <div
+      data-slot="dialog-header"
+      className={cn('flex flex-col gap-2 max-md:pr-8', className)}
+      {...props}
+    />
   )
 }
 
