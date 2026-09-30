@@ -3041,7 +3041,8 @@ export type HostResult = z.infer<typeof hostResultSchema>
 /**
  * One piece of the helper that is not installed (D-12), with the path the
  * daemon looked at: the script, the path unit (with its service beside it),
- * or the path unit installed but not enabled.
+ * or the path unit installed but not enabled. not-enabled comes only with
+ * both unit files installed, so never beside path-unit.
  */
 export const hostHelperMissingSchema = z.object({
   item: z.enum(['script', 'path-unit', 'not-enabled']),

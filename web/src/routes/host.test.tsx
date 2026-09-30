@@ -1819,10 +1819,13 @@ function helperNotice(): HTMLElement | null {
 }
 
 describe('the helper notice', () => {
+  // The lists Detect can produce: not-enabled comes only with both unit files
+  // installed, so never beside path-unit (G-13-2).
   it.each([
     [1, [SCRIPT]],
     [2, [SCRIPT, PATH_UNIT]],
-    [3, [SCRIPT, PATH_UNIT, NOT_ENABLED]],
+    [2, [SCRIPT, NOT_ENABLED]],
+    [1, [NOT_ENABLED]],
   ])("lists %i missing piece(s), in the server's order, and the install commands", (n, missing) => {
     wrap(<HostView host={hostShape({ actions: helperMissing(missing) })} stale={null} />)
 
@@ -1849,17 +1852,21 @@ describe('the helper notice', () => {
     expect(within(notice).queryByRole('button')).toBeNull()
   })
 
-  it('says what each piece is and where it comes from', () => {
+  it('says what each piece is and where it comes from, nothing installed', () => {
     wrap(
-      <HostView
-        host={hostShape({ actions: helperMissing([SCRIPT, PATH_UNIT, NOT_ENABLED]) })}
-        stale={null}
-      />,
+      <HostView host={hostShape({ actions: helperMissing([SCRIPT, PATH_UNIT]) })} stale={null} />,
     )
     const items = within(helperNotice() as HTMLElement).getAllByRole('listitem')
     expect(items.map((li) => li.textContent)).toEqual([
       '/usr/local/sbin/holzkube-manager-host — the helper script, from deploy/holzkube-manager-host.sh',
       '/etc/systemd/system/holzkube-manager-host.path — the unit that watches for orders, from deploy/holzkube-manager-host.path (with holzkube-manager-host.service beside it)',
+    ])
+  })
+
+  it('says what each piece is and where it comes from, units installed but not enabled', () => {
+    wrap(<HostView host={hostShape({ actions: helperMissing([NOT_ENABLED]) })} stale={null} />)
+    const items = within(helperNotice() as HTMLElement).getAllByRole('listitem')
+    expect(items.map((li) => li.textContent)).toEqual([
       '/etc/systemd/system/paths.target.wants/holzkube-manager-host.path — holzkube-manager-host.path is installed but not enabled',
     ])
   })

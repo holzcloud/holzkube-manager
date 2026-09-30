@@ -500,20 +500,33 @@ describe('/host at 390 px', () => {
     expect(overflowing(phone)).toEqual([])
   })
 
-  it('fits the helper notice: three missing pieces, the commands scroll inside their own box', () => {
+  // The two widest lists Detect can produce: nothing installed (two pieces)
+  // and the units installed but not enabled (the longest path). not-enabled
+  // never comes beside path-unit (G-13-2), so there is no three-item state.
+  it.each([
+    [
+      'nothing installed',
+      [
+        { item: 'script', path: '/usr/local/sbin/holzkube-manager-host' },
+        { item: 'path-unit', path: '/etc/systemd/system/holzkube-manager-host.path' },
+      ],
+    ],
+    [
+      'units installed, not enabled',
+      [
+        {
+          item: 'not-enabled',
+          path: '/etc/systemd/system/paths.target.wants/holzkube-manager-host.path',
+        },
+      ],
+    ],
+  ])('fits the helper notice, %s: the commands scroll inside their own box', (_, missing) => {
     const phone = renderAtPhoneWidth(
       shape({
         actions: {
           ...HELPER_INSTALLED,
           available: false,
-          missing: [
-            { item: 'script', path: '/usr/local/sbin/holzkube-manager-host' },
-            { item: 'path-unit', path: '/etc/systemd/system/holzkube-manager-host.path' },
-            {
-              item: 'not-enabled',
-              path: '/etc/systemd/system/paths.target.wants/holzkube-manager-host.path',
-            },
-          ],
+          missing,
           install_commands: INSTALL_COMMANDS,
         },
       }),
@@ -521,7 +534,10 @@ describe('/host at 390 px', () => {
     )
     expect(phone.getBoundingClientRect().width).toBe(PHONE_WIDTH)
     expect(phone.textContent).toContain('Host actions need the helper, which is not installed')
-    expect(phone.querySelectorAll('li').length).toBeGreaterThanOrEqual(3)
+    const notice = [...phone.querySelectorAll('div')].find((d) =>
+      d.firstElementChild?.textContent?.startsWith('Host actions need the helper'),
+    )
+    expect(notice?.querySelectorAll('li').length).toBe(missing.length)
     const pre = phone.querySelector('pre')
     if (pre === null) throw new Error('no commands block')
     expect(pre.textContent).toBe(INSTALL_COMMANDS.join('\n'))
