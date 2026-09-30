@@ -7,7 +7,15 @@ import {
   RotateCcw,
   RotateCw,
 } from 'lucide-react'
-import { type FormEvent, Fragment, type ReactNode, useEffect, useRef, useState } from 'react'
+import {
+  type FormEvent,
+  Fragment,
+  type ReactNode,
+  type RefObject,
+  useEffect,
+  useRef,
+  useState,
+} from 'react'
 import {
   api,
   type Host,
@@ -220,6 +228,8 @@ export function HostActions({
   onPlaced: (order: HostOrder) => void
 }) {
   const [pending, setPending] = useState<HostAction | null>(null)
+  // The button that opened the dialog: a cancel hands focus back to it.
+  const opener = useRef<HTMLButtonElement | null>(null)
   const hostname = host.device.hostname.readable ? host.device.hostname.value : ''
   const reason = disabledReason(host, sessionRole, pollFailed, order)
 
@@ -253,7 +263,10 @@ export function HostActions({
                   spec.destructive && 'text-destructive',
                 )}
                 disabled={reason !== null}
-                onClick={() => setPending(action)}
+                onClick={(e) => {
+                  opener.current = e.currentTarget
+                  setPending(action)
+                }}
               >
                 <Icon aria-hidden="true" className="size-4" />
                 {HOST_ACTION_LABEL[action]}
@@ -271,6 +284,8 @@ export function HostActions({
         <HostActionDialog
           action={pending}
           hostname={hostname}
+          reason={reason}
+          opener={opener}
           onClose={() => setPending(null)}
           onPlaced={(placed) => {
             setPending(null)
@@ -285,16 +300,28 @@ export function HostActions({
 function HostActionDialog({
   action,
   hostname,
+  reason,
+  opener,
   onClose,
   onPlaced,
 }: {
   action: HostAction
   hostname: string
+  /**
+   * The group's reason, followed while the dialog is open: a failed poll,
+   * another order or a role change arriving now turns the confirm off, because
+   * the route would refuse it. The server stays the lock (409/403).
+   */
+  reason: string | null
+  /** The button that opened the dialog, which a cancel gives focus back to. */
+  opener: RefObject<HTMLButtonElement | null>
   onClose: () => void
   onPlaced: (order: HostOrder) => void
 }) {
   const queryClient = useQueryClient()
   const [typed, setTyped] = useState('')
+  // Set once this dialog placed an order, before it hands the order on.
+  const placed = useRef(false)
   const spec = ACTION[action]
   const Icon = spec.icon
 
@@ -305,6 +332,7 @@ function HostActionDialog({
     },
     onSuccess: ({ order }) => {
       void queryClient.invalidateQueries({ queryKey: ['host'] })
+      placed.current = true
       onPlaced(order)
     },
   })
@@ -316,7 +344,7 @@ function HostActionDialog({
 
   const submit = (e: FormEvent) => {
     e.preventDefault()
-    if (matches && !run.isPending) {
+    if (matches && reason === null && !run.isPending) {
       run.mutate()
     }
   }
@@ -325,9 +353,18 @@ function HostActionDialog({
     <Dialog open onOpenChange={(open) => !open && onClose()}>
       <DialogContent
         className="sm:max-w-md"
-        // The trigger is off while the order is under way; focus goes to the
-        // status box instead (HostOrderStatus takes it).
-        onCloseAutoFocus={(e) => e.preventDefault()}
+        // After an order was placed the trigger is off while it is under way,
+        // and focus goes to the status box instead (HostOrderStatus takes it).
+        // A cancel -- Keep running, Escape, the close X -- placed nothing: the
+        // trigger is still on and gets focus back. Radix would only do that for
+        // a DialogTrigger, which these buttons are not, and left alone it drops
+        // focus on the page body next to the destructive pair.
+        onCloseAutoFocus={(e) => {
+          e.preventDefault()
+          if (!placed.current) {
+            opener.current?.focus()
+          }
+        }}
       >
         <form onSubmit={submit} className="grid gap-4">
           <DialogHeader>
@@ -369,11 +406,23 @@ function HostActionDialog({
                 autoCapitalize="none"
                 autoCorrect="off"
                 spellCheck={false}
-                onChange={(e) => setTyped(e.target.value)}
+                onChange={(e) => {
+                  setTyped(e.target.value)
+                  // An old Problem does not stay under a corrected name.
+                  if (run.isError) {
+                    run.reset()
+                  }
+                }}
               />
             </div>
             {run.error ? <Problem error={run.error} /> : null}
           </div>
+
+          {reason !== null && (
+            <p id="host-action-dialog-reason" className="text-xs text-muted-foreground">
+              {reason}
+            </p>
+          )}
 
           <DialogFooter>
             <Button type="button" variant="outline" onClick={onClose}>
@@ -382,7 +431,8 @@ function HostActionDialog({
             <Button
               type="submit"
               variant={spec.destructive ? 'destructive' : 'default'}
-              disabled={!matches || run.isPending}
+              disabled={!matches || reason !== null || run.isPending}
+              aria-describedby={reason === null ? undefined : 'host-action-dialog-reason'}
             >
               <Icon aria-hidden="true" className="size-4" />
               {run.isPending ? 'Working…' : HOST_ACTION_LABEL[action]}

@@ -13,6 +13,7 @@ import {
 } from '@/components/HostActions'
 import { SudoDialog } from '@/components/SudoDialog'
 import { SESSION_QUERY_KEY } from '@/hooks/useSession'
+import { ProblemError } from '@/lib/problem'
 import { PROBLEM_BASE_URI } from '@/test/problem-fixtures'
 import demo from '../../fixtures/demo.json'
 
@@ -451,6 +452,126 @@ describe('HostActions: one dialog per action', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Keep running' }))
     expect(screen.queryByRole('dialog')).toBeNull()
     expect(confirm).not.toHaveBeenCalled()
+  })
+
+  // 13-UI-REVIEW fix 1: a cancel is not an order. The trigger is still on, and
+  // a keyboard or screen-reader user left on the page body sits next to the
+  // destructive pair with no idea where they are.
+  it.each([
+    ['Keep running', () => userEvent.click(screen.getByRole('button', { name: 'Keep running' }))],
+    ['Escape', () => userEvent.keyboard('{Escape}')],
+    [
+      'the close X',
+      () =>
+        userEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Close' })),
+    ],
+  ] as const)('focus returns to the button that opened it on cancel with %s', async (_, cancel) => {
+    actions()
+    const trigger = screen.getByRole('button', { name: 'Restart host' })
+    await userEvent.click(trigger)
+    expect(screen.getByRole('dialog')).toBeInTheDocument()
+    await cancel()
+    expect(screen.queryByRole('dialog')).toBeNull()
+    // Radix hands focus back after a tick.
+    await vi.waitFor(() => expect(trigger).toHaveFocus())
+  })
+
+  // The other half of the rule: after an order the status box takes focus, so
+  // the dialog must not hand it back -- even when the trigger is still on
+  // (here the parent never follows the order, so nothing turns it off).
+  it('focus does not return to the button after an order was placed', async () => {
+    vi.spyOn(api.hostActions, 'confirm').mockResolvedValue({
+      token: 'token-1',
+      expires: '2026-09-28T10:10:05Z',
+    })
+    vi.spyOn(api.hostActions, 'place').mockResolvedValue({ order: { ...held, action: 'reboot' } })
+    const onPlaced = vi.fn()
+    actions({ onPlaced })
+    const trigger = screen.getByRole('button', { name: 'Restart host' })
+    await userEvent.click(trigger)
+    await userEvent.type(screen.getByLabelText(/to confirm/), 'example-host')
+    await userEvent.click(
+      within(screen.getByRole('dialog')).getByRole('button', { name: 'Restart host' }),
+    )
+    await vi.waitFor(() => expect(onPlaced).toHaveBeenCalled())
+    await vi.waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+    expect(trigger).toBeEnabled()
+    // Past the tick after which Radix would have handed focus back.
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    expect(trigger).not.toHaveFocus()
+  })
+
+  // 13-UI-REVIEW fix 2: the page learns a reason while the dialog is open (a
+  // failed poll, another order, a role change). The route would refuse the
+  // confirm, so the dialog must not offer it.
+  it('the reason in an open dialog: shown above the footer, and the confirm is off until it is gone', async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const view = (pollFailed: boolean) => (
+      <QueryClientProvider client={client}>
+        <HostActions
+          host={hostWith()}
+          sessionRole="operator"
+          pollFailed={pollFailed}
+          order={null}
+          onPlaced={() => undefined}
+        />
+      </QueryClientProvider>
+    )
+    const { rerender } = render(view(false))
+    await userEvent.click(screen.getByRole('button', { name: 'Restart host' }))
+    await userEvent.type(screen.getByLabelText(/to confirm/), 'example-host')
+    const confirmIn = () =>
+      within(screen.getByRole('dialog')).getByRole('button', { name: /^Restart host/ })
+    expect(confirmIn()).toBeEnabled()
+
+    rerender(view(true))
+    const dialog = screen.getByRole('dialog')
+    const said = within(dialog).getByText(
+      'holzkube-manager is not answering; host actions return when it does.',
+    )
+    expect(confirmIn()).toBeDisabled()
+    expect(confirmIn()).toHaveAttribute('aria-describedby', said.id)
+    expect(said.id).not.toBe('')
+    // Above the footer: the sentence comes before Keep running in the dialog.
+    const keep = within(dialog).getByRole('button', { name: 'Keep running' })
+    expect(said.compareDocumentPosition(keep) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+
+    rerender(view(false))
+    expect(
+      within(screen.getByRole('dialog')).queryByText(
+        'holzkube-manager is not answering; host actions return when it does.',
+      ),
+    ).toBeNull()
+    expect(confirmIn()).toBeEnabled()
+    expect(confirmIn()).not.toHaveAttribute('aria-describedby')
+  })
+
+  it('the Problem clears as soon as the typed text changes', async () => {
+    vi.spyOn(api.hostActions, 'confirm').mockRejectedValue(
+      new ProblemError({
+        type: `${PROBLEM_BASE_URI}validation`,
+        title: 'Validation failed',
+        status: 400,
+        detail: "Type this machine's hostname exactly to confirm.",
+        code: 'validation.failed',
+      }),
+    )
+    actions()
+    await userEvent.click(screen.getByRole('button', { name: 'Restart host' }))
+    const field = screen.getByLabelText(/to confirm/)
+    await userEvent.type(field, 'example-host')
+    await userEvent.click(
+      within(screen.getByRole('dialog')).getByRole('button', { name: 'Restart host' }),
+    )
+    const dialog = screen.getByRole('dialog')
+    expect(
+      await within(dialog).findByText("Type this machine's hostname exactly to confirm."),
+    ).toHaveClass('text-destructive')
+
+    await userEvent.type(field, 'x')
+    expect(
+      within(dialog).queryByText("Type this machine's hostname exactly to confirm."),
+    ).toBeNull()
   })
 })
 
