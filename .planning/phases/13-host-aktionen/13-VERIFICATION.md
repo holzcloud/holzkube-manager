@@ -1,8 +1,8 @@
 ---
 phase: 13-host-aktionen
-verified: 2026-09-29T19:37:10Z
-status: gaps_found
-score: 4/5 must-haves verified
+verified: 2026-09-30T04:14:06Z
+status: human_needed
+score: 5/5 must-haves verified
 covered_files:
   - ".github/workflows/ci.yml"
   - ".goreleaser.yaml"
@@ -24,6 +24,10 @@ covered_files:
   - ".planning/phases/13-host-aktionen/13-08-SUMMARY.md"
   - ".planning/phases/13-host-aktionen/13-09-PLAN.md"
   - ".planning/phases/13-host-aktionen/13-09-SUMMARY.md"
+  - ".planning/phases/13-host-aktionen/13-10-PLAN.md"
+  - ".planning/phases/13-host-aktionen/13-10-SUMMARY.md"
+  - ".planning/phases/13-host-aktionen/13-11-PLAN.md"
+  - ".planning/phases/13-host-aktionen/13-11-SUMMARY.md"
   - "README.md"
   - "cmd/holzkube-managerd/budget_test.go"
   - "cmd/holzkube-managerd/main.go"
@@ -33,6 +37,7 @@ covered_files:
   - "deploy/holzkube-manager-host.sh"
   - "docs/api-contract.md"
   - "docs/guide.md"
+  - "docs/screenshots/host.png"
   - "internal/audit/redact.go"
   - "internal/host/actions_test.go"
   - "internal/host/collector.go"
@@ -78,39 +83,17 @@ covered_files:
   - "web/src/routes/host.test.tsx"
   - "web/src/routes/host.tsx"
   - "web/src/routes/wall.test.tsx"
-covered_digest: "v2:sha256:046803a731b409afb95cb776692277a33b5b7a3521a4190ea9e3f89309d862eb"
+covered_digest: "v2:sha256:1e68bdfb8e993c6f3bb1b56c81233c2a21558ad86b003109e1344612d0708a54"
 behavior_unverified: 0
 overrides_applied: 0
-gaps:
-  - truth: "SC4: With the helper not installed, the actions are locked, the page names what from deploy/ goes where, and no order is created"
-    status: partial
-    reason: >-
-      Locked and no-order hold (tests pass; seen red by this verifier). But in exactly the
-      state SC4 names -- nothing installed, the Pi's state -- the helper notice states a
-      falsehood: hostaction.Detect appends MissingNotEnabled whenever the
-      paths.target.wants entry is absent, also when the unit files themselves are missing
-      (helper.go:102-104, contradicting its own doc at :55-57), and HostActions.tsx:777
-      renders that item as "holzkube-manager-host.path is installed but not enabled",
-      directly under the line saying the path unit is missing. The API contract
-      (api-contract.md:1867, "units are there but the path unit is not enabled"), the demo
-      fixture and README's host.png carry the same contradiction. Independently confirmed
-      by code reading; also reported by 13-UAT.md as G-13-2.
-    artifacts:
-      - path: "internal/host/hostaction/helper.go"
-        issue: "not-enabled reported alongside path-unit when no unit file exists"
-      - path: "web/src/components/HostActions.tsx"
-        issue: "line 777 asserts the path unit is installed"
-      - path: "docs/api-contract.md"
-        issue: "line 1867 defines not-enabled as 'units are there', which Detect does not honour"
-      - path: "web/fixtures/demo.json"
-        issue: "fixture shows all three items, so docs/screenshots/host.png shows the false sentence"
-    missing:
-      - "Report not-enabled only when both unit files are present (or word the item so it is true in both states), with a Detect/TestHelper row seen red against the current behaviour"
-      - "Fixture, TestTheFixtureShowsTheRealInstallCommands expectation, contract text and host.png follow the corrected list"
-deferred:
-  - truth: "No host action label runs past its button at 390 px (13-UAT G-13-3)"
-    addressed_in: "Phase 14"
-    evidence: "Phase 14 SC4: '/host mit seinen Aktionen und dem Bestätigungsdialog besteht die Prüfung bei 390 px, und auf einem Telefon lässt sich der Host ansehen und eine Aktion bis zur getippten Bestätigung führen'. Confirmed here: a temporary assertion in host.browser.test.tsx measured 'Check for updates and install' at scrollWidth 191 / clientWidth 189 in the 2 x 2 grid (Chromium, 390 px); reverted."
+re_verification:
+  previous_status: gaps_found
+  previous_score: 4/5
+  gaps_closed:
+    - "SC4: With the helper not installed, the actions are locked, the page names what from deploy/ goes where, and no order is created (G-13-2: Detect no longer lists not-enabled beside path-unit)"
+    - "No host action label runs past its button at 390 px (G-13-3, previously deferred to Phase 14, closed in 13-11)"
+  gaps_remaining: []
+  regressions: []
 human_verification:
   - test: "Install the helper per deploy/HOST-HELPER.md on the Pi (operator's call), then run the three-step probe: start holzkube-manager-host.service with no order, check the path unit is 'active (waiting)', then press 'Check for updates and install' on /host."
     expected: "Journal says 'kein Auftrag' and exit 0; path unit active (waiting); the order is picked up once, /var/lib/holzkube-manager-host/last reads '<id> update started <time>', the status box walks placed -> picked up -> started -> update finished, the path unit does not loop."
@@ -129,11 +112,15 @@ human_verification:
 # Phase 13: Host-Aktionen über einen root-eigenen Helfer -- Verification Report
 
 **Phase Goal:** Der Betreiber kann den Host neu starten, herunterfahren, den Dienst holzkube-manager neu starten und „jetzt nach Updates suchen" auslösen -- ohne dass der Daemon Root, D-Bus oder eine Capability bekommt. Er legt einen Auftrag im Datenverzeichnis ab; eine root-eigene Path-Unit holt ihn ab und ein festes Skript führt ihn aus einer festen Liste aus.
-**Verified:** 2026-09-29T19:37:10Z
-**Status:** gaps_found (one partial gap; plus human items that only an installed helper and a real reboot can show)
-**Re-verification:** No -- initial verification
+**Verified:** 2026-09-30T04:14:06Z
+**Status:** human_needed (all five success criteria verified; what remains needs an installed helper, a real reboot, or an operator decision)
+**Re-verification:** Yes -- after gap closure (13-10 G-13-2, 13-11 G-13-3), previous report 2026-09-29 at a45015c
 
-**Where this ran:** the operator's Raspberry Pi 5 (aarch64), Go 1.26.7 via GOTOOLCHAIN, Node v22 via nvm, Playwright Chromium, systemd 257. No `-race` (ThreadSanitizer refuses this kernel). `unshare --user --map-root-user id -u` printed 0, so every root-namespace test ran; 0 SKIP lines in any run below. Nothing installed; the production service, its data directory and `/etc/systemd` were not touched (only read: `systemctl cat`/`list-unit-files`). `/usr/local/sbin/holzkube-manager-host` and the path unit do not exist on this host. During verification a concurrent session committed `3e08d11` (13-UAT.md); its two issues were checked independently below, not taken on trust.
+**Where this ran:** the operator's Raspberry Pi 5 (aarch64), Go 1.27.1 from `~/.local/go`, Node via nvm, the browser project's Chromium. No `-race` (ThreadSanitizer refuses this kernel; the race verdict is CI's). `unshare --user --map-root-user id -u` printed 0, so the root-namespace script tests ran (28 `TestHostScriptAsRoot` subtests PASS, 0 SKIP). Nothing installed: `/usr/local/sbin/holzkube-manager-host` and `/etc/systemd/system/holzkube-manager-host.path` are still absent. The production service and its data directory were not addressed. `git status --porcelain` was empty after every injection and after the run.
+
+## Re-verification scope
+
+The commits since a45015c (`51631f8`, `a1f1679`, `dd670b3`, `c265f42`, plus planning docs) touch `helper.go`, the Detect/fixture/page tests, `demo.json`, `api-contract.md`, `api.ts`, `host.png`, `HostActions.tsx` and `host.browser.test.tsx`. The two gaps were verified in full. SC1, SC2, SC3 and SC5 got a regression check: their suites were re-run green (below), and none of their implementation files changed.
 
 ## Goal Achievement
 
@@ -141,113 +128,97 @@ human_verification:
 
 | # | Truth | Status | Evidence |
 |---|-------|--------|----------|
-| 1 | Four actions on /host; each needs sudo window + typed hostname, refused below operator, audited; each of the four locks removed singly and its test seen red | VERIFIED | Routes in `handlers/host.go` `HostRoutes`: `RequiresSession`, `MinRole: RoleOperator`, `Destructive: true`, `Action: host.<a>`; confirm route compares `TrimSpace(typed)` with uname hostname; `hostTypedPhrase` all four true; token intent `{host.<a>, "@host", session digest}` checked by `CheckOnce`. Audit allowlist `redact.go:238-241`. `TestHostActionGates` (8 subtests, each looping all four actions), `TestHostConfirmGates` (loops all four), `TestHostTokenOpensOneOrderInItsOwnSession`: PASS. 13-03 SUMMARY records F1 sudo / F2 typed / F3 role / F4 audit each red. **Spot-checked by this verifier:** typed-hostname comparison disabled -> `TestHostConfirmGates` rc 1 (5 subtests red, "the answer carries a token"); `Action: ""` on the action routes -> `TestHostActionGates/every_action_is_audited` rc 1. Four buttons: `HostActions.tsx` `HOST_ACTIONS`, jsdom + browser tests pass. |
-| 2 | Daemon never executes a host action itself; guard seen red against a smuggled process call | VERIFIED | `main.go:575-583` wires only `fsstore.PlaceNew`/`Claim` into the Box; `internal/processguard_test.go` (go-list half + alias-aware AST half + linkname/cgo/raw-syscall checks): PASS. **Spot-checked:** added `internal/host/smuggle.go` with `exec.Command("systemctl","reboot")` -> build ok, `TestTheDaemonStartsNoProcess` rc 1, both halves red (`smuggle.go:3: imports "os/exec"`); file removed. 13-05 records F7/F8 and 13-REVIEW-FIX IN-01 more. |
-| 3 | Helper script against a test data dir and stand-in systemctl runs exactly the four orders; unknown/malformed (foreign word, path, shell metachar) discarded and logged; test seen red against a script that runs it | VERIFIED | `deploy/holzkube-manager-host.sh`: claim by rename, `dd iflag=nofollow,nonblock` 65 B, anchored ERE under `LC_ALL=C`, exact-size check, fixed argv per action, content never logged. `TestHostScriptAsRoot` (28 subtests incl. foreign word, path, `;`, `$()`, backticks, NUL, CRLF, symlink, FIFO, stale, future) and `TestHostScriptClaimRace` (8): PASS, run as root in a user namespace. **Spot-checked:** pattern relaxed to any two fields and `*)` branch made to run `$action` -> `TestHostScriptAsRoot` rc 1 (`rejects_foreign_word`: "exit = 0, want 2", "systemctl was called, want never"); restored, `git status` clean. 13-04 records F9-F13. |
-| 4 | Helper not installed -> actions locked, page names what from deploy/ goes where, no order left in the data dir | PARTIAL (gap) | Locked + no order: both routes check `InContainer()` then `Missing()` before body/token/Place; `TestHostActionsNeedTheHelper` / `TestHostActionsInAContainer`: PASS. **Spot-checked:** helper check removed from the action route -> rc 1, "202, want 409 ... a refused request placed an order". Page: `disabledReason` puts the helper reason first after container; `HostHelperNotice` lists items and `install_commands`. **But** in the nothing-installed state the notice says "holzkube-manager-host.path is installed but not enabled" right after "path unit missing" (`helper.go:102-104` + `HostActions.tsx:777`); contract, fixture and host.png repeat it. See Gaps. |
-| 5 | deploy/ has path unit, service unit, script, install guide; `systemd-analyze verify` accepts the units; guide asks for no less hardening on the daemon unit | VERIFIED | All four files present and in `.goreleaser.yaml:85-88`. **Run by this verifier:** `systemd-analyze verify --man=no` on copies with ExecStart pointed at `/bin/true`: rc 0, no output (on the shipped files the only complaint is that `/usr/local/sbin/holzkube-manager-host` does not exist, i.e. not installed). `TestUnitsVerify` (output-gated, negative control), `TestUnitsAgree`, `TestGuideKeepsTheDaemonsHardening`, `TestInstallCommandsMatchTheGuide`, `TestTheArchiveCarriesTheHelper`, `TestTheUpdateScriptDoesNotShipTheHelper`: PASS. HOST-HELPER.md "The service's own unit stays as it is" names NoNewPrivileges, empty CapabilityBoundingSet, AF_INET AF_INET6, ProcSubset=pid and four more as unchanged; the production unit (read only) still carries all of them. |
+| 1 | Four actions on /host; each needs sudo window + typed hostname, refused below operator, audited; each lock removed singly and its test seen red | VERIFIED (regression) | `handlers/host.go`, `redact.go` unchanged since a45015c; `go test ./internal/httpapi/` rc 0 (includes TestHostActionGates, TestHostConfirmGates, TestHostTokenOpensOneOrderInItsOwnSession). Red runs from the initial verification stand. |
+| 2 | Daemon never executes a host action itself; guard seen red against a smuggled process call | VERIFIED (regression) | `go test ./internal/ ./cmd/...` rc 0 (TestTheDaemonStartsNoProcess). `main.go` unchanged. |
+| 3 | Helper script runs exactly the four orders against a test dir and stand-in systemctl; unknown/malformed input discarded and logged; test seen red | VERIFIED (regression) | `deploy/holzkube-manager-host.sh` unchanged; `TestHostScriptAsRoot` PASS with 28/28 subtests run as root in a user namespace, 0 SKIP. |
+| 4 | Helper not installed -> actions locked, page names what from deploy/ goes where, no order left in the data dir | VERIFIED (gap G-13-2 closed) | `helper.go:96-115`: the wants entry is only checked when `unitsInstalled`, so an empty machine gives `[script, path-unit]`. `TestHelperEveryCombination` walks all 16 presence states and holds that path-unit and not-enabled never appear together, that not-enabled appears exactly when both units are present and wants is absent, and that the list is empty exactly when everything is installed. The routes' 409 for a missing helper is unchanged: `TestHostActionsNeedTheHelper` has new rows for "nothing installed" and "script installed, no unit files" and passes. `demo.json`, `fixtures.test.ts`, `api-contract.md:1865-1872` and the example at `:1888-1894` show the two-item list. The contract now defines not-enabled as "both unit files are there". **host.png viewed by this verifier:** the notice lists only the script path and the .path unit path, and does not contain "installed but not enabled". The sentence "is installed but not enabled" (`HostActions.tsx:784`) is now only reachable when it is true. **Reinstated by this verifier:** `if unitsInstalled {` -> `if unitsInstalled \|\| !unitsInstalled {`, which compiles, gave rc 1 across TestHelperEveryCombination (e.g. "script=no .path=no .service=no wants=no ... lists path-unit and not-enabled together"), TestHelperBoxMissing, TestHelper (3 rows), TestTheFixtureShowsTheRealInstallCommands, TestReadCarriesActions/nothing_installed and TestHostActionsNeedTheHelper (2 rows). Restored with `git checkout`; tree clean. |
+| 5 | deploy/ has path unit, service unit, script, install guide; `systemd-analyze verify` accepts them; guide asks for no less hardening | VERIFIED (regression) | deploy/ unchanged since a45015c; TestUnitsVerify, TestUnitsAgree, TestGuideKeepsTheDaemonsHardening, TestInstallCommandsMatchTheGuide in the `hostaction` package run: rc 0. |
 
-**Score:** 4/5 truths verified (0 present-but-behavior-unverified)
+**Score:** 5/5 truths verified (0 present-but-behavior-unverified)
 
-### Plan-level truths (cross-cutting, from ROADMAP)
+### Plan-level and UAT truths
 
 | Truth | Status | Evidence |
 |---|---|---|
-| 40-character hostname wraps inside the dialog at 390 px | VERIFIED | `host.browser.test.tsx` "wraps a 40-character hostname inside the Restart host dialog": PASS (Chromium, 6/6) |
-| A /host page that did not place the reboot order shows the waiting notice | VERIFIED (derivation) + human | `host.test.tsx` "says waiting on a page that did not place the order" PASS; real two-session reboot is a human item |
-| Nothing installed on the operator's host, production never restarted; helper ships in deploy/ only | VERIFIED | helper files absent from `/usr/local/sbin` and `/etc/systemd/system`; update script never names the helper (test); archive carries it |
+| No host action label runs past its button at 390 px (UAT G-13-3, previously deferred to Phase 14) | VERIFIED (closed in 13-11) | Root cause confirmed in code: the old template put `max-md:whitespace-normal${` right before the interpolation, so Tailwind's scanner never saw the class as a token. It is now `cn('... max-md:whitespace-normal', spec.destructive && 'text-destructive')` (`HostActions.tsx:251-254`). **Built CSS:** `./bin/task build:web --force` rc 0, and `index-*.css` has exactly one `.max-md\:whitespace-normal{white-space:normal}`, inside `@media not all and (width>=48rem)`. HostActions.tsx is the only source file that uses the class. **Browser:** `host.browser.test.tsx` 8/8 PASS. The tests include per-button `spillsPastItsButton`, `lineBoxes(update) == 2` at 390 px, both helper-notice shapes with disabled buttons, and the 1200-px desktop shape (28 px tall, one line each). **Reinstated by this verifier:** the original template literal put back gave rc 1, 3 failed / 5 passed, with `"Check for updates and install" scrolls: scrollWidth 191 > clientWidth 189`, the icon at -0.5..15.5 and the text line at 19.5..191.5 outside 0..191. This matches 13-11's claimed red run exactly. Restored; tree clean. |
+| 40-character hostname wraps inside the dialog at 390 px | VERIFIED | browser test PASS; the dialog footer buttons now also pass `spillsPastItsButton` |
+| A /host page that did not place the reboot order shows the waiting notice | VERIFIED (derivation) + human | `host.test.tsx` PASS; the real reboot is a human item |
+| Nothing installed on the operator's host, production never restarted; helper ships in deploy/ only | VERIFIED | Helper files absent from the host; this verifier did not touch the service |
 
-### Deferred Items
-
-| # | Item | Addressed In | Evidence |
-|---|------|-------------|----------|
-| 1 | "Check for updates and install" label overflows its button at 390 px (scrollWidth 191 / clientWidth 189 in the browser harness; UAT saw 180/173 in the app) | Phase 14 | SC4: "/host mit seinen Aktionen ... besteht die Prüfung bei 390 px" |
-
-### Required Artifacts
+### Required Artifacts (changed since a45015c)
 
 | Artifact | Expected | Status | Details |
 |---|---|---|---|
-| `deploy/holzkube-manager-host.sh` | root helper, four fixed orders | VERIFIED | substantive (claim, validate, record, act); exercised by 36 root-namespace subtests |
-| `deploy/holzkube-manager-host.path` / `.service` | PathExists on host-order; hardened oneshot | VERIFIED | verify clean; no [Install] on service, no RemainAfterExit |
-| `deploy/HOST-HELPER.md` | install, probe, hardening unchanged, drop-in, recovery, uninstall | VERIFIED | install block == `hostaction.InstallCommands` (test) |
-| `internal/host/hostaction/*` | Box, Place/Claim, pickup timer, sweep, Close withdrawal, Detect, ReadResult | VERIFIED (Detect wording gap above) | wired in `main.go`, `host.Collector`, handlers |
-| `internal/httpapi/handlers/host.go` | confirm + four action routes | VERIFIED | registered via `handlers.HostRoutes(deps)` in `main.go:904` |
-| `internal/processguard_test.go` | no process start in the daemon | VERIFIED | red against injection |
-| `web/src/components/HostActions.tsx`, `routes/host.tsx` | four buttons, dialog, reason, status, waiting, helper notice | VERIFIED except line 777 | 219 jsdom tests + 6 browser tests pass |
+| `internal/host/hostaction/helper.go` | Detect: not-enabled only with both units | VERIFIED | its doc comment and code agree; red against the reinstated fault |
+| `internal/host/hostaction/helper_test.go` | 16-combination invariant plus example rows | VERIFIED | goes red on the fault |
+| `web/fixtures/demo.json`, `docs/api-contract.md`, `docs/screenshots/host.png` | two-item empty-machine list | VERIFIED | Go and web fixture guards both pin the list; png inspected |
+| `web/src/components/HostActions.tsx` | class list through `cn()` | VERIFIED | rule is in the built CSS |
+| `web/src/routes/host.browser.test.tsx` | per-button fit check and desktop shape | VERIFIED | red against the reinstated template |
 
 ### Key Link Verification
 
 | From | To | Via | Status |
 |---|---|---|---|
-| `/host` buttons | `POST /api/v1/host/confirm` then `/actions/<a>` | `api.hostActions`, `HOST_ACTION_PATHS` | WIRED (cmd route-reachability guards pass) |
-| action route | order file | `Box.Place` -> `fsstore.PlaceNew` (link, EEXIST -> 409) | WIRED (`TestHostActionRoundTrip` PASS, root helper consumed the real order) |
-| order file | root script | `PathExists=/var/lib/holzkube-manager/host-order` | WIRED on paper (units agree with script default and Go constant); real firing = human item |
-| script | page | `/var/lib/holzkube-manager-host/last` -> `ReadResult` -> `actions.result` | WIRED (round trip reads the script's own line) |
-| helper detection | routes + page | `Box.Missing()` used by both routes and `actions.available` | WIRED |
+| `Detect` | page notice + route 409 | `Box.Missing()` -> `actions.missing` / `available` | WIRED (TestReadCarriesActions, TestHostActionsNeedTheHelper) |
+| `demo.json` | `host.png` / README | `web/scripts/readme-images.mjs` | WIRED (png shows the fixture's two items) |
+| `HostActions.tsx` class | built stylesheet | Tailwind source scan -> `dist/assets/index-*.css` | WIRED (rule present, one source) |
+
+Other links are unchanged from the initial report and still pass: buttons -> confirm/actions routes -> `Box.Place` -> order file -> PathExists -> script -> `last` -> `ReadResult`.
 
 ### Behavioral Spot-Checks
 
 | Behavior | Command | Result | Status |
 |---|---|---|---|
-| Host/hostaction/fsstore/jobs suites | `go test ./internal/host/... ./internal/store/fsstore/ ./internal/jobs/ -count=1 -v` | rc 0, 423 PASS, 0 SKIP | PASS |
-| Host API gates, helper, container, round trip, contract codes | `go test ./internal/httpapi/ -run '...'` (8 tests) + `TestHostTokenOpensOneOrderInItsOwnSession` | rc 0, 0 SKIP | PASS |
-| Process guard | `go test ./internal/ -run 'TestTheDaemonStartsNoProcess\|TestProcessGuardRecognisesAProcessStart'` | rc 0 | PASS |
-| cmd guards (budget, allowlist, reachability) | `go test ./cmd/holzkube-managerd/ -count=1 -v` | rc 0, 140 PASS | PASS |
-| Full Go suite, once | `go test ./internal/... ./cmd/... -count=1` | rc 0, 41 packages ok (incl. publicrepo) | PASS |
-| Web jsdom | `vitest run --project jsdom HostActions.test.tsx host.test.tsx fixtures.test.ts` | rc 0, 219/219 | PASS |
-| Web browser | `npm run test:browser -- src/routes/host.browser.test.tsx` | rc 0, 6/6 | PASS |
-| Units | `systemd-analyze verify --man=no` (ExecStart stubbed) | rc 0, empty output | PASS |
+| Host, hostaction, httpapi, fsstore, jobs, publicrepo | `go test ./internal/host/... ./internal/httpapi/ ./internal/store/fsstore/ ./internal/jobs/ ./internal/publicrepo/ -count=1` | rc 0, 7 packages ok | PASS |
+| Named G-13-2 tests + root script | `go test -v -run 'TestHelper\|TestTheFixtureShowsTheRealInstallCommands\|TestReadCarriesActions\|TestHostActionsNeedTheHelper\|TestHostScriptAsRoot'` | rc 0, 64 PASS, 0 SKIP, 0 FAIL | PASS |
+| Process guard + cmd guards | `go test ./internal/ ./cmd/... -count=1` | rc 0 | PASS |
+| Web jsdom | `vitest run --project jsdom HostActions.test.tsx host.test.tsx fixtures.test.ts` | rc 0, 221/221 | PASS |
+| Web browser | `npm run test:browser -- src/routes/host.browser.test.tsx` | rc 0, 8/8 | PASS |
+| Built CSS carries the wrap rule | `./bin/task build:web --force`; grep the css | rc 0; 1 rule inside the max-md media query | PASS |
+| Web typecheck / lint | `npm run typecheck`, `npm run lint` | rc 0 / rc 0 (2 warnings, 1 info, pre-existing per 13-10) | PASS |
 
-### Fault injections re-run by this verifier (each restored; `git status --porcelain` empty after every one)
+### Fault injections by this verifier (each restored; `git status --porcelain` empty after)
 
 | Injection | Test | rc |
 |---|---|---|
-| `internal/host/smuggle.go` with `exec.Command("systemctl","reboot")` | TestTheDaemonStartsNoProcess | 1 |
-| script accepts any two-field line and runs `$action` | TestHostScriptAsRoot | 1 |
-| typed-hostname comparison `if false && ...` | TestHostConfirmGates | 1 |
-| helper check off in the action route | TestHostActionsNeedTheHelper | 1 |
-| `Action: ""` on the four action routes | TestHostActionGates/every_action_is_audited | 1 |
-| (measurement, not a fix) scrollWidth/clientWidth of the four buttons at 390 px | host.browser.test.tsx | 1 -- confirms deferred G-13-3 |
+| `helper.go`: wants check made unconditional (`if unitsInstalled \|\| !unitsInstalled`) | TestHelper*, TestTheFixtureShowsTheRealInstallCommands, TestReadCarriesActions, TestHostActionsNeedTheHelper | 1 |
+| `HostActions.tsx`: original `...whitespace-normal${...}` template put back | host.browser.test.tsx | 1 (3 failed) |
 
 ### Requirements Coverage
 
 | Requirement | Description | Status | Evidence |
 |---|---|---|---|
-| HACT-01 | Restart host | SATISFIED (automated) / real run human | route, script `systemctl reboot`, button |
-| HACT-02 | Shut down host | SATISFIED (automated) / real run human | route, script `systemctl poweroff`, button |
-| HACT-03 | Restart service | SATISFIED (automated) / real run human | route, script `systemctl restart holzkube-manager.service` |
-| HACT-04 | "jetzt nach Updates suchen" | SATISFIED as "check and install" -- decision flagged | `systemctl start --no-block holzkube-manager-update.service`; unit exists on the Pi |
+| HACT-01 | Restart host | SATISFIED (automated) / real run human | unchanged |
+| HACT-02 | Shut down host | SATISFIED (automated) / real run human | unchanged |
+| HACT-03 | Restart service | SATISFIED (automated) / real run human | unchanged |
+| HACT-04 | "jetzt nach Updates suchen" | SATISFIED as "check and install" -- decision flagged | unchanged; label now fits at 390 px |
 | HACT-05 | sudo + typed hostname + audit + operator | SATISFIED | SC1 |
 | HACT-06 | daemon never executes; fixed list; unknown discarded and logged | SATISFIED | SC2, SC3 |
-| HACT-07 | helper missing -> UI says so and names what to install, no order | PARTIAL | SC4 gap (false "installed but not enabled") |
+| HACT-07 | helper missing -> UI says so and names what to install, no order | SATISFIED | SC4, G-13-2 closed |
 | HACT-08 | deploy/ units, script, guide | SATISFIED | SC5 |
 
-No orphaned requirements: REQUIREMENTS.md maps exactly HACT-01..08 to Phase 13, all claimed by plans.
+No orphaned requirements.
 
 ### Anti-Patterns Found
 
-No `TBD`/`FIXME`/`XXX`/`TODO`/`HACK` in the 56 non-planning files changed since `ef4648a`.
+The files changed since a45015c contain no `TBD`, `FIXME`, `XXX`, `TODO` or `HACK`. Both warnings from the previous report (helper.go:102-104 and HostActions.tsx:777) are resolved.
 
 | File | Line | Pattern | Severity | Impact |
 |---|---|---|---|---|
-| internal/host/hostaction/helper.go | 102-104 | item reported contrary to its own documented meaning | Warning | false sentence on the page in the production state (gap) |
-| web/src/components/HostActions.tsx | 777 | copy asserts a fact the data does not carry | Warning | same gap |
-| .github/workflows/ci.yml | 121-122 | userns sysctl step never executed (no CI minutes) | Info | root matrix is proven on the Pi only; CI run unperformed |
+| .github/workflows/ci.yml | 121-122 | userns sysctl step never executed (no CI minutes) | Info | the root matrix is proven on the Pi only |
 
 ### Human Verification Required
 
-1. **Install and probe the helper** -- follow HOST-HELPER.md, run the three-step probe, press "Check for updates and install". Expected: `kein Auftrag` on the dry start, path unit `active (waiting)`, one pickup, `last` = `<id> update started`, no loop. Why human: real system manager and sandbox; installing is the operator's call.
-2. **Real reboot, two sessions** -- expected waiting notice on both pages, then "back", order not re-run after boot. Why human: needs a real reboot and the Pi's clock at boot.
-3. **Restart service and shut down once each** -- expected both work from inside the helper's sandbox. Why human: the stand-in systemctl only records argv.
-4. **HACT-04 wording** -- accept "check for updates and install" as meeting "nach Updates suchen", or ask for check-only. Why human: product decision flagged in 13-CONTEXT.
+1. **Install and probe the helper.** Follow HOST-HELPER.md, run the three-step probe, then press "Check for updates and install". Expected: `kein Auftrag` on the dry start, the path unit `active (waiting)`, one pickup, `last` reads `<id> update started`, and no loop. Why human: it needs the real system manager and sandbox, and installing is the operator's call.
+2. **Real reboot with two sessions.** Expected: both pages show the waiting notice, then "back", and the order does not run again after boot. Why human: it needs a real reboot and the Pi's clock at boot.
+3. **Restart service and shut down, once each.** Expected: both work from inside the helper's sandbox. Why human: the stand-in systemctl only records argv.
+4. **HACT-04 wording.** Either accept "check for updates and install" as meeting "nach Updates suchen", or ask for a check-only variant. Why human: this is a product decision flagged in 13-CONTEXT.
 
 ### Gaps Summary
 
-The phase goal is structurally achieved: the daemon places one validated line through fsstore and nothing else, the guard is red against smuggled process starts, the root script carries out exactly four fixed commands and was red against a script that runs anything else, the four locks and the host/session-bound single-use token are each held by tests seen red, and deploy/ ships verified units and a guide that loosens nothing.
-
-One gap remains, and it sits in the state the Pi is actually in: with nothing installed, the helper notice (and the contract, fixture and README picture) says the path unit "is installed but not enabled" one line after saying it is missing. `Detect` should report `not-enabled` only when both unit files are present. The 390-px label overflow is real but belongs to Phase 14's /host layout criterion. Everything a real reboot or a root-installed helper would show is left to the operator.
+Both gaps are closed in the code, not only in the summaries. On an empty machine, `Detect` now reports `[script, path-unit]`. That state is pinned by a 16-state invariant, by the Go and web fixture guards, by the contract and by the re-rendered host.png. Putting the old unconditional check back turns five test functions red. The update button's wrap class now reaches the built stylesheet. Chromium measures every host button against its own border box at 390 px and checks the desktop shape at 1200 px. Putting the old template back reproduces the 191/189 overflow. No regressions were found in SC1-3 or SC5. What remains cannot be checked here: an installed helper under the real system manager, a real reboot, restart-service and poweroff from the sandbox, and the HACT-04 wording decision.
 
 ---
 
-_Verified: 2026-09-29T19:37:10Z_
+_Verified: 2026-09-30T04:14:06Z_
 _Verifier: Claude (gsd-verifier)_
