@@ -187,13 +187,14 @@ export const REASON = {
   hostname: 'The hostname could not be read, so there is nothing to type to confirm a host action.',
   notAnswering: 'holzkube-manager is not answering; host actions return when it does.',
   updateRunning: 'An update is running; wait for it to finish.',
+  checkRunning: 'An update check is running; wait for it to finish.',
   underWay: 'The last host action is still under way; wait for it to finish.',
   pending: 'An order is waiting for the helper. The next one can be placed when it is answered.',
 } as const
 
 /**
- * Why the four buttons are off, or null when they are on. The first reason
- * that applies wins; every one of them applies to all four buttons, so there
+ * Why the five buttons are off, or null when they are on. The first reason
+ * that applies wins; every one of them applies to all five buttons, so there
  * is one line for the group rather than one per button (UI-SPEC, checker
  * resolution 1).
  *
@@ -225,9 +226,18 @@ export function disabledReason(
   if (order !== null) {
     // Started is not done: a restart or shutdown the helper has begun takes the
     // host or the service away within seconds, and a second order placed in
-    // those seconds would outlive the process that placed it.
+    // those seconds would outlive the process that placed it. A check running
+    // is the helper busy waiting for it, and an update beside it would run the
+    // update script twice at once.
     if (order.phase === 'started') {
-      return order.action === 'update' ? REASON.updateRunning : REASON.underWay
+      switch (order.action) {
+        case 'update':
+          return REASON.updateRunning
+        case 'check-update':
+          return REASON.checkRunning
+        default:
+          return REASON.underWay
+      }
     }
     if (order.phase === 'placed' || order.phase === 'picked-up') {
       return REASON.pending
@@ -572,6 +582,16 @@ function runsUpdateScript(action: HostAction): boolean {
   return action === 'update' || action === 'check-update'
 }
 
+/**
+ * The actions that take the host or the service away, so that a failed poll
+ * while they are under way is the page waiting for holzkube-manager to come
+ * back. A check takes nothing away: a failed poll during it is only a stale
+ * reading.
+ */
+function takesItAway(action: HostAction): boolean {
+  return action !== 'check-update'
+}
+
 export function isFinal(phase: OrderPhase): boolean {
   return FINAL.has(phase)
 }
@@ -594,14 +614,15 @@ function bootTime(host: Host): number | null {
  * - no result for this id yet: the order's state as the daemon reports it (or,
  *   before it has, as the placement answered it) -- pending is placed,
  *   withdrawn is not picked up, picked-up is picked up, or waiting while the
- *   host does not answer; and no answer once RESULT_WITHIN_MS have passed
+ *   host does not answer (never for a check, which takes nothing away); and no
+ *   answer once RESULT_WITHIN_MS have passed
  *   without the daemon reporting the file still there;
  * - the helper's result for this id: rejected or failed as it says; started
  *   becomes update finished once the update status is not older than the
  *   order (update, check), back once the process started (restart service,
  *   update) or the machine booted (restart host, shut down host) after it,
  *   waiting while the host does not answer, and started until then. A check
- *   restarts nothing, so it is never back.
+ *   restarts nothing, so it is never back and never waiting.
  *
  * "Update finished" is asked first: an update that installed a release also
  * restarted the process, and its own sentence says which it was. The update
@@ -624,7 +645,7 @@ export function orderPhase(order: HostOrder, host: Host, pollFailed = false): Or
     if (state === 'pending' && (known || pollFailed)) {
       return 'placed'
     }
-    if (pollFailed) {
+    if (pollFailed && takesItAway(order.action)) {
       return 'waiting'
     }
     // Neither picked up and answered nor withdrawn, and nobody will say more:
@@ -647,7 +668,7 @@ export function orderPhase(order: HostOrder, host: Host, pollFailed = false): Or
   ) {
     return 'update-finished'
   }
-  if (pollFailed) {
+  if (pollFailed && takesItAway(order.action)) {
     return 'waiting'
   }
   if (order.action === 'restart-service' || order.action === 'update') {

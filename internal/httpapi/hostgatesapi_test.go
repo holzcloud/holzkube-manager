@@ -20,13 +20,14 @@ import (
 	"github.com/holzcloud/holzkube-manager/internal/store/fsstore"
 )
 
-// The locks in front of the four host actions (Phase 13, D-07, D-08, D-10).
+// The locks in front of the five host actions (Phase 13, D-07, D-08, D-10).
 //
 // Every one of them is a declarative flag on a route or a single call in a
 // handler, and a flag that silently flips passes every test that only walks
-// the happy path. So each lock is asserted here on all four routes, from the
+// the happy path. So each lock is asserted here on all five routes, from the
 // outside, the way a browser meets it -- and each was removed once, on
-// purpose, and this file seen red (13-03-SUMMARY lists the injections).
+// purpose, and this file seen red (13-03-SUMMARY lists the injections; for
+// check-update, removed for it alone, 13-12-SUMMARY).
 //
 // The fifth lock D-10 names is not here: a session route without a role
 // cannot be registered at all (TestARouteWithNoRoleCannotBeRegistered).
@@ -288,7 +289,7 @@ func TestHostActionGates(t *testing.T) {
 
 	t.Run("operator places each action", func(t *testing.T) {
 		// HACT-01..04 at the route: the least role, an open window and the
-		// matching token open each of the four.
+		// matching token open each of the five.
 		for _, a := range hostaction.Actions() {
 			tok := hostToken(t, g.operator, a)
 			got, raw := g.operator.status(t, http.MethodPost, actionPath(a), map[string]string{"confirmation": tok})

@@ -207,6 +207,21 @@ describe('HostActions: the five buttons and the one reason they are off', () => 
     expectOffBecause('An update is running; wait for it to finish.')
   })
 
+  // A second order during a check would be an update running the update script
+  // beside it, or a restart cutting it off.
+  it('while a check runs: all five off until it finishes', () => {
+    actions({ order: { action: 'check-update', phase: 'started' } })
+    expectOffBecause('An update check is running; wait for it to finish.')
+  })
+
+  it('once a check finished, offers them again', () => {
+    actions({ order: { action: 'check-update', phase: 'update-finished' } })
+    expect(reasonLine()).toBeNull()
+    for (const b of headerButtons()) {
+      expect(b).toBeEnabled()
+    }
+  })
+
   // WR-02: a restart or shutdown under way takes the host or the service away
   // within seconds; a second order placed in them would outlive its process.
   it.each(['reboot', 'poweroff', 'restart-service'] as const)(
@@ -470,32 +485,48 @@ describe('HostActions: one dialog per action', () => {
   // mutation's onSuccess runs even after the dialog has gone. A close in those
   // seconds would say "Keep running" and restart the host anyway, so there is
   // no close: the dialog stays, says Working…, and ends as the order does.
-  it.each([
-    ['Keep running', () => userEvent.click(screen.getByRole('button', { name: 'Keep running' }))],
-    ['Escape', () => userEvent.keyboard('{Escape}')],
-    [
-      'the close X',
-      () =>
-        userEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Close' })),
-    ],
-  ] as const)(
-    'while the order is being placed, %s does not close the dialog',
-    async (_, attempt) => {
+  // The check's dialog is held the same way (13-12): its own dialog, its own
+  // order on the way.
+  it.each(
+    (
+      [
+        [
+          'Keep running',
+          () => userEvent.click(screen.getByRole('button', { name: 'Keep running' })),
+        ],
+        ['Escape', () => userEvent.keyboard('{Escape}')],
+        [
+          'the close X',
+          () =>
+            userEvent.click(
+              within(screen.getByRole('dialog')).getByRole('button', { name: 'Close' }),
+            ),
+        ],
+      ] as const
+    ).flatMap(([how, attempt]) =>
+      (
+        [
+          ['reboot', 'Restart host'],
+          ['check-update', 'Check for updates'],
+        ] as const
+      ).map(([action, label]) => [how, label, attempt, action] as const),
+    ),
+  )(
+    'while the order is being placed, %s does not close the %s dialog',
+    async (_, label, attempt, action) => {
       let answer: (value: { token: string; expires: string }) => void = () => undefined
       vi.spyOn(api.hostActions, 'confirm').mockReturnValue(
         new Promise((resolve) => {
           answer = resolve
         }),
       )
-      const order: HostOrder = { ...held, action: 'reboot' }
+      const order: HostOrder = { ...held, action }
       const place = vi.spyOn(api.hostActions, 'place').mockResolvedValue({ order })
       const onPlaced = vi.fn()
       actions({ onPlaced })
-      await userEvent.click(screen.getByRole('button', { name: 'Restart host' }))
+      await userEvent.click(screen.getByRole('button', { name: label }))
       await userEvent.type(screen.getByLabelText(/to confirm/), 'example-host')
-      await userEvent.click(
-        within(screen.getByRole('dialog')).getByRole('button', { name: 'Restart host' }),
-      )
+      await userEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: label }))
       const dialog = screen.getByRole('dialog')
       await within(dialog).findByRole('button', { name: /Working/ })
 
@@ -509,7 +540,7 @@ describe('HostActions: one dialog per action', () => {
       // The order goes through in front of the operator, not behind a closed dialog.
       answer({ token: 'token-1', expires: '2026-09-28T10:10:05Z' })
       await vi.waitFor(() => expect(onPlaced).toHaveBeenCalledWith(order))
-      expect(place).toHaveBeenCalledWith('reboot', 'token-1')
+      expect(place).toHaveBeenCalledWith(action, 'token-1')
     },
   )
 
@@ -1193,6 +1224,25 @@ describe('orderPhase: every phase from server fields', () => {
       ),
       false,
       'no-answer',
+    ],
+    // A check takes nothing away: a failed poll during it is a stale reading,
+    // never "Waiting for holzkube-manager to come back".
+    [
+      'check picked up, then no answer: still picked up, never waiting',
+      order('check-update'),
+      later({ order: order('check-update') }, { observed: SOON }),
+      true,
+      'picked-up',
+    ],
+    [
+      'check started, then no answer: still started, never waiting',
+      order('check-update'),
+      later(
+        { order: order('check-update'), result: resultFor(ID, 'check-update', 'started') },
+        { observed: SOON },
+      ),
+      true,
+      'started',
     ],
     [
       'shut down host, switched on again a day later: back, not no answer',
