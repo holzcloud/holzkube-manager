@@ -173,7 +173,7 @@ Waves: 1 → {01, 02} · 2 → {03, 04} · 3 → {05} · 4 → {06} · 5 → {07
   5. `deploy/` enthält Path-Unit, Service-Unit, Skript und eine Anleitung zur Installation; `systemd-analyze verify` nimmt die Units an, und die Anleitung verlangt keine Zeile weniger Härtung an der Unit des Daemons (`NoNewPrivileges`, kein `AF_UNIX`, `ProcSubset=pid` bleiben).
 
 **Research**: Path-Units — `PathChanged` gegen `PathModified` gegen `DirectoryNotEmpty`, und wie ein Auftrag, den der Daemon per Rename atomar ablegt, genau einmal abgeholt wird; wie der Daemon ohne D-Bus erkennt, ob der Helfer installiert ist.
-**Plans:** 11/13 plans executed (2 gap-closure plans; 2 plans for HACT-04 „nur suchen" added 2026-09-30)
+**Plans:** 11/15 plans executed (2 gap-closure plans; 4 plans for HACT-04 „nur suchen" added 2026-09-30)
 **UI hint**: yes
 
 Plans:
@@ -199,15 +199,17 @@ Plans:
 - [x] 13-11-PLAN.md — G-13-3: „Check for updates and install" bricht bei 390 px in seinem Knopf um (Tailwind erzeugte `max-md:whitespace-normal` nie); Passprüfung je Knopf und Desktop-Form im Browser-Test, `./bin/task ci` (HACT-01..04)
 
 **HACT-04 nur suchen** *(Entscheidung des Betreibers 2026-09-30: eine fünfte Aktion, die nichts installiert)*
-- [ ] 13-12-PLAN.md — Tracer: „Check for updates" vom Knopf über die vier Sperren, `check-update <id>`, den Helfer (blockierendes `systemctl start holzkube-manager-update-check.service`) und `holzkube-manager-update --check` zurück in „Update check" und den Statuskasten; der Helfer-Vertrag (der alte Helfer verwirft das Wort, Markierungszeile = Muster = case = Actions), die Check-Unit per `systemd-analyze` geprüft, `--check` installiert nachweislich nichts; Installationsbefehle, Anleitung, Fixture, Archiv; D-08-Vorher-Dump (HACT-04)
-- [ ] 13-13-PLAN.md — Zu alter Helfer: Markierungszeile gelesen, `actions.outdated`, 409 `conflict.host-helper-outdated` ohne Auftrag, nur der Prüfknopf aus mit Grund und Hinweis samt Befehlen; README, Anleitung, HOST-HELPER.md, Vertrag, `host.png`; D-08 nach 13-12 gelesen, `./bin/task ci` auf dem Pi (HACT-04)
+- [ ] 13-12-PLAN.md — Tracer: „Check for updates" vom Knopf über `check-update <id>`, den Helfer (blockierendes `systemctl start holzkube-manager-update-check.service`) und `holzkube-manager-update --check` zurück in „Update check" und den Statuskasten; die vier Sperren je einzeln rot, kein Warte-Hinweis bei einer Prüfung; D-08-Vorher-Dump (HACT-04)
+- [ ] 13-13-PLAN.md — Der Helfer-Vertrag: der alte Helfer (8b64a06) verwirft das Wort, Markierungszeile = Muster = case = Actions, Check-Unit per `systemd-analyze` geprüft, `--check` installiert nachweislich nichts; Installationsbefehle, HOST-HELPER.md, Fixture, Archiv, Vertrag (HACT-04)
+- [ ] 13-14-PLAN.md — Zu alter Helfer: Markierungszeile gelesen, `actions.outdated`, 409 `conflict.host-helper-outdated` ohne Auftrag; nur der Prüfknopf aus, mit Grund (HACT-04)
+- [ ] 13-15-PLAN.md — Hinweis mit Befehlen für einen alten Helfer, Fixtures; README, Anleitung, HOST-HELPER.md, Vertrag, `host.png`; D-08 nach 13-12 gelesen, `./bin/task ci` auf dem Pi (HACT-04)
 
 **Cross-cutting constraints:**
 - A 40-character hostname wraps inside the host action dialog at 390 px
 - A /host page that did not place the reboot order shows the waiting notice, not the stale notice
 - Nothing is installed on the operator's host and the production service is never restarted; the helper ships in `deploy/` only
 
-Waves: 1 → {01, 02} · 2 → {03, 04, 05, 06} · 3 → {07, 08} · 4 → {09} · gap closure: {10} → {11} · HACT-04 nur suchen: 5 → {12} · 6 → {13}
+Waves: 1 → {01, 02} · 2 → {03, 04, 05, 06} · 3 → {07, 08} · 4 → {09} · gap closure: {10} → {11} · HACT-04 nur suchen: 6 → {12} · 7 → {13} · 8 → {14} · 9 → {15}
 
 ### Phase 14: Telefon — Tippziele, die ein Daumen trifft
 
