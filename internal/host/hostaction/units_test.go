@@ -11,25 +11,32 @@ import (
 	"regexp"
 	"runtime"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"testing/fstest"
 	"time"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/holzcloud/holzkube-manager/internal/host/updatestatus"
 )
 
 // What the operator installs by hand has to agree with what the daemon looks
-// for, and has to load the way it reads. The helper is five files outside this
-// package -- two units, the script, the guide, the release archive's list --
+// for, and has to load the way it reads. The helper is six files outside this
+// package -- three units, the script, the guide, the release archive's list --
 // plus the paths and the install commands in here, and none of them can see
 // the others. These tests hold them together (D-17, D-18, D-19, HACT-08):
 //
-//   - TestUnitsVerify: systemd itself accepts both units, read by its output
-//     and not only by its exit code, with a negative control;
+//   - TestUnitsVerify: systemd itself accepts all three units, read by its
+//     output and not only by its exit code, with a negative control;
 //   - TestUnitsAgree: the units' paths and the script's defaults are the
 //     paths this package uses, and the service carries the hardening D-18
 //     asks for and none that would break a reboot;
+//   - TestTheHelperNamesItsOrders: the script's marker line, its pattern, its
+//     case arms and Actions() are the same words;
+//   - TestTheCheckUnitRunsOnlyTheCheck: the check unit runs the update
+//     script's --check and nothing else, sandboxed, below the helper's limit;
 //   - TestInstallCommandsMatchTheGuide: the guide's install block is
 //     InstallCommands, byte for byte;
 //   - TestGuideKeepsTheDaemonsHardening: the guide names the daemon's
@@ -48,6 +55,7 @@ var (
 	deployDir         = filepath.Join("..", "..", "..", "deploy")
 	shippedPathUnit   = filepath.Join(deployDir, "holzkube-manager-host.path")
 	shippedService    = filepath.Join(deployDir, "holzkube-manager-host.service")
+	shippedCheckUnit  = filepath.Join(deployDir, "holzkube-manager-update-check.service")
 	shippedScript     = filepath.Join(deployDir, "holzkube-manager-host.sh")
 	shippedGuide      = filepath.Join(deployDir, "HOST-HELPER.md")
 	shippedUpdater    = filepath.Join(deployDir, "holzkube-manager-update.sh")
@@ -159,7 +167,8 @@ func wantOnly(t *testing.T, u unitFile, section, key, want string) {
 	}
 }
 
-// TestUnitsVerify runs systemd-analyze verify over copies of both units.
+// TestUnitsVerify runs systemd-analyze verify over copies of the three units:
+// the path unit, the helper's service and the check unit it starts.
 //
 // Its exit code alone says nothing about the hardening: an unknown key
 // ("ProtectHom=true") or a bad value is reported as a warning, the line is
@@ -171,8 +180,10 @@ func wantOnly(t *testing.T, u unitFile, section, key, want string) {
 //
 // ExecStart= is rewritten to an executable in the temporary directory, because
 // verify fails with "is not executable" when the command does not exist, and
-// the helper is (deliberately) not installed where the tests run.
-// TestUnitsAgree holds the shipped ExecStart= to HelperScriptPath instead.
+// the helper is (deliberately) not installed where the tests run -- in the
+// check unit to the stub followed by --check, as the shipped line has it.
+// TestUnitsAgree holds the shipped ExecStart= to HelperScriptPath instead, and
+// TestTheCheckUnitRunsOnlyTheCheck the check unit's to UpdateScriptPath.
 func TestUnitsVerify(t *testing.T) {
 	bin, err := exec.LookPath("systemd-analyze")
 	if err != nil {
@@ -191,6 +202,10 @@ func TestUnitsVerify(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read the service unit: %v", err)
 	}
+	checkSrc, err := os.ReadFile(shippedCheckUnit)
+	if err != nil {
+		t.Fatalf("read the check unit: %v", err)
+	}
 
 	verify := func(t *testing.T, service string) (string, int) {
 		t.Helper()
@@ -200,23 +215,31 @@ func TestUnitsVerify(t *testing.T) {
 			t.Fatal(err)
 		}
 		execStart := regexp.MustCompile(`(?m)^ExecStart=.*$`)
-		if n := len(execStart.FindAllString(service, -1)); n != 1 {
-			t.Fatalf("the service has %d ExecStart= lines, want exactly 1 to point at the stub", n)
+		pointAtStub := func(name, unit, args string) string {
+			if n := len(execStart.FindAllString(unit, -1)); n != 1 {
+				t.Fatalf("%s has %d ExecStart= lines, want exactly 1 to point at the stub", name, n)
+			}
+			return execStart.ReplaceAllLiteralString(unit, "ExecStart="+stub+args)
 		}
-		service = execStart.ReplaceAllLiteralString(service, "ExecStart="+stub)
+		service = pointAtStub("the service", service, "")
+		check := pointAtStub("the check unit", string(checkSrc), " --check")
 
 		pathFile := filepath.Join(dir, filepath.Base(shippedPathUnit))
 		serviceFile := filepath.Join(dir, filepath.Base(shippedService))
-		if err := os.WriteFile(pathFile, pathSrc, 0o644); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(serviceFile, []byte(service), 0o644); err != nil {
-			t.Fatal(err)
+		checkFile := filepath.Join(dir, filepath.Base(shippedCheckUnit))
+		for file, content := range map[string][]byte{
+			pathFile:    pathSrc,
+			serviceFile: []byte(service),
+			checkFile:   []byte(check),
+		} {
+			if err := os.WriteFile(file, content, 0o644); err != nil {
+				t.Fatal(err)
+			}
 		}
 
 		ctx, cancel := context.WithTimeout(context.Background(), systemdAnalyzeMax)
 		defer cancel()
-		cmd := exec.CommandContext(ctx, bin, "verify", "--man=no", pathFile, serviceFile)
+		cmd := exec.CommandContext(ctx, bin, "verify", "--man=no", pathFile, serviceFile, checkFile)
 		cmd.Env = append(os.Environ(), "SYSTEMD_COLORS=0", "SYSTEMD_PAGER=", "LC_ALL=C")
 		out, err := cmd.CombinedOutput()
 		var exitErr *exec.ExitError
@@ -388,6 +411,275 @@ func TestUnitsAgree(t *testing.T) {
 	}
 	if !strings.Contains(string(script), `"$STATE_DIR/`+filepath.Base(DefaultResultPath)+`"`) {
 		t.Errorf("the script does not write $STATE_DIR/%s, the file ReadResult reads", filepath.Base(DefaultResultPath))
+	}
+}
+
+// TestTheHelperNamesItsOrders: the helper script names the orders it carries
+// out on one marker line, which the daemon reads from the installed script to
+// learn what that helper knows (D-12). The line is only worth reading if it is
+// the truth about the code below it, so the words on it, the alternation of
+// the one pattern that admits an order, the labels of the case arms before
+// the catch-all, and Actions() are the same words, each once.
+//
+// Faults injected and seen red: check-update dropped from the marker line;
+// halt added to the pattern alone.
+func TestTheHelperNamesItsOrders(t *testing.T) {
+	t.Parallel()
+
+	data, err := os.ReadFile(shippedScript)
+	if err != nil {
+		t.Fatalf("read the helper script: %v", err)
+	}
+	lines := strings.Split(string(data), "\n")
+
+	// The words of one list, refusing a word that appears twice.
+	words := func(what string, list []string) map[string]bool {
+		t.Helper()
+		set := map[string]bool{}
+		for _, w := range list {
+			if set[w] {
+				t.Errorf("%s names %q twice", what, w)
+			}
+			set[w] = true
+		}
+		return set
+	}
+
+	var marker []string
+	for i, l := range lines {
+		if strings.HasPrefix(l, HelperOrdersMarker) {
+			if marker != nil {
+				t.Errorf("line %d: a second marker line %q; the daemon reads exactly one", i+1, l)
+				continue
+			}
+			marker = strings.Split(strings.TrimPrefix(l, HelperOrdersMarker), " ")
+		}
+	}
+	if marker == nil {
+		t.Fatalf("the helper script has no line beginning %q", HelperOrdersMarker)
+	}
+
+	pattern := regexp.MustCompile(`=~ \^\(([^)]*)\)`)
+	var alternation []string
+	for i, l := range lines {
+		if m := pattern.FindStringSubmatch(l); m != nil {
+			if alternation != nil {
+				t.Fatalf("line %d: a second pattern line; the script admits orders through one", i+1)
+			}
+			alternation = strings.Split(m[1], "|")
+		}
+	}
+	if alternation == nil {
+		t.Fatalf("the helper script has no pattern line `=~ ^(...)`")
+	}
+
+	var arms []string
+	armLabel := regexp.MustCompile(`^\s*([^\s#()]+)\)`)
+	inCase, closed := false, false
+	for _, l := range lines {
+		trimmed := strings.TrimSpace(l)
+		switch {
+		case trimmed == "case $action in":
+			inCase = true
+		case !inCase || strings.HasPrefix(trimmed, "#"):
+		case trimmed == "esac":
+			inCase = false
+		default:
+			m := armLabel.FindStringSubmatch(l)
+			if m == nil {
+				continue
+			}
+			if m[1] == "*" {
+				closed = true
+				inCase = false
+				continue
+			}
+			arms = append(arms, m[1])
+		}
+	}
+	if !closed {
+		t.Fatalf("the helper's case over $action has no catch-all arm *) -- or none was found")
+	}
+
+	var actions []string
+	for _, a := range Actions() {
+		actions = append(actions, string(a))
+	}
+
+	want := words("Actions()", actions)
+	for _, got := range []struct {
+		what string
+		set  map[string]bool
+	}{
+		{"the marker line", words("the marker line", marker)},
+		{"the pattern", words("the pattern", alternation)},
+		{"the case arms", words("the case arms", arms)},
+	} {
+		if !mapsEqual(got.set, want) {
+			t.Errorf("%s names %v, Actions() is %v: the helper must say exactly what it carries out",
+				got.what, sortedKeys(got.set), sortedKeys(want))
+		}
+	}
+}
+
+func mapsEqual(a, b map[string]bool) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for k := range a {
+		if !b[k] {
+			return false
+		}
+	}
+	return true
+}
+
+func sortedKeys(m map[string]bool) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	slices.Sort(out)
+	return out
+}
+
+// systemdSpan parses a systemd time span of the forms the units use -- "90",
+// "90s", "2min", "3min", "1h 30min" -- into a duration. Anything else fails
+// the test: a span it cannot read is not one it can compare.
+func systemdSpan(t *testing.T, s string) time.Duration {
+	t.Helper()
+	units := map[string]time.Duration{
+		"":    time.Second,
+		"s":   time.Second,
+		"sec": time.Second,
+		"m":   time.Minute,
+		"min": time.Minute,
+		"h":   time.Hour,
+		"hr":  time.Hour,
+	}
+	part := regexp.MustCompile(`^([0-9]+)\s*([a-z]*)$`)
+	var total time.Duration
+	fields := regexp.MustCompile(`[0-9]+\s*[a-z]*`).FindAllString(s, -1)
+	if len(fields) == 0 || strings.Join(fields, "") != strings.Join(strings.Fields(s), "") {
+		t.Fatalf("cannot read %q as a systemd time span", s)
+	}
+	for _, f := range fields {
+		m := part.FindStringSubmatch(strings.TrimSpace(f))
+		unit, ok := units[m[2]]
+		if !ok {
+			t.Fatalf("cannot read %q as a systemd time span (unit %q)", s, m[2])
+		}
+		n, err := strconv.Atoi(m[1])
+		if err != nil {
+			t.Fatalf("cannot read %q as a systemd time span: %v", s, err)
+		}
+		total += time.Duration(n) * unit
+	}
+	return total
+}
+
+// TestTheCheckUnitRunsOnlyTheCheck: the check unit runs as root, and the only
+// thing it may run is the update script's look -- never the update itself.
+// So its one command is UpdateScriptPath --check; it is a oneshot that ends
+// below the helper's own limit (the helper waits for it and must still record
+// failed); it writes only the update status directory the daemon reads; it
+// may reach the network, which the helper's own service may not; and it
+// carries no [Install] (nothing starts it but the helper), no RemainAfterExit
+// (a second check would never run), no environment and no capability.
+//
+// Fault injected and seen red: --check removed from ExecStart=.
+func TestTheCheckUnitRunsOnlyTheCheck(t *testing.T) {
+	t.Parallel()
+
+	check := readUnitFile(t, shippedCheckUnit)
+	service := readUnitFile(t, shippedService)
+
+	if check.name != filepath.Base(UpdateCheckUnitPath) {
+		t.Errorf("the shipped check unit is %s, the helper starts and the guide installs %s", check.name, UpdateCheckUnitPath)
+	}
+
+	wantOnly(t, check, "Service", "ExecStart", UpdateScriptPath+" --check")
+	wantOnly(t, check, "Service", "Type", "oneshot")
+	statusDir := filepath.Dir(updatestatus.DefaultPath)
+	if filepath.Dir(statusDir) != "/var/lib" {
+		t.Errorf("updatestatus.DefaultPath %s is not under /var/lib, where StateDirectory= puts it", updatestatus.DefaultPath)
+	}
+	wantOnly(t, check, "Service", "StateDirectory", filepath.Base(statusDir))
+	for _, kv := range [][2]string{
+		{"NoNewPrivileges", "true"},
+		{"CapabilityBoundingSet", ""},
+		{"ProtectSystem", "strict"},
+		{"ProtectHome", "true"},
+		{"PrivateTmp", "true"},
+		{"PrivateDevices", "true"},
+		{"ProtectKernelTunables", "true"},
+		{"ProtectKernelModules", "true"},
+		{"ProtectKernelLogs", "true"},
+		{"ProtectControlGroups", "true"},
+		{"ProtectClock", "true"},
+		{"ProtectHostname", "true"},
+		{"RestrictNamespaces", "true"},
+		{"RestrictRealtime", "true"},
+		{"RestrictSUIDSGID", "true"},
+		{"LockPersonality", "true"},
+		{"MemoryDenyWriteExecute", "true"},
+		{"SystemCallArchitectures", "native"},
+		{"StateDirectoryMode", "0755"},
+		{"UMask", "0022"},
+	} {
+		wantOnly(t, check, "Service", kv[0], kv[1])
+	}
+
+	// The network: the look asks GitHub for the release list.
+	families := check.values("Service", "RestrictAddressFamilies")
+	if len(families) != 1 {
+		t.Errorf("%s: RestrictAddressFamilies=%q, want exactly one line", check.name, families)
+	} else {
+		got := strings.Fields(families[0])
+		if len(got) > 0 && strings.HasPrefix(got[0], "~") {
+			t.Errorf("%s: RestrictAddressFamilies=%s is a deny list, want the families it may use", check.name, families[0])
+		}
+		for _, f := range []string{"AF_INET", "AF_INET6"} {
+			if !slices.Contains(got, f) {
+				t.Errorf("%s: RestrictAddressFamilies=%s does not allow %s; the check cannot reach GitHub", check.name, families[0], f)
+			}
+		}
+	}
+
+	// Below the helper's limit: the helper waits for this unit.
+	lastSpan := func(u unitFile) time.Duration {
+		v := u.values("Service", "TimeoutStartSec")
+		if len(v) == 0 {
+			t.Fatalf("%s has no TimeoutStartSec=; a oneshot has no start limit without one", u.name)
+		}
+		return systemdSpan(t, v[len(v)-1])
+	}
+	if c, h := lastSpan(check), lastSpan(service); c <= 0 || c >= h {
+		t.Errorf("%s: TimeoutStartSec is %v, want more than 0 and less than the helper service's %v -- "+
+			"the helper waits for the check and must still record failed when systemd ends it", check.name, c, h)
+	}
+
+	if check.hasSection("Install") {
+		t.Errorf("%s has an [Install] section; only the helper may start it", check.name)
+	}
+	for _, key := range []string{"RemainAfterExit", "Environment", "EnvironmentFile", "AmbientCapabilities", "ReadWritePaths"} {
+		if l := check.lines(key); len(l) > 0 {
+			t.Errorf("%s:%d: %s=%s must not be in the check unit", check.name, l[0].line, key, l[0].value)
+		}
+	}
+
+	// And the helper starts exactly this unit for a check-update order.
+	script, err := os.ReadFile(shippedScript)
+	if err != nil {
+		t.Fatalf("read the helper script: %v", err)
+	}
+	arm := regexp.MustCompile(`(?m)^\s*` + regexp.QuoteMeta(string(CheckUpdate)) + `\)\s*cmd=\(([^)]*)\)\s*;;\s*$`)
+	m := arm.FindAllStringSubmatch(string(script), -1)
+	if len(m) != 1 {
+		t.Fatalf("the helper script has %d case arms for %s, want exactly 1", len(m), CheckUpdate)
+	}
+	if want := "start " + filepath.Base(UpdateCheckUnitPath); m[0][1] != want {
+		t.Errorf("the helper's %s arm runs systemctl %s, want exactly systemctl %s", CheckUpdate, m[0][1], want)
 	}
 }
 

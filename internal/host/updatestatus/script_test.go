@@ -286,6 +286,44 @@ func (e *scriptEnv) wantNoStatus(dir string) {
 	}
 }
 
+// recordCalls points the curl and systemctl stubs at logs in the run's
+// directory, so a test can ask afterwards what the script asked for.
+func (e *scriptEnv) recordCalls() {
+	e.t.Helper()
+	e.extra = append(e.extra,
+		"HKM_STUB_URLS="+filepath.Join(e.dir, "curl-urls"),
+		"HKM_STUB_SYSTEMCTL_LOG="+filepath.Join(e.dir, "systemctl-calls"))
+}
+
+// wantInstalledNothing asserts what --check promises (D-19): the installed
+// binary answers the version it had, no copy of it was kept as the previous
+// one, the release list is the only URL asked for -- no asset, no checksum
+// file, no health check -- and systemctl was never called. It needs
+// recordCalls before the run.
+func (e *scriptEnv) wantInstalledNothing(installed string) {
+	e.t.Helper()
+	if got := e.binVersion(); got != "holzkube-managerd "+installed {
+		e.t.Errorf("installed binary answers %q, want %q: the check replaced it", got, "holzkube-managerd "+installed)
+	}
+	if _, err := os.Lstat(e.previous); !errors.Is(err, os.ErrNotExist) {
+		e.t.Errorf("%s exists (%v): the check kept a previous binary, as only an install does", e.previous, err)
+	}
+	urls, err := os.ReadFile(filepath.Join(e.dir, "curl-urls"))
+	if err != nil {
+		e.t.Fatalf("the curl stub recorded no URL -- the check never asked for the release list, or recordCalls was not set: %v", err)
+	}
+	for _, u := range strings.Fields(string(urls)) {
+		if !strings.HasSuffix(u, "/releases?per_page=20") {
+			e.t.Errorf("the check asked for %s; it may ask for the release list and nothing else", u)
+		}
+	}
+	if calls, err := os.ReadFile(filepath.Join(e.dir, "systemctl-calls")); err == nil {
+		e.t.Errorf("the check called systemctl:\n%s", calls)
+	} else if !errors.Is(err, os.ErrNotExist) {
+		e.t.Fatal(err)
+	}
+}
+
 // binVersion is what the installed binary answers now.
 func (e *scriptEnv) binVersion() string {
 	e.t.Helper()
@@ -323,7 +361,8 @@ func releaseArchive(t *testing.T, daemon string) []byte {
 // curlStub answers the four kinds of request the script makes: the release
 // list, an asset download (-o), and the health check. HKM_STUB_LIST_FAIL and
 // HKM_STUB_HEALTHY steer it; HKM_STUB_PWD, when set, names a file each call
-// appends the directory it was run in to. HKM_STUB_LIST_BLOCK names a file the
+// appends the directory it was run in to, and HKM_STUB_URLS one each call
+// appends the URL it was asked for to. HKM_STUB_LIST_BLOCK names a file the
 // release-list request creates before it blocks, so a test can tell when to
 // send its signal.
 const curlStub = `#!/usr/bin/env bash
@@ -337,6 +376,7 @@ while [[ $# -gt 0 ]]; do
     *) shift ;;
   esac
 done
+[[ -n ${HKM_STUB_URLS:-} ]] && printf '%s\n' "$url" >> "$HKM_STUB_URLS"
 case "$url" in
   */releases\?per_page=20)
     if [[ -n ${HKM_STUB_LIST_BLOCK:-} ]]; then touch "$HKM_STUB_LIST_BLOCK"; exec /bin/sleep 60; fi
@@ -351,7 +391,10 @@ case "$url" in
 esac
 `
 
+// systemctlStub answers restart and is-active; HKM_STUB_SYSTEMCTL_LOG, when
+// set, names a file each call appends its argv to.
 const systemctlStub = `#!/usr/bin/env bash
+[[ -n ${HKM_STUB_SYSTEMCTL_LOG:-} ]] && printf '%s\n' "$*" >> "$HKM_STUB_SYSTEMCTL_LOG"
 case "$1" in
   restart) exit 0 ;;
   is-active) [[ ${HKM_STUB_HEALTHY:-1} == 1 ]] && exit 0; exit 3 ;;
@@ -383,10 +426,12 @@ func TestUpdateScript(t *testing.T) {
 	t.Run("check available", func(t *testing.T) {
 		t.Parallel()
 		e := newScriptEnv(t, fakeInstalled, true)
+		e.recordCalls()
 		if rc := e.run(false, "--check"); rc != 0 {
 			t.Fatalf("exit = %d, want 0", rc)
 		}
 		e.wantStatus(OutcomeAvailable, ptr(fakeInstalled), ptr(fakeRelease))
+		e.wantInstalledNothing(fakeInstalled)
 	})
 
 	t.Run("check with the release list unreadable", func(t *testing.T) {
@@ -552,6 +597,22 @@ func TestUpdateScriptAsRoot(t *testing.T) {
 		if got := e.binVersion(); got != "holzkube-managerd "+fakeRelease {
 			t.Errorf("installed binary answers %q, want the release's", got)
 		}
+	})
+
+	// The check unit runs --check as root (holzkube-manager-update-check.service),
+	// where nothing but the script itself would stop an install: with a newer
+	// release there, the check installs nothing, as root.
+	//
+	// Fault injected and seen red: the exit 0 that ends the check removed.
+	t.Run("check installs nothing, as root", func(t *testing.T) {
+		t.Parallel()
+		e := newScriptEnv(t, fakeInstalled, true)
+		e.recordCalls()
+		if rc := e.run(true, "--check"); rc != 0 {
+			t.Fatalf("exit = %d, want 0", rc)
+		}
+		e.wantStatus(OutcomeAvailable, ptr(fakeInstalled), ptr(fakeRelease))
+		e.wantInstalledNothing(fakeInstalled)
 	})
 
 	t.Run("already current", func(t *testing.T) {

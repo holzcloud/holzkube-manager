@@ -65,10 +65,11 @@ func TestEveryConfirmableActionDecidesOnTypedPhrase(t *testing.T) {
 // (Phase 13, D-09).
 //
 // Every host action requires typing the hostname -- unlike a node's reboot and
-// shutdown -- because there is exactly one host and it is the machine this page
-// runs on: after the click it is gone. The check, which takes nothing away,
-// requires it too: HACT-05 wants it for every host action. So hostTypedPhrase has exactly one entry
-// per hostaction.Actions(), and every one is true.
+// shutdown -- because HACT-05 asks for it on every host action: there is
+// exactly one host, and it is the machine this page runs on. Four of the five
+// take it away for a while; the check, which takes nothing away, is typed for
+// all the same, so no host action is ever one click. So hostTypedPhrase has
+// exactly one entry per hostaction.Actions(), and every one is true.
 //
 // And it is a separate table for a reason this test holds too: typedPhrase is
 // the node confirm route's, and a host action there would make
