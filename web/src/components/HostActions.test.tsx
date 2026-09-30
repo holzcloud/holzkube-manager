@@ -523,6 +523,50 @@ describe('HostActions: one dialog per action', () => {
     await vi.waitFor(() => expect(trigger).toHaveFocus())
   })
 
+  // 14-REVIEW WR-01: a reason that arrives while the dialog is open turns the
+  // trigger off too, and focus() on a disabled button does nothing -- the
+  // operator was left on the page body. The group's reason line says why the
+  // buttons went off, so that is where a cancel hands focus.
+  it.each([
+    ['Keep running', () => userEvent.click(screen.getByRole('button', { name: 'Keep running' }))],
+    ['Escape', () => userEvent.keyboard('{Escape}')],
+    [
+      'the close X',
+      () =>
+        userEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Close' })),
+    ],
+  ] as const)(
+    'with the trigger turned off meanwhile, %s hands focus to the reason line',
+    async (_, cancel) => {
+      const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+      const view = (pollFailed: boolean) => (
+        <QueryClientProvider client={client}>
+          <HostActions
+            host={hostWith()}
+            sessionRole="operator"
+            pollFailed={pollFailed}
+            order={null}
+            onPlaced={() => undefined}
+          />
+        </QueryClientProvider>
+      )
+      const { rerender } = render(view(false))
+      const trigger = screen.getByRole('button', { name: 'Restart host' })
+      await userEvent.click(trigger)
+      rerender(view(true))
+      expect(trigger).toBeDisabled()
+
+      await cancel()
+      expect(screen.queryByRole('dialog')).toBeNull()
+      const line = reasonLine()
+      expect(line).toHaveTextContent(
+        'holzkube-manager is not answering; host actions return when it does.',
+      )
+      await vi.waitFor(() => expect(line).toHaveFocus())
+      expect(document.activeElement).not.toBe(document.body)
+    },
+  )
+
   // The other half of the rule: after an order the status box takes focus, so
   // the dialog must not hand it back -- even when the trigger is still on
   // (here the parent never follows the order, so nothing turns it off).
