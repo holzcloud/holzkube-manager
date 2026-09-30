@@ -5,16 +5,16 @@ milestone_name: Host & Telefon
 current_phase: 14
 current_phase_name: telefon-tippziele
 status: executing
-stopped_at: Completed 14-04-PLAN.md
-last_updated: "2026-09-30T10:18:49.572Z"
+stopped_at: Completed 14-05-PLAN.md
+last_updated: "2026-09-30T10:32:29.746Z"
 last_activity: 2026-09-30
 last_activity_desc: Phase 14 execution started
-state_head: 27ace4b2979329ebabf608a649e575d3ad470382
+state_head: 990542e959d11a1bc68255d2c10406cfa3d10e47
 progress:
   total_phases: 4
   completed_phases: 2
   total_plans: 33
-  completed_plans: 30
+  completed_plans: 31
   percent: 50
 ---
 
@@ -33,7 +33,7 @@ See: .planning/PROJECT.md (updated 2026-09-28)
 ## Current Position
 
 Phase: 14 (telefon-tippziele) — EXECUTING
-Plan: 5 of 7
+Plan: 6 of 7
 Status: Ready to execute
 Last activity: 2026-09-30 — Phase 14 execution started
 
@@ -135,6 +135,9 @@ Siehe `PROJECT.md`, die `MILESTONE-*.md`-Dateien und für v1.18 den Abschnitt
 - [Phase 14]: 14-03: first extended audit run red with 7 findings: primitives dialog-close icon-sm, dropdown-menu-item, select-item (14-05); nav links, WhatsNew version button and chips, Reset disk checkboxes (14-06)
 - [Phase 14]: 14-04: the D-08 dump comes out of findSmallTargets' own loop (one CONTROL_SELECTOR, same skips) and records each control's own box; a LAYOUT_DUMP path inside the repository is refused
 - [Phase 14]: 14-04: noise floor 0 of 964 controls without any determinism fix or exclusion; before-dump at $HOME/.cache/holzkube-manager-layout/14-before.jsonl, not committed
+- [Phase 14]: 14-05: Unused Button sizes (xs, icon-xs, icon-lg) get max-md:size-11 too, so a first use cannot bring back a small target
+- [Phase 14]: 14-05: DialogHeader max-md:pr-8 applies also without a close X (SudoDialog)
+- [Phase 14]: 14-05: The toast dismiss is held by a Chromium component test, not an audit opener; Tailwind generates max-md:size-11! (A2 confirmed)
 
 ### Blockers/Concerns
 
@@ -149,8 +152,8 @@ Siehe `PROJECT.md`, die `MILESTONE-*.md`-Dateien und für v1.18 den Abschnitt
 
 ## Session Continuity
 
-Last session: 2026-09-30T10:18:49.426Z
-Stopped at: Completed 14-04-PLAN.md
+Last session: 2026-09-30T10:32:29.603Z
+Stopped at: Completed 14-05-PLAN.md
 Resume file: None
 Next: `/gsd-plan-phase 11`
 
@@ -188,3 +191,4 @@ Next: `/gsd-plan-phase 11`
 | Phase 14 P02 | 11min | 2 tasks | 5 files |
 | Phase 14 P03 | 20min | 2 tasks | 4 files |
 | Phase 14 P04 | 11min | 2 tasks | 2 files |
+| Phase 14 P05 | 12min | 2 tasks | 6 files |
