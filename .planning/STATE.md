@@ -5,16 +5,16 @@ milestone_name: Host & Telefon
 current_phase: 14
 current_phase_name: telefon-tippziele
 status: verifying
-stopped_at: Completed 13-14-PLAN.md
-last_updated: "2026-09-30T15:27:03.614Z"
+stopped_at: Completed 13-15-PLAN.md
+last_updated: "2026-09-30T16:04:10.969Z"
 last_activity: 2026-09-30
 last_activity_desc: Phase 14 execution started
-state_head: f97c2dfb6e696403994b94a43fc8dbff996b51a7
+state_head: b7ecc83f79548d170e6daf23018215d430d9b28f
 progress:
   total_phases: 4
   completed_phases: 2
   total_plans: 37
-  completed_plans: 36
+  completed_plans: 37
   percent: 50
 ---
 
@@ -148,6 +148,8 @@ Siehe `PROJECT.md`, die `MILESTONE-*.md`-Dateien und für v1.18 den Abschnitt
 - [Phase 13]: 13-13: The check unit is held to the helper service's sandbox except RestrictAddressFamilies (reaches GitHub) and ReadWritePaths (writes only its StateDirectory), with an empty CapabilityBoundingSet and a start limit below the helper's
 - [Phase 13]: 13-14: KnownOrders reads the installed helper's marker line only after Detect's ownership rule and bounded at 64 KiB; no marker, two markers or too large counts as the four orders of 13-01
 - [Phase 13]: 13-14: actions.outdated (script-outdated, check-unit) is asked only while nothing is missing; available unchanged; both host routes refuse check-update with 409 conflict.host-helper-outdated after container and missing, before token and Place
+- [Phase 13]: 13-15: the older-helper notice renders only when nothing is missing, independent of the server keeping outdated empty then; both helper notices share one frame
+- [Phase 13]: 13-15: D-08's route/opener/index/tag key turns an index shift across a tag boundary into ONLY BEFORE/AFTER pairs; 'no control disappeared' is judged by re-keying /host by opener, tag and name
 
 ### Blockers/Concerns
 
@@ -162,8 +164,8 @@ Siehe `PROJECT.md`, die `MILESTONE-*.md`-Dateien und für v1.18 den Abschnitt
 
 ## Session Continuity
 
-Last session: 2026-09-30T15:27:03.162Z
-Stopped at: Completed 13-14-PLAN.md
+Last session: 2026-09-30T16:04:10.699Z
+Stopped at: Completed 13-15-PLAN.md
 Resume file: None
 Next: `/gsd-plan-phase 11`
 
@@ -207,3 +209,4 @@ Next: `/gsd-plan-phase 11`
 | Phase 13 P12 | 33min | 2 tasks | 16 files |
 | Phase 13 P13 | 23min | 2 tasks | 15 files |
 | Phase 13 P14 | 20min | 2 tasks | 15 files |
+| Phase 13 P15 | 75min | 3 tasks | 11 files |
