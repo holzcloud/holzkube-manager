@@ -55,6 +55,27 @@ Filled in by the planner per task; the requirement-level map is:
 
 *Status: ⬜ pending · ✅ green · ❌ red · ⚠️ flaky*
 
+### Per task (planner, 2026-09-30)
+
+| Task | Requirement | Automated command | Red before green |
+|------|-------------|-------------------|------------------|
+| 14-01 T1 (tracer) | MOB-02 | `npm --prefix web exec -- vitest run --project jsdom src/layoutRoutes.test.ts`; `./bin/task test:layout` | T3 |
+| 14-01 T2 | MOB-02 | `./bin/task test:layout` (REQUEST 428 line, Sudo dialog ok at 390 and 1280) | T3 |
+| 14-01 T3 | MOB-02 | the same, against the guard's four messages and OPENER / EMPTY / EXECUTED injections; `cmp` restore | itself |
+| 14-02 T1 | MOB-03 | `npm --prefix web exec -- vitest run --project jsdom src/components/HostActions.test.tsx` | step 1 |
+| 14-02 T2 | MOB-03 | the same plus `src/routes/host.test.tsx`; `npm --prefix web run test:browser -- src/routes/host.browser.test.tsx` | step 1 |
+| 14-03 T1 | MOB-02, MOB-03 | `npm --prefix web exec -- vitest run --project jsdom src/fixtures.test.ts`; `go test ./internal/publicrepo/` | step 1 |
+| 14-03 T2 | MOB-02, MOB-03 | first extended `./bin/task test:layout`, expected red, no OPENER / EMPTY / EXECUTED | expected red is the finding |
+| 14-04 T1 | MOB-01 | `node web/scripts/layout-dump-compare.mjs` on crafted pairs | the moved-box case |
+| 14-04 T2 | MOB-01 | the comparer on two dumps of one tree (noise floor 0) | — |
+| 14-05 T1 | MOB-01 | jsdom project, browser project, lint, typecheck, built-CSS greps | — |
+| 14-05 T2 | MOB-01 | `npm --prefix web run test:browser -- src/components/ui/sonner.browser.test.tsx`; audit log without primitive findings | toast at 24 px |
+| 14-06 T1 | MOB-01 | Sidebar/WhatsNew tests; audit log without Navigation / What's new findings or CUT OFF | — |
+| 14-06 T2 | MOB-01, MOB-03 | `./bin/task test:layout` exit 0 | — |
+| 14-07 T1 | MOB-01, MOB-02 | red checks (a) (b) (c) via `./bin/task test:layout`; `cmp` restores; D-08 comparer | itself |
+| 14-07 T2 | all | `go test ./internal/publicrepo/` | — |
+| 14-07 T3 | all | `./bin/task ci`; helper absent; D-11 human-check | — |
+
 ---
 
 ## Wave 0 Requirements
