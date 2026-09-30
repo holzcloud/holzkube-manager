@@ -258,7 +258,8 @@ const OPENERS = [
    * types into or submits the dialog's password field, because it knows the
    * account's password and submitting it would open the sudo window for the
    * rest of this context. The request monitor is the proof that nothing ran:
-   * a 2xx to POST /api/v1/users would be an EXECUTED line and a red run.
+   * a 2xx to POST /api/v1/users would be an EXECUTED line and a red run, and
+   * so would a 2xx to POST /api/v1/auth/sudo, the grant itself.
    *
    * The password typed into the form is a throwaway and not the audit
    * account's; the account it names is never created.
@@ -1083,10 +1084,14 @@ try {
    * and fails the run on one that carried an action out.
    *
    * Attached for the span of one opener only: setup and login are POSTs that
-   * answer 2xx by design, and they happen outside any opener. The allowlist
-   * below is the second fence for the same reason -- /api/v1/auth/ and
-   * /api/v1/setup never carry out an action on anything, and a path ending in
-   * /confirm only issues a token that a second, sudo-gated request would spend.
+   * answer 2xx by design, and they happen outside any opener, so nothing an
+   * opener sends needs /api/v1/auth/ or /api/v1/setup. The one path let
+   * through is one ending in /confirm, which only issues a token that a
+   * second, sudo-gated request would spend. A 2xx to POST /api/v1/auth/sudo
+   * is EXECUTED like any other (14-REVIEW WR-02): it opens the sudo window for
+   * the rest of the context, which is exactly what the Sudo dialog opener
+   * promises never to do, and every later destructive opener would then reach
+   * its handler.
    *
    * Why this exists at all: the audit runs on the machine production runs on.
    * It talks only to the daemon it started, in a temporary directory, and the
@@ -1103,8 +1108,7 @@ try {
       if (!path.startsWith('/api/v1/')) return
       const status = response.status()
       console.log(`  REQUEST   ${method} ${path} -> ${status}`)
-      const allowed =
-        path.startsWith('/api/v1/auth/') || path === '/api/v1/setup' || path.endsWith('/confirm')
+      const allowed = path.endsWith('/confirm')
       if (status >= 200 && status < 300 && !allowed) {
         executed += 1
         console.error(
