@@ -506,16 +506,19 @@ const OPENERS = [
 | A3 | Importing every route module in one jsdom test file has no import-time side effect that crashes | Pitfall 12 | the guard test errors at import. Detected by the first task's run |
 | A4 | Sonner renders its dismiss button with a `data-close-button` attribute that a browser test can select | Don't Hand-Roll (toast backstop) | the backstop selects nothing and reports nothing. Must assert count ≥ 1 |
 
-## Open Questions
+## Open Questions (RESOLVED)
 
-1. **Does the spec's "the audit never presses a confirm button" admit submitting the New-account form?**
+1. **Does the spec's "the audit never presses a confirm button" admit submitting the New-account form?** (RESOLVED)
    - What we know: that submit is the only verified real path to a 428 in the audit (Pattern 3), and the server makes it non-executing by construction.
    - Recommendation: the plan states the reading explicitly ("never a confirm in a confirmation dialog, never the sudo dialog"), keeps `EXECUTED` as the proof, and falls back to the D-05 fixture 428 only after one failed attempt. This is a planner decision inside D-05's latitude, not an operator question.
-2. **Can the D-11 hand test reach the typed confirmation at all?**
+   - **RESOLVED (14-01 Task 2):** the Sudo dialog opener submits the New account form on /settings and gets the daemon's real `428 sudo.required`. The reading goes into the opener's comment. The sudo password field is never filled (a grep gate checks this). `EXECUTED` fails any 2xx to an action request, and it is seen red in 14-01 Task 3. The D-05 fixture 428 is a fallback, used only after two consecutive failed runs and only with a body a real run printed. The SUMMARY says which path was taken.
+2. **Can the D-11 hand test reach the typed confirmation at all?** (RESOLVED)
    - What we know: the buttons need `actions.available`, which the server derives from the helper files on the machine. 13-11 found them absent on the Pi. The production daemon is excluded by the UI-SPEC. A phone cannot use `--insecure-http` (Secure cookies are not sent over http, HANDOVER §3.1), so a dev daemon on the LAN needs its self-signed TLS.
    - Recommendation: put the prerequisite to the operator as a choice (AskUserQuestion) at the end of the phase: (a) the operator installs the helper on the Pi (a Phase 13 UAT item anyway), then the hand test runs against a dev daemon with TLS on a LAN port. Recommended: it serves both phases. (b) record "not performed" per D-11. Nothing may be done silently. Installing the helper and addressing production are the operator's call.
-3. **Which of the dialogs' own contents turn out small in the first red run** (Reset dialog disk rows, What's new chips, `WhatsNew` version button)?
+   - **RESOLVED (14-07 Task 3):** the executor installs nothing and asks no open question. It records the hand test as performed (device, browser, result) or as "not performed" together with its three prerequisites. Until the hand test is performed, ROADMAP criterion 4 stays **open (human_needed)** in the SUMMARY: its measured half is met by 14-06, and its phone half is never marked passed by default. At verification the prerequisite goes to the operator as a choice: (A, recommended) install the helper and run the test against a dev daemon with TLS; (B) keep "not performed", with criterion 4 left human_needed.
+3. **Which of the dialogs' own contents turn out small in the first red run** (Reset dialog disk rows, What's new chips, `WhatsNew` version button)? (RESOLVED)
    - Recommendation: the plan treats the first extended run as the finding (CONTEXT "Specific Ideas"). The UI-SPEC single-place table already names the likely ones.
+   - **RESOLVED (14-03 Task 2 → 14-05, 14-06):** the first extended run is recorded as the finding in `$HOME/.cache/holzkube-manager-layout/14-03-first-red.log`. Each SMALL detail line now names its primitive by data-slot, so the SUMMARY sorts every finding into primitives (fixed in 14-05) or single places (fixed in 14-06). A finding in a file 14-06 does not list is fixed there the same way and named in its SUMMARY.
 
 ## Environment Availability
 
