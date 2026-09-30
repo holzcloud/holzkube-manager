@@ -166,7 +166,7 @@ func parseResult(raw []byte) (Result, error) {
 			return Result{}, errors.New("the id in the host helper's result file is not 16 lowercase hex characters")
 		}
 		if !Action(action).Known() {
-			return Result{}, errors.New("the action in the host helper's result file is not one of the four host actions")
+			return Result{}, errors.New("the action in the host helper's result file is not one of the five host actions")
 		}
 		r.ID = id
 		r.Action = Action(action)

@@ -666,12 +666,14 @@ const ACTION_LABELS: ReadonlyArray<{
       'password again before it runs. Nothing is lost if it fails: the certificate is proved ' +
       'against a node before it replaces the one in use',
   },
-  // The four host actions (Phase 13). The machine these take away is the one
-  // this page runs on, so the prompt names which of the four it is.
+  // The five host actions (Phase 13). Four take away the machine this page
+  // runs on or the service itself, and the fifth has root look for a release on
+  // the page's behalf, so the prompt names which of the five it is.
   { match: /^\/api\/v1\/host\/actions\/reboot$/, action: 'Restart this host' },
   { match: /^\/api\/v1\/host\/actions\/poweroff$/, action: 'Shut this host down' },
   { match: /^\/api\/v1\/host\/actions\/restart-service$/, action: 'Restart holzkube-manager' },
   { match: /^\/api\/v1\/host\/actions\/update$/, action: 'Check for updates and install' },
+  { match: /^\/api\/v1\/host\/actions\/check-update$/, action: 'Check for updates' },
 ]
 
 function challengeFor(path: string): { action: string; because?: string } {
@@ -2993,10 +2995,10 @@ export const linkSchema = z.object({
 
 export type Link = z.infer<typeof linkSchema>
 
-/** The four host actions (Phase 13), as the order file and the routes name them. */
-export type HostAction = 'reboot' | 'poweroff' | 'restart-service' | 'update'
+/** The five host actions (Phase 13), as the order file and the routes name them. */
+export type HostAction = 'reboot' | 'poweroff' | 'restart-service' | 'update' | 'check-update'
 
-const hostActionSchema = z.enum(['reboot', 'poweroff', 'restart-service', 'update'])
+const hostActionSchema = z.enum(['reboot', 'poweroff', 'restart-service', 'update', 'check-update'])
 
 /**
  * Each host action's route, written out: the patterns carry no parameter, so
@@ -3007,6 +3009,7 @@ export const HOST_ACTION_PATHS: Record<HostAction, string> = {
   poweroff: '/api/v1/host/actions/poweroff',
   'restart-service': '/api/v1/host/actions/restart-service',
   update: '/api/v1/host/actions/update',
+  'check-update': '/api/v1/host/actions/check-update',
 }
 
 /**

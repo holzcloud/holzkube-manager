@@ -229,7 +229,7 @@ var allowlist = map[string][]string{
 	// what a person typed into a box is a habit worth not starting.
 	"action.confirm": {"action", "params.mode", "params.graceful", "params.reboot"},
 
-	// The four host actions, phase 13 (D-07). Each route names its action,
+	// The five host actions, phase 13 (D-07). Each route names its action,
 	// and the body carries only the confirmation token, which -- like every
 	// confirmation above -- never belongs in an archive kept for ever. So
 	// nothing is permitted: the record is who, when, which action, and what
@@ -239,6 +239,7 @@ var allowlist = map[string][]string{
 	"host.poweroff":        {},
 	"host.restart-service": {},
 	"host.update":          {},
+	"host.check-update":    {},
 
 	// A cancel names its job in the path.
 	"job.cancel": {},

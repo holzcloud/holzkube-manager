@@ -1,10 +1,10 @@
 // Package hostaction is the daemon's half of the host actions (HACT-01..08):
-// restart the host, shut it down, restart holzkube-manager, and run the update
-// the hourly timer runs.
+// restart the host, shut it down, restart holzkube-manager, run the update the
+// hourly timer runs, and only look whether a newer release exists.
 //
 // # The daemon places an order and runs nothing
 //
-// None of the four is something holzkube-manager may do itself. The daemon runs
+// None of the five is something holzkube-manager may do itself. The daemon runs
 // unprivileged under a hardened unit (NoNewPrivileges, no AF_UNIX to reach
 // logind or PID 1), and that hardening stays. So this package does exactly one
 // thing on the machine: it places a one-line order -- the action, one space, a
@@ -14,7 +14,7 @@
 //
 // The other half is root's: deploy/holzkube-manager-host.sh, started by a
 // systemd path unit when the order appears. It consumes the order before it
-// acts, accepts exactly four lines of one fixed shape, runs a fixed systemctl
+// acts, accepts exactly five lines of one fixed shape, runs a fixed systemctl
 // command for each, and records what came of it in its own state directory,
 // which this package reads back (result.go).
 //
@@ -61,11 +61,11 @@ import (
 	"github.com/holzcloud/holzkube-manager/internal/store/fsstore"
 )
 
-// Action is one of the four host actions. Its string is what the order file
+// Action is one of the five host actions. Its string is what the order file
 // carries and what the route path ends in.
 type Action string
 
-// The four host actions, and nothing else: the helper script knows exactly
+// The five host actions, and nothing else: the helper script knows exactly
 // these and refuses every other word.
 const (
 	// Reboot restarts the whole machine (systemctl reboot).
@@ -77,16 +77,23 @@ const (
 	// Update starts holzkube-manager-update.service: the unit the hourly timer
 	// runs, which looks for a newer release and installs it if there is one.
 	Update Action = "update"
+	// CheckUpdate only looks (HACT-04, as the operator decided on 2026-09-30):
+	// the helper starts holzkube-manager-update-check.service, which runs the
+	// update script's --check. It asks for the newest release, records what it
+	// found where the update script always records (updatestatus), and
+	// installs nothing.
+	CheckUpdate Action = "check-update"
 )
 
-// Actions returns the four actions in one fixed order: the order the routes
-// are registered in and the contract lists them in. (The page arranges its
+// Actions returns the five actions in one fixed order: the order the routes
+// are registered in and the contract lists them in. The check came last and
+// stays last, so the four before it keep their places. (The page arranges its
 // buttons its own way, harmless first.)
 func Actions() []Action {
-	return []Action{Reboot, Poweroff, RestartService, Update}
+	return []Action{Reboot, Poweroff, RestartService, Update, CheckUpdate}
 }
 
-// Known reports whether a is one of the four actions.
+// Known reports whether a is one of the five actions.
 func (a Action) Known() bool {
 	for _, k := range Actions() {
 		if a == k {

@@ -38,25 +38,26 @@ import (
 //
 // # The host actions (HACT-01..08, Phase 13)
 //
-// Five more routes: POST /api/v1/host/confirm, and one
+// Six more routes: POST /api/v1/host/confirm, and one
 // POST /api/v1/host/actions/<action> for each of reboot, poweroff,
-// restart-service and update. None of them does what it names. The daemon
+// restart-service, update and check-update. None of them does what it names. The daemon
 // runs unprivileged and stays hardened; an action route places a one-line
 // order in the data directory (internal/host/hostaction), and a root-owned
 // helper, deploy/holzkube-manager-host.sh, carries it out. Nothing in this file
 // starts a process.
 //
-// **The action routes are destructive (D-06, D-07).** They restart or switch
-// off the machine every cluster's secrets live on, or the service itself, so
-// each one requires a session, the operator role and an open sudo window, and
-// each carries its own audit Action, host.<action>, written before the
-// handler runs. The body is only the confirmation token, which never belongs in
+// **The action routes are destructive (D-06, D-07).** Four restart or switch
+// off the machine every cluster's secrets live on, or the service itself; the
+// fifth, check-update, changes nothing but has root reach the network with the
+// release token on the page's behalf. So each one requires a session, the
+// operator role and an open sudo window, and each carries its own audit
+// Action, host.<action>, written before the handler runs. The body is only the confirmation token, which never belongs in
 // an archive kept for ever, so the allowlist records no parameter of them.
 //
 // **The confirm route is operator and not destructive**, like the node one: it
 // changes nothing, it issues a token -- and only to somebody who typed the
-// hostname (D-08). Every host action requires typing (D-09), unlike a node
-// reboot: there is one host, and it is the machine this page runs on.
+// hostname (D-08). Every host action requires typing (D-09, HACT-05), unlike
+// a node reboot: there is one host, and it is the machine this page runs on.
 //
 // **The token is bound to the host.** The confirm route issues it for
 // {Action: host.<action>, Machine: hostIntentTarget}, and the action route
@@ -99,17 +100,22 @@ import (
 const hostIntentTarget = "@host"
 
 // hostActionName is the audit Action and the confirmation's action of one host
-// action: host.reboot, host.poweroff, host.restart-service, host.update.
+// action: host.reboot, host.poweroff, host.restart-service, host.update,
+// host.check-update.
 func hostActionName(a hostaction.Action) string {
 	return "host." + string(a)
 }
 
 // hostTypedPhrase says, for every host action the host confirm route will
 // issue a token for, whether the operator has to type the hostname first. All
-// four do (D-09): the node rule -- reboot and shutdown without typing, so that
-// typing still means something where it matters -- does not carry over,
-// because there is exactly one host and it is the machine this page runs on;
-// after the click it is gone.
+// five do, because HACT-05 wants it for every host action and ROADMAP
+// criterion 1 lists the check among the five. For the four that take the host
+// or the service away, D-09's reason holds: the node rule -- reboot and
+// shutdown without typing, so that typing still means something where it
+// matters -- does not carry over, because there is exactly one host and it is
+// the machine this page runs on; after the click it is gone. The check takes
+// nothing away; for it the reason is that root acts on the host on the page's
+// behalf, with network and the release token.
 //
 // It is its own table and deliberately not merged into typedPhrase: that one
 // is the node confirm route's, and an entry there would make
@@ -120,9 +126,10 @@ var hostTypedPhrase = map[string]bool{
 	hostActionName(hostaction.Poweroff):       true,
 	hostActionName(hostaction.RestartService): true,
 	hostActionName(hostaction.Update):         true,
+	hostActionName(hostaction.CheckUpdate):    true,
 }
 
-// HostRoutes serves the host page's read, the host confirm route and the four
+// HostRoutes serves the host page's read, the host confirm route and the five
 // host action routes.
 func HostRoutes(d httpapi.Deps) []httpapi.Route {
 	routes := []httpapi.Route{
@@ -234,7 +241,7 @@ func confirmHostAction(d httpapi.Deps) http.HandlerFunc {
 		needsPhrase, known := hostTypedPhrase[body.Action]
 		if !known {
 			httpapi.WriteProblem(w, r, httpapi.Validation(
-				"This instance issues host confirmations for its four host actions and that is not one of them.",
+				"This instance issues host confirmations for its five host actions and that is not one of them.",
 				httpapi.FieldError{Field: "action", Reason: "not a confirmable host action"}))
 			return
 		}

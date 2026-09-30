@@ -248,7 +248,7 @@ type Deps struct {
 	// page; the route answers 502 rather than panicking if it is.
 	Host *host.Collector
 
-	// HostActions is the one slot the four host actions place their orders
+	// HostActions is the one slot the five host actions place their orders
 	// in; the root helper, not this process, carries them out. It is nil in a
 	// deployment that offers no host actions, and the host confirm and action
 	// routes answer 502 rather than panicking if it is.

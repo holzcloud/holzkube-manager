@@ -1816,6 +1816,7 @@ func TestEveryRouteThatReachesUpstreamHasABudgetRow(t *testing.T) {
 		"POST /api/v1/host/actions/poweroff",
 		"POST /api/v1/host/actions/restart-service",
 		"POST /api/v1/host/actions/update",
+		"POST /api/v1/host/actions/check-update",
 	} {
 		noUpstream[r] = true
 	}

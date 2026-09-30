@@ -117,7 +117,7 @@ func TestReadResult(t *testing.T) {
 		{
 			name:    "an unknown action",
 			file:    ptr("0123456789abcdef hkmhalt started " + resultTime + "\n"),
-			wantErr: "not one of the four host actions",
+			wantErr: "not one of the five host actions",
 			marker:  "hkmhalt",
 		},
 		{

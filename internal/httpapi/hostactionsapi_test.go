@@ -19,6 +19,7 @@ import (
 
 	"github.com/holzcloud/holzkube-manager/internal/host"
 	"github.com/holzcloud/holzkube-manager/internal/host/hostaction"
+	"github.com/holzcloud/holzkube-manager/internal/host/updatestatus"
 	"github.com/holzcloud/holzkube-manager/internal/store/fsstore"
 )
 
@@ -147,6 +148,13 @@ func requireRootNamespace(t *testing.T) {
 // longer reads them would run against /var/lib and the real systemctl.
 func runHelper(t *testing.T, order, stateDir string) (rc int, stubLog string) {
 	t.Helper()
+	return runHelperWithStub(t, order, stateDir, "")
+}
+
+// runHelperWithStub is runHelper with more for the stand-in systemctl to do
+// after it logged its argv: extra is sh, run with the argv as "$@".
+func runHelperWithStub(t *testing.T, order, stateDir, extra string) (rc int, stubLog string) {
+	t.Helper()
 
 	src, err := os.ReadFile(filepath.Join("..", "..", "deploy", "holzkube-manager-host.sh"))
 	if err != nil {
@@ -165,7 +173,7 @@ func runHelper(t *testing.T, order, stateDir string) (rc int, stubLog string) {
 	}
 	stubLog = filepath.Join(dir, "systemctl.log")
 	stub := filepath.Join(dir, "systemctl")
-	if err := os.WriteFile(stub, []byte("#!/bin/sh\nprintf '%s\\n' \"$*\" >> '"+stubLog+"'\n"), 0o755); err != nil { //nolint:gosec // the stand-in must be executable
+	if err := os.WriteFile(stub, []byte("#!/bin/sh\nprintf '%s\\n' \"$*\" >> '"+stubLog+"'\n"+extra), 0o755); err != nil { //nolint:gosec // the stand-in must be executable
 		t.Fatal(err)
 	}
 
@@ -375,6 +383,182 @@ func TestHostActionRoundTrip(t *testing.T) {
 	}
 	if o := after.Actions.Order; o == nil || o.ID != id || o.State != "picked-up" {
 		t.Errorf("actions.order after the helper ran = %+v, want %s picked-up", o, id)
+	}
+}
+
+// hostCheckView is the part of GET /api/v1/host the check's round trip reads
+// beyond the order and the result: what the update script last recorded.
+type hostCheckView struct {
+	hostActionsView
+	Service struct {
+		Update struct {
+			Readable bool `json:"readable"`
+			Value    *struct {
+				CheckedAt string  `json:"checked_at"`
+				Installed *string `json:"installed"`
+				Latest    *string `json:"latest"`
+				Outcome   string  `json:"outcome"`
+			} `json:"value"`
+			Reason *struct {
+				Code string `json:"code"`
+			} `json:"reason"`
+		} `json:"update"`
+	} `json:"service"`
+}
+
+// TestHostCheckRoundTrip is the fifth order end to end (HACT-04 as the
+// operator decided it on 2026-09-30): "Check for updates" through the same
+// gates as the other four, one line in the slot, the helper as root starting
+// exactly the check unit -- blocking, so a check that fails is the helper's
+// failure for this id -- and the answer back on the page, through the status
+// file the update script writes and the daemon already reads.
+//
+// The stand-in systemctl plays the check unit: started as
+// `start holzkube-manager-update-check.service`, it records a status the way
+// the update script's EXIT trap does (a temporary name in the status
+// directory, then a rename).
+func TestHostCheckRoundTrip(t *testing.T) {
+	t.Parallel()
+	requireRootNamespace(t)
+
+	fsys, stateDir := installedHelperFS(t)
+	// The fixture's root: its state directory is <root>/var/lib/holzkube-manager-host,
+	// and the update script's status directory sits beside it, where
+	// updatestatus.DefaultPath names it.
+	statusDir := filepath.Join(filepath.Dir(stateDir), "holzkube-manager-update")
+	if err := os.MkdirAll(statusDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if want := filepath.Join(statusDir, "status.json"); !strings.HasSuffix(filepath.ToSlash(want), updatestatus.DefaultPath) {
+		t.Fatalf("status file %s is not where updatestatus.DefaultPath (%s) names it", want, updatestatus.DefaultPath)
+	}
+	sys := hostSys{uname: host.Uname{Nodename: "example-host", Release: "6.18.50+rpt-rpi-2712", Machine: "aarch64"}}
+
+	h := newHarness(t,
+		withHostActions(func(dataDir string) *hostaction.Box {
+			return hostaction.NewBox(hostaction.Config{
+				FS:      fsys,
+				DataDir: dataDir,
+				Place:   fsstore.PlaceNew,
+			})
+		}),
+		withHostOver(func(box *hostaction.Box) *host.Collector {
+			// The same root: the status file is read from it as on the host.
+			return host.New(host.Config{FS: fsys, Sys: sys, Actions: box})
+		}),
+	)
+	h.setupAndLogin(t)
+	if resp, raw := h.do(t, http.MethodPost, "/api/v1/auth/sudo",
+		map[string]string{"password": testPass}); resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("sudo: %d (%s)", resp.StatusCode, raw)
+	}
+
+	// Nothing recorded yet: the page has no answer to show.
+	var before hostCheckView
+	h.getJSON(t, "/api/v1/host", &before)
+	if before.Service.Update.Readable {
+		t.Fatalf("service.update before any check = %+v, want not recorded", before.Service.Update)
+	}
+
+	resp, raw := h.confirmAndPlace(t, hostaction.CheckUpdate, "example-host")
+	if resp.StatusCode != http.StatusAccepted {
+		t.Fatalf("POST /api/v1/host/actions/check-update: %d, want 202 (%s)", resp.StatusCode, raw)
+	}
+	var placed struct {
+		Order struct {
+			ID       string `json:"id"`
+			Action   string `json:"action"`
+			PlacedAt string `json:"placed_at"`
+			State    string `json:"state"`
+		} `json:"order"`
+	}
+	if err := json.Unmarshal(raw, &placed); err != nil {
+		t.Fatalf("decode 202: %v (%s)", err, raw)
+	}
+	id := placed.Order.ID
+	if len(id) != 16 || strings.Trim(id, "0123456789abcdef") != "" {
+		t.Fatalf("order id %q is not 16 lowercase hex characters", id)
+	}
+	if placed.Order.Action != "check-update" || placed.Order.State != "pending" {
+		t.Errorf("202 order = %+v, want action check-update, state pending", placed.Order)
+	}
+	placedAt, err := time.Parse(time.RFC3339Nano, placed.Order.PlacedAt)
+	if err != nil {
+		t.Fatalf("placed_at %q: %v", placed.Order.PlacedAt, err)
+	}
+
+	// Exactly one line, and nothing else, mode 0600.
+	orderPath := filepath.Join(h.dataDir, hostaction.OrderFileName)
+	info, err := os.Lstat(orderPath)
+	if err != nil {
+		t.Fatalf("the order file: %v", err)
+	}
+	if info.Mode() != 0o600 {
+		t.Errorf("order file mode = %v, want -rw-------", info.Mode())
+	}
+	line, err := os.ReadFile(orderPath) //nolint:gosec // a path in the test's own data directory
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "check-update " + id + "\n"; string(line) != want {
+		t.Fatalf("order file = %q, want %q", line, want)
+	}
+
+	// The root half. The stand-in plays the check unit only for the exact
+	// argv the helper must use; any other call records nothing, and the page
+	// half below goes red with the argv assertion.
+	status := filepath.Join(statusDir, "status.json")
+	check := `if [ "$*" = "start holzkube-manager-update-check.service" ]; then
+  tmp=$(mktemp '` + statusDir + `/.status.XXXXXX') || exit 1
+  printf '{"checked_at":"%s","installed":"v0.1.0","latest":"v9.9.9","outcome":"available"}\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$tmp" || exit 1
+  chmod 0644 "$tmp" && mv -f -- "$tmp" '` + status + `'
+fi
+`
+	rc, stubLog := runHelperWithStub(t, orderPath, stateDir, check)
+	if rc != 0 {
+		t.Fatalf("helper exit = %d, want 0", rc)
+	}
+	calls, err := os.ReadFile(stubLog) //nolint:gosec // the test's own stand-in log
+	if err != nil {
+		t.Fatalf("the stand-in systemctl was never called: %v", err)
+	}
+	if got, want := string(calls), "start holzkube-manager-update-check.service\n"; got != want {
+		t.Errorf("systemctl called with %q, want exactly %q", got, want)
+	}
+	if _, err := os.Lstat(orderPath); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("the order is still there after the helper ran: %v", err)
+	}
+
+	// And back to the page: the helper's result for this id, and the check's
+	// answer where the page already reads the update script's.
+	var after hostCheckView
+	h.getJSON(t, "/api/v1/host", &after)
+	res := after.Actions.Result
+	if !res.Readable || res.Value == nil {
+		t.Fatalf("actions.result after the helper ran = %+v, want readable", res)
+	}
+	if res.Value.ID != id || res.Value.Action != "check-update" || res.Value.Outcome != "started" {
+		t.Errorf("actions.result = %+v, want %s check-update started", *res.Value, id)
+	}
+	if o := after.Actions.Order; o == nil || o.ID != id || o.State != "picked-up" {
+		t.Errorf("actions.order after the helper ran = %+v, want %s picked-up", o, id)
+	}
+	u := after.Service.Update
+	if !u.Readable || u.Value == nil {
+		t.Fatalf("service.update after the check = %+v, want readable", u)
+	}
+	if u.Value.Outcome != "available" || u.Value.Latest == nil || *u.Value.Latest != "v9.9.9" ||
+		u.Value.Installed == nil || *u.Value.Installed != "v0.1.0" {
+		t.Errorf("service.update = %+v, want available, installed v0.1.0, latest v9.9.9", *u.Value)
+	}
+	checkedAt, err := time.Parse(time.RFC3339, u.Value.CheckedAt)
+	if err != nil {
+		t.Fatalf("service.update.checked_at %q: %v", u.Value.CheckedAt, err)
+	}
+	// Whole seconds against a sub-second placement: the page compares with the
+	// placement truncated to the second, and so does this.
+	if checkedAt.Before(placedAt.Truncate(time.Second)) {
+		t.Errorf("checked_at %s is before the placement %s (truncated to the second)", checkedAt, placedAt)
 	}
 }
 

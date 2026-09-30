@@ -3,19 +3,20 @@
 # Fuehrt genau einen Host-Auftrag aus, den holzkube-managerd abgelegt hat.
 #
 # Der Daemon laeuft ohne Rechte und bleibt so gehaertet, wie er ist. Er startet
-# nichts selbst: fuer die vier Host-Aktionen seiner Host-Seite legt er eine
+# nichts selbst: fuer die fuenf Host-Aktionen seiner Host-Seite legt er eine
 # Zeile in sein Datenverzeichnis,
 #
 #   /var/lib/holzkube-manager/host-order      <aktion> <id>
 #
 # und holzkube-manager-host.path startet dieses Skript als root, sobald die
-# Datei da ist. Es kennt genau vier Auftraege und fuer jeden einen festen
+# Datei da ist. Es kennt genau fuenf Auftraege und fuer jeden einen festen
 # Befehl:
 #
 #   reboot            systemctl reboot
 #   poweroff          systemctl poweroff
 #   restart-service   systemctl restart holzkube-manager.service
 #   update            systemctl start --no-block holzkube-manager-update.service
+#   check-update      systemctl start holzkube-manager-update-check.service
 #
 # Alles andere wird verworfen. Der Text eines Auftrags wird nie ausgefuehrt,
 # nie ausgewertet, nie ungequotet benutzt und nie ins Journal geschrieben:
@@ -186,7 +187,7 @@ line=""
 IFS= read -r line < "$work/o" || reject "keine vollstaendige Zeile" "$size"
 # Genau eine Zeile und ihr Zeilenende, nichts davor, nichts danach.
 (( size == ${#line} + 1 )) || reject "nicht genau eine Zeile" "$size"
-[[ $line =~ ^(reboot|poweroff|restart-service|update)\ ([0-9a-f]{16})$ ]] || reject "unbekannte Form" "$size"
+[[ $line =~ ^(reboot|poweroff|restart-service|update|check-update)\ ([0-9a-f]{16})$ ]] || reject "unbekannte Form" "$size"
 action=${BASH_REMATCH[1]}
 id=${BASH_REMATCH[2]}
 
@@ -200,6 +201,13 @@ case $action in
   poweroff)        cmd=(poweroff) ;;
   restart-service) cmd=(restart holzkube-manager.service) ;;
   update)          cmd=(start --no-block holzkube-manager-update.service) ;;
+  # Ohne --no-block, anders als update: der Start eines oneshot endet, wenn
+  # sein ExecStart endet, also ist das Ende dieses systemctl das Ende der
+  # Suche. Scheitert sie (GitHub nicht erreichbar, das Update-Skript fehlt),
+  # scheitert systemctl, und unten steht "failed" fuer genau diesen Auftrag,
+  # statt dass die Seite bis "keine Antwort" wartet. Die Unit begrenzt sich
+  # selbst (TimeoutStartSec=2min), unter der Grenze dieses Dienstes (3min).
+  check-update)    cmd=(start holzkube-manager-update-check.service) ;;
   *)               reject "unbekannte Aktion" "$size" ;;
 esac
 

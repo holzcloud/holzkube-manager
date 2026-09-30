@@ -1,0 +1,72 @@
+# holzkube-manager-update-check.service -- sieht nach, ob es ein neueres
+# Release gibt, als root, und installiert nichts.
+#
+# Das ist nur das Nachsehen: das Update-Skript mit --check vergleicht die
+# installierte Version mit dem neuesten Release, haelt das Ergebnis in
+# /var/lib/holzkube-manager-update/status.json fest und endet, bevor irgendetwas
+# heruntergeladen oder installiert wird. Die Host-Seite liest genau diese
+# Datei (internal/host/updatestatus).
+#
+# Gestartet nur von holzkube-manager-host.service, fuer einen Auftrag
+# "check-update"; das Skript (deploy/holzkube-manager-host.sh) wartet, bis diese
+# Unit fertig ist.
+#
+# Installiert wird sie von niemandem ausser dem Betreiber, von Hand, zusammen
+# mit dem Helfer, aus dem Release-Archiv: deploy/HOST-HELPER.md. Das
+# Update-Skript liefert sie nicht aus und nennt sie nicht.
+#
+# Warum die Zeilen so sind, wie sie sind:
+#
+#   - Kein [Install]: nur der Helfer startet sie, fuer einen Auftrag.
+#     Aktiviert, liefe sie bei jedem Booten einmal, ohne dass jemand fragte.
+#   - Kein RemainAfterExit=: ein oneshot, der danach "active" bliebe, wuerde
+#     nie ein zweites Mal gestartet, und die zweite Suche liefe nie.
+#   - Als root: das Statusverzeichnis gehoert root, und das Skript schreibt als
+#     root nur in ein Verzeichnis, das root allein gehoert. Das Token fuer die
+#     Release-Liste (/etc/holzkube-manager/github-token) kann nur root lesen.
+#   - RestrictAddressFamilies= mit AF_INET und AF_INET6: das Skript fragt
+#     GitHub nach der Release-Liste. AF_UNIX und AF_NETLINK braucht die
+#     Namensaufloesung.
+#   - TimeoutStartSec=2min: ein oneshot hat sonst keine Startgrenze. Der Helfer
+#     wartet auf diese Unit, und seine eigene Grenze ist 3min; diese liegt
+#     darunter, damit der Helfer noch "failed" festhalten kann, wenn sie
+#     abgebrochen wird. curl im Skript hat ohnehin --max-time 30.
+#   - CapabilityBoundingSet= leer: alles, was das Nachsehen liest oder
+#     schreibt, gehoert root; keine Capability ist noetig.
+#   - StateDirectory= mit 0755 und UMask=0022: status.json muss der Daemon
+#     lesen koennen, der als anderer Benutzer laeuft. Das Verzeichnis ist das,
+#     in das das Update-Skript immer schreibt; ProtectSystem=strict laesst nur
+#     es beschreibbar.
+#   - Kein Environment=, kein EnvironmentFile=: was das Skript an Einstellungen
+#     kennt, liest es selbst aus /etc/holzkube-manager/update.conf, wie beim
+#     stuendlichen Lauf.
+[Unit]
+Description=holzkube-manager - nach einem neueren Release sehen, nichts installieren
+Documentation=https://github.com/holzcloud/holzkube-manager/blob/main/deploy/HOST-HELPER.md
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/holzkube-manager-update --check
+TimeoutStartSec=2min
+StateDirectory=holzkube-manager-update
+StateDirectoryMode=0755
+UMask=0022
+NoNewPrivileges=true
+CapabilityBoundingSet=
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+SystemCallArchitectures=native
