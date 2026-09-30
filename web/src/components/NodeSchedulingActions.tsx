@@ -85,7 +85,7 @@ export function NodeSchedulingActions({
             <input
               id={forceID}
               type="checkbox"
-              className="mt-0.5 max-md:mt-2.5 max-md:size-6"
+              className="mt-0.5 max-md:mt-3 max-md:size-6"
               checked={force}
               onChange={(event) => setForce(event.target.checked)}
             />
@@ -99,7 +99,7 @@ export function NodeSchedulingActions({
             <input
               id={localID}
               type="checkbox"
-              className="mt-0.5 max-md:mt-2.5 max-md:size-6"
+              className="mt-0.5 max-md:mt-3 max-md:size-6"
               checked={deleteLocalData}
               onChange={(event) => setDeleteLocalData(event.target.checked)}
             />

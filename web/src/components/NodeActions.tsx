@@ -336,27 +336,44 @@ function ResetDialog({
                 </p>
               ) : (
                 <ul className="font-mono text-xs">
-                  {preview.data.disks.map((d) => (
-                    <li key={d.device} className="flex items-center gap-2">
-                      {needsDisks && (
-                        <input
-                          type="checkbox"
-                          aria-label={`Wipe ${d.device}`}
-                          checked={disks.includes(d.device)}
-                          onChange={(e) =>
-                            setDisks((prev) =>
-                              e.target.checked
-                                ? [...prev, d.device]
-                                : prev.filter((x) => x !== d.device),
-                            )
-                          }
-                        />
-                      )}
+                  {preview.data.disks.map((d) => {
+                    const text = (
                       <span>
                         {d.device} {d.pretty_size || d.size} {d.model && `(${d.model})`}
                       </span>
-                    </li>
-                  ))}
+                    )
+                    return (
+                      <li key={d.device}>
+                        {needsDisks ? (
+                          /* One label per row, around its own checkbox and its
+                             text, so on a phone the whole 44px row is the tap
+                             target and a tap toggles only this disk. The label
+                             carries the row's flex classes, so above md
+                             checkbox and text sit where they sat. The checkbox
+                             keeps its own name: a tap is not a reset -- the
+                             typed phrase and the server's token still are. */
+                          <label className="flex items-center gap-2 max-md:min-h-11">
+                            <input
+                              type="checkbox"
+                              className="max-md:size-6"
+                              aria-label={`Wipe ${d.device}`}
+                              checked={disks.includes(d.device)}
+                              onChange={(e) =>
+                                setDisks((prev) =>
+                                  e.target.checked
+                                    ? [...prev, d.device]
+                                    : prev.filter((x) => x !== d.device),
+                                )
+                              }
+                            />
+                            {text}
+                          </label>
+                        ) : (
+                          <div className="flex items-center gap-2">{text}</div>
+                        )}
+                      </li>
+                    )
+                  })}
                 </ul>
               )}
             </div>
@@ -382,10 +399,10 @@ function ResetDialog({
 
             <fieldset className="space-y-2">
               <legend className="mb-1 font-medium">Effective flags</legend>
-              <label className="flex items-start gap-2">
+              <label className="flex items-start gap-2 max-md:min-h-11">
                 <input
                   type="checkbox"
-                  className="mt-1"
+                  className="mt-1 max-md:mt-3 max-md:size-6"
                   checked={graceful}
                   onChange={(e) => setGraceful(e.target.checked)}
                 />
@@ -398,10 +415,10 @@ function ResetDialog({
                   </span>
                 </span>
               </label>
-              <label className="flex items-start gap-2">
+              <label className="flex items-start gap-2 max-md:min-h-11">
                 <input
                   type="checkbox"
-                  className="mt-1"
+                  className="mt-1 max-md:mt-3 max-md:size-6"
                   checked={reboot}
                   onChange={(e) => setReboot(e.target.checked)}
                 />
