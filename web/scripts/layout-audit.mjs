@@ -41,12 +41,24 @@
  *
  * The widths are the operator's decision of 2026-09-17: a phone and a desk, the
  * two sides of the `md` breakpoint.
+ *
+ * LAYOUT_DUMP=<file> (D-08, "the desk unchanged, measured once"): the run also
+ * writes, at the desk width, one JSON line per control on every route and inside
+ * every opener -- route, opener, index in DOM order within the scope, tag, name,
+ * and the x, y, width, height of the element's own box. Phase 14 raises tap
+ * targets below `md` only; a dump taken before the first class change and one
+ * after the last, judged by scripts/layout-dump-compare.mjs, is what shows the
+ * desk kept its compact sizes rather than a reviewer's reading of the prefixes.
+ * It is a one-off measurement, not a baseline: the path is refused inside the
+ * repository, because a checked-in baseline is regenerated the first time it
+ * disagrees and from then on measures nothing. Without LAYOUT_DUMP nothing of
+ * this runs and the output is what it always was.
  */
 import { spawn, spawnSync } from 'node:child_process'
-import { existsSync, readFileSync } from 'node:fs'
+import { appendFileSync, existsSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { chromium } from 'playwright'
 
@@ -102,6 +114,63 @@ const WIDTHS = [390, 1280]
  */
 const TOUCH_WIDTH = 390
 const TOUCH_MIN = 44
+/** The width the desk is dumped at (D-08): the other side of `md`. */
+const DESK_WIDTH = 1280
+
+/**
+ * What counts as a control: one list, handed to findSmallTargets as an argument
+ * for both the size pass and the D-08 dump, so the two cannot disagree about
+ * what a control is. A second copy would drift, and a dump that counted other
+ * elements than the audit measures would compare something nobody checks.
+ */
+const CONTROL_SELECTOR = [
+  'button',
+  'a[href]',
+  'summary',
+  'input',
+  'select',
+  'textarea',
+  '[role="button"]',
+  '[role="checkbox"]',
+  '[role="switch"]',
+  '[role="tab"]',
+  '[role="menuitem"]',
+  '[role="option"]',
+  '[tabindex]:not([tabindex="-1"])',
+].join(',')
+
+/**
+ * Where the D-08 dump goes, when asked for; undefined otherwise.
+ *
+ * Resolved to an absolute path (a relative one is read from the directory the
+ * script runs in, web/ under `task test:layout`) and refused inside the
+ * repository before the daemon starts: D-08 forbids a checked-in baseline, and
+ * the one way a dump becomes one by accident is being written where `git add`
+ * finds it. The directory is resolved through its symlinks, so a link into the
+ * checkout is refused too. Truncated here, so a dump holds one run.
+ */
+const DUMP = (() => {
+  const asked = process.env.LAYOUT_DUMP
+  if (!asked) return undefined
+  const repo = realpathSync(fileURLToPath(new URL('../../', import.meta.url)))
+  const wanted = resolve(asked)
+  let folder
+  try {
+    folder = realpathSync(dirname(wanted))
+  } catch {
+    throw new Error(`LAYOUT_DUMP: the directory of ${wanted} does not exist`)
+  }
+  const file = join(folder, basename(wanted))
+  const inside = relative(repo, file)
+  if (inside === '' || (!inside.startsWith('..') && !isAbsolute(inside))) {
+    throw new Error(
+      `LAYOUT_DUMP: ${file} is inside the repository. A dump is a one-off measurement and ` +
+        'never a checked-in baseline (D-08); write it outside, e.g. under ~/.cache.',
+    )
+  }
+  writeFileSync(file, '')
+  return file
+})()
 /**
  * The routes it measures, and where the list comes from.
  *
@@ -578,29 +647,17 @@ const findSidewaysPanes = (root) => {
  * Each finding carries the element's `data-slot` and `data-size` when it has
  * them, so a line says which primitive to raise rather than which screen.
  */
-const findSmallTargets = (root, min) => {
-  const SELECTOR = [
-    'button',
-    'a[href]',
-    'summary',
-    'input',
-    'select',
-    'textarea',
-    '[role="button"]',
-    '[role="checkbox"]',
-    '[role="switch"]',
-    '[role="tab"]',
-    '[role="menuitem"]',
-    '[role="option"]',
-    '[tabindex]:not([tabindex="-1"])',
-  ].join(',')
-
+const findSmallTargets = (root, { min, selector, dump = false }) => {
   const out = []
+  // With `dump`, every control that passes the skips, in DOM order, with the
+  // element's OWN box: wrapping a checkbox in a label must not read as a moved
+  // control in the D-08 comparison, even though the label is what is tapped.
+  const controls = []
   // How many controls passed the visibility and size skips, from the same loop and
-  // the same SELECTOR, so a menu of `role="menuitem"` rows or a list of options counts
+  // the same selector, so a menu of `role="menuitem"` rows or a list of options counts
   // what it holds. A narrower count selector would call a full menu empty.
   let measured = 0
-  for (const el of root.querySelectorAll(SELECTOR)) {
+  for (const el of root.querySelectorAll(selector)) {
     const style = getComputedStyle(el)
     if (style.visibility === 'hidden' || style.display === 'none') continue
     if (el.getAttribute('aria-hidden') === 'true') continue
@@ -619,6 +676,20 @@ const findSmallTargets = (root, min) => {
     // on the screen. The exemption for a link in running text below is a
     // verdict about its size, not a sign that nothing is there.
     measured += 1
+    if (dump) {
+      const own = el.getBoundingClientRect()
+      controls.push({
+        tag: el.tagName.toLowerCase(),
+        name: (el.getAttribute('aria-label') ?? el.textContent ?? '')
+          .trim()
+          .replace(/\s+/g, ' ')
+          .slice(0, 40),
+        x: Math.round(own.x),
+        y: Math.round(own.y),
+        width: Math.round(own.width),
+        height: Math.round(own.height),
+      })
+    }
     // A link in running text. The test is the sentence around it: a parent
     // that carries more text than the link does is the sentence.
     if (el.tagName === 'A' && style.display.startsWith('inline')) {
@@ -648,7 +719,7 @@ const findSmallTargets = (root, min) => {
         .join(' '),
     })
   }
-  return { small: out, measured }
+  return { small: out, measured, controls }
 }
 
 /**
@@ -836,6 +907,8 @@ let failures = 0
 // than routes listed.
 const measuredRoutes = new Set()
 const measuredOpeners = new Set()
+// How many D-08 lines were written, printed at the end when LAYOUT_DUMP is set.
+let dumped = 0
 try {
   await waitForDaemon(base)
 
@@ -885,11 +958,33 @@ try {
     if (width === TOUCH_WIDTH) {
       result.wide = await scope.evaluate(findWideTables, width)
       result.sideways = await scope.evaluate(findSidewaysPanes)
-      const touch = await scope.evaluate(findSmallTargets, TOUCH_MIN)
+      const touch = await scope.evaluate(findSmallTargets, {
+        min: TOUCH_MIN,
+        selector: CONTROL_SELECTOR,
+      })
       result.small = touch.small
       result.measured = touch.measured
     }
     return result
+  }
+
+  /**
+   * Appends the D-08 lines for one scope at the desk width: the page's <body>
+   * for a route (opener empty), the element that opened for an opener. The
+   * index is the control's place in DOM order within that scope -- the one
+   * order that is the same on two runs of the same tree. Nothing without
+   * LAYOUT_DUMP, and nothing at the phone width.
+   */
+  async function dumpControls(scope, route, opener, width) {
+    if (DUMP === undefined || width !== DESK_WIDTH) return
+    const { controls } = await scope.evaluate(findSmallTargets, {
+      min: TOUCH_MIN,
+      selector: CONTROL_SELECTOR,
+      dump: true,
+    })
+    const lines = controls.map((c, index) => JSON.stringify({ route, opener, index, ...c }))
+    if (lines.length > 0) appendFileSync(DUMP, `${lines.join('\n')}\n`)
+    dumped += lines.length
   }
 
   /** Prints what a scan found under `label`, and returns how many ways it failed. */
@@ -962,6 +1057,7 @@ try {
     await settle(page, route)
 
     const result = await scan(page.locator('body'), width)
+    await dumpControls(page.locator('body'), route, '', width)
     const counted =
       width === TOUCH_WIDTH
         ? `  (${result.measured} controls, ${await page.evaluate(countItems)} items)`
@@ -1135,6 +1231,7 @@ try {
       }
     }
     measuredOpeners.add(opener.name)
+    await dumpControls(opened, opener.route, opener.name, width)
 
     const result = await scan(opened, width)
     let found = report(label, width, result)
@@ -1144,7 +1241,9 @@ try {
     // is the empty-output-is-green shape. The desk pass measures reach only, so
     // it counts with the same loop without reporting sizes.
     const measured =
-      result.measured ?? (await opened.evaluate(findSmallTargets, TOUCH_MIN)).measured
+      result.measured ??
+      (await opened.evaluate(findSmallTargets, { min: TOUCH_MIN, selector: CONTROL_SELECTOR }))
+        .measured
     if (measured === 0) {
       found += 1
       console.error(`  EMPTY     ${w}  ${label} -- opened, but not one control in it was measured`)
@@ -1229,6 +1328,9 @@ try {
   await rm(dir, { recursive: true, force: true })
 }
 
+if (DUMP !== undefined) {
+  console.log(`\nLAYOUT_DUMP: ${dumped} controls at ${DESK_WIDTH}px written to ${DUMP}`)
+}
 if (failures > 0) {
   console.error(
     `\n${failures} finding(s) across routes, openers and widths.\n\n` +
