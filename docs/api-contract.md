@@ -1863,8 +1863,13 @@ out a reboot nobody asked for any more. So:
     `/etc/systemd/system/holzkube-manager-host.service`, whichever of the two
     unit files is absent or not a regular file (one item for the pair);
   - `not-enabled`, path
-    `/etc/systemd/system/paths.target.wants/holzkube-manager-host.path`: the
-    units are there but the path unit is not enabled.
+    `/etc/systemd/system/paths.target.wants/holzkube-manager-host.path`: both
+    unit files are there but the path unit is not enabled. It is listed only
+    then: while either unit file is missing the item is `path-unit` alone,
+    because a unit that is not installed cannot be enabled, and the install
+    commands enable it in the same run.
+
+  The list is empty exactly when all of the helper is installed.
 
   The daemon reads these files and asks systemd nothing -- its unit gives it no
   way to reach systemd, and that hardening stays. A path unit that is enabled
@@ -1884,8 +1889,7 @@ operator installs it -- the same object reads:
   "available": false,
   "missing": [
     {"item": "script", "path": "/usr/local/sbin/holzkube-manager-host"},
-    {"item": "path-unit", "path": "/etc/systemd/system/holzkube-manager-host.path"},
-    {"item": "not-enabled", "path": "/etc/systemd/system/paths.target.wants/holzkube-manager-host.path"}
+    {"item": "path-unit", "path": "/etc/systemd/system/holzkube-manager-host.path"}
   ],
   "install_commands": ["…the four lines above…"]
 }
