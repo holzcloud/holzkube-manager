@@ -5,16 +5,16 @@ milestone_name: Host & Telefon
 current_phase: 14
 current_phase_name: telefon-tippziele
 status: verifying
-stopped_at: Completed 13-12-PLAN.md
-last_updated: "2026-09-30T14:40:15.896Z"
+stopped_at: Completed 13-13-PLAN.md
+last_updated: "2026-09-30T15:05:08.068Z"
 last_activity: 2026-09-30
 last_activity_desc: Phase 14 execution started
-state_head: f37fff3033d40464f8d9cc2566edbcd71f72ebe9
+state_head: ed3db0149486413a64e7c0f934adc6c3b5ee36e6
 progress:
   total_phases: 4
   completed_phases: 2
   total_plans: 37
-  completed_plans: 34
+  completed_plans: 35
   percent: 50
 ---
 
@@ -144,6 +144,8 @@ Siehe `PROJECT.md`, die `MILESTONE-*.md`-Dateien und für v1.18 den Abschnitt
 - [Phase 14]: [Phase 14-07]: D-11 phone hand test not performed; ROADMAP criterion 4 phone half open (human_needed), MOB-03 stays partial; repeat D-08 for /host and D-11 after 13-12
 - [Phase 13]: 13-12: Check for updates is a fifth host order, check-update, run by the root helper through holzkube-manager-update-check.service (the update script's --check), behind all four locks
 - [Phase 13]: 13-12: a finished check is emerald for current and available, red only for failed; orderPhase compares checked_at with the placement truncated to the second
+- [Phase 13]: 13-13: The helper names its orders on one marker line '# holzkube-manager-host orders: ' plus the words; no line means the first four (reboot poweroff restart-service update). Additive: a later order is a new word
+- [Phase 13]: 13-13: The check unit is held to the helper service's sandbox except RestrictAddressFamilies (reaches GitHub) and ReadWritePaths (writes only its StateDirectory), with an empty CapabilityBoundingSet and a start limit below the helper's
 
 ### Blockers/Concerns
 
@@ -158,8 +160,8 @@ Siehe `PROJECT.md`, die `MILESTONE-*.md`-Dateien und für v1.18 den Abschnitt
 
 ## Session Continuity
 
-Last session: 2026-09-30T14:40:15.652Z
-Stopped at: Completed 13-12-PLAN.md
+Last session: 2026-09-30T15:05:07.898Z
+Stopped at: Completed 13-13-PLAN.md
 Resume file: None
 Next: `/gsd-plan-phase 11`
 
@@ -201,3 +203,4 @@ Next: `/gsd-plan-phase 11`
 | Phase 14 P06 | 18min | 2 tasks | 4 files |
 | Phase 14 P07 | 50min | 3 tasks | 2 files |
 | Phase 13 P12 | 33min | 2 tasks | 16 files |
+| Phase 13 P13 | 23min | 2 tasks | 15 files |
