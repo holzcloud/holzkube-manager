@@ -5,16 +5,16 @@ milestone_name: Host & Telefon
 current_phase: 13
 current_phase_name: Host-Aktionen über einen root-eigenen Helfer
 status: verifying
-stopped_at: Completed 13-09-PLAN.md
-last_updated: "2026-09-29T03:56:06.422Z"
+stopped_at: Completed 13-10-PLAN.md
+last_updated: "2026-09-30T03:42:55.860Z"
 last_activity: 2026-09-29
 last_activity_desc: Phase 13 execution started
-state_head: 8f36495890a801442313f6ec1b30a1cd138d3a33
+state_head: dd670b3aadcc611307e5ad19ab509b42048c088d
 progress:
   total_phases: 4
   completed_phases: 2
-  total_plans: 24
-  completed_plans: 24
+  total_plans: 26
+  completed_plans: 25
   percent: 50
 ---
 
@@ -118,6 +118,7 @@ Siehe `PROJECT.md`, die `MILESTONE-*.md`-Dateien und für v1.18 den Abschnitt
 - [Phase 13]: 13-08: HostActions/HostView take sessionRole (biome reads role= as ARIA); the status box follows the held order until dismissed, else the daemon's order or the helper's result within 15 min of observed_at
 - [Phase 13]: 13-09: the fixture's helper-missing actions are held to InstallCommands and Detect by TestTheFixtureShowsTheRealInstallCommands
 - [Phase 13]: 13-09: readme-images.mjs scrolls to the top before measuring a tall shot
+- [Phase 13]: G-13-2 fixed in Detect: not-enabled only asked once both unit files are there, so the page sentence stays exact (D-12)
 
 ### Blockers/Concerns
 
@@ -132,8 +133,8 @@ Siehe `PROJECT.md`, die `MILESTONE-*.md`-Dateien und für v1.18 den Abschnitt
 
 ## Session Continuity
 
-Last session: 2026-09-29T03:56:06.126Z
-Stopped at: Completed 13-09-PLAN.md
+Last session: 2026-09-30T03:42:55.728Z
+Stopped at: Completed 13-10-PLAN.md
 Resume file: None
 Next: `/gsd-plan-phase 11`
 
@@ -165,3 +166,4 @@ Next: `/gsd-plan-phase 11`
 | Phase 13 P07 | 14min | 2 tasks | 5 files |
 | Phase 13 P08 | 24 min | 3 tasks | 6 files |
 | Phase 13 P09 | 45min | 2 tasks | 9 files |
+| Phase 13 P10 | 10min | 3 tasks | 12 files |
