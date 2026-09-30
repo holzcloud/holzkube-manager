@@ -24,6 +24,11 @@ import (
 //   - the path unit's paths.target.wants entry, which `systemctl enable`
 //     makes. Without it the units are there but nothing starts them.
 //
+// The enable entry is only asked about once both unit files are there. A unit
+// that is not installed cannot be "installed but not enabled", and the install
+// commands enable it in the same run, so while a unit file is missing the
+// path-unit item is the whole answer for the units.
+//
 // What this cannot see is a path unit that is enabled but stopped or failed.
 // For that the second net is the Box's pickup timer: an order nobody takes
 // within DefaultPickupTimeout is withdrawn, and the warning names
@@ -81,16 +86,19 @@ var InstallCommands = []string{
 
 // Detect reports which pieces of the helper are missing on the machine fsys
 // is rooted at ("/"), in the order the script, the path unit, and its being
-// enabled. It never returns nil: an installed helper is an empty list.
+// enabled. Its being enabled is only looked at when both unit files are
+// there. It never returns nil: an installed helper is an empty list.
 func Detect(fsys fs.FS) []Missing {
 	missing := []Missing{}
 	if !scriptInstalled(fsys) {
 		missing = append(missing, Missing{Item: MissingScript, Path: HelperScriptPath})
 	}
+	unitsInstalled := true
 	for _, p := range []string{PathUnitPath, ServiceUnitPath} {
 		info, err := fs.Stat(fsys, fsName(p))
 		if err != nil || !info.Mode().IsRegular() {
 			missing = append(missing, Missing{Item: MissingPathUnit, Path: p})
+			unitsInstalled = false
 			// One item for the pair: the operator installs both with one
 			// command.
 			break
@@ -98,9 +106,12 @@ func Detect(fsys fs.FS) []Missing {
 	}
 	// Lstat: any entry under the name enables the unit -- the symlink
 	// `systemctl enable` makes, or a file somebody copied there. Whether a
-	// link's target exists is the unit file's question, asked above.
-	if _, err := fs.Lstat(fsys, fsName(WantsLinkPath)); err != nil {
-		missing = append(missing, Missing{Item: MissingNotEnabled, Path: WantsLinkPath})
+	// link's target exists is the unit file's question, asked above; and
+	// while that question has no, "not enabled" would not be true.
+	if unitsInstalled {
+		if _, err := fs.Lstat(fsys, fsName(WantsLinkPath)); err != nil {
+			missing = append(missing, Missing{Item: MissingNotEnabled, Path: WantsLinkPath})
+		}
 	}
 	return missing
 }

@@ -51,7 +51,28 @@ func TestHelper(t *testing.T) {
 		want []Missing
 	}{
 		{"installed", installedFS(), []Missing{}},
-		{"nothing installed", fstest.MapFS{}, []Missing{script, pathUnit, notEnabled}},
+		// A unit that is not installed cannot be "installed but not enabled":
+		// while a unit file is missing, path-unit is the whole answer for the
+		// pair, and the install commands enable it in the same run (G-13-2).
+		{"nothing installed", fstest.MapFS{}, []Missing{script, pathUnit}},
+		{"script installed, no unit files, not enabled", with(func(m fstest.MapFS) {
+			delete(m, fsName(PathUnitPath))
+			delete(m, fsName(ServiceUnitPath))
+			delete(m, fsName(WantsLinkPath))
+		}), []Missing{pathUnit}},
+		{".service absent, not enabled", with(func(m fstest.MapFS) {
+			delete(m, fsName(ServiceUnitPath))
+			delete(m, fsName(WantsLinkPath))
+		}), []Missing{serviceUnit}},
+		{"script absent, both units, not enabled", with(func(m fstest.MapFS) {
+			delete(m, fsName(HelperScriptPath))
+			delete(m, fsName(WantsLinkPath))
+		}), []Missing{script, notEnabled}},
+		// A dangling wants link does not make a unit installed.
+		{"enabled, both unit files absent", with(func(m fstest.MapFS) {
+			delete(m, fsName(PathUnitPath))
+			delete(m, fsName(ServiceUnitPath))
+		}), []Missing{pathUnit}},
 
 		{"script absent", with(func(m fstest.MapFS) { delete(m, fsName(HelperScriptPath)) }), []Missing{script}},
 		{"script is a directory", with(scriptAs(&fstest.MapFile{Mode: fs.ModeDir | 0o755, Sys: &syscall.Stat_t{}})), []Missing{script}},
@@ -95,9 +116,77 @@ func TestHelperBoxMissing(t *testing.T) {
 	if got := NewBox(Config{FS: installedFS(), DataDir: t.TempDir()}).Missing(); got == nil || len(got) != 0 {
 		t.Errorf("Box over the installed fixture: Missing = %#v, want an empty list", got)
 	}
-	if got := NewBox(Config{FS: fstest.MapFS{}, DataDir: t.TempDir()}).Missing(); len(got) != 3 {
-		t.Errorf("Box over an empty FS: Missing = %+v, want three items", got)
+	want := []Missing{
+		{Item: MissingScript, Path: HelperScriptPath},
+		{Item: MissingPathUnit, Path: PathUnitPath},
 	}
+	if got := NewBox(Config{FS: fstest.MapFS{}, DataDir: t.TempDir()}).Missing(); !reflect.DeepEqual(got, want) {
+		t.Errorf("Box over an empty FS: Missing = %+v, want %+v", got, want)
+	}
+}
+
+// TestHelperEveryCombination walks all 16 presence combinations of the four
+// entries Detect reads -- the script, the .path unit, the .service unit and
+// the paths.target.wants entry -- and holds three things in each (G-13-2,
+// D-12):
+//
+//  1. path-unit and not-enabled are never listed together: a unit that is not
+//     installed is not "installed but not enabled";
+//  2. not-enabled is listed exactly when both unit files are there and the
+//     wants entry is not;
+//  3. the list is empty exactly when all four are there, so actions.available
+//     and the routes' 409 are what they were before the fix in every state.
+func TestHelperEveryCombination(t *testing.T) {
+	t.Parallel()
+
+	entries := []string{
+		fsName(HelperScriptPath),
+		fsName(PathUnitPath),
+		fsName(ServiceUnitPath),
+		fsName(WantsLinkPath),
+	}
+	for mask := 0; mask < 1<<len(entries); mask++ {
+		present := func(i int) bool { return mask&(1<<i) != 0 }
+		m := installedFS()
+		for i, name := range entries {
+			if !present(i) {
+				delete(m, name)
+			}
+		}
+		script, path, service, wants := present(0), present(1), present(2), present(3)
+
+		got := Detect(m)
+		has := func(item string) bool {
+			for _, g := range got {
+				if g.Item == item {
+					return true
+				}
+			}
+			return false
+		}
+		state := func() string {
+			return strings.Join([]string{
+				"script=" + yes(script), ".path=" + yes(path), ".service=" + yes(service), "wants=" + yes(wants),
+			}, " ")
+		}
+
+		if has(MissingPathUnit) && has(MissingNotEnabled) {
+			t.Errorf("%s: Detect = %+v lists path-unit and not-enabled together", state(), got)
+		}
+		if wantNE := path && service && !wants; has(MissingNotEnabled) != wantNE {
+			t.Errorf("%s: Detect = %+v; not-enabled listed = %v, want %v", state(), got, has(MissingNotEnabled), wantNE)
+		}
+		if all := script && path && service && wants; (len(got) == 0) != all {
+			t.Errorf("%s: Detect = %+v; empty = %v, want %v (empty exactly when all is installed)", state(), got, len(got) == 0, all)
+		}
+	}
+}
+
+func yes(b bool) string {
+	if b {
+		return "yes"
+	}
+	return "no"
 }
 
 // TestInstallCommandsAreTheGuidesBlock holds the shape of the one copy of the

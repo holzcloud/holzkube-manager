@@ -163,7 +163,14 @@ func TestHostActionsNeedTheHelper(t *testing.T) {
 			for _, n := range []string{helperScriptName, helperPathUnit, helperServiceUnit, helperWantsLink} {
 				delete(m, n)
 			}
-		}, []hostaction.Missing{script, pathUnit, notEnabled}},
+		}, []hostaction.Missing{script, pathUnit}},
+		// Not enabled, but the unit files are not there either: path-unit is
+		// the whole answer, and the route still refuses (G-13-2).
+		{"script installed, no unit files, not enabled", func(m fstest.MapFS) {
+			for _, n := range []string{helperPathUnit, helperServiceUnit, helperWantsLink} {
+				delete(m, n)
+			}
+		}, []hostaction.Missing{pathUnit}},
 		{"script owned by uid 1000", func(m fstest.MapFS) {
 			m[helperScriptName] = &fstest.MapFile{Data: []byte("#!/bin/sh\n"), Mode: 0o755, Sys: &syscall.Stat_t{Uid: 1000}}
 		}, []hostaction.Missing{script}},
