@@ -1626,6 +1626,11 @@ describe('the order status and the waiting notice', () => {
 
       const waiting = screen.getByText(sentence)
       expect(waiting).toHaveClass('border-slate-500/40')
+      // A polite live region, and no role: the order box is the one status on
+      // the page, and getByRole('status') finds exactly it (13-UI-REVIEW).
+      expect(waiting).toHaveAttribute('aria-live', 'polite')
+      expect(waiting).not.toHaveAttribute('role')
+      expect(screen.getAllByRole('status')).toHaveLength(1)
       expect(screen.queryByText(STALE_SENTENCE)).toBeNull()
       expect(cellOf('Hostname').closest('.opacity-60')).not.toBeNull()
       expect(

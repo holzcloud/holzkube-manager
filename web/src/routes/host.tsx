@@ -173,7 +173,12 @@ export function HostView({
         />
       )}
       {waitingFor !== null ? (
-        <p className="rounded-md border border-slate-500/40 bg-slate-500/10 px-3 py-2 text-sm text-slate-700 dark:text-slate-300">
+        // A polite live region without a role: the order box above is the one
+        // status on the page, and a second would make it ambiguous.
+        <p
+          aria-live="polite"
+          className="rounded-md border border-slate-500/40 bg-slate-500/10 px-3 py-2 text-sm text-slate-700 dark:text-slate-300"
+        >
           {waitingFor === 'poweroff'
             ? 'The host is shut down. holzkube-manager answers again once somebody switches the machine on; this page keeps asking every 3 s.'
             : 'Waiting for holzkube-manager to come back. This page keeps asking every 3 s.'}

@@ -680,4 +680,22 @@ describe('/host at 1200 px', () => {
     }
     expect(spillsPastItsButton(group)).toEqual([])
   })
+
+  // 13-UI-REVIEW item 4: the host-level pair stands 16 px from the service
+  // pair, as Phase 13's spec declared. A 16-px spacer between two gap-2s drew
+  // 8 + 16 + 8 = 32. Measured between the two named buttons, not by position
+  // in the group, so a fifth action (13-12) does not move the measurement.
+  it('stands the host-level pair 16 px from the service pair', async () => {
+    await page.viewport(1200, 900)
+    const box = renderAtPhoneWidth(shape({ actions: HELPER_INSTALLED }), 'operator', 1200)
+    const group = within(box).getByRole('group', { name: 'Host actions' })
+    const service = within(group).getByRole('button', { name: 'Restart service' })
+    const host = within(group).getByRole('button', { name: 'Restart host' })
+    const left = service.getBoundingClientRect()
+    const right = host.getBoundingClientRect()
+    // One row, so the gap is a horizontal one.
+    expect(right.top).toBe(left.top)
+    expect(right.left - left.right).toBeCloseTo(16, 0)
+    expect(Math.abs(right.left - left.right - 16)).toBeLessThanOrEqual(0.5)
+  })
 })
