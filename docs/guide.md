@@ -1657,6 +1657,43 @@ created an account and signed in before measuring anything, and after that
 then the rest signed in. The first run of the node detail page found fifteen
 elements past the right edge with nothing to scroll (ledger 153).
 
+**The list of screens is the router's, not a hand list.** The audit opens what
+`web/scripts/layout-routes.json` names, and `src/layoutRoutes.test.ts` holds that
+file to the router: every route the router has appears once, none that is gone
+is still named, and every parameter has an example. That test runs before the
+browser starts, so a new screen nobody added to the list fails the build with
+the route's name, instead of passing because it was never opened. Today that is
+27 routes.
+
+**It also opens what only appears after a tap.** A screen can pass while the
+menu or dialog behind one of its buttons does not, so the audit opens nine such
+states and measures each on its own, at both widths: the navigation drawer,
+What's new, the Power menu and its confirmation, the Reset dialog with its disk
+rows, a select list, the sudo dialog, and `/host` with its actions available and
+with one action's dialog open. Only the opened menu or dialog is measured, not
+the page behind it. The first run with these states found seven controls under
+44px, among them the close button every dialog shares.
+
+**Disabled controls are measured too.** A button that is switched off becomes
+usable without its layout changing, so a small one would reach the phone the
+moment it is switched on. Skipping it would pass exactly the case that matters.
+
+**The audit never carries anything out.** It opens, measures and closes, and
+never confirms a dialog. Every request an opened state sends other than a read
+is printed, and one that is answered as done (a 2xx to an action) fails the run.
+It only ever talks to the daemon it started itself in a temporary directory.
+
+**The desk width is held by how the sizes are written, not by a snapshot.**
+Every phone size is a `max-md:` class, so it does not exist above 768px. That
+was measured once when the phone sizes went in: the size and position of all
+964 controls at 1280px, before and after, and none differed. A checked-in record
+of the desk to compare every build against was rejected: every intended change
+to the desk would have to rewrite it, and a record that gets regenerated without
+being read guards nothing.
+
+**The toast's dismiss button is held by a component test** instead, because
+nothing in the running product raises a toast without first doing something.
+
 ## Metrics
 
 ```
