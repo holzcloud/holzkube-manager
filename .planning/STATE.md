@@ -5,16 +5,16 @@ milestone_name: Host & Telefon
 current_phase: 14
 current_phase_name: telefon-tippziele
 status: executing
-stopped_at: Completed 14-03-PLAN.md
-last_updated: "2026-09-30T10:06:09.769Z"
+stopped_at: Completed 14-04-PLAN.md
+last_updated: "2026-09-30T10:18:49.572Z"
 last_activity: 2026-09-30
 last_activity_desc: Phase 14 execution started
-state_head: fb2a3b3f18f81dd080960355468a544f2dcfb6ab
+state_head: 27ace4b2979329ebabf608a649e575d3ad470382
 progress:
   total_phases: 4
   completed_phases: 2
   total_plans: 33
-  completed_plans: 29
+  completed_plans: 30
   percent: 50
 ---
 
@@ -33,7 +33,7 @@ See: .planning/PROJECT.md (updated 2026-09-28)
 ## Current Position
 
 Phase: 14 (telefon-tippziele) — EXECUTING
-Plan: 4 of 7
+Plan: 5 of 7
 Status: Ready to execute
 Last activity: 2026-09-30 — Phase 14 execution started
 
@@ -133,6 +133,8 @@ Siehe `PROJECT.md`, die `MILESTONE-*.md`-Dateien und für v1.18 den Abschnitt
 - [Phase 14]: 14-03: no new layout-audit exemption; disabled controls are measured, the remaining skips each carry their reason
 - [Phase 14]: 14-03: /host helper-installed variant lives in web/fixtures/host-helper-installed.json, merged over the demo host by both the audit and fixtures.test.ts
 - [Phase 14]: 14-03: first extended audit run red with 7 findings: primitives dialog-close icon-sm, dropdown-menu-item, select-item (14-05); nav links, WhatsNew version button and chips, Reset disk checkboxes (14-06)
+- [Phase 14]: 14-04: the D-08 dump comes out of findSmallTargets' own loop (one CONTROL_SELECTOR, same skips) and records each control's own box; a LAYOUT_DUMP path inside the repository is refused
+- [Phase 14]: 14-04: noise floor 0 of 964 controls without any determinism fix or exclusion; before-dump at $HOME/.cache/holzkube-manager-layout/14-before.jsonl, not committed
 
 ### Blockers/Concerns
 
@@ -147,8 +149,8 @@ Siehe `PROJECT.md`, die `MILESTONE-*.md`-Dateien und für v1.18 den Abschnitt
 
 ## Session Continuity
 
-Last session: 2026-09-30T10:06:09.614Z
-Stopped at: Completed 14-03-PLAN.md
+Last session: 2026-09-30T10:18:49.426Z
+Stopped at: Completed 14-04-PLAN.md
 Resume file: None
 Next: `/gsd-plan-phase 11`
 
@@ -185,3 +187,4 @@ Next: `/gsd-plan-phase 11`
 | Phase 14 P01 | 21min | 3 tasks | 7 files |
 | Phase 14 P02 | 11min | 2 tasks | 5 files |
 | Phase 14 P03 | 20min | 2 tasks | 4 files |
+| Phase 14 P04 | 11min | 2 tasks | 2 files |
