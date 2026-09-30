@@ -35,7 +35,10 @@ import { cn } from '@/lib/utils'
  * phase-1 areas, because the Image Factory work had not been scoped as an
  * operator-facing screen yet. A requirement that names a screen ("der Betreiber
  * stellt zusammen", "die UI warnt") wins over a claim that the navigation was
- * already complete. Adding an area is one entry here plus one route in App.tsx.
+ * already complete. Adding an area is one entry here, one route in
+ * `web/src/routeTree.ts`, and one entry in `web/scripts/layout-routes.json` --
+ * the layout audit's route guard fails the gate on a router route that list
+ * does not name, so a new screen cannot skip the phone check.
  *
  * `phase` is null for an area that exists now. Anything else names the phase
  * that builds it, and the placeholder page says so in plain English (D-09).
@@ -205,6 +208,12 @@ export function Sidebar({ open = false, onNavigate }: { open?: boolean; onNaviga
         // reads as the page having jumped.
         'max-md:fixed max-md:inset-y-0 max-md:left-0 max-md:z-50 max-md:shadow-xl',
         'max-md:transition-transform max-md:duration-200 max-md:ease-out',
+        // Below md the links are 44px tap targets, and thirteen of them plus
+        // the brand block and the footer notices are taller than an 844px
+        // phone. A drawer whose last entries sit below the screen with nothing
+        // to scroll is the vertical form of what the layout audit's CUT OFF
+        // line exists to catch, so the drawer scrolls on its own.
+        'max-md:overflow-y-auto',
         open ? 'max-md:translate-x-0' : 'max-md:-translate-x-full',
         // visibility and not aria-hidden/inert, and the reason is that `open`
         // is false on a desk too: those are React props and cannot be scoped to
@@ -240,6 +249,8 @@ export function Sidebar({ open = false, onNavigate }: { open?: boolean; onNaviga
           onClick={onNavigate}
           className={cn(
             'flex items-center gap-2 rounded-md border-l-2 border-transparent py-1.5 pr-2 pl-1.5 text-sm text-sidebar-foreground/70',
+            // A thumb-sized row on a phone (MOB-01); the desk keeps its 32px.
+            'max-md:min-h-11',
             'hover:bg-sidebar-accent hover:text-sidebar-accent-foreground',
             'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring',
             // The active styles ride on the router's own data-status rather than

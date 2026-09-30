@@ -53,6 +53,9 @@ export function WhatsNew({ className }: { className?: string }) {
         onClick={() => setOpen(true)}
         className={cn(
           'w-full rounded px-1 text-left text-xs text-sidebar-foreground/60',
+          // A 16px line of text is no tap target on a phone: below md the
+          // button grows to 44px and keeps its text centred in it (MOB-01).
+          'max-md:flex max-md:min-h-11 max-md:items-center',
           'hover:text-sidebar-accent-foreground hover:underline underline-offset-2',
           'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring',
           className,
@@ -166,6 +169,8 @@ export function ReleaseNotes({
                 aria-pressed={entry.name === active}
                 className={cn(
                   'rounded-md border px-2.5 py-1 text-sm',
+                  // 44px below md, with the 12px sides Button sm uses there.
+                  'max-md:min-h-11 max-md:px-3',
                   'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring',
                   entry.name === active
                     ? 'border-primary bg-primary/10 font-medium text-primary'
