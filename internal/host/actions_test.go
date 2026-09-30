@@ -3,6 +3,7 @@ package host
 import (
 	"context"
 	"io/fs"
+	"os"
 	"reflect"
 	"syscall"
 	"testing"
@@ -13,16 +14,41 @@ import (
 )
 
 // helperInstalledFS is a root filesystem on which the helper is installed the
-// way deploy/HOST-HELPER.md installs it.
-func helperInstalledFS() fstest.MapFS {
+// way deploy/HOST-HELPER.md installs it: the shipped script's own bytes, both
+// unit files, the path unit enabled, and the check unit.
+func helperInstalledFS(t *testing.T) fstest.MapFS {
+	t.Helper()
 	return fstest.MapFS{
 		"usr/local/sbin/holzkube-manager-host": {
-			Data: []byte("#!/usr/bin/env bash\n"), Mode: 0o755, Sys: &syscall.Stat_t{Uid: 0, Gid: 0},
+			Data: helperScript(t, "../../deploy/holzkube-manager-host.sh"), Mode: 0o755, Sys: &syscall.Stat_t{Uid: 0, Gid: 0},
 		},
 		"etc/systemd/system/holzkube-manager-host.path":                    {Data: []byte("[Path]\n"), Mode: 0o644},
 		"etc/systemd/system/holzkube-manager-host.service":                 {Data: []byte("[Service]\n"), Mode: 0o644},
 		"etc/systemd/system/paths.target.wants/holzkube-manager-host.path": {Data: []byte(hostaction.PathUnitPath), Mode: fs.ModeSymlink | 0o777},
+		"etc/systemd/system/holzkube-manager-update-check.service":         {Data: []byte("[Service]\n"), Mode: 0o644},
 	}
+}
+
+// helperScript reads a helper script's bytes from the repository.
+func helperScript(t *testing.T, path string) []byte {
+	t.Helper()
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return b
+}
+
+// olderHelperFS is helperInstalledFS with the helper as it was before the
+// check (frozen at 8b64a06): installed completely, and too old for the check.
+func olderHelperFS(t *testing.T) fstest.MapFS {
+	t.Helper()
+	m := helperInstalledFS(t)
+	m["usr/local/sbin/holzkube-manager-host"] = &fstest.MapFile{
+		Data: helperScript(t, "hostaction/testdata/holzkube-manager-host-before-check.sh"),
+		Mode: 0o755, Sys: &syscall.Stat_t{Uid: 0, Gid: 0},
+	}
+	return m
 }
 
 // TestReadCarriesActions: one answer says whether the page may offer the host
@@ -30,8 +56,17 @@ func helperInstalledFS() fstest.MapFS {
 func TestReadCarriesActions(t *testing.T) {
 	t.Parallel()
 
-	inContainer := helperInstalledFS()
+	inContainer := helperInstalledFS(t)
 	inContainer[".dockerenv"] = &fstest.MapFile{}
+	noCheckUnit := helperInstalledFS(t)
+	delete(noCheckUnit, "etc/systemd/system/holzkube-manager-update-check.service")
+	// The older helper with a piece missing: missing is the whole answer,
+	// since the install commands install everything, the newer script too.
+	olderNotEnabled := olderHelperFS(t)
+	delete(olderNotEnabled, "etc/systemd/system/paths.target.wants/holzkube-manager-host.path")
+
+	scriptOutdated := hostaction.Missing{Item: hostaction.OutdatedScript, Path: hostaction.HelperScriptPath}
+	checkUnit := hostaction.Missing{Item: hostaction.OutdatedCheckUnit, Path: hostaction.UpdateCheckUnitPath}
 
 	allMissing := []hostaction.Missing{
 		{Item: hostaction.MissingScript, Path: hostaction.HelperScriptPath},
@@ -44,12 +79,20 @@ func TestReadCarriesActions(t *testing.T) {
 		noBox         bool
 		wantAvailable bool
 		wantMissing   []hostaction.Missing
+		wantOutdated  []hostaction.Missing
 		wantContainer bool
 	}{
-		{name: "installed, not in a container", fsys: helperInstalledFS(), wantAvailable: true, wantMissing: []hostaction.Missing{}},
-		{name: "nothing installed", fsys: fstest.MapFS{}, wantMissing: allMissing},
-		{name: "installed, in a container", fsys: inContainer, wantMissing: []hostaction.Missing{}, wantContainer: true},
-		{name: "no Box", fsys: helperInstalledFS(), noBox: true, wantMissing: []hostaction.Missing{}},
+		{name: "installed, not in a container", fsys: helperInstalledFS(t), wantAvailable: true, wantMissing: []hostaction.Missing{}, wantOutdated: []hostaction.Missing{}},
+		{name: "nothing installed", fsys: fstest.MapFS{}, wantMissing: allMissing, wantOutdated: []hostaction.Missing{}},
+		{name: "installed, in a container", fsys: inContainer, wantMissing: []hostaction.Missing{}, wantOutdated: []hostaction.Missing{}, wantContainer: true},
+		{name: "no Box", fsys: helperInstalledFS(t), noBox: true, wantMissing: []hostaction.Missing{}, wantOutdated: []hostaction.Missing{}},
+		// The four older orders work with an older helper: available stays
+		// true, and only the check is said to need more (D-12, D-15).
+		{name: "the helper before the check", fsys: olderHelperFS(t), wantAvailable: true, wantMissing: []hostaction.Missing{}, wantOutdated: []hostaction.Missing{scriptOutdated}},
+		{name: "no check unit", fsys: noCheckUnit, wantAvailable: true, wantMissing: []hostaction.Missing{}, wantOutdated: []hostaction.Missing{checkUnit}},
+		{name: "the helper before the check, not enabled", fsys: olderNotEnabled, wantMissing: []hostaction.Missing{
+			{Item: hostaction.MissingNotEnabled, Path: hostaction.WantsLinkPath},
+		}, wantOutdated: []hostaction.Missing{}},
 	}
 
 	for _, tc := range cases {
@@ -73,6 +116,12 @@ func TestReadCarriesActions(t *testing.T) {
 			if !reflect.DeepEqual(a.Missing, tc.wantMissing) {
 				t.Errorf("actions.missing = %+v, want %+v", a.Missing, tc.wantMissing)
 			}
+			if a.Outdated == nil {
+				t.Errorf("actions.outdated is nil; on the wire that is null, and the page reads a list")
+			}
+			if !reflect.DeepEqual(a.Outdated, tc.wantOutdated) {
+				t.Errorf("actions.outdated = %+v, want %+v", a.Outdated, tc.wantOutdated)
+			}
 			if !reflect.DeepEqual(a.InstallCommands, hostaction.InstallCommands) {
 				t.Errorf("actions.install_commands = %q, want hostaction.InstallCommands %q", a.InstallCommands, hostaction.InstallCommands)
 			}
@@ -88,15 +137,19 @@ func TestReadCarriesActions(t *testing.T) {
 				}
 			}
 
-			// And on the wire: the three keys are there, and missing is a list.
+			// And on the wire: the four keys are there, and missing and
+			// outdated are lists.
 			wire, _ := marshalView(t, v)["actions"].(map[string]any)
-			for _, key := range []string{"available", "missing", "install_commands"} {
+			for _, key := range []string{"available", "missing", "outdated", "install_commands"} {
 				if _, ok := wire[key]; !ok {
 					t.Errorf("actions.%s is not in the answer: %v", key, wire)
 				}
 			}
 			if _, ok := wire["missing"].([]any); !ok {
 				t.Errorf("actions.missing on the wire = %#v, want a list", wire["missing"])
+			}
+			if _, ok := wire["outdated"].([]any); !ok {
+				t.Errorf("actions.outdated on the wire = %#v, want a list", wire["outdated"])
 			}
 		})
 	}
@@ -114,5 +167,21 @@ func TestInstallCommandsAreNotShared(t *testing.T) {
 	v.Actions.InstallCommands[0] = "changed"
 	if hostaction.InstallCommands[0] == "changed" {
 		t.Error("the answer's install commands are hostaction.InstallCommands itself, not a copy")
+	}
+}
+
+// TestUnsupportedPlatformOutdated: a platform without systemd asks nothing of
+// the helper beyond what Missing says, and outdated is an empty list, never
+// null -- even over an older helper's files.
+func TestUnsupportedPlatformOutdated(t *testing.T) {
+	t.Parallel()
+
+	fsys := olderHelperFS(t)
+	v := New(Config{
+		FS: fsys, Sys: newUnsupportedSys(), Now: func() time.Time { return fixedNow },
+		Actions: hostaction.NewBox(hostaction.Config{FS: fsys, DataDir: t.TempDir()}),
+	}).Read(context.Background())
+	if v.Actions.Outdated == nil || len(v.Actions.Outdated) != 0 {
+		t.Errorf("actions.outdated on an unsupported platform = %#v, want an empty list", v.Actions.Outdated)
 	}
 }

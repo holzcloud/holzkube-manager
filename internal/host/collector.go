@@ -195,6 +195,7 @@ func (c *Collector) readUnsupported(v View, now time.Time) View {
 	v.Actions = Actions{
 		Result:          Hidden[hostaction.Result](r),
 		Missing:         []hostaction.Missing{},
+		Outdated:        []hostaction.Missing{},
 		InstallCommands: slices.Clone(hostaction.InstallCommands),
 	}
 	if c.cfg.Actions != nil {
@@ -217,22 +218,31 @@ const (
 // error names the rule a file broke, never its bytes, so it can be shown.
 //
 // Available is decided here and by the same two questions the routes ask
-// (InContainer, the Box's Missing), so the page never offers a button the
-// server then refuses.
+// (InContainer, the Box's Missing), and Outdated by the Box's Outdated, which
+// the routes ask for the check, so the page never offers a button the server
+// then refuses.
 func (c *Collector) readActions(container bool) Actions {
 	box := c.cfg.Actions
 	if box == nil {
 		return Actions{
 			Result:          Hidden[hostaction.Result](Reason{Code: CodeNoResult, Message: noActionsMessage}),
 			Missing:         []hostaction.Missing{},
+			Outdated:        []hostaction.Missing{},
 			InstallCommands: slices.Clone(hostaction.InstallCommands),
 		}
 	}
 	missing := box.Missing()
+	// Outdated only once nothing is missing: the script is read only when
+	// Detect found it root's, and the install commands install everything.
+	outdated := []hostaction.Missing{}
+	if len(missing) == 0 {
+		outdated = box.Outdated()
+	}
 	a := Actions{
 		Order:           box.Order(),
 		Available:       !container && len(missing) == 0,
 		Missing:         missing,
+		Outdated:        outdated,
 		InstallCommands: slices.Clone(hostaction.InstallCommands),
 	}
 	result, err := box.Result()
