@@ -3,7 +3,7 @@ status: diagnosed
 phase: 13-host-aktionen
 source: 13-01-SUMMARY.md, 13-02-SUMMARY.md, 13-03-SUMMARY.md, 13-04-SUMMARY.md, 13-05-SUMMARY.md, 13-06-SUMMARY.md, 13-07-SUMMARY.md, 13-08-SUMMARY.md, 13-09-SUMMARY.md
 started: 2026-09-29T19:23:00Z
-updated: 2026-09-29T19:40:00Z
+updated: 2026-09-30T00:00:00Z
 ---
 
 ## Where this ran
@@ -119,8 +119,10 @@ blocked: 2
 ## Gaps
 
 - gap_id: G-13-2
+  resolved_by: 13-10-PLAN.md
+  resolved_at: 2026-09-30
   truth: "Every sentence of the helper notice is true for the machine it is shown on"
-  status: failed
+  status: resolved
   reason: "User reported: On a machine with nothing installed the third item reads 'holzkube-manager-host.path is installed but not enabled' -- the path unit is listed as missing one line above."
   severity: minor
   test: 2
@@ -137,8 +139,10 @@ blocked: 2
   debug_session: ""
 
 - gap_id: G-13-3
+  resolved_by: 13-11-PLAN.md
+  resolved_at: 2026-09-30
   truth: "No host action label runs past its button at 390 px"
-  status: failed
+  status: resolved
   reason: "User reported: 'Check for updates and install' overflows its button at 390 px: scrollWidth 180 against clientWidth 173; the icon touches the left border."
   severity: cosmetic
   test: 3
