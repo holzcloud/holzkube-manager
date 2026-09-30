@@ -107,7 +107,8 @@ missing and the commands that install it.
 
 ![The machine holzkube-manager runs on](docs/screenshots/host.png)
 
-**On a phone.** Every screen, one-handed.
+**On a phone.** Every screen, one-handed, and every menu and dialog a tap
+opens: the build fails when a control on any of them is under 44px.
 
 ![Three screens on a phone](docs/screenshots/phone.png)
 
