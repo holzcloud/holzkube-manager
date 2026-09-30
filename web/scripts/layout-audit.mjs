@@ -20,6 +20,21 @@
  * how an operator lost the "New account" form and the button that changes a
  * password.
  *
+ * WHAT IT MEASURES: every route in web/scripts/layout-routes.json -- the
+ * router's own leaves, held equal to it by src/layoutRoutes.test.ts, which runs
+ * first -- and then the states that only appear after a tap (OPENERS): a
+ * dialog, a menu, a list. Those are an explicit list because the alternative,
+ * clicking every button, would press the destructive actions and would not
+ * open the same thing twice. An opener is measured scoped to what opened,
+ * after its animation, and must close again; one that cannot be opened, holds
+ * no control, or does not close is a failure, never a skip.
+ *
+ * WHY IT WATCHES ITS OWN REQUESTS: it runs on the machine production runs on.
+ * It only ever talks to the daemon it started in a temporary directory, and an
+ * opener that submits a form is stopped by the server's sudo gate -- but that
+ * is shown, not assumed: every non-GET request an opener sends is printed, and
+ * one that carried an action out (EXECUTED) fails the run.
+ *
  * WHY IT IS IN THE CHAIN AND NOT OPT-IN: ledger entries 5 and 64 record a drift
  * watcher that existed, was never scheduled, and therefore never watched
  * anything. A guard nobody runs is a comment.
@@ -94,7 +109,9 @@ const ROUTE_ENTRIES = JSON.parse(
 const WHENS = ['before-account', 'before-session']
 for (const e of ROUTE_ENTRIES) {
   if (e.when !== undefined && !WHENS.includes(e.when)) {
-    throw new Error(`layout-routes.json: ${e.route} has when "${e.when}", which this audit does not read`)
+    throw new Error(
+      `layout-routes.json: ${e.route} has when "${e.when}", which this audit does not read`,
+    )
   }
 }
 const entryFor = (when) => {
@@ -105,6 +122,66 @@ const entryFor = (when) => {
 const BEFORE_ACCOUNT = entryFor('before-account')
 const BEFORE_SESSION = entryFor('before-session')
 const SIGNED_IN = ROUTE_ENTRIES.filter((e) => e.when === undefined)
+
+/**
+ * What appears after a tap: the states a route pass never sees.
+ *
+ * An explicit list, not "click every button": clicking everything would press
+ * the destructive actions this product is full of, and what opens would depend
+ * on the order things were clicked in. Each opener names its route, the widths
+ * it is measured at, the steps that open it (each with the name a missing
+ * control is reported by), the selector of what opened, and optionally a close
+ * step (Escape when absent) and a per-opener override of GET answers
+ * (`fixture`, keyed by API path like web/fixtures/demo.json).
+ *
+ * Opened states are measured scoped to what opened, after its animation has
+ * finished, and must close again. The runner is further down (runOpener).
+ */
+const OPENERS = [
+  /**
+   * The sudo dialog, reached the real way: the New account form on /settings.
+   * POST /api/v1/users is admin-only, Destructive and has no cluster scope, so
+   * the audit's own daemon answers `428 sudo.required` in its sudo middleware
+   * before the user.create handler runs -- and a login never opens the sudo
+   * window, only POST /api/v1/auth/sudo does.
+   *
+   * How "the audit never presses a confirm button" is read here: submitting a
+   * form that the server answers 428 before its handler is how the prompt is
+   * reached at all. The audit never presses the confirm button inside a
+   * confirmation dialog, and never the sudo dialog's -- it never fills,
+   * types into or submits the dialog's password field, because it knows the
+   * account's password and submitting it would open the sudo window for the
+   * rest of this context. The request monitor is the proof that nothing ran:
+   * a 2xx to POST /api/v1/users would be an EXECUTED line and a red run.
+   *
+   * The password typed into the form is a throwaway and not the audit
+   * account's; the account it names is never created.
+   */
+  {
+    name: 'Sudo dialog',
+    route: '/settings',
+    widths: [390, 1280],
+    open: [
+      {
+        name: '#new-username',
+        locate: (p) => p.locator('#new-username'),
+        fill: 'layout-audit-probe',
+      },
+      {
+        name: 'the New account password field',
+        // /settings carries a second #new-password (the change-password form),
+        // so the field is the one in the form that holds #new-username.
+        locate: (p) => p.locator('form:has(#new-username) #new-password'),
+        fill: 'a-throwaway-passphrase-never-created-2',
+      },
+      {
+        name: 'Create account',
+        locate: (p) => p.getByRole('button', { name: 'Create account', exact: true }),
+      },
+    ],
+    expect: '[role="dialog"]:has-text("Confirm your password")',
+  },
+]
 
 /**
  * The daemon this measures, and why it is built here rather than found here.
@@ -179,9 +256,9 @@ async function waitForDaemon(base, deadlineMs = 30_000) {
  * than class names -- the distinction that made the difference here, because
  * the page never scrolled sideways and nothing about the markup said so.
  */
-const findClipped = (vw) => {
+const findClipped = (root, vw) => {
   const out = []
-  for (const el of document.querySelectorAll('body *')) {
+  for (const el of root.querySelectorAll('*')) {
     const box = el.getBoundingClientRect()
     if (box.width < 1 && box.height < 1) continue
     if (box.right <= vw + 1) continue
@@ -237,9 +314,11 @@ const findClipped = (vw) => {
  * thing this guard already refuses for tables, and a full-screen pane doing it
  * is worse: there is no edge to tell somebody there is more.
  */
-const findSidewaysPanes = () => {
+const findSidewaysPanes = (root) => {
   const out = []
-  for (const el of document.querySelectorAll('body *')) {
+  // The root itself too: an opened dialog IS a fixed pane, and scoping the pass
+  // to it must not skip the one element it is about.
+  for (const el of [root, ...root.querySelectorAll('*')]) {
     const style = getComputedStyle(el)
     if (style.position !== 'fixed' && style.position !== 'absolute') continue
     if (el.scrollWidth <= el.clientWidth + 1) continue
@@ -275,7 +354,7 @@ const findSidewaysPanes = () => {
   return out
 }
 
-const findSmallTargets = (min) => {
+const findSmallTargets = (root, min) => {
   const SELECTOR = [
     'button',
     'a[href]',
@@ -293,7 +372,11 @@ const findSmallTargets = (min) => {
   ].join(',')
 
   const out = []
-  for (const el of document.querySelectorAll(SELECTOR)) {
+  // How many controls passed the visibility and size skips, from the same loop and
+  // the same SELECTOR, so a menu of `role="menuitem"` rows or a list of options counts
+  // what it holds. A narrower count selector would call a full menu empty.
+  let measured = 0
+  for (const el of root.querySelectorAll(SELECTOR)) {
     const style = getComputedStyle(el)
     if (style.visibility === 'hidden' || style.display === 'none') continue
     if (el.getAttribute('aria-hidden') === 'true') continue
@@ -309,6 +392,10 @@ const findSmallTargets = (min) => {
     // semantics, and anything else with no box. Its visible partner is the
     // button beside it, which this pass measures on its own.
     if (box.width < 1 || box.height < 1) continue
+    // Counted here: it passed the visibility and size skips, so it is a control
+    // on the screen. The exemption for a link in running text below is a
+    // verdict about its size, not a sign that nothing is there.
+    measured += 1
     // A link in running text. The test is the sentence around it: a parent
     // that carries more text than the link does is the sentence.
     if (el.tagName === 'A' && style.display.startsWith('inline')) {
@@ -330,7 +417,7 @@ const findSmallTargets = (min) => {
       cls: (el.getAttribute('class') ?? '').slice(0, 50),
     })
   }
-  return out
+  return { small: out, measured }
 }
 
 /**
@@ -349,9 +436,9 @@ const findSmallTargets = (min) => {
  *
  * Only at phone width: a wide table on a desk is what tables are for.
  */
-const findWideTables = (vw) => {
+const findWideTables = (root, vw) => {
   const out = []
-  for (const el of document.querySelectorAll('table')) {
+  for (const el of root.querySelectorAll('table')) {
     const style = getComputedStyle(el)
     if (style.visibility === 'hidden' || style.display === 'none') continue
     const box = el.getBoundingClientRect()
@@ -392,18 +479,6 @@ const findWideTables = (vw) => {
  */
 const countItems = () =>
   document.querySelectorAll('tbody tr, [data-row], [data-slot="card"]').length
-
-/** How many controls the touch pass looked at, so a thin page is visible. */
-const countTargets = () =>
-  [
-    ...document.querySelectorAll('button,a[href],summary,input,select,textarea,[role="button"]'),
-  ].filter((el) => {
-    const style = getComputedStyle(el)
-    const box = el.getBoundingClientRect()
-    return (
-      style.visibility !== 'hidden' && style.display !== 'none' && box.width >= 1 && box.height >= 1
-    )
-  }).length
 
 /**
  * A picture of the phone, when asked for. Never part of a verdict: the guard
@@ -529,6 +604,7 @@ let failures = 0
 // What was actually measured, so the green line counts routes opened rather
 // than routes listed.
 const measuredRoutes = new Set()
+const measuredOpeners = new Set()
 try {
   await waitForDaemon(base)
 
@@ -566,71 +642,102 @@ try {
     return context
   }
 
-  /** Measures one route at one width, and returns how many ways it failed. */
-  async function measure(page, route, width) {
-    measuredRoutes.add(route)
-    await page.goto(base + route)
-    // The shell renders, then the queries land and the page grows. Measuring
-    // before that is measuring an empty screen, which passes everything --
-    // and a fixed wait is the flake one builds oneself: 700ms was enough on
-    // a CI runner and not on the operator's Pi, where /images measured 15
-    // controls instead of 32 because the Image Factory catalog had not
-    // arrived. Network idle first, then a short settle for the render the
-    // last response triggers.
-    await page.waitForLoadState('networkidle', { timeout: 20_000 }).catch(() => {})
-    await page.waitForTimeout(400)
-
-    let found = 0
-    const clipped = await page.evaluate(findClipped, width)
-    let counted = ''
+  /**
+   * Runs the passes inside one scope: the page's <body> for a route, the element
+   * that opened for an opener. A real scope, handed to the in-page functions as
+   * their root -- not a document-wide pass filtered afterwards, because Radix
+   * leaves the page in the DOM behind a modal and a document-wide pass would
+   * measure the route a second time and report its findings twice.
+   */
+  async function scan(scope, width) {
+    const result = { clipped: await scope.evaluate(findClipped, width) }
     if (width === TOUCH_WIDTH) {
-      const wide = await page.evaluate(findWideTables, width)
-      if (wide.length > 0) {
-        found += 1
-        console.error(`  SIDEWAYS  ${String(width).padStart(4)}px  ${route}  (${wide.length})`)
-        for (const t of wide) {
-          console.error(
-            `              ${t.width}px wide, ${t.rows} rows, in "${t.where}" -- first row: "${t.first}"`,
-          )
-        }
+      result.wide = await scope.evaluate(findWideTables, width)
+      result.sideways = await scope.evaluate(findSidewaysPanes)
+      const touch = await scope.evaluate(findSmallTargets, TOUCH_MIN)
+      result.small = touch.small
+      result.measured = touch.measured
+    }
+    return result
+  }
+
+  /** Prints what a scan found under `label`, and returns how many ways it failed. */
+  function report(label, width, result) {
+    let found = 0
+    const w = `${String(width).padStart(4)}px`
+    const { clipped, wide = [], sideways = [], small = [] } = result
+    if (wide.length > 0) {
+      found += 1
+      console.error(`  SIDEWAYS  ${w}  ${label}  (${wide.length})`)
+      for (const t of wide) {
+        console.error(
+          `              ${t.width}px wide, ${t.rows} rows, in "${t.where}" -- first row: "${t.first}"`,
+        )
       }
-      const sideways = await page.evaluate(findSidewaysPanes)
-      if (sideways.length > 0) {
-        found += 1
-        console.error(`  OFFSCREEN ${String(width).padStart(4)}px  ${route}  (${sideways.length})`)
-        for (const p of sideways) {
+    }
+    if (sideways.length > 0) {
+      found += 1
+      console.error(`  OFFSCREEN ${w}  ${label}  (${sideways.length})`)
+      for (const p of sideways) {
+        console.error(
+          `              <${p.tag}> ${p.scroll}px of content in ${p.client}px .${p.cls}`,
+        )
+        for (const c of p.culprits) {
           console.error(
-            `              <${p.tag}> ${p.scroll}px of content in ${p.client}px .${p.cls}`,
+            `                past the edge: <${c.tag}> right=${c.right} "${c.text}" .${c.cls}`,
           )
-          for (const c of p.culprits) {
-            console.error(
-              `                past the edge: <${c.tag}> right=${c.right} "${c.text}" .${c.cls}`,
-            )
-          }
-        }
-      }
-      const small = await page.evaluate(findSmallTargets, TOUCH_MIN)
-      counted = `  (${await page.evaluate(countTargets)} controls, ${await page.evaluate(countItems)} items)`
-      if (small.length > 0) {
-        found += 1
-        console.error(`  SMALL     ${String(width).padStart(4)}px  ${route}  (${small.length})`)
-        for (const c of small) {
-          console.error(`              <${c.tag}>${c.via} ${c.w}x${c.h} "${c.label}" .${c.cls}`)
         }
       }
     }
-    // After both passes and before the verdict, so resizing for a picture
-    // cannot change what was measured, and so a route WITH findings is
-    // photographed too -- that is the one somebody wants to look at.
-    await shoot(page, route, width)
-
+    if (small.length > 0) {
+      found += 1
+      console.error(`  SMALL     ${w}  ${label}  (${small.length})`)
+      for (const c of small) {
+        console.error(`              <${c.tag}>${c.via} ${c.w}x${c.h} "${c.label}" .${c.cls}`)
+      }
+    }
     if (clipped.length > 0) {
       found += 1
-      console.error(`  CLIPPED   ${String(width).padStart(4)}px  ${route}  (${clipped.length})`)
+      console.error(`  CLIPPED   ${w}  ${label}  (${clipped.length})`)
       for (const c of clipped.slice(0, 5)) {
         console.error(`              <${c.tag}> right=${c.right} "${c.text}" .${c.cls}`)
       }
     }
+    return found
+  }
+
+  /**
+   * A page as measure() leaves it: loaded, its queries landed, settled.
+   *
+   * The shell renders, then the queries land and the page grows. Measuring
+   * before that is measuring an empty screen, which passes everything -- and a
+   * fixed wait is the flake one builds oneself: 700ms was enough on a CI runner
+   * and not on the operator's Pi, where /images measured 15 controls instead of
+   * 32 because the Image Factory catalog had not arrived. Network idle first,
+   * then a short settle for the render the last response triggers.
+   */
+  async function settle(page, route) {
+    await page.goto(base + route)
+    await page.waitForLoadState('networkidle', { timeout: 20_000 }).catch(() => {})
+    await page.waitForTimeout(400)
+  }
+
+  /** Measures one route at one width, and returns how many ways it failed. */
+  async function measure(page, route, width) {
+    measuredRoutes.add(route)
+    await settle(page, route)
+
+    const result = await scan(page.locator('body'), width)
+    const counted =
+      width === TOUCH_WIDTH
+        ? `  (${result.measured} controls, ${await page.evaluate(countItems)} items)`
+        : ''
+    // After the passes and before the verdict, so resizing for a picture
+    // cannot change what was measured, and so a route WITH findings is
+    // photographed too -- that is the one somebody wants to look at.
+    await shoot(page, route, width)
+
+    const found = report(route, width, result)
     if (found === 0) {
       // The count is printed because this guard measures what the page
       // happens to show. /images lists one control per Image Factory
@@ -639,6 +746,155 @@ try {
       console.log(`  ok        ${String(width).padStart(4)}px  ${route}${counted}`)
     }
     return found
+  }
+
+  /**
+   * Prints every non-GET API request the page answers while an opener runs,
+   * and fails the run on one that carried an action out.
+   *
+   * Attached for the span of one opener only: setup and login are POSTs that
+   * answer 2xx by design, and they happen outside any opener. The allowlist
+   * below is the second fence for the same reason -- /api/v1/auth/ and
+   * /api/v1/setup never carry out an action on anything, and a path ending in
+   * /confirm only issues a token that a second, sudo-gated request would spend.
+   *
+   * Why this exists at all: the audit runs on the machine production runs on.
+   * It talks only to the daemon it started, in a temporary directory, and the
+   * server's sudo gate stands between a submitted form and its handler. This
+   * is the proof that the gate held, rather than a hope that it did.
+   */
+  function watchRequests(page) {
+    let executed = 0
+    const onResponse = (response) => {
+      const request = response.request()
+      const method = request.method()
+      if (method === 'GET') return
+      const path = new URL(response.url()).pathname
+      if (!path.startsWith('/api/v1/')) return
+      const status = response.status()
+      console.log(`  REQUEST   ${method} ${path} -> ${status}`)
+      const allowed =
+        path.startsWith('/api/v1/auth/') || path === '/api/v1/setup' || path.endsWith('/confirm')
+      if (status >= 200 && status < 300 && !allowed) {
+        executed += 1
+        console.error(
+          `  EXECUTED  ${method} ${path} -> ${status} -- the audit carried out an action; it must only open and measure`,
+        )
+      }
+    }
+    page.on('response', onResponse)
+    return () => {
+      page.off('response', onResponse)
+      return executed
+    }
+  }
+
+  /** Waits until every finite animation below `el` has finished (zoom-in-95 reads 44px as ~42). */
+  const animationsDone = (el) =>
+    Promise.all(
+      el
+        .getAnimations({ subtree: true })
+        .filter((a) => a.effect?.getTiming().iterations !== Number.POSITIVE_INFINITY)
+        .map((a) => a.finished.catch(() => {})),
+    ).then(() => true)
+
+  /**
+   * Opens one state on a fresh page, measures it scoped, closes it, and
+   * returns how many ways it failed.
+   *
+   * A fresh page per opener, loaded and settled as measure() does, so no state
+   * leaks from the one before: an open drawer, a Problem left by a refused
+   * request. Every way an opener can fail to be measured is a failure of its
+   * own, never a skip (D-04).
+   */
+  async function runOpener(context, opener, width) {
+    const label = `${opener.route} · ${opener.name}`
+    const page = await context.newPage()
+    if (opener.fixture !== undefined) {
+      // A page route beats the context's, so this overrides only what it names.
+      await page.route('**/api/v1/**', (route) => {
+        const path = new URL(route.request().url()).pathname
+        const body = opener.fixture[path]
+        if (route.request().method() !== 'GET' || body === undefined) return route.fallback()
+        return route.fulfill({
+          status: 200,
+          contentType: 'application/json; charset=utf-8',
+          body: JSON.stringify(body),
+        })
+      })
+    }
+    const stopWatching = watchRequests(page)
+    let outcome
+    let executed = 0
+    try {
+      outcome = await openMeasureClose(page, opener, width, label)
+    } finally {
+      executed = stopWatching()
+      await page.close()
+    }
+    const found = outcome.found + executed
+    if (found === 0) {
+      console.log(
+        `  ok        ${String(width).padStart(4)}px  ${label}  (${outcome.measured} controls)`,
+      )
+    }
+    return found
+  }
+
+  async function openMeasureClose(page, opener, width, label) {
+    const w = `${String(width).padStart(4)}px`
+    await settle(page, opener.route)
+    for (const step of opener.open) {
+      const target = step.locate(page)
+      if ((await target.count()) === 0) {
+        console.error(`  OPENER    ${w}  ${label} -- no control named "${step.name}" to open it`)
+        return { found: 1 }
+      }
+      try {
+        if (step.fill !== undefined) await target.fill(step.fill, { timeout: 5_000 })
+        else await target.click({ timeout: 5_000 })
+      } catch (error) {
+        const why = String(error?.message ?? error).split('\n')[0]
+        console.error(`  OPENER    ${w}  ${label} -- could not use "${step.name}": ${why}`)
+        return { found: 1 }
+      }
+    }
+
+    const opened = page.locator(opener.expect)
+    try {
+      await opened.waitFor({ state: 'visible', timeout: 5_000 })
+    } catch {
+      console.error(
+        `  OPENER    ${w}  ${label} -- clicked, but ${opener.expect} did not appear within 5 s`,
+      )
+      return { found: 1 }
+    }
+    // Measured once it has stopped moving: getBoundingClientRect includes the
+    // transform, and a 44px button reads about 42px during zoom-in-95.
+    await opened.evaluate(animationsDone)
+    measuredOpeners.add(opener.name)
+
+    const result = await scan(opened, width)
+    let found = report(label, width, result)
+    // Zero is red at both widths: a dialog with no control in it cannot be
+    // closed by a thumb, and "measured nothing" printed as a count nobody reads
+    // is the empty-output-is-green shape. The desk pass measures reach only, so
+    // it counts with the same loop without reporting sizes.
+    const measured =
+      result.measured ?? (await opened.evaluate(findSmallTargets, TOUCH_MIN)).measured
+    if (measured === 0) {
+      found += 1
+      console.error(`  EMPTY     ${w}  ${label} -- opened, but not one control in it was measured`)
+    }
+
+    await (opener.close ?? ((p) => p.keyboard.press('Escape')))(page)
+    try {
+      await opened.waitFor({ state: 'hidden', timeout: 5_000 })
+    } catch {
+      found += 1
+      console.error(`  OPENER    ${w}  ${label} -- still open after Escape`)
+    }
+    return { found, measured }
   }
 
   // THE TWO SCREENS BEFORE A SESSION, and they were missing for as long as this
@@ -684,6 +940,11 @@ try {
     for (const entry of SIGNED_IN) {
       failures += await measure(page, entry.path, width)
     }
+    // After the routes, in the same signed-in context, each on a page of its own.
+    for (const opener of OPENERS) {
+      if (!opener.widths.includes(width)) continue
+      failures += await runOpener(context, opener, width)
+    }
     await context.close()
   }
 } finally {
@@ -703,7 +964,7 @@ try {
 
 if (failures > 0) {
   console.error(
-    `\n${failures} route/width combination(s) failed.\n\n` +
+    `\n${failures} finding(s) across routes, openers and widths.\n\n` +
       'An element past the right edge with nothing to scroll is not narrow, it is gone: ' +
       'no swipe brings it back and no scrollbar says it is there. That is how the ' +
       '"New account" form and the change-password button left /settings on a phone ' +
@@ -718,12 +979,14 @@ if (failures > 0) {
       'swiping the row identity off the left edge. The operator photographed ' +
       'exactly that on 2026-09-19 -- a Scale field and a Roll pods button with no ' +
       'way to see which deployment they belonged to. Below md a row becomes a ' +
-      'card, or its secondary columns fold away; it does not become a swipe.',
+      'card, or its secondary columns fold away; it does not become a swipe.\n\n' +
+      'An opener that finds nothing is a failure, not a skip: a dialog the audit cannot open ' +
+      'is a dialog it has not measured.',
   )
   process.exit(1)
 }
 console.log(
   `\nNothing out of reach at ${WIDTHS.join('px and ')}px, ` +
-    `and every control is at least ${TOUCH_MIN}px at ${TOUCH_WIDTH}px, ` +
-    `on ${measuredRoutes.size} routes.`,
+    `every control is at least ${TOUCH_MIN}px at ${TOUCH_WIDTH}px, ` +
+    `on ${measuredRoutes.size} routes and in ${measuredOpeners.size} opened states.`,
 )
