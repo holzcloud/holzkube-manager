@@ -1,0 +1,13 @@
+{
+  "order": null,
+  "result": {
+    "readable": false,
+    "reason": {
+      "code": "host-action.no-result",
+      "message": "The holzkube-manager-host helper has not recorded an order on this machine."
+    }
+  },
+  "available": true,
+  "missing": [],
+  "install_commands": []
+}

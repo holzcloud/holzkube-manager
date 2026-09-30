@@ -23,6 +23,7 @@ import {
   nodeDetailSchema,
   noticesSchema,
   powerSchema,
+  resetPreviewSchema,
   schematicSchema,
   sweepPlanSchema,
   usersSchema,
@@ -30,6 +31,7 @@ import {
   workloadsSchema,
 } from '@/api'
 import demo from '../fixtures/demo.json'
+import helperInstalled from '../fixtures/host-helper-installed.json'
 
 /**
  * The layout guard's fixtures, parsed with the product's own schemas.
@@ -80,6 +82,7 @@ describe('the layout guard’s fixtures', () => {
     ['/api/v1/clusters/c-homelab/kubernetes/apps/media/Deployment/jellyfin/power', powerSchema],
     ['/api/v1/host', hostSchema],
     ['/api/v1/host/history', historySchema],
+    ['/api/v1/machines/m-cp-1/reset-preview', resetPreviewSchema],
   ])('%s is something the product would accept', (path, schema) => {
     const parsed = schema.safeParse(fixtures[path])
     // The error is printed in full rather than as "expected true": a fixture
@@ -160,6 +163,40 @@ describe('the layout guard’s fixtures', () => {
     expect(host.actions.missing.map((m) => m.item)).toEqual(['script', 'path-unit'])
     expect(host.actions.install_commands.length).toBeGreaterThanOrEqual(1)
     expect(host.actions.order).toBeNull()
+  })
+
+  it('has a helper-installed /host for the audit, the same host with only its actions replaced', () => {
+    // The layout audit serves this to its two /host openers: the action group
+    // with its buttons enabled, and the dialog with its typed-hostname field.
+    // It is a file of its own, parsed here, because a variant written only into
+    // layout-audit.mjs would be the one fixture no schema checks (ledger 149):
+    // it could drift into a shape the page rejects, and the audit would then
+    // measure the helper notice again and call the buttons measured.
+    const host = hostSchema.parse({
+      ...(fixtures['/api/v1/host'] as object),
+      actions: helperInstalled,
+    })
+
+    expect(host.actions.available).toBe(true)
+    expect(host.actions.missing).toEqual([])
+    expect(host.actions.install_commands).toEqual([])
+    expect(host.actions.order).toBeNull()
+  })
+
+  it("previews m-cp-1's reset as the server builds it, with the disk rows showing", () => {
+    // The Reset dialog renders its disk checkboxes only when the chosen mode
+    // needs disks. Without this answer the audit's request reaches its own
+    // daemon, which has no inventory, and the dialog would be measured as an
+    // error -- without the rows whose size is the point.
+    const preview = resetPreviewSchema.parse(fixtures['/api/v1/machines/m-cp-1/reset-preview'])
+    const machine = machineSchema.parse(fixtures['/api/v1/machines/m-cp-1'])
+
+    const chosen = preview.modes.find((m) => m.mode === preview.defaults.mode)
+    expect(chosen?.needs_disks).toBe(true)
+    expect(preview.disks.length).toBeGreaterThanOrEqual(2)
+    expect(preview.machine).toBe('m-cp-1')
+    expect(preview.hostname).toBe(machine.hostname.value)
+    expect(preview.confirm_phrase).toBe(machine.hostname.value)
   })
 
   it("draws the host's history from what the fixture's hardening leaves readable, with a gap", () => {
