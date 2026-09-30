@@ -3108,6 +3108,61 @@
       }
     ]
   },
+  "/api/v1/machines/m-cp-1/reset-preview": {
+    "machine": "m-cp-1",
+    "hostname": "srv-node-01.homelab.example",
+    "confirm_phrase": "srv-node-01.homelab.example",
+    "disks": [
+      {
+        "device": "/dev/nvme0n1",
+        "size": 1000204886016,
+        "pretty_size": "1.0 TB",
+        "model": "Samsung SSD 990 EVO Plus 1TB",
+        "serial": "S7U8NJ0XA12345B",
+        "transport": "nvme",
+        "rotational": false,
+        "readonly": false,
+        "cdrom": false
+      },
+      {
+        "device": "/dev/mmcblk0",
+        "size": 31914983424,
+        "pretty_size": "32 GB",
+        "model": "SD32G",
+        "serial": "0x3f8a2c91",
+        "transport": "mmc",
+        "rotational": false,
+        "readonly": false,
+        "cdrom": false
+      }
+    ],
+    "modes": [
+      {
+        "mode": "user-disks",
+        "label": "User disks only",
+        "description": "Wipes the block devices you name. Talos itself stays installed.",
+        "needs_disks": true
+      },
+      {
+        "mode": "system-disk",
+        "label": "System disk",
+        "description": "Wipes the disk Talos is installed on. The machine comes back in maintenance mode and can be provisioned again.",
+        "needs_disks": false
+      },
+      {
+        "mode": "all",
+        "label": "Everything",
+        "description": "Wipes every disk on the machine. Nothing on it survives.",
+        "needs_disks": false
+      }
+    ],
+    "defaults": {
+      "mode": "user-disks",
+      "graceful": true,
+      "reboot": true
+    },
+    "talos_default_warning": "talosctl reset defaults to wiping every disk and leaving the machine powered off. holzkube-manager does not pre-select either: choose the scope and both flags."
+  },
   "/api/v1/machines/m-cp-1/power": {
     "state": "running",
     "disabled": false,
