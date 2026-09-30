@@ -183,6 +183,21 @@ describe('the layout guard’s fixtures', () => {
     expect(host.actions.order).toBeNull()
   })
 
+  it('carries `outdated` in both /host fixtures as written, not by a schema default', () => {
+    // hostSchema turns a missing `outdated` into [] -- the tolerance an answer
+    // from a daemon before 13-14 needs. The same tolerance would hide a fixture
+    // that lost the key (13-09 W2 was such a default hiding a missing key), so
+    // the raw JSON is read here, before any schema touches it.
+    const raw = (v: unknown) => (v as { actions: Record<string, unknown> }).actions
+    const demoActions = raw(fixtures['/api/v1/host'])
+    const installedActions = helperInstalled as Record<string, unknown>
+
+    expect(Object.hasOwn(demoActions, 'outdated')).toBe(true)
+    expect(Array.isArray(demoActions.outdated)).toBe(true)
+    expect(Object.hasOwn(installedActions, 'outdated')).toBe(true)
+    expect(Array.isArray(installedActions.outdated)).toBe(true)
+  })
+
   it("previews m-cp-1's reset as the server builds it, with the disk rows showing", () => {
     // The Reset dialog renders its disk checkboxes only when the chosen mode
     // needs disks. Without this answer the audit's request reaches its own

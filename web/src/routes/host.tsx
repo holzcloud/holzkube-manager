@@ -17,6 +17,7 @@ import {
   followedOrder,
   HostActions,
   HostHelperNotice,
+  HostHelperOutdatedNotice,
   HostOrderStatus,
   orderPhase,
   outcomeSentence,
@@ -225,8 +226,18 @@ export function HostView({
           </p>
         </div>
       )}
+      {/* The helper notice, or in its place the older-helper one: an
+          installed helper too old for the check. Never both -- the server
+          sends outdated empty while anything is missing, and the page holds
+          to that on its own, because the install commands install everything. */}
       {!host.container && host.actions.missing.length > 0 && (
         <HostHelperNotice missing={host.actions.missing} commands={host.actions.install_commands} />
+      )}
+      {!host.container && host.actions.missing.length === 0 && host.actions.outdated.length > 0 && (
+        <HostHelperOutdatedNotice
+          outdated={host.actions.outdated}
+          commands={host.actions.install_commands}
+        />
       )}
 
       <div className={isStale ? 'space-y-5 opacity-60' : 'space-y-5'}>
