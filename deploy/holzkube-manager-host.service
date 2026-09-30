@@ -2,7 +2,7 @@
 #
 # Gestartet nur von holzkube-manager-host.path, wenn der Daemon einen Auftrag
 # abgelegt hat; das Skript (deploy/holzkube-manager-host.sh) verbraucht ihn,
-# bevor es etwas tut, und kennt nur vier feste Befehle.
+# bevor es etwas tut, und kennt nur fuenf feste Befehle.
 #
 # Installiert wird er von niemandem ausser dem Betreiber, von Hand, aus dem
 # Release-Archiv: deploy/HOST-HELPER.md. Das Update-Skript fasst ihn nicht an.

@@ -46,7 +46,27 @@ const (
 	// WantsLinkPath is what `systemctl enable holzkube-manager-host.path`
 	// creates: the path unit's WantedBy=paths.target.
 	WantsLinkPath = "/etc/systemd/system/paths.target.wants/holzkube-manager-host.path"
+	// UpdateCheckUnitPath is the oneshot the helper starts for a
+	// "check-update" order, installed from
+	// deploy/holzkube-manager-update-check.service. It has no [Install]
+	// section: nothing enables it, only the helper starts it.
+	UpdateCheckUnitPath = "/etc/systemd/system/holzkube-manager-update-check.service"
+	// UpdateScriptPath is the reference installation's update script,
+	// installed from deploy/holzkube-manager-update.sh. The hourly timer runs
+	// it to update; the check unit runs it with --check, which only looks.
+	UpdateScriptPath = "/usr/local/sbin/holzkube-manager-update"
 )
+
+// HelperOrdersMarker begins the one line in the helper script that names the
+// orders it carries out, separated by single spaces:
+//
+//	# holzkube-manager-host orders: reboot poweroff restart-service update check-update
+//
+// The daemon reads it from the installed script to learn which orders that
+// helper knows. A helper without the line predates it and knows exactly the
+// first four: reboot, poweroff, restart-service and update. A test holds the
+// line to the script's pattern, its case arms and Actions().
+const HelperOrdersMarker = "# holzkube-manager-host orders: "
 
 // The three things that can be missing, in the order Detect reports them.
 const (

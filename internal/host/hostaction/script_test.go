@@ -87,11 +87,18 @@ func requireHostScriptTools(t *testing.T) {
 // stand-in systemctl. failing makes the stand-in exit 1 after it has logged.
 func newHostScriptEnv(t *testing.T, failing bool) *hostScriptEnv {
 	t.Helper()
+	return newHostScriptEnvFrom(t, filepath.Join("..", "..", "..", "deploy", "holzkube-manager-host.sh"), failing)
+}
+
+// newHostScriptEnvFrom is newHostScriptEnv for a copy of the script at from --
+// the shipped one, or an older one kept in testdata.
+func newHostScriptEnvFrom(t *testing.T, from string, failing bool) *hostScriptEnv {
+	t.Helper()
 	requireHostScriptTools(t)
 
-	src, err := os.ReadFile(filepath.Join("..", "..", "..", "deploy", "holzkube-manager-host.sh"))
+	src, err := os.ReadFile(from)
 	if err != nil {
-		t.Fatalf("read the helper script: %v", err)
+		t.Fatalf("read the helper script %s: %v", from, err)
 	}
 	// A copy that ignored these would read the host's own order, write into
 	// the host's own state directory and, as root, call the real systemctl --
@@ -358,6 +365,7 @@ const (
 	idPoweroff = "fedcba9876543210"
 	idRestart  = "00112233445566ff"
 	idUpdate   = "a1b2c3d4e5f60718"
+	idCheck    = "c0ffee00c0ffee11"
 )
 
 func TestHostScript(t *testing.T) {
@@ -395,7 +403,9 @@ func TestHostScriptAsRoot(t *testing.T) {
 	t.Parallel()
 	requireHostNamespace(t)
 
-	// The four orders, each to its one fixed command (D-06).
+	// The five orders, each to its one fixed command (D-06). The check waits
+	// for its unit (no --no-block): the end of that systemctl is the end of
+	// the check, so a check that fails is recorded as failed for this order.
 	for _, tc := range []struct {
 		action Action
 		id     string
@@ -405,6 +415,7 @@ func TestHostScriptAsRoot(t *testing.T) {
 		{Poweroff, idPoweroff, "poweroff"},
 		{RestartService, idRestart, "restart holzkube-manager.service"},
 		{Update, idUpdate, "start --no-block holzkube-manager-update.service"},
+		{CheckUpdate, idCheck, "start holzkube-manager-update-check.service"},
 	} {
 		t.Run("valid "+string(tc.action), func(t *testing.T) {
 			t.Parallel()
@@ -470,6 +481,9 @@ func TestHostScriptAsRoot(t *testing.T) {
 		{"100 bytes", strings.Repeat("hkmLong", 14) + "x\n", "hkmLong", "zu lang", "mehr als 64"},
 		{"empty file", "", "", "keine vollstaendige Zeile", "0"},
 		{"a leading space", " reboot " + idReboot + "\n", idReboot, "unbekannte Form", "25"},
+		{"check-update without an id", "check-update\n", "check-update", "unbekannte Form", "13"},
+		{"check-update with a trailing word", "check-update " + idCheck + " now\n", idCheck, "unbekannte Form", "34"},
+		{"check-update capitalised", "Check-update " + idCheck + "\n", idCheck, "unbekannte Form", "30"},
 	} {
 		t.Run("rejects "+tc.name, func(t *testing.T) {
 			t.Parallel()
@@ -739,4 +753,57 @@ func TestHostScriptClaimRace(t *testing.T) {
 			})
 		}
 	}
+}
+
+// olderHelper is the helper exactly as it was before the fifth order:
+// deploy/holzkube-manager-host.sh at 8b64a06, the last commit that touched it
+// before check-update, byte for byte. No release carried it, but a checkout of
+// main from 2026-09-29 on did, so it is the one older helper there can be on a
+// host. It is copied like the shipped script and never run from testdata.
+var olderHelper = filepath.Join("testdata", "holzkube-manager-host-before-check.sh")
+
+// TestAnOlderHelperRefusesTheCheck: the order list lives on hosts, in a script
+// the operator installed by hand, and the daemon cannot replace it. A helper
+// that predates check-update must receive the word safely -- refuse it as it
+// refuses any unknown form: exit 2, systemctl never called, the order
+// consumed, `- - rejected` recorded, and not one byte of the order in the
+// journal. And it must still carry out what it knows.
+//
+// Fault injected and seen red: check-update added to the frozen copy's
+// pattern and case (the stand-in was called).
+func TestAnOlderHelperRefusesTheCheck(t *testing.T) {
+	t.Parallel()
+	requireHostNamespace(t)
+
+	t.Run("check-update is refused", func(t *testing.T) {
+		t.Parallel()
+		e := newHostScriptEnvFrom(t, olderHelper, false)
+		e.writeOrder(string(CheckUpdate) + " " + idCheck + "\n")
+		rc, out := e.run(true)
+		if rc != 2 {
+			t.Errorf("exit = %d, want 2", rc)
+		}
+		e.wantNotCalled()
+		e.wantOrder(false)
+		e.wantResult("", "", OutcomeRejected)
+		if want := "Auftrag verworfen: unbekannte Form (30 Byte)"; !strings.Contains(out, want) {
+			t.Errorf("output lacks %q", want)
+		}
+		if strings.Contains(out, idCheck) {
+			t.Errorf("output quotes the order's id: the journal must carry only the reason and the length")
+		}
+	})
+
+	t.Run("update is still carried out", func(t *testing.T) {
+		t.Parallel()
+		e := newHostScriptEnvFrom(t, olderHelper, false)
+		e.writeOrder(string(Update) + " " + idUpdate + "\n")
+		rc, _ := e.run(true)
+		if rc != 0 {
+			t.Errorf("exit = %d, want 0", rc)
+		}
+		e.wantCalled("start --no-block holzkube-manager-update.service")
+		e.wantOrder(false)
+		e.wantResult(idUpdate, Update, OutcomeStarted)
+	})
 }
