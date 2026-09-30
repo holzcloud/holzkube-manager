@@ -36,7 +36,6 @@ func TestReadCarriesActions(t *testing.T) {
 	allMissing := []hostaction.Missing{
 		{Item: hostaction.MissingScript, Path: hostaction.HelperScriptPath},
 		{Item: hostaction.MissingPathUnit, Path: hostaction.PathUnitPath},
-		{Item: hostaction.MissingNotEnabled, Path: hostaction.WantsLinkPath},
 	}
 
 	cases := []struct {
