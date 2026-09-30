@@ -65,42 +65,46 @@ const WIDTHS = [390, 1280]
  */
 const TOUCH_WIDTH = 390
 const TOUCH_MIN = 44
-const ROUTES = [
-  '/',
-  // The wall is measured like every other screen, and it is the one that most
-  // looks like it does not need to be: it is fixed to the viewport and never
-  // scrolls, so anything that does not fit is GONE rather than one swipe away.
-  '/wall',
-  '/nodes',
-  '/nodes/m-cp-1',
-  // The machine holzkube-manager runs on, measured like every node page.
-  '/host',
-  '/clusters',
-  // The Kubernetes screen is ten pages since 2026-09-20, and each is measured.
-  // Listing only '/kubernetes' would have measured the overview and called the
-  // other nine checked -- which is the shape of ledger 153 (three screens the
-  // audit had never opened) and 159 (a build it never looked at).
-  '/kubernetes',
-  // The apps list and one app, since 2026-09-26.
-  '/kubernetes/apps',
-  '/kubernetes/apps/media/Deployment/jellyfin',
-  '/kubernetes/workloads',
-  '/kubernetes/pods',
-  '/kubernetes/storage',
-  '/kubernetes/network',
-  '/kubernetes/config',
-  '/kubernetes/namespaces',
-  '/kubernetes/access',
-  '/kubernetes/events',
-  '/kubernetes/maintenance',
-  '/config',
-  '/jobs',
-  '/provision',
-  '/upgrades',
-  '/images',
-  '/audit',
-  '/settings',
-]
+/**
+ * The routes it measures, and where the list comes from.
+ *
+ * web/scripts/layout-routes.json, one entry per leaf route of the router, and
+ * src/layoutRoutes.test.ts holds that list equal to the router: it runs ahead of
+ * this script in `npm run test:layout`, so a route added to the app without an
+ * entry here fails the gate before a browser starts. The list used to be typed
+ * into this file by hand, and that is the shape of ledger 153 (three screens the
+ * audit had never opened) and 159 (a build it never looked at): a guard reports
+ * on what it was told about, and the router grew beside it.
+ *
+ * `route` is the router's path, `path` what the browser opens -- a parameter
+ * route opens an example from web/fixtures/demo.json. `when` marks the two
+ * screens measured before a session (before-account: /setup, before-session:
+ * /login); every entry without it is measured signed in.
+ *
+ * The wall is measured like every other screen, and it is the one that most
+ * looks like it does not need to be: it is fixed to the viewport and never
+ * scrolls, so anything that does not fit is GONE rather than one swipe away.
+ * The Kubernetes screen is ten pages since 2026-09-20 plus the apps list and one
+ * app, and each is its own entry: listing only '/kubernetes' would measure the
+ * overview and call the rest checked.
+ */
+const ROUTE_ENTRIES = JSON.parse(
+  readFileSync(fileURLToPath(new URL('./layout-routes.json', import.meta.url)), 'utf8'),
+)
+const WHENS = ['before-account', 'before-session']
+for (const e of ROUTE_ENTRIES) {
+  if (e.when !== undefined && !WHENS.includes(e.when)) {
+    throw new Error(`layout-routes.json: ${e.route} has when "${e.when}", which this audit does not read`)
+  }
+}
+const entryFor = (when) => {
+  const e = ROUTE_ENTRIES.find((x) => x.when === when)
+  if (e === undefined) throw new Error(`layout-routes.json has no entry with when "${when}"`)
+  return e
+}
+const BEFORE_ACCOUNT = entryFor('before-account')
+const BEFORE_SESSION = entryFor('before-session')
+const SIGNED_IN = ROUTE_ENTRIES.filter((e) => e.when === undefined)
 
 /**
  * The daemon this measures, and why it is built here rather than found here.
@@ -522,6 +526,9 @@ daemon.on('exit', (code) => {
 
 let browser
 let failures = 0
+// What was actually measured, so the green line counts routes opened rather
+// than routes listed.
+const measuredRoutes = new Set()
 try {
   await waitForDaemon(base)
 
@@ -561,6 +568,7 @@ try {
 
   /** Measures one route at one width, and returns how many ways it failed. */
   async function measure(page, route, width) {
+    measuredRoutes.add(route)
     await page.goto(base + route)
     // The shell renders, then the queries land and the page grows. Measuring
     // before that is measuring an empty screen, which passes everything --
@@ -642,7 +650,7 @@ try {
   for (const width of WIDTHS) {
     const context = await open(width)
     const page = await context.newPage()
-    failures += await measure(page, '/setup', width)
+    failures += await measure(page, BEFORE_ACCOUNT.path, width)
     await context.close()
   }
 
@@ -659,7 +667,7 @@ try {
   for (const width of WIDTHS) {
     const context = await open(width)
     const page = await context.newPage()
-    failures += await measure(page, '/login', width)
+    failures += await measure(page, BEFORE_SESSION.path, width)
     await context.close()
   }
 
@@ -673,8 +681,8 @@ try {
     await page.click('button[type="submit"]')
     await page.waitForURL((u) => !u.pathname.startsWith('/login'), { timeout: 20_000 })
 
-    for (const route of ROUTES) {
-      failures += await measure(page, route, width)
+    for (const entry of SIGNED_IN) {
+      failures += await measure(page, entry.path, width)
     }
     await context.close()
   }
@@ -716,5 +724,6 @@ if (failures > 0) {
 }
 console.log(
   `\nNothing out of reach at ${WIDTHS.join('px and ')}px, ` +
-    `and every control is at least ${TOUCH_MIN}px at ${TOUCH_WIDTH}px.`,
+    `and every control is at least ${TOUCH_MIN}px at ${TOUCH_WIDTH}px, ` +
+    `on ${measuredRoutes.size} routes.`,
 )
