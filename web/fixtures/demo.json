@@ -3347,8 +3347,7 @@
       "available": false,
       "missing": [
         { "item": "script", "path": "/usr/local/sbin/holzkube-manager-host" },
-        { "item": "path-unit", "path": "/etc/systemd/system/holzkube-manager-host.path" },
-        { "item": "not-enabled", "path": "/etc/systemd/system/paths.target.wants/holzkube-manager-host.path" }
+        { "item": "path-unit", "path": "/etc/systemd/system/holzkube-manager-host.path" }
       ],
       "install_commands": [
         "sudo install -o root -g root -m 0755 deploy/holzkube-manager-host.sh /usr/local/sbin/holzkube-manager-host",

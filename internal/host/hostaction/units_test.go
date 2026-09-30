@@ -612,8 +612,8 @@ var demoFixture = filepath.Join("..", "..", "..", "web", "fixtures", "demo.json"
 
 // TestTheFixtureShowsTheRealInstallCommands: the README's picture of /host is
 // rendered from web/fixtures/demo.json, and the fixture shows the helper as
-// the operator's machine has it until it is installed -- not available, all
-// three pieces missing, the commands that install it. Were the fixture to keep
+// the operator's machine has it until it is installed -- not available, the
+// script and the unit files missing, the commands that install it. Were the fixture to keep
 // a copy of commands this package no longer has, the picture would show an
 // operator lines the guide does not have. So the fixture's missing list is
 // what Detect reports on a machine with nothing installed, and its commands
@@ -661,11 +661,24 @@ func TestTheFixtureShowsTheRealInstallCommands(t *testing.T) {
 
 	// Nothing installed: what Detect reports on an empty machine, in its order.
 	want := Detect(fstest.MapFS{})
-	if len(want) != 3 {
-		t.Fatalf("Detect on an empty machine reports %d pieces, want 3: %v", len(want), want)
+	if exact := []Missing{
+		{Item: MissingScript, Path: HelperScriptPath},
+		{Item: MissingPathUnit, Path: PathUnitPath},
+	}; !slices.Equal(want, exact) {
+		t.Fatalf("Detect on an empty machine reports %v, want %v", want, exact)
 	}
 	if !slices.Equal(a.Missing, want) {
 		t.Errorf("the fixture's missing list is %v, want what Detect reports with nothing installed: %v", a.Missing, want)
+	}
+	// The sentence G-13-2 found false: a path unit that is missing is not
+	// "installed but not enabled".
+	var pathUnit, notEnabled bool
+	for _, m := range a.Missing {
+		pathUnit = pathUnit || m.Item == MissingPathUnit
+		notEnabled = notEnabled || m.Item == MissingNotEnabled
+	}
+	if pathUnit && notEnabled {
+		t.Errorf("the fixture's missing list %v names path-unit and not-enabled together", a.Missing)
 	}
 	for _, m := range a.Missing {
 		switch m.Path {

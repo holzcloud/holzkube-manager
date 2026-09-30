@@ -157,7 +157,7 @@ describe('the layout guard’s fixtures', () => {
 
     expect(host.container).toBe(false)
     expect(host.actions.available).toBe(false)
-    expect(host.actions.missing.map((m) => m.item)).toEqual(['script', 'path-unit', 'not-enabled'])
+    expect(host.actions.missing.map((m) => m.item)).toEqual(['script', 'path-unit'])
     expect(host.actions.install_commands.length).toBeGreaterThanOrEqual(1)
     expect(host.actions.order).toBeNull()
   })
