@@ -230,6 +230,9 @@ export function HostActions({
   const [pending, setPending] = useState<HostAction | null>(null)
   // The button that opened the dialog: a cancel hands focus back to it.
   const opener = useRef<HTMLButtonElement | null>(null)
+  // The group's reason line: where a cancel hands focus when the opener was
+  // turned off while the dialog was open (14-REVIEW WR-01).
+  const reasonLine = useRef<HTMLParagraphElement | null>(null)
   const hostname = host.device.hostname.readable ? host.device.hostname.value : ''
   const reason = disabledReason(host, sessionRole, pollFailed, order)
 
@@ -279,7 +282,14 @@ export function HostActions({
         })}
       </fieldset>
       {reason !== null && (
-        <p id="host-actions-reason" className="text-xs text-muted-foreground md:text-right">
+        // tabIndex -1: not a tab stop, but focusable from script, for the
+        // cancel that finds its opener turned off.
+        <p
+          ref={reasonLine}
+          id="host-actions-reason"
+          tabIndex={-1}
+          className="text-xs text-muted-foreground md:text-right"
+        >
           {reason}
         </p>
       )}
@@ -289,6 +299,7 @@ export function HostActions({
           hostname={hostname}
           reason={reason}
           opener={opener}
+          reasonLine={reasonLine}
           onClose={() => setPending(null)}
           onPlaced={(placed) => {
             setPending(null)
@@ -305,6 +316,7 @@ function HostActionDialog({
   hostname,
   reason,
   opener,
+  reasonLine,
   onClose,
   onPlaced,
 }: {
@@ -318,6 +330,11 @@ function HostActionDialog({
   reason: string | null
   /** The button that opened the dialog, which a cancel gives focus back to. */
   opener: RefObject<HTMLButtonElement | null>
+  /**
+   * The group's reason line, which a cancel gives focus to instead when the
+   * opener was turned off meanwhile: focus() on a disabled button does nothing.
+   */
+  reasonLine: RefObject<HTMLParagraphElement | null>
   onClose: () => void
   onPlaced: (order: HostOrder) => void
 }) {
@@ -374,11 +391,20 @@ function HostActionDialog({
         // while an order is on its way -- placed nothing: the trigger gets
         // focus back. Radix would only do that for a DialogTrigger, which these
         // buttons are not, and left alone it drops focus on the page body next
-        // to the destructive pair.
+        // to the destructive pair. A reason that arrived while the dialog was
+        // open (a failed poll, another order, a role change) has turned the
+        // trigger off as well, and a disabled button takes no focus: then the
+        // line that says why is where focus goes.
         onCloseAutoFocus={(e) => {
           e.preventDefault()
-          if (!placed.current) {
-            opener.current?.focus()
+          if (placed.current) {
+            return
+          }
+          const trigger = opener.current
+          if (trigger !== null && !trigger.disabled) {
+            trigger.focus()
+          } else {
+            reasonLine.current?.focus()
           }
         }}
       >
