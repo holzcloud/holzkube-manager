@@ -333,17 +333,17 @@ function longWarning(): { host: Host; sentence: string } {
   return { host, sentence }
 }
 
-function renderAtPhoneWidth(host: Host, sessionRole?: string): HTMLElement {
+function renderAtPhoneWidth(host: Host, sessionRole?: string, width = PHONE_WIDTH): HTMLElement {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   const { container } = render(
     <QueryClientProvider client={client}>
-      <div data-testid="phone" style={{ width: `${PHONE_WIDTH}px` }}>
+      <div data-testid="phone" style={{ width: `${width}px` }}>
         <HostView host={host} stale={null} sessionRole={sessionRole} />
       </div>
     </QueryClientProvider>,
   )
   const phone = container.querySelector<HTMLElement>('[data-testid="phone"]')
-  if (phone === null) throw new Error('the 390-px container did not render')
+  if (phone === null) throw new Error(`the ${width}-px container did not render`)
   // Every disclosure open: the virtual interfaces are part of what must fit.
   for (const d of phone.querySelectorAll('details')) d.open = true
   return phone
@@ -405,6 +405,70 @@ function overflowing(phone: HTMLElement): string[] {
     out.push(`text of ${describeEl(parent)} ends at ${right.toFixed(1)} > ${edge.toFixed(1)}`)
   }
   return out
+}
+
+/**
+ * Every button below root whose content runs past its own box, with the numbers.
+ *
+ * `overflowing` measures against the page's right edge, and a label that runs
+ * past its button in a 390-px page never reaches it: "Check for updates and
+ * install" did, 191 px of text in a 189-px button with its icon starting left
+ * of the border (G-13-3), and the page-edge check stayed green. So each button
+ * is measured against itself: its scroll width against its client width, and
+ * every descendant box and every line of its text (a Range over each text node,
+ * as `overflowing` does) against its border box, left and right, within 0.5 px.
+ */
+function spillsPastItsButton(root: Element): string[] {
+  const out: string[] = []
+  const range = document.createRange()
+  for (const button of root.querySelectorAll('button')) {
+    if (scrollsSideways(button, root) || screenReaderOnly(button, root)) continue
+    const box = button.getBoundingClientRect()
+    if (box.width === 0 && box.height === 0) continue
+    const name = describeEl(button)
+    const [left, right] = [box.left - 0.5, box.right + 0.5]
+    if (button.scrollWidth > button.clientWidth) {
+      out.push(
+        `${name} scrolls: scrollWidth ${button.scrollWidth} > clientWidth ${button.clientWidth}`,
+      )
+    }
+    for (const el of button.querySelectorAll('*')) {
+      const r = el.getBoundingClientRect()
+      if (r.width === 0 && r.height === 0) continue
+      if (screenReaderOnly(el, button)) continue
+      if (r.left >= left && r.right <= right) continue
+      out.push(
+        `${describeEl(el)} in ${name} spans ${r.left.toFixed(1)}..${r.right.toFixed(1)} outside ${box.left.toFixed(1)}..${box.right.toFixed(1)}`,
+      )
+    }
+    const walker = document.createTreeWalker(button, NodeFilter.SHOW_TEXT)
+    for (let n = walker.nextNode(); n !== null; n = walker.nextNode()) {
+      const parent = n.parentElement
+      if (parent === null || screenReaderOnly(parent, button)) continue
+      range.selectNodeContents(n)
+      for (const r of range.getClientRects()) {
+        if (r.left >= left && r.right <= right) continue
+        out.push(
+          `text line of ${name} spans ${r.left.toFixed(1)}..${r.right.toFixed(1)} outside ${box.left.toFixed(1)}..${box.right.toFixed(1)}`,
+        )
+      }
+    }
+  }
+  return out
+}
+
+/** The number of line boxes the text of el lies on: distinct tops of its text rects. */
+function lineBoxes(el: Element): number {
+  const range = document.createRange()
+  const tops = new Set<number>()
+  const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT)
+  for (let n = walker.nextNode(); n !== null; n = walker.nextNode()) {
+    range.selectNodeContents(n)
+    for (const r of range.getClientRects()) {
+      if (r.width > 0) tops.add(Math.round(r.top))
+    }
+  }
+  return tops.size
 }
 
 // The viewport, not only the container, is 390 px wide: the cards switch their
@@ -489,6 +553,9 @@ describe('/host at 390 px', () => {
     // Row 1 is this service, row 2 the machine; left column, right column.
     expect(service.top).toBe(update.top)
     expect(poweroff.top).toBe(reboot.top)
+    // The grid stretches a row neighbour to the wrapped label's height (UI-SPEC).
+    expect(service.bottom).toBe(update.bottom)
+    expect(poweroff.bottom).toBe(reboot.bottom)
     expect(reboot.top).toBeGreaterThanOrEqual(update.bottom)
     expect(reboot.left).toBe(update.left)
     expect(poweroff.left).toBe(service.left)
@@ -497,6 +564,12 @@ describe('/host at 390 px', () => {
     for (const b of buttons) {
       expect(b.getBoundingClientRect().width).toBeGreaterThan(44)
     }
+    // Every label and icon inside its own button; the longest one on two lines,
+    // whole, in its ~175-px cell (UI-SPEC), rather than past the border (G-13-3).
+    expect(spillsPastItsButton(group)).toEqual([])
+    const [updateButton] = buttons as [HTMLElement, ...HTMLElement[]]
+    expect(updateButton.textContent).toBe('Check for updates and install')
+    expect(lineBoxes(updateButton)).toBe(2)
     expect(overflowing(phone)).toEqual([])
   })
 
@@ -544,6 +617,13 @@ describe('/host at 390 px', () => {
     // The longest command is wider than a phone: it scrolls inside the block.
     expect(pre.scrollWidth).toBeGreaterThan(pre.clientWidth)
     expect(pre.getBoundingClientRect().right).toBeLessThanOrEqual(PHONE_WIDTH + 0.5)
+    // The buttons are off here -- the Pi's state when the UAT saw G-13-3 -- and
+    // their labels fit all the same.
+    const group = within(phone).getByRole('group', { name: 'Host actions' })
+    const buttons = within(group).getAllByRole('button')
+    expect(buttons).toHaveLength(4)
+    for (const b of buttons) expect(b).toBeDisabled()
+    expect(spillsPastItsButton(group)).toEqual([])
     expect(overflowing(phone)).toEqual([])
   })
 
@@ -577,5 +657,27 @@ describe('/host at 390 px', () => {
     // It did wrap: the name spans more than one line somewhere.
     const name = within(title).getByText(hostname)
     expect(name.getClientRects().length).toBeGreaterThan(1)
+    // The footer's buttons keep their labels inside themselves too.
+    expect(within(dialog).getAllByRole('button').length).toBeGreaterThan(0)
+    expect(spillsPastItsButton(dialog)).toEqual([])
+  })
+})
+
+describe('/host at 1200 px', () => {
+  // The phone classes on the host action buttons are all max-md: above md the
+  // four keep size sm's desktop shape. A phone class that lost its prefix --
+  // min-h-11 alone would do it -- turns them into 44-px blocks on a desk.
+  it('keeps the four host actions at their desktop shape: 28 px tall, one line each', async () => {
+    await page.viewport(1200, 900)
+    const box = renderAtPhoneWidth(shape({ actions: HELPER_INSTALLED }), 'operator', 1200)
+    expect(box.getBoundingClientRect().width).toBe(1200)
+    const group = within(box).getByRole('group', { name: 'Host actions' })
+    const buttons = within(group).getAllByRole('button')
+    expect(buttons).toHaveLength(4)
+    for (const b of buttons) {
+      expect(b.getBoundingClientRect().height, `${b.textContent} height`).toBe(28)
+      expect(lineBoxes(b), `${b.textContent} lines`).toBe(1)
+    }
+    expect(spillsPastItsButton(group)).toEqual([])
   })
 })
