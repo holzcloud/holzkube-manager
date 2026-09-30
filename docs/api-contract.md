@@ -1949,6 +1949,10 @@ offered and the check is not:
 }
 ```
 
+The Host page then keeps the four other buttons on, turns the check's off with
+its own reason, and shows a note in the helper notice's place naming each entry
+of `outdated` with `install_commands`; it never shows both notes.
+
 A daemon started without host actions sends `available: false`, `missing: []`,
 `outdated: []` and the result reason "This instance was started without host
 actions."

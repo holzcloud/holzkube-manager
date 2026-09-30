@@ -195,6 +195,15 @@ The helper is never updated automatically. The update script replaces the
 daemon and itself, and never touches the helper's files. To take a newer
 helper, repeat the install commands above from the newer archive.
 
+The Host page says when the installed helper is older than holzkube-manager:
+a helper installed before `check-update` existed carries out the four older
+orders, and their buttons keep working, but **Check for updates** stays off,
+and a note under the page's header names what is missing for it -- the script
+that does not know `check-update`, the unit
+`holzkube-manager-update-check.service`, or both -- with the same install
+commands. Repeating them from the newer archive installs both, and the check
+comes on with the next reading of the page.
+
 ## Uninstall
 
 ```sh
