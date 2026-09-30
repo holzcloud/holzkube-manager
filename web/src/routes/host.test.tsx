@@ -1628,14 +1628,50 @@ describe('the order status and the waiting notice', () => {
       expect(waiting).toHaveClass('border-slate-500/40')
       // A polite live region, and no role: the order box is the one status on
       // the page, and getByRole('status') finds exactly it (13-UI-REVIEW).
-      expect(waiting).toHaveAttribute('aria-live', 'polite')
-      expect(waiting).not.toHaveAttribute('role')
+      const region = waiting.closest('[aria-live="polite"]')
+      expect(region).not.toBeNull()
+      expect(region).not.toHaveAttribute('role')
       expect(screen.getAllByRole('status')).toHaveLength(1)
       expect(screen.queryByText(STALE_SENTENCE)).toBeNull()
       expect(cellOf('Hostname').closest('.opacity-60')).not.toBeNull()
       expect(
         screen.getByText('holzkube-manager is not answering; host actions return when it does.'),
       ).toBeInTheDocument()
+    },
+  )
+
+  // 14-REVIEW WR-03: a screen reader announces a change inside a live region
+  // it already knows, and generally not a region that appears with its text
+  // in the same mutation. So the region is there, empty, while the host still
+  // answers, and only the sentence arrives when the poll fails.
+  it.each([
+    ['reboot', WAITING],
+    ['poweroff', WAITING_POWEROFF],
+  ])(
+    'the waiting notice lands in a polite region that was there, empty, before it (%s)',
+    (action, sentence) => {
+      const host = hostShape({
+        actions: helperInstalled({ order: orderOf(action), result: startedFor(action) }),
+      })
+      const view = wrap(<HostView host={host} stale={null} sessionRole="operator" />)
+      expect(screen.queryByText(sentence)).toBeNull()
+      const before = new Set(document.querySelectorAll('[aria-live="polite"]'))
+      const empty = [...before].filter((el) => el.textContent === '')
+      expect(empty).toHaveLength(1)
+
+      view.rerender(
+        <HostView host={host} stale={new Error('Network down')} sessionRole="operator" />,
+      )
+      const region = screen.getByText(sentence).closest('[aria-live="polite"]')
+      expect(region).toBe(empty[0])
+      expect(region).not.toHaveAttribute('role')
+      expect(screen.getAllByRole('status')).toHaveLength(1)
+
+      // And back: the sentence goes, the region stays.
+      view.rerender(<HostView host={host} stale={null} sessionRole="operator" />)
+      expect(screen.queryByText(sentence)).toBeNull()
+      expect(region).toBeInTheDocument()
+      expect(region?.textContent).toBe('')
     },
   )
 
