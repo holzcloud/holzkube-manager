@@ -52,6 +52,12 @@ Progress: [█████░░░░░] 50%
   („10 Bedienelemente unter 44 px, kein Wächter") stammte aus der Übergabe vom
   2026-09-17. Offen ist, was der Wächter nicht öffnet — Dialoge, Menüs, die
   mobile Navigation — und dass seine Routen eine Hand-Liste sind.
+- **Phase 13 offen (Stand 2026-09-30):** Verifikation 5/5, `human_needed`.
+  Entschieden vom Betreiber: HACT-04 braucht eine **fünfte Aktion „nur nach
+  Updates suchen"**, die nichts installiert — „Check for updates and install"
+  allein reicht nicht. Noch zu planen (13-12). Außerdem nur auf dem Pi
+  prüfbar: Helfer installieren, echter Neustart mit zwei Sitzungen,
+  Dienst-Neustart und Herunterfahren je einmal.
 - **Entscheidungen des Betreibers:** Cloud-/Infra-Provider, SAML.
 - **Auf echter Hardware nicht geübt:** Live-Sensoren, Wake-on-LAN, erzwungene
   Power-Aktionen.
