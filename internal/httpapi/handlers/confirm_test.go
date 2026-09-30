@@ -66,7 +66,8 @@ func TestEveryConfirmableActionDecidesOnTypedPhrase(t *testing.T) {
 //
 // Every host action requires typing the hostname -- unlike a node's reboot and
 // shutdown -- because there is exactly one host and it is the machine this page
-// runs on: after the click it is gone. So hostTypedPhrase has exactly one entry
+// runs on: after the click it is gone. The check, which takes nothing away,
+// requires it too: HACT-05 wants it for every host action. So hostTypedPhrase has exactly one entry
 // per hostaction.Actions(), and every one is true.
 //
 // And it is a separate table for a reason this test holds too: typedPhrase is
@@ -85,7 +86,7 @@ func TestEveryHostActionRequiresTyping(t *testing.T) {
 		}
 		if !needs {
 			t.Errorf("hostTypedPhrase[%s] = false: a host action without the typed hostname. Every "+
-				"host action takes away the machine this page runs on (D-09)", name)
+				"host action requires it (D-09, HACT-05)", name)
 		}
 	}
 	if got, want := len(hostTypedPhrase), len(hostaction.Actions()); got != want {
