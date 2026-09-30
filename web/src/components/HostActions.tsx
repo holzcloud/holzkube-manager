@@ -248,8 +248,11 @@ export function HostActions({
           const Icon = spec.icon
           return (
             <Fragment key={action}>
-              {/* The machine-wide pair stands apart from the service pair. */}
-              {action === 'reboot' && <span aria-hidden="true" className="w-4 max-md:hidden" />}
+              {/* The machine-wide pair stands 16 px apart from the service pair:
+                  a zero-width spacer between the row's two gap-2s, 8 + 0 + 8.
+                  A w-4 spacer drew 32 (13-UI-REVIEW). Hidden on the phone grid,
+                  where it would take a cell. */}
+              {action === 'reboot' && <span aria-hidden="true" className="w-0 max-md:hidden" />}
               <Button
                 variant="outline"
                 size="sm"
@@ -731,14 +734,15 @@ function phaseSentence(phase: OrderPhase, order: HostOrder, host: Host): ReactNo
           )}.`
         case 'update':
           return `done. holzkube-manager is back, running ${version}.`
+        // With the boot time unknown the clause is left out, never "up since .".
         case 'reboot':
-          return `done. The host restarted and holzkube-manager is back; up since ${
-            boot === null ? '' : timeOf(boot)
-          }.`
+          return boot === null
+            ? 'done. The host restarted and holzkube-manager is back.'
+            : `done. The host restarted and holzkube-manager is back; up since ${timeOf(boot)}.`
         case 'poweroff':
-          return `the host was switched on again and holzkube-manager is back; up since ${
-            boot === null ? '' : timeOf(boot)
-          }.`
+          return boot === null
+            ? 'the host was switched on again and holzkube-manager is back.'
+            : `the host was switched on again and holzkube-manager is back; up since ${timeOf(boot)}.`
       }
     }
   }

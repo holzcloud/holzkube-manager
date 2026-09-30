@@ -1323,7 +1323,26 @@ describe('HostOrderStatus', () => {
 
   it('says when the helper recorded an order it only knows from the result', () => {
     status(later({}), order('reboot'), 'started', { from: 'result' })
-    expect(screen.getByRole('status')).toHaveTextContent(`Order ${ID} · recorded`)
+    // 14-UI-SPEC copy: "recorded {time}" instead of "placed {time}".
+    expect(screen.getByRole('status')).toHaveTextContent(
+      `Order ${ID} · recorded ${new Date('2026-09-28T10:00:05Z').toLocaleTimeString()}`,
+    )
+    expect(screen.getByRole('status')).not.toHaveTextContent('placed')
+  })
+
+  // 13-UI-REVIEW fix 3: orderPhase never reaches 'back' for these two without
+  // a boot time, so the render path is driven with the phase given directly.
+  // The sentence leaves the clause out rather than saying "up since .".
+  it.each([
+    ['reboot', 'Restart host — done. The host restarted and holzkube-manager is back.'],
+    ['poweroff', 'Shut down host — the host was switched on again and holzkube-manager is back.'],
+  ] as const)('%s back with the boot time unknown: no "up since" at all', (action, sentence) => {
+    const host = later({})
+    host.device.uptime_seconds = { readable: false, reason: { code: 'read-failed', message: 'x' } }
+    status(host, order(action), 'back')
+    const box = screen.getByRole('status')
+    expect(box.querySelector('p')?.textContent).toBe(sentence)
+    expect(box).not.toHaveTextContent('up since')
   })
 
   it('Dismiss status hands the dismissal on', async () => {
