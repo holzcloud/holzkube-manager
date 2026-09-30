@@ -534,11 +534,12 @@ describe('/host at 390 px', () => {
     expect(overflowing(phone)).toEqual([])
   })
 
-  it('lays the four host actions out as two rows of two, each a thumb wide and tall', () => {
+  it('lays the check alone on the first row, then two rows of two, each a thumb wide and tall', () => {
     const phone = renderAtPhoneWidth(shape({ actions: HELPER_INSTALLED }), 'operator')
     const group = within(phone).getByRole('group', { name: 'Host actions' })
     const buttons = within(group).getAllByRole('button')
     expect(buttons.map((b) => b.textContent)).toEqual([
+      'Check for updates',
       'Check for updates and install',
       'Restart service',
       'Restart host',
@@ -549,8 +550,21 @@ describe('/host at 390 px', () => {
       expect(r.height, `${buttons[k]?.textContent} height`).toBeGreaterThanOrEqual(44)
       expect(r.width, `${buttons[k]?.textContent} width`).toBeGreaterThanOrEqual(150)
     }
-    const [update, service, reboot, poweroff] = boxes as [DOMRect, DOMRect, DOMRect, DOMRect]
-    // Row 1 is this service, row 2 the machine; left column, right column.
+    const [check, update, service, reboot, poweroff] = boxes as [
+      DOMRect,
+      DOMRect,
+      DOMRect,
+      DOMRect,
+      DOMRect,
+    ]
+    // The check spans the group's width, on a row of its own above the rest.
+    const groupBox = group.getBoundingClientRect()
+    expect(check.left).toBe(groupBox.left)
+    expect(check.right).toBe(groupBox.right)
+    expect(check.left).toBe(update.left)
+    expect(check.right).toBe(service.right)
+    expect(update.top).toBeGreaterThanOrEqual(check.bottom)
+    // Row 2 is this service, row 3 the machine; left column, right column.
     expect(service.top).toBe(update.top)
     expect(poweroff.top).toBe(reboot.top)
     // The grid stretches a row neighbour to the wrapped label's height (UI-SPEC).
@@ -567,7 +581,7 @@ describe('/host at 390 px', () => {
     // Every label and icon inside its own button; the longest one on two lines,
     // whole, in its ~175-px cell (UI-SPEC), rather than past the border (G-13-3).
     expect(spillsPastItsButton(group)).toEqual([])
-    const [updateButton] = buttons as [HTMLElement, ...HTMLElement[]]
+    const [, updateButton] = buttons as [HTMLElement, HTMLElement, ...HTMLElement[]]
     expect(updateButton.textContent).toBe('Check for updates and install')
     expect(lineBoxes(updateButton)).toBe(2)
     expect(overflowing(phone)).toEqual([])
@@ -621,7 +635,7 @@ describe('/host at 390 px', () => {
     // their labels fit all the same.
     const group = within(phone).getByRole('group', { name: 'Host actions' })
     const buttons = within(group).getAllByRole('button')
-    expect(buttons).toHaveLength(4)
+    expect(buttons).toHaveLength(5)
     for (const b of buttons) expect(b).toBeDisabled()
     expect(spillsPastItsButton(group)).toEqual([])
     expect(overflowing(phone)).toEqual([])
@@ -665,15 +679,15 @@ describe('/host at 390 px', () => {
 
 describe('/host at 1200 px', () => {
   // The phone classes on the host action buttons are all max-md: above md the
-  // four keep size sm's desktop shape. A phone class that lost its prefix --
+  // five keep size sm's desktop shape. A phone class that lost its prefix --
   // min-h-11 alone would do it -- turns them into 44-px blocks on a desk.
-  it('keeps the four host actions at their desktop shape: 28 px tall, one line each', async () => {
+  it('keeps the five host actions at their desktop shape: 28 px tall, one line each', async () => {
     await page.viewport(1200, 900)
     const box = renderAtPhoneWidth(shape({ actions: HELPER_INSTALLED }), 'operator', 1200)
     expect(box.getBoundingClientRect().width).toBe(1200)
     const group = within(box).getByRole('group', { name: 'Host actions' })
     const buttons = within(group).getAllByRole('button')
-    expect(buttons).toHaveLength(4)
+    expect(buttons).toHaveLength(5)
     for (const b of buttons) {
       expect(b.getBoundingClientRect().height, `${b.textContent} height`).toBe(28)
       expect(lineBoxes(b), `${b.textContent} lines`).toBe(1)

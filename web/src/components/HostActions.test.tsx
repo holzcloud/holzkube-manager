@@ -18,7 +18,7 @@ import { PROBLEM_BASE_URI } from '@/test/problem-fixtures'
 import demo from '../../fixtures/demo.json'
 
 /**
- * The host actions on /host (Phase 13): the four buttons, the one reason they
+ * The host actions on /host (Phase 13): the five buttons, the one reason they
  * are off, the dialog with the typed hostname, and the status box that follows
  * the order through the host answer. The server is the gate (the routes refuse
  * a reader, a container, a missing helper, a second order, and a typed text
@@ -70,6 +70,7 @@ const held: HostOrder = {
 }
 
 const LABELS = [
+  'Check for updates',
   'Check for updates and install',
   'Restart service',
   'Restart host',
@@ -99,7 +100,7 @@ function actions(
   )
 }
 
-/** The four header buttons, in document order. */
+/** The five header buttons, in document order. */
 function headerButtons(): HTMLElement[] {
   return within(screen.getByRole('group', { name: 'Host actions' })).getAllByRole('button')
 }
@@ -108,7 +109,7 @@ function reasonLine(): HTMLElement | null {
   return document.getElementById('host-actions-reason')
 }
 
-/** All four rendered, all four off, and the one line says why. */
+/** All five rendered, all five off, and the one line says why. */
 function expectOffBecause(reason: string) {
   const buttons = headerButtons()
   expect(buttons.map((b) => b.textContent)).toEqual(LABELS)
@@ -127,8 +128,8 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-describe('HostActions: the four buttons and the one reason they are off', () => {
-  it('offers all four to an operator with the helper installed, harmless first, and says nothing', () => {
+describe('HostActions: the five buttons and the one reason they are off', () => {
+  it('offers all five to an operator with the helper installed, harmless first, and says nothing', () => {
     actions()
 
     const buttons = headerButtons()
@@ -136,8 +137,9 @@ describe('HostActions: the four buttons and the one reason they are off', () => 
     for (const b of buttons) {
       expect(b).toBeEnabled()
     }
-    // The machine-wide pair is red, the service pair is not.
+    // The machine-wide pair is red, the check and the service pair are not.
     expect(buttons.map((b) => b.classList.contains('text-destructive'))).toEqual([
+      false,
       false,
       false,
       true,
@@ -166,7 +168,7 @@ describe('HostActions: the four buttons and the one reason they are off', () => 
     )
   })
 
-  it('for a reader: all four still shown, all off, and the role named (F21)', () => {
+  it('for a reader: all five still shown, all off, and the role named (F21)', () => {
     actions({ role: 'reader' })
     expectOffBecause('Host actions need the operator role. You are signed in as a reader.')
   })
@@ -266,6 +268,16 @@ type DialogCase = {
 }
 
 const DIALOGS: DialogCase[] = [
+  {
+    action: 'check-update',
+    label: 'Check for updates',
+    title: 'Check for updates on example-host?',
+    description:
+      'Looks up the newest release and compares it with the version installed here. Nothing is downloaded or installed, and holzkube-manager keeps running.',
+    box: 'The page stays connected. The answer appears here and under Update check, usually within seconds.',
+    red: false,
+    destructive: false,
+  },
   {
     action: 'update',
     label: 'Check for updates and install',
@@ -841,6 +853,20 @@ const order = (action: HostAction, state: HostOrder['state'] = 'picked-up'): Hos
   state,
 })
 
+/** An order placed 734 ms into 10:00:05, as the daemon's clock writes it. */
+const subSecond = (action: HostAction): HostOrder => ({
+  ...order(action),
+  placed_at: '2026-09-28T10:00:05.734Z',
+})
+
+/** The update status recorded in that same whole second. */
+const sameSecond = (outcome: string) => ({
+  checked_at: '2026-09-28T10:00:05Z',
+  installed: 'v0.1.0',
+  latest: outcome === 'current' ? 'v0.1.0' : 'v9.9.9',
+  outcome,
+})
+
 describe('orderPhase: every phase from server fields', () => {
   type Row = [string, HostOrder, Host, boolean, string]
   const rows: Row[] = [
@@ -1091,6 +1117,83 @@ describe('orderPhase: every phase from server fields', () => {
       true,
       'waiting',
     ],
+    // Decision 6 of 13-12: checked_at has whole seconds, placed_at does not.
+    // A run that ends in the second it was placed in is finished, not
+    // waiting 15 min for "no answer".
+    [
+      'update, the status in the same second as the placement: finished',
+      subSecond('update'),
+      later(
+        { order: subSecond('update'), result: resultFor(ID, 'update', 'started') },
+        { update: sameSecond('current') },
+      ),
+      false,
+      'update-finished',
+    ],
+    [
+      'check, the status in the same second as the placement: finished',
+      subSecond('check-update'),
+      later(
+        { order: subSecond('check-update'), result: resultFor(ID, 'check-update', 'started') },
+        { update: sameSecond('available') },
+      ),
+      false,
+      'update-finished',
+    ],
+    [
+      'check, a status the second before the placement does not finish it',
+      subSecond('check-update'),
+      later(
+        { order: subSecond('check-update'), result: resultFor(ID, 'check-update', 'started') },
+        {
+          observed: SOON,
+          update: { ...sameSecond('available'), checked_at: '2026-09-28T10:00:04Z' },
+        },
+      ),
+      false,
+      'started',
+    ],
+    [
+      'check started, nothing newer',
+      order('check-update'),
+      later(
+        { order: order('check-update'), result: resultFor(ID, 'check-update', 'started') },
+        { observed: SOON },
+      ),
+      false,
+      'started',
+    ],
+    // A check restarts nothing: a process started after it is not its answer.
+    [
+      'check started, a process started after the order: still started, never back',
+      order('check-update'),
+      later(
+        { order: null, result: resultFor(ID, 'check-update', 'started') },
+        { observed: SOON, started: '2026-09-28T10:00:20Z' },
+      ),
+      false,
+      'started',
+    ],
+    [
+      'check started, 2 min 59 s without a newer status: still started',
+      order('check-update'),
+      later(
+        { order: order('check-update'), result: resultFor(ID, 'check-update', 'started') },
+        { observed: '2026-09-28T10:03:04Z' },
+      ),
+      false,
+      'started',
+    ],
+    [
+      'check started, 3 min without a newer status: no answer',
+      order('check-update'),
+      later(
+        { order: order('check-update'), result: resultFor(ID, 'check-update', 'started') },
+        { observed: '2026-09-28T10:03:06Z' },
+      ),
+      false,
+      'no-answer',
+    ],
     [
       'shut down host, switched on again a day later: back, not no answer',
       order('poweroff'),
@@ -1162,6 +1265,13 @@ describe('followedOrder: which order the box follows', () => {
   })
 })
 
+const updatedShape = {
+  checked_at: '2026-09-28T10:00:45Z',
+  installed: 'v0.1.0',
+  latest: 'v0.2.0',
+  outcome: 'updated',
+}
+
 const SLATE = 'border-slate-500/40'
 const EMERALD = 'border-emerald-600/40'
 const RED = 'border-red-600/40'
@@ -1201,6 +1311,12 @@ describe('HostOrderStatus', () => {
     latest: 'v0.2.0',
     outcome: 'failed',
   }
+  const checked = (outcome: string) => ({
+    checked_at: '2026-09-28T10:00:07Z',
+    installed: 'v0.1.0',
+    latest: outcome === 'current' ? 'v0.1.0' : 'v9.9.9',
+    outcome,
+  })
   const rows: Row[] = [
     [
       'placed',
@@ -1383,6 +1499,62 @@ describe('HostOrderStatus', () => {
       true,
     ],
     [
+      'started, check',
+      order('check-update'),
+      later({}),
+      'started',
+      'Check for updates — started. Looking for a newer release; nothing is installed.',
+      SLATE,
+      false,
+    ],
+    [
+      'check finished, a newer release available',
+      order('check-update'),
+      later({}, { update: checked('available') }),
+      'update-finished',
+      'Check for updates — finished. v9.9.9 is available; v0.1.0 is installed. Nothing was installed: Check for updates and install, or the hourly update, installs it.',
+      EMERALD,
+      true,
+    ],
+    [
+      'check finished, up to date',
+      order('check-update'),
+      later({}, { update: checked('current') }),
+      'update-finished',
+      'Check for updates — finished. v0.1.0 is installed and is the newest release; there is nothing to install.',
+      EMERALD,
+      true,
+    ],
+    [
+      'check finished, the check failed',
+      order('check-update'),
+      later({}, { update: checked('failed') }),
+      'update-finished',
+      'Check for updates — finished. The check failed, and nothing was installed. journalctl -u holzkube-manager-update-check says why.',
+      RED,
+      true,
+    ],
+    // The hourly timer ran between the placement and the answer: its outcome,
+    // said as the Update check row says it.
+    [
+      'check finished by an hourly update in between',
+      order('check-update'),
+      later({}, { update: updated }),
+      'update-finished',
+      'Check for updates — finished. Updated to v0.2.0.',
+      EMERALD,
+      true,
+    ],
+    [
+      'no answer, check started',
+      order('check-update'),
+      later({ result: resultFor(ID, 'check-update', 'started') }, { observed: LATE }),
+      'no-answer',
+      'Check for updates — started, but no update check was reported within 3 min. journalctl -u holzkube-manager-update-check says what happened.',
+      RED,
+      true,
+    ],
+    [
       'update finished, failed',
       order('update'),
       later({}, { update: failedUpdate }),
@@ -1410,6 +1582,15 @@ describe('HostOrderStatus', () => {
   it('says a command in a sentence as code', () => {
     status(later({}), order('reboot', 'withdrawn'), 'not-picked-up')
     expect(screen.getByText('systemctl status holzkube-manager-host.path').tagName).toBe('CODE')
+  })
+
+  it("says the check unit's journal as code", () => {
+    status(
+      later({}, { update: { ...updatedShape, outcome: 'failed' } }),
+      order('check-update'),
+      'update-finished',
+    )
+    expect(screen.getByText('journalctl -u holzkube-manager-update-check').tagName).toBe('CODE')
   })
 
   it('says when the helper recorded an order it only knows from the result', () => {

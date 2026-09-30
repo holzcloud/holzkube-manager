@@ -6,6 +6,7 @@ import {
   PowerOff,
   RotateCcw,
   RotateCw,
+  Search,
 } from 'lucide-react'
 import {
   type FormEvent,
@@ -58,6 +59,7 @@ import { cn } from '@/lib/utils'
 
 /** Each action's label, as its button, its status box and its dialog name it. */
 export const HOST_ACTION_LABEL: Record<HostAction, string> = {
+  'check-update': 'Check for updates',
   update: 'Check for updates and install',
   'restart-service': 'Restart service',
   reboot: 'Restart host',
@@ -89,10 +91,33 @@ type ActionSpec = {
   destructive: boolean
 }
 
-/** The four actions, in the order the header shows them: harmless first. */
-export const HOST_ACTIONS: HostAction[] = ['update', 'restart-service', 'reboot', 'poweroff']
+/**
+ * The five actions, in the order the header shows them: harmless first. The
+ * check, which only looks, comes before the update that installs.
+ */
+export const HOST_ACTIONS: HostAction[] = [
+  'check-update',
+  'update',
+  'restart-service',
+  'reboot',
+  'poweroff',
+]
 
 const ACTION: Record<HostAction, ActionSpec> = {
+  'check-update': {
+    icon: Search,
+    title: (h) => (
+      <>
+        Check for updates on <Hostname name={h} />?
+      </>
+    ),
+    description:
+      'Looks up the newest release and compares it with the version installed here. Nothing is downloaded or installed, and holzkube-manager keeps running.',
+    consequence:
+      'The page stays connected. The answer appears here and under Update check, usually within seconds.',
+    consequenceClass: SLATE,
+    destructive: false,
+  },
   update: {
     icon: Download,
     title: (h) => (
@@ -267,6 +292,9 @@ export function HostActions({
                 className={cn(
                   'max-md:h-auto max-md:min-h-11 max-md:min-w-0 max-md:py-2 max-md:whitespace-normal',
                   spec.destructive && 'text-destructive',
+                  // The check alone on the phone grid's first row; the service
+                  // pair and the machine pair keep their two rows of two.
+                  action === 'check-update' && 'max-md:col-span-2',
                 )}
                 disabled={reason !== null}
                 onClick={(e) => {
@@ -532,6 +560,18 @@ export const RESULT_WITHIN_MS = 60 * 1000
  */
 export const STARTED_WITHIN_MS = 15 * 60 * 1000
 
+/**
+ * The same for a started check. The helper waits for the check unit inside
+ * its own service, whose TimeoutStartSec is 3 min; a check that has recorded
+ * nothing by then will not.
+ */
+export const CHECK_WITHIN_MS = 3 * 60 * 1000
+
+/** The actions whose answer is a newer update status: they run the update script. */
+function runsUpdateScript(action: HostAction): boolean {
+  return action === 'update' || action === 'check-update'
+}
+
 export function isFinal(phase: OrderPhase): boolean {
   return FINAL.has(phase)
 }
@@ -557,13 +597,17 @@ function bootTime(host: Host): number | null {
  *   host does not answer; and no answer once RESULT_WITHIN_MS have passed
  *   without the daemon reporting the file still there;
  * - the helper's result for this id: rejected or failed as it says; started
- *   becomes update finished once the update status is newer than the order,
- *   back once the process started (restart service, update) or the machine
- *   booted (restart host, shut down host) after it, waiting while the host
- *   does not answer, and started until then.
+ *   becomes update finished once the update status is not older than the
+ *   order (update, check), back once the process started (restart service,
+ *   update) or the machine booted (restart host, shut down host) after it,
+ *   waiting while the host does not answer, and started until then. A check
+ *   restarts nothing, so it is never back.
  *
  * "Update finished" is asked first: an update that installed a release also
- * restarted the process, and its own sentence says which it was.
+ * restarted the process, and its own sentence says which it was. The update
+ * status records whole seconds and the placement does not, so the placement
+ * is compared truncated to its second: a run that ends in the second it was
+ * placed in is finished, not left waiting for "no answer".
  */
 export function orderPhase(order: HostOrder, host: Host, pollFailed = false): OrderPhase {
   const result = host.actions.result
@@ -594,11 +638,12 @@ export function orderPhase(order: HostOrder, host: Host, pollFailed = false): Or
     return result.value.outcome
   }
   const placed = Date.parse(order.placed_at)
+  const placedSecond = Math.floor(placed / 1000) * 1000
   const update = host.service.update
   if (
-    order.action === 'update' &&
+    runsUpdateScript(order.action) &&
     update.readable &&
-    Date.parse(update.value.checked_at) > placed
+    Date.parse(update.value.checked_at) >= placedSecond
   ) {
     return 'update-finished'
   }
@@ -609,13 +654,13 @@ export function orderPhase(order: HostOrder, host: Host, pollFailed = false): Or
     if (Date.parse(host.service.started_at) > placed) {
       return 'back'
     }
-  } else {
+  } else if (order.action !== 'check-update') {
     const boot = bootTime(host)
     if (boot !== null && boot > placed) {
       return 'back'
     }
   }
-  if (elapsed > STARTED_WITHIN_MS) {
+  if (elapsed > (order.action === 'check-update' ? CHECK_WITHIN_MS : STARTED_WITHIN_MS)) {
     return 'no-answer'
   }
   return 'started'
@@ -690,6 +735,7 @@ export function outcomeSentence(u: UpdateStatus): string {
 }
 
 const STARTED: Record<HostAction, string> = {
+  'check-update': 'started. Looking for a newer release; nothing is installed.',
   update:
     'started. If a newer release exists it is installed and holzkube-manager restarts; the outcome appears here and under Update check.',
   'restart-service': 'started. holzkube-manager is restarting.',
@@ -701,9 +747,15 @@ const JOURNAL = <code className="font-mono text-xs">journalctl -u holzkube-manag
 const UPDATE_JOURNAL = (
   <code className="font-mono text-xs">journalctl -u holzkube-manager-update</code>
 )
+const CHECK_JOURNAL = (
+  <code className="font-mono text-xs">journalctl -u holzkube-manager-update-check</code>
+)
 
 /** A started order the host never reported done: what did not happen. */
 const NOT_DONE: Record<HostAction, ReactNode> = {
+  'check-update': (
+    <>started, but no update check was reported within 3 min. {CHECK_JOURNAL} says what happened.</>
+  ),
   update: (
     <>
       started, but no finished update was reported within 15 min. {UPDATE_JOURNAL} says what
@@ -752,7 +804,14 @@ function phaseSentence(phase: OrderPhase, order: HostOrder, host: Host): ReactNo
       )
     case 'update-finished': {
       const u = host.service.update
-      return u.readable ? `finished. ${outcomeSentence(u.value)}` : 'finished.'
+      if (!u.readable) {
+        return 'finished.'
+      }
+      return order.action === 'check-update' ? (
+        <>finished. {checkSentence(u.value)}</>
+      ) : (
+        `finished. ${outcomeSentence(u.value)}`
+      )
     }
     case 'no-answer':
       return result.readable && result.value.id === order.id ? (
@@ -767,6 +826,10 @@ function phaseSentence(phase: OrderPhase, order: HostOrder, host: Host): ReactNo
       const version = host.service.version
       const boot = bootTime(host)
       switch (order.action) {
+        // orderPhase never calls a check back; given the phase anyway, the box
+        // says what was last known.
+        case 'check-update':
+          return STARTED[order.action]
         case 'restart-service':
           return `done. holzkube-manager is back, running ${version} since ${timeOf(
             Date.parse(host.service.started_at),
@@ -787,16 +850,44 @@ function phaseSentence(phase: OrderPhase, order: HostOrder, host: Host): ReactNo
   }
 }
 
+/**
+ * What a finished check found. A newer release is news, not a fault: the
+ * check did what it was asked, so it is said with both versions and what
+ * installs it. Any other outcome means the hourly update ran in between, and
+ * its sentence is the Update check row's.
+ */
+function checkSentence(u: UpdateStatus): ReactNode {
+  switch (u.outcome) {
+    case 'available':
+      return u.latest !== null && u.installed !== null
+        ? `${u.latest} is available; ${u.installed} is installed. Nothing was installed: Check for updates and install, or the hourly update, installs it.`
+        : outcomeSentence(u)
+    case 'current':
+      return u.installed !== null
+        ? `${u.installed} is installed and is the newest release; there is nothing to install.`
+        : outcomeSentence(u)
+    case 'failed':
+      return <>The check failed, and nothing was installed. {CHECK_JOURNAL} says why.</>
+    default:
+      return outcomeSentence(u)
+  }
+}
+
+/** The outcomes a finished run is emerald for; a check asked whether one is available. */
+const GOOD_OUTCOMES: Record<'update' | 'check-update', ReadonlyArray<string>> = {
+  update: ['current', 'updated'],
+  'check-update': ['current', 'available', 'updated'],
+}
+
 /** The box's colour set: slate under way, emerald done, red when nothing (good) happened. */
-function phaseColour(phase: OrderPhase, host: Host): string {
+function phaseColour(phase: OrderPhase, host: Host, action: HostAction): string {
   switch (phase) {
     case 'back':
       return EMERALD
     case 'update-finished': {
       const u = host.service.update
-      return u.readable && (u.value.outcome === 'current' || u.value.outcome === 'updated')
-        ? EMERALD
-        : RED
+      const good = GOOD_OUTCOMES[action === 'check-update' ? 'check-update' : 'update']
+      return u.readable && good.includes(u.value.outcome) ? EMERALD : RED
     }
     case 'rejected':
     case 'failed':
@@ -843,7 +934,7 @@ export function HostOrderStatus({
       ref={box}
       role="status"
       tabIndex={-1}
-      className={`rounded-md border px-3 py-2 text-sm ${phaseColour(phase, host)}`}
+      className={`rounded-md border px-3 py-2 text-sm ${phaseColour(phase, host, order.action)}`}
     >
       <p>
         <span className="font-semibold">{HOST_ACTION_LABEL[order.action]}</span> —{' '}
