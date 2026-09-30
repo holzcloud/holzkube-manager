@@ -41,8 +41,12 @@ const Toaster = ({ ...props }: ToasterProps) => {
           // top-LEFT corner, so two thirds of it sits outside the toast and it
           // cuts across the corner radius -- and on a bottom-right toast that
           // is the edge facing the page. Pull it inside, on the trailing edge.
+          // Below md the chip becomes a 44px square in the corner and drops its
+          // border: a bordered chip grown to 44px would be a box drawn on the
+          // toast, so the X stays its size and the square around it is the
+          // target. Its centre moves 2px (24 to 22 from the corner).
           closeButton:
-            'top-3! right-3! left-auto! size-6! translate-x-0! translate-y-0! border-border bg-transparent',
+            'top-3! right-3! left-auto! size-6! translate-x-0! translate-y-0! border-border bg-transparent max-md:size-11! max-md:top-0! max-md:right-0! max-md:border-transparent!',
         },
       }}
       {...props}
