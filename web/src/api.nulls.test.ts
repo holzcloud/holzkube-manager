@@ -3,8 +3,10 @@ import {
   accessControlSchema,
   clusterNetworkSchema,
   clusterStorageSchema,
+  hostSchema,
   inventorySchema,
 } from '@/api'
+import demo from '../fixtures/demo.json'
 
 /**
  * A null list is an empty list (2026-09-20).
@@ -53,5 +55,18 @@ describe('a null list', () => {
   it('still fills a missing list, which is what it always did', () => {
     const parsed = inventorySchema.safeParse({ notice: '' })
     expect(parsed.success && parsed.data.namespaces).toEqual([])
+  })
+
+  it('reads a null or absent actions.outdated as nothing outdated (13-14)', () => {
+    const host = structuredClone((demo as Record<string, unknown>)['/api/v1/host']) as Record<
+      string,
+      unknown
+    >
+    const actions = host.actions as Record<string, unknown>
+    for (const outdated of [null, undefined]) {
+      const parsed = hostSchema.safeParse({ ...host, actions: { ...actions, outdated } })
+      expect(parsed.success ? null : JSON.stringify(parsed.error.issues)).toBeNull()
+      expect(parsed.success && parsed.data.actions.outdated).toEqual([])
+    }
   })
 })

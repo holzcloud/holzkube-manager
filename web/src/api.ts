@@ -3054,6 +3054,19 @@ export const hostHelperMissingSchema = z.object({
 
 export type HostHelperMissing = z.infer<typeof hostHelperMissingSchema>
 
+/**
+ * One thing the check for updates needs that an installed helper does not
+ * have (13-14, D-12): script-outdated, the installed script does not name
+ * check-update and would refuse it; check-unit, the unit it starts for the
+ * check is not installed. The four other actions need neither.
+ */
+export const hostHelperOutdatedSchema = z.object({
+  item: z.enum(['script-outdated', 'check-unit']),
+  path: z.string(),
+})
+
+export type HostHelperOutdated = z.infer<typeof hostHelperOutdatedSchema>
+
 /** The machine holzkube-manager runs on: GET /api/v1/host (Phase 11). */
 export const hostSchema = z.object({
   observed_at: z.string(),
@@ -3198,11 +3211,18 @@ export const hostSchema = z.object({
       result: reading(hostResultSchema),
       available: z.boolean(),
       missing: z.array(hostHelperMissingSchema).nullish().transform(orEmpty),
+      /**
+       * What the check needs that the installed helper lacks; the check alone
+       * is refused while it is not empty. Absent from a daemon before 13-14,
+       * which then reads as nothing outdated.
+       */
+      outdated: z.array(hostHelperOutdatedSchema).nullish().transform(orEmpty),
       install_commands: z.array(z.string()).nullish().transform(orEmpty),
     })
     .default({
       available: false,
       missing: [],
+      outdated: [],
       install_commands: [],
       order: null,
       result: {

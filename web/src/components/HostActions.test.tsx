@@ -42,8 +42,17 @@ const installed = {
   result: noResult,
   available: true,
   missing: [],
+  outdated: [],
   install_commands: [],
 }
+
+/** A helper installed before the check existed: the four older orders work. */
+const olderScript = [{ item: 'script-outdated', path: '/usr/local/sbin/holzkube-manager-host' }]
+const noCheckUnit = [
+  { item: 'check-unit', path: '/etc/systemd/system/holzkube-manager-update-check.service' },
+]
+const CHECK_NEEDS_NEWER =
+  'Check for updates needs a newer holzkube-manager-host helper. The note below says how to reinstall it.'
 
 /**
  * The demo host, renamed to the documentation hostname, with the helper
@@ -255,6 +264,103 @@ describe('HostActions: the five buttons and the one reason they are off', () => 
     for (const b of headerButtons()) {
       expect(b).toBeEnabled()
     }
+  })
+
+  // D-15, D-16: an older helper carries out the four older orders and refuses
+  // the check, so only the check is off, with its own sentence.
+  it.each([
+    ['its script does not know the check', olderScript],
+    ['the check unit is not installed', noCheckUnit],
+  ] as const)('with an older helper (%s): only the check is off, and says why', (_, outdated) => {
+    actions({ host: hostWith({ outdated }) })
+
+    const buttons = headerButtons()
+    expect(buttons.map((b) => b.textContent)).toEqual(LABELS)
+    expect(buttons.map((b) => b.hasAttribute('disabled'))).toEqual([
+      true,
+      false,
+      false,
+      false,
+      false,
+    ])
+    expect(reasonLine()?.textContent).toBe(CHECK_NEEDS_NEWER)
+    expect(screen.getByRole('group', { name: 'Host actions' })).toHaveAttribute(
+      'aria-describedby',
+      'host-actions-reason',
+    )
+  })
+
+  it('with nothing outdated: all five on, and no line', () => {
+    actions({ host: hostWith({ outdated: [] }) })
+    for (const b of headerButtons()) {
+      expect(b).toBeEnabled()
+    }
+    expect(reasonLine()).toBeNull()
+  })
+
+  // A reason for the whole group wins over the check's own: all five off, and
+  // the line says the group's reason.
+  it.each([
+    [
+      'in a container',
+      { host: hostWith({ available: false, outdated: olderScript }, { container: true }) },
+      'Host actions are only available with the systemd installation.',
+    ],
+    [
+      'with the helper missing',
+      {
+        host: hostWith({
+          available: false,
+          missing: [{ item: 'script', path: '/usr/local/sbin/holzkube-manager-host' }],
+          outdated: olderScript,
+        }),
+      },
+      'Host actions need the holzkube-manager-host helper, which is not installed. The note below says what to install.',
+    ],
+    [
+      'for a reader',
+      { host: hostWith({ outdated: olderScript }), role: 'reader' },
+      'Host actions need the operator role. You are signed in as a reader.',
+    ],
+    [
+      'while holzkube-manager does not answer',
+      { host: hostWith({ outdated: olderScript }), pollFailed: true },
+      'holzkube-manager is not answering; host actions return when it does.',
+    ],
+    [
+      'while an order is under way',
+      {
+        host: hostWith({ outdated: olderScript }),
+        order: { action: 'reboot', phase: 'started' } as FollowedOrder,
+      },
+      'The last host action is still under way; wait for it to finish.',
+    ],
+  ] as const)('%s with an older helper: the group reason wins, all five off', (_, opts, why) => {
+    actions(opts)
+    expectOffBecause(why)
+  })
+
+  it('with the hostname not readable and an older helper: the group reason wins', () => {
+    const host = hostWith({ outdated: olderScript })
+    host.device.hostname = {
+      readable: false,
+      reason: { code: 'read-failed', message: 'uname(2) failed.' },
+    }
+    actions({ host })
+    expectOffBecause(
+      'The hostname could not be read, so there is nothing to type to confirm a host action.',
+    )
+  })
+
+  it('parses an answer without outdated (a daemon before 13-14) as nothing outdated', () => {
+    const host = hostWith()
+    const raw = structuredClone((demo as Record<string, unknown>)['/api/v1/host']) as Record<
+      string,
+      unknown
+    >
+    const { outdated: _dropped, ...older } = raw.actions as Record<string, unknown>
+    expect(hostSchema.parse({ ...raw, actions: older }).actions.outdated).toEqual([])
+    expect(host.actions.outdated).toEqual([])
   })
 
   it('says the first reason that applies, and only that one', () => {
@@ -609,6 +715,49 @@ describe('HostActions: one dialog per action', () => {
       expect(document.activeElement).not.toBe(document.body)
     },
   )
+
+  // WR-01 for the check: an older helper learnt while the check's dialog is
+  // open turns its trigger off; the dialog says why and a cancel hands focus to
+  // the line that says it.
+  it('an older helper learnt while the check dialog is open: the confirm is off, and a cancel focuses the reason', async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const view = (outdated: ReadonlyArray<unknown>) => (
+      <QueryClientProvider client={client}>
+        <HostActions
+          host={hostWith({ outdated })}
+          sessionRole="operator"
+          pollFailed={false}
+          order={null}
+          onPlaced={() => undefined}
+        />
+      </QueryClientProvider>
+    )
+    const { rerender } = render(view([]))
+    const trigger = screen.getByRole('button', { name: 'Check for updates' })
+    await userEvent.click(trigger)
+    await userEvent.type(screen.getByLabelText(/to confirm/), 'example-host')
+    rerender(view(olderScript))
+    expect(trigger).toBeDisabled()
+    const dialog = screen.getByRole('dialog')
+    within(dialog).getByText(CHECK_NEEDS_NEWER)
+    expect(within(dialog).getByRole('button', { name: /^Check for updates/ })).toBeDisabled()
+
+    await userEvent.click(screen.getByRole('button', { name: 'Keep running' }))
+    expect(screen.queryByRole('dialog')).toBeNull()
+    const line = reasonLine()
+    expect(line).toHaveTextContent(CHECK_NEEDS_NEWER)
+    await vi.waitFor(() => expect(line).toHaveFocus())
+  })
+
+  // The check's reason is the check's alone: a restart's dialog stays usable.
+  it('with an older helper the other dialogs are not told the check reason', async () => {
+    actions({ host: hostWith({ outdated: olderScript }) })
+    await userEvent.click(screen.getByRole('button', { name: 'Restart host' }))
+    await userEvent.type(screen.getByLabelText(/to confirm/), 'example-host')
+    const dialog = screen.getByRole('dialog')
+    expect(within(dialog).queryByText(CHECK_NEEDS_NEWER)).toBeNull()
+    expect(within(dialog).getByRole('button', { name: /^Restart host/ })).toBeEnabled()
+  })
 
   // The other half of the rule: after an order the status box takes focus, so
   // the dialog must not hand it back -- even when the trigger is still on
