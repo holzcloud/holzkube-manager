@@ -5,16 +5,16 @@ milestone_name: Host & Telefon
 current_phase: 14
 current_phase_name: telefon-tippziele
 status: executing
-stopped_at: Completed 13-11-PLAN.md
-last_updated: "2026-09-30T06:58:25.750Z"
-last_activity: 2026-09-29
-last_activity_desc: Phase 13 execution started
-state_head: 3a3d3e4473cd7a89c6e479c0f0de86cec45b548a
+stopped_at: Completed 14-01-PLAN.md
+last_updated: "2026-09-30T09:31:22.814Z"
+last_activity: 2026-09-30
+last_activity_desc: Phase 14 execution started
+state_head: 2b7bdcba65605666243d0a54a9e574f7b8dc628f
 progress:
   total_phases: 4
   completed_phases: 2
   total_plans: 33
-  completed_plans: 26
+  completed_plans: 27
   percent: 50
 ---
 
@@ -28,14 +28,14 @@ liegt unverändert in `milestones/STATE-2026-09-17.md`.
 See: .planning/PROJECT.md (updated 2026-09-28)
 
 **Core value:** Eine neue Maschine wird komplett in der UI zum Cluster-Node — ohne `talosctl`, ohne Omni.
-**Current focus:** Phase 13 — Host-Aktionen über einen root-eigenen Helfer
+**Current focus:** Phase 14 — telefon-tippziele
 
 ## Current Position
 
-Phase: 14 (telefon-tippziele) — READY TO EXECUTE
-Plan: 9 of 9
+Phase: 14 (telefon-tippziele) — EXECUTING
+Plan: 2 of 7
 Status: Ready to execute
-Last activity: 2026-09-29 — Phase 13 execution started
+Last activity: 2026-09-30 — Phase 14 execution started
 
 Progress: [█████░░░░░] 50%
 
@@ -126,6 +126,8 @@ Siehe `PROJECT.md`, die `MILESTONE-*.md`-Dateien und für v1.18 den Abschnitt
 - [Phase 13]: 13-09: readme-images.mjs scrolls to the top before measuring a tall shot
 - [Phase 13]: G-13-2 fixed in Detect: not-enabled only asked once both unit files are there, so the page sentence stays exact (D-12)
 - [Phase 13]: G-13-3: host action button classes go through cn() as whitespace-bounded literals; a class flush against a template interpolation never reaches Tailwind's output
+- [Phase 14]: 14-01: D-05 held on the real path -- the Sudo dialog opener gets the audit daemon's real 428 on POST /api/v1/users from the New account form; no fixture 428
+- [Phase 14]: 14-01: route guard uses router.matchRoutes (A1 held); quick guard command must run from web/ (npm --prefix web exec runs vitest in the repo root)
 
 ### Blockers/Concerns
 
@@ -140,8 +142,8 @@ Siehe `PROJECT.md`, die `MILESTONE-*.md`-Dateien und für v1.18 den Abschnitt
 
 ## Session Continuity
 
-Last session: 2026-09-30T04:05:14.040Z
-Stopped at: Completed 13-11-PLAN.md
+Last session: 2026-09-30T09:31:22.658Z
+Stopped at: Completed 14-01-PLAN.md
 Resume file: None
 Next: `/gsd-plan-phase 11`
 
@@ -175,3 +177,4 @@ Next: `/gsd-plan-phase 11`
 | Phase 13 P09 | 45min | 2 tasks | 9 files |
 | Phase 13 P10 | 10min | 3 tasks | 12 files |
 | Phase 13 P11 | 20min | 2 tasks | 2 files |
+| Phase 14 P01 | 21min | 3 tasks | 7 files |
