@@ -238,14 +238,21 @@ checked, which versions it saw and what came of it.
 
 #### Host actions
 
-Four buttons in the page's header act on the machine itself:
+Five buttons in the page's header act on the machine itself:
 
+- **Check for updates** looks up the newest release through the same update
+  script the timer runs (`holzkube-manager-update --check`, run by
+  `holzkube-manager-update-check.service`, which the helper starts) and
+  installs nothing: holzkube-manager keeps running and the page keeps its
+  connection. The status box and **Update check** then name the newest release
+  and the version installed here. A check that fails says so;
+  `journalctl -u holzkube-manager-update-check` says why.
 - **Check for updates and install** runs the same update the hourly timer runs
   (`holzkube-manager-update.service`): it looks for a newer release and, if
   there is one, installs it and restarts holzkube-manager. If there is none,
-  nothing changes. It is not a check that only looks -- that is why the button
-  says "and install". What came of it appears in the status box and under
-  **Update check**.
+  nothing changes. To only look, use **Check for updates** -- that is why this
+  button says "and install". What came of it appears in the status box and
+  under **Update check**.
 - **Restart service** restarts holzkube-manager. The machine and everything
   else on it keep running.
 - **Restart host** restarts the whole machine, and everything running on it.
@@ -253,23 +260,25 @@ Four buttons in the page's header act on the machine itself:
   switch it back on: somebody has to power it on by hand.
 
 **Who may press them, and what they ask for.** The operator role; a reader sees
-the four buttons switched off, with the reason beneath them. Each one opens its
-own dialog, and every one of the four asks you to type the machine's hostname --
-there is only one host, and it is the one this page runs on. What you typed
+the five buttons switched off, with the reason beneath them. Each one opens its
+own dialog, and every one of the five asks you to type the machine's hostname --
+there is only one host, and it is the one this page runs on. That holds for the
+check as well: it installs nothing, but root still acts on the machine on the
+page's behalf. What you typed
 places that one order, from that session, and no second. Then the password,
 unless you gave it within the sudo window -- five minutes unless
 `--sudo-window` says otherwise, the same as for every other destructive action;
-with a provider sign-in, the provider's login instead. Each action is recorded in the audit log as `host.reboot`,
-`host.poweroff`, `host.restart-service` or `host.update`, and the typed
-confirmation as `action.confirm`.
+with a provider sign-in, the provider's login instead. Each action is recorded in the audit log as `host.check-update`,
+`host.reboot`, `host.poweroff`, `host.restart-service` or `host.update`, and the
+typed confirmation as `action.confirm`.
 
 **holzkube-manager does none of this itself.** The service keeps every line of
 its hardening: no root, no capability, no way to reach systemd over D-Bus. A
 button only leaves a one-line order in the data directory
 (`/var/lib/holzkube-manager/host-order`). A small root-owned helper that you
-install once -- a script and two systemd units, in `deploy/` in every release
+install once -- a script and three systemd units, in `deploy/` in every release
 archive -- is started by systemd when the order appears, checks that it is one
-of exactly four, removes it, and runs the one fixed `systemctl` command for it.
+of exactly five, removes it, and runs the one fixed `systemctl` command for it.
 It records what came of it in its own directory, `/var/lib/holzkube-manager-host`,
 where the page reads it. **`deploy/HOST-HELPER.md` installs it**, step by step,
 and says how to check it works and how to remove it again. Until it is
@@ -277,6 +286,13 @@ installed the buttons stay off, and a notice under the header names
 exactly which of its files are missing and shows the four commands that install
 it. The release update never installs or replaces the helper: new root code on
 the machine is the operator's decision.
+
+**A helper older than holzkube-manager.** A helper installed before **Check for
+updates** existed carries out the other four orders, and their buttons work.
+**Check for updates** stays off and says so, and a notice under the header names
+what to reinstall -- the helper script that does not know the check, the check's
+own unit, or both -- with the same install commands. Running them again from the
+newer release archive adds the check; nothing else changes.
 
 **What the page shows once you have pressed one.** A status box under the
 header follows the order from start to end:
@@ -301,9 +317,10 @@ header follows the order from start to end:
 - **no answer** means the page stopped waiting: the helper took the order but
   recorded nothing within a minute, or an action it started was not reported
   done within 15 minutes -- the host did not restart, no finished update
-  appeared. The buttons come back and the box can be dismissed;
-  `journalctl -u holzkube-manager-host` (for an update,
-  `journalctl -u holzkube-manager-update`) says what happened.
+  appeared -- or a check within 3 minutes. The buttons come back and the box
+  can be dismissed; `journalctl -u holzkube-manager-host` (for an update,
+  `journalctl -u holzkube-manager-update`; for a check,
+  `journalctl -u holzkube-manager-update-check`) says what happened.
 
 One order at a time: while one waits for the helper, and while a restart or
 shutdown it started is still under way, the buttons are off, and a second
@@ -317,7 +334,7 @@ board without a battery-backed clock restores from a saved time at boot, so it
 is a net and not a guarantee.
 
 **Not in a container.** A container has no host of its own to restart, switch
-off or update, so there the four buttons stay off and say so; host actions
+off or update, so there the five buttons stay off and say so; host actions
 exist only with the systemd installation.
 
 **A data directory other than `/var/lib/holzkube-manager`** needs one more

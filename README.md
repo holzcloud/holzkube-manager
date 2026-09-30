@@ -48,9 +48,9 @@ did.
   the threshold; its state (healthy, warning, not readable) in the navigation
   and as a tile on the wall; a value the service's hardening hides says so
   instead of showing 0; and from the same page restart the service, restart or
-  shut down the machine, or check for an update and install it — carried out by
-  a small root-owned helper the operator installs from `deploy/`, while the
-  service itself never gets root
+  shut down the machine, check for an update without installing anything, or
+  check and install it — carried out by a small root-owned helper the operator
+  installs from `deploy/`, while the service itself never gets root
 - **Apps** — everything that runs, grouped by what was installed, with its CPU
   and memory now and over the day
 - **Kubernetes** — workloads, pods and why one is broken, events, storage,
@@ -100,10 +100,11 @@ and its last update check, and how it is doing right now. A value the service's
 hardening hides says so, and says which line shows it, instead of reading 0.
 Here the processor has run past its warning line: the notice says which value
 crossed which threshold, and the day's curves show it climbing — with a gap
-where the service was stopped, not a line drawn across it. The four host
-actions sit in the header, switched off here: the helper that carries them out
-is not installed yet, and the notice below the hardening note names what is
-missing and the commands that install it.
+where the service was stopped, not a line drawn across it. The five host
+actions sit in the header — the first only looks for a newer release and
+installs nothing — switched off here: the helper that carries them out is not
+installed yet, and the notice below the hardening note names what is missing
+and the commands that install it.
 
 ![The machine holzkube-manager runs on](docs/screenshots/host.png)
 
