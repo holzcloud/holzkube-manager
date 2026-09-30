@@ -66,7 +66,7 @@ damit er es am Ende auf einen Blick prüfen und umwerfen kann.
 
 ### Telefon (MOB)
 
-- [ ] **MOB-01**: Bei 390 px Breite hat jedes Bedienelement eine Tippfläche von mindestens 44 × 44 px (unterhalb `md`; Desktop unverändert)
+- [x] **MOB-01**: Bei 390 px Breite hat jedes Bedienelement eine Tippfläche von mindestens 44 × 44 px (unterhalb `md`; Desktop unverändert)
 - [ ] **MOB-02**: Ein Wächter in der Layout-Prüfung misst die Tippzielgrößen auf allen Routen und wird rot, sobald ein Element darunter fällt
 - [ ] **MOB-03**: Die neue Host-Seite erfüllt MOB-01 und ist auf dem Telefon bedienbar
 
@@ -104,7 +104,7 @@ damit er es am Ende auf einen Blick prüfen und umwerfen kann.
 | HACT-06 | Phase 13 | Complete |
 | HACT-07 | Phase 13 | Complete |
 | HACT-08 | Phase 13 | Complete |
-| MOB-01 | Phase 14 | Pending |
+| MOB-01 | Phase 14 | Complete |
 | MOB-02 | Phase 14 | Pending |
 | MOB-03 | Phase 14 | Pending |
 

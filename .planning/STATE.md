@@ -5,16 +5,16 @@ milestone_name: Host & Telefon
 current_phase: 14
 current_phase_name: telefon-tippziele
 status: executing
-stopped_at: Completed 14-05-PLAN.md
-last_updated: "2026-09-30T10:32:29.746Z"
+stopped_at: Completed 14-06-PLAN.md
+last_updated: "2026-09-30T10:51:29.134Z"
 last_activity: 2026-09-30
 last_activity_desc: Phase 14 execution started
-state_head: 990542e959d11a1bc68255d2c10406cfa3d10e47
+state_head: 46a363febd2bac12d8fdac0582bc26dea5b64c0b
 progress:
   total_phases: 4
   completed_phases: 2
   total_plans: 33
-  completed_plans: 31
+  completed_plans: 32
   percent: 50
 ---
 
@@ -33,7 +33,7 @@ See: .planning/PROJECT.md (updated 2026-09-28)
 ## Current Position
 
 Phase: 14 (telefon-tippziele) — EXECUTING
-Plan: 6 of 7
+Plan: 7 of 7
 Status: Ready to execute
 Last activity: 2026-09-30 — Phase 14 execution started
 
@@ -138,6 +138,8 @@ Siehe `PROJECT.md`, die `MILESTONE-*.md`-Dateien und für v1.18 den Abschnitt
 - [Phase 14]: 14-05: Unused Button sizes (xs, icon-xs, icon-lg) get max-md:size-11 too, so a first use cannot bring back a small target
 - [Phase 14]: 14-05: DialogHeader max-md:pr-8 applies also without a close X (SudoDialog)
 - [Phase 14]: 14-05: The toast dismiss is held by a Chromium component test, not an audit opener; Tailwind generates max-md:size-11! (A2 confirmed)
+- [Phase 14]: 14-06: The phone drawer scrolls (max-md:overflow-y-auto); without it the audit reports CUT OFF, 885px in 844px
+- [Phase 14]: 14-06: Reset dialog disk rows are one label each, taking the li's flex classes; wipe-mode radios left unchanged because the audit did not name them
 
 ### Blockers/Concerns
 
@@ -152,8 +154,8 @@ Siehe `PROJECT.md`, die `MILESTONE-*.md`-Dateien und für v1.18 den Abschnitt
 
 ## Session Continuity
 
-Last session: 2026-09-30T10:32:29.603Z
-Stopped at: Completed 14-05-PLAN.md
+Last session: 2026-09-30T10:51:28.984Z
+Stopped at: Completed 14-06-PLAN.md
 Resume file: None
 Next: `/gsd-plan-phase 11`
 
@@ -192,3 +194,4 @@ Next: `/gsd-plan-phase 11`
 | Phase 14 P03 | 20min | 2 tasks | 4 files |
 | Phase 14 P04 | 11min | 2 tasks | 2 files |
 | Phase 14 P05 | 12min | 2 tasks | 6 files |
+| Phase 14 P06 | 18min | 2 tasks | 4 files |
