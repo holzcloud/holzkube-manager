@@ -85,6 +85,7 @@ archives:
       - deploy/holzkube-manager-host.sh
       - deploy/holzkube-manager-host.path
       - deploy/holzkube-manager-host.service
+      - deploy/holzkube-manager-update-check.service
       - deploy/HOST-HELPER.md
       # The Markdown only: docs/ also holds the README's screenshots and the
       # brand images, which are megabytes nobody installing a daemon needs.

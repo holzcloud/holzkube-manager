@@ -1440,6 +1440,7 @@ node.
 | `POST` | `/api/v1/host/actions/poweroff` | yes | `host.poweroff` | as above, `poweroff <id>` |
 | `POST` | `/api/v1/host/actions/restart-service` | yes | `host.restart-service` | as above, `restart-service <id>` |
 | `POST` | `/api/v1/host/actions/update` | yes | `host.update` | as above, `update <id>` |
+| `POST` | `/api/v1/host/actions/check-update` | yes | `host.check-update` | as above, `check-update <id>`; looks for a newer release and installs nothing |
 
 None of these routes is open to a wall link. The wall carries the host's name and
 state in its own answer instead; see "One screen for the IT office".
@@ -1697,10 +1698,11 @@ time or version. The path is set with `--update-status-file`
 
 ### Host actions: an order for a root helper
 
-Four actions on the host page: restart the host (`reboot`), shut it down
-(`poweroff`), restart holzkube-manager (`restart-service`), and run the update
+Five actions on the host page: restart the host (`reboot`), shut it down
+(`poweroff`), restart holzkube-manager (`restart-service`), run the update
 the hourly timer runs (`update`: it looks for a newer release and installs it if
-there is one). **The daemon carries out none of them.** It runs unprivileged
+there is one), and check for an update (`check-update`: it only looks, and
+installs nothing). **The daemon carries out none of them.** It runs unprivileged
 under its hardened unit, and an action route places a one-line order in the
 data directory; a root-owned helper started by a systemd path unit --
 `deploy/holzkube-manager-host.sh` -- consumes the order, runs one fixed
@@ -1708,11 +1710,12 @@ data directory; a root-owned helper started by a systemd path unit --
 
 **Confirming.** `POST /api/v1/host/confirm` takes
 `{"action": "host.update", "typed": "example-host"}`. `action` is one of
-`host.reboot`, `host.poweroff`, `host.restart-service` and `host.update`;
-anything else is `422` naming `action` ("not a confirmable host action").
+`host.reboot`, `host.poweroff`, `host.restart-service`, `host.update` and
+`host.check-update`; anything else is `422` naming `action` ("not a confirmable host action").
 **Every host action requires typing the hostname** -- unlike a node's reboot
 and shutdown, because there is exactly one host and it is the machine this page
-runs on. `typed`, trimmed of surrounding blanks, is compared with the hostname
+runs on. The check, which takes nothing away, requires it too: no host action
+is one click. `typed`, trimmed of surrounding blanks, is compared with the hostname
 `uname(2)` reports at that moment; a mismatch is `422` naming `typed` ("does
 not match the hostname"), and a hostname that cannot be read is `422` with no
 token. Success is `200`:
@@ -1736,14 +1739,14 @@ confirmation is unchanged: good for any number of requests until it expires.) Th
 `action.confirm` with the action (never with `typed`), and is not destructive:
 it changes nothing.
 
-**Placing.** `POST /api/v1/host/actions/{reboot|poweroff|restart-service|update}`
+**Placing.** `POST /api/v1/host/actions/{reboot|poweroff|restart-service|update|check-update}`
 takes `{"confirmation": "<token>"}`. Each route requires a session, the
 operator role and an open sudo window (`428 sudo.required` otherwise), and is
-audited under its own action, `host.reboot` … `host.update`, with no parameter
+audited under its own action, `host.reboot` … `host.check-update`, with no parameter
 recorded: the body is only the token. A token for a different action or for a
 node is `403 forbidden.confirmation-invalid`, an old one
 `403 forbidden.confirmation-expired`. A session without the operator role is
-`403 forbidden.role` on the confirm route and on all four action routes.
+`403 forbidden.role` on the confirm route and on all five action routes.
 Success is `202` -- the order is placed and nothing has happened yet:
 
 ```json
@@ -1752,6 +1755,16 @@ Success is `202` -- the order is placed and nothing has happened yet:
 
 For `restart-service` and `update` the helper ends the very process that
 answered; the `202` is written before the helper can act.
+
+**What `check-update` runs.** The helper starts
+`holzkube-manager-update-check.service` and waits for it (no `--no-block`), so
+the order's result follows the check: `started` is recorded as it begins, and
+becomes `failed` when the check could not look (the unit failed or was ended). That unit, a oneshot installed with the helper, runs
+`/usr/local/sbin/holzkube-manager-update --check`: the update script's look,
+which compares the installed version with the newest release and records
+`current`, `available` or `failed` in the status file the host answer already
+carries as `service.update` (above). Nothing is downloaded or installed, and
+the service keeps running.
 
 | Status | Code | When |
 |---|---|---|
@@ -1775,11 +1788,11 @@ audit log:
 update 3f9c2a7b1d4e8f60
 ```
 
-The action is one of the four words, the id 16 lowercase hex characters from a
+The action is one of the five words, the id 16 lowercase hex characters from a
 cryptographic random source, then one newline. It is placed exclusively: written
 to a temporary name in the same directory, flushed, then linked to `host-order`,
 which fails when the name is taken -- that failure is the `409`. The helper
-accepts nothing but `^(reboot|poweroff|restart-service|update) [0-9a-f]{16}$`
+accepts nothing but `^(reboot|poweroff|restart-service|update|check-update) [0-9a-f]{16}$`
 on exactly one line of at most 64 bytes, takes the order **before** it reads
 it -- a rename to a name of its own in the same directory, the same kind of
 claim the daemon's withdrawal makes, so exactly one of the two owns an order --
@@ -1832,7 +1845,7 @@ out a reboot nobody asked for any more. So:
   "missing": [],
   "install_commands": [
     "sudo install -o root -g root -m 0755 deploy/holzkube-manager-host.sh /usr/local/sbin/holzkube-manager-host",
-    "sudo install -o root -g root -m 0644 deploy/holzkube-manager-host.path deploy/holzkube-manager-host.service /etc/systemd/system/",
+    "sudo install -o root -g root -m 0644 deploy/holzkube-manager-host.path deploy/holzkube-manager-host.service deploy/holzkube-manager-update-check.service /etc/systemd/system/",
     "sudo systemctl daemon-reload",
     "sudo systemctl enable --now holzkube-manager-host.path"
   ]

@@ -1,21 +1,28 @@
 # The host helper
 
 The Host page can restart the machine, shut it down, restart the
-holzkube-manager service and install an update. holzkube-managerd itself
+holzkube-manager service and install an update. It can also check for an
+update without installing anything. holzkube-managerd itself
 cannot do any of that, and is meant not to: it runs as an unprivileged user,
 without capabilities, and starts no process. What it does instead is place a
 one-line order in its data directory, `/var/lib/holzkube-manager/host-order`.
 
-The **host helper** is what carries the order out. It is three files you
+The **host helper** is what carries the order out. It is four files you
 install by hand, as root, from the release archive:
 
 - `holzkube-manager-host.path` -- a path unit. PID 1 watches for the order
   file; until one appears, nothing runs.
 - `holzkube-manager-host.service` -- a oneshot service the path unit starts.
   It runs the script once per order, sandboxed as far as a reboot allows.
+- `holzkube-manager-update-check.service` -- a oneshot the helper starts for
+  a `check-update` order. It runs `/usr/local/sbin/holzkube-manager-update
+  --check`, which looks up the newest release, records what it found, and
+  installs nothing. It has a sandbox of its own: it may reach the network,
+  which the helper's own service may not, and it writes only
+  `/var/lib/holzkube-manager-update`.
 - `holzkube-manager-host.sh`, installed as
   `/usr/local/sbin/holzkube-manager-host` -- the script. It removes the order
-  before it does anything, and knows exactly four orders, each with one fixed
+  before it does anything, and knows exactly five orders, each with one fixed
   command:
 
   | Order             | Command                                                |
@@ -24,8 +31,12 @@ install by hand, as root, from the release archive:
   | `poweroff`        | `systemctl poweroff`                                   |
   | `restart-service` | `systemctl restart holzkube-manager.service`           |
   | `update`          | `systemctl start --no-block holzkube-manager-update.service` |
+  | `check-update`    | `systemctl start holzkube-manager-update-check.service` |
 
-  Anything else -- a fifth word, a second line, a symlink, an order older than
+  `check-update` waits for the check to end, so the order's result is the
+  check's.
+
+  Anything else -- a sixth word, a second line, a symlink, an order older than
   a minute -- is rejected. The text of an order is never executed, evaluated or
   written to the journal.
 
@@ -46,9 +57,12 @@ Putting new code on a host that runs as root is your decision, every time.
   stops itself instead of starting it forever.
 - GNU coreutils (`dd` with `iflag=nofollow`, `stat`, `mktemp`).
 - The daemon running as `holzkube-manager.service` with its data in
-  `/var/lib/holzkube-manager` (otherwise see below), and, for the `update`
-  order, `holzkube-manager-update.service`, the unit that runs the update
-  script in the reference installation.
+  `/var/lib/holzkube-manager` (otherwise see below).
+- For both update orders, the update script at
+  `/usr/local/sbin/holzkube-manager-update`, as the reference installation
+  has it: `update` starts `holzkube-manager-update.service`, which runs it,
+  and `check-update` starts `holzkube-manager-update-check.service`, which
+  runs it with `--check`.
 
 ## Install
 
@@ -57,7 +71,7 @@ From the root of the unpacked release archive (or a checkout):
 <!-- install-commands:begin -->
 ```sh
 sudo install -o root -g root -m 0755 deploy/holzkube-manager-host.sh /usr/local/sbin/holzkube-manager-host
-sudo install -o root -g root -m 0644 deploy/holzkube-manager-host.path deploy/holzkube-manager-host.service /etc/systemd/system/
+sudo install -o root -g root -m 0644 deploy/holzkube-manager-host.path deploy/holzkube-manager-host.service deploy/holzkube-manager-update-check.service /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable --now holzkube-manager-host.path
 ```
@@ -65,8 +79,9 @@ sudo systemctl enable --now holzkube-manager-host.path
 
 These are the same four lines the Host page shows when the helper is missing.
 The page checks for the script (owned by root and writable by nobody else),
-both unit files, and the entry `systemctl enable` makes in
-`/etc/systemd/system/paths.target.wants/`.
+the helper's two unit files, and the entry `systemctl enable` makes in
+`/etc/systemd/system/paths.target.wants/`. Only the path unit is enabled: the
+check unit has no `[Install]` section, and nothing but the helper starts it.
 
 ## Check that it works
 
@@ -88,10 +103,13 @@ both unit files, and the entry `systemctl enable` makes in
 
    It should say `active (waiting)`.
 
-3. On the Host page, use **Check for updates and install** as the first real
-   order. It goes the same way as the other three -- the helper asks systemd
-   to start a unit -- without taking the machine down. The page reports what
-   became of the order, and the update service does the rest.
+3. On the Host page, use **Check for updates** as the first real order. It
+   installs nothing and takes nothing down, and goes the same way as the
+   others -- the
+   helper asks systemd to start a unit. The page reports what became of the
+   order, and the status box then names the newest release.
+   **Check for updates and install** can follow; the update service does the
+   rest.
 
 ## The service's own unit stays as it is
 
@@ -153,6 +171,8 @@ tests and are left alone.
 - `journalctl -u holzkube-manager-host` says why: which order was started,
   why one was rejected (the reason and the length, never the text), or what
   failed.
+- `journalctl -u holzkube-manager-update-check` says what the check itself
+  did: the installed version, the newest release, or why it could not look.
 - The script's exit code: `0` no order, or started; `1` failed; `2` rejected.
 
 ## When the path unit has stopped
@@ -179,7 +199,7 @@ helper, repeat the install commands above from the newer archive.
 
 ```sh
 sudo systemctl disable --now holzkube-manager-host.path
-sudo rm /usr/local/sbin/holzkube-manager-host /etc/systemd/system/holzkube-manager-host.path /etc/systemd/system/holzkube-manager-host.service
+sudo rm /usr/local/sbin/holzkube-manager-host /etc/systemd/system/holzkube-manager-host.path /etc/systemd/system/holzkube-manager-host.service /etc/systemd/system/holzkube-manager-update-check.service
 sudo systemctl daemon-reload
 ```
 

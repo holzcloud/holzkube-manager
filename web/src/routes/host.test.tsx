@@ -1839,7 +1839,7 @@ describe('the order status and the waiting notice', () => {
 
 const INSTALL_COMMANDS = [
   'sudo install -o root -g root -m 0755 deploy/holzkube-manager-host.sh /usr/local/sbin/holzkube-manager-host',
-  'sudo install -o root -g root -m 0644 deploy/holzkube-manager-host.path deploy/holzkube-manager-host.service /etc/systemd/system/',
+  'sudo install -o root -g root -m 0644 deploy/holzkube-manager-host.path deploy/holzkube-manager-host.service deploy/holzkube-manager-update-check.service /etc/systemd/system/',
   'sudo systemctl daemon-reload',
   'sudo systemctl enable --now holzkube-manager-host.path',
 ]

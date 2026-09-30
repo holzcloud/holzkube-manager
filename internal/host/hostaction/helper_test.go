@@ -197,14 +197,14 @@ func TestInstallCommandsAreTheGuidesBlock(t *testing.T) {
 
 	want := []string{
 		"sudo install -o root -g root -m 0755 deploy/holzkube-manager-host.sh " + HelperScriptPath,
-		"sudo install -o root -g root -m 0644 deploy/holzkube-manager-host.path deploy/holzkube-manager-host.service /etc/systemd/system/",
+		"sudo install -o root -g root -m 0644 deploy/holzkube-manager-host.path deploy/holzkube-manager-host.service deploy/holzkube-manager-update-check.service /etc/systemd/system/",
 		"sudo systemctl daemon-reload",
 		"sudo systemctl enable --now holzkube-manager-host.path",
 	}
 	if !reflect.DeepEqual(InstallCommands, want) {
 		t.Errorf("InstallCommands =\n%s\nwant\n%s", strings.Join(InstallCommands, "\n"), strings.Join(want, "\n"))
 	}
-	for _, p := range []string{PathUnitPath, ServiceUnitPath, WantsLinkPath} {
+	for _, p := range []string{PathUnitPath, ServiceUnitPath, UpdateCheckUnitPath, WantsLinkPath} {
 		if !strings.HasPrefix(p, "/etc/systemd/system/") {
 			t.Errorf("%s is not where the second command installs the units", p)
 		}

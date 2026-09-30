@@ -93,13 +93,19 @@ type Missing struct {
 // InstallCommands installs the helper, run from the root of an unpacked
 // release archive (or a checkout).
 //
+// The second line installs three units: the helper's path unit and service,
+// and the check unit the helper starts for a check-update order.
+// daemon-reload makes systemd see them; only the path unit is enabled. The
+// check unit has no [Install] section -- nothing enables it, and only the
+// helper starts it.
+//
 // This is the one copy. The host page shows it when the helper is missing,
 // and deploy/HOST-HELPER.md carries the same four lines, held to this slice
 // byte for byte by a test -- a test and not an embed, because a package under
 // internal/ cannot embed a file from deploy/.
 var InstallCommands = []string{
 	"sudo install -o root -g root -m 0755 deploy/holzkube-manager-host.sh /usr/local/sbin/holzkube-manager-host",
-	"sudo install -o root -g root -m 0644 deploy/holzkube-manager-host.path deploy/holzkube-manager-host.service /etc/systemd/system/",
+	"sudo install -o root -g root -m 0644 deploy/holzkube-manager-host.path deploy/holzkube-manager-host.service deploy/holzkube-manager-update-check.service /etc/systemd/system/",
 	"sudo systemctl daemon-reload",
 	"sudo systemctl enable --now holzkube-manager-host.path",
 }
