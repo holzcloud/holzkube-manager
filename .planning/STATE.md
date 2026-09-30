@@ -5,16 +5,16 @@ milestone_name: Host & Telefon
 current_phase: 14
 current_phase_name: telefon-tippziele
 status: verifying
-stopped_at: Completed 14-07-PLAN.md
-last_updated: "2026-09-30T11:43:20.913Z"
+stopped_at: Completed 13-12-PLAN.md
+last_updated: "2026-09-30T14:40:15.896Z"
 last_activity: 2026-09-30
 last_activity_desc: Phase 14 execution started
-state_head: 028b60e962e4cca5b1ac45ee0362b81556e18da1
+state_head: f37fff3033d40464f8d9cc2566edbcd71f72ebe9
 progress:
   total_phases: 4
   completed_phases: 2
-  total_plans: 33
-  completed_plans: 33
+  total_plans: 37
+  completed_plans: 34
   percent: 50
 ---
 
@@ -142,6 +142,8 @@ Siehe `PROJECT.md`, die `MILESTONE-*.md`-Dateien und für v1.18 den Abschnitt
 - [Phase 14]: 14-06: Reset dialog disk rows are one label each, taking the li's flex classes; wipe-mode radios left unchanged because the audit did not name them
 - [Phase 14]: [Phase 14-07]: D-10 red checks (a) (b) (c) each exit 201 from task test:layout; D-08 after-dump compared 964 controls, 0 differ
 - [Phase 14]: [Phase 14-07]: D-11 phone hand test not performed; ROADMAP criterion 4 phone half open (human_needed), MOB-03 stays partial; repeat D-08 for /host and D-11 after 13-12
+- [Phase 13]: 13-12: Check for updates is a fifth host order, check-update, run by the root helper through holzkube-manager-update-check.service (the update script's --check), behind all four locks
+- [Phase 13]: 13-12: a finished check is emerald for current and available, red only for failed; orderPhase compares checked_at with the placement truncated to the second
 
 ### Blockers/Concerns
 
@@ -156,8 +158,8 @@ Siehe `PROJECT.md`, die `MILESTONE-*.md`-Dateien und für v1.18 den Abschnitt
 
 ## Session Continuity
 
-Last session: 2026-09-30T11:43:20.594Z
-Stopped at: Completed 14-07-PLAN.md
+Last session: 2026-09-30T14:40:15.652Z
+Stopped at: Completed 13-12-PLAN.md
 Resume file: None
 Next: `/gsd-plan-phase 11`
 
@@ -198,3 +200,4 @@ Next: `/gsd-plan-phase 11`
 | Phase 14 P05 | 12min | 2 tasks | 6 files |
 | Phase 14 P06 | 18min | 2 tasks | 4 files |
 | Phase 14 P07 | 50min | 3 tasks | 2 files |
+| Phase 13 P12 | 33min | 2 tasks | 16 files |
