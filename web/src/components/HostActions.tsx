@@ -28,6 +28,7 @@ import {
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { cn } from '@/lib/utils'
 
 /**
  * The host actions on /host (Phase 13, HACT-01..05).
@@ -242,9 +243,15 @@ export function HostActions({
               <Button
                 variant="outline"
                 size="sm"
-                className={`max-md:h-auto max-md:min-h-11 max-md:min-w-0 max-md:py-2 max-md:whitespace-normal${
-                  spec.destructive ? ' text-destructive' : ''
-                }`}
+                // Every class a whitespace-bounded literal: Tailwind reads the
+                // source as text, and a class written flush against an
+                // interpolation (`...whitespace-normal${`) is a token it cannot
+                // read, so no rule was generated and the label ran past its
+                // button at 390 px (G-13-3).
+                className={cn(
+                  'max-md:h-auto max-md:min-h-11 max-md:min-w-0 max-md:py-2 max-md:whitespace-normal',
+                  spec.destructive && 'text-destructive',
+                )}
                 disabled={reason !== null}
                 onClick={() => setPending(action)}
               >
