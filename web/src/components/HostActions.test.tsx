@@ -454,6 +454,53 @@ describe('HostActions: one dialog per action', () => {
     expect(confirm).not.toHaveBeenCalled()
   })
 
+  // 14-REVIEW CR-01: once the confirm is pressed the order is on its way, and a
+  // mutation's onSuccess runs even after the dialog has gone. A close in those
+  // seconds would say "Keep running" and restart the host anyway, so there is
+  // no close: the dialog stays, says Working…, and ends as the order does.
+  it.each([
+    ['Keep running', () => userEvent.click(screen.getByRole('button', { name: 'Keep running' }))],
+    ['Escape', () => userEvent.keyboard('{Escape}')],
+    [
+      'the close X',
+      () =>
+        userEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Close' })),
+    ],
+  ] as const)(
+    'while the order is being placed, %s does not close the dialog',
+    async (_, attempt) => {
+      let answer: (value: { token: string; expires: string }) => void = () => undefined
+      vi.spyOn(api.hostActions, 'confirm').mockReturnValue(
+        new Promise((resolve) => {
+          answer = resolve
+        }),
+      )
+      const order: HostOrder = { ...held, action: 'reboot' }
+      const place = vi.spyOn(api.hostActions, 'place').mockResolvedValue({ order })
+      const onPlaced = vi.fn()
+      actions({ onPlaced })
+      await userEvent.click(screen.getByRole('button', { name: 'Restart host' }))
+      await userEvent.type(screen.getByLabelText(/to confirm/), 'example-host')
+      await userEvent.click(
+        within(screen.getByRole('dialog')).getByRole('button', { name: 'Restart host' }),
+      )
+      const dialog = screen.getByRole('dialog')
+      await within(dialog).findByRole('button', { name: /Working/ })
+
+      await attempt()
+      // Past the tick in which Radix would have unmounted it.
+      await new Promise((resolve) => setTimeout(resolve, 50))
+      expect(screen.queryByRole('dialog')).toBe(dialog)
+      expect(within(dialog).getByRole('button', { name: 'Keep running' })).toBeDisabled()
+      expect(place).not.toHaveBeenCalled()
+
+      // The order goes through in front of the operator, not behind a closed dialog.
+      answer({ token: 'token-1', expires: '2026-09-28T10:10:05Z' })
+      await vi.waitFor(() => expect(onPlaced).toHaveBeenCalledWith(order))
+      expect(place).toHaveBeenCalledWith('reboot', 'token-1')
+    },
+  )
+
   // 13-UI-REVIEW fix 1: a cancel is not an order. The trigger is still on, and
   // a keyboard or screen-reader user left on the page body sits next to the
   // destructive pair with no idea where they are.
