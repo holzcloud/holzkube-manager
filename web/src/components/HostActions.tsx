@@ -353,15 +353,28 @@ function HostActionDialog({
   }
 
   return (
-    <Dialog open onOpenChange={(open) => !open && onClose()}>
+    // No way out while the order is on its way (14-REVIEW CR-01): the
+    // mutation's onSuccess runs even after the dialog has gone, so a close in
+    // those seconds would say "Keep running" and place the order anyway.
+    // Escape, a tap outside and the close X all arrive here and are ignored
+    // until the confirm and the placement have answered.
+    <Dialog
+      open
+      onOpenChange={(open) => {
+        if (!open && !run.isPending) {
+          onClose()
+        }
+      }}
+    >
       <DialogContent
         className="sm:max-w-md"
         // After an order was placed the trigger is off while it is under way,
         // and focus goes to the status box instead (HostOrderStatus takes it).
-        // A cancel -- Keep running, Escape, the close X -- placed nothing: the
-        // trigger is still on and gets focus back. Radix would only do that for
-        // a DialogTrigger, which these buttons are not, and left alone it drops
-        // focus on the page body next to the destructive pair.
+        // A cancel -- Keep running, Escape, the close X, none of which closes
+        // while an order is on its way -- placed nothing: the trigger gets
+        // focus back. Radix would only do that for a DialogTrigger, which these
+        // buttons are not, and left alone it drops focus on the page body next
+        // to the destructive pair.
         onCloseAutoFocus={(e) => {
           e.preventDefault()
           if (!placed.current) {
@@ -428,7 +441,7 @@ function HostActionDialog({
           )}
 
           <DialogFooter>
-            <Button type="button" variant="outline" onClick={onClose}>
+            <Button type="button" variant="outline" onClick={onClose} disabled={run.isPending}>
               Keep running
             </Button>
             <Button
