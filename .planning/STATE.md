@@ -5,16 +5,16 @@ milestone_name: Host & Telefon
 current_phase: 13
 current_phase_name: Host-Aktionen über einen root-eigenen Helfer
 status: verifying
-stopped_at: Completed 13-10-PLAN.md
-last_updated: "2026-09-30T03:42:55.860Z"
+stopped_at: Completed 13-11-PLAN.md
+last_updated: "2026-09-30T04:05:14.166Z"
 last_activity: 2026-09-29
 last_activity_desc: Phase 13 execution started
-state_head: dd670b3aadcc611307e5ad19ab509b42048c088d
+state_head: c265f421ccbb0a8ab597690d2bd340d43c7f710f
 progress:
   total_phases: 4
   completed_phases: 2
   total_plans: 26
-  completed_plans: 25
+  completed_plans: 26
   percent: 50
 ---
 
@@ -119,6 +119,7 @@ Siehe `PROJECT.md`, die `MILESTONE-*.md`-Dateien und für v1.18 den Abschnitt
 - [Phase 13]: 13-09: the fixture's helper-missing actions are held to InstallCommands and Detect by TestTheFixtureShowsTheRealInstallCommands
 - [Phase 13]: 13-09: readme-images.mjs scrolls to the top before measuring a tall shot
 - [Phase 13]: G-13-2 fixed in Detect: not-enabled only asked once both unit files are there, so the page sentence stays exact (D-12)
+- [Phase 13]: G-13-3: host action button classes go through cn() as whitespace-bounded literals; a class flush against a template interpolation never reaches Tailwind's output
 
 ### Blockers/Concerns
 
@@ -133,8 +134,8 @@ Siehe `PROJECT.md`, die `MILESTONE-*.md`-Dateien und für v1.18 den Abschnitt
 
 ## Session Continuity
 
-Last session: 2026-09-30T03:42:55.728Z
-Stopped at: Completed 13-10-PLAN.md
+Last session: 2026-09-30T04:05:14.040Z
+Stopped at: Completed 13-11-PLAN.md
 Resume file: None
 Next: `/gsd-plan-phase 11`
 
@@ -167,3 +168,4 @@ Next: `/gsd-plan-phase 11`
 | Phase 13 P08 | 24 min | 3 tasks | 6 files |
 | Phase 13 P09 | 45min | 2 tasks | 9 files |
 | Phase 13 P10 | 10min | 3 tasks | 12 files |
+| Phase 13 P11 | 20min | 2 tasks | 2 files |
