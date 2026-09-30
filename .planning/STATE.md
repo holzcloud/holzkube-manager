@@ -5,16 +5,16 @@ milestone_name: Host & Telefon
 current_phase: 14
 current_phase_name: telefon-tippziele
 status: executing
-stopped_at: Completed 14-01-PLAN.md
-last_updated: "2026-09-30T09:31:22.814Z"
+stopped_at: Completed 14-02-PLAN.md
+last_updated: "2026-09-30T09:44:21.278Z"
 last_activity: 2026-09-30
 last_activity_desc: Phase 14 execution started
-state_head: 2b7bdcba65605666243d0a54a9e574f7b8dc628f
+state_head: 8ee19f4fc6df12941ccbc2da17d4db83dde9f104
 progress:
   total_phases: 4
   completed_phases: 2
   total_plans: 33
-  completed_plans: 27
+  completed_plans: 28
   percent: 50
 ---
 
@@ -33,7 +33,7 @@ See: .planning/PROJECT.md (updated 2026-09-28)
 ## Current Position
 
 Phase: 14 (telefon-tippziele) — EXECUTING
-Plan: 2 of 7
+Plan: 3 of 7
 Status: Ready to execute
 Last activity: 2026-09-30 — Phase 14 execution started
 
@@ -128,6 +128,8 @@ Siehe `PROJECT.md`, die `MILESTONE-*.md`-Dateien und für v1.18 den Abschnitt
 - [Phase 13]: G-13-3: host action button classes go through cn() as whitespace-bounded literals; a class flush against a template interpolation never reaches Tailwind's output
 - [Phase 14]: 14-01: D-05 held on the real path -- the Sudo dialog opener gets the audit daemon's real 428 on POST /api/v1/users from the New account form; no fixture 428
 - [Phase 14]: 14-01: route guard uses router.matchRoutes (A1 held); quick guard command must run from web/ (npm --prefix web exec runs vitest in the repo root)
+- [Phase 14]: 14-02: focus on cancel is returned from an opener ref, because Radix's modal DialogContent only refocuses a DialogTrigger
+- [Phase 14]: 14-02: host-level pair gap is a zero-width spacer (8+0+8=16 px above md, measured 32 before) -- the phase's one deliberate change above md, landed before the D-08 before-dump
 
 ### Blockers/Concerns
 
@@ -142,8 +144,8 @@ Siehe `PROJECT.md`, die `MILESTONE-*.md`-Dateien und für v1.18 den Abschnitt
 
 ## Session Continuity
 
-Last session: 2026-09-30T09:31:22.658Z
-Stopped at: Completed 14-01-PLAN.md
+Last session: 2026-09-30T09:44:21.114Z
+Stopped at: Completed 14-02-PLAN.md
 Resume file: None
 Next: `/gsd-plan-phase 11`
 
@@ -178,3 +180,4 @@ Next: `/gsd-plan-phase 11`
 | Phase 13 P10 | 10min | 3 tasks | 12 files |
 | Phase 13 P11 | 20min | 2 tasks | 2 files |
 | Phase 14 P01 | 21min | 3 tasks | 7 files |
+| Phase 14 P02 | 11min | 2 tasks | 5 files |
