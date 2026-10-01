@@ -129,6 +129,13 @@ var allowlist = map[string][]string{
 	// Likewise: the account is in the path and there is no body.
 	"user.delete": {},
 
+	// Unlinking single sign-on: the account is in the path and there is no
+	// body. The issuer and subject it removes are a person's identity at a
+	// third party, and this archive is one nothing ever removes from -- so
+	// nothing is permitted, and whatever a client sends anyway is redacted by
+	// the fail-closed default rather than kept forever.
+	"user.identity-unlink": {},
+
 	// Service accounts, v1.16 phase 4. The username and the role, for the same
 	// reason user.create permits them: "a machine identity was created"
 	// without them cannot answer who can reach this cluster and since when.

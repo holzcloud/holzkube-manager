@@ -1557,7 +1557,7 @@ var routeBudgets = slices.Concat([]routeBudget{
 		verdict:       withinBudget,
 		clipping:      uncut,
 		why: "store-only: accounts live in this installation's own store and nothing about them " +
-			"is on a node. The four rows below are the same, and they are listed one by one " +
+			"is on a node. The rows below are the same, and they are listed one by one " +
 			"rather than as a prefix because the guard matches whole routes -- a prefix rule " +
 			"here would silently cover a future /api/v1/users/{id}/something that does reach " +
 			"one.",
@@ -1588,6 +1588,14 @@ var routeBudgets = slices.Concat([]routeBudget{
 	},
 	{
 		route:         "DELETE /api/v1/users/{id}",
+		calls:         nil,
+		routeDeadline: 0,
+		verdict:       withinBudget,
+		clipping:      uncut,
+		why:           "store-only.",
+	},
+	{
+		route:         "DELETE /api/v1/users/{id}/identity",
 		calls:         nil,
 		routeDeadline: 0,
 		verdict:       withinBudget,

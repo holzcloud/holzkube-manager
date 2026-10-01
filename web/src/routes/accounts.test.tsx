@@ -2,7 +2,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
-import type { User } from '@/api'
+import { api, type User } from '@/api'
 import { AccountTable } from '@/routes/accounts'
 
 /**
@@ -26,18 +26,19 @@ function account(over: Partial<User> = {}): User {
     token_issued_at: '',
     last_used_at: '',
     linked_identity: false,
+    linked_provider: '',
     self: false,
     ...over,
   }
 }
 
-function wrap(users: User[]) {
+function wrap(users: User[], onChanged: () => void = vi.fn()) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   })
   return render(
     <QueryClientProvider client={client}>
-      <AccountTable users={users} onChanged={vi.fn()} />
+      <AccountTable users={users} onChanged={onChanged} />
     </QueryClientProvider>,
   )
 }
@@ -150,7 +151,44 @@ describe('the accounts table', () => {
     if (linked === null || local === null) {
       throw new Error('an account has no row')
     }
-    expect(within(linked).getByText(/single sign-on/i)).toBeInTheDocument()
+    // The Sign-in text, specifically: the linked row also holds the unlink
+    // button, whose label says single sign-on too.
+    expect(within(linked).getByText(/password and single sign-on/i)).toBeInTheDocument()
     expect(within(local).queryByText(/single sign-on/i)).toBeNull()
+  })
+
+  it('names the provider and unlinks through a confirmation', async () => {
+    const user = userEvent.setup()
+    const onChanged = vi.fn()
+    const unlink = vi
+      .spyOn(api.users, 'unlinkIdentity')
+      .mockResolvedValue(account({ id: 'u2', username: 'linked' }))
+    wrap(
+      [
+        account({
+          id: 'u2',
+          username: 'linked',
+          linked_identity: true,
+          linked_provider: 'idp.example.com',
+        }),
+      ],
+      onChanged,
+    )
+
+    const row = screen.getByText('linked').closest('tr')
+    if (row === null) {
+      throw new Error('the linked account has no row')
+    }
+    expect(within(row).getByText(/via idp\.example\.com/i)).toBeInTheDocument()
+
+    await user.click(within(row).getByRole('button', { name: 'Unlink single sign-on' }))
+    const dialog = await screen.findByRole('dialog')
+    expect(within(dialog).getByText(/Unlink single sign-on for linked\?/)).toBeInTheDocument()
+    expect(unlink).not.toHaveBeenCalled()
+
+    await user.click(within(dialog).getByRole('button', { name: 'Unlink' }))
+    await waitFor(() => expect(onChanged).toHaveBeenCalled())
+    expect(unlink).toHaveBeenCalledWith('u2')
+    unlink.mockRestore()
   })
 })

@@ -10,6 +10,7 @@ package handlers
 import (
 	"errors"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -19,11 +20,13 @@ import (
 	"github.com/holzcloud/holzkube-manager/internal/store"
 )
 
-// UserRoutes serves the account list and the four things an admin does to one.
+// UserRoutes serves the account list and the things an admin does to one.
 //
-// Creating, deleting and resetting a password are Destructive: each of them
-// changes who can reach cluster PKI, which is the same argument that makes the
-// operator's own password change destructive. Changing a role is Destructive
+// Creating, deleting, resetting a password and unlinking single sign-on are
+// Destructive: each of them changes who can reach cluster PKI, which is the
+// same argument that makes the operator's own password change destructive.
+// Unlinking changes it through the provider -- which identity there the next
+// single sign-on resolves to -- and that is a door to the same PKI. Changing a role is Destructive
 // for the same reason in one direction -- promotion to admin -- and marking it
 // only in that direction would be a flag that depends on the body, which is
 // exactly what D-06 says a marking must not be.
@@ -93,6 +96,19 @@ func UserRoutes(d httpapi.Deps) []httpapi.Route {
 			Action:          "user.delete",
 			Handler:         handler(deleteUser(d)),
 		},
+		{
+			// Registered whether or not a provider is configured: a binding
+			// left over from a provider that has since been switched off is
+			// exactly the one that needs removing, and a route that existed
+			// only while a provider is configured could not remove it.
+			Method:          http.MethodDelete,
+			Pattern:         "/api/v1/users/{id}/identity",
+			RequiresSession: true,
+			MinRole:         model.RoleAdmin,
+			Destructive:     true,
+			Action:          "user.identity-unlink",
+			Handler:         handler(unlinkUserIdentity(d)),
+		},
 	}
 }
 
@@ -119,10 +135,15 @@ type userView struct {
 	LastUsedAt    string `json:"last_used_at,omitempty"`
 
 	// LinkedIdentity says whether this account signs in through the identity
-	// provider. The issuer and subject themselves are not reported: they are
-	// somebody's identity at a third party, and "is it linked" is the whole of
-	// what an admin looking at a list needs.
+	// provider. The subject is never reported: it is somebody's identifier at
+	// a third party. The issuer is reported only as its host, in
+	// LinkedProvider, because "which provider" is what an admin deciding
+	// whether to unlink needs, and the issuer's path adds nothing to that.
 	LinkedIdentity bool `json:"linked_identity"`
+
+	// LinkedProvider is the issuer's host (and port, when it has one) for a
+	// linked account, and absent otherwise.
+	LinkedProvider string `json:"linked_provider,omitempty"`
 
 	// Self marks the account making the request, so an interface can refuse
 	// the two things it should not offer somebody about themselves without
@@ -140,6 +161,9 @@ func viewOfUser(u model.User, self model.UserID) userView {
 		LinkedIdentity: u.HasIdentityBinding(),
 		Self:           u.ID == self,
 	}
+	if u.HasIdentityBinding() {
+		v.LinkedProvider = providerHost(u.Issuer)
+	}
 	if u.IsService() {
 		v.TokenIssuedAt = stamp(u.TokenIssuedAt)
 		// Empty rather than the zero time, and the difference is what the
@@ -148,6 +172,16 @@ func viewOfUser(u model.User, self model.UserID) userView {
 		v.LastUsedAt = stamp(u.LastUsedAt)
 	}
 	return v
+}
+
+// providerHost is an issuer reduced to its host: never the path, and empty
+// when the issuer does not parse as a URL with one.
+func providerHost(issuer string) string {
+	parsed, err := url.Parse(issuer)
+	if err != nil {
+		return ""
+	}
+	return parsed.Host
 }
 
 // stamp formats a time, and the empty string for one that was never set.
@@ -362,6 +396,21 @@ func deleteUser(d httpapi.Deps) http.HandlerFunc {
 			return
 		}
 		w.WriteHeader(http.StatusNoContent)
+	}
+}
+
+// unlinkUserIdentity removes an account's single sign-on binding and answers
+// with the account as it now is, the same shape a role change answers with.
+func unlinkUserIdentity(d httpapi.Deps) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		saved, err := d.Auth.UnlinkIdentity(r.Context(), model.UserID(r.PathValue("id")))
+		if err != nil {
+			writeUserError(w, r, d, err)
+			return
+		}
+
+		me, _ := d.Auth.CurrentUser(r.Context())
+		writeJSON(w, http.StatusOK, viewOfUser(saved, me.ID))
 	}
 }
 

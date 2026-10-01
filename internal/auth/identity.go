@@ -50,8 +50,9 @@ func (s *Service) FindByIdentity(ctx context.Context, issuer, subject string) (m
 // It refuses to move a binding that already exists. Re-pointing an account at a
 // different subject is indistinguishable, from the store's side, from an
 // attacker who reached this path taking over the only operator account -- and
-// unbinding is a deliberate act that belongs in its own operation, not a side
-// effect of somebody signing in.
+// unbinding is a deliberate act with its own operation, UnlinkIdentity, behind
+// an admin role and the re-authentication window, not a side effect of somebody
+// signing in.
 func (s *Service) BindIdentity(ctx context.Context, u model.User, issuer, subject string) (model.User, error) {
 	if issuer == "" || subject == "" {
 		return model.User{}, errors.New("auth: refusing to bind an empty identity")
@@ -70,6 +71,32 @@ func (s *Service) BindIdentity(ctx context.Context, u model.User, issuer, subjec
 		return model.User{}, fmt.Errorf("auth: store identity binding: %w", err)
 	}
 	return bound, nil
+}
+
+// UnlinkIdentity removes an account's link to a provider identity.
+//
+// Both halves go: an issuer without a subject, or the reverse, is not a
+// binding HasIdentityBinding recognises, but it is a half-remembered one, and
+// the next first-use bind would sit on top of whatever was left. The account
+// itself -- its ID, role and password -- is untouched, so this decides only
+// which account the next provider sign-in resolves to.
+//
+// Neither the issuer nor the subject goes into an error: they are somebody's
+// identity at a third party, and an error is a thing that gets logged.
+func (s *Service) UnlinkIdentity(ctx context.Context, id model.UserID) (model.User, error) {
+	u, err := s.store.Users().Get(ctx, id)
+	if err != nil {
+		return model.User{}, err
+	}
+
+	u.Issuer = ""
+	u.Subject = ""
+	saved, err := s.store.Users().Put(ctx, u)
+	if err != nil {
+		return model.User{}, fmt.Errorf("auth: store unlinked account: %w", err)
+	}
+	saved.PasswordHash = ""
+	return saved, nil
 }
 
 // SingleAccount returns the sole operator account.

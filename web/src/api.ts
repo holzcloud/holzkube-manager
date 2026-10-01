@@ -235,6 +235,9 @@ export const userSchema = z.object({
   last_used_at: z.string().default(''),
   /** Whether this account signs in through the identity provider. */
   linked_identity: z.boolean().default(false),
+  /** The provider's host for a linked account, and empty otherwise. The host
+   * only: the server never reports the issuer's path or the subject. */
+  linked_provider: z.string().default(''),
   /** Whether this is the account making the request. */
   self: z.boolean().default(false),
 })
@@ -3831,6 +3834,11 @@ export const api = {
     remove: async (id: string): Promise<void> => {
       await sendJSON('DELETE', `/api/v1/users/${encodeURIComponent(id)}`, z.unknown())
     },
+
+    /** Removes the account's single sign-on link and answers with the account
+     * as it now is. The account, its role and its password stay. */
+    unlinkIdentity: (id: string): Promise<User> =>
+      sendJSON('DELETE', `/api/v1/users/${encodeURIComponent(id)}/identity`, userSchema),
   },
 
   serviceAccounts: {

@@ -12,6 +12,14 @@ import { DataTable } from '@/components/DataTable'
 import { Problem } from '@/components/Problem'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import {
@@ -78,6 +86,11 @@ export function AccountsCard() {
 
 export function AccountTable({ users, onChanged }: { users: User[]; onChanged: () => void }) {
   const admins = users.filter((u) => u.role === 'admin')
+  // Only people count: this mirrors SinglePersonAccount in
+  // internal/auth/identity.go, which first-use linking (bindFirstIdentity) uses.
+  // A service account never signs in through the provider, so it never makes
+  // the answer to "whose identity is this" ambiguous.
+  const personCount = users.filter((u) => u.kind !== 'service').length
 
   return (
     <DataTable
@@ -114,7 +127,12 @@ export function AccountTable({ users, onChanged }: { users: User[]; onChanged: (
           label: 'Actions',
           role: 'actions',
           render: (u) => (
-            <AccountActions user={u} adminCount={admins.length} onChanged={onChanged} />
+            <AccountActions
+              user={u}
+              adminCount={admins.length}
+              personCount={personCount}
+              onChanged={onChanged}
+            />
           ),
         },
       ]}
@@ -184,7 +202,16 @@ function RoleCell({
 
 function SignInCell({ user }: { user: User }) {
   if (user.kind !== 'service') {
-    return <>{user.linked_identity ? 'password and single sign-on' : 'password'}</>
+    if (!user.linked_identity) {
+      return <>password</>
+    }
+    return (
+      <>
+        {user.linked_provider === ''
+          ? 'password and single sign-on'
+          : `password and single sign-on via ${user.linked_provider}`}
+      </>
+    )
   }
   return (
     <span>
@@ -206,10 +233,12 @@ function SignInCell({ user }: { user: User }) {
 function AccountActions({
   user,
   adminCount,
+  personCount,
   onChanged,
 }: {
   user: User
   adminCount: number
+  personCount: number
   onChanged: () => void
 }) {
   const [resetting, setResetting] = useState(false)
@@ -217,6 +246,7 @@ function AccountActions({
   const [token, setToken] = useState<ServiceAccountToken | null>(null)
 
   const isService = user.kind === 'service'
+  const linked = !isService && user.linked_identity
   const lastAdmin = user.role === 'admin' && adminCount === 1
 
   const rotate = useMutation({
@@ -263,6 +293,9 @@ function AccountActions({
           >
             Reset password
           </Button>
+        )}
+        {linked && (
+          <UnlinkSingleSignOn user={user} personCount={personCount} onChanged={onChanged} />
         )}
         <Button
           type="button"
@@ -312,6 +345,88 @@ function AccountActions({
       {rotate.error ? <Problem error={rotate.error} /> : null}
       {remove.error ? <Problem error={remove.error} /> : null}
     </div>
+  )
+}
+
+/**
+ * Removing an account's link to the identity provider, behind a confirmation.
+ *
+ * What the dialog spends its words on is what happens *after*: linking again is
+ * a first-use act that only works from the local network address, and only
+ * while there is exactly one account for a person. Both are facts the click
+ * cannot be undone around, so they are said before it rather than discovered.
+ */
+function UnlinkSingleSignOn({
+  user,
+  personCount,
+  onChanged,
+}: {
+  user: User
+  personCount: number
+  onChanged: () => void
+}) {
+  const [open, setOpen] = useState(false)
+  const unlink = useMutation({
+    mutationFn: () => api.users.unlinkIdentity(user.id),
+    onSuccess: () => {
+      setOpen(false)
+      onChanged()
+    },
+  })
+  const provider = user.linked_provider === '' ? 'the identity provider' : user.linked_provider
+
+  return (
+    <>
+      <Button
+        type="button"
+        size="sm"
+        variant="outline"
+        className="max-md:h-11"
+        onClick={() => setOpen(true)}
+      >
+        Unlink single sign-on
+      </Button>
+
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Unlink single sign-on for {user.username}?</DialogTitle>
+            <DialogDescription>
+              {user.username} will no longer sign in through {provider}. The account, its password
+              and its role stay. Linking it again happens from the local network address, because
+              linking is refused on an address that only accepts single sign-on.
+            </DialogDescription>
+          </DialogHeader>
+          {personCount > 1 && (
+            <p className="text-muted-foreground text-sm">
+              This instance has {personCount} accounts for people (service accounts do not count).
+              Single sign-on links on first use only while there is exactly one, so after this no
+              account here can be linked again until it is the only one.
+            </p>
+          )}
+          {user.self && (
+            <p className="text-muted-foreground text-sm">
+              This is your account. You stay signed in, but until it is linked again it cannot
+              confirm anything through the identity provider: use the password, on the local
+              network.
+            </p>
+          )}
+          {unlink.error ? <Problem error={unlink.error} /> : null}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              disabled={unlink.isPending}
+              onClick={() => unlink.mutate()}
+            >
+              {unlink.isPending ? 'Working…' : 'Unlink'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
   )
 }
 
