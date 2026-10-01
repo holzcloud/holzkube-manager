@@ -4,13 +4,14 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"fmt"
 	"io/fs"
 	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
 	"reflect"
+	"regexp"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"syscall"
@@ -655,14 +656,47 @@ func TestHostActionsWaitForARunningCheck(t *testing.T) {
 	}
 	// The Box holds a taken check back for as long as the page waits for its
 	// record before it says "no answer".
-	if want := fmt.Sprintf("RESULT_WITHIN_MS = %d * 1000", int(hostaction.ResultWithin/time.Second)); !strings.Contains(string(src), want) {
-		t.Errorf("web/src/components/HostActions.tsx has no %s; the page and hostaction.ResultWithin disagree", want)
+	if got := pageMillis(t, string(src), "RESULT_WITHIN_MS"); got != hostaction.ResultWithin {
+		t.Errorf("web/src/components/HostActions.tsx: RESULT_WITHIN_MS is %v, hostaction.ResultWithin %v; the page and the Box disagree",
+			got, hostaction.ResultWithin)
 	}
 	// And a check for as long as the routes hold its record to be running
 	// (13-REVIEW-2 V-04 c): past it the page says "no answer".
-	if want := fmt.Sprintf("CHECK_WITHIN_MS = %d * 60 * 1000", int(hostaction.HelperServiceLimit/time.Minute)); hostaction.HelperServiceLimit%time.Minute != 0 || !strings.Contains(string(src), want) {
-		t.Errorf("web/src/components/HostActions.tsx has no %s; the page and hostaction.HelperServiceLimit disagree", want)
+	if got := pageMillis(t, string(src), "CHECK_WITHIN_MS"); got != hostaction.HelperServiceLimit {
+		t.Errorf("web/src/components/HostActions.tsx: CHECK_WITHIN_MS is %v, hostaction.HelperServiceLimit %v; the page and the routes disagree",
+			got, hostaction.HelperServiceLimit)
 	}
+}
+
+// pageMillis is the value of the page constant name, declared in src as
+// `export const NAME = <product>` and nowhere else, where the product is
+// integer literals joined by " * " and nothing more on the line -- no other
+// operator, no comment. Anything else fails: a substring match would pass
+// "3 * 60 * 1000 * 2", or a comment beside a changed value (13-REVIEW-2
+// round 3, I2).
+func pageMillis(t *testing.T, src, name string) time.Duration {
+	t.Helper()
+	decl := regexp.MustCompile(`(?m)^export const ` + regexp.QuoteMeta(name) + ` = (.*)$`)
+	m := decl.FindAllStringSubmatch(src, -1)
+	if n := len(regexp.MustCompile(`\b`+regexp.QuoteMeta(name)+`\s*=[^=]`).FindAllString(src, -1)); len(m) != 1 || n != 1 {
+		t.Fatalf("web/src/components/HostActions.tsx declares %s %d times and assigns it %d times, want exactly one `export const %s = ...`", name, len(m), n, name)
+	}
+	expr := m[0][1]
+	if !regexp.MustCompile(`^[0-9]+( \* [0-9]+)*$`).MatchString(expr) {
+		t.Fatalf("web/src/components/HostActions.tsx: %s = %q is not a product of integer literals and nothing else on the line", name, expr)
+	}
+	ms := int64(1)
+	for _, f := range strings.Split(expr, " * ") {
+		n, err := strconv.ParseInt(f, 10, 64)
+		if err != nil || n > 1<<20 {
+			t.Fatalf("web/src/components/HostActions.tsx: %s: factor %q is not a small integer", name, f)
+		}
+		ms *= n
+		if ms > int64(24*time.Hour/time.Millisecond) {
+			t.Fatalf("web/src/components/HostActions.tsx: %s = %s is more than a day", name, expr)
+		}
+	}
+	return time.Duration(ms) * time.Millisecond
 }
 
 // TestABusyRefusalKeepsTheToken (13-REVIEW-2 V-04): the action route refuses
