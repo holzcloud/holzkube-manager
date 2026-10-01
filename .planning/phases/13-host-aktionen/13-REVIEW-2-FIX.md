@@ -608,3 +608,146 @@ ProtectSystem=strict with the StateDirectory=).
 - `./bin/task lint:go`: exit 0, 0 issues.
 - `go test ./internal/publicrepo/` before each commit: exit 0.
 - web/ not touched, so no web suite was run.
+
+## Round 3 — verification findings W1, W2, I1–I5
+
+Ran on the operator's Pi (aarch64), in the main checkout, no worktree, no
+`-race`. Every exit code below was read from the command itself, not through
+a pipe. Every injection was restored and checked with `cmp` against the
+pre-injection copy or `git show HEAD:`, then the suite went green again.
+`holzkube-manager.service` was the same before and after: ActiveEnterTimestamp
+Tue 2026-09-29 20:25:38 CEST, NRestarts 0. Nothing was pushed or released.
+
+### Per item
+
+| Item | Outcome | Commit |
+|------|---------|--------|
+| W1 page lacks the boot clause (V-02) | fixed | 59b2523 |
+| W2 systemdSpan overflow | fixed | 21c594c |
+| I1 CheckHeld / checkHeld without an age bound | fixed | ebb226d |
+| I2 page-constant ties by substring; ResultWithin unpinned | fixed | b308179 |
+| I3 api.ts "four host actions" | fixed (comment) | cc39887 |
+| I4 checkAnswer window and the answer taken back | fixed | dad669a |
+| I5 Unicode white space in unit files | fixed | ddfc86a |
+
+- **W1.** A started check is now `started` exactly while the host answer's
+  `actions.busy` is true. Once it is false the check is over (`no-answer`).
+  The server's busy already reads the record against HelperServiceLimit and
+  the boot (CheckRunning), so the page keeps no second copy of that rule.
+  This applies both to the order the page placed and to the one it rebuilds
+  from the helper's record after a reload. The box gets a new red sentence
+  when the machine booted after the record (the server's whole-second rule):
+  "started, but the host restarted before the check ended. Nothing was
+  installed; `journalctl -u holzkube-manager-update-check` says how far it
+  got." It is recorded in 13-UI-SPEC.md (copy row and rule), and guide.md
+  says the page offers the buttons again. The running-check test fixtures
+  now carry `busy: true`, as the server sends it.
+- **W2.** systemdSpan holds each part (`n > maxUnitSpan/unit`) and each
+  partial sum (`total > maxUnitSpan - d`) under 24 h before it adds them, so
+  nothing can wrap. strconv.ParseInt replaces Atoi.
+- **I1.** CheckHeld returns false for a started record that is
+  HelperServiceLimit or more older than the withdrawn order's placement. The
+  page's checkHeld does the same with CHECK_WITHIN_MS, which I2 now ties
+  exactly to HelperServiceLimit.
+- **I2.** pageMillis requires exactly one `export const NAME = <product>` in
+  HostActions.tsx. The product must be integer literals joined by ` * `, with
+  nothing else on the line, and the name must be assigned nowhere else. It
+  evaluates the product and compares durations.
+  TestBusyFromTheCheckThisBoxPlacedEnds steps 59 s and 1 s as literals and
+  pins ResultWithin to 1 min.
+- **I4.** Both parts were real wrong displays and both are fixed:
+  - checkAnswer reaches back to done − 3 min only for `from: 'result'`. An
+    order this page placed, or one the daemon reports, has a true placement
+    time.
+  - HostOrderStatus keeps the answer it read, per followed order id, so the
+    next hourly run no longer turns the emerald answer into "not in the
+    update status".
+  - The same-second case (`checked == end`) is left as it was: the script
+    writes before the helper records, so a status in the done second is the
+    check's.
+- **I5.** refuseAmbiguousUnitBytes refuses any `unicode.IsSpace` rune other
+  than the space and the tab.
+
+### Red runs
+
+**W2.** Injected into deploy/holzkube-manager-update-check.service, test
+`-run '^(TestUnitsVerify|TestUnitsAgree|TestTheCheckUnitRunsOnlyTheCheck)$'`:
+
+- `TimeoutStopSec=2562048h 9223371278s` against the old test: exit 0 (the
+  gap). Against the new test: exit 1, "longer than 24h0m0s".
+- `TimeoutStartSec=2562048h 9223371330s`: exit 1.
+- `TimeoutStopSec=23h 2h` (the sum branch): exit 1.
+- The helper service with `TimeoutStartSec=2562048h 9223371458s`: exit 1
+  (TestUnitsAgree).
+- Restored: exit 0.
+
+**I5.** Byte-exact injections, with the bytes checked with `od`:
+
+- U+00A0 after `TimeoutStopSec=10s`, U+2028 after `TimeoutStartSec=2min`, and
+  U+0085 after `ExecStart=… --check`.
+- New test, TestUnitsAgree plus TestTheCheckUnitRunsOnlyTheCheck alone: each
+  exit 1, "white space U+… that systemd does not take for white space".
+  TestUnitsVerify is also red now, at the same guard.
+- HEAD's test, the same two tests: all three exit 0. The ExecStart one was
+  also exit 0 with TestUnitsVerify included, the case nothing caught.
+
+**I2.**
+
+- `ResultWithin = 3 * time.Minute`: `go test ./internal/host/hostaction/`
+  exit 1 ("ResultWithin = 3m0s, want 1m0s"). Against HEAD's test: exit 0.
+- API test (`-run 'TestHostActionsWaitForARunningCheck$'`), each exit 1:
+  - CHECK_WITHIN_MS `3 * 60 * 1000 * 2`: "is 6m0s";
+  - `4 * 60 * 1000 // CHECK_WITHIN_MS = 3 * 60 * 1000`: "assigns it 2 times";
+  - `4 * 60 * 1000 // was 3 * 60 * 1000`: "not a product of integer
+    literals";
+  - RESULT_WITHIN_MS `60 * 1000 * 3`: "is 3m0s".
+- HEAD's API test against the `* 2`, the `// CHECK_WITHIN_MS` and the `* 3`
+  injections: each exit 0.
+
+**I1.**
+
+- Go, bound removed: exit 1 (three TestCheckHeld rows, plus the withdrawal
+  warning row "a check started 6 h before").
+- Go, `>` for `>=`: exit 1 (the exactly-3-min row).
+- Page, bound removed: 2 failed.
+- Page, `>` for `>=`: 1 failed.
+- Restored: green.
+
+**W1.** vitest, `src/components/HostActions.test.tsx`:
+
+- The new tests against the page at HEAD: exit 1, 4 failed. These are the
+  order placed here, the one from the record after a reload, the box, and the
+  orderPhase row.
+- Busy clause removed: 5 failed.
+- Boot rule `<` for `<=`: 1 failed (a boot in the record's next second).
+- Cut-off sentence never chosen: 2 failed.
+- Restored: 177 passed.
+
+**I4.**
+
+- The new tests against the page before the change: 3 failed.
+- Widening for every order: 2 failed.
+- Widening for the wrong orders: 4 failed.
+- Nothing kept: 1 failed.
+- Kept for any order id: first green (a gap in the new tests), so a test
+  was added for it; then 1 failed.
+- Restored: 181 passed.
+
+**I3.** A comment only; there is no guard and no red run.
+
+### Not in this round's list
+
+- V-22 (Place's lock does not close the helper's rename between busyLocked's
+  Lstat and the link, info) was not among the items, and was not changed.
+- V-26 stays the operator's root step, as above.
+
+### Final suites (Pi, main checkout)
+
+- `go test ./internal/... ./cmd/... -count=1`: exit 0, 41 `ok`, and only "no
+  test files" lines otherwise.
+- `./bin/task lint:go`: exit 0, 0 issues.
+- `go test ./internal/publicrepo/` before each commit: exit 0.
+- web: `npx vitest run --project jsdom` exit 0, 56 files and 805 tests.
+  `npm run test:browser` exit 0, 5 files and 23 tests. `npm run lint` exit 0
+  (2 old warnings and 1 info in DataTable.tsx and wall.test.tsx, untouched).
+  `npm run typecheck` exit 0.
