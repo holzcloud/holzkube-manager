@@ -405,7 +405,13 @@ func bindFirstIdentity(d httpapi.Deps, r *http.Request, issuer string, identity 
 	bound, err := d.Auth.BindIdentity(r.Context(), u, issuer, identity.Subject)
 	outcome, cause := audit.OutcomeSuccess, error(nil)
 	if err != nil {
-		outcome, cause = audit.OutcomeError, errors.New(bindCode(err))
+		code := bindCode(err)
+		if code == "" {
+			// The same token the middleware records for an unexpected failure:
+			// a record whose cause is empty says nothing.
+			code = "internal.unexpected"
+		}
+		outcome, cause = audit.OutcomeError, errors.New(code)
 	}
 	if oerr := d.Audit.Outcome(r.Context(), seq, outcome, cause); oerr != nil {
 		// The intent is durable, and an intent with no outcome is the designed

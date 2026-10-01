@@ -257,7 +257,7 @@ type racingUsers struct {
 func (u *racingUsers) Put(ctx context.Context, rec model.User) (model.User, error) {
 	if u.r.written < u.r.races {
 		u.r.written++
-		current, err := u.UserStore.Get(ctx, rec.ID)
+		current, err := u.Get(ctx, rec.ID)
 		if err != nil {
 			return model.User{}, err
 		}

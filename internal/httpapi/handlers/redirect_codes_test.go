@@ -99,7 +99,7 @@ func TestEveryRedirectCodeIsExplainedAndInTheContract(t *testing.T) {
 		return regexp.MustCompile(`(?m)^\s*'?` + regexp.QuoteMeta(code) + `'?:`).MatchString(page)
 	}
 	inContract := func(param, code string) bool {
-		return regexp.MustCompile("`" + regexp.QuoteMeta(code) + "`").MatchString(contract) ||
+		return regexp.MustCompile("`"+regexp.QuoteMeta(code)+"`").MatchString(contract) ||
 			regexp.MustCompile(regexp.QuoteMeta(param+"="+code)+`\b`).MatchString(contract)
 	}
 

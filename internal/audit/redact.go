@@ -605,11 +605,6 @@ func ListedActions() []string {
 	return out
 }
 
-// Params returns the parameters as they may be written to the log.
-//
-// An action with no entry in the table redacts everything. That is the default
-// on purpose: forgetting to extend the allowlist costs a useful record, while
-// the opposite default would cost a secret.
 // AccountParam and AccountUsernameParam name the account an account route acts
 // on, in a record's params. They are written by the server -- the id from the
 // path, the name from the store -- after the body has been redacted, so a body
@@ -645,6 +640,11 @@ func AccountFromPath(action string, pathValue func(string) string) string {
 	return pathValue(wildcard)
 }
 
+// Params returns the parameters as they may be written to the log.
+//
+// An action with no entry in the table redacts everything. That is the default
+// on purpose: forgetting to extend the allowlist costs a useful record, while
+// the opposite default would cost a secret.
 func Params(action string, raw map[string]any) map[string]any {
 	// Allowlist entries are authored as dotted paths and are split into
 	// segments here, because a dot in the table means "descend" while a dot in

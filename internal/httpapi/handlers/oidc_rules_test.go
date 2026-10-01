@@ -267,7 +267,7 @@ func (c conflictingStore) Users() store.UserStore { return conflictingUsers{c.St
 type conflictingUsers struct{ store.UserStore }
 
 func (c conflictingUsers) Put(ctx context.Context, rec model.User) (model.User, error) {
-	current, err := c.UserStore.Get(ctx, rec.ID)
+	current, err := c.Get(ctx, rec.ID)
 	if err == nil {
 		current.Role = model.RoleOperator
 		if _, err := c.UserStore.Put(ctx, current); err != nil {
