@@ -10,6 +10,8 @@
   "available": true,
   "missing": [],
   "outdated": [],
+  "update_script": [],
   "busy": false,
-  "install_commands": []
+  "install_commands": [],
+  "update_script_install_commands": []
 }

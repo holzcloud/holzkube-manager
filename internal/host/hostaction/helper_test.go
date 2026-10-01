@@ -336,3 +336,69 @@ func TestOutdated(t *testing.T) {
 		})
 	}
 }
+
+// TestUpdateScriptMissing (13-REVIEW-2 IN-04): both update orders end in the
+// update script, and the daemon asks for it the way it asks for the helper's
+// script -- a regular executable file owned by uid 0 and writable by nobody
+// else -- from the file alone. Anything else is one update-script item.
+func TestUpdateScriptMissing(t *testing.T) {
+	t.Parallel()
+
+	missing := []Missing{{Item: MissingUpdateScript, Path: UpdateScriptPath}}
+	at := func(f *fstest.MapFile) fstest.MapFS {
+		return fstest.MapFS{fsName(UpdateScriptPath): f}
+	}
+	root := func(mode fs.FileMode) *fstest.MapFile {
+		return &fstest.MapFile{Data: []byte("#!/usr/bin/env bash\n"), Mode: mode, Sys: &syscall.Stat_t{Uid: 0, Gid: 0}}
+	}
+
+	cases := []struct {
+		name string
+		fsys fstest.MapFS
+		want []Missing
+	}{
+		{"installed as the update script installs itself: root, 0755", at(root(0o755)), []Missing{}},
+		{"root, 0700", at(root(0o700)), []Missing{}},
+		{"absent", fstest.MapFS{}, missing},
+		// The helper's files say nothing about it: the install commands do
+		// not bring it.
+		{"absent, the helper installed", installedFS(), missing},
+		{"a directory", at(&fstest.MapFile{Mode: fs.ModeDir | 0o755, Sys: &syscall.Stat_t{}}), missing},
+		{"mode 0644", at(root(0o644)), missing},
+		{"mode 0775", at(root(0o775)), missing},
+		{"mode 0757", at(root(0o757)), missing},
+		{"owned by uid 1000", at(&fstest.MapFile{Mode: 0o755, Sys: &syscall.Stat_t{Uid: 1000}}), missing},
+		{"no owner information", at(&fstest.MapFile{Mode: 0o755}), missing},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got := UpdateScriptMissing(tc.fsys)
+			if got == nil {
+				t.Fatal("UpdateScriptMissing returned nil; the answer's update_script must be a list, never null")
+			}
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Errorf("UpdateScriptMissing = %+v, want %+v", got, tc.want)
+			}
+			if box := NewBox(Config{FS: tc.fsys, DataDir: t.TempDir()}).UpdateScript(); !reflect.DeepEqual(box, tc.want) {
+				t.Errorf("Box.UpdateScript = %+v, want %+v", box, tc.want)
+			}
+		})
+	}
+}
+
+// TestNeedsUpdateScript: exactly the two update orders end in the update
+// script; reboot, poweroff and restart-service do not.
+func TestNeedsUpdateScript(t *testing.T) {
+	t.Parallel()
+
+	var need []Action
+	for _, a := range Actions() {
+		if NeedsUpdateScript(a) {
+			need = append(need, a)
+		}
+	}
+	if want := []Action{Update, CheckUpdate}; !reflect.DeepEqual(need, want) {
+		t.Errorf("NeedsUpdateScript is true for %v, want exactly %v", need, want)
+	}
+}

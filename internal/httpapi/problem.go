@@ -175,6 +175,16 @@ const (
 	// what to reinstall.
 	CodeHostHelperOutdated = "conflict.host-helper-outdated"
 
+	// CodeHostUpdateScriptMissing: one of the two update actions -- update
+	// or check-update -- was asked for while the update script both end in,
+	// /usr/local/sbin/holzkube-manager-update, is not installed as root's
+	// (13-REVIEW-2 IN-04). The helper would start a unit that fails. A
+	// conflict for the same reason as a missing helper: the request is well
+	// formed, and this machine cannot carry it out. No token was issued and no
+	// order placed; reboot, poweroff and restart-service still work, and
+	// GET /api/v1/host names the command that installs the script.
+	CodeHostUpdateScriptMissing = "conflict.host-update-script-missing"
+
 	// CodeHostHelperBusy: a host action was asked for while the root helper
 	// is still carrying out an update check (13-REVIEW-2 WR-01). The helper
 	// waits for the check unit, so it picks up nothing else until the check

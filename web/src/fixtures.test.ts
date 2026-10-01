@@ -198,6 +198,26 @@ describe('the layout guard’s fixtures', () => {
     expect(Array.isArray(installedActions.outdated)).toBe(true)
   })
 
+  it('carries `update_script` in both /host fixtures as written, the demo with the script there', () => {
+    // The same reasoning (13-REVIEW-2 IN-04): the schema reads a missing
+    // update_script as [], which would hide a fixture that lost the key. The
+    // demo is the reference installation before the helper, so the update
+    // script is there and the README picture shows the helper notice alone.
+    const raw = (v: unknown) => (v as { actions: Record<string, unknown> }).actions
+    const demoActions = raw(fixtures['/api/v1/host'])
+    const installedActions = helperInstalled as Record<string, unknown>
+
+    expect(demoActions.update_script).toEqual([])
+    expect(installedActions.update_script).toEqual([])
+    expect(Array.isArray(demoActions.update_script_install_commands)).toBe(true)
+    expect(Array.isArray(installedActions.update_script_install_commands)).toBe(true)
+    expect(
+      hostSchema.parse(fixtures['/api/v1/host']).actions.update_script_install_commands,
+    ).toEqual([
+      'sudo install -o root -g root -m 0755 deploy/holzkube-manager-update.sh /usr/local/sbin/holzkube-manager-update',
+    ])
+  })
+
   it('carries `busy` in both /host fixtures as written, as the daemon sends it', () => {
     // The same reasoning for busy (13-REVIEW-2 V-01): the schema reads a
     // missing one as false, which would hide a fixture that lost the key.

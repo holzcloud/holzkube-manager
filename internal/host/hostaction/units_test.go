@@ -827,7 +827,14 @@ func TestTheCheckUnitRunsOnlyTheCheck(t *testing.T) {
 // lines excluded.
 func guideBlock(t *testing.T, guide string) string {
 	t.Helper()
-	const begin, end = "<!-- install-commands:begin -->", "<!-- install-commands:end -->"
+	return guideBlockNamed(t, guide, "install-commands")
+}
+
+// guideBlockNamed returns the lines between the guide's markers
+// <!-- name:begin --> and <!-- name:end -->, fence lines excluded.
+func guideBlockNamed(t *testing.T, guide, name string) string {
+	t.Helper()
+	begin, end := "<!-- "+name+":begin -->", "<!-- "+name+":end -->"
 	lines := strings.Split(guide, "\n")
 	b, e := -1, -1
 	for i, l := range lines {
@@ -884,6 +891,33 @@ func TestInstallCommandsMatchTheGuide(t *testing.T) {
 				t.Errorf("the install commands name %s, which is not in the repository: %v", f, err)
 			}
 		}
+	}
+}
+
+// TestUpdateScriptInstallCommandsMatchTheGuide (13-REVIEW-2 IN-04): the page
+// shows UpdateScriptInstallCommands while the update script is missing, and the
+// guide carries the same line between its update-script-command markers, byte
+// for byte. The line installs a shipped file to exactly the path
+// UpdateScriptMissing looks at, as root's and 0755 -- what the check asks for,
+// and what the update script does when it replaces itself.
+func TestUpdateScriptInstallCommandsMatchTheGuide(t *testing.T) {
+	t.Parallel()
+
+	data, err := os.ReadFile(shippedGuide)
+	if err != nil {
+		t.Fatalf("read the guide: %v", err)
+	}
+	got := guideBlockNamed(t, string(data), "update-script-command")
+	if want := strings.Join(UpdateScriptInstallCommands, "\n"); got != want {
+		t.Errorf("the guide's update-script block differs from UpdateScriptInstallCommands (the page's block).\nguide:\n%q\nUpdateScriptInstallCommands:\n%q", got, want)
+	}
+
+	want := []string{"sudo install -o root -g root -m 0755 deploy/holzkube-manager-update.sh " + UpdateScriptPath}
+	if !slices.Equal(UpdateScriptInstallCommands, want) {
+		t.Errorf("UpdateScriptInstallCommands = %q, want %q", UpdateScriptInstallCommands, want)
+	}
+	if _, err := os.Stat(shippedUpdater); err != nil {
+		t.Errorf("the command installs deploy/holzkube-manager-update.sh, which is not in the repository: %v", err)
 	}
 }
 
@@ -1006,7 +1040,7 @@ func TestTheArchiveCarriesTheHelper(t *testing.T) {
 		"deploy/holzkube-manager-host.service",
 		"deploy/HOST-HELPER.md",
 	}
-	for _, cmd := range InstallCommands {
+	for _, cmd := range append(slices.Clone(InstallCommands), UpdateScriptInstallCommands...) {
 		for _, f := range strings.Fields(cmd) {
 			if strings.HasPrefix(f, "deploy/") {
 				want = append(want, f)
@@ -1067,11 +1101,13 @@ func TestTheFixtureShowsTheRealInstallCommands(t *testing.T) {
 	}
 	var host struct {
 		Actions *struct {
-			Order           json.RawMessage `json:"order"`
-			Available       *bool           `json:"available"`
-			Missing         []Missing       `json:"missing"`
-			InstallCommands []string        `json:"install_commands"`
-			Result          struct {
+			Order                       json.RawMessage `json:"order"`
+			Available                   *bool           `json:"available"`
+			Missing                     []Missing       `json:"missing"`
+			UpdateScript                []Missing       `json:"update_script"`
+			InstallCommands             []string        `json:"install_commands"`
+			UpdateScriptInstallCommands []string        `json:"update_script_install_commands"`
+			Result                      struct {
 				Readable bool `json:"readable"`
 				Reason   *struct {
 					Code string `json:"code"`
@@ -1089,6 +1125,16 @@ func TestTheFixtureShowsTheRealInstallCommands(t *testing.T) {
 
 	if got, want := strings.Join(a.InstallCommands, "\n"), strings.Join(InstallCommands, "\n"); got != want {
 		t.Errorf("the fixture's install_commands differ from InstallCommands.\nfixture:\n%q\nInstallCommands:\n%q", got, want)
+	}
+
+	if got, want := strings.Join(a.UpdateScriptInstallCommands, "\n"), strings.Join(UpdateScriptInstallCommands, "\n"); got != want {
+		t.Errorf("the fixture's update_script_install_commands differ from UpdateScriptInstallCommands.\nfixture:\n%q\nUpdateScriptInstallCommands:\n%q", got, want)
+	}
+	// The demo is the reference installation before the helper: the update
+	// script the hourly timer runs is there, so nothing more is said about it
+	// and the README's picture stays the helper notice alone.
+	if a.UpdateScript == nil || len(a.UpdateScript) != 0 {
+		t.Errorf("the fixture's update_script is %#v, want an empty list: the reference installation has the update script", a.UpdateScript)
 	}
 
 	// Nothing installed: what Detect reports on an empty machine, in its order.

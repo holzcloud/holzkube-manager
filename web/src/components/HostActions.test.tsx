@@ -54,6 +54,11 @@ const noCheckUnit = [
 const CHECK_NEEDS_NEWER =
   'Check for updates needs a newer holzkube-manager-host helper. The note below says how to reinstall it.'
 
+/** The update script both update actions end in is missing (13-REVIEW-2 IN-04). */
+const updateScript = [{ item: 'update-script', path: '/usr/local/sbin/holzkube-manager-update' }]
+const UPDATE_SCRIPT_NEEDED =
+  'Both update buttons need the update script, which is not installed. The note below says how to install it.'
+
 /**
  * The demo host, renamed to the documentation hostname, with the helper
  * installed unless the test says otherwise.
@@ -410,6 +415,74 @@ describe('HostActions: the five buttons and the one reason they are off', () => 
     for (const b of buttons.slice(1)) {
       expect(b).toHaveAccessibleDescription('')
     }
+  })
+
+  // 13-REVIEW-2 IN-04: both update actions end in the update script, so with
+  // it missing those two are off and the other three are not -- one line for
+  // the pair, which describes the two and not the three.
+  it.each([
+    ['with an up-to-date helper', []],
+    ['with an older helper too: the reason both share comes first', olderScript],
+  ] as const)(
+    'with the update script missing (%s): only the two update buttons are off',
+    (_, outdated) => {
+      actions({ host: hostWith({ update_script: updateScript, outdated }) })
+
+      const buttons = headerButtons()
+      expect(buttons.map((b) => b.textContent)).toEqual(LABELS)
+      expect(buttons.map((b) => b.hasAttribute('disabled'))).toEqual([
+        true,
+        true,
+        false,
+        false,
+        false,
+      ])
+      expect(reasonLine()?.textContent).toBe(UPDATE_SCRIPT_NEEDED)
+      expect(screen.getByRole('group', { name: 'Host actions' })).not.toHaveAttribute(
+        'aria-describedby',
+      )
+      expect(buttons.map((b) => b.getAttribute('aria-describedby'))).toEqual([
+        'host-actions-reason',
+        'host-actions-reason',
+        null,
+        null,
+        null,
+      ])
+      for (const b of buttons.slice(0, 2)) {
+        expect(b).toHaveAccessibleDescription(UPDATE_SCRIPT_NEEDED)
+      }
+      for (const b of buttons.slice(2)) {
+        expect(b).toHaveAccessibleDescription('')
+      }
+    },
+  )
+
+  it('with the helper missing and the update script too: the group reason wins, all five off', () => {
+    actions({
+      host: hostWith({
+        available: false,
+        missing: [{ item: 'script', path: '/usr/local/sbin/holzkube-manager-host' }],
+        update_script: updateScript,
+      }),
+    })
+    expectOffBecause(
+      'Host actions need the holzkube-manager-host helper, which is not installed. The note below says what to install.',
+    )
+  })
+
+  it('parses an answer without update_script (a daemon before it) as nothing missing', () => {
+    const raw = structuredClone((demo as Record<string, unknown>)['/api/v1/host']) as Record<
+      string,
+      unknown
+    >
+    const {
+      update_script: _dropped,
+      update_script_install_commands: _alsoDropped,
+      ...older
+    } = raw.actions as Record<string, unknown>
+    const parsed = hostSchema.parse({ ...raw, actions: older }).actions
+    expect(parsed.update_script).toEqual([])
+    expect(parsed.update_script_install_commands).toEqual([])
   })
 
   it('with nothing outdated: all five on, and no line', () => {

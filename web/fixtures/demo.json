@@ -3405,12 +3405,16 @@
         { "item": "path-unit", "path": "/etc/systemd/system/holzkube-manager-host.path" }
       ],
       "outdated": [],
+      "update_script": [],
       "busy": false,
       "install_commands": [
         "sudo install -o root -g root -m 0755 deploy/holzkube-manager-host.sh /usr/local/sbin/holzkube-manager-host",
         "sudo install -o root -g root -m 0644 deploy/holzkube-manager-host.path deploy/holzkube-manager-host.service deploy/holzkube-manager-update-check.service /etc/systemd/system/",
         "sudo systemctl daemon-reload",
         "sudo systemctl enable --now holzkube-manager-host.path"
+      ],
+      "update_script_install_commands": [
+        "sudo install -o root -g root -m 0755 deploy/holzkube-manager-update.sh /usr/local/sbin/holzkube-manager-update"
       ]
     }
   },

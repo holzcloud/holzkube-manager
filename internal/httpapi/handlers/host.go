@@ -93,7 +93,23 @@ import (
 // nothing. Both questions are the ones GET /api/v1/host answers in
 // actions.available, so the page and the routes cannot disagree.
 //
-// The check alone is asked a third question, after those two: whether the
+// The two update actions, update and check-update, are asked a question of
+// their own after those two: whether the update script both end in,
+// /usr/local/sbin/holzkube-manager-update, is installed as root's (409
+// conflict.host-update-script-missing, 13-REVIEW-2 IN-04). The helper's
+// install commands do not install it, so a helper installed completely can
+// still start an update unit that fails at once. hostaction.UpdateScriptMissing
+// reads it from the file, as Detect reads the helper's, and GET /api/v1/host
+// answers it in actions.update_script. It comes before the check's own
+// question below, the older helper, for two reasons. It is the reason that
+// applies to both update buttons, so with it first the page shows one line for
+// the pair and the routes refuse both with the same code the page's line
+// names; the older-helper note stays on the page meanwhile, so nothing is
+// hidden. And, as with every question before the busy one, it is a standing
+// condition that waiting will not cure, so it is named before the transient
+// one.
+//
+// The check alone is asked the question after that: whether the
 // installed helper is new enough for it (409 conflict.host-helper-outdated).
 // A helper installed before check-update existed carries out the four older
 // orders and refuses the fifth; hostaction.Outdated reads that from the
@@ -105,7 +121,7 @@ import (
 // refusal of every word it does not know stays the lock; this keeps the page
 // and the routes from offering what it would refuse.
 //
-// And every action is asked a fourth question, last: whether the helper is
+// And every action is asked one more question, last: whether the helper is
 // busy with a check (409 conflict.host-helper-busy, 13-REVIEW-2 WR-01). The
 // helper waits for the check unit, up to its service's 3-min limit, and picks
 // up nothing meanwhile; an order placed then would lie in the slot until the
@@ -151,6 +167,17 @@ var hostTypedPhrase = map[string]bool{
 	hostActionName(hostaction.RestartService): true,
 	hostActionName(hostaction.Update):         true,
 	hostActionName(hostaction.CheckUpdate):    true,
+}
+
+// needsUpdateScript reports whether the host action named name (host.update)
+// is one hostaction.NeedsUpdateScript names.
+func needsUpdateScript(name string) bool {
+	for _, a := range hostaction.Actions() {
+		if hostActionName(a) == name {
+			return hostaction.NeedsUpdateScript(a)
+		}
+	}
+	return false
 }
 
 // HostRoutes serves the host page's read, the host confirm route and the five
@@ -236,6 +263,9 @@ const (
 	// running check (REASON.checkRunning in web/src/components/HostActions.tsx),
 	// so the button's reason and the refusal say the same thing.
 	hostHelperBusyDetail = "An update check is running; wait for it to finish. No order was placed."
+	// hostUpdateScriptMissingDetail is the two update actions' refusal: the
+	// other three still go through.
+	hostUpdateScriptMissingDetail = "The update script /usr/local/sbin/holzkube-manager-update is not installed, so no order was placed. The Host page says how to install it."
 )
 
 // confirmHostAction hands out a token for one host action, to somebody who
@@ -274,6 +304,12 @@ func confirmHostAction(d httpapi.Deps) http.HandlerFunc {
 			httpapi.WriteProblem(w, r, httpapi.Validation(
 				"This instance issues host confirmations for its five host actions and that is not one of them.",
 				httpapi.FieldError{Field: "action", Reason: "not a confirmable host action"}))
+			return
+		}
+		// The two update actions, before anything is typed against: no token
+		// for an order that ends in a script that is not there.
+		if needsUpdateScript(body.Action) && len(d.HostActions.UpdateScript()) > 0 {
+			httpapi.WriteProblem(w, r, httpapi.Conflict(httpapi.CodeHostUpdateScriptMissing, hostUpdateScriptMissingDetail))
 			return
 		}
 		// The check, before anything is typed against: no token for an order
@@ -339,6 +375,12 @@ func hostAction(d httpapi.Deps, a hostaction.Action) http.HandlerFunc {
 		}
 		if len(d.HostActions.Missing()) > 0 {
 			httpapi.WriteProblem(w, r, httpapi.Conflict(httpapi.CodeHostHelperMissing, hostHelperMissingDetail))
+			return
+		}
+		// The two update actions: both end in the update script, so neither
+		// is placed while it is not there.
+		if hostaction.NeedsUpdateScript(a) && len(d.HostActions.UpdateScript()) > 0 {
+			httpapi.WriteProblem(w, r, httpapi.Conflict(httpapi.CodeHostUpdateScriptMissing, hostUpdateScriptMissingDetail))
 			return
 		}
 		// The check alone: an older helper refuses it, so it is not placed.

@@ -3069,6 +3069,19 @@ export const hostHelperOutdatedSchema = z.object({
 
 export type HostHelperOutdated = z.infer<typeof hostHelperOutdatedSchema>
 
+/**
+ * The update script both update actions end in, when it is missing
+ * (13-REVIEW-2 IN-04): /usr/local/sbin/holzkube-manager-update is absent, or
+ * not a regular executable file owned by root and writable by nobody else.
+ * The helper's install commands do not install it.
+ */
+export const hostUpdateScriptSchema = z.object({
+  item: z.enum(['update-script']),
+  path: z.string(),
+})
+
+export type HostUpdateScript = z.infer<typeof hostUpdateScriptSchema>
+
 /** The machine holzkube-manager runs on: GET /api/v1/host (Phase 11). */
 export const hostSchema = z.object({
   observed_at: z.string(),
@@ -3220,6 +3233,13 @@ export const hostSchema = z.object({
        */
       outdated: z.array(hostHelperOutdatedSchema).nullish().transform(orEmpty),
       /**
+       * The update script, when it is missing: both update actions are
+       * refused while it is not empty (409 conflict.host-update-script-missing),
+       * the other three are not. Absent from a daemon before it, which then
+       * reads as nothing missing -- that daemon does not refuse for it either.
+       */
+      update_script: z.array(hostUpdateScriptSchema).nullish().transform(orEmpty),
+      /**
        * Whether the helper is busy with an update check (13-REVIEW-2 V-01):
        * it picks up nothing else until the check ends, and the routes refuse
        * every action meanwhile (409 conflict.host-helper-busy). The server
@@ -3231,13 +3251,17 @@ export const hostSchema = z.object({
         .nullish()
         .transform((v) => v ?? false),
       install_commands: z.array(z.string()).nullish().transform(orEmpty),
+      /** The command that installs the update script; the page shows it. */
+      update_script_install_commands: z.array(z.string()).nullish().transform(orEmpty),
     })
     .default({
       available: false,
       missing: [],
       outdated: [],
+      update_script: [],
       busy: false,
       install_commands: [],
+      update_script_install_commands: [],
       order: null,
       result: {
         readable: false,

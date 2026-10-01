@@ -297,6 +297,17 @@ what to reinstall -- the helper script that does not know the check, the check's
 own unit, or both -- with the same install commands. Running them again from the
 newer release archive adds the check; nothing else changes.
 
+**Without the update script.** Both update buttons end in
+`/usr/local/sbin/holzkube-manager-update`, the script the hourly update runs,
+and the helper's install commands do not install it. Where it is missing -- or
+is not owned by root, or others may change it -- **Check for updates** and
+**Check for updates and install** stay off with one line saying so, the other
+three buttons stay on, and a note under the header names the file and the one
+command that installs it from the release archive:
+`sudo install -o root -g root -m 0755 deploy/holzkube-manager-update.sh /usr/local/sbin/holzkube-manager-update`
+(`deploy/HOST-HELPER.md`, "The update script"). Both come on with the
+next reading of the page.
+
 **What the page shows once you have pressed one.** A status box under the
 header follows the order from start to end:
 

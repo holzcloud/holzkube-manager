@@ -1774,8 +1774,9 @@ records nothing, and the order is `failed`.
 |---|---|---|
 | `409` | `conflict.host-in-container` | the daemon runs in a container. There are host actions only with the systemd installation; the confirm route refuses too, and nothing is placed. Asked first. Detail: "Host actions are only available with the systemd installation." |
 | `409` | `conflict.host-helper-missing` | the root helper is not installed completely (see `actions.missing` below). The confirm route refuses too, and the action route refuses before it looks at the token: nothing is placed. Detail: "The holzkube-manager-host helper is not installed, so no order was placed. The Host page says what to install." |
-| `409` | `conflict.host-helper-outdated` | `check-update` only: the helper is installed but older than this daemon (see `actions.outdated` below) -- its script does not carry out the check, or the check unit is not installed. The confirm route refuses `host.check-update` before the hostname is compared, and the action route refuses before it looks at the token: no token, nothing placed. The four other actions still go through. Asked after the two above. Detail: "The installed holzkube-manager-host helper does not carry out an update check yet, so no order was placed. The Host page says what to reinstall." |
-| `409` | `conflict.host-helper-busy` | every action: the helper is still carrying out an update check. It waits for the check unit and picks up nothing else meanwhile, so an order placed then would only be withdrawn after 10 s. Busy means the helper's own last record (`actions.result`) is a `check-update` it `started` and has not yet recorded `done` or `failed` for, less than 3 min ago (its service's limit, after which systemd has ended it) and not before the machine's last boot -- or that the last order this daemon placed is a `check-update` the helper has taken (its file is gone) and recorded nothing for yet, less than a minute after its placement. The update status (`service.update`) has no say: the hourly run writes it as well. The update script lets one run at a time look and record -- a check waits up to 60 s for a running hourly update, the hourly update up to 600 s for a running check, and a run that waited that long ends with exit code 1 and records nothing -- but an update script installed before that lock records beside a check. `actions.busy` (below) is the same answer, which the page turns its buttons off by. The confirm route refuses before the hostname is compared, the action route before it looks at the token: no token, and a refused client keeps the token it had. Asked after the three above. The placement asks it once more under the slot's lock; a check taken in the moment between the two is refused there with the same `409`, the token then spent and nothing placed. Detail: "An update check is running; wait for it to finish. No order was placed." |
+| `409` | `conflict.host-update-script-missing` | `update` and `check-update` only: the update script both end in, `/usr/local/sbin/holzkube-manager-update`, is not a regular executable file owned by root and writable by nobody else (see `actions.update_script` below). The helper's install commands do not install it. The confirm route refuses `host.update` and `host.check-update` before the hostname is compared, and the action route refuses before it looks at the token: no token, nothing placed. `reboot`, `poweroff` and `restart-service` still go through. Asked after the two above, and before the older helper: it is the reason both update actions share, so the page shows one line for the pair and the routes refuse both with it; the older-helper note stays on the page meanwhile. Detail: "The update script /usr/local/sbin/holzkube-manager-update is not installed, so no order was placed. The Host page says how to install it." |
+| `409` | `conflict.host-helper-outdated` | `check-update` only: the helper is installed but older than this daemon (see `actions.outdated` below) -- its script does not carry out the check, or the check unit is not installed. The confirm route refuses `host.check-update` before the hostname is compared, and the action route refuses before it looks at the token: no token, nothing placed. The four other actions still go through. Asked after the three above. Detail: "The installed holzkube-manager-host helper does not carry out an update check yet, so no order was placed. The Host page says what to reinstall." |
+| `409` | `conflict.host-helper-busy` | every action: the helper is still carrying out an update check. It waits for the check unit and picks up nothing else meanwhile, so an order placed then would only be withdrawn after 10 s. Busy means the helper's own last record (`actions.result`) is a `check-update` it `started` and has not yet recorded `done` or `failed` for, less than 3 min ago (its service's limit, after which systemd has ended it) and not before the machine's last boot -- or that the last order this daemon placed is a `check-update` the helper has taken (its file is gone) and recorded nothing for yet, less than a minute after its placement. The update status (`service.update`) has no say: the hourly run writes it as well. The update script lets one run at a time look and record -- a check waits up to 60 s for a running hourly update, the hourly update up to 600 s for a running check, and a run that waited that long ends with exit code 1 and records nothing -- but an update script installed before that lock records beside a check. `actions.busy` (below) is the same answer, which the page turns its buttons off by. The confirm route refuses before the hostname is compared, the action route before it looks at the token: no token, and a refused client keeps the token it had. Asked after the four above. The placement asks it once more under the slot's lock; a check taken in the moment between the two is refused there with the same `409`, the token then spent and nothing placed. Detail: "An update check is running; wait for it to finish. No order was placed." |
 | `409` | `conflict.host-order-pending` | an order still waits for the helper. There is one slot and no queue: the second order is refused and the first stays exactly as it was. Detail: "Another host action is still waiting for the helper. Wait for it to be answered, then try again." |
 | `428` | `sudo.required` | the action routes only: the session's sudo window is not open. The client asks for the password again and replays the request with the same token. |
 | `403` | `forbidden.role` | the session is a reader's. |
@@ -1784,10 +1785,12 @@ records nothing, and the order is `failed`.
 
 The two refusals about the machine, container and helper, come before the body
 is read, on both routes: a client that has not been told yet learns it before
-the operator has typed anything that would be thrown away. The check's own
-refusal, an older helper, comes after them: on the action route before the body,
-on the confirm route as soon as the body names the check. A running check comes
-last, in the same place, for every action.
+the operator has typed anything that would be thrown away. The update actions'
+own refusal, a missing update script, comes after them, then the check's own,
+an older helper: on the action route before the body, on the confirm route as
+soon as the body names the action. A running check comes last, in the same
+place, for every action. Every refusal before it is a standing condition that
+waiting will not cure; a running check passes.
 
 **The order file.** `<data directory>/host-order`, mode `0600`, holding exactly
 one line and nothing else -- no user, no time, no parameter; who asked is in the
@@ -1864,12 +1867,16 @@ out a reboot nobody asked for any more. So:
   "available": true,
   "missing": [],
   "outdated": [],
+  "update_script": [],
   "busy": false,
   "install_commands": [
     "sudo install -o root -g root -m 0755 deploy/holzkube-manager-host.sh /usr/local/sbin/holzkube-manager-host",
     "sudo install -o root -g root -m 0644 deploy/holzkube-manager-host.path deploy/holzkube-manager-host.service deploy/holzkube-manager-update-check.service /etc/systemd/system/",
     "sudo systemctl daemon-reload",
     "sudo systemctl enable --now holzkube-manager-host.path"
+  ],
+  "update_script_install_commands": [
+    "sudo install -o root -g root -m 0755 deploy/holzkube-manager-update.sh /usr/local/sbin/holzkube-manager-update"
   ]
 }
 ```
@@ -1933,6 +1940,19 @@ out a reboot nobody asked for any more. So:
   that knows `reboot`, `poweroff`, `restart-service` and `update`. The line only
   decides what is offered: the helper itself refuses every word it does not
   know.
+- `update_script` lists the update script when it is missing, never `null`:
+  one item, `{"item": "update-script", "path": "/usr/local/sbin/holzkube-manager-update"}`,
+  when that file is absent, or not a regular executable file owned by root and
+  writable by nobody else -- the test `script` gets in `missing`, read from the
+  file alone. Both update actions end in it (`update` starts
+  `holzkube-manager-update.service`, which runs it; the check unit runs it with
+  `--check`), and while it is listed both are refused with
+  `409 conflict.host-update-script-missing`. The three other actions do not
+  need it, so `available` does not change. It is asked whatever `missing`
+  says, because the helper's install commands do not install it; it is empty
+  when the daemon was started without host actions. In a container it says
+  what the container's own filesystem has, and the container refusal comes
+  first. `holzkube-manager-update.service` itself is not looked for.
 - `busy` is whether the helper is busy with an update check right now, exactly
   the question behind `409 conflict.host-helper-busy` (above): its last record
   is a `check-update` it `started` and has not recorded `done` or `failed` for,
@@ -1946,6 +1966,9 @@ out a reboot nobody asked for any more. So:
 - `install_commands` are the commands that install the helper, run from an
   unpacked release archive: the same four lines as `deploy/HOST-HELPER.md`,
   always sent.
+- `update_script_install_commands` is the command that installs the update
+  script, run from an unpacked release archive: the same line as
+  `deploy/HOST-HELPER.md` § The update script, always sent.
 
 On a machine where the helper is not installed -- every installation until its
 operator installs it -- the same object reads:
@@ -1960,8 +1983,10 @@ operator installs it -- the same object reads:
     {"item": "path-unit", "path": "/etc/systemd/system/holzkube-manager-host.path"}
   ],
   "outdated": [],
+  "update_script": [],
   "busy": false,
-  "install_commands": ["…the four lines above…"]
+  "install_commands": ["…the four lines above…"],
+  "update_script_install_commands": ["…the line above…"]
 }
 ```
 
@@ -1982,8 +2007,28 @@ The Host page then keeps the four other buttons on, turns the check's off with
 its own reason, and shows a note in the helper notice's place naming each entry
 of `outdated` with `install_commands`; it never shows both notes.
 
+With the helper installed and no update script, the three actions that do not
+need it are offered and the two update actions are not:
+
+```json
+"actions": {
+  "available": true,
+  "missing": [],
+  "outdated": [],
+  "update_script": [
+    {"item": "update-script", "path": "/usr/local/sbin/holzkube-manager-update"}
+  ]
+}
+```
+
+The Host page then turns off **Check for updates** and **Check for updates and
+install** with one reason line for the pair, keeps the other three on, and
+shows a note under the header naming the file with
+`update_script_install_commands`. That note appears beside the helper notice
+or the older-helper note, since neither set of commands installs the script.
+
 A daemon started without host actions sends `available: false`, `missing: []`,
-`outdated: []` and the result reason "This instance was started without host
+`outdated: []`, `update_script: []` and the result reason "This instance was started without host
 actions."
 
 ### GET /api/v1/host/history: the host's last day
