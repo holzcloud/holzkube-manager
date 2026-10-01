@@ -53,6 +53,13 @@ func TestReadResult(t *testing.T) {
 			want: Result{ID: "a1b2c3d4e5f60718", Action: Update, Outcome: OutcomeStarted, At: at},
 		},
 		{
+			// 13-REVIEW-2 V-01: the helper records the end of a check, so that
+			// the end of its wait is its own word, not the update status's.
+			name: "check-update done",
+			file: ptr("c0ffee00c0ffee11 check-update done " + resultTime + "\n"),
+			want: Result{ID: "c0ffee00c0ffee11", Action: CheckUpdate, Outcome: OutcomeDone, At: at},
+		},
+		{
 			name: "a malformed order: - - rejected",
 			file: ptr("- - rejected " + resultTime + "\n"),
 			want: Result{Outcome: OutcomeRejected, At: at},
@@ -75,8 +82,28 @@ func TestReadResult(t *testing.T) {
 			// the script claiming to act on an order it could not name.
 			name:    "- with started",
 			file:    ptr("- - started 2026-09-28T09:37:01Z\n"),
-			wantErr: "started order without an id",
+			wantErr: "started or done order without an id",
 			marker:  "2026-09-28T09:37:01Z",
+		},
+		{
+			name:    "- with done",
+			file:    ptr("- - done 2026-09-28T09:37:06Z\n"),
+			wantErr: "started or done order without an id",
+			marker:  "2026-09-28T09:37:06Z",
+		},
+		{
+			// Only the check waits for its command; the script never writes
+			// done for another order, so a file that says so is not its.
+			name:    "a reboot done",
+			file:    ptr("0123456789abcdef reboot done 2026-09-28T09:37:07Z\n"),
+			wantErr: "done for an order other than check-update",
+			marker:  "2026-09-28T09:37:07Z",
+		},
+		{
+			name:    "an update done",
+			file:    ptr("a1b2c3d4e5f60718 update done 2026-09-28T09:37:08Z\n"),
+			wantErr: "done for an order other than check-update",
+			marker:  "a1b2c3d4e5f60718",
 		},
 		{
 			name:    "- as the id only",

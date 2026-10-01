@@ -682,7 +682,9 @@ function bootTime(host: Host): number | null {
  *   host does not answer (never for a check, which takes nothing away); and no
  *   answer once RESULT_WITHIN_MS have passed
  *   without the daemon reporting the file still there;
- * - the helper's result for this id: rejected or failed as it says; started
+ * - the helper's result for this id: rejected or failed as it says; done --
+ *   which only a check is, once the helper has waited for its unit -- is
+ *   update finished; started
  *   becomes update finished once the update status is not older than the
  *   order (update, check), back once the process started (restart service,
  *   update) or the machine booted (restart host, shut down host) after it,
@@ -719,6 +721,11 @@ export function orderPhase(order: HostOrder, host: Host, pollFailed = false): Or
       return 'no-answer'
     }
     return state === 'pending' ? 'placed' : 'picked-up'
+  }
+  // Only a check is ever done: the helper waited for its unit, and the unit
+  // ended well. What it found is the update status's (checkAnswer).
+  if (result.value.outcome === 'done') {
+    return 'update-finished'
   }
   if (result.value.outcome !== 'started') {
     return result.value.outcome
@@ -899,15 +906,22 @@ function phaseSentence(phase: OrderPhase, order: HostOrder, host: Host): ReactNo
         </>
       )
     case 'update-finished': {
+      if (order.action === 'check-update') {
+        const answer = checkAnswer(order, host)
+        return answer === null ? (
+          <>
+            finished, but what it found is not in the update status holzkube-manager reads.{' '}
+            {CHECK_JOURNAL} says what it found.
+          </>
+        ) : (
+          <>finished. {checkSentence(answer)}</>
+        )
+      }
       const u = host.service.update
       if (!u.readable) {
         return 'finished.'
       }
-      return order.action === 'check-update' ? (
-        <>finished. {checkSentence(u.value)}</>
-      ) : (
-        `finished. ${outcomeSentence(u.value)}`
-      )
+      return `finished. ${outcomeSentence(u.value)}`
     }
     case 'no-answer':
       return result.readable && result.value.id === order.id ? (
@@ -969,6 +983,30 @@ function checkSentence(u: UpdateStatus): ReactNode {
   }
 }
 
+/**
+ * The update status as the answer of the check `order`, or null when it is not
+ * that. The update script records it as the check ends, just before the helper
+ * records the check done; so it is the check's when it is no older than the
+ * order's placement -- or, when the helper has recorded this check done, than
+ * the longest a check can take before that record. (An order the page knows
+ * only from the helper's record has the record's time as its placement, which
+ * for a done check is its end.) Anything older is an earlier run's, left
+ * because the check could not record its own.
+ */
+function checkAnswer(order: HostOrder, host: Host): UpdateStatus | null {
+  const u = host.service.update
+  if (!u.readable) {
+    return null
+  }
+  const placed = Date.parse(order.placed_at)
+  let since = Math.floor(placed / 1000) * 1000
+  const result = host.actions.result
+  if (result.readable && result.value.id === order.id && result.value.outcome === 'done') {
+    since = Math.min(since, Date.parse(result.value.at) - CHECK_WITHIN_MS)
+  }
+  return Date.parse(u.value.checked_at) >= since ? u.value : null
+}
+
 /** The outcomes a finished run is emerald for; a check asked whether one is available. */
 const GOOD_OUTCOMES: Record<'update' | 'check-update', ReadonlyArray<string>> = {
   update: ['current', 'updated'],
@@ -976,14 +1014,22 @@ const GOOD_OUTCOMES: Record<'update' | 'check-update', ReadonlyArray<string>> = 
 }
 
 /** The box's colour set: slate under way, emerald done, red when nothing (good) happened. */
-function phaseColour(phase: OrderPhase, host: Host, action: HostAction): string {
+function phaseColour(phase: OrderPhase, host: Host, order: HostOrder): string {
   switch (phase) {
     case 'back':
       return EMERALD
     case 'update-finished': {
+      if (order.action === 'check-update') {
+        // A check that ended without an answer this page can read is neither
+        // news nor a fault it can name.
+        const answer = checkAnswer(order, host)
+        if (answer === null) {
+          return SLATE
+        }
+        return GOOD_OUTCOMES['check-update'].includes(answer.outcome) ? EMERALD : RED
+      }
       const u = host.service.update
-      const good = GOOD_OUTCOMES[action === 'check-update' ? 'check-update' : 'update']
-      return u.readable && good.includes(u.value.outcome) ? EMERALD : RED
+      return u.readable && GOOD_OUTCOMES.update.includes(u.value.outcome) ? EMERALD : RED
     }
     case 'rejected':
     case 'failed':
@@ -1030,7 +1076,7 @@ export function HostOrderStatus({
       ref={box}
       role="status"
       tabIndex={-1}
-      className={`rounded-md border px-3 py-2 text-sm ${phaseColour(phase, host, order.action)}`}
+      className={`rounded-md border px-3 py-2 text-sm ${phaseColour(phase, host, order)}`}
     >
       <p>
         <span className="font-semibold">{HOST_ACTION_LABEL[order.action]}</span> —{' '}

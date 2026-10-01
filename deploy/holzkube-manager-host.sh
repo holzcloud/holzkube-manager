@@ -40,11 +40,15 @@
 #     (/var/lib/holzkube-manager-host, StateDirectory der Unit). Dort steht in
 #     "last", was aus dem letzten Auftrag wurde:
 #
-#       <id> <aktion> started|rejected|failed <zeit>
+#       <id> <aktion> started|done|rejected|failed <zeit>
 #
+#     "done" gibt es nur fuer check-update: die Suche ist zu Ende, und ihr
+#     Ergebnis steht im Update-Status. Solange fuer eine Suche "started" das
+#     letzte Wort ist, wartet dieses Skript auf sie und holt nichts ab.
 #     Die Host-Seite liest genau diese Zeile (internal/host/hostaction).
 #
-# Exit-Codes: 0 kein Auftrag oder gestartet, 2 verworfen, 1 gescheitert.
+# Exit-Codes: 0 kein Auftrag, gestartet, oder die Suche ist zu Ende;
+# 2 verworfen; 1 gescheitert.
 set -euo pipefail
 
 # Nichts hier haengt vom Verzeichnis des Aufrufers ab, und es laeuft als root.
@@ -212,7 +216,10 @@ case $action in
   # sein ExecStart endet, also ist das Ende dieses systemctl das Ende der
   # Suche. Scheitert sie (GitHub nicht erreichbar, das Update-Skript fehlt),
   # scheitert systemctl, und unten steht "failed" fuer genau diesen Auftrag,
-  # statt dass die Seite bis "keine Antwort" wartet. Die Unit begrenzt sich
+  # statt dass die Seite bis "keine Antwort" wartet; gelingt sie, steht dort
+  # "done". Erst eines von beiden sagt dem Daemon, dass dieser Helfer wieder
+  # Auftraege abholt -- nicht der Update-Status, den auch der stuendliche
+  # Lauf schreibt (13-REVIEW-2 V-01). Die Unit begrenzt sich
   # selbst (TimeoutStartSec=2min plus TimeoutStopSec=15s), unter der Grenze
   # dieses Dienstes (3min).
   check-update)    cmd=(start holzkube-manager-update-check.service) ;;
@@ -227,4 +234,12 @@ if ! "$SYSTEMCTL" "${cmd[@]}"; then
   log "FEHLER: Auftrag $id ($action) gescheitert"
   record "$id" "$action" failed
   exit 1
+fi
+# Nur die Suche wartet auf ihre Unit; nur bei ihr ist das Ende dieses
+# systemctl das Ende des Auftrags. Bei den anderen hat systemctl einen Job
+# eingereiht (reboot, poweroff, update --no-block) oder den Dienst neu
+# gestartet, und was daraus wurde, sagt die Seite anders.
+if [[ $action == check-update ]]; then
+  log "Auftrag $id: Suche beendet"
+  record "$id" "$action" done
 fi

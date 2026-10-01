@@ -33,8 +33,9 @@ install by hand, as root, from the release archive:
   | `update`          | `systemctl start --no-block holzkube-manager-update.service` |
   | `check-update`    | `systemctl start holzkube-manager-update-check.service` |
 
-  `check-update` waits for the check to end, so the order's result is the
-  check's.
+  `check-update` waits for the check to end and records that end for the
+  order: `done` when the check looked (what it found is in the update status
+  the Host page shows), `failed` when it could not.
 
   Anything else -- a sixth word, a second line, a symlink, an order older than
   a minute -- is rejected. The text of an order is never executed, evaluated or
@@ -167,13 +168,20 @@ tests and are left alone.
 ## Results and reasons
 
 - `/var/lib/holzkube-manager-host/last` holds one line about the last order:
-  `<id> <order> started|rejected|failed <time>`. The Host page reads it.
+  `<id> <order> started|done|rejected|failed <time>`. The Host page reads it.
+  `done` comes only for `check-update`: the helper waits for the check unit
+  and records its end, `done` when the unit ended well and `failed` when it
+  did not. While a check's last record is `started`, the helper is still
+  waiting for it and picks up no other order, and holzkube-manager refuses
+  every host action meanwhile. A check left at `started` means the helper was
+  ended while it waited: by its own 3-min limit, a reboot, or a kill.
 - `journalctl -u holzkube-manager-host` says why: which order was started,
   why one was rejected (the reason and the length, never the text), or what
   failed.
 - `journalctl -u holzkube-manager-update-check` says what the check itself
   did: the installed version, the newest release, or why it could not look.
-- The script's exit code: `0` no order, or started; `1` failed; `2` rejected.
+- The script's exit code: `0` no order, started, or a check done; `1`
+  failed; `2` rejected.
 
 ## When the path unit has stopped
 

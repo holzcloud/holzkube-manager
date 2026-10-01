@@ -544,8 +544,10 @@ fi
 	if !res.Readable || res.Value == nil {
 		t.Fatalf("actions.result after the helper ran = %+v, want readable", res)
 	}
-	if res.Value.ID != id || res.Value.Action != "check-update" || res.Value.Outcome != "started" {
-		t.Errorf("actions.result = %+v, want %s check-update started", *res.Value, id)
+	// done: the helper waited for the check unit and records its end, so the
+	// end of the check is the helper's own word (13-REVIEW-2 V-01).
+	if res.Value.ID != id || res.Value.Action != "check-update" || res.Value.Outcome != "done" {
+		t.Errorf("actions.result = %+v, want %s check-update done", *res.Value, id)
 	}
 	if o := after.Actions.Order; o == nil || o.ID != id || o.State != "picked-up" {
 		t.Errorf("actions.order after the helper ran = %+v, want %s picked-up", o, id)
