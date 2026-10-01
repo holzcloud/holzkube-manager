@@ -36,7 +36,7 @@ This Code of Conduct applies within all community spaces, and also applies when 
 
 ## Enforcement
 
-Instances of abusive, harassing, or otherwise unacceptable behavior may be reported to the community leaders responsible for enforcement at <conduct@holzcloud.ch>. All complaints will be reviewed and investigated promptly and fairly.
+Instances of abusive, harassing, or otherwise unacceptable behavior may be reported to the community leaders responsible for enforcement at <info@holzcloud.ch>. All complaints will be reviewed and investigated promptly and fairly.
 
 All community leaders are obligated to respect the privacy and security of the reporter of any incident.
 
@@ -86,7 +86,7 @@ For answers to common questions about this code of conduct, see the FAQ at [http
 
 ## Reporting
 
-Conduct concerns go to <conduct@holzcloud.ch>. It reaches the maintainer and
+Conduct concerns go to <info@holzcloud.ch>. It reaches the maintainer and
 nobody else.
 
 Security vulnerabilities do **not** belong here — those go through

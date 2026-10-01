@@ -89,6 +89,9 @@ A published reporting address that bounces is worse than none: a person raising
 a conduct concern gets silence and no second channel. Create the mailbox or an
 alias before the repository goes public. Deferred on the operator's instruction.
 
+**Resolved 2026-10-01:** the operator named `info@holzcloud.ch` as the one address for
+communication and GitHub; `CODE_OF_CONDUCT.md` now names it in both places.
+
 ---
 
 ## 6. Pre-open-source backups still live in a session scratchpad
