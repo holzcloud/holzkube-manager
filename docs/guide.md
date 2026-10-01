@@ -306,7 +306,9 @@ three buttons stay on, and a note under the header names the file and the one
 command that installs it from the release archive:
 `sudo install -o root -g root -m 0755 deploy/holzkube-manager-update.sh /usr/local/sbin/holzkube-manager-update`
 (`deploy/HOST-HELPER.md`, "The update script"). Both come on with the
-next reading of the page.
+next reading of the page. **Check for updates and install** also needs
+`holzkube-manager-update.service`, the unit your hourly update timer starts;
+the page does not look for that one, and without it that order fails.
 
 **What the page shows once you have pressed one.** A status box under the
 header follows the order from start to end:
