@@ -338,6 +338,13 @@ fields, because such a list forgets the next secret.
 `instance` of any problem response — the record's field set is closed, so
 server-side context belongs in `params` rather than in a new column.
 
+The account routes that act on one account named in the path — `user.role`,
+`user.password-reset`, `user.delete`, `user.identity-unlink` and
+`service-account.rotate` — carry it the same way: `account` is the id from the
+path and `account_username` its name, read before the handler runs so that a
+deletion is still named. Both are written by the server after redaction, so a
+body sending either key does not decide what the record says.
+
 `session` is a **truncated** token, not the live one: a log kept forever must
 not be a store of every session that ever existed.
 
@@ -3527,9 +3534,9 @@ answers `200` with the account view (the same shape as a role change), so a
 client sees `linked_identity` false. The route is registered whether or not a
 provider is configured — a binding left over from a provider that has since been
 switched off is exactly the one that needs removing. It is audited as
-`user.identity-unlink` with **no parameters recorded**: the account is in the
-path, and an issuer or subject a client sends in a body is redacted rather than
-kept in an archive nothing removes from. **It ends every session that came in
+`user.identity-unlink`, naming the account (`account`, `account_username`) and
+nothing from the body: an issuer or subject a client sends there is redacted
+rather than kept in an archive nothing removes from. **It ends every session that came in
 through the removed link**, the caller's included when it is one of them: a
 session signed in through the provider carries a fingerprint of the identity it
 came through, and it is signed in only while its account is linked to that

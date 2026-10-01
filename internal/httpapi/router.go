@@ -592,6 +592,15 @@ func (a auditAdapter) Attempt(ctx context.Context, action, srcIP string, params 
 	if u, ok := a.deps.Auth.CurrentUser(ctx); ok {
 		actor = u.Username
 	}
+	// The account an account route acts on, by name beside its id: an id alone
+	// stops meaning anything once the account is deleted, and user.create
+	// records the name and not the id. Read before the handler runs, so a
+	// deletion still finds it.
+	if id, ok := params[audit.AccountParam].(string); ok && id != "" {
+		if u, err := a.deps.Store.Users().Get(ctx, model.UserID(id)); err == nil {
+			params[audit.AccountUsernameParam] = u.Username
+		}
+	}
 	// params arrives already redacted: the middleware runs every captured body
 	// through the allowlist before it gets here, and there is no path that
 	// reaches this call with raw input. The session token is shortened inside

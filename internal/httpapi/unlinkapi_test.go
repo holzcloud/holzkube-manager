@@ -309,7 +309,7 @@ func TestUnlinkSingleSignOnOfYourOwnAccountKeepsTheSession(t *testing.T) {
 	}
 }
 
-func TestUnlinkSingleSignOnAuditRecordCarriesNoIdentity(t *testing.T) {
+func TestUnlinkSingleSignOnAuditRecordNamesTheAccountAndNoIdentity(t *testing.T) {
 	t.Parallel()
 
 	h := newHarness(t)
@@ -319,9 +319,10 @@ func TestUnlinkSingleSignOnAuditRecordCarriesNoIdentity(t *testing.T) {
 	h.openSudo(t)
 
 	// A client that sends the identity anyway: the route reads no body, and the
-	// archive must not keep what it was handed either.
+	// archive must not keep what it was handed either. It also tries to name a
+	// different account; the record names the one in the path.
 	resp, raw := h.do(t, http.MethodDelete, "/api/v1/users/"+me.ID+"/identity", map[string]string{
-		"issuer": plantedIssuer, "subject": plantedSubject,
+		"issuer": plantedIssuer, "subject": plantedSubject, "account": "somebody-else",
 	})
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("unlink: %d (%s)", resp.StatusCode, raw)
@@ -339,6 +340,15 @@ func TestUnlinkSingleSignOnAuditRecordCarriesNoIdentity(t *testing.T) {
 		switch rec.Outcome {
 		case audit.OutcomeAttempt:
 			attempt = true
+			// Whose account it was is the question a forensic reader has, and
+			// the record answers it: the account the path named, by id and
+			// by name.
+			if got := rec.Params["account"]; got != me.ID {
+				t.Errorf("the record names account %v, want the unlinked one %q", got, me.ID)
+			}
+			if got := rec.Params["account_username"]; got != testUser {
+				t.Errorf("the record names account_username %v, want %q", got, testUser)
+			}
 		case audit.OutcomeSuccess:
 			outcome = true
 		}
@@ -355,4 +365,44 @@ func TestUnlinkSingleSignOnAuditRecordCarriesNoIdentity(t *testing.T) {
 	if !attempt || !outcome {
 		t.Fatalf("no record of the unlink: attempt %v, outcome %v (%d records)", attempt, outcome, len(page.Items))
 	}
+}
+
+// Every account route's record names the account it acted on -- a deletion
+// too, whose account is gone by the time anybody reads the record. That is why
+// the name is read before the handler runs and written beside the id.
+func TestDeletingAnAccountNamesItInTheAuditRecord(t *testing.T) {
+	t.Parallel()
+
+	h := newHarness(t)
+	h.setupAndLogin(t)
+	h.openSudo(t)
+	resp, raw := h.do(t, http.MethodPost, "/api/v1/users", map[string]string{
+		"username": "leaving-colleague", "password": newAccountPass, "role": string(model.RoleReader),
+	})
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("create: %d (%s)", resp.StatusCode, raw)
+	}
+	var created listedUser
+	if err := json.Unmarshal(raw, &created); err != nil {
+		t.Fatalf("decode: %v (%s)", err, raw)
+	}
+	if resp, raw := h.do(t, http.MethodDelete, "/api/v1/users/"+created.ID, map[string]any{}); resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("delete: %d (%s)", resp.StatusCode, raw)
+	}
+
+	page, err := h.logger.Query(context.Background(), audit.Filter{Action: "user.delete"})
+	if err != nil {
+		t.Fatalf("query audit: %v", err)
+	}
+	for _, rec := range page.Items {
+		if rec.Outcome != audit.OutcomeAttempt {
+			continue
+		}
+		if rec.Params["account"] != created.ID || rec.Params["account_username"] != "leaving-colleague" {
+			t.Errorf("the deletion's record names %v / %v, want %q / leaving-colleague",
+				rec.Params["account"], rec.Params["account_username"], created.ID)
+		}
+		return
+	}
+	t.Fatalf("no record of the deletion (%d records)", len(page.Items))
 }

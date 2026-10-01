@@ -116,21 +116,22 @@ var allowlist = map[string][]string{
 	// writes <redacted> and this is the case it was built for.
 	"user.create": {"username", "role"},
 
-	// The role a change moved somebody to. The account is in the path. A role
-	// change with a redacted direction is a record of nothing, which is the
-	// same argument cluster.lock makes.
+	// The role a change moved somebody to. The account it moved is recorded
+	// from the path (accountPath, below). A role change with a redacted
+	// direction is a record of nothing, which is the same argument
+	// cluster.lock makes.
 	"user.role": {"role"},
 
 	// A reset has nothing permissible in its body at all, and the entry exists
 	// so the table says so rather than leaving it to be inferred. The account
-	// whose password was reset is in the path, and that is the fact.
+	// whose password was reset is the fact, and it comes from the path.
 	"user.password-reset": {},
 
-	// Likewise: the account is in the path and there is no body.
+	// Likewise: the account comes from the path and there is no body.
 	"user.delete": {},
 
-	// Unlinking single sign-on: the account is in the path and there is no
-	// body. The issuer and subject it removes are a person's identity at a
+	// Unlinking single sign-on: the account comes from the path and there is
+	// no body. The issuer and subject it removes are a person's identity at a
 	// third party, and this archive is one nothing ever removes from -- so
 	// nothing is permitted, and whatever a client sends anyway is redacted by
 	// the fail-closed default rather than kept forever.
@@ -146,9 +147,10 @@ var allowlist = map[string][]string{
 	// capture even in principle.
 	"service-account.create": {"username", "role"},
 
-	// A rotation has no body. The account is in the path, and the fact is that
-	// its previous token stopped working at this moment -- which is exactly
-	// what somebody investigating a machine that suddenly got 401s needs.
+	// A rotation has no body. The account comes from the path, and the fact is
+	// that its previous token stopped working at this moment -- which is
+	// exactly what somebody investigating a machine that suddenly got 401s
+	// needs.
 	"service-account.rotate": {},
 
 	// Labels and machine classes, v1.16 phase 5.
@@ -601,6 +603,41 @@ func ListedActions() []string {
 // An action with no entry in the table redacts everything. That is the default
 // on purpose: forgetting to extend the allowlist costs a useful record, while
 // the opposite default would cost a secret.
+// AccountParam and AccountUsernameParam name the account an account route acts
+// on, in a record's params. They are written by the server -- the id from the
+// path, the name from the store -- after the body has been redacted, so a body
+// that sends either key does not decide what the record says.
+const (
+	AccountParam         = "account"
+	AccountUsernameParam = "account_username"
+)
+
+// accountPath names, for each account route, the path wildcard that holds the
+// account it acts on.
+//
+// The record's field set is closed (D-14) and the body of these routes carries
+// no account, so before this the archive said "an admin unlinked single
+// sign-on" without saying whose -- the one question a forensic reader has.
+// An account id is server-generated, never a credential, and the same id the
+// account list shows.
+var accountPath = map[string]string{
+	"user.role":              "id",
+	"user.password-reset":    "id",
+	"user.delete":            "id",
+	"user.identity-unlink":   "id",
+	"service-account.rotate": "id",
+}
+
+// AccountFromPath answers the account id an account route's path names, and
+// "" for any other action. pathValue is the request's PathValue.
+func AccountFromPath(action string, pathValue func(string) string) string {
+	wildcard, ok := accountPath[action]
+	if !ok {
+		return ""
+	}
+	return pathValue(wildcard)
+}
+
 func Params(action string, raw map[string]any) map[string]any {
 	// Allowlist entries are authored as dotted paths and are split into
 	// segments here, because a dot in the table means "descend" while a dot in

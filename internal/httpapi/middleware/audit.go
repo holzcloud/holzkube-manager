@@ -115,6 +115,11 @@ func Audit(
 func captureParams(r *http.Request, action string) map[string]any {
 	params := audit.Params(action, readBody(r))
 	params[RequestIDParam] = RequestIDFromContext(r.Context())
+	// After redaction, like the request id, so that a body sending the same
+	// key does not decide which account the record names.
+	if account := audit.AccountFromPath(action, r.PathValue); account != "" {
+		params[audit.AccountParam] = account
+	}
 	return params
 }
 

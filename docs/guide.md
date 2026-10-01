@@ -533,8 +533,8 @@ account's link, issuer and `sub` both, so that the next first sign-in can link a
 different identity. The Sign-in column shows which provider an account is linked
 to by its host only (`idp.example.com`), never the `sub`. Only an admin can
 unlink, it asks for re-authentication like every other account change, and it
-is recorded in the audit log as `user.identity-unlink` without the issuer or the
-`sub`. It is refused for an account that is not linked.
+is recorded in the audit log as `user.identity-unlink`, naming the account
+whose link it removed and never the issuer or the `sub`. It is refused for an account that is not linked.
 
 A service account never signs in through the provider, whatever is stored: a
 binding on one is ignored at sign-in. An earlier release could still make one —
