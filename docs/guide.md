@@ -246,7 +246,10 @@ Five buttons in the page's header act on the machine itself:
   installs nothing: holzkube-manager keeps running and the page keeps its
   connection. The status box and **Update check** then name the newest release
   and the version installed here. A check that fails says so;
-  `journalctl -u holzkube-manager-update-check` says why.
+  `journalctl -u holzkube-manager-update-check` says why. A check that comes
+  while the hourly update is running waits for it, up to a minute, and
+  reports what is installed after it; if the update takes longer, the check
+  fails and says another run of the update script was still going.
 - **Check for updates and install** runs the same update the hourly timer runs
   (`holzkube-manager-update.service`): it looks for a newer release and, if
   there is one, installs it and restarts holzkube-manager. If there is none,

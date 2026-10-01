@@ -54,6 +54,7 @@ cd /
 #   HOLZKUBE_MANAGER_TOKEN_FILE         /etc/holzkube-manager/github-token
 #   HOLZKUBE_MANAGER_HEALTH_URL         https://127.0.0.1:8443/api/v1/system/status
 #   HOLZKUBE_MANAGER_UPDATE_STATUS_DIR  /var/lib/holzkube-manager-update
+#   HOLZKUBE_MANAGER_UPDATE_LOCK_WAIT   60 mit --check, sonst 600 (Sekunden)
 
 # Woher die Releases kommen. Ein Repo, seit die beiden am 2026-09-03 wieder
 # zusammengelegt wurden. CONF darf es ueberschreiben, ohne das Skript zu
@@ -121,6 +122,35 @@ INSTALLED=""
 LATEST=""
 TMP=""
 
+# status_dir_ok sagt, ob in $STATUS_DIR geschrieben werden darf, und legt es als
+# root an, wenn es fehlt. Dieselbe Frage stellen das Festhalten und die Sperre
+# unten: wer festhalten darf, sperrt, und wer nicht festhalten darf, braucht
+# keine Sperre.
+status_dir_ok() {
+  local dir=${STATUS_DIR:-}
+  [[ -n $dir ]] || return 1
+  # Ein Symlink wird nicht verfolgt, von niemandem.
+  [[ ! -L $dir ]] || return 1
+  if [[ ! -d $dir ]]; then
+    # Anlegen darf es nur root, und dann so, wie es gehoert.
+    [[ $EUID -eq 0 ]] || return 1
+    install -d -o root -g root -m 0755 "$dir" || return 1
+  fi
+  # Als root nur in ein Verzeichnis, das root gehoert und in das niemand sonst
+  # schreiben kann. Gehoert es root, ist aber gruppen- oder weltschreibbar,
+  # kann ein anderer die Datei von mktemp zwischen mktemp und der Umleitung
+  # unten gegen einen Symlink tauschen, und root schriebe dorthin, wo er zeigt
+  # -- auch mit Sticky-Bit, denn die Datei, die er tauschte, waere dann seine.
+  # Die Pruefung laeuft in python3, weil stat(1) auf Linux und BSD
+  # verschiedene Schalter hat, und mit lstat, damit sie keinem Symlink folgt.
+  if [[ $EUID -eq 0 ]]; then
+    python3 -I -c 'import os, stat, sys; s = os.lstat(sys.argv[1]); sys.exit(0 if stat.S_ISDIR(s.st_mode) and s.st_uid == 0 and not s.st_mode & 0o022 else 1)' "$dir" \
+      || return 1
+  fi
+  # --check ohne root: nicht schreibbar heisst nichts festhalten.
+  [[ -w $dir ]]
+}
+
 record_status() {
   local rc=$1 outcome=${OUTCOME:-} dir=${STATUS_DIR:-} tmp
   if [[ -z $outcome && $rc -ne 0 ]]; then
@@ -134,27 +164,7 @@ record_status() {
     outcome=failed
   fi
   [[ -n $outcome && -n $dir ]] || return 0
-
-  # Ein Symlink wird nicht verfolgt, von niemandem.
-  [[ ! -L $dir ]] || return 0
-  if [[ ! -d $dir ]]; then
-    # Anlegen darf es nur root, und dann so, wie es gehoert.
-    [[ $EUID -eq 0 ]] || return 0
-    install -d -o root -g root -m 0755 "$dir" || return 0
-  fi
-  # Als root nur in ein Verzeichnis, das root gehoert und in das niemand sonst
-  # schreiben kann. Gehoert es root, ist aber gruppen- oder weltschreibbar,
-  # kann ein anderer die Datei von mktemp zwischen mktemp und der Umleitung
-  # unten gegen einen Symlink tauschen, und root schriebe dorthin, wo er zeigt
-  # -- auch mit Sticky-Bit, denn die Datei, die er tauschte, waere dann seine.
-  # Die Pruefung laeuft in python3, weil stat(1) auf Linux und BSD
-  # verschiedene Schalter hat, und mit lstat, damit sie keinem Symlink folgt.
-  if [[ $EUID -eq 0 ]]; then
-    python3 -I -c 'import os, stat, sys; s = os.lstat(sys.argv[1]); sys.exit(0 if stat.S_ISDIR(s.st_mode) and s.st_uid == 0 and not s.st_mode & 0o022 else 1)' "$dir" \
-      || return 0
-  fi
-  # --check ohne root: nicht schreibbar heisst nichts festhalten.
-  [[ -w $dir ]] || return 0
+  status_dir_ok || return 0
 
   tmp=$(mktemp "$dir/.status.XXXXXX") || return 0
   # Die Werte gehen als argv hinein und als JSON heraus. Tag-Namen kommen von
@@ -217,9 +227,68 @@ if [[ $ROLLBACK -eq 1 ]]; then
   exit 0
 fi
 
+# --- Ein Lauf nach dem anderen ----------------------------------------------
+# Der stuendliche Lauf (holzkube-manager-update.service) und das Nachsehen
+# (holzkube-manager-update-check.service, das der Host-Helfer startet) fuehren
+# dieses Skript aus, und nichts ordnet die beiden Units gegeneinander. Ohne
+# Sperre sah ein Nachsehen vor dem Installieren nach, hielt danach fest und
+# ueberschrieb "updated" mit "available" -- fuer ein Release, das da schon
+# installiert war (13-REVIEW-2 IN-02).
+#
+# Also nimmt jeder Lauf, der festhalten darf, zuerst eine Sperre: flock(1) auf
+# $STATUS_DIR/.lock. Was das sicher macht:
+#
+#   - Die Sperre gehoert dem Kernel, nicht der Datei. Sie endet mit dem
+#     letzten Prozess, der die Datei offen haelt, auch bei SIGKILL oder einem
+#     Absturz; eine liegengebliebene .lock sperrt nichts. Die Kinder dieses
+#     Skripts erben den Deskriptor; das laengste ist curl mit --max-time 300.
+#   - Gewartet wird begrenzt: mit --check 60 s, damit Warten und Nachsehen
+#     (curl --max-time 30) unter TimeoutStartSec=2min der Check-Unit bleiben;
+#     sonst 600 s, mehr als das Nachsehen je dauert (die Unit beendet es nach
+#     hoechstens 2min40s). Bleibt sie laenger gehalten, endet der Lauf mit 1
+#     und haelt nichts fest: festhalten wird der, der sie haelt, und ein
+#     Eintrag daneben waere genau das Rennen. Der Timer startet die naechste
+#     Stunde wie immer.
+#   - Die Datei ist 0600 und gehoert root. Lesen kann sie sonst niemand, also
+#     kann auch niemand anderes sie sperren -- der Dienstbenutzer des Daemons,
+#     der status.json liest, haelt so kein Update auf.
+#   - Was die Sperre selbst verhindert, haelt kein Update auf: fehlt flock, ist
+#     das Verzeichnis nicht verwendbar oder die Datei nicht zu oeffnen, laeuft
+#     das Skript wie vorher ohne. Nur eine Sperre, die ein anderer Lauf
+#     wirklich haelt, laesst es warten.
+#
+# Ohne Sperre bleiben --help, eine unbekannte Option, die Weigerung ohne root
+# und --rollback: sie enden oben und halten nichts fest. Ein --check ohne root
+# darf nicht festhalten und sperrt darum auch nicht.
+take_lock() {
+  local wait=$1 lock old
+  command -v flock >/dev/null || { log "WARNUNG: flock fehlt - dieser Lauf laeuft ohne Sperre."; return 0; }
+  status_dir_ok >/dev/null 2>&1 || return 0
+  lock=$STATUS_DIR/.lock
+  [[ ! -L $lock ]] || return 0
+  old=$(umask)
+  umask 077
+  if ! exec 9>>"$lock"; then
+    umask "$old"
+    return 0
+  fi
+  umask "$old"
+  flock -n 9 && return 0
+  log "Ein anderer Lauf des Update-Skripts laeuft; warte hoechstens $wait s auf ihn ..."
+  flock -w "$wait" 9 || fail "ein anderer Lauf des Update-Skripts haelt $lock seit ueber $wait s.
+Dieser Lauf hat nichts nachgesehen, nichts installiert und nichts festgehalten."
+}
+
+LOCK_WAIT=${HOLZKUBE_MANAGER_UPDATE_LOCK_WAIT:-}
+if [[ ! $LOCK_WAIT =~ ^[0-9]+$ ]]; then
+  LOCK_WAIT=600
+  [[ $CHECK_ONLY -eq 1 ]] && LOCK_WAIT=60
+fi
+take_lock "$LOCK_WAIT"
+
 # Ab hier kommt jeder Lauf zu einer Entscheidung, und die wird festgehalten.
 # --help, eine unbekannte Option, die Weigerung ohne root und --rollback enden
-# oben und halten nichts fest.
+# oben und halten nichts fest; ein Lauf, der die Sperre nicht bekam, auch nicht.
 trap on_exit EXIT
 # Ein Signal beendet den Lauf ueber exit, mit 128 + Signalnummer. Ohne diese
 # Fallen laeuft die EXIT-Falle bei SIGTERM zwar auch, sieht in $? aber den

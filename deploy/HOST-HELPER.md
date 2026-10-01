@@ -19,7 +19,11 @@ install by hand, as root, from the release archive:
   --check`, which looks up the newest release, records what it found, and
   installs nothing. It has a sandbox of its own: it may reach the network,
   which the helper's own service may not, and it writes only
-  `/var/lib/holzkube-manager-update`.
+  `/var/lib/holzkube-manager-update`. The update script runs one run at a
+  time: a check that finds the hourly update running waits for it, at most
+  60 s, and the hourly update waits for a running check, at most 600 s. A run
+  that waited that long ends with exit code 1, records nothing, and says in
+  its journal that another run held `/var/lib/holzkube-manager-update/.lock`.
 - `holzkube-manager-host.sh`, installed as
   `/usr/local/sbin/holzkube-manager-host` -- the script. It removes the order
   before it does anything, and knows exactly five orders, each with one fixed

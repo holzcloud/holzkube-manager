@@ -39,7 +39,12 @@
 #     abgebrochen wird. Darum steht hier auch kein TimeoutSec=,
 #     SendSIGKILL=, FinalKillSignal=, TimeoutStartFailureMode= und keine
 #     Ordnung (After=): jede davon aendert diese Rechnung. curl im Skript hat
-#     ohnehin --max-time 30.
+#     ohnehin --max-time 30, und vorher wartet das Skript mit --check
+#     hoechstens 60 s auf einen anderen Lauf, der die Sperre
+#     /var/lib/holzkube-manager-update/.lock haelt (der stuendliche Lauf):
+#     zusammen bleibt beides unter TimeoutStartSec=2min. Der stuendliche Lauf
+#     wartet seinerseits auf das Nachsehen. Bleibt die Sperre laenger
+#     gehalten, endet das Skript mit 1 und haelt nichts fest.
 #   - Im [Unit]-Teil nur Beschreibung und Dokumentation: kein OnSuccess=,
 #     OnFailure=, Wants=, Requires=. holzkube-manager-update.service ist das
 #     ganze Update als root; diese Unit startet nichts anderes.
