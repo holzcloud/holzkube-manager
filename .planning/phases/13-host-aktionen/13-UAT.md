@@ -1,5 +1,5 @@
 ---
-status: diagnosed
+status: partial
 phase: 13-host-aktionen
 source: 13-01-SUMMARY.md, 13-02-SUMMARY.md, 13-03-SUMMARY.md, 13-04-SUMMARY.md, 13-05-SUMMARY.md, 13-06-SUMMARY.md, 13-07-SUMMARY.md, 13-08-SUMMARY.md, 13-09-SUMMARY.md
 started: 2026-09-29T19:23:00Z
@@ -107,12 +107,24 @@ result: pass
 source: automated
 coverage_id: D7
 
+### 16. Install the helper and the check unit, then probe
+expected: Following deploy/HOST-HELPER.md on the Pi, /host shows all five actions on; "Check for updates" answers under Update check without installing anything; then "Check for updates and install" runs the real update.
+result: [pending]
+
+### 17. The check unit under its real sandbox (V-26)
+expected: After installing, `systemctl start holzkube-manager-update-check.service` reaches GitHub and records current/available in the update status; `journalctl -u holzkube-manager-update-check` shows no sandbox denial.
+result: [pending]
+
+### 18. Restart service and Shut down host, once each
+expected: Each runs through the helper exactly once; the page shows the waiting notice and then "back" (restart) or the host is off (poweroff); a check cut off by a reboot shows the "host restarted before the check ended" sentence.
+result: [pending]
+
 ## Summary
 
-total: 15
+total: 18
 passed: 11
 issues: 2
-pending: 0
+pending: 3
 skipped: 0
 blocked: 2
 
