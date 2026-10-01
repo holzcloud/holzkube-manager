@@ -879,7 +879,17 @@ function phaseSentence(phase: OrderPhase, order: HostOrder, host: Host): ReactNo
     case 'rejected':
       return <>the helper rejected the order, so nothing was done. {JOURNAL} says why.</>
     case 'failed':
-      return <>the helper could not carry it out. {JOURNAL} says why.</>
+      // A check fails in its own unit (GitHub out of reach, the update script
+      // missing, the unit timed out), and the helper's journal says only that
+      // the order failed (13-REVIEW-2 WR-02).
+      return order.action === 'check-update' ? (
+        <>
+          the check could not look for a newer release, and nothing was installed. {CHECK_JOURNAL}{' '}
+          says why.
+        </>
+      ) : (
+        <>the helper could not carry it out. {JOURNAL} says why.</>
+      )
     case 'not-picked-up':
       return (
         <>
