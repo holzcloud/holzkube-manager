@@ -941,3 +941,147 @@ everything else:
 - `./bin/task lint:go`: exit 0, 0 issues (after c47f2ac).
 - `go test ./internal/publicrepo/` before each commit: exit 0.
 - web/ was not touched, so no web suite was run.
+
+## Remaining notes — IN-04
+
+**Where it ran:** the operator's Raspberry Pi 5 (aarch64), main checkout, no
+worktree. Go from `~/.local/go` (no `-race`), Node through nvm. Nothing
+installed. `/usr/local/sbin/holzkube-manager-host` and
+`/etc/systemd/system/holzkube-manager-update-check.service` are absent before
+and after. `holzkube-manager.service` read `ActiveEnterTimestamp=Tue
+2026-09-29 20:25:38 CEST, NRestarts=0` before and after. The real
+`/usr/local/sbin/holzkube-manager-update` here is root 0755, so it counts as
+installed. Nothing pushed, no release, no changelog entry.
+
+### IN-04: the update script is now detected — fixed (4ebc14f)
+
+**What.** Both update orders end in `/usr/local/sbin/holzkube-manager-update`:
+`update` through `holzkube-manager-update.service`, `check-update` through the
+check unit's `--check`. The helper's install commands do not install it. The
+daemon now asks for it from the file alone, as it asks for the helper's
+script. It must be a regular executable owned by uid 0 and writable by
+nobody else (`hostaction.UpdateScriptMissing`, the shared `rootExecutable`).
+That is a stat under `ProtectSystem=strict`: no D-Bus, no process, and the
+file is never read. It is asked whatever `Missing` says, because the helper's
+commands never bring it.
+
+**Refused:** only `update` and `check-update` (`hostaction.NeedsUpdateScript`),
+with `409 conflict.host-update-script-missing` on both routes. The confirm
+route refuses once the body names one of them, before the hostname is
+compared. The action route refuses before the body and the token. No token,
+nothing placed. `reboot`, `poweroff` and `restart-service` go through.
+
+**Order:** container → missing → update script → outdated → busy.
+
+- The update script comes after container and missing because those decide
+  whether anything can be placed at all. In a container, installing is the
+  wrong advice.
+- It comes before the older helper because it is the reason both update
+  actions share. With it first, the page has one reason line for the pair, and
+  the routes refuse both with the code that line names. With outdated first,
+  the check and the update would carry different reasons. The older-helper
+  note stays on the page meanwhile, so nothing is hidden.
+- It comes before busy for the same reason outdated does: it is a standing
+  condition that waiting will not cure.
+
+**Wire.** `actions.update_script` (one item
+`{"item":"update-script","path":"/usr/local/sbin/holzkube-manager-update"}`,
+or `[]`, never null) and `actions.update_script_install_commands` (the one
+line from `hostaction.UpdateScriptInstallCommands`). `available` is
+unchanged.
+
+**Page.**
+
+- `actionReason` turns off only the two update buttons, with `REASON.updateScript`.
+- The one reason line describes those two buttons through `aria-describedby`.
+  The group and the other three describe nothing.
+- `HostUpdateScriptNotice`, in the shared slate frame with no new classes,
+  names the path, says in one sentence which buttons need it, and shows the
+  server's command. It appears beside the helper notice or the older-helper
+  note, never in a container.
+- Install command: `sudo install -o root -g root -m 0755
+  deploy/holzkube-manager-update.sh /usr/local/sbin/holzkube-manager-update`.
+  The archive carries the file (`.goreleaser.yaml`, now held by
+  `TestTheArchiveCarriesTheHelper`), and the script reinstalls itself with
+  exactly that owner and mode.
+
+**Docs:**
+
+- `deploy/HOST-HELPER.md` has a new section, "The update script", whose
+  command block is held byte for byte by
+  `TestUpdateScriptInstallCommandsMatchTheGuide`.
+- `docs/api-contract.md` gets the new row, `update_script`,
+  `update_script_install_commands`, an example and the order paragraph.
+- `docs/guide.md` gets "Without the update script."
+- README unchanged: it describes the helper notice and the host picture, and
+  no rendered screen changes (below).
+
+**Fixtures.** `demo.json` and `host-helper-installed.json` carry both keys as
+written, held by vitest (`fixtures.test.ts`) and Go
+(`TestTheFixtureShowsTheRealInstallCommands`). The demo stays helper-missing,
+with `update_script: []`: the reference installation has the script.
+
+**Red runs.** Each was injected, seen fail through the command's own exit code
+(not through a pipe), restored from a scratch copy with `cmp`, then green.
+After the commit, `git show HEAD:<file> | cmp - <file>` holds for all five
+injected files.
+
+- Action route refusal removed (`if false && …` in `hostAction`):
+  `TestHostUpdateActionsNeedTheUpdateScript` exit 1, 7 FAIL lines,
+  "POST /api/v1/host/actions/update with a valid host token: 202, want 409".
+- Confirm route refusal removed: exit 1, 7 FAIL lines. The confirm route
+  answered "200 … handed out a token", and with busy, "code
+  conflict.host-helper-busy, want conflict.host-update-script-missing".
+- Update-script and outdated refusals swapped in the action route: exit 1,
+  subtest `outdated` FAIL, "code conflict.host-helper-outdated, want
+  conflict.host-update-script-missing".
+- Ownership check dropped from the detection (mode only): all exit 1.
+  - `TestUpdateScriptMissing`: owned_by_uid_1000 and no_owner_information FAIL.
+  - `TestReadCarriesActions`: an_update_script_uid_1000_owns FAIL.
+  - `TestHostUpdateActionsNeedTheUpdateScript`: owned_by_uid_1000 FAIL.
+- Collector asks only once the helper is installed: `TestReadCarriesActions`
+  exit 1, nothing_installed FAIL.
+- Page reason clause removed (`actionReason`): `HostActions.test.tsx` exit 1,
+  2 failed.
+- Page reasons swapped (outdated before the script): exit 1, 1 failed (the
+  "older helper too" case).
+- Page notice removed (`host.tsx`): `host.test.tsx` exit 1, 3 failed.
+- The page's `UPDATE_SCRIPT_ACTIONS` cut to `['check-update']`: exit 1, "the
+  page and the routes disagree". On the first try that cross-check also failed
+  on the correct list, because it compared the two lists in their declaration
+  order. It now compares them sorted and was seen red again against the cut
+  list.
+
+**Not covered.** `update` also needs `holzkube-manager-update.service`, the
+unit the hourly timer starts. This repository does not ship that unit, so
+there is no install command to show, and the page does not look for it.
+HOST-HELPER.md says so. If the operator's reference installation ever lacks
+that unit, the update order still starts a unit that does not exist, and the
+helper records `failed`.
+
+### Final suites (Pi, main checkout)
+
+- `go test ./internal/... ./cmd/... -count=1`: exit 0, 41 `ok`, nothing else.
+  After that, a doc-comment-only change for revive, then
+  `go test ./internal/host/... -count=1`: exit 0.
+- Root namespace (`unshare --user --map-root-user`, `-v`):
+  `TestHostActionRoundTrip`, `TestHostCheckRoundTrip` and `TestHostScriptAsRoot`
+  PASS, 0 SKIP. `installedHelperFS` changed, so the end-to-end run was redone.
+- `./bin/task lint:go`: exit 0, 0 issues. The first run found one revive
+  comment form, which was fixed.
+- web:
+  - `npx vitest run --project jsdom`: exit 0, 56 files, 815 tests.
+  - `npm run test:browser`: exit 0, 5 files, 23 tests.
+  - `npm run lint`: exit 0. The 2 warnings and 1 info are in `DataTable.tsx`
+    and `wall.test.tsx`, which this change does not touch.
+  - `npm run typecheck`: exit 0.
+- `go test ./internal/publicrepo/` before the commit: exit 0.
+- `systemd-analyze verify`: no unit file changed, so nothing to verify.
+- `./bin/task test:layout`: not run, because no class changed. The notice reuses
+  `HelperInstallNotice`'s frame.
+- Pictures: `task build && node web/scripts/readme-images.mjs` rewrote every
+  PNG. A pixel diff of `host.png` (bbox 39,824–1239,1724) is only the
+  render-time "since" dates and the dev-build version label
+  (`v0.0.1-284-gd3de078-dirty` vs `v0.1.0`). The same noise is in screens this
+  change does not touch. No picture shows the change, so all were restored and
+  none committed.
