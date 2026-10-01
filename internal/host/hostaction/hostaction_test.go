@@ -630,3 +630,195 @@ func TestOrderStateWhenTheSlotCannotBeRead(t *testing.T) {
 		t.Errorf("Order() once the slot reads empty = %+v, want picked-up", got)
 	}
 }
+
+// busyRig is a Box over a real data directory and a real result file, with a
+// clock and a boot the test sets.
+type busyRig struct {
+	*rig
+	result string
+	now    time.Time
+	up     time.Duration
+	upErr  error
+}
+
+func newBusyRig(t *testing.T) *busyRig {
+	t.Helper()
+	dir := t.TempDir()
+	if err := os.Chmod(dir, 0o700); err != nil {
+		t.Fatalf("chmod: %v", err)
+	}
+	state := t.TempDir()
+	b := &busyRig{
+		rig:    &rig{dir: dir, timers: &manualTimers{}, logs: &logRecorder{}, claims: &countingClaim{}},
+		result: filepath.Join(state, "last"),
+		now:    time.Date(2026, 9, 30, 16, 0, 0, 0, time.UTC),
+		up:     time.Hour,
+	}
+	b.box = NewBox(Config{
+		FS:         os.DirFS("/"),
+		DataDir:    dir,
+		ResultPath: b.result,
+		Place:      fsstore.PlaceNew,
+		Claim:      b.claims.claim,
+		AfterFunc:  b.timers.afterFunc,
+		Now:        func() time.Time { return b.now },
+		SinceBoot:  func() (time.Duration, error) { return b.up, b.upErr },
+		Logger:     slog.New(b.logs),
+	})
+	t.Cleanup(b.box.Close)
+	return b
+}
+
+// record writes the helper's result line, recorded ago before the rig's now.
+func (b *busyRig) record(t *testing.T, id string, a Action, o Outcome, ago time.Duration) {
+	t.Helper()
+	line := fmt.Sprintf("%s %s %s %s\n", id, a, o, b.now.Add(-ago).UTC().Truncate(time.Second).Format(time.RFC3339))
+	if err := os.WriteFile(b.result, []byte(line), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// pickUp does what the helper does first: the order's name goes.
+func (b *busyRig) pickUp(t *testing.T) {
+	t.Helper()
+	if err := os.Remove(b.orderPath()); err != nil {
+		t.Fatalf("pick up: %v", err)
+	}
+}
+
+// wantRefused asks Busy and Place and wants both to say the helper is busy,
+// with nothing placed.
+func (b *busyRig) wantRefused(t *testing.T, why string) {
+	t.Helper()
+	if !b.box.Busy() {
+		t.Errorf("%s: Busy = false, want true", why)
+	}
+	if _, err := b.box.Place(Reboot); !errors.Is(err, ErrBusy) {
+		t.Errorf("%s: Place(reboot) = %v, want ErrBusy", why, err)
+	}
+	if _, err := os.Lstat(b.orderPath()); err == nil {
+		t.Errorf("%s: a refused Place left an order in the slot", why)
+		_ = os.Remove(b.orderPath())
+	}
+}
+
+// wantPlaced asks Busy and Place and wants the order placed; the slot is
+// emptied again afterwards, as a helper would.
+func (b *busyRig) wantPlaced(t *testing.T, why string) {
+	t.Helper()
+	if b.box.Busy() {
+		t.Errorf("%s: Busy = true, want false", why)
+	}
+	if _, err := b.box.Place(Reboot); err != nil {
+		t.Errorf("%s: Place(reboot) = %v, want it placed", why, err)
+		return
+	}
+	b.pickUp(t)
+}
+
+// TestBusyIsTheHelpersOwnWord (13-REVIEW-2 V-01, V-02, V-21): the helper is
+// busy with a check while its own last record is that check started --
+// whatever any update status says, which this Box does not even read -- and
+// no longer once it recorded the end, its service's limit passed, or the
+// machine booted since. Place refuses under its lock exactly when Busy says
+// so.
+func TestBusyIsTheHelpersOwnWord(t *testing.T) {
+	const id = "c0ffee00c0ffee11"
+	for _, tc := range []struct {
+		name    string
+		outcome Outcome
+		action  Action
+		ago     time.Duration
+		up      time.Duration
+		upErr   error
+		busy    bool
+	}{
+		{"a check started 5 s ago", OutcomeStarted, CheckUpdate, 5 * time.Second, time.Hour, nil, true},
+		{"a check started 2 min 15 s ago", OutcomeStarted, CheckUpdate, 135 * time.Second, time.Hour, nil, true},
+		{"a check started 5 s ago, the boot unknown", OutcomeStarted, CheckUpdate, 5 * time.Second, 0, errors.New("no clock"), true},
+		{"a check done", OutcomeDone, CheckUpdate, 5 * time.Second, time.Hour, nil, false},
+		{"a check failed", OutcomeFailed, CheckUpdate, 5 * time.Second, time.Hour, nil, false},
+		{"a check started 3 min ago, the helper's limit", OutcomeStarted, CheckUpdate, HelperServiceLimit, time.Hour, nil, false},
+		{"a check started 40 s ago, the machine up for 20 s", OutcomeStarted, CheckUpdate, 40 * time.Second, 20 * time.Second, nil, false},
+		{"an update started 5 s ago", OutcomeStarted, Update, 5 * time.Second, time.Hour, nil, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			b := newBusyRig(t)
+			b.up, b.upErr = tc.up, tc.upErr
+			b.record(t, id, tc.action, tc.outcome, tc.ago)
+			if tc.busy {
+				b.wantRefused(t, tc.name)
+			} else {
+				b.wantPlaced(t, tc.name)
+			}
+		})
+	}
+}
+
+// TestBusyFromTheCheckThisBoxPlaced (13-REVIEW-2 V-03, V-22): between the
+// helper's rename of a check order and its "started" record, the record
+// still names the order before, and only the Box knows the check was taken.
+// It holds every order back until the helper records the check, or until
+// ResultWithin has passed without a record.
+func TestBusyFromTheCheckThisBoxPlaced(t *testing.T) {
+	b := newBusyRig(t)
+	// The record before: an older reboot, long answered.
+	b.record(t, "0123456789abcdef", Reboot, OutcomeRejected, time.Hour)
+
+	check, err := b.box.Place(CheckUpdate)
+	if err != nil {
+		t.Fatalf("Place(check-update): %v", err)
+	}
+	// Still in the slot: not busy -- the slot itself refuses the next one.
+	if b.box.Busy() {
+		t.Error("Busy = true while the check still waits in the slot, want false")
+	}
+	if _, err := b.box.Place(Reboot); !errors.Is(err, ErrPending) {
+		t.Errorf("Place(reboot) with the check in the slot = %v, want ErrPending", err)
+	}
+
+	b.pickUp(t)
+	b.now = b.now.Add(50 * time.Millisecond)
+	b.wantRefused(t, "the check taken, nothing recorded for it")
+
+	b.now = b.now.Add(time.Second)
+	b.record(t, check.ID, CheckUpdate, OutcomeStarted, 0)
+	b.wantRefused(t, "the check recorded started")
+
+	b.now = b.now.Add(30 * time.Second)
+	b.record(t, check.ID, CheckUpdate, OutcomeDone, 0)
+	b.wantPlaced(t, "the check recorded done")
+}
+
+func TestBusyFromTheCheckThisBoxPlacedEnds(t *testing.T) {
+	t.Run("a minute without a record", func(t *testing.T) {
+		b := newBusyRig(t)
+		if _, err := b.box.Place(CheckUpdate); err != nil {
+			t.Fatal(err)
+		}
+		b.pickUp(t)
+		b.now = b.now.Add(ResultWithin - time.Second)
+		b.wantRefused(t, "59 s without a record")
+		b.now = b.now.Add(time.Second)
+		b.wantPlaced(t, "a minute without a record")
+	})
+	t.Run("withdrawn", func(t *testing.T) {
+		b := newBusyRig(t)
+		if _, err := b.box.Place(CheckUpdate); err != nil {
+			t.Fatal(err)
+		}
+		b.timers.fire(t, 0)
+		if got := b.box.Order(); got == nil || got.State != StateWithdrawn {
+			t.Fatalf("Order() = %+v, want withdrawn", got)
+		}
+		b.wantPlaced(t, "a check withdrawn before anybody took it")
+	})
+	t.Run("another order taken", func(t *testing.T) {
+		b := newBusyRig(t)
+		if _, err := b.box.Place(Update); err != nil {
+			t.Fatal(err)
+		}
+		b.pickUp(t)
+		b.wantPlaced(t, "an update taken, nothing recorded for it")
+	})
+}

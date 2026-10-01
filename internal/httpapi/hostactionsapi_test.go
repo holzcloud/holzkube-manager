@@ -569,6 +569,21 @@ fi
 	if checkedAt.Before(placedAt.Truncate(time.Second)) {
 		t.Errorf("checked_at %s is before the placement %s (truncated to the second)", checkedAt, placedAt)
 	}
+
+	// The helper recorded the check done, so it is not busy any more: the
+	// page offers the next action, and the route takes it.
+	var busy struct {
+		Actions struct {
+			Busy *bool `json:"busy"`
+		} `json:"actions"`
+	}
+	h.getJSON(t, "/api/v1/host", &busy)
+	if busy.Actions.Busy == nil || *busy.Actions.Busy {
+		t.Errorf("actions.busy after the check was done = %v, want false", busy.Actions.Busy)
+	}
+	if resp, raw := h.confirmAndPlace(t, hostaction.Reboot, "example-host"); resp.StatusCode != http.StatusAccepted {
+		t.Errorf("a reboot after the check was done: %d, want 202 (%s)", resp.StatusCode, raw)
+	}
 }
 
 // getJSON GETs path with the harness's session and decodes a 200 into v.

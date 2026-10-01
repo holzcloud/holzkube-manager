@@ -152,6 +152,12 @@ type Actions struct {
 	// empty while anything is Missing: the install commands install
 	// everything, the newer script and the check unit with it.
 	Outdated []hostaction.Missing `json:"outdated"`
+	// Busy is whether the helper is busy with an update check right now
+	// (hostaction.Box.Busy): it picks up nothing else until the check ends,
+	// and the routes refuse every host action while it is true (409
+	// conflict.host-helper-busy). The page turns all five buttons off by it.
+	// False without host actions and on a platform with no readings.
+	Busy bool `json:"busy"`
 	// InstallCommands are the commands that install the helper, exactly
 	// hostaction.InstallCommands -- the page shows them, it does not keep a
 	// copy of its own.

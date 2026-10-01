@@ -255,36 +255,11 @@ export function disabledReason(
   // A check the page does not follow -- another tab or client placed it --
   // holds the helper all the same, and the routes refuse every order meanwhile
   // (409 conflict.host-helper-busy, whose detail begins with this sentence).
-  if (helperWaitsForCheck(host)) {
+  // The server's own answer, so the page cannot read it differently.
+  if (host.actions.busy) {
     return REASON.checkRunning
   }
   return null
-}
-
-/**
- * Whether the helper is still waiting for a check, by the readings the routes
- * refuse by (hostaction.CheckRunning): its last record is a check it started,
- * less than its service's limit ago, and the update status has recorded no
- * run since. The helper records nothing when a check succeeds, so the update
- * status is what says it is over; both record whole seconds, and the same
- * second counts as over.
- */
-export function helperWaitsForCheck(host: Host): boolean {
-  const result = host.actions.result
-  if (
-    !result.readable ||
-    result.value.action !== 'check-update' ||
-    result.value.outcome !== 'started'
-  ) {
-    return false
-  }
-  const at = Date.parse(result.value.at)
-  const age = Date.parse(host.observed_at) - at
-  if (!(age >= 0 && age < CHECK_WITHIN_MS)) {
-    return false
-  }
-  const update = host.service.update
-  return !(update.readable && Date.parse(update.value.checked_at) >= at)
 }
 
 /**
@@ -642,11 +617,6 @@ export const STARTED_WITHIN_MS = 15 * 60 * 1000
  */
 export const CHECK_WITHIN_MS = 3 * 60 * 1000
 
-/** The actions whose answer is a newer update status: they run the update script. */
-function runsUpdateScript(action: HostAction): boolean {
-  return action === 'update' || action === 'check-update'
-}
-
 /**
  * The actions that take the host or the service away, so that a failed poll
  * while they are under way is the page waiting for holzkube-manager to come
@@ -684,9 +654,9 @@ function bootTime(host: Host): number | null {
  *   without the daemon reporting the file still there;
  * - the helper's result for this id: rejected or failed as it says; done --
  *   which only a check is, once the helper has waited for its unit -- is
- *   update finished; started
+ *   update finished, and a check is finished by nothing else; started
  *   becomes update finished once the update status is not older than the
- *   order (update, check), back once the process started (restart service,
+ *   order (update), back once the process started (restart service,
  *   update) or the machine booted (restart host, shut down host) after it,
  *   waiting while the host does not answer, and started until then. A check
  *   restarts nothing, so it is never back and never waiting.
@@ -732,9 +702,12 @@ export function orderPhase(order: HostOrder, host: Host, pollFailed = false): Or
   }
   const placed = Date.parse(order.placed_at)
   const placedSecond = Math.floor(placed / 1000) * 1000
+  // An update is finished once the update status is newer than it. A check
+  // is not: the helper records its end (done, above), and the hourly run may
+  // write the update status while the check still runs (13-REVIEW-2 V-01).
   const update = host.service.update
   if (
-    runsUpdateScript(order.action) &&
+    order.action === 'update' &&
     update.readable &&
     Date.parse(update.value.checked_at) >= placedSecond
   ) {

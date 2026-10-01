@@ -4,12 +4,15 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"io/fs"
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"testing"
 	"testing/fstest"
@@ -50,10 +53,17 @@ func helperState(t *testing.T, edit func(m fstest.MapFS)) fs.FS {
 // wires them; signed in, with the sudo window open.
 func hostHelperHarness(t *testing.T, boxFS fs.FS, collectorFS fs.FS) *harness {
 	t.Helper()
+	return hostHelperHarnessUp(t, boxFS, collectorFS, nil)
+}
+
+// hostHelperHarnessUp is hostHelperHarness with the Box told how long the
+// machine has been up (nil: not told).
+func hostHelperHarnessUp(t *testing.T, boxFS fs.FS, collectorFS fs.FS, up func() (time.Duration, error)) *harness {
+	t.Helper()
 	sys := hostSys{uname: host.Uname{Nodename: "example-host", Release: "6.18.50+rpt-rpi-2712", Machine: "aarch64"}}
 	h := newHarness(t,
 		withHostActions(func(dataDir string) *hostaction.Box {
-			return hostaction.NewBox(hostaction.Config{FS: boxFS, DataDir: dataDir, Place: fsstore.PlaceNew})
+			return hostaction.NewBox(hostaction.Config{FS: boxFS, DataDir: dataDir, Place: fsstore.PlaceNew, SinceBoot: up})
 		}),
 		withHostOver(func(box *hostaction.Box) *host.Collector {
 			return host.New(host.Config{FS: collectorFS, Sys: sys, Actions: box})
@@ -77,6 +87,7 @@ type hostHelperView struct {
 		Available       *bool                `json:"available"`
 		Missing         []hostaction.Missing `json:"missing"`
 		Outdated        []hostaction.Missing `json:"outdated"`
+		Busy            *bool                `json:"busy"`
 		InstallCommands []string             `json:"install_commands"`
 	} `json:"actions"`
 }
@@ -463,15 +474,16 @@ func requireGoesThrough(t *testing.T, h *harness, action hostaction.Action) {
 	}
 }
 
-// TestHostActionsWaitForARunningCheck (13-REVIEW-2 WR-01): the helper carries
-// out a check blocking -- it waits for the check unit, up to its own service's
-// limit -- so while one runs it picks up nothing else. An order placed then
-// would lie in the slot until the Box withdrew it after 10 s, with a sentence
-// blaming the path unit. So while the helper's last record is a check it has
-// started, younger than that limit, and the update status is not yet newer
-// than it, both routes refuse every host action with 409
-// conflict.host-helper-busy: no token, nothing placed. The page turns the
-// buttons off by the same two readings.
+// TestHostActionsWaitForARunningCheck (13-REVIEW-2 WR-01, and its
+// verification V-01, V-02, V-21): the helper carries out a check blocking --
+// it waits for the check unit, up to its own service's limit -- so while one
+// runs it picks up nothing else. An order placed then would lie in the slot
+// until the Box withdrew it after 10 s. So while the helper's own last record
+// is a check it has started and not yet recorded done or failed, younger than
+// that limit and not from before the last boot, both routes refuse every host
+// action with 409 conflict.host-helper-busy: no token, nothing placed, and
+// actions.busy says so to the page. The update status has no say: the hourly
+// run writes it too, also while a check runs.
 //
 // The refusals keep their order: container, missing, outdated, busy.
 func TestHostActionsWaitForARunningCheck(t *testing.T) {
@@ -482,15 +494,13 @@ func TestHostActionsWaitForARunningCheck(t *testing.T) {
 	// "5 s ago" taken when the test began can be minutes old by then.
 	const id = "c0ffee00c0ffee11"
 	stamp := func(at time.Time) string { return at.UTC().Truncate(time.Second).Format(time.RFC3339) }
-	checkStarted := func(ago time.Duration) func(now time.Time) func(m fstest.MapFS) {
-		return func(now time.Time) func(m fstest.MapFS) {
-			return helperRecorded(id + " check-update started " + stamp(now.Add(-ago)))
-		}
-	}
 	recorded := func(action, outcome string, ago time.Duration) func(now time.Time) func(m fstest.MapFS) {
 		return func(now time.Time) func(m fstest.MapFS) {
 			return helperRecorded(id + " " + action + " " + outcome + " " + stamp(now.Add(-ago)))
 		}
+	}
+	checkStarted := func(ago time.Duration) func(now time.Time) func(m fstest.MapFS) {
+		return recorded("check-update", "started", ago)
 	}
 	noStatus := func(time.Time) fstest.MapFS { return fstest.MapFS{} }
 	statusAgo := func(ago time.Duration) func(now time.Time) fstest.MapFS {
@@ -500,6 +510,8 @@ func TestHostActionsWaitForARunningCheck(t *testing.T) {
 		name   string
 		edit   func(now time.Time) func(m fstest.MapFS)
 		status func(now time.Time) fstest.MapFS
+		// up is how long the machine has been up; zero: an hour.
+		up time.Duration
 	}
 	build := func(t *testing.T, f fixture) *harness {
 		t.Helper()
@@ -508,14 +520,35 @@ func TestHostActionsWaitForARunningCheck(t *testing.T) {
 		if f.edit != nil {
 			edit = f.edit(now)
 		}
-		return hostHelperHarness(t, helperState(t, edit), f.status(now))
+		up := f.up
+		if up == 0 {
+			up = time.Hour
+		}
+		// The update status on both filesystems, as on the host, where the
+		// Box and the host reader read the same root: whether the Box looks
+		// at it is the question, not whether it can.
+		status := f.status(now)
+		both := func(m fstest.MapFS) {
+			if edit != nil {
+				edit(m)
+			}
+			for name, file := range status {
+				m[name] = file
+			}
+		}
+		return hostHelperHarnessUp(t, helperState(t, both), status, func() (time.Duration, error) { return up, nil })
 	}
 
 	busy := []fixture{
-		{"a check started 5 s ago, no update status yet", checkStarted(5 * time.Second), noStatus},
-		{"a check started 5 s ago, the update status from an hour before", checkStarted(5 * time.Second), statusAgo(time.Hour)},
+		{name: "a check started 5 s ago, no update status yet", edit: checkStarted(5 * time.Second), status: noStatus},
+		{name: "a check started 5 s ago, the update status from an hour before", edit: checkStarted(5 * time.Second), status: statusAgo(time.Hour)},
+		// V-01: the hourly run ended during the check and wrote the status;
+		// the helper still waits for the check.
+		{name: "a check started 5 s ago, an hourly run recorded since", edit: checkStarted(5 * time.Second), status: statusAgo(0)},
+		{name: "a check started 5 s ago, an update status in its own second", edit: checkStarted(5 * time.Second), status: statusAgo(5 * time.Second)},
+		{name: "a check started 5 s ago, an update status from the future", edit: checkStarted(5 * time.Second), status: statusAgo(-time.Hour)},
 		// The check unit may take 2 min and its stop 15 s: still the helper's.
-		{"a check started 2 min 15 s ago", checkStarted(135 * time.Second), noStatus},
+		{name: "a check started 2 min 15 s ago", edit: checkStarted(135 * time.Second), status: noStatus},
 	}
 	for _, tc := range busy {
 		t.Run("refused: "+tc.name, func(t *testing.T) {
@@ -534,10 +567,14 @@ func TestHostActionsWaitForARunningCheck(t *testing.T) {
 			}
 			requireNothingPlaced(t, h, "/api/v1/host/actions/reboot")
 
-			// Available stays true: the helper is installed; the page reads
-			// the running check from the result and the update status.
-			if v := readHelperView(t, h); !*v.Actions.Available {
+			// Available stays true: the helper is installed. busy is what
+			// turns the page's buttons off.
+			v := readHelperView(t, h)
+			if !*v.Actions.Available {
 				t.Error("actions.available = false while a check runs; the helper is installed")
+			}
+			if v.Actions.Busy == nil || !*v.Actions.Busy {
+				t.Errorf("actions.busy = %v while the routes refuse as busy, want true", v.Actions.Busy)
 			}
 		})
 	}
@@ -545,18 +582,23 @@ func TestHostActionsWaitForARunningCheck(t *testing.T) {
 	// The controls: the same fixture with the check over, or never a check,
 	// goes through -- so the refusals above are the running check's.
 	through := []fixture{
-		{"the check's answer arrived", checkStarted(5 * time.Second), statusAgo(0)},
-		{"the answer in the second the check started", checkStarted(5 * time.Second), statusAgo(5 * time.Second)},
-		{"a check started 4 min ago, past the helper's 3-min limit", checkStarted(4 * time.Minute), noStatus},
-		{"a check that failed", recorded("check-update", "failed", 5*time.Second), noStatus},
-		{"an update started", recorded("update", "started", 5*time.Second), noStatus},
-		{"a check recorded in the future (the clock went back)", checkStarted(-time.Hour), noStatus},
-		{"nothing recorded", nil, noStatus},
+		{name: "a check the helper recorded done", edit: recorded("check-update", "done", 5*time.Second), status: noStatus},
+		{name: "a check that failed", edit: recorded("check-update", "failed", 5*time.Second), status: noStatus},
+		{name: "a check started 4 min ago, past the helper's 3-min limit", edit: checkStarted(4 * time.Minute), status: noStatus},
+		// V-02: the machine went down mid-check; nothing waits for it now.
+		{name: "a check started 40 s ago, the machine up for 20 s", edit: checkStarted(40 * time.Second), status: noStatus, up: 20 * time.Second},
+		{name: "an update started", edit: recorded("update", "started", 5*time.Second), status: noStatus},
+		{name: "a check recorded in the future (the clock went back)", edit: checkStarted(-time.Hour), status: noStatus},
+		{name: "nothing recorded", status: noStatus},
 	}
 	for _, tc := range through {
 		t.Run("goes through: "+tc.name, func(t *testing.T) {
 			t.Parallel()
-			requireGoesThrough(t, build(t, tc), hostaction.Reboot)
+			h := build(t, tc)
+			if v := readHelperView(t, h); v.Actions.Busy == nil || *v.Actions.Busy {
+				t.Errorf("actions.busy = %v, want false", v.Actions.Busy)
+			}
+			requireGoesThrough(t, h, hostaction.Reboot)
 		})
 	}
 
@@ -610,4 +652,95 @@ func TestHostActionsWaitForARunningCheck(t *testing.T) {
 	if want := "checkRunning: '" + strings.TrimSuffix(checkBusyDetail, " No order was placed.") + "'"; !strings.Contains(string(src), want) {
 		t.Errorf("web/src/components/HostActions.tsx has no %s; the page's reason and the refusal disagree", want)
 	}
+	// The Box holds a taken check back for as long as the page waits for its
+	// record before it says "no answer".
+	if want := fmt.Sprintf("RESULT_WITHIN_MS = %d * 1000", int(hostaction.ResultWithin/time.Second)); !strings.Contains(string(src), want) {
+		t.Errorf("web/src/components/HostActions.tsx has no %s; the page and hostaction.ResultWithin disagree", want)
+	}
+}
+
+// TestABusyRefusalKeepsTheToken (13-REVIEW-2 V-04): the action route refuses
+// a busy helper before it looks at the token, so a client turned away keeps
+// its confirmation and can place the order once the check is over, without
+// typing the hostname again. The token is replayed after the check recorded
+// done, and must still be good.
+func TestABusyRefusalKeepsTheToken(t *testing.T) {
+	t.Parallel()
+
+	fsys, stateDir := installedHelperFS(t)
+	last := filepath.Join(stateDir, "last")
+	write := func(outcome string) {
+		t.Helper()
+		line := "c0ffee00c0ffee11 check-update " + outcome + " " +
+			time.Now().UTC().Add(-5*time.Second).Truncate(time.Second).Format(time.RFC3339) + "\n"
+		if err := os.WriteFile(last, []byte(line), 0o644); err != nil { //nolint:gosec // the reader wants 0644, as the helper writes it
+			t.Fatal(err)
+		}
+	}
+	write("started")
+	h := hostHelperHarness(t, fsys, fstest.MapFS{})
+
+	tok := sessionHostToken(t, h.confirmer, h.srv.URL, h.client, "host.reboot")
+	const path = "/api/v1/host/actions/reboot"
+	resp, raw := h.do(t, http.MethodPost, path, map[string]string{"confirmation": tok})
+	if resp.StatusCode != http.StatusConflict {
+		t.Fatalf("POST %s while a check runs: %d, want 409 conflict.host-helper-busy (%s)", path, resp.StatusCode, raw)
+	}
+	if p := decodeProblem(t, resp, raw); p.Code != "conflict.host-helper-busy" {
+		t.Fatalf("POST %s: code %q, want conflict.host-helper-busy", path, p.Code)
+	}
+	requireNothingPlaced(t, h, path)
+
+	write("done")
+	resp, raw = h.do(t, http.MethodPost, path, map[string]string{"confirmation": tok})
+	if resp.StatusCode != http.StatusAccepted {
+		t.Errorf("POST %s with the same token after the check: %d, want 202 -- the busy refusal spent it (%s)", path, resp.StatusCode, raw)
+	}
+}
+
+// flipResultFS hides the helper's result file from the first Stat and shows
+// it from the second on: the helper recording "started" for a check in the
+// moment between the action route's busy question and its placement.
+type flipResultFS struct {
+	fs.FS
+	stats *atomic.Int32
+}
+
+func (f flipResultFS) Stat(name string) (fs.FileInfo, error) {
+	if name == helperResultName && f.stats.Add(1) == 1 {
+		return nil, &fs.PathError{Op: "stat", Path: name, Err: fs.ErrNotExist}
+	}
+	return fs.Stat(f.FS, name)
+}
+
+func (f flipResultFS) Lstat(name string) (fs.FileInfo, error) { return fs.Lstat(f.FS, name) }
+
+func (f flipResultFS) ReadLink(name string) (string, error) { return fs.ReadLink(f.FS, name) }
+
+// TestAHelperBusyAtPlacementIsRefusedAsBusy (13-REVIEW-2 V-22): Place asks
+// the busy question once more under the slot's lock, and the route answers
+// what it says as the same 409, not as an internal error.
+func TestAHelperBusyAtPlacementIsRefusedAsBusy(t *testing.T) {
+	t.Parallel()
+
+	fsys, stateDir := installedHelperFS(t)
+	line := "c0ffee00c0ffee11 check-update started " + time.Now().UTC().Truncate(time.Second).Format(time.RFC3339) + "\n"
+	if err := os.WriteFile(filepath.Join(stateDir, "last"), []byte(line), 0o644); err != nil { //nolint:gosec // as the helper writes it
+		t.Fatal(err)
+	}
+	stats := &atomic.Int32{}
+	h := hostHelperHarness(t, flipResultFS{FS: fsys, stats: stats}, fstest.MapFS{})
+
+	tok := sessionHostToken(t, h.confirmer, h.srv.URL, h.client, "host.reboot")
+	const path = "/api/v1/host/actions/reboot"
+	resp, raw := h.do(t, http.MethodPost, path, map[string]string{"confirmation": tok})
+	if n := stats.Load(); n < 2 {
+		t.Fatalf("the result file was asked for %d times, want the route's question and Place's: the flip injected nothing", n)
+	}
+	if resp.StatusCode != http.StatusConflict {
+		t.Errorf("POST %s, the check taken between the question and the placement: %d, want 409 (%s)", path, resp.StatusCode, raw)
+	} else if p := decodeProblem(t, resp, raw); p.Code != "conflict.host-helper-busy" || p.Detail != checkBusyDetail {
+		t.Errorf("POST %s: %q %q, want conflict.host-helper-busy %q", path, p.Code, p.Detail, checkBusyDetail)
+	}
+	requireNothingPlaced(t, h, path)
 }

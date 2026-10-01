@@ -578,7 +578,9 @@ func run(args []string) error {
 		Place:   fsstore.PlaceNew,
 		Claim:   fsstore.Claim,
 		Now:     time.Now,
-		Logger:  logger,
+		// A check record from before the last boot holds nothing back.
+		SinceBoot: host.OS().BootTime,
+		Logger:    logger,
 	})
 	defer hostActions.Close()
 
