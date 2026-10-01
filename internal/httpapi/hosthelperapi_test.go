@@ -547,8 +547,9 @@ func TestHostActionsWaitForARunningCheck(t *testing.T) {
 		{name: "a check started 5 s ago, an hourly run recorded since", edit: checkStarted(5 * time.Second), status: statusAgo(0)},
 		{name: "a check started 5 s ago, an update status in its own second", edit: checkStarted(5 * time.Second), status: statusAgo(5 * time.Second)},
 		{name: "a check started 5 s ago, an update status from the future", edit: checkStarted(5 * time.Second), status: statusAgo(-time.Hour)},
-		// The check unit may take 2 min and its stop 15 s: still the helper's.
-		{name: "a check started 2 min 15 s ago", edit: checkStarted(135 * time.Second), status: noStatus},
+		// The check unit may take 2 min, and its stop up to 4 x 10 s when a
+		// process survives every signal: still the helper's.
+		{name: "a check started 2 min 40 s ago", edit: checkStarted(160 * time.Second), status: noStatus},
 	}
 	for _, tc := range busy {
 		t.Run("refused: "+tc.name, func(t *testing.T) {

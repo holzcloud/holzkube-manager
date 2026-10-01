@@ -27,12 +27,22 @@
 #   - RestrictAddressFamilies= mit AF_INET und AF_INET6: das Skript fragt
 #     GitHub nach der Release-Liste. AF_UNIX und AF_NETLINK braucht die
 #     Namensaufloesung.
-#   - TimeoutStartSec=2min und TimeoutStopSec=15s: ein oneshot hat sonst
-#     keine Startgrenze. Laeuft sie ab, schickt systemd SIGTERM und wartet
-#     TimeoutStopSec (sonst 90 s) bis SIGKILL, und erst dann endet der Start,
-#     auf den der Helfer wartet. Zusammen 2min15s, unter der Grenze des
-#     Helfers (3min), damit er noch "failed" festhalten kann, wenn diese Unit
-#     abgebrochen wird. curl im Skript hat ohnehin --max-time 30.
+#   - TimeoutStartSec=2min und TimeoutStopSec=10s: ein oneshot hat sonst
+#     keine Startgrenze. Laeuft sie ab, geht systemd durch SIGTERM, SIGKILL,
+#     ein letztes SIGTERM und ein letztes SIGKILL und wartet vor jedem
+#     naechsten Schritt TimeoutStopSec (sonst 90 s); erst danach endet der
+#     Start, auf den der Helfer wartet. Endet das Skript mit SIGTERM oder
+#     SIGKILL, ist es nach 2min oder 2min10s vorbei; ueberlebt ein Prozess
+#     jedes Signal (haengt etwa im Kernel auf der SD-Karte), nach
+#     2min + 4 x 10s = 2min40s. Das bleibt unter der Grenze des Helfers
+#     (3min), damit er noch "failed" festhalten kann, wenn diese Unit
+#     abgebrochen wird. Darum steht hier auch kein TimeoutSec=,
+#     SendSIGKILL=, FinalKillSignal=, TimeoutStartFailureMode= und keine
+#     Ordnung (After=): jede davon aendert diese Rechnung. curl im Skript hat
+#     ohnehin --max-time 30.
+#   - Im [Unit]-Teil nur Beschreibung und Dokumentation: kein OnSuccess=,
+#     OnFailure=, Wants=, Requires=. holzkube-manager-update.service ist das
+#     ganze Update als root; diese Unit startet nichts anderes.
 #   - CapabilityBoundingSet= leer: alles, was das Nachsehen liest oder
 #     schreibt, gehoert root; keine Capability ist noetig.
 #   - StateDirectory= mit 0755 und UMask=0022: status.json muss der Daemon
@@ -50,7 +60,7 @@ Documentation=https://github.com/holzcloud/holzkube-manager/blob/main/deploy/HOS
 Type=oneshot
 ExecStart=/usr/local/sbin/holzkube-manager-update --check
 TimeoutStartSec=2min
-TimeoutStopSec=15s
+TimeoutStopSec=10s
 StateDirectory=holzkube-manager-update
 StateDirectoryMode=0755
 UMask=0022

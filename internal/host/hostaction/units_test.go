@@ -578,19 +578,47 @@ func systemdSpan(t *testing.T, s string) time.Duration {
 	return total
 }
 
+// checkUnitMargin is how far below the helper's limit the check unit's worst
+// case must end. The helper spends some of its own limit before it starts the
+// check (claiming the order, recording "started") and after (recording
+// "failed"), its limit runs from before the check's, and each of systemd's
+// timers on the way may fire a little late. None of that is more than a
+// second; this leaves fifteen.
+const checkUnitMargin = 15 * time.Second
+
+// checkUnitWorstCase is the longest the helper's blocking `systemctl start` of
+// the check unit can take, as systemd 257 runs a oneshot with its default
+// kill settings (13-REVIEW-2 V-09, V-13). When the start limit runs out
+// (TimeoutStartFailureMode=, by default, terminate), systemd walks
+// stop-sigterm, stop-sigkill, final-sigterm and final-sigkill and arms
+// TimeoutStopSec= for each of them (there is no ExecStop= or ExecStopPost= in
+// between); the start job ends only after the last. Processes that SIGKILL ends -- the
+// usual case -- cut that short after the second; one stuck in uninterruptible
+// sleep (an SD card stalling under curl) goes through all four. Measured on
+// the Pi with a transient unit, TimeoutStartSec=3s and TimeoutStopSec=2s:
+// 3.2 s for a process SIGTERM ends, 5.5 s for one that ignores SIGTERM, 12.0 s
+// for one no signal ends (KillSignal= and FinalKillSignal=SIGCONT, which takes
+// the same states) -- start + 4 x stop.
+//
+// SendSIGKILL=no, FinalKillSignal=, TimeoutAbortSec=, TimeoutSec= and any
+// ordering would each change this sum.
+func checkUnitWorstCase(start, stop time.Duration) time.Duration {
+	return start + 4*stop
+}
+
 // TestTheCheckUnitRunsOnlyTheCheck: the check unit runs as root, and the only
 // thing it may run is the update script's look -- never the update itself.
 // So its one command is UpdateScriptPath --check; it is a oneshot whose
-// start and stop limits together end below the helper's own limit (the helper waits for it and must still record
-// failed); it writes only the update status directory the daemon reads; it
-// may reach the network, which the helper's own service may not; and it
+// worst case (checkUnitWorstCase) ends below the helper's own limit (the
+// helper waits for it and must still record failed); it writes only the
+// update status directory the daemon reads; it may reach the network, which the helper's own service may not; and it
 // carries no [Install] (nothing starts it but the helper), no RemainAfterExit
 // (a second check would never run), no environment and no capability.
 //
 // Faults injected and seen red: --check removed from ExecStart=; an
 // ExecStartPost= running the update with --force; AF_PACKET added to
 // RestrictAddressFamilies=; DynamicUser=true; TimeoutStopSec= absent, 90s
-// and 1min.
+// and 1min; TimeoutStopSec=15s, the shipped value before V-09.
 func TestTheCheckUnitRunsOnlyTheCheck(t *testing.T) {
 	t.Parallel()
 
@@ -675,12 +703,12 @@ func TestTheCheckUnitRunsOnlyTheCheck(t *testing.T) {
 		t.Errorf("%s: TimeoutStartSec is %v, HelperServiceLimit is %v; the routes would hold orders back "+
 			"for a different time than systemd lets the helper wait for a check", service.name, h, HelperServiceLimit)
 	}
-	// The worst case is the start limit plus the stop limit: when the start
-	// times out, systemd sends SIGTERM and waits TimeoutStopSec (default
-	// 90 s) before SIGKILL, and the helper's blocking systemctl start returns
-	// only once the unit has stopped (13-REVIEW-2 WR-03). Both must be set,
-	// and their sum below the helper's limit, or systemd ends the helper
-	// before it can record failed.
+	// The worst case is systemd's (checkUnitWorstCase): the start limit, then
+	// up to four stop limits when a process survives the kills, and the
+	// helper's blocking systemctl start returns only once the unit has
+	// stopped (13-REVIEW-2 WR-03, V-09). Both must be set, and the worst case
+	// at least checkUnitMargin below the helper's limit, or systemd ends the
+	// helper before it can record failed.
 	stopSpan := func(u unitFile) time.Duration {
 		v := u.values("Service", "TimeoutStopSec")
 		if len(v) == 0 {
@@ -688,9 +716,11 @@ func TestTheCheckUnitRunsOnlyTheCheck(t *testing.T) {
 		}
 		return systemdSpan(t, v[len(v)-1])
 	}
-	if c, stop, h := lastSpan(check), stopSpan(check), lastSpan(service); c <= 0 || stop <= 0 || c+stop >= h {
-		t.Errorf("%s: TimeoutStartSec %v + TimeoutStopSec %v = %v, want both above 0 and the sum below the helper service's %v -- "+
-			"the helper waits for the check and must still record failed when systemd ends it", check.name, c, stop, c+stop, h)
+	start, stop, helper := lastSpan(check), stopSpan(check), lastSpan(service)
+	if worst := checkUnitWorstCase(start, stop); start <= 0 || stop <= 0 || worst+checkUnitMargin > helper {
+		t.Errorf("%s: TimeoutStartSec %v + 4 x TimeoutStopSec %v = %v, systemd's worst case for the start the helper waits for; "+
+			"want both above 0 and the sum at least %v below the helper service's %v, or systemd ends the helper before it can record failed",
+			check.name, start, stop, worst, checkUnitMargin, helper)
 	}
 
 	if check.hasSection("Install") {

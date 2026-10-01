@@ -734,7 +734,7 @@ func TestBusyIsTheHelpersOwnWord(t *testing.T) {
 		busy    bool
 	}{
 		{"a check started 5 s ago", OutcomeStarted, CheckUpdate, 5 * time.Second, time.Hour, nil, true},
-		{"a check started 2 min 15 s ago", OutcomeStarted, CheckUpdate, 135 * time.Second, time.Hour, nil, true},
+		{"a check started 2 min 40 s ago, the check unit's worst case", OutcomeStarted, CheckUpdate, 160 * time.Second, time.Hour, nil, true},
 		{"a check started 5 s ago, the boot unknown", OutcomeStarted, CheckUpdate, 5 * time.Second, 0, errors.New("no clock"), true},
 		{"a check done", OutcomeDone, CheckUpdate, 5 * time.Second, time.Hour, nil, false},
 		{"a check failed", OutcomeFailed, CheckUpdate, 5 * time.Second, time.Hour, nil, false},
