@@ -983,9 +983,12 @@ function checkSentence(u: UpdateStatus): ReactNode {
 /**
  * Whether the helper's last record says it was waiting for an update check
  * while `order` lay in the slot -- hostaction.CheckHeld, which the daemon's
- * withdrawal warning asks too: another order's check with no end yet (and not
- * from before the last boot), or one whose end was recorded after `order` was
- * placed. The slot holds one order, so such a check was already running.
+ * withdrawal warning asks too: another order's check with no end yet (less
+ * than the helper's limit before `order` was placed, and not from before the
+ * last boot), or one whose end was recorded after `order` was placed. The
+ * slot holds one order, so such a check was already running. A started record
+ * older than the limit is a helper systemd had ended before: it held nothing
+ * (13-REVIEW-2 round 3, I1).
  */
 function checkHeld(order: HostOrder, host: Host): boolean {
   const result = host.actions.result
@@ -995,6 +998,9 @@ function checkHeld(order: HostOrder, host: Host): boolean {
   const at = Date.parse(result.value.at)
   switch (result.value.outcome) {
     case 'started': {
+      if (Date.parse(order.placed_at) - at >= CHECK_WITHIN_MS) {
+        return false
+      }
       const boot = bootTime(host)
       return boot === null || at + 1000 > boot
     }

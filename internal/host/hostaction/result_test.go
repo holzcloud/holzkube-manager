@@ -337,7 +337,8 @@ func TestCheckRunning(t *testing.T) {
 
 // TestCheckHeld: the helper was waiting for a check while an order lay in the
 // slot when its last record is another order's check without an end (from this
-// boot), or one whose end came after the placement.
+// boot, and less than HelperServiceLimit before the placement), or one whose
+// end came after the placement.
 func TestCheckHeld(t *testing.T) {
 	t.Parallel()
 
@@ -358,6 +359,13 @@ func TestCheckHeld(t *testing.T) {
 		{"a check started in the future (the clock went back)", rec(check, CheckUpdate, OutcomeStarted, placed.Add(time.Hour)), booted, true},
 		{"a check started, the boot unknown", rec(check, CheckUpdate, OutcomeStarted, placed.Add(-time.Minute)), time.Time{}, true},
 		{"a check started before the last boot", rec(check, CheckUpdate, OutcomeStarted, booted.Add(-time.Minute)), booted, false},
+		// 13-REVIEW-2 round 3, I1: systemd ends the helper HelperServiceLimit
+		// after it began, whatever the check did; a started record older than
+		// that held nothing, however long ago the boot was.
+		{"a check started 6 h before the placement", rec(check, CheckUpdate, OutcomeStarted, placed.Add(-6*time.Hour)), placed.Add(-48 * time.Hour), false},
+		{"a check started HelperServiceLimit before the placement", rec(check, CheckUpdate, OutcomeStarted, placed.Add(-HelperServiceLimit)), booted, false},
+		{"a check started just under HelperServiceLimit before", rec(check, CheckUpdate, OutcomeStarted, placed.Add(-HelperServiceLimit+time.Second)), booted, true},
+		{"an old started check, the boot unknown", rec(check, CheckUpdate, OutcomeStarted, placed.Add(-6*time.Hour)), time.Time{}, false},
 		{"a check done after the placement", rec(check, CheckUpdate, OutcomeDone, placed.Add(3*time.Second)), booted, true},
 		{"a check failed in the placement's second", rec(check, CheckUpdate, OutcomeFailed, placed.Truncate(time.Second)), booted, true},
 		{"a check done the second before the placement", rec(check, CheckUpdate, OutcomeDone, placed.Truncate(time.Second).Add(-time.Second)), booted, false},

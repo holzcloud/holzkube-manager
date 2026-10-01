@@ -873,6 +873,15 @@ func TestTheWithdrawalNamesABusyHelper(t *testing.T) {
 				b.record(t, check, CheckUpdate, OutcomeStarted, 2*time.Minute)
 			},
 		},
+		// 13-REVIEW-2 round 3, I1: systemd ended that helper at its limit,
+		// hours before the order; it held nothing, whatever the boot.
+		{
+			name: "a check started 6 h before, the helper long ended by its limit",
+			before: func(t *testing.T, b *busyRig) {
+				b.up = 48 * time.Hour
+				b.record(t, check, CheckUpdate, OutcomeStarted, 6*time.Hour)
+			},
+		},
 		{
 			name:   "an older reboot",
 			before: func(t *testing.T, b *busyRig) { b.record(t, "0123456789abcdef", Reboot, OutcomeRejected, time.Hour) },
