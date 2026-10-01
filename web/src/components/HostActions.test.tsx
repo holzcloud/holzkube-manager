@@ -274,6 +274,72 @@ describe('HostActions: the five buttons and the one reason they are off', () => 
     }
   })
 
+  // 13-REVIEW-2 round 3, W1 (V-02): the machine restarted while a check ran.
+  // The server reads the helper's "started" against the boot, answers
+  // busy=false and takes orders again; the page, whether it placed the check
+  // or found it in the helper's record after a reload, must offer them too --
+  // not hold all five off for the rest of the helper's 3 min.
+  describe('a check the machine restarted under', () => {
+    const check: HostOrder = {
+      id: ID,
+      action: 'check-update',
+      placed_at: '2026-09-28T10:04:30Z',
+      state: 'picked-up',
+    }
+    const rebooted = (busy: boolean) =>
+      later(
+        {
+          order: null,
+          result: resultFor(ID, 'check-update', 'started', '2026-09-28T10:04:31Z'),
+          busy,
+        },
+        { observed: '2026-09-28T10:05:00Z', uptime: 15 },
+      )
+
+    it.each([
+      ['placed from this page', check],
+      ["found in the helper's record after a reload", null],
+    ] as const)('%s: the buttons are on, as the routes take orders', (_, heldOrder) => {
+      const host = rebooted(false)
+      const followed = followedOrder(heldOrder, host, new Set())
+      if (followed === null) {
+        throw new Error('the page follows no order after the reboot')
+      }
+      const phase = orderPhase(followed.order, host)
+      expect(phase).toBe('no-answer')
+      actions({ host, order: { action: 'check-update', phase } })
+      expect(reasonLine()).toBeNull()
+      for (const b of headerButtons()) {
+        expect(b).toBeEnabled()
+      }
+    })
+
+    // The server's boot rule: a record is from before the boot once its whole
+    // second ended by then -- 10:04:31 by a boot at 10:04:32.
+    it.each([
+      ['booted 15 s before the reading', 15],
+      ['booted the second after the record', 28],
+    ] as const)('the box says the restart ended it: %s', (_, uptime) => {
+      const host = rebooted(false)
+      host.device.uptime_seconds = { readable: true, value: uptime }
+      status(host, check, orderPhase(check, host))
+      const box = screen.getByRole('status')
+      expect(box.querySelector('p')?.textContent).toBe(
+        'Check for updates — started, but the host restarted before the check ended. Nothing was installed; journalctl -u holzkube-manager-update-check says how far it got.',
+      )
+      expect(box).toHaveClass(RED)
+      expect(screen.getByRole('button', { name: 'Dismiss status' })).toBeInTheDocument()
+    })
+
+    it('while the server still says busy, the page does too', () => {
+      const host = rebooted(true)
+      const phase = orderPhase(check, host)
+      expect(phase).toBe('started')
+      actions({ host, order: { action: 'check-update', phase } })
+      expectOffBecause('An update check is running; wait for it to finish.')
+    })
+  })
+
   // WR-02: a restart or shutdown under way takes the host or the service away
   // within seconds; a second order placed in them would outlive its process.
   it.each(['reboot', 'poweroff', 'restart-service'] as const)(
@@ -1433,7 +1499,11 @@ describe('orderPhase: every phase from server fields', () => {
       'check started, an update status since: still started',
       subSecond('check-update'),
       later(
-        { order: subSecond('check-update'), result: resultFor(ID, 'check-update', 'started') },
+        {
+          order: subSecond('check-update'),
+          result: resultFor(ID, 'check-update', 'started'),
+          busy: true,
+        },
         { observed: SOON, update: sameSecond('available') },
       ),
       false,
@@ -1443,7 +1513,11 @@ describe('orderPhase: every phase from server fields', () => {
       'check, a status the second before the placement does not finish it',
       subSecond('check-update'),
       later(
-        { order: subSecond('check-update'), result: resultFor(ID, 'check-update', 'started') },
+        {
+          order: subSecond('check-update'),
+          result: resultFor(ID, 'check-update', 'started'),
+          busy: true,
+        },
         {
           observed: SOON,
           update: { ...sameSecond('available'), checked_at: '2026-09-28T10:00:04Z' },
@@ -1456,7 +1530,11 @@ describe('orderPhase: every phase from server fields', () => {
       'check started, nothing newer',
       order('check-update'),
       later(
-        { order: order('check-update'), result: resultFor(ID, 'check-update', 'started') },
+        {
+          order: order('check-update'),
+          result: resultFor(ID, 'check-update', 'started'),
+          busy: true,
+        },
         { observed: SOON },
       ),
       false,
@@ -1467,7 +1545,7 @@ describe('orderPhase: every phase from server fields', () => {
       'check started, a process started after the order: still started, never back',
       order('check-update'),
       later(
-        { order: null, result: resultFor(ID, 'check-update', 'started') },
+        { order: null, result: resultFor(ID, 'check-update', 'started'), busy: true },
         { observed: SOON, started: '2026-09-28T10:00:20Z' },
       ),
       false,
@@ -1477,7 +1555,11 @@ describe('orderPhase: every phase from server fields', () => {
       'check started, 2 min 59 s without a newer status: still started',
       order('check-update'),
       later(
-        { order: order('check-update'), result: resultFor(ID, 'check-update', 'started') },
+        {
+          order: order('check-update'),
+          result: resultFor(ID, 'check-update', 'started'),
+          busy: true,
+        },
         { observed: '2026-09-28T10:03:04Z' },
       ),
       false,
@@ -1506,10 +1588,37 @@ describe('orderPhase: every phase from server fields', () => {
       'check started, then no answer: still started, never waiting',
       order('check-update'),
       later(
-        { order: order('check-update'), result: resultFor(ID, 'check-update', 'started') },
+        {
+          order: order('check-update'),
+          result: resultFor(ID, 'check-update', 'started'),
+          busy: true,
+        },
         { observed: SOON },
       ),
       true,
+      'started',
+    ],
+    // 13-REVIEW-2 round 3, W1 (V-02): the server's word for a running check
+    // is actions.busy -- the helper's record read against its limit and the
+    // last boot. A check the machine restarted under is over there.
+    [
+      'check started, the machine restarted since: over, as the server says',
+      order('check-update'),
+      later(
+        { order: null, result: resultFor(ID, 'check-update', 'started'), busy: false },
+        { observed: SOON, uptime: 15 },
+      ),
+      false,
+      'no-answer',
+    ],
+    [
+      'check started, the server still busy with it: started',
+      order('check-update'),
+      later(
+        { order: null, result: resultFor(ID, 'check-update', 'started'), busy: true },
+        { observed: SOON },
+      ),
+      false,
       'started',
     ],
     [
@@ -2126,6 +2235,7 @@ describe('HostOrderStatus', () => {
         {
           order: order('check-update'),
           result: resultFor(ID, 'check-update', 'started', '2026-09-28T10:00:06Z'),
+          busy: true,
         },
         { observed: SOON, update: failedStatus('2026-09-28T10:00:07Z') },
       )

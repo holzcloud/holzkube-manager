@@ -665,7 +665,9 @@ function bootTime(host: Host): number | null {
  *   order (update), back once the process started (restart service,
  *   update) or the machine booted (restart host, shut down host) after it,
  *   waiting while the host does not answer, and started until then. A check
- *   restarts nothing, so it is never back and never waiting.
+ *   restarts nothing, so it is never back and never waiting; it is started
+ *   while the server says the helper is busy (actions.busy), and no answer
+ *   once it does not.
  *
  * "Update finished" is asked first: an update that installed a release also
  * restarted the process, and its own sentence says which it was. The update
@@ -726,7 +728,17 @@ export function orderPhase(order: HostOrder, host: Host, pollFailed = false): Or
     if (Date.parse(host.service.started_at) > placed) {
       return 'back'
     }
-  } else if (order.action !== 'check-update') {
+  } else if (order.action === 'check-update') {
+    // Whether the helper still waits for the check is the server's word,
+    // actions.busy: it reads this record against the helper's limit and
+    // against the last boot (hostaction.CheckRunning), and the routes take
+    // orders again once it says no. The page asks it rather than a clock of
+    // its own, so a check the machine restarted under is over here as soon as
+    // it is there (13-REVIEW-2 round 3, W1, V-02).
+    if (!host.actions.busy) {
+      return 'no-answer'
+    }
+  } else {
     const boot = bootTime(host)
     if (boot !== null && boot > placed) {
       return 'back'
@@ -830,6 +842,27 @@ const CHECK_JOURNAL = (
  */
 const CHECK_FAILED = <>the check failed, and nothing was installed. {CHECK_JOURNAL} says why.</>
 
+/**
+ * A started check whose record is from before the machine last booted: the
+ * restart ended it, and its own end was never recorded (13-REVIEW-2 round 3,
+ * W1).
+ */
+const CHECK_CUT_OFF = (
+  <>
+    started, but the host restarted before the check ended. Nothing was installed; {CHECK_JOURNAL}{' '}
+    says how far it got.
+  </>
+)
+
+/**
+ * Whether the machine booted after the helper's record at `at`: by the server's
+ * rule (hostaction.CheckRunning), when the record's whole second ended by then.
+ */
+function bootedSince(at: string, host: Host): boolean {
+  const boot = bootTime(host)
+  return boot !== null && Date.parse(at) + 1000 <= boot
+}
+
 /** A started order the host never reported done: what did not happen. */
 const NOT_DONE: Record<HostAction, ReactNode> = {
   // The limit said from the constant the API test holds to the helper's own
@@ -922,6 +955,14 @@ function phaseSentence(phase: OrderPhase, order: HostOrder, host: Host): ReactNo
       return `finished. ${outcomeSentence(u.value)}`
     }
     case 'no-answer':
+      if (
+        result.readable &&
+        result.value.id === order.id &&
+        order.action === 'check-update' &&
+        bootedSince(result.value.at, host)
+      ) {
+        return CHECK_CUT_OFF
+      }
       return result.readable && result.value.id === order.id ? (
         NOT_DONE[order.action]
       ) : (
@@ -997,13 +1038,10 @@ function checkHeld(order: HostOrder, host: Host): boolean {
   }
   const at = Date.parse(result.value.at)
   switch (result.value.outcome) {
-    case 'started': {
-      if (Date.parse(order.placed_at) - at >= CHECK_WITHIN_MS) {
-        return false
-      }
-      const boot = bootTime(host)
-      return boot === null || at + 1000 > boot
-    }
+    case 'started':
+      return (
+        Date.parse(order.placed_at) - at < CHECK_WITHIN_MS && !bootedSince(result.value.at, host)
+      )
     case 'done':
     case 'failed':
       return at >= Math.floor(Date.parse(order.placed_at) / 1000) * 1000
