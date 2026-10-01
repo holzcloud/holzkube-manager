@@ -308,6 +308,11 @@ export function HostActions({
   // The one line under the group: the group's reason, else the check's own.
   // No other button has one of its own, so there is never more than one.
   const line = reason ?? actionReason('check-update', null, host)
+  // Whom the line describes: the group when its reason applies to all five,
+  // else the check button alone -- the four that are on are not described as
+  // needing a newer helper (13-REVIEW-2 V-27).
+  const describes: 'group' | 'check-update' | null =
+    reason !== null ? 'group' : line !== null ? 'check-update' : null
 
   return (
     <div className="flex flex-col items-end gap-1 max-md:w-full max-md:items-stretch">
@@ -316,7 +321,7 @@ export function HostActions({
           min-content width, which would push the phone grid past the edge. */}
       <fieldset
         aria-label="Host actions"
-        aria-describedby={line === null ? undefined : 'host-actions-reason'}
+        aria-describedby={describes === 'group' ? 'host-actions-reason' : undefined}
         className="m-0 flex min-w-0 flex-wrap gap-2 border-0 p-0 max-md:grid max-md:grid-cols-2"
       >
         {HOST_ACTIONS.map((action) => {
@@ -345,6 +350,7 @@ export function HostActions({
                   action === 'check-update' && 'max-md:col-span-2',
                 )}
                 disabled={actionReason(action, reason, host) !== null}
+                aria-describedby={describes === action ? 'host-actions-reason' : undefined}
                 onClick={(e) => {
                   opener.current = e.currentTarget
                   setPending(action)
