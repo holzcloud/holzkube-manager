@@ -86,6 +86,12 @@ archives:
       - deploy/holzkube-manager-host.path
       - deploy/holzkube-manager-host.service
       - deploy/holzkube-manager-update-check.service
+      # The hourly update's two units travel so the operator can install them
+      # from the archive (deploy/HOST-HELPER.md, "The hourly update"). Like the
+      # helper, nothing installs or replaces them: the update script replaces
+      # the binary and itself, never a unit.
+      - deploy/holzkube-manager-update.service
+      - deploy/holzkube-manager-update.timer
       - deploy/HOST-HELPER.md
       # The Markdown only: docs/ also holds the README's screenshots and the
       # brand images, which are megabytes nobody installing a daemon needs.

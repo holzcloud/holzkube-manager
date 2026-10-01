@@ -73,6 +73,18 @@ import (
 // whatever Detect says, because the helper's install commands do not bring it:
 // an operator who installs the helper should learn in the same reading that
 // the update buttons need one more file.
+//
+// The hourly update's units (operator decision 2026-10-01)
+//
+// The update script runs every hour from holzkube-manager-update.service,
+// which holzkube-manager-update.timer starts, and the helper's update order
+// starts the same service by name, with --no-block. Until 13-16 those two
+// units existed only as what an operator wrote by hand; now both ship in
+// deploy/ and the release archive, and UpdateUnitInstallCommands installs
+// them. As with the helper, nothing installs or replaces them but the
+// operator: the update script replaces the daemon's binary and itself, never
+// a unit, so a newer unit comes from repeating the install commands with a
+// newer archive.
 
 // The helper's files, as the operator installs them (deploy/HOST-HELPER.md).
 const (
@@ -97,6 +109,17 @@ const (
 	// UpdateScriptMissing asks for it, and UpdateScriptInstallCommands
 	// installs it.
 	UpdateScriptPath = "/usr/local/sbin/holzkube-manager-update"
+	// UpdateUnitPath is the hourly update's service, installed from
+	// deploy/holzkube-manager-update.service by the operator, never by the
+	// update script. It runs UpdateScriptPath with no argument, as root. The
+	// timer at UpdateTimerPath starts it hourly, and the helper's update
+	// order starts it by name with --no-block, so nobody waits for it.
+	UpdateUnitPath = "/etc/systemd/system/holzkube-manager-update.service"
+	// UpdateTimerPath is the timer that starts UpdateUnitPath's service five
+	// minutes after boot and then an hour after its last start, installed
+	// from deploy/holzkube-manager-update.timer by the operator, never by the
+	// update script. It is the one of the two that is enabled.
+	UpdateTimerPath = "/etc/systemd/system/holzkube-manager-update.timer"
 )
 
 // HelperOrdersMarker begins the one line in the helper script that names the
@@ -126,6 +149,33 @@ var originalOrders = []Action{Reboot, Poweroff, RestartService, Update}
 // slice byte for byte by a test.
 var UpdateScriptInstallCommands = []string{
 	"sudo install -o root -g root -m 0755 deploy/holzkube-manager-update.sh /usr/local/sbin/holzkube-manager-update",
+}
+
+// UpdateUnitInstallCommands installs the hourly update's two units, run from
+// the root of an unpacked release archive (or a checkout): the archive
+// carries deploy/holzkube-manager-update.service and
+// deploy/holzkube-manager-update.timer.
+//
+// The first line exists because the service makes
+// /usr/local/lib/holzkube-manager writable -- the update script keeps the
+// previous binary there -- but under ProtectSystem=strict cannot create it:
+// its ReadWritePaths= entry carries "-", so a directory that does not exist
+// is skipped, /usr/local/lib stays read-only, and the script's own install -d
+// of it fails. Then both units
+// go into /etc/systemd/system, daemon-reload makes systemd see them, and only
+// the timer is enabled; the service has no [Install] section, and only the
+// timer and the helper start it.
+//
+// The lines replace units of the same name an operator wrote by hand. This
+// is the one copy: deploy/HOST-HELPER.md and docs/guide.md carry the same
+// lines, held to this slice byte for byte by a test -- a test and not an
+// embed, as for InstallCommands, because a package under internal/ cannot
+// embed a file from deploy/.
+var UpdateUnitInstallCommands = []string{
+	"sudo install -d -o root -g root -m 0755 /usr/local/lib/holzkube-manager",
+	"sudo install -o root -g root -m 0644 deploy/holzkube-manager-update.service deploy/holzkube-manager-update.timer /etc/systemd/system/",
+	"sudo systemctl daemon-reload",
+	"sudo systemctl enable --now holzkube-manager-update.timer",
 }
 
 // MissingUpdateScript is the item UpdateScriptMissing reports: the update

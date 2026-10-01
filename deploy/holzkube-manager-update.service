@@ -1,0 +1,135 @@
+# holzkube-manager-update.service -- das ganze Update, als root: nachsehen,
+# herunterladen, pruefen, installieren, den Dienst neu starten, nachsehen, ob
+# er gesund ist, und sonst auf die vorige Version zurueck.
+#
+# Es ist dasselbe Skript, das holzkube-manager-update-check.service mit
+# --check ausfuehrt, hier ohne Argument: deploy/holzkube-manager-update.sh,
+# installiert als /usr/local/sbin/holzkube-manager-update. Was es zuletzt tat,
+# haelt es in /var/lib/holzkube-manager-update/status.json fest; die Host-Seite
+# liest genau diese Datei.
+#
+# Gestartet wird sie von holzkube-manager-update.timer, stuendlich, und vom
+# Host-Helfer fuer einen Auftrag "update" von der Host-Seite, mit --no-block:
+# niemand wartet auf sie.
+#
+# Installiert wird sie von niemandem ausser dem Betreiber, von Hand, aus dem
+# Release-Archiv: deploy/HOST-HELPER.md, "The hourly update". Das Update-Skript
+# ersetzt das Binary und sich selbst, nie eine Unit; eine neuere Unit kommt nur,
+# wenn man die Installationsbefehle aus einem neueren Archiv wiederholt.
+#
+# Warum die Zeilen so sind, wie sie sind:
+#
+#   - Type=oneshot und ExecStart= mit dem Skript ohne Argument: nie --force
+#     (das installiert auch die gleiche Version neu), nie --check (das ist die
+#     Check-Unit).
+#   - Kein [Install]: nur der Timer und der Helfer starten sie. Aktiviert,
+#     liefe sie zusaetzlich bei jedem Booten, ohne dass jemand fragte.
+#   - Kein RemainAfterExit=: ein oneshot, der danach "active" bliebe, machte
+#     den Start der naechsten Stunde zu nichts.
+#   - Als root, ohne User=, Group=, DynamicUser=: sie ersetzt root's Binary in
+#     /usr/local/bin, startet holzkube-manager.service ueber PID 1 neu und
+#     liest /etc/holzkube-manager, das nur root lesen kann (Token, update.conf).
+#   - Kein Environment=, kein EnvironmentFile=: das Skript liest
+#     /etc/holzkube-manager/update.conf selbst; seine HOLZKUBE_MANAGER_*-
+#     Variablen sind fuer die Tests.
+#   - Kein Restart=: ein gescheiterter Lauf wartet auf die naechste Stunde, er
+#     wiederholt sich nicht in einer Schleife.
+#   - After= und Wants= auf network-online.target: der Lauf braucht GitHub, und
+#     der erste nach dem Booten soll nicht vor dem Netz starten.
+#   - TimeoutStartSec=45min und TimeoutStopSec=30s. Das Skript begrenzt sich
+#     selbst: auf die Sperre wartet es hoechstens 600 s, die Release-Liste
+#     hoechstens 30 s, zwei Downloads je 300 s, zwei Neustarts von
+#     holzkube-manager.service mit systemds 90 s je Grenze (4 x Stop + Start =
+#     450 s je Neustart), die Gesundheitspruefung 20 x (5 s + 1 s), dazu rund
+#     60 s eigene Arbeit (tar, sha256sum, install, cp, journalctl, python3) --
+#     zusammen etwa 38,5 min. Die Grenze ist ein Netz darueber und nie das,
+#     was ein echtes Update beendet: ein Abbruch zwischen install und Neustart
+#     liesse das neue Binary unter dem alten Prozess liegen, und die naechste
+#     Stunde hielte es fuer aktuell. Start + 4 x Stop = 47 min, unter der
+#     Stunde, die der Timer wartet. Die Seite hoert nach 15 min auf zu warten;
+#     der Lauf geht weiter und haelt fest, was er tat, und die Zeile "Update
+#     check" der Host-Seite zeigt es. Darum auch kein TimeoutSec=,
+#     SendSIGKILL=, FinalKillSignal=, TimeoutStartFailureMode=: jede davon
+#     aendert diese Rechnung.
+#   - StateDirectory= mit 0755 und UMask=0022: status.json muss der Daemon
+#     lesen koennen, der als anderer Benutzer laeuft, im selben Verzeichnis,
+#     in das auch die Check-Unit schreibt.
+#   - ReadWritePaths= mit /usr/local/bin, /usr/local/sbin und
+#     /usr/local/lib/holzkube-manager: install(1) loescht die Datei und legt
+#     sie neu an (eine neue Inode), also braucht es die Verzeichnisse, nicht
+#     die Dateien -- fuer das Binary des Daemons, fuer das Skript, das sich
+#     nach einem gesunden Update selbst ersetzt, und fuer die vorige Version.
+#     Das "-" vor dem dritten, weil die Installationsbefehle es anlegen: fehlt
+#     es, startet die Unit trotzdem, und das install -d des Skripts scheitert
+#     mit einer Meldung. Nebenwirkung, mit Namen: in /usr/local/sbin liegt
+#     auch das Skript des Host-Helfers, und dieser root-Prozess koennte es
+#     schreiben. Das Update-Skript nennt den Helfer nirgends; ein Test haelt
+#     das fest.
+#   - ProtectSystem=strict, ProtectHome=true, PrivateTmp=true (mktemp des
+#     Skripts in /tmp), PrivateDevices=true, ProtectKernelTunables=true,
+#     ProtectKernelModules=true, ProtectKernelLogs=true (journalctl liest die
+#     Journal-Dateien, nicht das Kernel-Log), ProtectControlGroups=true
+#     (systemctl fragt PID 1 und schreibt in keine cgroup), ProtectClock=true,
+#     ProtectHostname=true, RestrictNamespaces=true, RestrictRealtime=true,
+#     RestrictSUIDSGID=true (install -m 0755 setzt kein Set-ID-Bit),
+#     LockPersonality=true, MemoryDenyWriteExecute=true (bash, curl, tar,
+#     python3 -I, coreutils, systemctl, journalctl und das --version eines
+#     Go-Binarys bilden nichts zugleich schreib- und ausfuehrbar ab),
+#     SystemCallArchitectures=native (das Skript waehlt das Archiv nach
+#     uname -m) und NoNewPrivileges=true (nichts auf dem Weg ist Set-ID): die
+#     gemeinsame Haertung, Wert fuer Wert wie bei den anderen Units.
+#   - RestrictAddressFamilies= mit vier Familien: Internet fuer GitHub und
+#     fuer die Gesundheitspruefung auf 127.0.0.1:8443, Unix-Sockets fuer
+#     systemctl, journalctl und den Resolver, Netlink fuer getaddrinfo. Kein
+#     IPAddressDeny=: der Resolver liegt oft im LAN, und die Pruefung braucht
+#     127.0.0.1.
+#   - PrivateIPC=true: nichts auf dem Weg benutzt SysV-IPC oder POSIX-
+#     Nachrichtenwarteschlangen.
+#   - Bewusst weggelassen, bis es gemessen ist:
+#       CapabilityBoundingSet=: systemctl restart und is-active gehen an PID 1,
+#       journalctl liest das Journal. Ob beides fuer root ohne Capabilities
+#       geht -- systemctl sieht unter Umstaenden auch nach /proc/1, fuer seine
+#       chroot-Pruefung, und das braucht ptrace-Zugriff auf PID 1 --, ist auf
+#       systemd 257 nicht als root gemessen, und ein falscher Schluss
+#       installiert das Binary und scheitert dann am Neustart.
+#       SystemCallFilter=: das strace der Check-Unit deckt nur das Nachsehen
+#       ab; systemctl, journalctl, install, cp, tar und sha256sum sind nicht
+#       verfolgt.
+#       ProtectProc= und ProcSubset=: dieselbe Frage nach /proc/1.
+#     Eine solche Zeile kommt erst hinein, wenn sie als root durch ein echtes
+#     Installieren und einen echten Neustart gemessen ist -- auf dem Host des
+#     Betreibers ist das seine Entscheidung.
+[Unit]
+Description=holzkube-manager - Update aus dem neuesten Release, stuendlich und auf Auftrag
+Documentation=https://github.com/holzcloud/holzkube-manager/blob/main/deploy/HOST-HELPER.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/holzkube-manager-update
+TimeoutStartSec=45min
+TimeoutStopSec=30s
+StateDirectory=holzkube-manager-update
+StateDirectoryMode=0755
+UMask=0022
+ReadWritePaths=/usr/local/bin /usr/local/sbin -/usr/local/lib/holzkube-manager
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+SystemCallArchitectures=native
+PrivateIPC=true

@@ -55,16 +55,20 @@ import (
 
 // The shipped files, from this package's directory.
 var (
-	deployDir         = filepath.Join("..", "..", "..", "deploy")
-	shippedPathUnit   = filepath.Join(deployDir, "holzkube-manager-host.path")
-	shippedService    = filepath.Join(deployDir, "holzkube-manager-host.service")
-	shippedCheckUnit  = filepath.Join(deployDir, "holzkube-manager-update-check.service")
-	shippedScript     = filepath.Join(deployDir, "holzkube-manager-host.sh")
-	shippedGuide      = filepath.Join(deployDir, "HOST-HELPER.md")
-	shippedUpdater    = filepath.Join(deployDir, "holzkube-manager-update.sh")
-	goreleaserConfig  = filepath.Join("..", "..", "..", ".goreleaser.yaml")
-	noSystemdAnalyze  = "HOLZKUBE_MANAGER_NO_SYSTEMD_ANALYZE"
-	systemdAnalyzeMax = 2 * time.Minute
+	deployDir        = filepath.Join("..", "..", "..", "deploy")
+	shippedPathUnit  = filepath.Join(deployDir, "holzkube-manager-host.path")
+	shippedService   = filepath.Join(deployDir, "holzkube-manager-host.service")
+	shippedCheckUnit = filepath.Join(deployDir, "holzkube-manager-update-check.service")
+	// The hourly update's two units (operator decision 2026-10-01): the
+	// service the timer and the helper's update order start, and the timer.
+	shippedUpdateUnit  = filepath.Join(deployDir, "holzkube-manager-update.service")
+	shippedUpdateTimer = filepath.Join(deployDir, "holzkube-manager-update.timer")
+	shippedScript      = filepath.Join(deployDir, "holzkube-manager-host.sh")
+	shippedGuide       = filepath.Join(deployDir, "HOST-HELPER.md")
+	shippedUpdater     = filepath.Join(deployDir, "holzkube-manager-update.sh")
+	goreleaserConfig   = filepath.Join("..", "..", "..", ".goreleaser.yaml")
+	noSystemdAnalyze   = "HOLZKUBE_MANAGER_NO_SYSTEMD_ANALYZE"
+	systemdAnalyzeMax  = 2 * time.Minute
 )
 
 // unitAssignment is one Key=Value line of a unit file.
@@ -270,8 +274,9 @@ func hardening() []unitLine {
 	return out
 }
 
-// TestUnitsVerify runs systemd-analyze verify over copies of the three units:
-// the path unit, the helper's service and the check unit it starts.
+// TestUnitsVerify runs systemd-analyze verify over copies of the five units:
+// the path unit, the helper's service, the check unit it starts, and the
+// hourly update's service and timer.
 //
 // Its exit code alone says nothing about the hardening: an unknown key
 // ("ProtectHom=true") or a bad value is reported as a warning, the line is
@@ -279,14 +284,27 @@ func hardening() []unitLine {
 // with a misspelt protection loads without that protection. So any output at
 // all fails the test, and a copy with exactly that misspelling must produce
 // output: without that control, a verify that stopped reporting would leave
-// this green.
+// this green. There is one control per kind of file verify reads for a
+// different reason: the helper's service, the update service (a sandbox of its
+// own), and the timer (OnUnitActivSec=1h, a schedule that would silently not
+// be one).
 //
 // ExecStart= is rewritten to an executable in the temporary directory, because
 // verify fails with "is not executable" when the command does not exist, and
 // the helper is (deliberately) not installed where the tests run -- in the
-// check unit to the stub followed by --check, as the shipped line has it.
-// TestUnitsAgree holds the shipped ExecStart= to HelperScriptPath instead, and
-// TestTheCheckUnitRunsOnlyTheCheck the check unit's to UpdateScriptPath.
+// check unit to the stub followed by --check, as the shipped line has it, and
+// in the update service to the stub with no argument, as its line has none.
+// TestUnitsAgree holds the shipped ExecStart= to HelperScriptPath instead,
+// TestTheCheckUnitRunsOnlyTheCheck the check unit's to UpdateScriptPath
+// --check, and TestTheUpdateUnitRunsTheUpdate the update service's to
+// UpdateScriptPath.
+//
+// The timer and its service are always copied together, into one directory:
+// verify resolves the timer's unit from the directories of the files it is
+// given before the system's, so the copy is what it reads -- measured while
+// planning 13-16 and again in its SUMMARY: a misspelling in the temporary
+// copy of the service was reported when only the timer was passed -- and never
+// the operator's installed holzkube-manager-update.service.
 func TestUnitsVerify(t *testing.T) {
 	bin, err := exec.LookPath("systemd-analyze")
 	if err != nil {
@@ -297,25 +315,37 @@ func TestUnitsVerify(t *testing.T) {
 			"Install systemd, or set %s=1 to skip this knowingly -- the test then reports SKIPPED, not verified.", err, noSystemdAnalyze)
 	}
 
-	pathSrc, err := os.ReadFile(shippedPathUnit)
-	if err != nil {
-		t.Fatalf("read the path unit: %v", err)
+	// The five shipped files, in the order verify is given them, each with
+	// the arguments its ExecStart= keeps after the stub; a file without
+	// ExecStart= (the path unit, the timer) has none to rewrite.
+	type shipped struct {
+		path     string
+		execArgs string
+		hasExec  bool
 	}
-	serviceSrc, err := os.ReadFile(shippedService)
-	if err != nil {
-		t.Fatalf("read the service unit: %v", err)
+	units := []shipped{
+		{path: shippedPathUnit},
+		{path: shippedService, hasExec: true},
+		{path: shippedCheckUnit, execArgs: " --check", hasExec: true},
+		{path: shippedUpdateUnit, hasExec: true},
+		{path: shippedUpdateTimer},
 	}
-	checkSrc, err := os.ReadFile(shippedCheckUnit)
-	if err != nil {
-		t.Fatalf("read the check unit: %v", err)
+	src := map[string]string{}
+	for _, u := range units {
+		data, err := os.ReadFile(u.path)
+		if err != nil {
+			t.Fatalf("read %s: %v", u.path, err)
+		}
+		// The ExecStart= rewrite below finds lines by newline, as systemd
+		// would not if a line hid behind a carriage return (13-REVIEW-2 V-15).
+		refuseAmbiguousUnitBytes(t, u.path, data)
+		src[u.path] = string(data)
 	}
-	// The ExecStart= rewrite below finds lines by newline, as systemd would
-	// not if a line hid behind a carriage return (13-REVIEW-2 V-15).
-	refuseAmbiguousUnitBytes(t, shippedPathUnit, pathSrc)
-	refuseAmbiguousUnitBytes(t, shippedService, serviceSrc)
-	refuseAmbiguousUnitBytes(t, shippedCheckUnit, checkSrc)
 
-	verify := func(t *testing.T, service string) (string, int) {
+	// verify writes all five units into one temporary directory -- with the
+	// content in replace instead of the shipped one where replace names a
+	// file -- and runs systemd-analyze verify over them.
+	verify := func(t *testing.T, replace map[string]string) (string, int) {
 		t.Helper()
 		dir := t.TempDir()
 		stub := filepath.Join(dir, "helper-stub")
@@ -323,31 +353,28 @@ func TestUnitsVerify(t *testing.T) {
 			t.Fatal(err)
 		}
 		execStart := regexp.MustCompile(`(?m)^ExecStart=.*$`)
-		pointAtStub := func(name, unit, args string) string {
-			if n := len(execStart.FindAllString(unit, -1)); n != 1 {
-				t.Fatalf("%s has %d ExecStart= lines, want exactly 1 to point at the stub", name, n)
+		var files []string
+		for _, u := range units {
+			content := src[u.path]
+			if r, ok := replace[u.path]; ok {
+				content = r
 			}
-			return execStart.ReplaceAllLiteralString(unit, "ExecStart="+stub+args)
-		}
-		service = pointAtStub("the service", service, "")
-		check := pointAtStub("the check unit", string(checkSrc), " --check")
-
-		pathFile := filepath.Join(dir, filepath.Base(shippedPathUnit))
-		serviceFile := filepath.Join(dir, filepath.Base(shippedService))
-		checkFile := filepath.Join(dir, filepath.Base(shippedCheckUnit))
-		for file, content := range map[string][]byte{
-			pathFile:    pathSrc,
-			serviceFile: []byte(service),
-			checkFile:   []byte(check),
-		} {
-			if err := os.WriteFile(file, content, 0o644); err != nil {
+			if u.hasExec {
+				if n := len(execStart.FindAllString(content, -1)); n != 1 {
+					t.Fatalf("%s has %d ExecStart= lines, want exactly 1 to point at the stub", u.path, n)
+				}
+				content = execStart.ReplaceAllLiteralString(content, "ExecStart="+stub+u.execArgs)
+			}
+			file := filepath.Join(dir, filepath.Base(u.path))
+			if err := os.WriteFile(file, []byte(content), 0o644); err != nil {
 				t.Fatal(err)
 			}
+			files = append(files, file)
 		}
 
 		ctx, cancel := context.WithTimeout(context.Background(), systemdAnalyzeMax)
 		defer cancel()
-		cmd := exec.CommandContext(ctx, bin, "verify", "--man=no", pathFile, serviceFile, checkFile)
+		cmd := exec.CommandContext(ctx, bin, append([]string{"verify", "--man=no"}, files...)...)
 		cmd.Env = append(os.Environ(), "SYSTEMD_COLORS=0", "SYSTEMD_PAGER=", "LC_ALL=C")
 		out, err := cmd.CombinedOutput()
 		var exitErr *exec.ExitError
@@ -362,7 +389,7 @@ func TestUnitsVerify(t *testing.T) {
 		}
 	}
 
-	out, rc := verify(t, string(serviceSrc))
+	out, rc := verify(t, nil)
 	if rc != 0 || out != "" {
 		t.Errorf("systemd-analyze verify on the shipped units: exit %d, output:\n%s\n"+
 			"Any output fails this gate, not only a non-zero exit: verify reports an unknown key or a bad value "+
@@ -370,18 +397,27 @@ func TestUnitsVerify(t *testing.T) {
 			rc, out)
 	}
 
-	// The negative control. The shipped service must have the line, or there
+	// The negative controls. The shipped file must have the line, or there
 	// is nothing to misspell and the control would prove nothing.
-	misspelt := strings.Replace(string(serviceSrc), "\nProtectHome=true\n", "\nProtectHom=true\n", 1)
-	if misspelt == string(serviceSrc) {
-		t.Fatalf("the shipped service has no line ProtectHome=true to misspell for the negative control")
-	}
-	out, rc = verify(t, misspelt)
-	if out == "" {
-		t.Errorf("negative control: systemd-analyze verify printed nothing (exit %d) for a service with ProtectHom=true. "+
-			"If verify no longer reports an unknown key, an empty output no longer means the units are clean, and this gate proves nothing.", rc)
-	} else {
-		t.Logf("negative control (ProtectHom=true), exit %d: %s", rc, strings.TrimSpace(out))
+	for _, c := range []struct {
+		path, line, misspelt string
+	}{
+		{shippedService, "ProtectHome=true", "ProtectHom=true"},
+		{shippedUpdateUnit, "ProtectHome=true", "ProtectHom=true"},
+		{shippedUpdateTimer, "OnUnitActiveSec=1h", "OnUnitActivSec=1h"},
+	} {
+		misspelt := strings.Replace(src[c.path], "\n"+c.line+"\n", "\n"+c.misspelt+"\n", 1)
+		if misspelt == src[c.path] {
+			t.Fatalf("%s has no line %s to misspell for the negative control", c.path, c.line)
+		}
+		out, rc := verify(t, map[string]string{c.path: misspelt})
+		if out == "" {
+			t.Errorf("negative control: systemd-analyze verify printed nothing (exit %d) for %s with %s. "+
+				"If verify no longer reports an unknown key, an empty output no longer means the units are clean, and this gate proves nothing.",
+				rc, filepath.Base(c.path), c.misspelt)
+		} else {
+			t.Logf("negative control (%s in %s), exit %d: %s", c.misspelt, filepath.Base(c.path), rc, strings.TrimSpace(out))
+		}
 	}
 }
 
@@ -921,6 +957,102 @@ func TestUpdateScriptInstallCommandsMatchTheGuide(t *testing.T) {
 	}
 }
 
+// scriptDefault is the default of one path the update script lets the
+// environment override: the value of its one line VAR=${OVERRIDE:-default}.
+// Exactly one such line, or the test fails -- a second would leave it open
+// which one the script runs with.
+func scriptDefault(t *testing.T, script, variable, override string) string {
+	t.Helper()
+	re := regexp.MustCompile(`(?m)^` + variable + `=\$\{` + override + `:-([^}]*)\}$`)
+	m := re.FindAllStringSubmatch(script, -1)
+	if len(m) != 1 {
+		t.Fatalf("the update script has %d lines %s=${%s:-...}, want exactly 1", len(m), variable, override)
+	}
+	return m[0][1]
+}
+
+// TestUpdateUnitInstallCommandsMatchTheGuide (operator decision 2026-10-01):
+// the hourly update's two units are installed by UpdateUnitInstallCommands,
+// and the guide carries the same four lines between its update-unit-commands
+// markers, byte for byte. The lines are held to what they have to do, too:
+// create the directory of the update script's PREVIOUS default (the unit makes
+// it writable, but ProtectSystem=strict cannot create it), install exactly the
+// two shipped units into the directory UpdateUnitPath and UpdateTimerPath name,
+// as root's and 0644, and enable exactly the timer -- the service stays
+// static, started only by the timer and the helper.
+func TestUpdateUnitInstallCommandsMatchTheGuide(t *testing.T) {
+	t.Parallel()
+
+	data, err := os.ReadFile(shippedGuide)
+	if err != nil {
+		t.Fatalf("read the guide: %v", err)
+	}
+	got := guideBlockNamed(t, string(data), "update-unit-commands")
+	if want := strings.Join(UpdateUnitInstallCommands, "\n"); got != want {
+		t.Errorf("%s's update-unit block differs from UpdateUnitInstallCommands.\nguide:\n%q\nUpdateUnitInstallCommands:\n%q", shippedGuide, got, want)
+	}
+
+	want := []string{
+		"sudo install -d -o root -g root -m 0755 /usr/local/lib/holzkube-manager",
+		"sudo install -o root -g root -m 0644 deploy/holzkube-manager-update.service deploy/holzkube-manager-update.timer /etc/systemd/system/",
+		"sudo systemctl daemon-reload",
+		"sudo systemctl enable --now holzkube-manager-update.timer",
+	}
+	if !slices.Equal(UpdateUnitInstallCommands, want) {
+		t.Fatalf("UpdateUnitInstallCommands = %q, want exactly %q", UpdateUnitInstallCommands, want)
+	}
+
+	// Every deploy/ file they name is shipped.
+	for _, cmd := range UpdateUnitInstallCommands {
+		for _, f := range strings.Fields(cmd) {
+			if !strings.HasPrefix(f, "deploy/") {
+				continue
+			}
+			if _, err := os.Stat(filepath.Join(deployDir, strings.TrimPrefix(f, "deploy/"))); err != nil {
+				t.Errorf("the update-unit commands name %s, which is not in the repository: %v", f, err)
+			}
+		}
+	}
+
+	// The first line creates the directory of the script's PREVIOUS default,
+	// root's and 0755, as the script's own install -d does.
+	script, err := os.ReadFile(shippedUpdater)
+	if err != nil {
+		t.Fatalf("read the update script: %v", err)
+	}
+	previous := scriptDefault(t, string(script), "PREVIOUS", "HOLZKUBE_MANAGER_PREVIOUS")
+	if f := strings.Fields(UpdateUnitInstallCommands[0]); f[len(f)-1] != filepath.Dir(previous) ||
+		!slices.Equal(f[:len(f)-1], []string{"sudo", "install", "-d", "-o", "root", "-g", "root", "-m", "0755"}) {
+		t.Errorf("the first line %q does not create exactly %s, the directory of the script's PREVIOUS default %s, as root 0755",
+			UpdateUnitInstallCommands[0], filepath.Dir(previous), previous)
+	}
+
+	// The second installs exactly the two units, under their installed
+	// names, into the one directory both paths name, root's and 0644.
+	if filepath.Dir(UpdateTimerPath) != filepath.Dir(UpdateUnitPath) {
+		t.Errorf("UpdateUnitPath %s and UpdateTimerPath %s are not in one directory", UpdateUnitPath, UpdateTimerPath)
+	}
+	f := strings.Fields(UpdateUnitInstallCommands[1])
+	if !slices.Equal(f[:8], []string{"sudo", "install", "-o", "root", "-g", "root", "-m", "0644"}) {
+		t.Errorf("the second line %q does not install as root 0644", UpdateUnitInstallCommands[1])
+	}
+	if dest := strings.TrimSuffix(f[len(f)-1], "/"); dest != filepath.Dir(UpdateUnitPath) {
+		t.Errorf("the second line installs into %s, UpdateUnitPath is in %s", dest, filepath.Dir(UpdateUnitPath))
+	}
+	var bases []string
+	for _, src := range f[8 : len(f)-1] {
+		bases = append(bases, filepath.Base(src))
+	}
+	if wantBases := []string{filepath.Base(UpdateUnitPath), filepath.Base(UpdateTimerPath)}; !slices.Equal(bases, wantBases) {
+		t.Errorf("the second line installs %q, want exactly %q", bases, wantBases)
+	}
+
+	// The last enables exactly the timer.
+	if last := UpdateUnitInstallCommands[len(UpdateUnitInstallCommands)-1]; last != "sudo systemctl enable --now "+filepath.Base(UpdateTimerPath) {
+		t.Errorf("the last line %q does not enable exactly %s", last, filepath.Base(UpdateTimerPath))
+	}
+}
+
 // daemonHardening is the reference daemon unit's hardening the guide names as
 // unchanged (D-18). Installing the helper asks for none of it to go.
 var daemonHardening = []string{
@@ -986,8 +1118,11 @@ func TestGuideKeepsTheDaemonsHardening(t *testing.T) {
 	}
 }
 
-// TestTheArchiveCarriesTheHelper: the operator installs the helper from the
-// release archive, so the archive has to hold all four files.
+// TestTheArchiveCarriesTheHelper: the operator installs the helper, the update
+// script and the hourly update's units from the release archive, so the
+// archive has to hold every file an install command names -- and every regular
+// file in deploy/: a file added there and forgotten in the archive is one an
+// operator following the guide cannot find.
 func TestTheArchiveCarriesTheHelper(t *testing.T) {
 	t.Parallel()
 
@@ -1040,11 +1175,21 @@ func TestTheArchiveCarriesTheHelper(t *testing.T) {
 		"deploy/holzkube-manager-host.service",
 		"deploy/HOST-HELPER.md",
 	}
-	for _, cmd := range append(slices.Clone(InstallCommands), UpdateScriptInstallCommands...) {
+	commands := slices.Concat(InstallCommands, UpdateScriptInstallCommands, UpdateUnitInstallCommands)
+	for _, cmd := range commands {
 		for _, f := range strings.Fields(cmd) {
 			if strings.HasPrefix(f, "deploy/") {
 				want = append(want, f)
 			}
+		}
+	}
+	entries, err := os.ReadDir(deployDir)
+	if err != nil {
+		t.Fatalf("read %s: %v", deployDir, err)
+	}
+	for _, e := range entries {
+		if e.Type().IsRegular() {
+			want = append(want, "deploy/"+e.Name())
 		}
 	}
 	for _, name := range want {
@@ -1058,6 +1203,14 @@ func TestTheArchiveCarriesTheHelper(t *testing.T) {
 // replaces itself from the archive after a healthy update. If it began to
 // install or refresh the helper too, new root code would reach the host
 // without the operator deciding it (D-19). It does not so much as name it.
+//
+// The same holds for units, the hourly update's own included (D-19 extended
+// in 13-16): the archive carries holzkube-manager-update.service and .timer,
+// and the operator installs them, never the script. A unit the script
+// replaced would change what runs as root every hour without anybody reading
+// it, and a unit it got wrong could not be corrected by the update it runs.
+// So no line of it names /etc/systemd, daemon-reload, systemctl enable or a
+// .timer.
 func TestTheUpdateScriptDoesNotShipTheHelper(t *testing.T) {
 	t.Parallel()
 
@@ -1068,6 +1221,12 @@ func TestTheUpdateScriptDoesNotShipTheHelper(t *testing.T) {
 	for i, line := range strings.Split(string(data), "\n") {
 		if strings.Contains(line, "holzkube-manager-host") || strings.Contains(line, "HOST-HELPER") {
 			t.Errorf("%s:%d names the host helper: %s\nThe update script must not install or replace it (D-19).", shippedUpdater, i+1, strings.TrimSpace(line))
+		}
+		for _, unitWord := range []string{"/etc/systemd", "daemon-reload", "systemctl enable", ".timer"} {
+			if strings.Contains(line, unitWord) {
+				t.Errorf("%s:%d names %s: %s\nThe update script must not install, replace or enable a unit (D-19, 13-16).",
+					shippedUpdater, i+1, unitWord, strings.TrimSpace(line))
+			}
 		}
 	}
 }
