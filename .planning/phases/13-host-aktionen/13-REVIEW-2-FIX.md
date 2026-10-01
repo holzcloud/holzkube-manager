@@ -350,3 +350,109 @@ boot.
 - `npm --prefix web run test:browser`: exit 0, 5 files, 23 tests.
 - `npm run typecheck`: exit 0; `npm run lint`: exit 0.
 - `go test ./internal/publicrepo/` before each commit: exit 0.
+
+## Round 2 — A2-page-docs
+
+**Source:** the adversarial verification, items V-05, V-06, V-07, V-08, V-23,
+V-27, and the page side of A1's commits (1388949, 29197b2, e3d56b2).
+**Where it ran:** the operator's Raspberry Pi 5 (aarch64), main checkout, no
+worktree; Go from `~/.local/go` (no `-race`), Node through nvm. Nothing
+installed (`/usr/local/sbin/holzkube-manager-host` and
+`/etc/systemd/system/holzkube-manager-update-check.service` absent before and
+after); `holzkube-manager.service` `ActiveEnterTimestamp=Tue 2026-09-29
+20:25:38 CEST, NRestarts=0` before and after. Nothing pushed, no release, no
+changelog entry.
+
+**The page side of A1, checked first.** A1 already moved the page onto the
+helper's own word: the buttons follow `actions.busy` (`helperWaitsForCheck` is
+gone), and `orderPhase` finishes a check only on `done` and fails it on
+`failed`. What was left on the page is below (V-07: the answer bounded by the
+`done` record, one failed sentence; the no-answer sentence derived from
+`CHECK_WITHIN_MS`).
+
+### Per item
+
+- **V-05 [warning] — fixed** (by A1 in e3d56b2; verified here). The guide's
+  status-box bullet now reads "`journalctl -u holzkube-manager-host` says why
+  -- for a failed **Check for updates**, `journalctl -u
+  holzkube-manager-update-check`, since the check itself is what failed",
+  matching the page and the guide's own action list. No further change; docs
+  carry no guard.
+- **V-06 [info] — fixed.** 13-UI-SPEC.md gets "Additions for Check for updates":
+  every check-specific string as HostActions.tsx says it (dialog, reasons,
+  each status phase including the single failed sentence, the busy
+  not-picked-up sentence, the outdated notice, the two server details), with
+  the rules that go with them (finished only by `done`, one failed sentence,
+  whom the reason line describes). Each string was grepped against the source
+  (all present).
+- **V-07 [info] — fixed** (5edc2b9). Since 1388949 the poll-to-poll flip V-07
+  describes cannot happen (a check is `started` until the helper's `done` or
+  `failed`). What remained: a check that ended `done` while its own status
+  says `failed` (it could not read the installed version: `record_status`
+  turns rc 0 with an empty version into failed) said "finished. The check
+  failed..." while a helper-failed check said "the check could not look for a
+  newer release...". Both now say one `CHECK_FAILED`: "the check failed, and
+  nothing was installed. `journalctl -u holzkube-manager-update-check` says
+  why." -- red. And the check's answer is bounded by the helper's `done`: an
+  update status newer than it is a later run's, so a check that found "up to
+  date" no longer turns into "the check failed" when the next hourly run fails.
+  New test "one failed check is said one way" (four arrivals, one sentence;
+  the moment between status and record still says started; a later failed run
+  is not the check's).
+- **V-08 [info] — fixed** (5edc2b9). The orderPhase rows' comment no longer
+  claims WR-02; they now hold what they say -- a failed record is `failed`, not
+  finished as `done` is, and not finished by an update status recorded while
+  the check ran (new rows: an hourly "up to date" during it; the poll failing).
+  Both faults turn them red (below).
+- **V-23 [info] — fixed** (tie by A1 in e3d56b2, verified red here; 23a937e).
+  `TestHostActionsWaitForARunningCheck` reads `CHECK_WITHIN_MS` from the page
+  against `HelperServiceLimit`; the buttons no longer depend on it (they
+  follow `actions.busy`). The last copy of the limit, the literal "within 3
+  min" in the no-answer sentence, is now said from `CHECK_WITHIN_MS`.
+- **V-27 [info] — fixed** (aa9e279). The reason line describes the fieldset
+  only when the group's reason turns all five off; when only the check is off
+  (helper too old) it describes the check button, and the four that are on
+  carry no description. Test by attribute and by accessible description; the
+  group-reason helper also asserts no button repeats the group's description.
+
+### Red runs (exit code read from the command itself; every fault restored, `cmp` 0, then green)
+
+V-27, `npx vitest run --project jsdom src/components/HostActions.test.tsx`
+(exit 1 each): the page as at e3d56b2 (`git show HEAD:` -- `cmp` 0 --, 2
+failed, the two outdated rows); the check button without its
+`aria-describedby` (2 failed); every button described whenever there is a line
+(23 failed). Restored, 159 passed.
+
+V-07/V-08, same command (exit 1 each): the page as at aa9e279 (8 failed); the
+`done` record not bounding the answer (1: "a check done, then a later hourly
+run failed"); a check's `failed` record finished like `done` (5, the four
+orderPhase failed-check rows among them); the update status asked before the
+helper's word, for a check too (4: "check failed, the update status failed
+too", "...an hourly run during it said up to date", "check started, an update
+status since", "the status written, the helper not yet done"); a failed answer
+said through `checkSentence` again (4). Restored, 167 passed.
+
+V-23, `go test ./internal/httpapi -run 'TestHostActionsWaitForARunningCheck$'`
+(exit 1 each): `CHECK_WITHIN_MS = 4 * 60 * 1000` on the page; `HelperServiceLimit
+= 4 * time.Minute` in result.go with the page at 3 (both name line 663, "the
+page and hostaction.HelperServiceLimit disagree"). Restored (`cmp` 0), exit 0.
+
+### Screenshots
+
+No rendered screen changed: the demo fixture has no order and no outdated
+helper, so host.png shows neither the status box nor the check's reason; the
+V-27 change is an attribute. `readme-images.mjs` not run, no picture committed.
+
+### Final suites (Pi, main checkout)
+
+- `go test ./internal/... ./cmd/... -count=1`: first run exit 1 --
+  `internal/upgrade` `TestANodeSaysHowItBooted` timed out against its fake
+  Talos under the load of the full run (no file of that package touched);
+  alone exit 0; the full run again exit 0, 41 `ok`, no other lines.
+- `./bin/task lint:go`: exit 0, 0 issues.
+- `npx vitest run --project jsdom` (web/): exit 0, 56 files, 791 tests.
+- `npm --prefix web run test:browser`: exit 0, 5 files, 23 tests.
+- `npm run typecheck`: exit 0; `npm run lint`: exit 0 (its 2 warnings and 1
+  info are in DataTable.tsx and wall.test.tsx, untouched).
+- No class changed, so `task test:layout` was not needed.
+- `go test ./internal/publicrepo/` before each commit: exit 0.
