@@ -415,9 +415,12 @@ esac
 // flockStub is flock(1) itself, run through a stub so a test can tell when a
 // run has asked for the lock: HKM_STUB_FLOCK_LOG, when set, names a file each
 // call appends its argv to before it hands over. exec keeps the descriptor the
-// script locks.
+// script locks. HKM_STUB_FLOCK_FAIL, when set, is the exit code every call
+// ends with instead, as flock(1) ends on an error of its own rather than a
+// held lock (71 is its EX_OSERR).
 const flockStub = `#!/usr/bin/env bash
 [[ -n ${HKM_STUB_FLOCK_LOG:-} ]] && printf '%s\n' "$*" >> "$HKM_STUB_FLOCK_LOG"
+[[ -n ${HKM_STUB_FLOCK_FAIL:-} ]] && exit "$HKM_STUB_FLOCK_FAIL"
 exec "$HKM_STUB_FLOCK_REAL" "$@"
 `
 
@@ -1014,6 +1017,22 @@ func TestUpdateScriptRunsOneAtATime(t *testing.T) {
 			e.wantInstalledNothingAtAll(fakeInstalled)
 		})
 	}
+
+	// flock(1) failing for a reason of its own is not a held lock. The run
+	// goes ahead unlocked, as it did before there was a lock, rather than wait
+	// and give up every hour: the hourly update must not stop on the lock.
+	t.Run("an update whose flock fails goes ahead unlocked", func(t *testing.T) {
+		t.Parallel()
+		e := newScriptEnv(t, fakeInstalled, true)
+		run := e.start("update", true, []string{"HKM_STUB_FLOCK_FAIL=71", "HOLZKUBE_MANAGER_UPDATE_LOCK_WAIT=1"})
+		if rc := run.wait(); rc != 0 {
+			t.Fatalf("exit = %d, want 0", rc)
+		}
+		if out := run.out.String(); !strings.Contains(out, "ohne Sperre") {
+			t.Errorf("the run does not say it went ahead unlocked:\n%s", out)
+		}
+		e.wantStatus(OutcomeUpdated, ptr(fakeRelease), ptr(fakeRelease))
+	})
 
 	// A lock is the kernel's, on an open file: it ends with the last process
 	// holding it. A run killed outright -- SIGKILL to the whole group, as
