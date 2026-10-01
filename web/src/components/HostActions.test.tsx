@@ -1191,9 +1191,12 @@ describe('orderPhase: every phase from server fields', () => {
       false,
       'failed',
     ],
-    // 13-REVIEW-2 WR-02: how a check usually fails. The update script records
-    // failed, the unit fails, and the helper records failed for the order --
-    // the helper's word comes first.
+    // How a check usually fails: the update script records failed, the unit
+    // fails, and the helper records failed for the order. A failed record is
+    // the check's end and it is failed -- not finished, as done is, and not
+    // finished by an update status recorded while it ran, whatever that says:
+    // the helper's word comes first (13-REVIEW-2 V-08). Which sentence the
+    // box then says is held by the HostOrderStatus rows (WR-02, V-07).
     [
       'check failed, as the helper records it',
       order('check-update'),
@@ -1209,6 +1212,23 @@ describe('orderPhase: every phase from server fields', () => {
         { update: { ...sameSecond('failed'), checked_at: '2026-09-28T10:00:06Z' } },
       ),
       false,
+      'failed',
+    ],
+    [
+      'check failed, an hourly run during it said up to date',
+      order('check-update'),
+      later(
+        { order: order('check-update'), result: resultFor(ID, 'check-update', 'failed') },
+        { update: { ...sameSecond('current'), checked_at: '2026-09-28T10:00:06Z' } },
+      ),
+      false,
+      'failed',
+    ],
+    [
+      'check failed, then no answer: failed, never waiting',
+      order('check-update'),
+      later({ order: order('check-update'), result: resultFor(ID, 'check-update', 'failed') }),
+      true,
       'failed',
     ],
     // 13-REVIEW-2 V-01: the helper records the end of a check it waited for.
@@ -1702,7 +1722,7 @@ describe('HostOrderStatus', () => {
       order('check-update'),
       later({ result: resultFor(ID, 'check-update', 'failed') }, { update: checked('failed') }),
       'failed',
-      'Check for updates — the check could not look for a newer release, and nothing was installed. journalctl -u holzkube-manager-update-check says why.',
+      'Check for updates — the check failed, and nothing was installed. journalctl -u holzkube-manager-update-check says why.',
       RED,
       true,
     ],
@@ -1885,7 +1905,7 @@ describe('HostOrderStatus', () => {
       order('check-update'),
       later({}, { update: checked('failed') }),
       'update-finished',
-      'Check for updates — finished. The check failed, and nothing was installed. journalctl -u holzkube-manager-update-check says why.',
+      'Check for updates — the check failed, and nothing was installed. journalctl -u holzkube-manager-update-check says why.',
       RED,
       true,
     ],
@@ -2007,9 +2027,96 @@ describe('HostOrderStatus', () => {
     const o = order('check-update')
     status(host, o, orderPhase(o, host))
     const box = screen.getByRole('status')
-    expect(box).toHaveTextContent('the check could not look for a newer release')
+    expect(box).toHaveTextContent('the check failed, and nothing was installed')
     expect(screen.getByText('journalctl -u holzkube-manager-update-check').tagName).toBe('CODE')
     expect(screen.queryByText('journalctl -u holzkube-manager-host')).toBeNull()
+  })
+
+  // 13-REVIEW-2 V-07: one failed check, one sentence. Every reading below is a
+  // poll of the same check, the phase taken as the page takes it; whichever
+  // way the failure arrives, the box says it the same way, and the readings
+  // before the helper's end say started, not a second "failed" sentence.
+  describe('one failed check is said one way', () => {
+    const checkFailed =
+      'Check for updates — the check failed, and nothing was installed. journalctl -u holzkube-manager-update-check says why.'
+    const failedStatus = (at: string) => ({ ...updatedShape, checked_at: at, outcome: 'failed' })
+    const sentence = (host: Host, o: HostOrder = order('check-update')) => {
+      const { unmount } = status(host, o, orderPhase(o, host))
+      const box = screen.getByRole('status')
+      const said = { text: box.querySelector('p')?.textContent, red: box.classList.contains(RED) }
+      unmount()
+      return said
+    }
+
+    const arrivals: [string, Host, HostOrder | undefined][] = [
+      [
+        'the helper recorded the order failed',
+        later({ order: order('check-update'), result: resultFor(ID, 'check-update', 'failed') }),
+        undefined,
+      ],
+      [
+        'the helper recorded failed, the check its failed status first',
+        later(
+          { order: order('check-update'), result: resultFor(ID, 'check-update', 'failed') },
+          { update: failedStatus('2026-09-28T10:00:07Z') },
+        ),
+        undefined,
+      ],
+      [
+        'the check ended (done) and its own status says failed',
+        later(
+          {
+            order: order('check-update'),
+            result: resultFor(ID, 'check-update', 'done', '2026-09-28T10:00:08Z'),
+          },
+          { update: failedStatus('2026-09-28T10:00:07Z') },
+        ),
+        undefined,
+      ],
+      [
+        'known only from the done record, its failed status a second before it',
+        later(
+          { result: resultFor(ID, 'check-update', 'done', '2026-09-28T10:00:08Z') },
+          { update: failedStatus('2026-09-28T10:00:07Z') },
+        ),
+        { ...order('check-update'), placed_at: '2026-09-28T10:00:08Z' },
+      ],
+    ]
+    it.each(arrivals)('%s: the one sentence, red', (_, host, o) => {
+      expect(sentence(host, o)).toEqual({ text: checkFailed, red: true })
+    })
+
+    it('the status written, the helper not yet done: still started', () => {
+      const host = later(
+        {
+          order: order('check-update'),
+          result: resultFor(ID, 'check-update', 'started', '2026-09-28T10:00:06Z'),
+        },
+        { observed: SOON, update: failedStatus('2026-09-28T10:00:07Z') },
+      )
+      expect(sentence(host)).toEqual({
+        text: 'Check for updates — started. Looking for a newer release; nothing is installed.',
+        red: false,
+      })
+    })
+
+    // The helper's done record is the check's end: an update status recorded
+    // after it is a later run's, and its failure is not the check's.
+    it('a check done, then a later hourly run failed: not called a failed check', () => {
+      const host = later(
+        {
+          order: order('check-update'),
+          result: resultFor(ID, 'check-update', 'done', '2026-09-28T10:00:08Z'),
+        },
+        { update: failedStatus('2026-09-28T10:01:00Z') },
+      )
+      const said = sentence(host)
+      expect(said.text).not.toContain('failed')
+      expect(said).toEqual({
+        text: 'Check for updates — finished, but what it found is not in the update status holzkube-manager reads. journalctl -u holzkube-manager-update-check says what it found.',
+        red: false,
+      })
+    })
   })
 
   it('says when the helper recorded an order it only knows from the result', () => {
