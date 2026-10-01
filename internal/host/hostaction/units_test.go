@@ -596,9 +596,18 @@ func sortedKeys(m map[string]bool) []string {
 	return out
 }
 
+// maxUnitSpan is the longest span systemdSpan reads. No limit in these units
+// comes near it, and a time.Duration holds only some 292 years: systemd
+// accepts "2562048h 9223371278s" (584 years), which summed as a Duration
+// wraps to about 4 s and would pass every comparison below it (13-REVIEW-2
+// round 3, W2). So every part and every partial sum is held under this cap
+// before it is added, never after.
+const maxUnitSpan = 24 * time.Hour
+
 // systemdSpan parses a systemd time span of the forms the units use -- "90",
 // "90s", "2min", "3min", "1h 30min" -- into a duration. Anything else fails
-// the test: a span it cannot read is not one it can compare.
+// the test: a span it cannot read is not one it can compare, and neither is
+// one above maxUnitSpan.
 func systemdSpan(t *testing.T, s string) time.Duration {
 	t.Helper()
 	units := map[string]time.Duration{
@@ -622,11 +631,21 @@ func systemdSpan(t *testing.T, s string) time.Duration {
 		if !ok {
 			t.Fatalf("cannot read %q as a systemd time span (unit %q)", s, m[2])
 		}
-		n, err := strconv.Atoi(m[1])
+		n, err := strconv.ParseInt(m[1], 10, 64)
 		if err != nil {
 			t.Fatalf("cannot read %q as a systemd time span: %v", s, err)
 		}
-		total += time.Duration(n) * unit
+		// Compared before the multiplication and before the sum, so neither
+		// can wrap: n <= maxUnitSpan/unit keeps n*unit <= maxUnitSpan, and
+		// total <= maxUnitSpan - d keeps the sum there too.
+		if n > int64(maxUnitSpan/unit) {
+			t.Fatalf("the systemd time span %q is longer than %v; a limit that long is no limit this test can reason about", s, maxUnitSpan)
+		}
+		d := time.Duration(n) * unit
+		if total > maxUnitSpan-d {
+			t.Fatalf("the systemd time span %q is longer than %v; a limit that long is no limit this test can reason about", s, maxUnitSpan)
+		}
+		total += d
 	}
 	return total
 }
@@ -691,7 +710,9 @@ func checkUnitWorstCase(start, stop time.Duration) time.Duration {
 // SendSIGKILL=no; FinalKillSignal=; TimeoutStartFailureMode=abort; After=;
 // TimeoutStopSec=15s, the shipped value before V-09; an ExecStartPost= behind
 // a carriage return or a NUL in a comment; a byte-order mark before one; a
-// backslash at the end of the line before ExecStart=.
+// backslash at the end of the line before ExecStart=; TimeoutStopSec= and
+// TimeoutStartSec= of 584 years ("2562048h 9223371278s"), which systemd takes
+// and a time.Duration sum wraps to about 4 s, and "23h 2h" (maxUnitSpan).
 func TestTheCheckUnitRunsOnlyTheCheck(t *testing.T) {
 	t.Parallel()
 
