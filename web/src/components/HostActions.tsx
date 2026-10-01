@@ -823,6 +823,13 @@ const CHECK_JOURNAL = (
   <code className="font-mono text-xs">journalctl -u holzkube-manager-update-check</code>
 )
 
+/**
+ * A failed check, however the page learns of it -- the helper recorded the
+ * order failed, or the check ended and its own update status says failed:
+ * one sentence, red, and the check unit's journal (13-REVIEW-2 WR-02, V-07).
+ */
+const CHECK_FAILED = <>the check failed, and nothing was installed. {CHECK_JOURNAL} says why.</>
+
 /** A started order the host never reported done: what did not happen. */
 const NOT_DONE: Record<HostAction, ReactNode> = {
   'check-update': (
@@ -869,10 +876,7 @@ function phaseSentence(phase: OrderPhase, order: HostOrder, host: Host): ReactNo
       // missing, the unit timed out), and the helper's journal says only that
       // the order failed (13-REVIEW-2 WR-02).
       return order.action === 'check-update' ? (
-        <>
-          the check could not look for a newer release, and nothing was installed. {CHECK_JOURNAL}{' '}
-          says why.
-        </>
+        CHECK_FAILED
       ) : (
         <>the helper could not carry it out. {JOURNAL} says why.</>
       )
@@ -892,14 +896,19 @@ function phaseSentence(phase: OrderPhase, order: HostOrder, host: Host): ReactNo
     case 'update-finished': {
       if (order.action === 'check-update') {
         const answer = checkAnswer(order, host)
-        return answer === null ? (
-          <>
-            finished, but what it found is not in the update status holzkube-manager reads.{' '}
-            {CHECK_JOURNAL} says what it found.
-          </>
-        ) : (
-          <>finished. {checkSentence(answer)}</>
-        )
+        if (answer === null) {
+          return (
+            <>
+              finished, but what it found is not in the update status holzkube-manager reads.{' '}
+              {CHECK_JOURNAL} says what it found.
+            </>
+          )
+        }
+        // The check ran to its end but recorded that it failed (it could not
+        // read the installed version): the same sentence as a check the helper
+        // recorded failed, so one failed check is said one way (13-REVIEW-2
+        // V-07).
+        return answer.outcome === 'failed' ? CHECK_FAILED : <>finished. {checkSentence(answer)}</>
       }
       const u = host.service.update
       if (!u.readable) {
@@ -947,8 +956,9 @@ function phaseSentence(phase: OrderPhase, order: HostOrder, host: Host): ReactNo
 /**
  * What a finished check found. A newer release is news, not a fault: the
  * check did what it was asked, so it is said with both versions and what
- * installs it. Any other outcome means the hourly update ran in between, and
- * its sentence is the Update check row's.
+ * installs it. A failed one is not said here but as CHECK_FAILED, the same
+ * sentence the helper's failed record gets. Any other outcome means the hourly
+ * update ran in between, and its sentence is the Update check row's.
  */
 function checkSentence(u: UpdateStatus): ReactNode {
   switch (u.outcome) {
@@ -960,8 +970,6 @@ function checkSentence(u: UpdateStatus): ReactNode {
       return u.installed !== null
         ? `${u.installed} is installed and is the newest release; there is nothing to install.`
         : outcomeSentence(u)
-    case 'failed':
-      return <>The check failed, and nothing was installed. {CHECK_JOURNAL} says why.</>
     default:
       return outcomeSentence(u)
   }
@@ -1001,20 +1009,30 @@ function checkHeld(order: HostOrder, host: Host): boolean {
  * the longest a check can take before that record. (An order the page knows
  * only from the helper's record has the record's time as its placement, which
  * for a done check is its end.) Anything older is an earlier run's, left
- * because the check could not record its own.
+ * because the check could not record its own. And with the helper's done
+ * record there, anything newer than it is a later run's -- the hourly update
+ * after the check, which may have failed where the check did not: the box
+ * follows the helper's word for the check's end, not whatever the update
+ * status says now (13-REVIEW-2 V-07). Both times are whole seconds, and the
+ * script writes before the helper records.
  */
 function checkAnswer(order: HostOrder, host: Host): UpdateStatus | null {
   const u = host.service.update
   if (!u.readable) {
     return null
   }
+  const checked = Date.parse(u.value.checked_at)
   const placed = Date.parse(order.placed_at)
   let since = Math.floor(placed / 1000) * 1000
   const result = host.actions.result
   if (result.readable && result.value.id === order.id && result.value.outcome === 'done') {
-    since = Math.min(since, Date.parse(result.value.at) - CHECK_WITHIN_MS)
+    const end = Date.parse(result.value.at)
+    if (checked > end) {
+      return null
+    }
+    since = Math.min(since, end - CHECK_WITHIN_MS)
   }
-  return Date.parse(u.value.checked_at) >= since ? u.value : null
+  return checked >= since ? u.value : null
 }
 
 /** The outcomes a finished run is emerald for; a check asked whether one is available. */
