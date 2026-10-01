@@ -3537,7 +3537,15 @@ provider sign-in resolves to. Removing an account is what ends its sessions.
 | Code | Status | Means |
 |---|---|---|
 | `conflict.not-linked` | 409 | the account is not linked to single sign-on, so there is nothing to unlink. |
-| `conflict.not-a-person` | 409 | the account is a service account, which signs in with a token and is never linked. |
+
+A service account's binding is unlinked like a person's. No provider identity
+ever signs in as, or is bound to, a service account — `FindByIdentity` skips
+them, `BindIdentity` refuses them, no session is ever started for one, and a
+session record that names one is not treated as signed in. But a binding on one
+is not hypothetical: before first-use linking counted only people, an instance
+whose only account was a service account bound the provider's identity to it.
+The list reports such a binding (`linked_identity`, `linked_provider`), and this
+route removes it.
 
 Two refusals are the same rule seen from different sides, and they are separate
 codes because the remedy differs:
@@ -3596,10 +3604,7 @@ The mirror of that is the two routes that take a password — `POST
 /api/v1/account/password` and `POST /api/v1/auth/sudo` — which answer 409
 `conflict.not-a-person` to a service account: it authenticates with a token and
 has no password to change and none to re-authenticate with — and does not need
-one, since its token already satisfies the re-authentication window. `DELETE
-/api/v1/users/{id}/identity` answers the same code for a service account: it
-never signs in through the provider, so a binding on one can only have been
-planted, and unlinking it would bless that rather than remove it. Both routes
+one, since its token already satisfies the re-authentication window. Both routes
 are genuinely reachable by a service account: each needs only `RoleReader`, and
 a bearer token satisfies the CSRF check and the sudo window, so every gate in
 front of them hands the request through. Both answered `500 internal.unexpected`

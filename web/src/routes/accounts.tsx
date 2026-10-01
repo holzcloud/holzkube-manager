@@ -216,6 +216,16 @@ function SignInCell({ user }: { user: User }) {
   return (
     <span>
       token
+      {user.linked_identity && (
+        // Never used to sign in -- the server ignores it -- but an earlier
+        // release could make one, and a binding nobody can see is one nobody
+        // removes.
+        <span className="block text-xs">
+          {user.linked_provider === ''
+            ? 'leftover single sign-on link (never used to sign in)'
+            : `leftover single sign-on link to ${user.linked_provider} (never used to sign in)`}
+        </span>
+      )}
       <span className="block text-xs">
         {user.last_used_at === ''
           ? 'never used'
@@ -246,7 +256,7 @@ function AccountActions({
   const [token, setToken] = useState<ServiceAccountToken | null>(null)
 
   const isService = user.kind === 'service'
-  const linked = !isService && user.linked_identity
+  const linked = user.linked_identity
   const lastAdmin = user.role === 'admin' && adminCount === 1
 
   const rotate = useMutation({
@@ -391,13 +401,21 @@ function UnlinkSingleSignOn({
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle>Unlink single sign-on for {user.username}?</DialogTitle>
-            <DialogDescription>
-              {user.username} will no longer sign in through {provider}. The account, its password
-              and its role stay. Linking it again happens from the local network address, because
-              linking is refused on an address that only accepts single sign-on.
-            </DialogDescription>
+            {user.kind === 'service' ? (
+              <DialogDescription>
+                {user.username} is a service account and never signs in through {provider}: the link
+                is left over from an earlier release, and nothing uses it. Unlinking removes it. The
+                token is not affected.
+              </DialogDescription>
+            ) : (
+              <DialogDescription>
+                {user.username} will no longer sign in through {provider}. The account, its password
+                and its role stay. Linking it again happens from the local network address, because
+                linking is refused on an address that only accepts single sign-on.
+              </DialogDescription>
+            )}
           </DialogHeader>
-          {personCount > 1 && (
+          {user.kind !== 'service' && personCount > 1 && (
             <p className="text-muted-foreground text-sm">
               This instance has {personCount} accounts for people (service accounts do not count).
               Single sign-on links on first use only while there is exactly one, so after this no

@@ -224,8 +224,13 @@ describe('the accounts table', () => {
     expect(within(dialog).queryByText(/no account here can be linked again/i)).toBeNull()
   })
 
-  /** The server refuses it, and the page does not offer it. */
-  it('offers no unlink on a service account, even one that shows a link', () => {
+  /**
+   * A service account never signs in through the provider, but an earlier
+   * release could link one. The page shows the leftover link and offers to
+   * remove it, rather than hiding the one binding nobody wants.
+   */
+  it('shows a service account’s leftover link and offers to remove it', async () => {
+    const user = userEvent.setup()
     wrap([
       account({
         id: 'u2',
@@ -240,6 +245,13 @@ describe('the accounts table', () => {
     if (row === null) {
       throw new Error('the service account has no row')
     }
-    expect(within(row).queryByRole('button', { name: /Unlink single sign-on/i })).toBeNull()
+    expect(
+      within(row).getByText(/leftover single sign-on link to idp\.example\.com/i),
+    ).toBeInTheDocument()
+    await user.click(within(row).getByRole('button', { name: 'Unlink single sign-on' }))
+    const dialog = await screen.findByRole('dialog')
+    expect(
+      within(dialog).getByText(/never signs in through idp\.example\.com/i),
+    ).toBeInTheDocument()
   })
 })

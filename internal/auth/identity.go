@@ -23,7 +23,14 @@ var ErrAlreadyBound = errors.New("auth: the account is already bound to another 
 // provider binding.
 var ErrNotLinked = errors.New("auth: the account is not linked to an identity provider")
 
-// FindByIdentity returns the account bound to (issuer, subject).
+// FindByIdentity returns the person account bound to (issuer, subject).
+//
+// A service account is never the answer, whatever the store holds. It signs in
+// with a token, and a browser session for one skips everything a token is
+// checked for -- for the break-glass account, its expiry. Such a binding is not
+// hypothetical: before first-use linking counted only people, an instance whose
+// only account was a service account bound the provider's identity to it. It is
+// ignored here and removed by UnlinkIdentity.
 //
 // Both halves are compared in constant time. They are not secrets, but a
 // subject is attacker-supplied on every callback, and a comparison whose timing
@@ -39,7 +46,7 @@ func (s *Service) FindByIdentity(ctx context.Context, issuer, subject string) (m
 		return model.User{}, fmt.Errorf("auth: list users: %w", err)
 	}
 	for _, u := range users {
-		if !u.HasIdentityBinding() {
+		if u.IsService() || !u.HasIdentityBinding() {
 			continue
 		}
 		if constantTimeEqual(u.Issuer, issuer) && constantTimeEqual(u.Subject, subject) {
@@ -63,6 +70,10 @@ func (s *Service) FindByIdentity(ctx context.Context, issuer, subject string) (m
 // SinglePersonAccount, which strip the password hash -- writing that copy back
 // would erase the password at the moment single sign-on first worked, and with
 // it the break-glass way in.
+//
+// The stored record's kind is checked here, not left to the caller: a service
+// account is never bound (ErrNotAPerson), and the record that counts is the one
+// about to be written.
 func (s *Service) BindIdentity(ctx context.Context, account model.User, issuer, subject string) (model.User, error) {
 	if issuer == "" || subject == "" {
 		return model.User{}, errors.New("auth: refusing to bind an empty identity")
@@ -70,6 +81,9 @@ func (s *Service) BindIdentity(ctx context.Context, account model.User, issuer, 
 	u, err := s.store.Users().Get(ctx, account.ID)
 	if err != nil {
 		return model.User{}, fmt.Errorf("auth: read the account to bind: %w", err)
+	}
+	if u.IsService() {
+		return model.User{}, ErrNotAPerson
 	}
 	if u.HasIdentityBinding() {
 		if constantTimeEqual(u.Issuer, issuer) && constantTimeEqual(u.Subject, subject) {
@@ -89,6 +103,12 @@ func (s *Service) BindIdentity(ctx context.Context, account model.User, issuer, 
 
 // UnlinkIdentity removes an account's link to a provider identity.
 //
+// A service account's binding is removed like a person's. It never signs in
+// (FindByIdentity ignores it), but it is a binding an earlier release made --
+// first-use linking used to count every account, so a service-only instance
+// bound the provider's identity to its service account -- and the remedy for a
+// binding nobody wants is to remove it, not to refuse to look at it.
+//
 // Both halves go: an issuer without a subject, or the reverse, is not a
 // binding HasIdentityBinding recognises, but it is a half-remembered one, and
 // the next first-use bind would sit on top of whatever was left. The account
@@ -103,13 +123,6 @@ func (s *Service) UnlinkIdentity(ctx context.Context, id model.UserID) (model.Us
 		return model.User{}, err
 	}
 
-	// A service account signs in with a token and never through the provider,
-	// so a binding on one can only have been planted -- and "unlinking" it
-	// would bless that as a thing that happens rather than remove it. Checked
-	// before the binding, so that a planted one is still refused.
-	if u.IsService() {
-		return model.User{}, ErrNotAPerson
-	}
 	// An unlink that changes nothing would still write a success record into
 	// the audit archive, and that is a record of nothing.
 	if !u.HasIdentityBinding() {

@@ -405,13 +405,6 @@ func unlinkUserIdentity(d httpapi.Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		saved, err := d.Auth.UnlinkIdentity(r.Context(), model.UserID(r.PathValue("id")))
 		switch {
-		case errors.Is(err, auth.ErrNotAPerson):
-			// Conflict rather than notAPerson: that one's title says the
-			// account has no password, and this question is not about one.
-			httpapi.WriteProblem(w, r, httpapi.Conflict(httpapi.CodeNotAPerson,
-				"A service account signs in with a token and is never linked to single sign-on, "+
-					"so there is nothing to unlink."))
-			return
 		case errors.Is(err, auth.ErrNotLinked):
 			httpapi.WriteProblem(w, r, httpapi.Conflict(httpapi.CodeNotLinked,
 				"This account is not linked to single sign-on, so there is nothing to unlink."))

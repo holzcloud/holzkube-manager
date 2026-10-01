@@ -534,8 +534,13 @@ different identity. The Sign-in column shows which provider an account is linked
 to by its host only (`idp.example.com`), never the `sub`. Only an admin can
 unlink, it asks for re-authentication like every other account change, and it
 is recorded in the audit log as `user.identity-unlink` without the issuer or the
-`sub`. It is refused for a service account, which is never linked, and for an
-account that is not linked.
+`sub`. It is refused for an account that is not linked.
+
+A service account never signs in through the provider, whatever is stored: a
+binding on one is ignored at sign-in. An earlier release could still make one —
+first-use linking used to count every account, so an instance whose only
+account was a service account linked the provider to it. The Sign-in column
+shows such a leftover link, and **Unlink single sign-on** removes it.
 
 An admin may unlink their own account; the account keeps its password and its
 role. But on an address that only accepts single sign-on the password is

@@ -181,7 +181,14 @@ func (s *Service) rehashIfOutdated(ctx context.Context, u model.User, password s
 // StartSession attaches an identity to a freshly rotated session without
 // re-checking a password. It exists for the setup wizard, which has just proven
 // possession of the credentials by choosing them.
+//
+// A service account never gets a session: it signs in with a token on every
+// request, and a session would skip what a token is checked for -- for the
+// break-glass account, its expiry.
 func (s *Service) StartSession(ctx context.Context, u model.User) error {
+	if u.IsService() {
+		return ErrNotAPerson
+	}
 	if err := s.sm.RenewToken(ctx); err != nil {
 		return fmt.Errorf("auth: rotate session: %w", err)
 	}
@@ -282,6 +289,12 @@ func (s *Service) CurrentUser(ctx context.Context) (model.User, bool) {
 	}
 	u, err := s.store.Users().Get(ctx, model.UserID(id))
 	if err != nil {
+		return model.User{}, false
+	}
+	// No path in this release puts a service account into a session, but an
+	// earlier one did: its sign-in through the provider honoured a binding on a
+	// service account. Such a session is not one.
+	if u.IsService() {
 		return model.User{}, false
 	}
 	return u, true

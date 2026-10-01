@@ -78,24 +78,102 @@ func TestUnlinkIdentityLetsTheNextSignInBindANewProvider(t *testing.T) {
 	}
 }
 
-func TestUnlinkIdentityRefusesAServiceAccount(t *testing.T) {
+// A binding on a service account is not hypothetical: the first-use rule before
+// person accounts counted every account, so an instance whose only account was
+// a service account bound the provider's identity to it. The unlink is how such
+// a binding goes, so it clears it rather than refusing.
+func TestUnlinkIdentityClearsAServiceAccountsBinding(t *testing.T) {
 	t.Parallel()
 	svc, st := newTestService(t, time.Hour)
 	ctx := context.Background()
 
-	// A binding on a service account can only have been planted: it signs in
-	// with a token and never through the provider.
 	u := putAccount(t, st, "u-service", "ci-bot", model.KindService, oldIssuer, oldSubject)
 
-	if _, err := svc.UnlinkIdentity(ctx, u.ID); !errors.Is(err, ErrNotAPerson) {
-		t.Fatalf("UnlinkIdentity on a service account: %v, want ErrNotAPerson", err)
+	unlinked, err := svc.UnlinkIdentity(ctx, u.ID)
+	if err != nil {
+		t.Fatalf("UnlinkIdentity on a service account with a binding: %v", err)
+	}
+	if unlinked.HasIdentityBinding() {
+		t.Errorf("the returned account still carries a binding")
 	}
 	stored, err := st.Users().Get(ctx, u.ID)
 	if err != nil {
 		t.Fatalf("get: %v", err)
 	}
-	if stored.Issuer != oldIssuer || stored.Subject != oldSubject {
-		t.Errorf("a refused unlink changed the binding: issuer %q, subject %q", stored.Issuer, stored.Subject)
+	if stored.Issuer != "" || stored.Subject != "" {
+		t.Errorf("the service account still holds a binding: issuer %q, subject %q", stored.Issuer, stored.Subject)
+	}
+	if stored.Kind != model.KindService {
+		t.Errorf("the unlink changed the account's kind to %q", stored.Kind)
+	}
+}
+
+// A provider identity never resolves to a service account, whatever the store
+// holds: a service account signs in with a token, and a browser session for
+// one -- the break-glass account included -- would skip everything a token is
+// checked for, its expiry first.
+func TestFindByIdentityNeverAnswersAServiceAccount(t *testing.T) {
+	t.Parallel()
+	svc, st := newTestService(t, time.Hour)
+
+	putAccount(t, st, "u-service", "ci-bot", model.KindService, oldIssuer, oldSubject)
+
+	if u, err := svc.FindByIdentity(context.Background(), oldIssuer, oldSubject); !errors.Is(err, ErrNoIdentityBinding) {
+		t.Fatalf("FindByIdentity resolved a service account's binding: %q (%v), want ErrNoIdentityBinding", u.ID, err)
+	}
+}
+
+// BindIdentity guards the kind itself rather than trusting its caller to have
+// asked SinglePersonAccount: the record it writes is the one it re-reads, and
+// that is the one whose kind counts.
+func TestBindIdentityRefusesAServiceAccount(t *testing.T) {
+	t.Parallel()
+	svc, st := newTestService(t, time.Hour)
+	ctx := context.Background()
+
+	u := putAccount(t, st, "u-service", "ci-bot", model.KindService, "", "")
+
+	if _, err := svc.BindIdentity(ctx, u, newIssuer, newSubject); !errors.Is(err, ErrNotAPerson) {
+		t.Fatalf("BindIdentity on a service account: %v, want ErrNotAPerson", err)
+	}
+	stored, err := st.Users().Get(ctx, u.ID)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if stored.HasIdentityBinding() {
+		t.Errorf("a refused bind left a binding on the service account")
+	}
+}
+
+// No session ever carries a service account. StartSession refuses one, and a
+// session record that names one -- written by a release whose sign-in through
+// the provider honoured a binding on a service account -- is not a session.
+func TestASessionNeverCarriesAServiceAccount(t *testing.T) {
+	t.Parallel()
+	svc, st := newTestService(t, time.Hour)
+
+	u := putAccount(t, st, "u-service", "ci-bot", model.KindService, oldIssuer, oldSubject)
+
+	var startErr error
+	token := runInSession(t, svc, func(ctx context.Context) {
+		startErr = svc.StartSession(ctx, u)
+	})
+	if !errors.Is(startErr, ErrNotAPerson) {
+		t.Errorf("StartSession for a service account: %v, want ErrNotAPerson", startErr)
+	}
+	if token != "" && authenticatedIn(t, svc, token) {
+		t.Errorf("StartSession left a session signed in as a service account")
+	}
+
+	// The record an older release could have left behind.
+	legacy := runInSession(t, svc, func(ctx context.Context) {
+		if err := svc.sm.RenewToken(ctx); err != nil {
+			t.Fatalf("renew: %v", err)
+		}
+		svc.markAuthenticated(ctx, string(u.ID))
+	})
+	if authenticatedIn(t, svc, legacy) {
+		t.Errorf("a session naming a service account is treated as signed in")
 	}
 }
 

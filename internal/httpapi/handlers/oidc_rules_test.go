@@ -11,6 +11,7 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"net/http"
 	"net/http/httptest"
 	"os"
 	"testing"
@@ -164,5 +165,81 @@ func TestSudoRefusalNamesAnUnlinkedAccount(t *testing.T) {
 				t.Errorf("sudoIdentityRefusal = %q, want %q", got, tc.want)
 			}
 		})
+	}
+}
+
+// callbackDeps is rulesDeps with a provider -- built from a made-up issuer,
+// which oidc.New never contacts -- and every host SSO-only when ssoOnly is set.
+func callbackDeps(t *testing.T, ssoOnly bool) (httpapi.Deps, *fsstore.Store) {
+	t.Helper()
+	d, st := rulesDeps(t)
+	p, err := oidc.New(rulesIssuer, "holzkube-manager", "s3cret")
+	if err != nil {
+		t.Fatalf("oidc.New: %v", err)
+	}
+	d.OIDC = p
+	if ssoOnly {
+		d.IsSSOOnly = func(string) bool { return true }
+	}
+	return d, st
+}
+
+// completeLoginAs runs the end of a callback for the given subject, as the
+// session middleware would, and answers the redirect and the session cookie.
+func completeLoginAs(t *testing.T, d httpapi.Deps, subject string) (*httptest.ResponseRecorder, []*http.Cookie) {
+	t.Helper()
+	h := d.Auth.Sessions().LoadAndSave(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		completeLogin(d, w, r, oidc.Identity{Subject: subject, RawIDToken: "id-token"})
+	}))
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "https://192.168.1.10:8443/api/v1/auth/oidc/callback", nil))
+	return rec, rec.Result().Cookies()
+}
+
+// signedInAs answers which account the cookies' session is signed in as, and
+// "" for none.
+func signedInAs(t *testing.T, d httpapi.Deps, cookies []*http.Cookie) model.UserID {
+	t.Helper()
+	var who model.UserID
+	h := d.Auth.Sessions().LoadAndSave(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		if u, ok := d.Auth.CurrentUser(r.Context()); ok {
+			who = u.ID
+		}
+	}))
+	req := httptest.NewRequest(http.MethodGet, "https://192.168.1.10:8443/api/v1/auth/me", nil)
+	for _, c := range cookies {
+		req.AddCookie(c)
+	}
+	h.ServeHTTP(httptest.NewRecorder(), req)
+	return who
+}
+
+// A binding on a service account -- one an earlier release made -- never
+// signs anybody in as that service account. On an SSO-only address the
+// identity is then simply not linked: bind-host, and no session.
+func TestCallbackNeverSignsInAsAServiceAccount(t *testing.T) {
+	t.Parallel()
+	d, st := callbackDeps(t, true)
+	ctx := context.Background()
+
+	if _, err := st.Users().Put(ctx, model.User{
+		ID: "u-person", Username: "somebody", Role: model.RoleAdmin, Kind: model.KindPerson,
+		PasswordHash: plantedHash, CreatedAt: time.Now(),
+	}); err != nil {
+		t.Fatalf("put person: %v", err)
+	}
+	if _, err := st.Users().Put(ctx, model.User{
+		ID: "u-break-glass", Username: "break-glass", Role: model.RoleAdmin, Kind: model.KindService,
+		Issuer: rulesIssuer, Subject: "subject-0f3a9c", CreatedAt: time.Now(),
+	}); err != nil {
+		t.Fatalf("put service account: %v", err)
+	}
+
+	rec, cookies := completeLoginAs(t, d, "subject-0f3a9c")
+	if loc := rec.Header().Get("Location"); loc != "/login?sso_error=bind-host" {
+		t.Errorf("redirect = %d %q, want /login?sso_error=bind-host", rec.Code, loc)
+	}
+	if who := signedInAs(t, d, cookies); who != "" {
+		t.Fatalf("the callback signed in as %q through a service account's binding", who)
 	}
 }

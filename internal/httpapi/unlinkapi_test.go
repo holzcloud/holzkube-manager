@@ -206,7 +206,10 @@ func TestUnlinkSingleSignOnNeedsTheSudoWindow(t *testing.T) {
 	}
 }
 
-func TestUnlinkSingleSignOnRefusesAServiceAccount(t *testing.T) {
+// A service account never signs in through the provider, but an earlier
+// release could bind one -- first-use linking used to count every account. The
+// unlink is how that binding goes.
+func TestUnlinkSingleSignOnClearsAServiceAccountsBinding(t *testing.T) {
 	t.Parallel()
 
 	h := newHarness(t)
@@ -225,23 +228,26 @@ func TestUnlinkSingleSignOnRefusesAServiceAccount(t *testing.T) {
 	if err := json.Unmarshal(raw, &created); err != nil {
 		t.Fatalf("decode: %v (%s)", err, raw)
 	}
-	// A binding on a service account can only have been planted, and that is
-	// exactly how this one got there.
 	h.plantBinding(t, model.UserID(created.Account.ID))
 
-	resp, raw = h.unlink(t, created.Account.ID)
-	if resp.StatusCode != http.StatusConflict {
-		t.Fatalf("unlink a service account: %d (%s), want 409", resp.StatusCode, raw)
+	// The list shows it, so that an admin can see there is something to remove.
+	users, _ := h.listUsers(t)
+	for _, u := range users {
+		if u.ID == created.Account.ID && (!u.LinkedIdentity || u.LinkedProvider != "idp.example.com") {
+			t.Errorf("the list hides the service account's binding: %+v", u)
+		}
 	}
-	if p := decodeProblem(t, resp, raw); p.Code != "conflict.not-a-person" {
-		t.Errorf("code = %q, want conflict.not-a-person", p.Code)
+
+	resp, raw = h.unlink(t, created.Account.ID)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("unlink a service account's binding: %d (%s), want 200", resp.StatusCode, raw)
 	}
 	stored, err := h.store.Users().Get(context.Background(), model.UserID(created.Account.ID))
 	if err != nil {
 		t.Fatalf("get: %v", err)
 	}
-	if stored.Issuer != plantedIssuer || stored.Subject != plantedSubject {
-		t.Errorf("a refused unlink changed the planted binding: issuer %q, subject %q",
+	if stored.Issuer != "" || stored.Subject != "" {
+		t.Errorf("the service account still holds a binding: issuer %q, subject %q",
 			stored.Issuer, stored.Subject)
 	}
 }
