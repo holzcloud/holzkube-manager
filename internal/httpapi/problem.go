@@ -175,6 +175,15 @@ const (
 	// what to reinstall.
 	CodeHostHelperOutdated = "conflict.host-helper-outdated"
 
+	// CodeHostHelperBusy: a host action was asked for while the root helper
+	// is still carrying out an update check (13-REVIEW-2 WR-01). The helper
+	// waits for the check unit, so it picks up nothing else until the check
+	// ends; an order placed then would only be withdrawn after the pickup
+	// timeout. A conflict: the request is well formed, and the helper cannot
+	// take it now. No token was issued and no order placed; the client waits
+	// for the check's answer and tries again.
+	CodeHostHelperBusy = "conflict.host-helper-busy"
+
 	// CodeHostInContainer: a host action was asked for while the daemon runs
 	// in a container (Phase 13 D-14). A conflict for the same reason: the
 	// request is well formed, and a container has no host of its own to

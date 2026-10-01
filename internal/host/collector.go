@@ -160,6 +160,29 @@ func (c *Collector) InContainer() bool {
 	return detectContainer(c.cfg.FS)
 }
 
+// CheckRunning reports whether the helper is busy with a check right now
+// (hostaction.CheckRunning), read now from the helper's result and the update
+// status -- the two readings Read puts into actions.result and
+// service.update, from which the page draws the same conclusion. The host
+// action routes refuse while it is true (13-REVIEW-2 WR-01). False without
+// host actions, on a platform with no readings, and when the helper's result
+// cannot be read: then there is no check anybody knows of.
+func (c *Collector) CheckRunning() bool {
+	box := c.cfg.Actions
+	if box == nil || platformUnsupported(c.cfg.Sys) {
+		return false
+	}
+	r, err := box.Result()
+	if err != nil {
+		return false
+	}
+	var answered time.Time
+	if s, err := updatestatus.Read(c.cfg.FS, c.cfg.UpdateStatusPath); err == nil {
+		answered = s.CheckedAt
+	}
+	return hostaction.CheckRunning(r, answered, c.cfg.Now())
+}
+
 // readUnsupported is the answer on a platform with no readings (a darwin
 // build): every reading says unsupported, and only what the process knows
 // about itself -- its version, when it started, where its data is -- is

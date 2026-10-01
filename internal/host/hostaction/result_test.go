@@ -262,3 +262,41 @@ func TestReadResultPath(t *testing.T) {
 }
 
 func ptr(s string) *string { return &s }
+
+// TestCheckRunning (13-REVIEW-2 WR-01): the helper is busy with a check while
+// its last record is a check it started, younger than its service's limit,
+// and the update script has recorded no run since. At the edges: the limit
+// itself is over, and an answer in the check's own second counts.
+func TestCheckRunning(t *testing.T) {
+	t.Parallel()
+
+	at := time.Date(2026, 9, 30, 16, 0, 0, 0, time.UTC)
+	check := Result{ID: "c0ffee00c0ffee11", Action: CheckUpdate, Outcome: OutcomeStarted, At: at}
+	with := func(f func(r *Result)) Result { r := check; f(&r); return r }
+
+	cases := []struct {
+		name     string
+		r        Result
+		answered time.Time
+		now      time.Time
+		want     bool
+	}{
+		{"just started, never answered", check, time.Time{}, at, true},
+		{"5 s in, the last answer an hour old", check, at.Add(-time.Hour), at.Add(5 * time.Second), true},
+		{"an answer the second before it began", check, at.Add(-time.Second), at.Add(5 * time.Second), true},
+		{"one second short of the limit", check, time.Time{}, at.Add(HelperServiceLimit - time.Second), true},
+		{"at the limit", check, time.Time{}, at.Add(HelperServiceLimit), false},
+		{"answered in its own second", check, at, at.Add(5 * time.Second), false},
+		{"answered after", check, at.Add(2 * time.Second), at.Add(5 * time.Second), false},
+		{"recorded in the future", check, time.Time{}, at.Add(-time.Second), false},
+		{"failed", with(func(r *Result) { r.Outcome = OutcomeFailed }), time.Time{}, at.Add(5 * time.Second), false},
+		{"rejected", with(func(r *Result) { r.Outcome = OutcomeRejected }), time.Time{}, at.Add(5 * time.Second), false},
+		{"an update started", with(func(r *Result) { r.Action = Update }), time.Time{}, at.Add(5 * time.Second), false},
+		{"a reboot started", with(func(r *Result) { r.Action = Reboot }), time.Time{}, at.Add(5 * time.Second), false},
+	}
+	for _, tc := range cases {
+		if got := CheckRunning(tc.r, tc.answered, tc.now); got != tc.want {
+			t.Errorf("%s: CheckRunning = %v, want %v", tc.name, got, tc.want)
+		}
+	}
+}

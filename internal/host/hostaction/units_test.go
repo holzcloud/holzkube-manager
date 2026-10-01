@@ -654,6 +654,12 @@ func TestTheCheckUnitRunsOnlyTheCheck(t *testing.T) {
 		}
 		return systemdSpan(t, v[len(v)-1])
 	}
+	// The daemon's idea of the helper's limit is the unit's: the routes hold
+	// every order back while a check is younger than it (CheckRunning).
+	if h := lastSpan(service); h != HelperServiceLimit {
+		t.Errorf("%s: TimeoutStartSec is %v, HelperServiceLimit is %v; the routes would hold orders back "+
+			"for a different time than systemd lets the helper wait for a check", service.name, h, HelperServiceLimit)
+	}
 	if c, h := lastSpan(check), lastSpan(service); c <= 0 || c >= h {
 		t.Errorf("%s: TimeoutStartSec is %v, want more than 0 and less than the helper service's %v -- "+
 			"the helper waits for the check and must still record failed when systemd ends it", check.name, c, h)
