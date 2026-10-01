@@ -1758,8 +1758,9 @@ answered; the `202` is written before the helper can act.
 
 **What `check-update` runs.** The helper starts
 `holzkube-manager-update-check.service` and waits for it (no `--no-block`), so
-the order's result follows the check: `started` is recorded as it begins, and
-becomes `failed` when the check could not look (the unit failed or was ended); the reason is in the check unit's journal (`journalctl -u holzkube-manager-update-check`), and the page points there, since the helper's own journal says only that the order failed. That unit, a oneshot installed with the helper, runs
+the order's result follows the check: `started` is recorded as it begins,
+`done` when the unit ended well -- the check looked, and what it found is in
+`service.update` -- and `failed` when the check could not look (the unit failed or was ended); the reason is in the check unit's journal (`journalctl -u holzkube-manager-update-check`), and the page points there, since the helper's own journal says only that the order failed. That unit, a oneshot installed with the helper, runs
 `/usr/local/sbin/holzkube-manager-update --check`: the update script's look,
 which compares the installed version with the newest release and records
 `current`, `available` or `failed` in the status file the host answer already
@@ -1808,10 +1809,16 @@ root owns -- never in the daemon's:
 3f9c2a7b1d4e8f60 update started 2026-09-28T10:00:06Z
 ```
 
-Four fields: the id, the action, `started`, `rejected` or `failed`, and an
-RFC 3339 time in UTC. An order the helper could not trust has `-` for both id
-and action (`- - rejected …`, or `- - failed …` when it could not remove the
-order); a `started` one always has both. The file is `0644` in the helper's own
+Four fields: the id, the action, `started`, `done`, `rejected` or `failed`,
+and an RFC 3339 time in UTC. `done` is the check's alone: the helper waits for
+the check unit, so for `check-update` it records the end too -- `done` when the
+unit ended well, `failed` when it did not -- and `started` is never a check's
+last word unless the helper itself was ended while it waited (its service's
+3-min limit, a reboot, a kill). The other four stay `started`: their `systemctl`
+only queued a job or restarted a service. An order the helper could not trust
+has `-` for both id and action (`- - rejected …`, or `- - failed …` when it
+could not remove the order); a `started` or `done` one always has both, and a
+`done` one is always a `check-update`. The file is `0644` in the helper's own
 state directory (`StateDirectory=holzkube-manager-host`, `0755`), so the
 unprivileged daemon can read it and not write it.
 

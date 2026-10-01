@@ -45,12 +45,21 @@ const orderStillThere = "order-still-there"
 // The stand-in systemctl: its whole argv on one line, then whether the order
 // is still there. It reads the order's path from the environment the script
 // inherited, exactly as the real systemctl would see it.
+//
+// With stubSeenVar set it also copies the helper's result, as it stands while
+// systemctl runs, to that file: what the daemon reads while the helper waits.
 const systemctlStandIn = `#!/bin/sh
 printf '%s\n' "$*" >> "$` + stubLogVar + `"
 if [ -e "$HOLZKUBE_MANAGER_HOST_ORDER" ] || [ -L "$HOLZKUBE_MANAGER_HOST_ORDER" ]; then
   printf '%s\n' '` + orderStillThere + `' >> "$` + stubLogVar + `"
 fi
+if [ -n "$` + stubSeenVar + `" ]; then
+  cat "$HOLZKUBE_MANAGER_HOST_STATE_DIR/last" > "$` + stubSeenVar + `" 2>/dev/null || :
+fi
 `
+
+// stubSeenVar names the file the stand-in copies the helper's result to.
+const stubSeenVar = "HKM_STUB_SEEN_LAST"
 
 // scriptTimeout bounds every run. A FIFO opened without O_NONBLOCK blocks
 // forever; the test fails by this, never by hanging CI.
@@ -307,6 +316,19 @@ func (e *hostScriptEnv) wantResult(id string, action Action, outcome Outcome) {
 	e.wantNoTemporaries()
 }
 
+// wantSeen parses what the stand-in systemctl copied of the helper's result
+// while it ran, with the daemon's reader, and compares it.
+func (e *hostScriptEnv) wantSeen(seen, id string, action Action, outcome Outcome) {
+	e.t.Helper()
+	r, err := ReadResult(os.DirFS(filepath.Dir(seen)), "/"+filepath.Base(seen))
+	if err != nil {
+		e.t.Fatalf("while systemctl ran, the helper's result was not a record the daemon reads: %v", err)
+	}
+	if r.ID != id || r.Action != action || r.Outcome != outcome {
+		e.t.Errorf("while systemctl ran, last = {%q %q %q}, want {%q %q %q}", r.ID, r.Action, r.Outcome, id, action, outcome)
+	}
+}
+
 func (e *hostScriptEnv) wantNoResult() {
 	e.t.Helper()
 	if _, err := ReadResult(os.DirFS(e.stateDir), "/last"); !errors.Is(err, ErrNoResult) {
@@ -405,21 +427,28 @@ func TestHostScriptAsRoot(t *testing.T) {
 
 	// The five orders, each to its one fixed command (D-06). The check waits
 	// for its unit (no --no-block): the end of that systemctl is the end of
-	// the check, so a check that fails is recorded as failed for this order.
+	// the check, so the helper records the check's end for this order -- done
+	// when systemctl succeeded, failed below when it did not -- and "started"
+	// is never its last word (13-REVIEW-2 V-01). The four others stay
+	// "started": systemctl only queued a job, or restarted a service, and the
+	// page reads what came of them elsewhere.
 	for _, tc := range []struct {
 		action Action
 		id     string
 		argv   string
+		last   Outcome
 	}{
-		{Reboot, idReboot, "reboot"},
-		{Poweroff, idPoweroff, "poweroff"},
-		{RestartService, idRestart, "restart holzkube-manager.service"},
-		{Update, idUpdate, "start --no-block holzkube-manager-update.service"},
-		{CheckUpdate, idCheck, "start holzkube-manager-update-check.service"},
+		{Reboot, idReboot, "reboot", OutcomeStarted},
+		{Poweroff, idPoweroff, "poweroff", OutcomeStarted},
+		{RestartService, idRestart, "restart holzkube-manager.service", OutcomeStarted},
+		{Update, idUpdate, "start --no-block holzkube-manager-update.service", OutcomeStarted},
+		{CheckUpdate, idCheck, "start holzkube-manager-update-check.service", OutcomeDone},
 	} {
 		t.Run("valid "+string(tc.action), func(t *testing.T) {
 			t.Parallel()
 			e := newHostScriptEnv(t, false)
+			seen := filepath.Join(e.dir, "seen")
+			e.extraEnv = append(e.extraEnv, stubSeenVar+"="+seen)
 			e.writeOrder(string(tc.action) + " " + tc.id + "\n")
 			rc, _ := e.run(true)
 			if rc != 0 {
@@ -427,22 +456,41 @@ func TestHostScriptAsRoot(t *testing.T) {
 			}
 			e.wantCalled(tc.argv)
 			e.wantOrder(false)
-			e.wantResult(tc.id, tc.action, OutcomeStarted)
+			e.wantResult(tc.id, tc.action, tc.last)
+			// While systemctl ran -- for the check, the whole wait -- the
+			// helper's record was "started" for this order: the record the
+			// routes hold every other order back by.
+			e.wantSeen(seen, tc.id, tc.action, OutcomeStarted)
 		})
 	}
 
-	t.Run("systemctl fails", func(t *testing.T) {
-		t.Parallel()
-		e := newHostScriptEnv(t, true)
-		e.writeOrder("update " + idUpdate + "\n")
-		rc, _ := e.run(true)
-		if rc != 1 {
-			t.Errorf("exit = %d, want 1", rc)
-		}
-		e.wantCalled("start --no-block holzkube-manager-update.service")
-		e.wantOrder(false)
-		e.wantResult(idUpdate, Update, OutcomeFailed)
-	})
+	// 13-REVIEW-2 V-25: the systemctl that fails, for the update (which only
+	// queues) and for the check (which waits): both are recorded as failed for
+	// their own order, with exit 1, and the check never as done.
+	for _, tc := range []struct {
+		action Action
+		id     string
+		argv   string
+	}{
+		{Update, idUpdate, "start --no-block holzkube-manager-update.service"},
+		{CheckUpdate, idCheck, "start holzkube-manager-update-check.service"},
+	} {
+		t.Run("systemctl fails for "+string(tc.action), func(t *testing.T) {
+			t.Parallel()
+			e := newHostScriptEnv(t, true)
+			seen := filepath.Join(e.dir, "seen")
+			e.extraEnv = append(e.extraEnv, stubSeenVar+"="+seen)
+			e.writeOrder(string(tc.action) + " " + tc.id + "\n")
+			rc, _ := e.run(true)
+			if rc != 1 {
+				t.Errorf("exit = %d, want 1", rc)
+			}
+			e.wantCalled(tc.argv)
+			e.wantOrder(false)
+			e.wantResult(tc.id, tc.action, OutcomeFailed)
+			e.wantSeen(seen, tc.id, tc.action, OutcomeStarted)
+		})
+	}
 
 	t.Run("no order", func(t *testing.T) {
 		t.Parallel()

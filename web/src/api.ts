@@ -3030,12 +3030,14 @@ export type HostOrder = z.infer<typeof hostOrderSchema>
 
 /**
  * What the helper recorded about the last order it handled. `id` and `action`
- * are empty strings for an order it could not trust enough to repeat.
+ * are empty strings for an order it could not trust enough to repeat. `done`
+ * comes only for check-update: the helper waits for the check, and records its
+ * end -- done, or failed -- for the order (13-REVIEW-2 V-01).
  */
 export const hostResultSchema = z.object({
   id: z.string(),
   action: z.union([hostActionSchema, z.literal('')]),
-  outcome: z.enum(['started', 'rejected', 'failed']),
+  outcome: z.enum(['started', 'done', 'rejected', 'failed']),
   at: z.string(),
 })
 

@@ -1194,6 +1194,27 @@ describe('orderPhase: every phase from server fields', () => {
       false,
       'failed',
     ],
+    // 13-REVIEW-2 V-01: the helper records the end of a check it waited for.
+    [
+      'check done, as the helper records it',
+      order('check-update'),
+      later(
+        { order: order('check-update'), result: resultFor(ID, 'check-update', 'done') },
+        { observed: SOON },
+      ),
+      false,
+      'update-finished',
+    ],
+    [
+      'check done, then no answer: finished, never waiting',
+      order('check-update'),
+      later(
+        { order: order('check-update'), result: resultFor(ID, 'check-update', 'done') },
+        { observed: SOON },
+      ),
+      true,
+      'update-finished',
+    ],
     [
       "another order's result",
       order('reboot'),
@@ -1810,6 +1831,54 @@ describe('HostOrderStatus', () => {
       'update-finished',
       'Check for updates — finished. Updated to v0.2.0.',
       EMERALD,
+      true,
+    ],
+    // 13-REVIEW-2 V-01: a check the helper recorded done. Its answer is the
+    // update status the update script wrote just before -- also when the page
+    // knows the order only from that record, whose time is the check's end.
+    [
+      'check done, a newer release available',
+      order('check-update'),
+      later(
+        { result: resultFor(ID, 'check-update', 'done', '2026-09-28T10:00:08Z') },
+        { update: checked('available') },
+      ),
+      'update-finished',
+      'Check for updates — finished. v9.9.9 is available; v0.1.0 is installed. Nothing was installed: Check for updates and install, or the hourly update, installs it.',
+      EMERALD,
+      true,
+    ],
+    [
+      'check done, known only from the record, its answer a second before it',
+      { ...order('check-update'), placed_at: '2026-09-28T10:00:08Z' },
+      later(
+        { result: resultFor(ID, 'check-update', 'done', '2026-09-28T10:00:08Z') },
+        { update: checked('current') },
+      ),
+      'update-finished',
+      'Check for updates — finished. v0.1.0 is installed and is the newest release; there is nothing to install.',
+      EMERALD,
+      true,
+    ],
+    [
+      'check done, the update status not recorded',
+      order('check-update'),
+      later({ result: resultFor(ID, 'check-update', 'done', '2026-09-28T10:00:08Z') }),
+      'update-finished',
+      'Check for updates — finished, but what it found is not in the update status holzkube-manager reads. journalctl -u holzkube-manager-update-check says what it found.',
+      SLATE,
+      true,
+    ],
+    [
+      'check done, the update status from an earlier run',
+      order('check-update'),
+      later(
+        { result: resultFor(ID, 'check-update', 'done', '2026-09-28T10:00:08Z') },
+        { update: { ...checked('updated'), checked_at: '2026-09-28T09:00:00Z' } },
+      ),
+      'update-finished',
+      'Check for updates — finished, but what it found is not in the update status holzkube-manager reads. journalctl -u holzkube-manager-update-check says what it found.',
+      SLATE,
       true,
     ],
     [

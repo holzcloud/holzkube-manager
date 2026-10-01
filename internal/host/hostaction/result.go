@@ -36,12 +36,18 @@ var ErrNoResult = errors.New("the host helper has not recorded an order on this 
 // Outcome is what the helper did with an order.
 type Outcome string
 
-// The three outcomes the script records.
+// The four outcomes the script records.
 const (
 	// OutcomeStarted: the order was valid, and its systemctl command was
 	// about to run (the record is written before, because a reboot may end the
 	// script).
 	OutcomeStarted Outcome = "started"
+	// OutcomeDone: a check's unit ended successfully -- the check looked, and
+	// what it found is in the update status. Only check-update records it: the
+	// helper waits for the check unit, so for the check alone the end of its
+	// systemctl is the end of the order. Until the helper records it (or
+	// failed), the helper is busy with the check and picks up nothing else.
+	OutcomeDone Outcome = "done"
 	// OutcomeRejected: the order was refused -- not the one fixed shape, or
 	// too old. Nothing was done.
 	OutcomeRejected Outcome = "rejected"
@@ -50,7 +56,7 @@ const (
 	OutcomeFailed Outcome = "failed"
 )
 
-var resultOutcomes = []Outcome{OutcomeStarted, OutcomeRejected, OutcomeFailed}
+var resultOutcomes = []Outcome{OutcomeStarted, OutcomeDone, OutcomeRejected, OutcomeFailed}
 
 // Result is the helper's record of the last order it handled.
 type Result struct {
@@ -59,7 +65,7 @@ type Result struct {
 	ID string `json:"id"`
 	// Action is the order's action; empty exactly when ID is.
 	Action Action `json:"action"`
-	// Outcome is one of the three Outcome constants.
+	// Outcome is one of the four Outcome constants.
 	Outcome Outcome `json:"outcome"`
 	// At is when the helper recorded it, in UTC.
 	At time.Time `json:"at"`
@@ -172,6 +178,8 @@ func parseResult(raw []byte) (Result, error) {
 	switch {
 	case outcome == string(OutcomeStarted):
 		r.Outcome = OutcomeStarted
+	case outcome == string(OutcomeDone):
+		r.Outcome = OutcomeDone
 	case outcome == string(OutcomeRejected):
 		r.Outcome = OutcomeRejected
 	case outcome == string(OutcomeFailed):
@@ -187,13 +195,13 @@ func parseResult(raw []byte) (Result, error) {
 	// "-" stands for an id and an action the helper could not trust: an order
 	// that did not match the one fixed shape (rejected, R6), or one it could
 	// not consume and therefore never read as valid (failed). Never for an
-	// order it started -- a started order was valid, so it has both.
+	// order it started or finished -- such an order was valid, so it has both.
 	if id == "-" || action == "-" {
 		if id != action {
 			return Result{}, errors.New("the host helper's result file leaves out only one of id and action")
 		}
-		if r.Outcome == OutcomeStarted {
-			return Result{}, errors.New("the host helper's result file records a started order without an id")
+		if r.Outcome == OutcomeStarted || r.Outcome == OutcomeDone {
+			return Result{}, errors.New("the host helper's result file records a started or done order without an id")
 		}
 	} else {
 		if !idPattern.MatchString(id) {
@@ -201,6 +209,11 @@ func parseResult(raw []byte) (Result, error) {
 		}
 		if !Action(action).Known() {
 			return Result{}, errors.New("the action in the host helper's result file is not one of the five host actions")
+		}
+		// Only the check waits for its command, so only the check is ever
+		// done; a done reboot is not something the script writes.
+		if r.Outcome == OutcomeDone && Action(action) != CheckUpdate {
+			return Result{}, errors.New("the host helper's result file records done for an order other than check-update")
 		}
 		r.ID = id
 		r.Action = Action(action)
