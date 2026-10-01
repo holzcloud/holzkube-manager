@@ -333,7 +333,8 @@ client it was placed -- all five are off too: the helper waits for the check
 and picks up nothing else until it records the check done or failed, so
 holzkube-manager refuses every host action meanwhile. A check that never
 records an end holds them for at most 3 minutes, the helper's own limit, and
-not past a restart of the machine. An order that still waits when holzkube-manager stops is
+not past a restart of the machine: the page then says the restart ended the
+check, and offers the buttons again. An order that still waits when holzkube-manager stops is
 withdrawn as it stops, and one it finds when it starts is withdrawn too. The
 helper can run at boot before holzkube-manager does, though, and for an order
 that was left behind all the same -- a power cut in the seconds before the

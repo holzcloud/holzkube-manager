@@ -517,6 +517,7 @@ by `TestHostActionsWaitForARunningCheck`).
 | Status: finished, answer not readable (slate) | {Label} — finished, but what it found is not in the update status holzkube-manager reads. `journalctl -u holzkube-manager-update-check` says what it found. |
 | Status: check failed (red) | {Label} — the check failed, and nothing was installed. `journalctl -u holzkube-manager-update-check` says why. |
 | Status: no answer, check (red) | {Label} — started, but no update check was reported within {n} min. `journalctl -u holzkube-manager-update-check` says what happened. |
+| Status: check ended by a restart of the machine (red) | {Label} — started, but the host restarted before the check ended. Nothing was installed; `journalctl -u holzkube-manager-update-check` says how far it got. |
 | Status: not picked up, helper busy with a check (red) | {Label} — the helper did not pick up the order within 10 s, so holzkube-manager withdrew it. Nothing was done. The helper was busy with an update check, which holds every other order until it ends; place the order again once it has. |
 | Outdated notice heading | Check for updates needs a newer helper |
 | Outdated notice explanation | The holzkube-manager-host helper installed here is older than this holzkube-manager. It carries out the other four orders, and their buttons work. Installing the helper again from this release adds the update check, which only looks and installs nothing. |
@@ -535,6 +536,13 @@ Rules that go with the copy:
   status says failed, the box says "the check failed, and nothing was
   installed", red, with the check unit's journal -- never the helper's, whose
   only line is that the order failed.
+- **A check runs while the server says so** (13-REVIEW-2 round 3, W1): a
+  started check is "started", and turns all five off, exactly while the host
+  answer's `actions.busy` is true -- the server reads the helper's record
+  against its 3-minute limit and against the last boot. Once it is false the
+  check is over without an end: "started, but the host restarted before the
+  check ended" when the machine booted after the record, the no-answer
+  sentence otherwise. The page keeps no clock of its own for it.
 - **Whom the reason line describes** (13-REVIEW-2 V-27): the group
   (`aria-describedby` on the fieldset) when its reason turns all five off;
   the check button alone when only the check is off because the helper is too
