@@ -832,8 +832,13 @@ const CHECK_FAILED = <>the check failed, and nothing was installed. {CHECK_JOURN
 
 /** A started order the host never reported done: what did not happen. */
 const NOT_DONE: Record<HostAction, ReactNode> = {
+  // The limit said from the constant the API test holds to the helper's own
+  // (hostaction.HelperServiceLimit), not as a third copy of it (13-REVIEW-2 V-23).
   'check-update': (
-    <>started, but no update check was reported within 3 min. {CHECK_JOURNAL} says what happened.</>
+    <>
+      started, but no update check was reported within {CHECK_WITHIN_MS / 60_000} min.{' '}
+      {CHECK_JOURNAL} says what happened.
+    </>
   ),
   update: (
     <>
