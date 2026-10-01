@@ -130,6 +130,10 @@ function expectOffBecause(reason: string) {
     'aria-describedby',
     'host-actions-reason',
   )
+  // The group's reason is said once, by the group, not again by each button.
+  for (const b of buttons) {
+    expect(b).not.toHaveAttribute('aria-describedby')
+  }
 }
 
 afterEach(() => {
@@ -323,10 +327,23 @@ describe('HostActions: the five buttons and the one reason they are off', () => 
       false,
     ])
     expect(reasonLine()?.textContent).toBe(CHECK_NEEDS_NEWER)
-    expect(screen.getByRole('group', { name: 'Host actions' })).toHaveAttribute(
+    // 13-REVIEW-2 V-27: the line is the check's, so it describes the check
+    // button, not the group -- a screen reader in Restart host must not hear
+    // that it needs a newer helper -- and the four that are on carry nothing.
+    expect(screen.getByRole('group', { name: 'Host actions' })).not.toHaveAttribute(
       'aria-describedby',
-      'host-actions-reason',
     )
+    expect(buttons.map((b) => b.getAttribute('aria-describedby'))).toEqual([
+      'host-actions-reason',
+      null,
+      null,
+      null,
+      null,
+    ])
+    expect(buttons[0]).toHaveAccessibleDescription(CHECK_NEEDS_NEWER)
+    for (const b of buttons.slice(1)) {
+      expect(b).toHaveAccessibleDescription('')
+    }
   })
 
   it('with nothing outdated: all five on, and no line', () => {
