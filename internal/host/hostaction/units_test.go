@@ -40,8 +40,13 @@ import (
 //   - TestTheCheckUnitRunsOnlyTheCheck: the check unit carries exactly the
 //     lines listed for it, so it runs the update script's --check and nothing
 //     else, sandboxed, and its worst case ends below the helper's limit;
+//   - TestTheUpdateUnitRunsTheUpdate and TestTheUpdateTimerKeepsTheHour: the
+//     hourly update's service and timer carry exactly the lines listed for
+//     them, and TestTheUpdateTimingContract holds their limits to the
+//     script's own numbers, the check unit and the hour;
 //   - TestInstallCommandsMatchTheGuide: the guide's install block is
-//     InstallCommands, byte for byte;
+//     InstallCommands, byte for byte, and the update script's and the
+//     hourly update's blocks are theirs, in both guides;
 //   - TestGuideKeepsTheDaemonsHardening: the guide names the daemon's
 //     hardening as unchanged and asks for none of it to go;
 //   - TestTheArchiveCarriesTheHelper: the release archive has all of it;
@@ -65,10 +70,13 @@ var (
 	shippedUpdateTimer = filepath.Join(deployDir, "holzkube-manager-update.timer")
 	shippedScript      = filepath.Join(deployDir, "holzkube-manager-host.sh")
 	shippedGuide       = filepath.Join(deployDir, "HOST-HELPER.md")
-	shippedUpdater     = filepath.Join(deployDir, "holzkube-manager-update.sh")
-	goreleaserConfig   = filepath.Join("..", "..", "..", ".goreleaser.yaml")
-	noSystemdAnalyze   = "HOLZKUBE_MANAGER_NO_SYSTEMD_ANALYZE"
-	systemdAnalyzeMax  = 2 * time.Minute
+	// userGuide is docs/guide.md, which carries the update script's and the
+	// hourly update's install commands too.
+	userGuide         = filepath.Join("..", "..", "..", "docs", "guide.md")
+	shippedUpdater    = filepath.Join(deployDir, "holzkube-manager-update.sh")
+	goreleaserConfig  = filepath.Join("..", "..", "..", ".goreleaser.yaml")
+	noSystemdAnalyze  = "HOLZKUBE_MANAGER_NO_SYSTEMD_ANALYZE"
+	systemdAnalyzeMax = 2 * time.Minute
 )
 
 // unitAssignment is one Key=Value line of a unit file.
@@ -859,6 +867,349 @@ func TestTheCheckUnitRunsOnlyTheCheck(t *testing.T) {
 	}
 }
 
+// unitSpan reads the one key= line of section in u as a systemd time span. It
+// refuses TimeoutSec=, which sets both limits behind the reader's back; the
+// allow-lists rule it out, and this keeps the sums honest should one not.
+func unitSpan(t *testing.T, u unitFile, section, key string) time.Duration {
+	t.Helper()
+	var v []string
+	for _, a := range u.assignments {
+		switch {
+		case a.section != section:
+		case a.key == "TimeoutSec":
+			t.Fatalf("%s:%d: TimeoutSec=%s sets both limits; this test reads TimeoutStartSec= and TimeoutStopSec= only",
+				u.name, a.line, a.value)
+		case a.key == key:
+			v = append(v, a.value)
+		}
+	}
+	if len(v) != 1 {
+		t.Fatalf("%s: %d %s= lines in [%s], want exactly one", u.name, len(v), key, section)
+	}
+	return systemdSpan(t, v[0])
+}
+
+// helperArm is what the helper script's one case arm for a runs with
+// systemctl: the words inside its cmd=( ... ).
+func helperArm(t *testing.T, a Action) string {
+	t.Helper()
+	script, err := os.ReadFile(shippedScript)
+	if err != nil {
+		t.Fatalf("read the helper script: %v", err)
+	}
+	arm := regexp.MustCompile(`(?m)^\s*` + regexp.QuoteMeta(string(a)) + `\)\s*cmd=\(([^)]*)\)\s*;;\s*$`)
+	m := arm.FindAllStringSubmatch(string(script), -1)
+	if len(m) != 1 {
+		t.Fatalf("the helper script has %d case arms for %s, want exactly 1", len(m), a)
+	}
+	return m[0][1]
+}
+
+// exactlyFamilies accepts a RestrictAddressFamilies= value naming exactly
+// want, in any order.
+func exactlyFamilies(want ...string) func(string) string {
+	want = slices.Clone(want)
+	slices.Sort(want)
+	return func(v string) string {
+		got := strings.Fields(v)
+		slices.Sort(got)
+		if !slices.Equal(got, want) {
+			return "want exactly " + strings.Join(want, " ") + ": the network the update needs and nothing more"
+		}
+		return ""
+	}
+}
+
+// TestTheUpdateUnitRunsTheUpdate: the hourly update's service runs as root
+// and replaces root's binary, so it is held to an allow-list (wantExactly),
+// line for line, like the check unit. Its one command is UpdateScriptPath
+// with no argument -- never --force, never --check, and no ExecStartPre=,
+// ExecStartPost=, ExecStop= or other Exec line running anything else as
+// root. Its [Unit] section adds only the order after, and the want of,
+// network-online.target, as the operator's working unit has them: no
+// OnSuccess=, OnFailure=, Requires=, BindsTo=. It puts nothing over the
+// script or update.conf (no BindPaths=, RootDirectory=), takes no environment
+// (no Environment=, EnvironmentFile=, PassEnvironment=: the script's
+// overrides are for tests), and writes nowhere but its status directory and
+// exactly the three directories the script's BIN, PREVIOUS and own path
+// defaults name -- install(1) unlinks and recreates, so directories, not
+// files, and the previous binary's with "-" because the install commands
+// create it. No User=, Group=, DynamicUser= (root's binary, PID 1's restart,
+// root's 0700 /etc/holzkube-manager), no [Install] (the timer and the helper
+// start it), no RemainAfterExit= (the next hour's start would do nothing), no
+// Restart= (a failed run waits for the next hour).
+//
+// Four sandbox lines the check unit has are not on the list, and a test that
+// let them in would be a guess: CapabilityBoundingSet= (systemctl restart and
+// is-active go to PID 1, journalctl reads the journal, and systemctl may look
+// at /proc/1, which takes ptrace access), SystemCallFilter= (systemctl,
+// journalctl, install, cp, tar and sha256sum were never traced),
+// ProtectProc= and ProcSubset= (the /proc/1 question again). The measurement
+// that would let each in is one real install and restart through this unit,
+// as root, on the operator's host -- the operator's call.
+//
+// Faults injected and seen red (13-16): ExecStart= with --force; an
+// ExecStartPost=; CapabilityBoundingSet=; /usr/local/sbin dropped from
+// ReadWritePaths=, and /etc added; AF_PACKET added.
+func TestTheUpdateUnitRunsTheUpdate(t *testing.T) {
+	t.Parallel()
+
+	unit := readUnitFile(t, shippedUpdateUnit)
+	if unit.name != filepath.Base(UpdateUnitPath) {
+		t.Errorf("the shipped update unit is %s, the helper starts and the guide installs %s", unit.name, UpdateUnitPath)
+	}
+
+	data, err := os.ReadFile(shippedUpdater)
+	if err != nil {
+		t.Fatalf("read the update script: %v", err)
+	}
+	script := string(data)
+	bin := scriptDefault(t, script, "BIN", "HOLZKUBE_MANAGER_BIN")
+	previous := scriptDefault(t, script, "PREVIOUS", "HOLZKUBE_MANAGER_PREVIOUS")
+	statusDir := scriptDefault(t, script, "STATUS_DIR", "HOLZKUBE_MANAGER_UPDATE_STATUS_DIR")
+	if statusDir != filepath.Dir(updatestatus.DefaultPath) {
+		t.Errorf("the update script's STATUS_DIR defaults to %s, the daemon reads %s", statusDir, updatestatus.DefaultPath)
+	}
+	if filepath.Dir(statusDir) != "/var/lib" {
+		t.Errorf("the update script's STATUS_DIR %s is not under /var/lib, where StateDirectory= puts it", statusDir)
+	}
+
+	writable := []string{filepath.Dir(bin), filepath.Dir(UpdateScriptPath), "-" + filepath.Dir(previous)}
+	slices.Sort(writable)
+	positiveSpan := func(v string) string {
+		if systemdSpan(t, v) <= 0 {
+			return "want a limit above 0; 0 means none"
+		}
+		return ""
+	}
+	wantExactly(t, unit, []string{"Unit", "Service"}, append(append(unitHeader(),
+		unitLine{section: "Unit", key: "After", want: "network-online.target"},
+		unitLine{section: "Unit", key: "Wants", want: "network-online.target"},
+		unitLine{section: "Service", key: "Type", want: "oneshot"},
+		unitLine{section: "Service", key: "ExecStart", want: UpdateScriptPath},
+		unitLine{section: "Service", key: "TimeoutStartSec", check: positiveSpan},
+		unitLine{section: "Service", key: "TimeoutStopSec", check: positiveSpan},
+		unitLine{section: "Service", key: "StateDirectory", want: filepath.Base(statusDir)},
+		unitLine{section: "Service", key: "ReadWritePaths", check: func(v string) string {
+			got := strings.Fields(v)
+			slices.Sort(got)
+			if !slices.Equal(got, writable) {
+				return "want exactly " + strings.Join(writable, " ") +
+					": the directories of the script's BIN, own path and PREVIOUS defaults, and nothing else"
+			}
+			return ""
+		}},
+		// GitHub and the health check on 127.0.0.1 (AF_INET, AF_INET6),
+		// systemctl, journalctl and the resolver (AF_UNIX), getaddrinfo
+		// (AF_NETLINK).
+		unitLine{section: "Service", key: "RestrictAddressFamilies", check: exactlyFamilies("AF_UNIX", "AF_INET", "AF_INET6", "AF_NETLINK")},
+		unitLine{section: "Service", key: "PrivateIPC", want: "true"},
+	), hardening()...))
+}
+
+// TestTheUpdateTimerKeepsTheHour: the timer's schedule is the one the
+// operator's hand-made timer runs with (decision 2026-10-01) -- five minutes
+// after boot, then an hour after the service's last start, whoever started
+// it, with up to five minutes of random delay -- and it starts exactly the
+// service the helper's update order starts. Persistent= is not on the list:
+// it acts only with OnCalendar=, so on this timer it would do nothing, and a
+// line that does nothing reads like one that does. Unit= is not either: the
+// timer starts the service of its own name, and a Unit= line could point it
+// elsewhere -- at the check unit, say -- while the name still read right.
+//
+// Faults injected and seen red (13-16): Persistent=true;
+// Unit=holzkube-manager-update-check.service.
+func TestTheUpdateTimerKeepsTheHour(t *testing.T) {
+	t.Parallel()
+
+	timer := readUnitFile(t, shippedUpdateTimer)
+	if timer.name != filepath.Base(UpdateTimerPath) {
+		t.Errorf("the shipped timer is %s, the guide installs %s", timer.name, UpdateTimerPath)
+	}
+	wantExactly(t, timer, []string{"Unit", "Timer", "Install"}, append(unitHeader(),
+		unitLine{section: "Timer", key: "OnBootSec", want: "5min"},
+		unitLine{section: "Timer", key: "OnUnitActiveSec", want: "1h"},
+		unitLine{section: "Timer", key: "RandomizedDelaySec", want: "5min"},
+		unitLine{section: "Install", key: "WantedBy", want: "timers.target"},
+	))
+
+	// One name for the three: the timer's, the service's and the helper's.
+	timerName := strings.TrimSuffix(filepath.Base(UpdateTimerPath), ".timer")
+	serviceName := strings.TrimSuffix(filepath.Base(UpdateUnitPath), ".service")
+	if timerName != serviceName {
+		t.Errorf("the timer %s does not start %s by its name", UpdateTimerPath, UpdateUnitPath)
+	}
+	if words := strings.Fields(helperArm(t, Update)); len(words) == 0 || words[len(words)-1] != serviceName+".service" {
+		t.Errorf("the helper's %s arm starts %q, the timer starts %s.service", Update, words, serviceName)
+	}
+
+	if delay, every := unitSpan(t, timer, "Timer", "RandomizedDelaySec"), unitSpan(t, timer, "Timer", "OnUnitActiveSec"); delay >= every {
+		t.Errorf("RandomizedDelaySec %v is not below OnUnitActiveSec %v: the delay would swallow the hour", delay, every)
+	}
+}
+
+// The numbers the update's worst case is built from that the script does not
+// carry, each with its source.
+const (
+	// referenceDaemonStop and referenceDaemonStart are systemd's
+	// DefaultTimeoutStopSec and DefaultTimeoutStartSec: the reference
+	// daemon unit sets neither, read on 2026-10-01 with
+	// `systemctl show holzkube-manager.service -p TimeoutStopUSec -p TimeoutStartUSec`
+	// on the reference installation: 1min 30s each.
+	referenceDaemonStop  = 90 * time.Second
+	referenceDaemonStart = 90 * time.Second
+	// daemonRestartWorstCase is the longest one `systemctl restart` of the
+	// daemon can block: the walk checkUnitWorstCase describes, for a
+	// service without ExecStop=, before the start.
+	daemonRestartWorstCase = 4*referenceDaemonStop + referenceDaemonStart
+	// updateLocalWork is the script's own work between the network calls:
+	// tar, sha256sum, install, cp, journalctl, python3. A few seconds on the
+	// Pi; a minute leaves room for a slow SD card.
+	updateLocalWork = 60 * time.Second
+	// updateUnitMargin is how far above the computed worst case the update
+	// unit's TimeoutStartSec must stay: the limit is a backstop, never what
+	// ends a real update.
+	updateUnitMargin = 5 * time.Minute
+	// checkRunSlack is what the check's run takes besides its lock wait and
+	// its one request: bash, python3, flock and --version, a few seconds.
+	checkRunSlack = 15 * time.Second
+)
+
+// scriptNumber reads the one number the first group of re captures in text,
+// which must match exactly once.
+func scriptNumber(t *testing.T, text, what string, re *regexp.Regexp) int {
+	t.Helper()
+	m := re.FindAllStringSubmatch(text, -1)
+	if len(m) != 1 {
+		t.Fatalf("the update script has %d matches for %s (%s), want exactly 1; the timing model needs redoing", len(m), what, re)
+	}
+	n, err := strconv.Atoi(m[0][1])
+	if err != nil {
+		t.Fatalf("the update script's %s %q is not a number: %v", what, m[0][1], err)
+	}
+	return n
+}
+
+// scriptSeconds is scriptNumber read as seconds.
+func scriptSeconds(t *testing.T, text, what string, re *regexp.Regexp) time.Duration {
+	t.Helper()
+	return time.Duration(scriptNumber(t, text, what, re)) * time.Second
+}
+
+// scriptFunctionBody is the body of the update script's one shell function
+// name() { ... }, up to the first line that is a lone }.
+func scriptFunctionBody(t *testing.T, script, name string) string {
+	t.Helper()
+	m := regexp.MustCompile(`(?ms)^`+regexp.QuoteMeta(name)+`\(\) \{\n(.*?)^\}$`).FindAllStringSubmatch(script, -1)
+	if len(m) != 1 {
+		t.Fatalf("the update script defines %s() %d times, want exactly 1", name, len(m))
+	}
+	return m[0][1]
+}
+
+// TestTheUpdateTimingContract: the hourly update, the check and the hour fit
+// into one another, from the script's own numbers.
+//
+//   - The update unit's TimeoutStartSec is above the longest run the script
+//     allows itself plus updateUnitMargin: lock wait, the release list, two
+//     downloads, two restarts of the daemon (install, then roll back), the
+//     health loop and local work. A limit that ended a real update between
+//     install and restart would leave the new binary under the old process,
+//     and the next hour would take it for current.
+//   - The update unit's own worst case, TimeoutStartSec + 4 x TimeoutStopSec,
+//     ends before the hour the timer waits, so two hourly runs never meet.
+//   - The update waits longer for the lock than the check unit can hold it
+//     (checkUnitWorstCase plus checkUnitMargin), and the check's wait plus
+//     its one request fits into the check unit's own TimeoutStartSec.
+//   - The helper's update arm queues the start without waiting for it:
+//     exactly start --no-block and the update unit's name.
+//
+// The shape is held too: exactly two download call sites, one api call
+// site, three `systemctl restart "$SERVICE"` lines (--rollback's, the
+// install's, the roll back's; one run reaches at most two) and one seq health
+// loop. A change to any of them fails here until the model above is redone.
+//
+// Faults injected and seen red (13-16): TimeoutStartSec=20min;
+// TimeoutStopSec=5min (start + 4 x stop past the hour); --no-block dropped
+// from the helper's update arm; download()'s --max-time 300 raised to 1800;
+// the check's lock wait default 60 raised to 120.
+func TestTheUpdateTimingContract(t *testing.T) {
+	t.Parallel()
+
+	data, err := os.ReadFile(shippedUpdater)
+	if err != nil {
+		t.Fatalf("read the update script: %v", err)
+	}
+	script := string(data)
+
+	// The shape the model assumes.
+	for _, c := range []struct {
+		what string
+		re   *regexp.Regexp
+		want int
+	}{
+		{"download call sites", regexp.MustCompile(`(?m)(^|[^\w-])download -o `), 2},
+		{"api call sites", regexp.MustCompile(`(?m)(^|[^\w-])api "`), 1},
+		{`systemctl restart "$SERVICE" lines`, regexp.MustCompile(`(?m)^\s*systemctl restart "\$SERVICE"$`), 3},
+		{"seq health loops", regexp.MustCompile(`(?m)^\s*for _ in \$\(seq `), 1},
+	} {
+		if n := len(c.re.FindAllString(script, -1)); n != c.want {
+			t.Errorf("the update script has %d %s, the timing model counts %d; redo the model", n, c.what, c.want)
+		}
+	}
+
+	updateLock := scriptSeconds(t, script, "the update's lock wait", regexp.MustCompile(`(?m)^\s*LOCK_WAIT=([0-9]+)$`))
+	checkLock := scriptSeconds(t, script, "the check's lock wait", regexp.MustCompile(`(?m)^\s*\[\[ \$CHECK_ONLY -eq 1 \]\] && LOCK_WAIT=([0-9]+)$`))
+	apiMax := scriptSeconds(t, scriptFunctionBody(t, script, "api"), "api()'s --max-time", regexp.MustCompile(`--max-time ([0-9]+)\b`))
+	downloadMax := scriptSeconds(t, scriptFunctionBody(t, script, "download"), "download()'s --max-time", regexp.MustCompile(`--max-time ([0-9]+)\b`))
+	tries := scriptNumber(t, script, "the health loop's tries", regexp.MustCompile(`(?m)^\s*for _ in \$\(seq 1 ([0-9]+)\); do$`))
+	healthMax := scriptSeconds(t, script, "the health check's --max-time", regexp.MustCompile(`curl -sk --max-time ([0-9]+) "\$HEALTH_URL"`))
+	pause := scriptSeconds(t, script, "the health loop's sleep", regexp.MustCompile(`(?m)^\s*sleep ([0-9]+)$`))
+
+	worst := updateLock + apiMax + 2*downloadMax + 2*daemonRestartWorstCase +
+		time.Duration(tries)*(healthMax+pause) + updateLocalWork
+
+	unit := readUnitFile(t, shippedUpdateUnit)
+	start, stop := unitSpan(t, unit, "Service", "TimeoutStartSec"), unitSpan(t, unit, "Service", "TimeoutStopSec")
+	t.Logf("update worst case %v (lock %v + list %v + 2 x download %v + 2 x restart %v + %d x (%v + %v) + local %v); "+
+		"TimeoutStartSec %v leaves %v above it, margin wanted %v",
+		worst, updateLock, apiMax, downloadMax, daemonRestartWorstCase, tries, healthMax, pause, updateLocalWork,
+		start, start-worst, updateUnitMargin)
+	if worst+updateUnitMargin > start {
+		t.Errorf("%s: TimeoutStartSec %v, want at least %v: the script's worst case %v plus %v; "+
+			"a limit below that could end a real update between install and restart",
+			unit.name, start, worst+updateUnitMargin, worst, updateUnitMargin)
+	}
+
+	timer := readUnitFile(t, shippedUpdateTimer)
+	hour := unitSpan(t, timer, "Timer", "OnUnitActiveSec")
+	unitWorst := checkUnitWorstCase(start, stop)
+	t.Logf("update unit worst case %v (TimeoutStartSec %v + 4 x TimeoutStopSec %v), the timer waits %v", unitWorst, start, stop, hour)
+	if unitWorst >= hour {
+		t.Errorf("%s: TimeoutStartSec %v + 4 x TimeoutStopSec %v = %v, not below the timer's OnUnitActiveSec %v",
+			unit.name, start, stop, unitWorst, hour)
+	}
+
+	check := readUnitFile(t, shippedCheckUnit)
+	checkStart, checkStop := unitSpan(t, check, "Service", "TimeoutStartSec"), unitSpan(t, check, "Service", "TimeoutStopSec")
+	checkWorst := checkUnitWorstCase(checkStart, checkStop)
+	t.Logf("check unit worst case %v; the update waits %v for the lock; the check waits %v + list %v + slack %v within %v",
+		checkWorst, updateLock, checkLock, apiMax, checkRunSlack, checkStart)
+	if updateLock < checkWorst+checkUnitMargin {
+		t.Errorf("the update waits %v for the lock, the check unit can hold it %v (+ %v margin): an hourly run would give up beside a check",
+			updateLock, checkWorst, checkUnitMargin)
+	}
+	if checkLock+apiMax+checkRunSlack > checkStart {
+		t.Errorf("the check waits %v for the lock and %v for the release list (+ %v), more than the check unit's TimeoutStartSec %v",
+			checkLock, apiMax, checkRunSlack, checkStart)
+	}
+
+	if got, want := helperArm(t, Update), "start --no-block "+filepath.Base(UpdateUnitPath); got != want {
+		t.Errorf("the helper's %s arm runs systemctl %s, want exactly systemctl %s: the helper must not wait out an update",
+			Update, got, want)
+	}
+}
+
 // guideBlock returns the lines between the guide's install markers, fence
 // lines excluded.
 func guideBlock(t *testing.T, guide string) string {
@@ -932,20 +1283,24 @@ func TestInstallCommandsMatchTheGuide(t *testing.T) {
 
 // TestUpdateScriptInstallCommandsMatchTheGuide (13-REVIEW-2 IN-04): the page
 // shows UpdateScriptInstallCommands while the update script is missing, and the
-// guide carries the same line between its update-script-command markers, byte
-// for byte. The line installs a shipped file to exactly the path
+// guides -- deploy/HOST-HELPER.md and docs/guide.md -- carry the same line
+// between their update-script-command markers, byte for byte. The line installs a shipped file to exactly the path
 // UpdateScriptMissing looks at, as root's and 0755 -- what the check asks for,
 // and what the update script does when it replaces itself.
 func TestUpdateScriptInstallCommandsMatchTheGuide(t *testing.T) {
 	t.Parallel()
 
-	data, err := os.ReadFile(shippedGuide)
-	if err != nil {
-		t.Fatalf("read the guide: %v", err)
-	}
-	got := guideBlockNamed(t, string(data), "update-script-command")
-	if want := strings.Join(UpdateScriptInstallCommands, "\n"); got != want {
-		t.Errorf("the guide's update-script block differs from UpdateScriptInstallCommands (the page's block).\nguide:\n%q\nUpdateScriptInstallCommands:\n%q", got, want)
+	// Both guides carry the block: deploy/HOST-HELPER.md beside the helper,
+	// docs/guide.md where the hourly update is set up.
+	for _, guide := range []string{shippedGuide, userGuide} {
+		data, err := os.ReadFile(guide)
+		if err != nil {
+			t.Fatalf("read %s: %v", guide, err)
+		}
+		got := guideBlockNamed(t, string(data), "update-script-command")
+		if want := strings.Join(UpdateScriptInstallCommands, "\n"); got != want {
+			t.Errorf("%s's update-script block differs from UpdateScriptInstallCommands (the page's block).\nguide:\n%q\nUpdateScriptInstallCommands:\n%q", guide, got, want)
+		}
 	}
 
 	want := []string{"sudo install -o root -g root -m 0755 deploy/holzkube-manager-update.sh " + UpdateScriptPath}
@@ -973,8 +1328,8 @@ func scriptDefault(t *testing.T, script, variable, override string) string {
 
 // TestUpdateUnitInstallCommandsMatchTheGuide (operator decision 2026-10-01):
 // the hourly update's two units are installed by UpdateUnitInstallCommands,
-// and the guide carries the same four lines between its update-unit-commands
-// markers, byte for byte. The lines are held to what they have to do, too:
+// and both guides -- deploy/HOST-HELPER.md and docs/guide.md -- carry the same
+// four lines between their update-unit-commands markers, byte for byte. The lines are held to what they have to do, too:
 // create the directory of the update script's PREVIOUS default (the unit makes
 // it writable, but ProtectSystem=strict cannot create it), install exactly the
 // two shipped units into the directory UpdateUnitPath and UpdateTimerPath name,
@@ -983,13 +1338,15 @@ func scriptDefault(t *testing.T, script, variable, override string) string {
 func TestUpdateUnitInstallCommandsMatchTheGuide(t *testing.T) {
 	t.Parallel()
 
-	data, err := os.ReadFile(shippedGuide)
-	if err != nil {
-		t.Fatalf("read the guide: %v", err)
-	}
-	got := guideBlockNamed(t, string(data), "update-unit-commands")
-	if want := strings.Join(UpdateUnitInstallCommands, "\n"); got != want {
-		t.Errorf("%s's update-unit block differs from UpdateUnitInstallCommands.\nguide:\n%q\nUpdateUnitInstallCommands:\n%q", shippedGuide, got, want)
+	for _, guide := range []string{shippedGuide, userGuide} {
+		data, err := os.ReadFile(guide)
+		if err != nil {
+			t.Fatalf("read %s: %v", guide, err)
+		}
+		got := guideBlockNamed(t, string(data), "update-unit-commands")
+		if want := strings.Join(UpdateUnitInstallCommands, "\n"); got != want {
+			t.Errorf("%s's update-unit block differs from UpdateUnitInstallCommands.\nguide:\n%q\nUpdateUnitInstallCommands:\n%q", guide, got, want)
+		}
 	}
 
 	want := []string{

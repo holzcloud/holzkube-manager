@@ -51,6 +51,12 @@ did.
   shut down the machine, check for an update without installing anything, or
   check and install it — carried out by a small root-owned helper the operator
   installs from `deploy/`, while the service itself never gets root
+- **Updates itself** — every hour a timer looks for a newer release, installs
+  it, checks that the service answers and goes back to the previous version if
+  it does not; the update script and its two systemd units ship, sandboxed, in
+  `deploy/` of every release archive (`holzkube-manager-update.service` and
+  `holzkube-manager-update.timer`), and the Host page shows what the last run
+  found
 - **Apps** — everything that runs, grouped by what was installed, with its CPU
   and memory now and over the day
 - **Kubernetes** — workloads, pods and why one is broken, events, storage,
@@ -127,6 +133,10 @@ tar xzf holzkube-manager_*_linux_arm64.tar.gz
 Open `https://<host>:8443` and create the first account in the browser. The
 certificate is self-signed; compare the fingerprint your browser shows with the
 `sha256_fingerprint` line in the log before accepting it.
+
+To keep it up to date, install the update script and its hourly timer from the
+same archive, as the guide's
+[Updating itself every hour](docs/guide.md#updating-itself-every-hour) shows.
 
 Prefer a container? `docker compose up -d --build` in a checkout builds the
 image from the [`compose.yaml`](compose.yaml) in this repository. To build from source you

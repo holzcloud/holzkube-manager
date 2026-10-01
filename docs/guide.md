@@ -82,6 +82,61 @@ certificate authority: it cannot sign anything else.
 There is no private CA and nothing is installed into your system trust store.
 To use your own certificate instead, pass `--tls-cert` and `--tls-key`.
 
+### Updating itself every hour
+
+On a machine where holzkube-manager runs as a systemd service, it can keep
+itself up to date. Every release archive carries what that takes in `deploy/`:
+the update script and its two systemd units.
+
+A run of the update looks for the newest release that is not a draft,
+downloads it, checks its checksum and runs the new binary's `--version` before
+the service is touched. Then it installs the binary, restarts the service and
+checks that it answers on `127.0.0.1:8443` within about 20 seconds; if it does
+not, it goes back to the previous binary. What happened is recorded in
+`/var/lib/holzkube-manager-update/status.json`, and the Host page's **Update
+check** row shows it.
+
+It runs 5 minutes after boot, then an hour after the last run, whoever started
+it -- so pressing **Check for updates and install** on the Host page moves the
+next hourly run an hour on -- each time with up to 5 minutes of random delay.
+
+From the root of the unpacked release archive, install the script:
+
+<!-- update-script-command:begin -->
+```sh
+sudo install -o root -g root -m 0755 deploy/holzkube-manager-update.sh /usr/local/sbin/holzkube-manager-update
+```
+<!-- update-script-command:end -->
+
+and then the service that runs it and the timer that starts it every hour:
+
+<!-- update-unit-commands:begin -->
+```sh
+sudo install -d -o root -g root -m 0755 /usr/local/lib/holzkube-manager
+sudo install -o root -g root -m 0644 deploy/holzkube-manager-update.service deploy/holzkube-manager-update.timer /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now holzkube-manager-update.timer
+```
+<!-- update-unit-commands:end -->
+
+The service runs as root, in a sandbox that lets it write only where the
+binary, the script, the previous binary and the status file live. The second
+block replaces units of the same name written by hand; to see what is there
+first, run `systemctl cat holzkube-manager-update.service
+holzkube-manager-update.timer`. The update script replaces the binary and
+itself, never a unit, so a newer unit from a newer archive comes only by
+repeating that block.
+
+To see it work:
+
+```sh
+systemctl list-timers holzkube-manager-update.timer
+journalctl -u holzkube-manager-update
+```
+
+`deploy/HOST-HELPER.md`, "The hourly update", says more, including how to
+remove it.
+
 ## Configuration
 
 Flags and `HOLZKUBE_MANAGER_*` environment variables only. There is deliberately no
@@ -303,10 +358,9 @@ and the helper's install commands do not install it. Where it is missing -- or
 is not owned by root, or others may change it -- **Check for updates** and
 **Check for updates and install** stay off with one line saying so, the other
 three buttons stay on, and a note under the header names the file and the one
-command that installs it from the release archive:
-`sudo install -o root -g root -m 0755 deploy/holzkube-manager-update.sh /usr/local/sbin/holzkube-manager-update`
-(`deploy/HOST-HELPER.md`, "The update script"). Both come on with the
-next reading of the page. **Check for updates and install** also needs
+command that installs it from the release archive -- the one in
+[Updating itself every hour](#updating-itself-every-hour). Both come on with
+the next reading of the page. **Check for updates and install** also needs
 `holzkube-manager-update.service`, the unit your hourly update timer starts;
 the page does not look for that one, and without it that order fails.
 
