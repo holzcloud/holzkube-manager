@@ -3547,6 +3547,11 @@ whose only account was a service account bound the provider's identity to it.
 The list reports such a binding (`linked_identity`, `linked_provider`), and this
 route removes it.
 
+Two changes to the same account at the same moment — an unlink and a role
+change, say — cannot both be half-applied: the store's revision check refuses the
+later write, and every account route answers that with **409 `store.conflict`**
+and changes nothing. Reload and try again.
+
 Two refusals are the same rule seen from different sides, and they are separate
 codes because the remedy differs:
 

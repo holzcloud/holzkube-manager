@@ -7,6 +7,7 @@ import (
 	"fmt"
 
 	"github.com/holzcloud/holzkube-manager/internal/model"
+	"github.com/holzcloud/holzkube-manager/internal/store"
 )
 
 // ErrNoIdentityBinding is returned when no account is linked to the given
@@ -78,27 +79,44 @@ func (s *Service) BindIdentity(ctx context.Context, account model.User, issuer, 
 	if issuer == "" || subject == "" {
 		return model.User{}, errors.New("auth: refusing to bind an empty identity")
 	}
-	u, err := s.store.Users().Get(ctx, account.ID)
-	if err != nil {
-		return model.User{}, fmt.Errorf("auth: read the account to bind: %w", err)
-	}
-	if u.IsService() {
-		return model.User{}, ErrNotAPerson
-	}
-	if u.HasIdentityBinding() {
-		if constantTimeEqual(u.Issuer, issuer) && constantTimeEqual(u.Subject, subject) {
-			return u, nil
-		}
-		return model.User{}, ErrAlreadyBound
-	}
 
-	u.Issuer = issuer
-	u.Subject = subject
-	bound, err := s.store.Users().Put(ctx, u)
-	if err != nil {
-		return model.User{}, fmt.Errorf("auth: store identity binding: %w", err)
+	// Two attempts. A revision conflict means the record changed between the
+	// read and the write -- most often a second first-use bind finishing
+	// first. Reading again answers it the way that bind would have been
+	// answered had it come second: the same identity is a success, another one
+	// is ErrAlreadyBound, and an unrelated change (a role) is written around.
+	// A record that changes under it twice is store.ErrConflict, which the
+	// caller names rather than reporting as a fault.
+	for attempt := 0; ; attempt++ {
+		u, err := s.store.Users().Get(ctx, account.ID)
+		if err != nil {
+			return model.User{}, fmt.Errorf("auth: read the account to bind: %w", err)
+		}
+		if u.IsService() {
+			return model.User{}, ErrNotAPerson
+		}
+		if u.HasIdentityBinding() {
+			if constantTimeEqual(u.Issuer, issuer) && constantTimeEqual(u.Subject, subject) {
+				u.PasswordHash = ""
+				return u, nil
+			}
+			return model.User{}, ErrAlreadyBound
+		}
+
+		u.Issuer = issuer
+		u.Subject = subject
+		bound, err := s.store.Users().Put(ctx, u)
+		if errors.Is(err, store.ErrConflict) && attempt == 0 {
+			continue
+		}
+		if err != nil {
+			return model.User{}, fmt.Errorf("auth: store identity binding: %w", err)
+		}
+		// Stripped like every other account this package hands out: the
+		// stored record was needed to keep the hash, not to return it.
+		bound.PasswordHash = ""
+		return bound, nil
 	}
-	return bound, nil
 }
 
 // UnlinkIdentity removes an account's link to a provider identity.

@@ -9,11 +9,13 @@ package handlers
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -21,6 +23,7 @@ import (
 	"github.com/holzcloud/holzkube-manager/internal/auth/oidc"
 	"github.com/holzcloud/holzkube-manager/internal/httpapi"
 	"github.com/holzcloud/holzkube-manager/internal/model"
+	"github.com/holzcloud/holzkube-manager/internal/store"
 	"github.com/holzcloud/holzkube-manager/internal/store/fsstore"
 )
 
@@ -241,5 +244,67 @@ func TestCallbackNeverSignsInAsAServiceAccount(t *testing.T) {
 	}
 	if who := signedInAs(t, d, cookies); who != "" {
 		t.Fatalf("the callback signed in as %q through a service account's binding", who)
+	}
+}
+
+// conflictingStore makes every user write lose a revision race: before each
+// one, a concurrent writer changes the account's role, so the write that
+// follows carries a stale revision and the store answers ErrConflict.
+type conflictingStore struct{ *fsstore.Store }
+
+func (c conflictingStore) Users() store.UserStore { return conflictingUsers{c.Store.Users()} }
+
+type conflictingUsers struct{ store.UserStore }
+
+func (c conflictingUsers) Put(ctx context.Context, rec model.User) (model.User, error) {
+	current, err := c.UserStore.Get(ctx, rec.ID)
+	if err == nil {
+		current.Role = model.RoleOperator
+		if _, err := c.UserStore.Put(ctx, current); err != nil {
+			return model.User{}, err
+		}
+	}
+	return c.UserStore.Put(ctx, rec)
+}
+
+// A first-use bind whose account keeps changing under it ends on the sign-in
+// page with a code the page explains -- not as a problem document in the
+// address bar, which is what a 500 on this navigation renders as.
+func TestABindThatKeepsLosingARaceSaysSo(t *testing.T) {
+	t.Parallel()
+	d, st := callbackDeps(t, false)
+	if _, err := st.Users().Put(context.Background(), model.User{
+		ID: "u-person", Username: "somebody", Role: model.RoleAdmin, Kind: model.KindPerson,
+		PasswordHash: plantedHash, CreatedAt: time.Now(),
+	}); err != nil {
+		t.Fatalf("put person: %v", err)
+	}
+	au, err := auth.New(conflictingStore{st}, time.Hour)
+	if err != nil {
+		t.Fatalf("auth.New: %v", err)
+	}
+	d.Auth = au
+
+	rec, cookies := completeLoginAs(t, d, "subject-0f3a9c")
+	if loc := rec.Header().Get("Location"); loc != "/login?sso_error=account-changed" {
+		t.Errorf("answer = %d %q, want a redirect to /login?sso_error=account-changed", rec.Code, loc)
+	}
+	if who := signedInAs(t, d, cookies); who != "" {
+		t.Errorf("signed in as %q although nothing was linked", who)
+	}
+}
+
+// An account change that loses a revision race -- an unlink against a role
+// change, say -- is a named conflict, not an internal error.
+func TestAnAccountChangeLosingARaceIsAConflict(t *testing.T) {
+	t.Parallel()
+	d, _ := rulesDeps(t)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodDelete, "https://192.168.1.10:8443/api/v1/users/u-person/identity", nil)
+	writeUserError(rec, req, d, fmt.Errorf("auth: store unlinked account: %w", store.ErrConflict))
+
+	if rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), `"store.conflict"`) {
+		t.Errorf("answer = %d %s, want 409 store.conflict", rec.Code, rec.Body.String())
 	}
 }

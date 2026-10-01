@@ -235,3 +235,130 @@ func TestSinglePersonAccountWithNobody(t *testing.T) {
 		t.Errorf("SinglePersonAccount with only a service account: %v, want ErrNoPersonAccount", err)
 	}
 }
+
+// racingStore makes the first `races` user writes lose a revision race: just
+// before each one, it lets a concurrent writer change the stored record, so the
+// write that follows carries a stale revision and the store answers
+// ErrConflict -- the real conflict, not a stand-in for one.
+type racingStore struct {
+	store.Store
+	races   int
+	meddle  func(u *model.User)
+	written int
+}
+
+func (r *racingStore) Users() store.UserStore { return &racingUsers{UserStore: r.Store.Users(), r: r} }
+
+type racingUsers struct {
+	store.UserStore
+	r *racingStore
+}
+
+func (u *racingUsers) Put(ctx context.Context, rec model.User) (model.User, error) {
+	if u.r.written < u.r.races {
+		u.r.written++
+		current, err := u.UserStore.Get(ctx, rec.ID)
+		if err != nil {
+			return model.User{}, err
+		}
+		u.r.meddle(&current)
+		if _, err := u.UserStore.Put(ctx, current); err != nil {
+			return model.User{}, err
+		}
+	}
+	return u.UserStore.Put(ctx, rec)
+}
+
+func racingService(t *testing.T, races int, meddle func(u *model.User)) (*Service, store.Store) {
+	t.Helper()
+	_, st := newTestService(t, time.Hour)
+	racing := &racingStore{Store: st, races: races, meddle: meddle}
+	svc, err := New(racing, time.Hour)
+	if err != nil {
+		t.Fatalf("auth.New: %v", err)
+	}
+	return svc, st
+}
+
+// Two first-use binds at once: one wins, and the other must not become a 500.
+// Re-read once: the same identity is the success it would have been, a
+// different one is ErrAlreadyBound, and an unrelated change (a role) is simply
+// retried.
+func TestBindIdentityLosingARevisionRace(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name    string
+		meddle  func(u *model.User)
+		wantErr error
+		wantSub string
+	}{
+		{"the same identity won", func(u *model.User) { u.Issuer, u.Subject = newIssuer, newSubject }, nil, newSubject},
+		{"a different identity won", func(u *model.User) { u.Issuer, u.Subject = newIssuer, oldSubject }, ErrAlreadyBound, oldSubject},
+		{"a role changed meanwhile", func(u *model.User) { u.Role = model.RoleOperator }, nil, newSubject},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			svc, st := racingService(t, 1, tc.meddle)
+			ctx := context.Background()
+			u := putAccount(t, st, "u-person", "somebody", model.KindPerson, "", "")
+
+			bound, err := svc.BindIdentity(ctx, u, newIssuer, newSubject)
+			if !errors.Is(err, tc.wantErr) {
+				t.Fatalf("BindIdentity after losing the race: %v, want %v", err, tc.wantErr)
+			}
+			if err == nil && bound.Subject != newSubject {
+				t.Errorf("returned subject %q, want %q", bound.Subject, newSubject)
+			}
+			stored, err := st.Users().Get(ctx, u.ID)
+			if err != nil {
+				t.Fatalf("get: %v", err)
+			}
+			if stored.Subject != tc.wantSub {
+				t.Errorf("stored subject %q, want %q", stored.Subject, tc.wantSub)
+			}
+		})
+	}
+
+	// A record that keeps changing under it is a conflict the caller can name,
+	// not an internal error: store.ErrConflict, after one retry.
+	t.Run("it keeps changing", func(t *testing.T) {
+		t.Parallel()
+		svc, st := racingService(t, 2, func(u *model.User) { u.Role = model.RoleOperator })
+		u := putAccount(t, st, "u-person", "somebody", model.KindPerson, "", "")
+		if _, err := svc.BindIdentity(context.Background(), u, newIssuer, newSubject); !errors.Is(err, store.ErrConflict) {
+			t.Fatalf("BindIdentity losing twice: %v, want store.ErrConflict", err)
+		}
+	})
+}
+
+// The bind answers the account the way every other read here does: without its
+// password hash.
+func TestBindIdentityReturnsNoPasswordHash(t *testing.T) {
+	t.Parallel()
+	svc, st := newTestService(t, time.Hour)
+	ctx := context.Background()
+
+	u, err := st.Users().Put(ctx, model.User{
+		ID: "u-person", Username: "somebody", Role: model.RoleAdmin, Kind: model.KindPerson,
+		PasswordHash: "$argon2id$v=19$m=65536,t=1,p=4$c2FsdA$aGFzaA", CreatedAt: time.Now(),
+	})
+	if err != nil {
+		t.Fatalf("put: %v", err)
+	}
+	bound, err := svc.BindIdentity(ctx, u, newIssuer, newSubject)
+	if err != nil {
+		t.Fatalf("BindIdentity: %v", err)
+	}
+	if bound.PasswordHash != "" {
+		t.Errorf("the first bind returned the password hash")
+	}
+	again, err := svc.BindIdentity(ctx, u, newIssuer, newSubject)
+	if err != nil {
+		t.Fatalf("BindIdentity again: %v", err)
+	}
+	if again.PasswordHash != "" {
+		t.Errorf("binding the same identity again returned the password hash")
+	}
+}

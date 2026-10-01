@@ -11,6 +11,7 @@ import (
 	"github.com/holzcloud/holzkube-manager/internal/auth/oidc"
 	"github.com/holzcloud/holzkube-manager/internal/httpapi"
 	"github.com/holzcloud/holzkube-manager/internal/model"
+	"github.com/holzcloud/holzkube-manager/internal/store"
 )
 
 // Session keys for the in-flight authorisation request. They live in the
@@ -442,6 +443,11 @@ func writeBindProblem(d httpapi.Deps, w http.ResponseWriter, r *http.Request, er
 		failSignIn(w, r, "bind-ambiguous")
 	case errors.Is(err, auth.ErrAlreadyBound):
 		failSignIn(w, r, "other-identity")
+	case errors.Is(err, store.ErrConflict):
+		// The account kept changing while the bind was written (BindIdentity
+		// already re-read it once). Signing in again is the whole remedy, and
+		// a problem document reached by navigation would say it as raw JSON.
+		failSignIn(w, r, "account-changed")
 	default:
 		// An unexpected failure keeps its problem document and its request id:
 		// this one is a bug report, not something the operator can act on from

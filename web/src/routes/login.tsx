@@ -255,6 +255,8 @@ const ssoErrorText: Record<string, string> = {
   'setup-required':
     'This instance has no operator account yet. It has to be created from the local network.',
   'other-identity': 'This instance is linked to a different account at the identity provider.',
+  'account-changed':
+    'The account changed while single sign-on was linking it, so nothing was linked. Sign in again.',
   'bind-ambiguous':
     'This instance has more than one account for a person, so there is no telling which one this ' +
     'identity belongs to. Single sign-on links on first use only while there is exactly one ' +

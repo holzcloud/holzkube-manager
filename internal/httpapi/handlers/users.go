@@ -446,6 +446,13 @@ func writeUserError(w http.ResponseWriter, r *http.Request, d httpapi.Deps, err 
 		httpapi.WriteProblem(w, r, httpapi.Conflict("conflict.last-admin",
 			"This is the only account that can manage this instance. Promote another account to "+
 				"admin first; otherwise the repair for this is a shell on the host."))
+	case errors.Is(err, store.ErrConflict):
+		// Two changes to one account at the same moment -- an unlink and a
+		// role change, say. The store's revision check kept both from being
+		// half-applied; nothing is broken, and a 500 would say it was.
+		httpapi.WriteProblem(w, r, httpapi.Conflict("store.conflict",
+			"The account changed while this was being saved, so nothing was changed. Reload the "+
+				"list and try again."))
 	default:
 		httpapi.WriteInternal(w, r, d.Logger, err)
 	}
