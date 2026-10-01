@@ -422,10 +422,18 @@ stored before roles existed has none, and that is read as admin — it was the o
 account, so it could do everything, and demoting it on upgrade would be a lockout
 dressed as a security improvement.
 
-**Single sign-on links on first use only while there is exactly one account.**
-With two, there is no answer to "which account is this identity", and every
-plausible guess is a way for a new subject at the provider to take over somebody
-else's account.
+**Single sign-on links on first use only while there is exactly one account
+for a person.** With two, there is no answer to "which account is this
+identity", and every plausible guess is a way for a new subject at the provider
+to take over somebody else's account. Only accounts for people count: a service
+account never signs in through the provider, so it never makes the answer
+ambiguous. (Service accounts used to count, which blocked linking on any
+instance that had automation; they no longer do.)
+
+With more than one person account, no account can be linked — or linked again
+after an unlink — because there is no operation that links a chosen account.
+An unlinked account stays unlinked until it is the only person account again.
+The confirmation for **Unlink single sign-on** says so before the click.
 
 ### Service accounts
 
@@ -501,10 +509,15 @@ any of this is consulted.
 `--sso-only-hosts` without a configured provider is refused at start: that host
 would decline the password and have nothing to offer instead.
 
+On the public address a single sign-on is refused before the browser leaves for
+the provider only when no person account is linked yet (`bind-host`), or when
+there is no account at all (`setup-required`). As soon as one person is linked,
+the sign-in goes through to the provider, however many accounts there are.
+
 ### Linking the account to a provider identity
 
 The first sign-in through the provider binds the identity -- issuer and `sub` --
-to the one operator account. `sub` is the join key rather than the username,
+to the one account for a person. `sub` is the join key rather than the username,
 because a username can be reassigned to a different person at the provider while
 `sub` is defined to be stable.
 
@@ -514,6 +527,53 @@ behind the same boundary the break-glass account already sits behind, instead of
 offering it to whoever reaches the public name first. In practice: sign in
 through the provider once from the local network, and the public address works
 from then on.
+
+**Unlinking.** Settings → Accounts → **Unlink single sign-on** removes an
+account's link, issuer and `sub` both, so that the next first sign-in can link a
+different identity. The Sign-in column shows which provider an account is linked
+to by its host only (`idp.example.com`), never the `sub`. Only an admin can
+unlink, it asks for re-authentication like every other account change, and it
+is recorded in the audit log as `user.identity-unlink` without the issuer or the
+`sub`. It is refused for a service account, which is never linked, and for an
+account that is not linked.
+
+An admin may unlink their own account; the account keeps its password and its
+role. But on an address that only accepts single sign-on the password is
+refused, and linking is refused there too — so the link is made again from the
+local network address.
+
+**Unlinking stops the next sign-in, not open sessions.** The session that did
+it stays signed in, including one that came in through the provider; it can no
+longer confirm destructive actions through the provider, and says so — the
+password on the local network still can. To end somebody's sessions, remove the
+account.
+
+### Switching providers
+
+Moving to a different identity provider changes the issuer, and an account
+linked to the old one refuses the new one: a link is never moved by a sign-in.
+The order, using `192.168.1.10` as the local network address and
+`auth.example.com` as the new provider:
+
+1. Point `--oidc-issuer`, `--oidc-client-id` and the client-secret file at the
+   new provider (`https://auth.example.com/…`) and restart the service. Until
+   the next step, a single sign-on on `192.168.1.10` says the instance is linked
+   to a different account.
+2. On `https://192.168.1.10:8443`, sign in with the password.
+3. Settings → Accounts → **Unlink single sign-on** on your account, confirm, and
+   re-authenticate with the password.
+4. Sign out, then sign in through single sign-on on `192.168.1.10`. That first
+   sign-in links the new provider's identity.
+5. The public address (`manager.example.com`) works again.
+
+Why this order: unlinking while the old provider is still configured lets one
+click re-link the identity you just removed, because the old provider usually
+still has you signed in. Switching the issuer first means the only identity that
+can arrive is the new one.
+
+Step 4 is refused while there is more than one account for a person (service
+accounts do not count); the unlink confirmation in step 3 says so before you
+click.
 
 ### The client secret
 

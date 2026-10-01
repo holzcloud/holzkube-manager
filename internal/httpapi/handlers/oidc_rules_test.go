@@ -24,7 +24,10 @@ import (
 )
 
 // Documentation values only: the repository is public.
-const rulesIssuer = "https://idp.example.com/application/o/holzkube-manager/"
+const (
+	rulesIssuer      = "https://idp.example.com/application/o/holzkube-manager/"
+	rulesOtherIssuer = "https://auth.example.com/application/o/holzkube-manager/"
+)
 
 // plantedHash stands in for a password hash. Its shape does not matter: what
 // is asserted is only that a bind leaves it where it was.
@@ -133,6 +136,32 @@ func TestFirstUseBindCountsOnlyPeople(t *testing.T) {
 				if stored.PasswordHash != plantedHash {
 					t.Errorf("%s lost its password hash to the bind: %q", a.id, stored.PasswordHash)
 				}
+			}
+		})
+	}
+}
+
+func TestSudoRefusalNamesAnUnlinkedAccount(t *testing.T) {
+	t.Parallel()
+
+	bound := model.User{Username: "somebody", Issuer: rulesIssuer, Subject: "subject-0f3a9c"}
+	cases := []struct {
+		name    string
+		account model.User
+		issuer  string
+		subject string
+		want    string
+	}{
+		{"an unlinked account", model.User{Username: "somebody"}, rulesIssuer, "subject-0f3a9c", "oidc.not-linked"},
+		{"the same identity", bound, rulesIssuer, "subject-0f3a9c", ""},
+		{"a different subject", bound, rulesIssuer, "subject-7d21e4", "oidc.other-identity"},
+		{"a different issuer", bound, rulesOtherIssuer, "subject-0f3a9c", "oidc.other-identity"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if got := sudoIdentityRefusal(tc.account, tc.issuer, tc.subject); got != tc.want {
+				t.Errorf("sudoIdentityRefusal = %q, want %q", got, tc.want)
 			}
 		})
 	}

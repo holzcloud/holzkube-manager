@@ -450,6 +450,25 @@ func writeBindProblem(d httpapi.Deps, w http.ResponseWriter, r *http.Request, er
 	}
 }
 
+// sudoIdentityRefusal says why a provider re-authentication cannot confirm for
+// the signed-in account, and "" when it can.
+//
+// An account with no binding is its own answer. Unlinking ends no session, so
+// an account unlinked while its session lives on can still ask the provider to
+// confirm -- and that used to come back as "a different account", which names
+// the wrong cause and the wrong remedy: nothing about the provider's account is
+// different, this one simply is not linked to any. The remedy is the password,
+// on the local network.
+func sudoIdentityRefusal(u model.User, issuer, subject string) string {
+	if !u.HasIdentityBinding() {
+		return "oidc.not-linked"
+	}
+	if u.Issuer != issuer || u.Subject != subject {
+		return "oidc.other-identity"
+	}
+	return ""
+}
+
 // completeSudo opens the sudo window after a re-authentication.
 func completeSudo(d httpapi.Deps, w http.ResponseWriter, r *http.Request, identity oidc.Identity) {
 	u, ok := d.Auth.CurrentUser(r.Context())
@@ -461,7 +480,14 @@ func completeSudo(d httpapi.Deps, w http.ResponseWriter, r *http.Request, identi
 	// The returning identity must be the one already signed in. Without this,
 	// a second operator's completed flow would open the sudo window on the
 	// first one's session.
-	if !u.HasIdentityBinding() || u.Issuer != d.OIDC.Issuer() || u.Subject != identity.Subject {
+	switch sudoIdentityRefusal(u, d.OIDC.Issuer(), identity.Subject) {
+	case "oidc.not-linked":
+		d.Logger.Warn("a sudo re-authentication through the provider for an account that is not linked to it, "+
+			"so the provider cannot confirm anything for it",
+			slog.String("signed-in", u.Username))
+		failSudo(w, r, "oidc.not-linked")
+		return
+	case "oidc.other-identity":
 		d.Logger.Warn("a sudo re-authentication came back as a different account than the one signed in",
 			slog.String("signed-in", u.Username))
 		failSudo(w, r, "oidc.other-identity")

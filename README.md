@@ -63,9 +63,10 @@ did.
   SecureBoot, disk encryption, etcd snapshots and restore, certificate renewal
 - **A wall** — one page for a screen in the office that answers "is everything
   fine?" without anybody touching it
-- **Safe by default** — a local account and single sign-on (OIDC), roles,
-  re-authentication before anything destructive, a hash-chained audit log, and a
-  `--dry-run` mode that refuses every change at the wire
+- **Safe by default** — a local account and single sign-on (OIDC) that an admin
+  can unlink to move to another provider, roles, re-authentication before
+  anything destructive, a hash-chained audit log, and a `--dry-run` mode that
+  refuses every change at the wire
 - **Around it** — `holzkubectl` on the command line, Prometheus `/metrics`, a
   support bundle, and an interface that works on a phone and sits on its home
   screen like an app

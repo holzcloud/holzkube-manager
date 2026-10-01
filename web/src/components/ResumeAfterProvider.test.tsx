@@ -210,6 +210,22 @@ describe('SudoFailureNotice', () => {
     expect(other.container.textContent).toContain('different account')
   })
 
+  /**
+   * Unlinking ends no session, so an account unlinked while signed in can
+   * still ask the provider to confirm. That used to come back as "a different
+   * account", which sends the operator to the provider to fix something that
+   * is not wrong there.
+   */
+  it('says an unlinked account is not linked, and names the password as the way', () => {
+    withQuery('?sudo_error=oidc.not-linked')
+
+    const notice = render(<SudoFailureNotice />)
+
+    expect(screen.getByText('This account is not linked to single sign-on')).toBeInTheDocument()
+    expect(notice.container.textContent).toContain('password on the local network')
+    expect(notice.container.textContent).not.toContain('different account')
+  })
+
   it('still says something for a code it does not know', () => {
     withQuery('?sudo_error=oidc.invented-later')
 

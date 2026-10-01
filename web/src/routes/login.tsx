@@ -249,15 +249,17 @@ export type LoginReason = 'required' | 'expired' | 'signed-out' | undefined
  */
 const ssoErrorText: Record<string, string> = {
   'bind-host':
-    'This account is not linked to single sign-on yet. Linking has to happen from the local network — ' +
-    'sign in there once, and this address will work afterwards.',
+    'This account is not linked to single sign-on yet. Linking has to happen from the local network: ' +
+    'sign in through single sign-on there. It links on first use only while there is exactly one ' +
+    'account for a person (service accounts do not count).',
   'setup-required':
     'This instance has no operator account yet. It has to be created from the local network.',
   'other-identity': 'This instance is linked to a different account at the identity provider.',
   'bind-ambiguous':
-    'This instance has more than one account, so there is no way to tell which one this identity ' +
-    'belongs to. An admin has to link it to a specific account first — linking on first sign-in ' +
-    'only works while there is exactly one.',
+    'This instance has more than one account for a person, so there is no telling which one this ' +
+    'identity belongs to. Single sign-on links on first use only while there is exactly one ' +
+    '(service accounts do not count), and nothing else links one. Sign in with the password on ' +
+    'the local network.',
   denied:
     'The identity provider refused the sign-in. Check that your account is assigned to this application.',
   'provider-unreachable':

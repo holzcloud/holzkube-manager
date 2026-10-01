@@ -191,4 +191,55 @@ describe('the accounts table', () => {
     expect(unlink).toHaveBeenCalledWith('u2')
     unlink.mockRestore()
   })
+
+  /**
+   * First-use linking needs exactly one account for a person, and there is no
+   * operation that links a chosen one. With two people an unlink cannot be
+   * undone by anybody signing in, and that is said before the click.
+   */
+  it('warns that nothing can be linked again when there are several people', async () => {
+    const user = userEvent.setup()
+    wrap([
+      account({ id: 'u1', username: 'linked', linked_identity: true }),
+      account({ id: 'u2', username: 'colleague' }),
+    ])
+
+    await user.click(screen.getByRole('button', { name: 'Unlink single sign-on' }))
+    const dialog = await screen.findByRole('dialog')
+    expect(within(dialog).getByText(/no account here can be linked again/i)).toBeInTheDocument()
+    expect(within(dialog).getByText(/2 accounts for people/i)).toBeInTheDocument()
+  })
+
+  /** A service account never signs in through the provider, so it does not count. */
+  it('does not count a service account as somebody who blocks linking', async () => {
+    const user = userEvent.setup()
+    wrap([
+      account({ id: 'u1', username: 'linked', linked_identity: true }),
+      account({ id: 'u2', username: 'ci-bot', kind: 'service' }),
+    ])
+
+    await user.click(screen.getByRole('button', { name: 'Unlink single sign-on' }))
+    const dialog = await screen.findByRole('dialog')
+    expect(within(dialog).getByText(/from the local network address/i)).toBeInTheDocument()
+    expect(within(dialog).queryByText(/no account here can be linked again/i)).toBeNull()
+  })
+
+  /** The server refuses it, and the page does not offer it. */
+  it('offers no unlink on a service account, even one that shows a link', () => {
+    wrap([
+      account({
+        id: 'u2',
+        username: 'ci-bot',
+        kind: 'service',
+        linked_identity: true,
+        linked_provider: 'idp.example.com',
+      }),
+    ])
+
+    const row = screen.getByText('ci-bot').closest('tr')
+    if (row === null) {
+      throw new Error('the service account has no row')
+    }
+    expect(within(row).queryByRole('button', { name: /Unlink single sign-on/i })).toBeNull()
+  })
 })

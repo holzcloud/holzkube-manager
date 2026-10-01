@@ -126,7 +126,7 @@ export function forgetSudoIntent(): void {
  * operator must not have to guess at is whether a destructive action ran.
  */
 /**
- * What the three sudo refusals mean, and who fixes each.
+ * What the sudo refusals mean, and who fixes each.
  *
  * They used to be one sentence behind a problem document the browser rendered
  * as raw JSON in the address bar. An operator met that three times in a row on
@@ -156,6 +156,14 @@ const SUDO_ERRORS: Record<string, { title: string; detail: string }> = {
     detail:
       'The re-authentication was completed by an account other than the one signed in here. ' +
       'Nothing was confirmed. Sign out at the provider and sign in as the same account.',
+  },
+  'oidc.not-linked': {
+    title: 'This account is not linked to single sign-on',
+    detail:
+      'It was unlinked, so the identity provider cannot confirm anything for it. Nothing was ' +
+      'confirmed. Sign in with the password on the local network to confirm destructive actions. ' +
+      'Signing in through the provider there links the account again, as long as it is the only ' +
+      'account for a person (service accounts do not count).',
   },
 }
 
