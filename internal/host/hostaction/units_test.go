@@ -587,7 +587,10 @@ func systemdSpan(t *testing.T, s string) time.Duration {
 // carries no [Install] (nothing starts it but the helper), no RemainAfterExit
 // (a second check would never run), no environment and no capability.
 //
-// Fault injected and seen red: --check removed from ExecStart=.
+// Faults injected and seen red: --check removed from ExecStart=; an
+// ExecStartPost= running the update with --force; AF_PACKET added to
+// RestrictAddressFamilies=; DynamicUser=true; TimeoutStopSec= absent, 90s
+// and 1min.
 func TestTheCheckUnitRunsOnlyTheCheck(t *testing.T) {
 	t.Parallel()
 
@@ -599,6 +602,19 @@ func TestTheCheckUnitRunsOnlyTheCheck(t *testing.T) {
 	}
 
 	wantOnly(t, check, "Service", "ExecStart", UpdateScriptPath+" --check")
+	// And no other command, in any section (13-REVIEW-2 WR-04): ExecStartPre,
+	// ExecStartPost, ExecCondition, ExecStop, ExecStopPost and ExecReload all
+	// run as root too, and one line of them -- the update with --force -- would
+	// install a release on every check.
+	if n := len(check.lines("ExecStart")); n != 1 {
+		t.Errorf("%s has %d ExecStart= lines, want exactly 1", check.name, n)
+	}
+	for _, a := range check.assignments {
+		if strings.HasPrefix(a.key, "Exec") && a.key != "ExecStart" {
+			t.Errorf("%s:%d: [%s] %s=%s; the check unit runs its one ExecStart= and nothing else",
+				check.name, a.line, a.section, a.key, a.value)
+		}
+	}
 	wantOnly(t, check, "Service", "Type", "oneshot")
 	statusDir := filepath.Dir(updatestatus.DefaultPath)
 	if filepath.Dir(statusDir) != "/var/lib" {
@@ -630,19 +646,18 @@ func TestTheCheckUnitRunsOnlyTheCheck(t *testing.T) {
 		wantOnly(t, check, "Service", kv[0], kv[1])
 	}
 
-	// The network: the look asks GitHub for the release list.
-	families := check.values("Service", "RestrictAddressFamilies")
+	// The network: the look asks GitHub for the release list -- AF_INET and
+	// AF_INET6 for that, AF_UNIX and AF_NETLINK for name resolution -- and
+	// nothing more (13-REVIEW-2 WR-04): exactly these four, in any order.
+	families := check.lines("RestrictAddressFamilies")
 	if len(families) != 1 {
-		t.Errorf("%s: RestrictAddressFamilies=%q, want exactly one line", check.name, families)
+		t.Errorf("%s: %d RestrictAddressFamilies= lines, want exactly one", check.name, len(families))
 	} else {
-		got := strings.Fields(families[0])
-		if len(got) > 0 && strings.HasPrefix(got[0], "~") {
-			t.Errorf("%s: RestrictAddressFamilies=%s is a deny list, want the families it may use", check.name, families[0])
-		}
-		for _, f := range []string{"AF_INET", "AF_INET6"} {
-			if !slices.Contains(got, f) {
-				t.Errorf("%s: RestrictAddressFamilies=%s does not allow %s; the check cannot reach GitHub", check.name, families[0], f)
-			}
+		got := strings.Fields(families[0].value)
+		slices.Sort(got)
+		if want := []string{"AF_INET", "AF_INET6", "AF_NETLINK", "AF_UNIX"}; !slices.Equal(got, want) {
+			t.Errorf("%s: RestrictAddressFamilies=%s, want exactly %s: the network GitHub needs and nothing more",
+				check.name, families[0].value, strings.Join(want, " "))
 		}
 	}
 
@@ -681,7 +696,11 @@ func TestTheCheckUnitRunsOnlyTheCheck(t *testing.T) {
 	if check.hasSection("Install") {
 		t.Errorf("%s has an [Install] section; only the helper may start it", check.name)
 	}
-	for _, key := range []string{"RemainAfterExit", "Environment", "EnvironmentFile", "AmbientCapabilities", "ReadWritePaths"} {
+	// User=, Group= and DynamicUser= are left out too: the sandbox above is
+	// reasoned for root with an empty bounding set, writing a directory only
+	// root owns, and reading a token only root may read.
+	for _, key := range []string{"RemainAfterExit", "Environment", "EnvironmentFile", "AmbientCapabilities", "ReadWritePaths",
+		"User", "Group", "DynamicUser", "SupplementaryGroups"} {
 		if l := check.lines(key); len(l) > 0 {
 			t.Errorf("%s:%d: %s=%s must not be in the check unit", check.name, l[0].line, key, l[0].value)
 		}
