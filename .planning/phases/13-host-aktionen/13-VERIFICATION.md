@@ -1,6 +1,6 @@
 ---
 phase: 13-host-aktionen
-verified: 2026-09-30T04:14:06Z
+verified: 2026-10-01T13:12:51Z
 status: human_needed
 score: 5/5 must-haves verified
 covered_files:
@@ -28,6 +28,14 @@ covered_files:
   - ".planning/phases/13-host-aktionen/13-10-SUMMARY.md"
   - ".planning/phases/13-host-aktionen/13-11-PLAN.md"
   - ".planning/phases/13-host-aktionen/13-11-SUMMARY.md"
+  - ".planning/phases/13-host-aktionen/13-12-PLAN.md"
+  - ".planning/phases/13-host-aktionen/13-12-SUMMARY.md"
+  - ".planning/phases/13-host-aktionen/13-13-PLAN.md"
+  - ".planning/phases/13-host-aktionen/13-13-SUMMARY.md"
+  - ".planning/phases/13-host-aktionen/13-14-PLAN.md"
+  - ".planning/phases/13-host-aktionen/13-14-SUMMARY.md"
+  - ".planning/phases/13-host-aktionen/13-15-PLAN.md"
+  - ".planning/phases/13-host-aktionen/13-15-SUMMARY.md"
   - "README.md"
   - "cmd/holzkube-managerd/budget_test.go"
   - "cmd/holzkube-managerd/main.go"
@@ -35,6 +43,7 @@ covered_files:
   - "deploy/holzkube-manager-host.path"
   - "deploy/holzkube-manager-host.service"
   - "deploy/holzkube-manager-host.sh"
+  - "deploy/holzkube-manager-update-check.service"
   - "docs/api-contract.md"
   - "docs/guide.md"
   - "docs/screenshots/host.png"
@@ -54,9 +63,11 @@ covered_files:
   - "internal/host/hostaction/result.go"
   - "internal/host/hostaction/result_test.go"
   - "internal/host/hostaction/script_test.go"
+  - "internal/host/hostaction/testdata/holzkube-manager-host-before-check.sh"
   - "internal/host/hostaction/units_test.go"
   - "internal/host/sensors.go"
   - "internal/host/sensors_test.go"
+  - "internal/host/updatestatus/script_test.go"
   - "internal/httpapi/endtoend_test.go"
   - "internal/httpapi/handlers/confirm_test.go"
   - "internal/httpapi/handlers/host.go"
@@ -72,7 +83,9 @@ covered_files:
   - "internal/store/fsstore/atomic.go"
   - "internal/store/fsstore/place_test.go"
   - "web/fixtures/demo.json"
+  - "web/fixtures/host-helper-installed.json"
   - "web/scripts/readme-images.mjs"
+  - "web/src/api.nulls.test.ts"
   - "web/src/api.ts"
   - "web/src/components/HostActions.test.tsx"
   - "web/src/components/HostActions.tsx"
@@ -83,44 +96,60 @@ covered_files:
   - "web/src/routes/host.test.tsx"
   - "web/src/routes/host.tsx"
   - "web/src/routes/wall.test.tsx"
-covered_digest: "v2:sha256:1e68bdfb8e993c6f3bb1b56c81233c2a21558ad86b003109e1344612d0708a54"
+covered_digest: "v2:sha256:fa2b31758f700765db3e4ae5427c972fe47516572750e845bb92b40249c65de1"
 behavior_unverified: 0
 overrides_applied: 0
 re_verification:
-  previous_status: gaps_found
-  previous_score: 4/5
+  previous_status: human_needed
+  previous_score: 5/5
+  previous_head: 591af39
   gaps_closed:
-    - "SC4: With the helper not installed, the actions are locked, the page names what from deploy/ goes where, and no order is created (G-13-2: Detect no longer lists not-enabled beside path-unit)"
-    - "No host action label runs past its button at 390 px (G-13-3, previously deferred to Phase 14, closed in 13-11)"
+    - "HACT-04 wording (previous human item 4): the operator decided on 2026-09-30 for a fifth, check-only action; ROADMAP criteria 1 and 3 name five actions (48db458), and 13-12..13-15 built it"
   gaps_remaining: []
   regressions: []
+advisory:
+  - finding: "A check and the hourly holzkube-manager-update.service can run the update script at the same time; the script has no lock and status.json is last-writer-wins (13-REVIEW-2 IN-02, not applied)"
+    category: other
+    reason: "A fix touches the update script, which D-19 keeps unchanged, or adds ordering to the check unit, which the allow-list guard now forbids; an operator decision"
+    evidence_status: "none provided"
+  - finding: "The check unit's sandbox could be tighter (SystemCallFilter=@system-service, ProtectProc=invisible, ProcSubset=pid, PrivateIPC, IPAddressDeny for the LAN) (13-REVIEW-2 IN-03, not applied)"
+    category: security
+    reason: "Hardening beyond what SC5 asks; would need systemd-analyze security and the allow-list extended"
+    evidence_status: "none provided"
+  - finding: "Outdated() does not check /usr/local/sbin/holzkube-manager-update; on a host with the helper but without the reference update script the check button is on and every check fails (13-REVIEW-2 IN-04, not applied; HOST-HELPER.md 'What it needs' states the requirement)"
+    category: other
+    reason: "Documented prerequisite, not detected; the failed check now names the right journal (WR-02 fixed)"
+    evidence_status: "none provided"
 human_verification:
-  - test: "Install the helper per deploy/HOST-HELPER.md on the Pi (operator's call), then run the three-step probe: start holzkube-manager-host.service with no order, check the path unit is 'active (waiting)', then press 'Check for updates and install' on /host."
-    expected: "Journal says 'kein Auftrag' and exit 0; path unit active (waiting); the order is picked up once, /var/lib/holzkube-manager-host/last reads '<id> update started <time>', the status box walks placed -> picked up -> started -> update finished, the path unit does not loop."
-    why_human: "Needs root-installed units under the real system manager and its sandbox (ProtectSystem=strict, ReadWritePaths into a 0700 dir of another user, NoNewPrivileges). Tests ran the script under unshare with a stand-in systemctl, and 13-09 probed it under the user manager only."
-  - test: "With the helper installed, restart the host from /host with two sessions open, only one of which placed the order."
-    expected: "Both pages show 'Waiting for holzkube-manager to come back' (not the amber stale notice) while the host is down, then the status reaches 'back'; the order is not run a second time after boot (last shows one started line for that id)."
-    why_human: "Only a real reboot can show the connection loss, the PathExists-at-boot behaviour and the 60-s age window against the Pi's restored clock; host.test.tsx holds only the derivation from a reading."
+  - test: "Install the helper and the check unit per deploy/HOST-HELPER.md on the Pi (operator's call), run the guide's probe: start holzkube-manager-host.service with no order, check the path unit is 'active (waiting)', then press 'Check for updates' on /host, then 'Check for updates and install'."
+    expected: "Dry start: journal 'kein Auftrag', exit 0. Check for updates: the order is picked up once; /var/lib/holzkube-manager-host/last reads '<id> check-update started', then '<id> check-update done'; while it runs all five buttons are off with 'An update check is running; wait for it to finish.'; the status box ends with the newest and the installed version; nothing is installed. Check for updates and install: last reads '<id> update started'; the path unit does not loop."
+    why_human: "Needs root-installed units under the real system manager; every test here runs the script under unshare with a stand-in systemctl. Installing root code on the production host is the operator's call (CLAUDE.md)."
+  - test: "V-26: run the check unit under its real sandbox: sudo systemctl start holzkube-manager-update-check.service; echo exit=$?; systemctl show holzkube-manager-update-check.service -p Result -p ExecMainStatus; journalctl -u holzkube-manager-update-check.service -b -n 50; sudo -u holzkube-manager cat /var/lib/holzkube-manager-update/status.json"
+    expected: "exit=0, Result=success, ExecMainStatus=0; no 'Permission denied', 'Operation not permitted', 'Could not resolve host' or 'Address family not supported' in the journal; status.json has a checked_at from just now and the daemon user can read it."
+    why_human: "systemd-analyze verify and the allow-list guard prove the unit is well-formed, not that curl, python3 and bash work under RestrictAddressFamilies=, MemoryDenyWriteExecute= and ProtectSystem=strict with its StateDirectory=. Needs an installed unit and root."
+  - test: "With the helper installed, restart the host from /host with two sessions open, only one of which placed the order. Separately, once: start a Check for updates and reboot (or lose power) before it ends."
+    expected: "Both pages show 'Waiting for holzkube-manager to come back' (not the stale notice) while the host is down, then 'back'; the reboot order does not run a second time after boot (last shows one started line for that id). A check cut off by the reboot shows 'started, but the host restarted before the check ended ...' and actions.busy is false after boot, so the buttons are on again."
+    why_human: "Only a real reboot shows the connection loss, PathExists at boot, the 60-s age window against the restored clock and the boot clause of CheckRunning against CLOCK_BOOTTIME; tests hold the derivations from readings only."
   - test: "With the helper installed, 'Restart service' and 'Shut down host' once each (operator's choice when)."
-    expected: "restart-service: the daemon comes back and the page shows back; poweroff: the Pi powers off via the root oneshot under NoNewPrivileges/RestrictAddressFamilies=AF_UNIX."
+    expected: "restart-service: the daemon comes back and the page shows 'back'; poweroff: the Pi powers off via the root oneshot under NoNewPrivileges and RestrictAddressFamilies=AF_UNIX."
     why_human: "systemctl reboot/poweroff/restart from inside the helper's sandbox is not exercised by any test; the stand-in systemctl only records argv."
-  - test: "Decide whether HACT-04 ('jetzt nach Updates suchen') is met by 'Check for updates and install' (search AND install through holzkube-manager-update.service)."
-    expected: "Operator accepts the broader action, or asks for a check-only variant."
-    why_human: "13-CONTEXT marks this deviation from the requirement's wording 'Zur Prüfung vorgemerkt'; it is a product decision, not a code fact."
+  - test: "D-11 hand test with five actions: on a phone at its native width, against a development daemon (never production) over TLS on the LAN, with the helper installed: open /host without zooming, read the five buttons, tap Check for updates and Restart host, read each dialog, type the host name with the phone keyboard, see confirm enable, tap Keep running."
+    expected: "Five buttons readable and tappable without zoom ('Check for updates' spans the first row, the other four two by two), the dialog fits, typing works, Keep running closes it; nothing submitted."
+    why_human: "Needs a real phone, TLS and an installed helper; the layout audit measures 44 px at 390 px in Chromium, not a thumb on a device."
 ---
 
 # Phase 13: Host-Aktionen über einen root-eigenen Helfer -- Verification Report
 
 **Phase Goal:** Der Betreiber kann den Host neu starten, herunterfahren, den Dienst holzkube-manager neu starten und „jetzt nach Updates suchen" auslösen -- ohne dass der Daemon Root, D-Bus oder eine Capability bekommt. Er legt einen Auftrag im Datenverzeichnis ab; eine root-eigene Path-Unit holt ihn ab und ein festes Skript führt ihn aus einer festen Liste aus.
-**Verified:** 2026-09-30T04:14:06Z
-**Status:** human_needed (all five success criteria verified; what remains needs an installed helper, a real reboot, or an operator decision)
-**Re-verification:** Yes -- after gap closure (13-10 G-13-2, 13-11 G-13-3), previous report 2026-09-29 at a45015c
+**Verified:** 2026-10-01T13:12:51Z at 08e5443
+**Status:** human_needed. All five success criteria hold in the code and in tests run here. What remains needs the helper installed, a real reboot, or a phone.
+**Re-verification:** Yes. The previous report was written at 591af39. Since then: plans 13-12..13-15 (the operator's HACT-04 decision for a fifth, check-only action), 13-REVIEW-2, and three fix rounds (13-REVIEW-2-FIX rounds 1-3).
 
-**Where this ran:** the operator's Raspberry Pi 5 (aarch64), Go 1.27.1 from `~/.local/go`, Node via nvm, the browser project's Chromium. No `-race` (ThreadSanitizer refuses this kernel; the race verdict is CI's). `unshare --user --map-root-user id -u` printed 0, so the root-namespace script tests ran (28 `TestHostScriptAsRoot` subtests PASS, 0 SKIP). Nothing installed: `/usr/local/sbin/holzkube-manager-host` and `/etc/systemd/system/holzkube-manager-host.path` are still absent. The production service and its data directory were not addressed. `git status --porcelain` was empty after every injection and after the run.
+**Where this ran:** the operator's Raspberry Pi 5 (aarch64), with Go 1.27.1 from `~/.local/go`, Node 22 through nvm, and Chromium from the browser project. No `-race`: ThreadSanitizer refuses this kernel, so the race verdict is CI's. `unshare --user --map-root-user id -u` printed 0, so the root-namespace script tests ran (33 `TestHostScriptAsRoot` subtests PASS, 0 SKIP). Nothing was installed: `/usr/local/sbin/holzkube-manager-host`, `/etc/systemd/system/holzkube-manager-host.path` and `/etc/systemd/system/holzkube-manager-update-check.service` are absent. `holzkube-manager.service` read `ActiveEnterTimestamp=Tue 2026-09-29 20:25:38 CEST, NRestarts=0` and was not touched. Its data directory was not read. Every fault injection ran in a scratch copy made with `git archive HEAD`. The checkout's `git status --porcelain` was empty before this report was written.
 
 ## Re-verification scope
 
-The commits since a45015c (`51631f8`, `a1f1679`, `dd670b3`, `c265f42`, plus planning docs) touch `helper.go`, the Detect/fixture/page tests, `demo.json`, `api-contract.md`, `api.ts`, `host.png`, `HostActions.tsx` and `host.browser.test.tsx`. The two gaps were verified in full. SC1, SC2, SC3 and SC5 got a regression check: their suites were re-run green (below), and none of their implementation files changed.
+The ROADMAP's criteria 1 and 3 changed (48db458): they now name five actions, and "nach Updates suchen" is split into "search and install" and "search only". So every criterion was re-checked against the five-action code. A regression check alone would not have been enough. New and changed artifacts were checked in full: the check arm in the helper script, `holzkube-manager-update-check.service`, `KnownOrders`/`Outdated`, the busy rule (`CheckRunning`, `Box.Busy`, `CheckHeld`), the 409 codes `host-helper-outdated` and `host-helper-busy`, and the page's fifth button, dialog, status phases and notices.
 
 ## Goal Achievement
 
@@ -128,97 +157,111 @@ The commits since a45015c (`51631f8`, `a1f1679`, `dd670b3`, `c265f42`, plus plan
 
 | # | Truth | Status | Evidence |
 |---|-------|--------|----------|
-| 1 | Four actions on /host; each needs sudo window + typed hostname, refused below operator, audited; each lock removed singly and its test seen red | VERIFIED (regression) | `handlers/host.go`, `redact.go` unchanged since a45015c; `go test ./internal/httpapi/` rc 0 (includes TestHostActionGates, TestHostConfirmGates, TestHostTokenOpensOneOrderInItsOwnSession). Red runs from the initial verification stand. |
-| 2 | Daemon never executes a host action itself; guard seen red against a smuggled process call | VERIFIED (regression) | `go test ./internal/ ./cmd/...` rc 0 (TestTheDaemonStartsNoProcess). `main.go` unchanged. |
-| 3 | Helper script runs exactly the four orders against a test dir and stand-in systemctl; unknown/malformed input discarded and logged; test seen red | VERIFIED (regression) | `deploy/holzkube-manager-host.sh` unchanged; `TestHostScriptAsRoot` PASS with 28/28 subtests run as root in a user namespace, 0 SKIP. |
-| 4 | Helper not installed -> actions locked, page names what from deploy/ goes where, no order left in the data dir | VERIFIED (gap G-13-2 closed) | `helper.go:96-115`: the wants entry is only checked when `unitsInstalled`, so an empty machine gives `[script, path-unit]`. `TestHelperEveryCombination` walks all 16 presence states and holds that path-unit and not-enabled never appear together, that not-enabled appears exactly when both units are present and wants is absent, and that the list is empty exactly when everything is installed. The routes' 409 for a missing helper is unchanged: `TestHostActionsNeedTheHelper` has new rows for "nothing installed" and "script installed, no unit files" and passes. `demo.json`, `fixtures.test.ts`, `api-contract.md:1865-1872` and the example at `:1888-1894` show the two-item list. The contract now defines not-enabled as "both unit files are there". **host.png viewed by this verifier:** the notice lists only the script path and the .path unit path, and does not contain "installed but not enabled". The sentence "is installed but not enabled" (`HostActions.tsx:784`) is now only reachable when it is true. **Reinstated by this verifier:** `if unitsInstalled {` -> `if unitsInstalled \|\| !unitsInstalled {`, which compiles, gave rc 1 across TestHelperEveryCombination (e.g. "script=no .path=no .service=no wants=no ... lists path-unit and not-enabled together"), TestHelperBoxMissing, TestHelper (3 rows), TestTheFixtureShowsTheRealInstallCommands, TestReadCarriesActions/nothing_installed and TestHostActionsNeedTheHelper (2 rows). Restored with `git checkout`; tree clean. |
-| 5 | deploy/ has path unit, service unit, script, install guide; `systemd-analyze verify` accepts them; guide asks for no less hardening | VERIFIED (regression) | deploy/ unchanged since a45015c; TestUnitsVerify, TestUnitsAgree, TestGuideKeepsTheDaemonsHardening, TestInstallCommandsMatchTheGuide in the `hostaction` package run: rc 0. |
+| 1 | Five actions on /host: Restart host, Shut down host, Restart service, Check for updates and install, Check for updates (only looks). Each needs a sudo window and the typed hostname, is refused below operator, and is audited. Each of the four locks was removed singly and its test seen red | VERIFIED | `hostaction.Actions()` returns five (`hostaction.go:92-93`). `HostRoutes` builds one route per action with `MinRole: RoleOperator`, `Destructive: true` and `Action: host.<a>` (`handlers/host.go:176-186`). `hostTypedPhrase` is true for all five (`:148-154`). `redact.go:242` lists `host.check-update`. The gate tests loop over `Actions()` (`hostgatesapi_test.go:183-421`). host.png, viewed by this verifier, shows the five buttons in that order. **Red by this verifier:** with `hostTypedPhrase[CheckUpdate]` set to false, `TestEveryHostActionRequiresTyping` gave rc 1 ("a host action without the typed hostname") and `TestHostConfirmGates` gave rc 1 ("host.check-update typing \"example-hostx\": 200 ... want 400"). Restored, `cmp` 0, both rc 0. The other three locks' red runs for the check are 13-12's claims and were not repeated. |
+| 2 | The daemon never executes a host action itself; a guard was seen red against a smuggled process call | VERIFIED | `TestTheDaemonStartsNoProcess` PASS (`./internal/`). The check runs in the helper (`systemctl start holzkube-manager-update-check.service`), not in the daemon. The daemon's new code reads files only: the helper's marker line, bounded (`helper.go:224-296`), and `last` (`result.go`). `main.go`'s change wires `SinceBoot` from `host.OS().BootTime` and starts no process. |
+| 3 | The helper script, run against a test data dir and a stand-in systemctl, carries out exactly the known orders (five since 13-12); an unknown or malformed order is discarded and logged; the test was seen red against a script that runs it | VERIFIED | The anchored pattern and the case statement both name exactly the five words (`holzkube-manager-host.sh:201`, `:220-227`). One marker line names the same five, and `TestTheHelperNamesItsOrders` holds marker = pattern = case = `Actions()`. Root matrix: 33 subtests PASS, 0 SKIP. It covers valid runs of all five, systemctl failing for each, 19 malformed shapes (three of them check-update variants), symlink, FIFO, stale, future, directory and symlinked state dir. `TestAnOlderHelperRefusesTheCheck` PASS: the frozen 8b64a06 helper rejects `check-update <id>` and still runs `update`. **Red by this verifier (as root in a user namespace):** (a) the pattern widened to `^([a-z-]+)` and `*)` changed to run `systemctl start "$action"`: rc 1, `rejects_foreign_word` "exit = 0, want 2" and "systemctl was called, want never". (b) the `record ... done` line removed from the check arm: rc 1, `valid_check-update` "last = {... started}, want {... done}". Restored, `cmp` 0, rc 0 with 34 PASS. |
+| 4 | With the helper not installed, the actions are locked, the page names what from deploy/ goes where, and no order is left in the data dir | VERIFIED | The route refusals run in order: container, missing, outdated (check only), busy. All of them come before the body, the token and `Place` (`handlers/host.go:251-291` confirm route, `:336-356` action route). `TestHostActionsNeedTheHelper`, `TestHostActionsInAContainer` and `TestHostCheckNeedsANewerHelper` PASS. The empty machine still lists `[script, path-unit]`. The install commands now install the check unit as well, and the page, HOST-HELPER.md between its markers, and demo.json carry the same bytes (`TestInstallCommandsMatchTheGuide` PASS). The page's notice says "knows exactly five orders ... the five buttons above stay off" (host.png viewed). An older helper gets its own notice with what to reinstall, and only the check's button is off. |
+| 5 | deploy/ has the path unit, the service unit, the script and an install guide; `systemd-analyze verify` accepts the units; the guide asks for no less hardening on the daemon's unit | VERIFIED | deploy/ now also has `holzkube-manager-update-check.service`, and `.goreleaser.yaml:88` ships it. `TestUnitsVerify` PASS: it ran systemd-analyze over the three units with no output. `TestUnitsAgree` and `TestTheCheckUnitRunsOnlyTheCheck` PASS. After round 2 these are allow-lists: exactly one `ExecStart=/usr/local/sbin/holzkube-manager-update --check`, the four address families exactly, no other Exec*, the worst case start + 4 x stop at least 15 s under the helper's 3 min, and the helper's `TimeoutStartSec` equal to `HelperServiceLimit`. `TestGuideKeepsTheDaemonsHardening` PASS. `deploy/holzkube-manager-update.sh` is unchanged since 9f4104b (D-19). |
 
 **Score:** 5/5 truths verified (0 present-but-behavior-unverified)
 
-### Plan-level and UAT truths
+### Plan-level truths added since 591af39 (13-12..13-15 and the fix rounds)
 
 | Truth | Status | Evidence |
 |---|---|---|
-| No host action label runs past its button at 390 px (UAT G-13-3, previously deferred to Phase 14) | VERIFIED (closed in 13-11) | Root cause confirmed in code: the old template put `max-md:whitespace-normal${` right before the interpolation, so Tailwind's scanner never saw the class as a token. It is now `cn('... max-md:whitespace-normal', spec.destructive && 'text-destructive')` (`HostActions.tsx:251-254`). **Built CSS:** `./bin/task build:web --force` rc 0, and `index-*.css` has exactly one `.max-md\:whitespace-normal{white-space:normal}`, inside `@media not all and (width>=48rem)`. HostActions.tsx is the only source file that uses the class. **Browser:** `host.browser.test.tsx` 8/8 PASS. The tests include per-button `spillsPastItsButton`, `lineBoxes(update) == 2` at 390 px, both helper-notice shapes with disabled buttons, and the 1200-px desktop shape (28 px tall, one line each). **Reinstated by this verifier:** the original template literal put back gave rc 1, 3 failed / 5 passed, with `"Check for updates and install" scrolls: scrollWidth 191 > clientWidth 189`, the icon at -0.5..15.5 and the text line at 19.5..191.5 outside 0..191. This matches 13-11's claimed red run exactly. Restored; tree clean. |
-| 40-character hostname wraps inside the dialog at 390 px | VERIFIED | browser test PASS; the dialog footer buttons now also pass `spillsPastItsButton` |
-| A /host page that did not place the reboot order shows the waiting notice | VERIFIED (derivation) + human | `host.test.tsx` PASS; the real reboot is a human item |
-| Nothing installed on the operator's host, production never restarted; helper ships in deploy/ only | VERIFIED | Helper files absent from the host; this verifier did not touch the service |
+| A check places exactly `check-update <16 hex>\n`; the helper consumes it before acting, calls `start holzkube-manager-update-check.service` blocking, and records `started` then `done`/`failed` | VERIFIED | `TestHostCheckRoundTrip` PASS (gates, order, helper as root, status back in GET /api/v1/host). `TestHostScriptAsRoot/valid_check-update` and the "systemctl fails" rows PASS. Red (b) above. |
+| `--check` installs nothing (as root) | VERIFIED | `TestUpdateScriptAsRoot/check_installs_nothing,_as_root` PASS. |
+| An older helper is recognised from its marker line; check-update is refused with 409 `conflict.host-helper-outdated` and no order, while the other four still work | VERIFIED | `TestHostCheckNeedsANewerHelper` PASS. `KnownOrders` reads only a root-owned script that no one else can write, capped at Max+1. |
+| While the helper waits for a check, every order is refused with 409 `conflict.host-helper-busy` before token and placement; a refused client keeps its token; the page's buttons follow `actions.busy` | VERIFIED | This is a behaviour-dependent truth (a state transition). Named tests PASS: `TestHostActionsWaitForARunningCheck`, `TestABusyRefusalKeepsTheToken`, `TestAHelperBusyAtPlacementIsRefusedAsBusy`, `TestCheckRunning`, `TestCheckHeld`. **Red by this verifier:** (c) the action route's `Busy()` refusal removed: rc 1. `TestABusyRefusalKeepsTheToken` failed ("same token after the check: 403, want 202 -- the busy refusal spent it"), and so did `TestAHelperBusyAtPlacementIsRefusedAsBusy`. `TestHostActionsWaitForARunningCheck` alone stayed green, because `Place`'s own guard still refused with 409. (d) `Place`'s `busyLocked()` guard removed as well: rc 1, all seven "refused" rows of `TestHostActionsWaitForARunningCheck` ("202, want 409 conflict.host-helper-busy", "a refused request placed an order"). (e) Page: the `host.actions.busy` clause in `disabledReason` removed: vitest rc 1, 2 failed ("while the server says the helper is busy: all five off"). All restored, `cmp` 0 against the checkout, rc 0. |
+| A failed check names the check unit's journal; a check is finished only by the helper's `done`/`failed`, not by an hourly run's status; a check cut off by a reboot says so | VERIFIED (derivation) + human | Covered by HostActions.test.tsx rows (181 PASS). The real reboot is a human item. |
+| At 390 px 'Check for updates' spans the first row and the other four sit two by two, every control at least 44 px; at 1200 px all five are one line | VERIFIED | `host.browser.test.tsx` 10/10 PASS here. The CI log's layout audit ran `/host · Host actions (helper installed) (5 controls)` ok, and "every control is at least 44px at 390px". |
+| README, guide, HOST-HELPER.md and the contract describe five actions; host.png shows them | VERIFIED | README:51 ("check for an update without installing anything"). guide.md:243-253. api-contract.md:1443, :1704-1745. host.png viewed. |
 
-### Required Artifacts (changed since a45015c)
+### Required Artifacts (new or changed since 591af39)
 
-| Artifact | Expected | Status | Details |
-|---|---|---|---|
-| `internal/host/hostaction/helper.go` | Detect: not-enabled only with both units | VERIFIED | its doc comment and code agree; red against the reinstated fault |
-| `internal/host/hostaction/helper_test.go` | 16-combination invariant plus example rows | VERIFIED | goes red on the fault |
-| `web/fixtures/demo.json`, `docs/api-contract.md`, `docs/screenshots/host.png` | two-item empty-machine list | VERIFIED | Go and web fixture guards both pin the list; png inspected |
-| `web/src/components/HostActions.tsx` | class list through `cn()` | VERIFIED | rule is in the built CSS |
-| `web/src/routes/host.browser.test.tsx` | per-button fit check and desktop shape | VERIFIED | red against the reinstated template |
+| Artifact | Status | Details |
+|---|---|---|
+| `deploy/holzkube-manager-host.sh` | VERIFIED | five-word pattern, marker line, check arm without `--no-block`, `done` record; red (a), (b) |
+| `deploy/holzkube-manager-update-check.service` | VERIFIED | oneshot, only `--check`, no [Install], `TimeoutStopSec=10s`, allow-list guarded, in the release archive |
+| `internal/host/hostaction/{hostaction,helper,result}.go` | VERIFIED | `CheckUpdate`, `KnownOrders`/`Outdated`, `CheckRunning`/`CheckHeld`, `Box.Busy`, `ErrBusy` |
+| `internal/host/hostaction/testdata/holzkube-manager-host-before-check.sh` | VERIFIED | frozen older helper; `TestAnOlderHelperRefusesTheCheck` PASS |
+| `internal/httpapi/handlers/host.go`, `problem.go` | VERIFIED | refusal order container -> missing -> outdated -> busy, before token and body; red (c), (d) |
+| `web/src/components/HostActions.tsx`, `routes/host.tsx`, `api.ts` | VERIFIED | fifth button, dialog, phases, `actions.busy`, older-helper notice; red (e) |
+| `web/fixtures/demo.json`, `host-helper-installed.json`, `docs/screenshots/host.png` | VERIFIED | `outdated: []` in both raw fixtures (fixtures.test.ts PASS); five buttons in host.png |
 
 ### Key Link Verification
 
 | From | To | Via | Status |
 |---|---|---|---|
-| `Detect` | page notice + route 409 | `Box.Missing()` -> `actions.missing` / `available` | WIRED (TestReadCarriesActions, TestHostActionsNeedTheHelper) |
-| `demo.json` | `host.png` / README | `web/scripts/readme-images.mjs` | WIRED (png shows the fixture's two items) |
-| `HostActions.tsx` class | built stylesheet | Tailwind source scan -> `dist/assets/index-*.css` | WIRED (rule present, one source) |
-
-Other links are unchanged from the initial report and still pass: buttons -> confirm/actions routes -> `Box.Place` -> order file -> PathExists -> script -> `last` -> `ReadResult`.
+| HostActions.tsx | `/api/v1/host/actions/check-update` | `HOST_ACTION_PATHS` (`api.ts:3012`) | WIRED |
+| handlers/host.go | hostaction.go | route loop over `Actions()`, `hostTypedPhrase[CheckUpdate]` | WIRED |
+| holzkube-manager-host.sh | update-check.service | the fixed argv of the check arm | WIRED (TestUnitsAgree, marker test) |
+| update-check.service | update.sh | `ExecStart=UpdateScriptPath --check` | WIRED (allow-list) |
+| `Box.Busy()` | routes + `actions.busy` -> page buttons | `collector.go` -> host answer -> `disabledReason` | WIRED (red c, d, e) |
+| `Box.Outdated()` | 409 outdated + page notice | `actions.outdated` | WIRED (TestHostCheckNeedsANewerHelper) |
+| demo.json | host.png / README | `readme-images.mjs` | WIRED (png shows five) |
 
 ### Behavioral Spot-Checks
 
 | Behavior | Command | Result | Status |
 |---|---|---|---|
-| Host, hostaction, httpapi, fsstore, jobs, publicrepo | `go test ./internal/host/... ./internal/httpapi/ ./internal/store/fsstore/ ./internal/jobs/ ./internal/publicrepo/ -count=1` | rc 0, 7 packages ok | PASS |
-| Named G-13-2 tests + root script | `go test -v -run 'TestHelper\|TestTheFixtureShowsTheRealInstallCommands\|TestReadCarriesActions\|TestHostActionsNeedTheHelper\|TestHostScriptAsRoot'` | rc 0, 64 PASS, 0 SKIP, 0 FAIL | PASS |
-| Process guard + cmd guards | `go test ./internal/ ./cmd/... -count=1` | rc 0 | PASS |
-| Web jsdom | `vitest run --project jsdom HostActions.test.tsx host.test.tsx fixtures.test.ts` | rc 0, 221/221 | PASS |
-| Web browser | `npm run test:browser -- src/routes/host.browser.test.tsx` | rc 0, 8/8 | PASS |
-| Built CSS carries the wrap rule | `./bin/task build:web --force`; grep the css | rc 0; 1 rule inside the max-md media query | PASS |
-| Web typecheck / lint | `npm run typecheck`, `npm run lint` | rc 0 / rc 0 (2 warnings, 1 info, pre-existing per 13-10) | PASS |
+| Phase-13 Go packages | `go test -count=1 -v ./internal/host/... ./internal/httpapi/ ./internal/httpapi/handlers/ ./internal/ ./cmd/holzkube-managerd/ ./internal/audit/ ./internal/store/fsstore/ ./internal/jobs/ ./internal/publicrepo/` | rc 0, 11 packages ok, 1063 PASS lines, 0 SKIP, 0 FAIL | PASS |
+| Web jsdom | `vitest run --project jsdom HostActions.test.tsx host.test.tsx fixtures.test.ts api.nulls.test.ts wall.test.tsx` | rc 0, 5 files, 358 tests | PASS |
+| Web browser | `npm run test:browser -- src/routes/host.browser.test.tsx` | rc 0, 10/10 | PASS |
+| Whole gate | `./bin/task ci` on HEAD, run by the caller just before; log read, not re-run | rc 0 as the caller reported it (the log carries no rc line). Log: lint:web, test:web (61 files, 828 tests), build, lint:go "0 issues", test (every package `ok`, no FAIL line), test:layout "Nothing out of reach ... on 27 routes and in 9 opened states", test:next | PASS (log) |
 
-### Fault injections by this verifier (each restored; `git status --porcelain` empty after)
+### Fault injections by this verifier (scratch copy from `git archive HEAD`; each restored, `cmp` 0 against the checkout, then green)
 
-| Injection | Test | rc |
-|---|---|---|
-| `helper.go`: wants check made unconditional (`if unitsInstalled \|\| !unitsInstalled`) | TestHelper*, TestTheFixtureShowsTheRealInstallCommands, TestReadCarriesActions, TestHostActionsNeedTheHelper | 1 |
-| `HostActions.tsx`: original `...whitespace-normal${...}` template put back | host.browser.test.tsx | 1 (3 failed) |
+| # | Injection | Test | rc |
+|---|---|---|---|
+| a | helper script: pattern `^([a-z-]+)`, `*)` runs `systemctl start "$action"` | `TestHostScriptAsRoot` (as root, userns) | 1 (`rejects_foreign_word`) |
+| b | helper script: `record "$id" "$action" done` removed | `TestHostScriptAsRoot` | 1 (`valid_check-update`) |
+| c | action route: `Busy()` refusal removed | busy API tests | 1 (`TestABusyRefusalKeepsTheToken`, `TestAHelperBusyAtPlacementIsRefusedAsBusy`) |
+| d | (c) plus `Place`'s `busyLocked()` guard removed | busy API tests | 1 (7 rows of `TestHostActionsWaitForARunningCheck` as well) |
+| e | page: `host.actions.busy` clause in `disabledReason` removed | HostActions.test.tsx | 1 (2 failed) |
+| f | `hostTypedPhrase[CheckUpdate] = false` | `TestEveryHostActionRequiresTyping`, `TestHostConfirmGates` | 1, 1 |
+
+Injection (c) also shows what each test does. `TestHostActionsWaitForARunningCheck` sees "no order placed" and holds Place's guard. The token-keeping test is the one that holds the route's own early refusal.
 
 ### Requirements Coverage
 
 | Requirement | Description | Status | Evidence |
 |---|---|---|---|
-| HACT-01 | Restart host | SATISFIED (automated) / real run human | unchanged |
-| HACT-02 | Shut down host | SATISFIED (automated) / real run human | unchanged |
-| HACT-03 | Restart service | SATISFIED (automated) / real run human | unchanged |
-| HACT-04 | "jetzt nach Updates suchen" | SATISFIED as "check and install" -- decision flagged | unchanged; label now fits at 390 px |
-| HACT-05 | sudo + typed hostname + audit + operator | SATISFIED | SC1 |
-| HACT-06 | daemon never executes; fixed list; unknown discarded and logged | SATISFIED | SC2, SC3 |
-| HACT-07 | helper missing -> UI says so and names what to install, no order | SATISFIED | SC4, G-13-2 closed |
+| HACT-01 | Restart host | SATISFIED (automated) / real run human | SC1, SC3 |
+| HACT-02 | Shut down host | SATISFIED (automated) / real run human | SC1, SC3 |
+| HACT-03 | Restart service | SATISFIED (automated) / real run human | SC1, SC3 |
+| HACT-04 | „jetzt nach Updates suchen" | SATISFIED. The operator's decision of 2026-09-30 is built: "Check for updates" only looks, and "Check for updates and install" installs | 13-12..13-15; the previous report's decision item is closed |
+| HACT-05 | sudo + typed hostname + audit + operator | SATISFIED | SC1, injection f |
+| HACT-06 | daemon never executes; fixed list; unknown discarded and logged | SATISFIED | SC2, SC3, injections a, b |
+| HACT-07 | helper missing -> UI says so, names what to install, no order | SATISFIED | SC4; the older-helper case added |
 | HACT-08 | deploy/ units, script, guide | SATISFIED | SC5 |
 
-No orphaned requirements.
+No orphaned requirements. Every HACT ID is claimed by a plan.
 
 ### Anti-Patterns Found
 
-The files changed since a45015c contain no `TBD`, `FIXME`, `XXX`, `TODO` or `HACK`. Both warnings from the previous report (helper.go:102-104 and HostActions.tsx:777) are resolved.
+The implementation files changed by phase-13 commits since 591af39 contain no `TBD`, `FIXME`, `XXX`, `TODO` or `HACK`.
 
 | File | Line | Pattern | Severity | Impact |
 |---|---|---|---|---|
+| deploy/holzkube-manager-update.sh + update-check.service | -- | no lock between a check and the hourly update (IN-02, open) | Info | a rare overlap can overwrite status.json; see advisory |
+| internal/host/hostaction/helper.go | 281-296 | `Outdated` does not look for the update script (IN-04, open) | Info | documented prerequisite, not detected |
+| internal/host/hostaction/hostaction.go | busyLocked | V-22 remainder: Place's lock does not close the helper's rename between `Lstat` and the link (left as info by round 3) | Info | milliseconds window; the withdrawal then names the check unit's journal (`CheckHeld`) |
 | .github/workflows/ci.yml | 121-122 | userns sysctl step never executed (no CI minutes) | Info | the root matrix is proven on the Pi only |
 
 ### Human Verification Required
 
-1. **Install and probe the helper.** Follow HOST-HELPER.md, run the three-step probe, then press "Check for updates and install". Expected: `kein Auftrag` on the dry start, the path unit `active (waiting)`, one pickup, `last` reads `<id> update started`, and no loop. Why human: it needs the real system manager and sandbox, and installing is the operator's call.
-2. **Real reboot with two sessions.** Expected: both pages show the waiting notice, then "back", and the order does not run again after boot. Why human: it needs a real reboot and the Pi's clock at boot.
-3. **Restart service and shut down, once each.** Expected: both work from inside the helper's sandbox. Why human: the stand-in systemctl only records argv.
-4. **HACT-04 wording.** Either accept "check for updates and install" as meeting "nach Updates suchen", or ask for a check-only variant. Why human: this is a product decision flagged in 13-CONTEXT.
+1. **Install the helper and the check unit, then probe them.** Follow HOST-HELPER.md: do the dry start, check that the path unit is `active (waiting)`, then press Check for updates and then Check for updates and install. Expected: `last` walks `check-update started` -> `done`. All five buttons are off while the check runs. The box ends with the newest and the installed version. Nothing is installed by the check. The update order reads `update started`, and the path unit does not loop.
+2. **V-26: the check unit under its real sandbox.** Run `sudo systemctl start holzkube-manager-update-check.service`. Expected: exit 0, `Result=success`, no permission, address-family or DNS errors in its journal, and a fresh `status.json` that the daemon user can read.
+3. **A real reboot with two sessions, and a check cut off by a reboot.** Expected: both pages show the waiting notice, then "back", and the reboot order does not run again. The cut-off check says "the host restarted before the check ended", and the buttons come back on after boot.
+4. **Restart service and Shut down host, once each.** Both should work from inside the helper's sandbox.
+5. **D-11 phone hand test with five actions.** Against a development daemon over TLS with the helper installed: no zoom, five readable buttons, both dialogs open, typing works, and Keep running closes the dialog. Nothing is submitted.
 
 ### Gaps Summary
 
-Both gaps are closed in the code, not only in the summaries. On an empty machine, `Detect` now reports `[script, path-unit]`. That state is pinned by a 16-state invariant, by the Go and web fixture guards, by the contract and by the re-rendered host.png. Putting the old unconditional check back turns five test functions red. The update button's wrap class now reaches the built stylesheet. Chromium measures every host button against its own border box at 390 px and checks the desktop shape at 1200 px. Putting the old template back reproduces the 191/189 overflow. No regressions were found in SC1-3 or SC5. What remains cannot be checked here: an installed helper under the real system manager, a real reboot, restart-service and poweroff from the sandbox, and the HACT-04 wording decision.
+There are no gaps. The fifth action exists end to end. It has a button and its own dialog, goes through the same four locks (one of them re-seen red here), places a fixed one-line order, and is picked up by a helper whose pattern, case arms and marker line agree with `Actions()`. That helper blocks on a check unit that runs only `--check` and is guarded by an allow-list. The helper records `done` or `failed`, and the routes and the page refuse other orders until it does. The server is the lock: removing the route's refusal and Place's guard each turns a named test red. An older helper is told apart and refused for the check alone. The previous report's open product decision (HACT-04 wording) is closed by the operator's choice and built. What remains needs root on the real host, a real reboot, or a phone, and stays with the operator. Three review info items (IN-02, IN-03, IN-04) are recorded as advisory. None of them blocks a success criterion.
 
 ---
 
-_Verified: 2026-09-30T04:14:06Z_
+_Verified: 2026-10-01T13:12:51Z_
 _Verifier: Claude (gsd-verifier)_
