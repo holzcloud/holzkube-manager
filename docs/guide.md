@@ -547,11 +547,18 @@ role. But on an address that only accepts single sign-on the password is
 refused, and linking is refused there too — so the link is made again from the
 local network address.
 
-**Unlinking stops the next sign-in, not open sessions.** The session that did
-it stays signed in, including one that came in through the provider; it can no
-longer confirm destructive actions through the provider, and says so — the
-password on the local network still can. To end somebody's sessions, remove the
-account.
+**Unlinking ends the sessions that came in through the link.** A session that
+signed in through the provider lives only as long as the identity it came in
+through is linked to its account: after an unlink it is signed out at its next
+request, wherever it is open. Sessions opened with the password go on. That
+makes the unlink the way to throw somebody out who should not have been linked
+— removing the account would do it too, but the only admin cannot be removed.
+
+When you unlink your own account from a session that came in through single sign-on,
+that session is the one that ends: the page goes to the sign-in page. Sign in
+with the password on the local network. Signing in through single sign-on there
+links whichever provider is configured at that moment — the old one, if you
+have not switched yet.
 
 ### Switching providers
 

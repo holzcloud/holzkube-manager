@@ -2,6 +2,9 @@ package auth
 
 import (
 	"context"
+	"crypto/sha256"
+	"crypto/subtle"
+	"encoding/hex"
 	"fmt"
 	"net/http"
 	"time"
@@ -9,6 +12,7 @@ import (
 	"github.com/alexedwards/scs/v2"
 
 	"github.com/holzcloud/holzkube-manager/internal/auth/scsstore"
+	"github.com/holzcloud/holzkube-manager/internal/model"
 	"github.com/holzcloud/holzkube-manager/internal/store"
 )
 
@@ -25,6 +29,17 @@ const (
 	// lifetime: the limit is measured from here and from nothing else, so no
 	// amount of later traffic can move it.
 	sessionKeyAuthenticatedAt = "authenticated_at"
+
+	// sessionKeyProviderSignIn marks a session that came in through the
+	// identity provider. The value predates this package owning it -- the OIDC
+	// handlers wrote it -- and keeping it means a session from an earlier
+	// release is still recognised for what it is.
+	sessionKeyProviderSignIn = "oidc.authenticated"
+
+	// sessionKeyProviderBinding is a fingerprint of the provider identity the
+	// session came in through: a hash, so that the session record does not
+	// carry somebody's subject at a third party.
+	sessionKeyProviderBinding = "oidc.binding"
 )
 
 // newSessionManager configures the session manager for D-07: an absolute
@@ -67,6 +82,63 @@ func (s *Service) SessionID(ctx context.Context) string {
 func (s *Service) markAuthenticated(ctx context.Context, id string) {
 	s.sm.Put(ctx, sessionKeyUser, id)
 	s.sm.Put(ctx, sessionKeyAuthenticatedAt, s.now().UnixNano())
+
+	// Rotating the token keeps the session's data, so a sign-in in a browser
+	// whose previous session came through the provider would otherwise inherit
+	// that session's tie to the link. StartProviderSession sets the marks
+	// again after this; every other way in is not through the provider.
+	s.sm.Remove(ctx, sessionKeyProviderSignIn)
+	s.sm.Remove(ctx, sessionKeyProviderBinding)
+}
+
+// StartProviderSession is StartSession for a sign-in through the identity
+// provider, and ties the session to the identity it came in through.
+//
+// Such a session lives only as long as that identity is linked to its account
+// (see providerLinkHolds). That is what makes an unlink the way to end it: the
+// remedy for a wrong link is an unlink, and a remedy that left the wrong
+// person's session open until it expired would be no remedy -- the other way to
+// end a session, removing the account, is refused for the only admin.
+func (s *Service) StartProviderSession(ctx context.Context, u model.User, issuer, subject string) error {
+	if err := s.StartSession(ctx, u); err != nil {
+		return err
+	}
+	s.sm.Put(ctx, sessionKeyProviderSignIn, true)
+	s.sm.Put(ctx, sessionKeyProviderBinding, bindingFingerprint(issuer, subject))
+	return nil
+}
+
+// SignedInThroughProvider reports whether this session came in through the
+// identity provider.
+func (s *Service) SignedInThroughProvider(ctx context.Context) bool {
+	return s.sm.GetBool(ctx, sessionKeyProviderSignIn)
+}
+
+// providerLinkHolds reports whether a session's way in still exists.
+//
+// A password session always holds. A session through the provider holds while
+// its account is linked to the identity it came in through: an unlink ends it
+// at its next request, and so does a relink to a different identity. A
+// provider session from before the fingerprint existed carries none, and of it
+// only "the account is still linked" can be checked.
+func (s *Service) providerLinkHolds(ctx context.Context, u model.User) bool {
+	if !s.sm.GetBool(ctx, sessionKeyProviderSignIn) {
+		return true
+	}
+	if !u.HasIdentityBinding() {
+		return false
+	}
+	fp := s.sm.GetString(ctx, sessionKeyProviderBinding)
+	if fp == "" {
+		return true
+	}
+	return subtle.ConstantTimeCompare([]byte(fp), []byte(bindingFingerprint(u.Issuer, u.Subject))) == 1
+}
+
+// bindingFingerprint is a one-way digest of a provider identity.
+func bindingFingerprint(issuer, subject string) string {
+	sum := sha256.Sum256([]byte(issuer + "\x00" + subject))
+	return hex.EncodeToString(sum[:])
 }
 
 // withinAbsoluteLifetime reports whether the session was authenticated less

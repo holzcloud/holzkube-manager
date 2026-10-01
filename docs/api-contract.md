@@ -3529,10 +3529,17 @@ provider is configured — a binding left over from a provider that has since be
 switched off is exactly the one that needs removing. It is audited as
 `user.identity-unlink` with **no parameters recorded**: the account is in the
 path, and an issuer or subject a client sends in a body is redacted rather than
-kept in an archive nothing removes from. It **ends no session**, the caller's
-included: a session belongs to the account, and the account — its ID, role and
-password — is unchanged; the binding only decides which account the next
-provider sign-in resolves to. Removing an account is what ends its sessions.
+kept in an archive nothing removes from. **It ends every session that came in
+through the removed link**, the caller's included when it is one of them: a
+session signed in through the provider carries a fingerprint of the identity it
+came through, and it is signed in only while its account is linked to that
+identity — after an unlink, or a relink to another identity, its next request
+answers `401`. A session from before the fingerprint existed is held to "the
+account is still linked". Password sessions go on: the account — its ID, role
+and password — is unchanged. When the caller's own session ended, the server
+destroys it before answering, and the answer is still `200` with the account
+view (`self` true); `GET /api/v1/auth/me` reports `sso` for the session, which is
+how a client knows beforehand. Removing an account also ends its sessions.
 
 | Code | Status | Means |
 |---|---|---|

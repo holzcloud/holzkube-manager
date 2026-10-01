@@ -237,7 +237,7 @@ export function LoginPage() {
   )
 }
 
-export type LoginReason = 'required' | 'expired' | 'signed-out' | undefined
+export type LoginReason = 'required' | 'expired' | 'signed-out' | 'unlinked' | undefined
 
 /**
  * Why a single sign-on attempt ended back here.
@@ -288,6 +288,12 @@ function reasonText(reason: LoginReason): string {
       return 'Your session ended. Sessions last 24 hours; sign in again and nothing you had open is lost.'
     case 'signed-out':
       return 'You are signed out.'
+    case 'unlinked':
+      return (
+        'Single sign-on was unlinked, and the session that came in through it ended with it. ' +
+        'Sign in with the password on the local network. Signing in through single sign-on ' +
+        'there links whichever provider is configured at that moment.'
+      )
     default:
       return 'holzkube-manager needs a session before it will show you anything.'
   }
@@ -301,7 +307,12 @@ export const loginRoute = createRoute({
   ): { reason?: LoginReason; sso_error?: string } => {
     const reason = search.reason
     const out: { reason?: LoginReason; sso_error?: string } =
-      reason === 'required' || reason === 'expired' || reason === 'signed-out' ? { reason } : {}
+      reason === 'required' ||
+      reason === 'expired' ||
+      reason === 'signed-out' ||
+      reason === 'unlinked'
+        ? { reason }
+        : {}
 
     // Kept as a bare string rather than a union: the server owns this
     // vocabulary, and a page that dropped codes it did not recognise would

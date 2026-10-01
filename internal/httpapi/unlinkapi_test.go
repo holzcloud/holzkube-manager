@@ -277,8 +277,9 @@ func TestUnlinkSingleSignOnRefusesAnUnlinkedAccount(t *testing.T) {
 	}
 }
 
-// An admin unlinking their own account stays signed in: the session belongs to
-// the account, and the account -- its ID, role and password -- is unchanged.
+// An admin unlinking their own account from a password session stays signed
+// in: only sessions that came in through the removed link end with it, and the
+// account -- its ID, role and password -- is unchanged.
 func TestUnlinkSingleSignOnOfYourOwnAccountKeepsTheSession(t *testing.T) {
 	t.Parallel()
 

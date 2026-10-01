@@ -403,6 +403,7 @@ func deleteUser(d httpapi.Deps) http.HandlerFunc {
 // with the account as it now is, the same shape a role change answers with.
 func unlinkUserIdentity(d httpapi.Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		me, _ := d.Auth.CurrentUser(r.Context())
 		saved, err := d.Auth.UnlinkIdentity(r.Context(), model.UserID(r.PathValue("id")))
 		switch {
 		case errors.Is(err, auth.ErrNotLinked):
@@ -414,10 +415,18 @@ func unlinkUserIdentity(d httpapi.Deps) http.HandlerFunc {
 			return
 		}
 
-		// No session is ended, this one included: a session belongs to the
-		// account, and the account -- its ID, role and password -- is what it
-		// was. The binding only decides where the next provider sign-in lands.
-		me, _ := d.Auth.CurrentUser(r.Context())
+		// Every session that came in through the removed link ends with it,
+		// at its next request (auth.StartProviderSession); password sessions
+		// go on. When the caller's own session is one of them it is destroyed
+		// here rather than left to answer 401 next time, so that the cookie
+		// goes too. The answer is still the account, and still marked as the
+		// caller's own: the page reads it to know where to go next.
+		if _, still := d.Auth.CurrentUser(r.Context()); !still {
+			if err := d.Auth.Logout(r.Context()); err != nil {
+				d.Logger.WarnContext(r.Context(), "the unlink ended this session, and destroying it failed",
+					"error", err)
+			}
+		}
 		writeJSON(w, http.StatusOK, viewOfUser(saved, me.ID))
 	}
 }

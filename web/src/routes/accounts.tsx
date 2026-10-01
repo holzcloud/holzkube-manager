@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 import {
   api,
+  type Me,
   type ServiceAccountToken,
   USER_ROLE_SENTENCE,
   USER_ROLES,
@@ -29,6 +30,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import { SESSION_QUERY_KEY } from '@/hooks/useSession'
 
 /**
  * Accounts and roles (V2-AUTH-02).
@@ -84,7 +86,20 @@ export function AccountsCard() {
   )
 }
 
-export function AccountTable({ users, onChanged }: { users: User[]; onChanged: () => void }) {
+/** Where the page goes when an unlink ended the session it was made from. */
+function toSignInAfterUnlink() {
+  window.location.assign('/login?reason=unlinked')
+}
+
+export function AccountTable({
+  users,
+  onChanged,
+  onOwnSessionEnded = toSignInAfterUnlink,
+}: {
+  users: User[]
+  onChanged: () => void
+  onOwnSessionEnded?: () => void
+}) {
   const admins = users.filter((u) => u.role === 'admin')
   // Only people count: this mirrors SinglePersonAccount in
   // internal/auth/identity.go, which first-use linking (bindFirstIdentity) uses.
@@ -132,6 +147,7 @@ export function AccountTable({ users, onChanged }: { users: User[]; onChanged: (
               adminCount={admins.length}
               personCount={personCount}
               onChanged={onChanged}
+              onOwnSessionEnded={onOwnSessionEnded}
             />
           ),
         },
@@ -245,11 +261,13 @@ function AccountActions({
   adminCount,
   personCount,
   onChanged,
+  onOwnSessionEnded,
 }: {
   user: User
   adminCount: number
   personCount: number
   onChanged: () => void
+  onOwnSessionEnded: () => void
 }) {
   const [resetting, setResetting] = useState(false)
   const [password, setPassword] = useState('')
@@ -305,7 +323,12 @@ function AccountActions({
           </Button>
         )}
         {linked && (
-          <UnlinkSingleSignOn user={user} personCount={personCount} onChanged={onChanged} />
+          <UnlinkSingleSignOn
+            user={user}
+            personCount={personCount}
+            onChanged={onChanged}
+            onOwnSessionEnded={onOwnSessionEnded}
+          />
         )}
         <Button
           type="button"
@@ -363,23 +386,41 @@ function AccountActions({
  *
  * What the dialog spends its words on is what happens *after*: linking again is
  * a first-use act that only works from the local network address, and only
- * while there is exactly one account for a person. Both are facts the click
- * cannot be undone around, so they are said before it rather than discovered.
+ * while there is exactly one account for a person; and the sessions that came
+ * in through the link end with it -- the caller's own included, when it is one
+ * of them. These are facts the click cannot be undone around, so they are said
+ * before it rather than discovered.
  */
 function UnlinkSingleSignOn({
   user,
   personCount,
   onChanged,
+  onOwnSessionEnded,
 }: {
   user: User
   personCount: number
   onChanged: () => void
+  onOwnSessionEnded: () => void
 }) {
   const [open, setOpen] = useState(false)
+  // Read from the cache the shell fills, never fetched here -- the same
+  // reading the sudo dialog does.
+  const { data: me } = useQuery<Me>({
+    queryKey: SESSION_QUERY_KEY,
+    queryFn: api.me,
+    enabled: false,
+  })
+  // A session that came in through single sign-on ends with the link it came
+  // in through (the server ends it); a password session goes on.
+  const endsThisSession = user.self && me?.sso === true
   const unlink = useMutation({
     mutationFn: () => api.users.unlinkIdentity(user.id),
     onSuccess: () => {
       setOpen(false)
+      if (endsThisSession) {
+        onOwnSessionEnded()
+        return
+      }
       onChanged()
     },
   })
@@ -392,7 +433,11 @@ function UnlinkSingleSignOn({
         size="sm"
         variant="outline"
         className="max-md:h-11"
-        onClick={() => setOpen(true)}
+        onClick={() => {
+          // A refusal from the last attempt is about that attempt, not this one.
+          unlink.reset()
+          setOpen(true)
+        }}
       >
         Unlink single sign-on
       </Button>
@@ -422,13 +467,23 @@ function UnlinkSingleSignOn({
               account here can be linked again until it is the only one.
             </p>
           )}
-          {user.self && (
-            <p className="text-muted-foreground text-sm">
-              This is your account. You stay signed in, but until it is linked again it cannot
-              confirm anything through the identity provider: use the password, on the local
-              network.
-            </p>
-          )}
+          {user.kind !== 'service' &&
+            (endsThisSession ? (
+              <p className="text-muted-foreground text-sm">
+                This is your account, and you signed in through single sign-on: this session ends
+                with the link. Sign in again with the password on the local network — not through
+                single sign-on, which would link whichever provider is configured at that moment.
+              </p>
+            ) : user.self ? (
+              <p className="text-muted-foreground text-sm">
+                This is your account. You signed in with the password, so you stay signed in.
+              </p>
+            ) : (
+              <p className="text-muted-foreground text-sm">
+                Any session {user.username} opened through single sign-on ends with the link.
+                Sessions opened with the password go on.
+              </p>
+            ))}
           {unlink.error ? <Problem error={unlink.error} /> : null}
           <DialogFooter>
             <Button variant="outline" onClick={() => setOpen(false)}>

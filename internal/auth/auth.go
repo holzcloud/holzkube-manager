@@ -297,6 +297,10 @@ func (s *Service) CurrentUser(ctx context.Context) (model.User, bool) {
 	if u.IsService() {
 		return model.User{}, false
 	}
+	// A session through the provider ends with the link it came in through.
+	if !s.providerLinkHolds(ctx, u) {
+		return model.User{}, false
+	}
 	return u, true
 }
 

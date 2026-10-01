@@ -308,3 +308,50 @@ func TestAnAccountChangeLosingARaceIsAConflict(t *testing.T) {
 		t.Errorf("answer = %d %s, want 409 store.conflict", rec.Code, rec.Body.String())
 	}
 }
+
+// An admin who signed in through the provider and unlinks their own account
+// ends the session they did it from: it came in through the link that is now
+// gone. The unlink still answers with the account, marked as theirs, and the
+// session record is destroyed rather than left to answer 401 later.
+func TestUnlinkingYourOwnLinkEndsTheSessionThatCameThroughIt(t *testing.T) {
+	t.Parallel()
+	d, st := callbackDeps(t, false)
+	ctx := context.Background()
+	if _, err := st.Users().Put(ctx, model.User{
+		ID: "u-person", Username: "somebody", Role: model.RoleAdmin, Kind: model.KindPerson,
+		PasswordHash: plantedHash, Issuer: rulesIssuer, Subject: "subject-0f3a9c", CreatedAt: time.Now(),
+	}); err != nil {
+		t.Fatalf("put person: %v", err)
+	}
+
+	_, cookies := completeLoginAs(t, d, "subject-0f3a9c")
+	if who := signedInAs(t, d, cookies); who != "u-person" {
+		t.Fatalf("the provider sign-in is signed in as %q, want u-person", who)
+	}
+
+	h := d.Auth.Sessions().LoadAndSave(unlinkUserIdentity(d))
+	req := httptest.NewRequest(http.MethodDelete, "https://192.168.1.10:8443/api/v1/users/u-person/identity", nil)
+	req.SetPathValue("id", "u-person")
+	for _, c := range cookies {
+		req.AddCookie(c)
+	}
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("unlink: %d %s", rec.Code, rec.Body.String())
+	}
+	if body := rec.Body.String(); !strings.Contains(body, `"self":true`) || !strings.Contains(body, `"linked_identity":false`) {
+		t.Errorf("the answer does not describe the caller's own, now unlinked account: %s", body)
+	}
+	if who := signedInAs(t, d, cookies); who != "" {
+		t.Errorf("the session that came in through the removed link is still signed in as %q", who)
+	}
+	sessions, err := st.Sessions().List(ctx)
+	if err != nil {
+		t.Fatalf("list sessions: %v", err)
+	}
+	if len(sessions) != 0 {
+		t.Errorf("%d session records survive; the ended one was not destroyed", len(sessions))
+	}
+}

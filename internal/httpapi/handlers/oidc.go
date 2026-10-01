@@ -29,8 +29,11 @@ const (
 	// stored -- and not the token itself, which only ever arrives from the
 	// provider at runtime. Renaming it to something without the word would hide
 	// the finding by making the constant worse.
-	sessionKeyIDToken   = "oidc.id_token" //nolint:gosec // a session key name, not a credential
-	sessionKeyIsSSOAuth = "oidc.authenticated"
+	//
+	// Whether the session came in through the provider, and through which
+	// identity, is the auth package's to keep (StartProviderSession): it is
+	// what decides whether the session is still signed in.
+	sessionKeyIDToken = "oidc.id_token" //nolint:gosec // a session key name, not a credential
 )
 
 // afterAuth is where the browser lands once the flow completes.
@@ -356,13 +359,14 @@ func completeLogin(d httpapi.Deps, w http.ResponseWriter, r *http.Request, ident
 		return
 	}
 
-	if err := d.Auth.StartSession(r.Context(), u); err != nil {
+	// Tied to the identity it came in through: unlinking that identity ends
+	// this session at its next request, while the account's password sessions
+	// go on.
+	if err := d.Auth.StartProviderSession(r.Context(), u, issuer, identity.Subject); err != nil {
 		httpapi.WriteInternal(w, r, d.Logger, err)
 		return
 	}
-	sm := d.Auth.Sessions()
-	sm.Put(r.Context(), sessionKeyIsSSOAuth, true)
-	sm.Put(r.Context(), sessionKeyIDToken, identity.RawIDToken)
+	d.Auth.Sessions().Put(r.Context(), sessionKeyIDToken, identity.RawIDToken)
 
 	http.Redirect(w, r, afterAuth, http.StatusFound)
 }
@@ -459,12 +463,12 @@ func writeBindProblem(d httpapi.Deps, w http.ResponseWriter, r *http.Request, er
 // sudoIdentityRefusal says why a provider re-authentication cannot confirm for
 // the signed-in account, and "" when it can.
 //
-// An account with no binding is its own answer. Unlinking ends no session, so
-// an account unlinked while its session lives on can still ask the provider to
-// confirm -- and that used to come back as "a different account", which names
-// the wrong cause and the wrong remedy: nothing about the provider's account is
-// different, this one simply is not linked to any. The remedy is the password,
-// on the local network.
+// An account with no binding is its own answer. Unlinking ends the sessions
+// that came in through the link, but a password session of an unlinked account
+// lives on and can still ask the provider to confirm -- and that used to come
+// back as "a different account", which names the wrong cause and the wrong
+// remedy: nothing about the provider's account is different, this one simply
+// is not linked to any. The remedy is the password, on the local network.
 func sudoIdentityRefusal(u model.User, issuer, subject string) string {
 	if !u.HasIdentityBinding() {
 		return "oidc.not-linked"

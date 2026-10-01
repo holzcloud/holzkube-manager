@@ -271,6 +271,6 @@ func me(d httpapi.Deps, w http.ResponseWriter, r *http.Request) {
 		// get anywhere.
 		Role:   u.Role.OrAdmin(),
 		DryRun: d.TalosMode.DryRun,
-		SSO:    d.Auth.Sessions().GetBool(r.Context(), sessionKeyIsSSOAuth),
+		SSO:    d.Auth.SignedInThroughProvider(r.Context()),
 	})
 }

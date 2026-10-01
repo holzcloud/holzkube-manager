@@ -211,8 +211,9 @@ describe('SudoFailureNotice', () => {
   })
 
   /**
-   * Unlinking ends no session, so an account unlinked while signed in can
-   * still ask the provider to confirm. That used to come back as "a different
+   * Unlinking ends the sessions that came in through the link, not password
+   * sessions, so an unlinked account signed in with the password can still
+   * ask the provider to confirm. That used to come back as "a different
    * account", which sends the operator to the provider to fix something that
    * is not wrong there.
    */

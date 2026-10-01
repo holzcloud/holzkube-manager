@@ -2,7 +2,8 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
-import { api, type User } from '@/api'
+import { api, type Me, type User } from '@/api'
+import { SESSION_QUERY_KEY } from '@/hooks/useSession'
 import { AccountTable } from '@/routes/accounts'
 
 /**
@@ -32,15 +33,30 @@ function account(over: Partial<User> = {}): User {
   }
 }
 
-function wrap(users: User[], onChanged: () => void = vi.fn()) {
+function wrap(
+  users: User[],
+  onChanged: () => void = vi.fn(),
+  options: { me?: Me; onOwnSessionEnded?: () => void } = {},
+) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   })
+  if (options.me !== undefined) {
+    client.setQueryData(SESSION_QUERY_KEY, options.me)
+  }
   return render(
     <QueryClientProvider client={client}>
-      <AccountTable users={users} onChanged={onChanged} />
+      <AccountTable
+        users={users}
+        onChanged={onChanged}
+        onOwnSessionEnded={options.onOwnSessionEnded ?? vi.fn()}
+      />
     </QueryClientProvider>,
   )
+}
+
+function me(sso: boolean): Me {
+  return { id: 'u1', username: 'somebody', role: 'admin', dry_run: false, sso }
 }
 
 describe('the accounts table', () => {
@@ -222,6 +238,76 @@ describe('the accounts table', () => {
     const dialog = await screen.findByRole('dialog')
     expect(within(dialog).getByText(/from the local network address/i)).toBeInTheDocument()
     expect(within(dialog).queryByText(/no account here can be linked again/i)).toBeNull()
+  })
+
+  /**
+   * A session that came in through single sign-on ends with the link it came
+   * through. When it is the caller's own, the dialog says so before the click
+   * and the page leaves for the sign-in page afterwards, instead of reloading a
+   * list it can no longer read.
+   */
+  it('says your own single sign-on session ends, and leaves for the sign-in page', async () => {
+    const user = userEvent.setup()
+    const onChanged = vi.fn()
+    const onOwnSessionEnded = vi.fn()
+    const unlink = vi
+      .spyOn(api.users, 'unlinkIdentity')
+      .mockResolvedValue(account({ id: 'u1', self: true }))
+    wrap([account({ id: 'u1', role: 'admin', linked_identity: true, self: true })], onChanged, {
+      me: me(true),
+      onOwnSessionEnded,
+    })
+
+    await user.click(screen.getByRole('button', { name: 'Unlink single sign-on' }))
+    const dialog = await screen.findByRole('dialog')
+    expect(within(dialog).getByText(/this session ends with the link/i)).toBeInTheDocument()
+
+    await user.click(within(dialog).getByRole('button', { name: 'Unlink' }))
+    await waitFor(() => expect(onOwnSessionEnded).toHaveBeenCalled())
+    expect(onChanged).not.toHaveBeenCalled()
+    unlink.mockRestore()
+  })
+
+  it('keeps a password session signed in and says so', async () => {
+    const user = userEvent.setup()
+    const onChanged = vi.fn()
+    const onOwnSessionEnded = vi.fn()
+    const unlink = vi
+      .spyOn(api.users, 'unlinkIdentity')
+      .mockResolvedValue(account({ id: 'u1', self: true }))
+    wrap([account({ id: 'u1', role: 'admin', linked_identity: true, self: true })], onChanged, {
+      me: me(false),
+      onOwnSessionEnded,
+    })
+
+    await user.click(screen.getByRole('button', { name: 'Unlink single sign-on' }))
+    const dialog = await screen.findByRole('dialog')
+    expect(within(dialog).getByText(/you stay signed in/i)).toBeInTheDocument()
+
+    await user.click(within(dialog).getByRole('button', { name: 'Unlink' }))
+    await waitFor(() => expect(onChanged).toHaveBeenCalled())
+    expect(onOwnSessionEnded).not.toHaveBeenCalled()
+    unlink.mockRestore()
+  })
+
+  /** A refusal belongs to the attempt that met it, not to the next one. */
+  it('does not show the last attempt’s refusal when the dialog opens again', async () => {
+    const user = userEvent.setup()
+    const unlink = vi
+      .spyOn(api.users, 'unlinkIdentity')
+      .mockRejectedValue(new Error('The account changed while this was being saved'))
+    wrap([account({ id: 'u2', username: 'linked', linked_identity: true })])
+
+    await user.click(screen.getByRole('button', { name: 'Unlink single sign-on' }))
+    let dialog = await screen.findByRole('dialog')
+    await user.click(within(dialog).getByRole('button', { name: 'Unlink' }))
+    await within(dialog).findByText(/changed while this was being saved/i)
+    await user.click(within(dialog).getByRole('button', { name: 'Cancel' }))
+
+    await user.click(screen.getByRole('button', { name: 'Unlink single sign-on' }))
+    dialog = await screen.findByRole('dialog')
+    expect(within(dialog).queryByText(/changed while this was being saved/i)).toBeNull()
+    unlink.mockRestore()
   })
 
   /**
