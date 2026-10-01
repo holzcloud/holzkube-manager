@@ -1783,6 +1783,41 @@ describe('HostOrderStatus', () => {
       RED,
       true,
     ],
+    // 13-REVIEW-2 round 3, I1: systemd ends the helper 3 min after it began;
+    // a started check older than that at the placement held nothing.
+    [
+      'not picked up, a check started 6 h before the placement',
+      order('reboot', 'withdrawn'),
+      later({
+        result: resultFor('c0ffee00c0ffee11', 'check-update', 'started', '2026-09-28T04:00:05Z'),
+      }),
+      'not-picked-up',
+      'Restart host — the helper did not pick up the order within 10 s, so holzkube-manager withdrew it. Nothing was done. Check that the helper is running: systemctl status holzkube-manager-host.path',
+      RED,
+      true,
+    ],
+    [
+      'not picked up, a check started 3 min before the placement',
+      order('reboot', 'withdrawn'),
+      later({
+        result: resultFor('c0ffee00c0ffee11', 'check-update', 'started', '2026-09-28T09:57:05Z'),
+      }),
+      'not-picked-up',
+      'Restart host — the helper did not pick up the order within 10 s, so holzkube-manager withdrew it. Nothing was done. Check that the helper is running: systemctl status holzkube-manager-host.path',
+      RED,
+      true,
+    ],
+    [
+      'not picked up, a check started 2 min 59 s before the placement',
+      order('reboot', 'withdrawn'),
+      later({
+        result: resultFor('c0ffee00c0ffee11', 'check-update', 'started', '2026-09-28T09:57:06Z'),
+      }),
+      'not-picked-up',
+      'Restart host — the helper did not pick up the order within 10 s, so holzkube-manager withdrew it. Nothing was done. The helper was busy with an update check, which holds every other order until it ends; place the order again once it has.',
+      RED,
+      true,
+    ],
     [
       'back, restart service',
       order('restart-service'),

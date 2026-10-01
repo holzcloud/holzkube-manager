@@ -111,18 +111,25 @@ func CheckRunning(r Result, boot, now time.Time) bool {
 
 // CheckHeld reports whether r, the helper's last record, says the helper was
 // waiting for an update check while the order id, placed at placed, lay in
-// the slot: a check of another order that has no end yet -- started, and not
-// from before the last boot (boot as in CheckRunning) -- or one whose end was
-// recorded after that placement. The slot holds one order, so a check that
-// ended after this one was placed was already running when it was. It is the
-// withdrawal's diagnosis, and the page's "not picked up" sentence asks the
-// same: a helper busy with a check is not a path unit that stopped.
+// the slot: a check of another order that has no end yet -- started less than
+// HelperServiceLimit before that placement, and not from before the last boot
+// (boot as in CheckRunning) -- or one whose end was recorded after that
+// placement. The slot holds one order, so a check that ended after this one
+// was placed was already running when it was. A started record older than the
+// limit is a helper systemd ended before the order was placed: it held
+// nothing, and the order's withdrawal is the path unit's to explain
+// (13-REVIEW-2 round 3, I1). It is the withdrawal's diagnosis, and the page's
+// "not picked up" sentence asks the same: a helper busy with a check is not a
+// path unit that stopped.
 func CheckHeld(r Result, id string, placed, boot time.Time) bool {
 	if r.Action != CheckUpdate || r.ID == id {
 		return false
 	}
 	switch r.Outcome {
 	case OutcomeStarted:
+		if placed.Sub(r.At) >= HelperServiceLimit {
+			return false
+		}
 		return boot.IsZero() || r.At.Add(time.Second).After(boot)
 	case OutcomeDone, OutcomeFailed:
 		return !r.At.Before(placed.Truncate(time.Second))
