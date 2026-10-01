@@ -493,3 +493,49 @@ Binding for the planner:
   "back"/"finished"), with **Dismiss status**; the buttons return.
 - New disabled reason **"under way"**: while a started reboot, poweroff or
   restart-service order is not back, the four buttons stay off.
+
+## Additions for Check for updates (13-12..13-15, 13-REVIEW-2, 2026-10-01)
+
+The copy contract above predates the fifth action. These rows are the check's
+copy as `web/src/components/HostActions.tsx` says it; where a row above names
+all actions ("Status: failed", "Status: update finished"), the check's own row
+here replaces it for the check. `{installed}`/`{latest}` come from the update
+status, `{n}` from `CHECK_WITHIN_MS` (held to `hostaction.HelperServiceLimit`
+by `TestHostActionsWaitForARunningCheck`).
+
+| Element | Copy |
+|---------|------|
+| Label (button, status box, confirm) | Check for updates — first of the five, alone on the phone grid's first row |
+| Dialog title | Check for updates on {hostname}? |
+| Description: check | Looks up the newest release and compares it with the version installed here. Nothing is downloaded or installed, and holzkube-manager keeps running. |
+| Connection box: check (slate) | The page stays connected. The answer appears here and under Update check, usually within seconds. |
+| Reason: check running (all five off; also the first sentence of `conflict.host-helper-busy`) | An update check is running; wait for it to finish. |
+| Reason: helper too old for the check (only the check off) | Check for updates needs a newer holzkube-manager-host helper. The note below says how to reinstall it. |
+| Status: started, check (slate) | {Label} — started. Looking for a newer release; nothing is installed. |
+| Status: finished, newer release (emerald) | {Label} — finished. {latest} is available; {installed} is installed. Nothing was installed: Check for updates and install, or the hourly update, installs it. |
+| Status: finished, up to date (emerald) | {Label} — finished. {installed} is installed and is the newest release; there is nothing to install. |
+| Status: finished, answer not readable (slate) | {Label} — finished, but what it found is not in the update status holzkube-manager reads. `journalctl -u holzkube-manager-update-check` says what it found. |
+| Status: check failed (red) | {Label} — the check failed, and nothing was installed. `journalctl -u holzkube-manager-update-check` says why. |
+| Status: no answer, check (red) | {Label} — started, but no update check was reported within {n} min. `journalctl -u holzkube-manager-update-check` says what happened. |
+| Status: not picked up, helper busy with a check (red) | {Label} — the helper did not pick up the order within 10 s, so holzkube-manager withdrew it. Nothing was done. The helper was busy with an update check, which holds every other order until it ends; place the order again once it has. |
+| Outdated notice heading | Check for updates needs a newer helper |
+| Outdated notice explanation | The holzkube-manager-host helper installed here is older than this holzkube-manager. It carries out the other four orders, and their buttons work. Installing the helper again from this release adds the update check, which only looks and installs nothing. |
+| Problem `conflict.host-helper-outdated` (server `detail`) | The installed holzkube-manager-host helper does not carry out an update check yet, so no order was placed. The Host page says what to reinstall. |
+| Problem `conflict.host-helper-busy` (server `detail`) | An update check is running; wait for it to finish. No order was placed. |
+
+Rules that go with the copy:
+
+- **A check is finished only by the helper's own record** (`done`), never by
+  an update status that appears while it runs; its answer is the update
+  status recorded within the check -- not older than the placement, and not
+  newer than the helper's `done` (a later run's is not its answer, and the
+  box then says "finished, but what it found is not in the update status").
+- **One failed check, one sentence** (13-REVIEW-2 WR-02, V-07): whether the
+  helper recorded the order failed or the check ended and its own update
+  status says failed, the box says "the check failed, and nothing was
+  installed", red, with the check unit's journal -- never the helper's, whose
+  only line is that the order failed.
+- **Whom the reason line describes** (13-REVIEW-2 V-27): the group
+  (`aria-describedby` on the fieldset) when its reason turns all five off;
+  the check button alone when only the check is off because the helper is too
+  old, and then the four buttons that are on carry no description.
