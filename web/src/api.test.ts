@@ -343,6 +343,11 @@ describe('the sudo prompt names the action it is asking about', () => {
     // what they saw, twice, on the machine they were trying to remove.
     expect(challenge.action).toBe('Forget this machine')
   })
+
+  it('names unlinking single sign-on', async () => {
+    const challenge = await challengeRaisedBy(() => api.users.unlinkIdentity('u1'))
+    expect(challenge.action).toBe('Unlink single sign-on for this account')
+  })
 })
 
 /**

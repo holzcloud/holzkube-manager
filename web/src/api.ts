@@ -662,6 +662,10 @@ const ACTION_LABELS: ReadonlyArray<{
   { match: /^\/api\/v1\/machines\/[^/]+\/reset$/, action: 'Reset this machine' },
   { match: /^\/api\/v1\/clusters\/[^/]+$/, action: 'Forget this cluster' },
   {
+    match: /^\/api\/v1\/users\/[^/]+\/identity$/,
+    action: 'Unlink single sign-on for this account',
+  },
+  {
     match: /^\/api\/v1\/clusters\/[^/]+\/client-certificate$/,
     action: 'Renew this cluster’s certificate',
     because:
