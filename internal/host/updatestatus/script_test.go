@@ -45,6 +45,9 @@ type scriptEnv struct {
 	previous  string
 	statusDir string
 	extra     []string
+	// flock is the real flock(1), which the stub of that name hands every
+	// call to; empty when this host has none, and then there is no stub.
+	flock string
 }
 
 func requireScriptTools(t *testing.T) {
@@ -109,6 +112,10 @@ func newScriptEnv(t *testing.T, installed string, checksumOK bool) *scriptEnv {
 	e.write(filepath.Join(e.stubs, "journalctl"), "#!/usr/bin/env bash\nexit 0\n", 0o755)
 	e.write(filepath.Join(e.stubs, "sleep"),
 		"#!/usr/bin/env bash\nif [[ -n ${HKM_STUB_SLEEP_BLOCK:-} ]]; then touch \"$HKM_STUB_SLEEP_BLOCK\"; exec /bin/sleep 60; fi\nexit 0\n", 0o755)
+	if real, err := exec.LookPath("flock"); err == nil {
+		e.flock = real
+		e.write(filepath.Join(e.stubs, "flock"), flockStub, 0o755)
+	}
 	return e
 }
 
@@ -154,6 +161,7 @@ func (e *scriptEnv) env() []string {
 		"HOLZKUBE_MANAGER_TOKEN_FILE=" + filepath.Join(e.dir, "etc", "github-token"),
 		"HOLZKUBE_MANAGER_HEALTH_URL=" + testHealthURL,
 		"HOLZKUBE_MANAGER_UPDATE_STATUS_DIR=" + e.statusDir,
+		"HKM_STUB_FLOCK_REAL=" + e.flock,
 	}, e.extra...)
 }
 
@@ -365,8 +373,19 @@ func releaseArchive(t *testing.T, daemon string) []byte {
 // appends the URL it was asked for to. HKM_STUB_LIST_BLOCK names a file the
 // release-list request creates before it blocks, so a test can tell when to
 // send its signal.
+//
+// HKM_STUB_LIST_GATE and HKM_STUB_HEALTH_GATE hold a run at the release list
+// or at the health check until the test opens the gate: the request creates
+// GATE.ready, waits until the file GATE exists (at most 30 s, then it fails),
+// and then answers as usual. Two runs started with different gates can so be
+// stopped exactly where they would overlap.
 const curlStub = `#!/usr/bin/env bash
 [[ -n ${HKM_STUB_PWD:-} ]] && pwd >> "$HKM_STUB_PWD"
+gate() {
+  touch "$1.ready"
+  for _ in $(seq 1 600); do [[ -e $1 ]] && return 0; /bin/sleep 0.05; done
+  echo "curl stub: gate $1 never opened" >&2; exit 28
+}
 out="" url=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -380,15 +399,26 @@ done
 case "$url" in
   */releases\?per_page=20)
     if [[ -n ${HKM_STUB_LIST_BLOCK:-} ]]; then touch "$HKM_STUB_LIST_BLOCK"; exec /bin/sleep 60; fi
+    [[ -n ${HKM_STUB_LIST_GATE:-} ]] && gate "$HKM_STUB_LIST_GATE"
     [[ ${HKM_STUB_LIST_FAIL:-0} == 1 ]] && { echo '{"message":"stub: unavailable"}'; exit 22; }
     cat "$HKM_STUB_FIXTURES/releases.json" ;;
   */releases/assets/11|*/releases/assets/12) cp "$HKM_STUB_FIXTURES/archive.tar.gz" "$out" ;;
   */releases/assets/13) cp "$HKM_STUB_FIXTURES/checksums.txt" "$out" ;;
   "$HKM_STUB_HEALTH_URL")
+    [[ -n ${HKM_STUB_HEALTH_GATE:-} ]] && gate "$HKM_STUB_HEALTH_GATE"
     [[ ${HKM_STUB_HEALTHY:-1} == 1 ]] || exit 7
     echo '{"audit_chain":"intact"}' ;;
   *) echo "curl stub: unexpected URL $url" >&2; exit 2 ;;
 esac
+`
+
+// flockStub is flock(1) itself, run through a stub so a test can tell when a
+// run has asked for the lock: HKM_STUB_FLOCK_LOG, when set, names a file each
+// call appends its argv to before it hands over. exec keeps the descriptor the
+// script locks.
+const flockStub = `#!/usr/bin/env bash
+[[ -n ${HKM_STUB_FLOCK_LOG:-} ]] && printf '%s\n' "$*" >> "$HKM_STUB_FLOCK_LOG"
+exec "$HKM_STUB_FLOCK_REAL" "$@"
 `
 
 // systemctlStub answers restart and is-active; HKM_STUB_SYSTEMCTL_LOG, when
@@ -772,6 +802,256 @@ func TestUpdateScriptAsRoot(t *testing.T) {
 			t.Fatalf("exit = %d, want 0", rc)
 		}
 	})
+}
+
+// background is a run of the script the test does not wait for at once, so
+// that a second run can be started beside it.
+type background struct {
+	t    *testing.T
+	name string
+	cmd  *exec.Cmd
+	out  bytes.Buffer
+	done chan struct{}
+	rc   int
+}
+
+// start runs the script copy with the run's environment plus extra, in a
+// process group of its own, and returns at once. Whatever is still running
+// when the test ends is killed, group and all.
+func (e *scriptEnv) start(name string, asRoot bool, extra []string, args ...string) *background {
+	e.t.Helper()
+	var cmd *exec.Cmd
+	if asRoot {
+		cmd = exec.Command("unshare", append([]string{"--user", "--map-root-user", "bash", e.script}, args...)...)
+	} else {
+		cmd = exec.Command("bash", append([]string{e.script}, args...)...)
+	}
+	cmd.Env = append(e.env(), extra...)
+	cmd.Dir = e.dir
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.WaitDelay = 5 * time.Second
+	b := &background{t: e.t, name: name, cmd: cmd, done: make(chan struct{})}
+	cmd.Stdout, cmd.Stderr = &b.out, &b.out
+	if err := cmd.Start(); err != nil {
+		e.t.Fatalf("start the %s: %v", name, err)
+	}
+	pgid := cmd.Process.Pid
+	go func() {
+		defer close(b.done)
+		err := cmd.Wait()
+		var exitErr *exec.ExitError
+		switch {
+		case err == nil:
+			b.rc = 0
+		case errors.As(err, &exitErr):
+			b.rc = exitErr.ExitCode()
+		default:
+			b.rc = -2
+		}
+	}()
+	e.t.Cleanup(func() {
+		_ = syscall.Kill(-pgid, syscall.SIGKILL)
+		<-b.done
+	})
+	return b
+}
+
+func (b *background) exited() bool {
+	select {
+	case <-b.done:
+		return true
+	default:
+		return false
+	}
+}
+
+// wait returns the run's exit code, read from the process itself, and fails
+// the test if it has not ended within 30 s.
+func (b *background) wait() int {
+	b.t.Helper()
+	select {
+	case <-b.done:
+	case <-time.After(30 * time.Second):
+		b.t.Fatalf("the %s has not ended after 30 s", b.name)
+	}
+	b.t.Logf("%s (exit %d):\n%s", b.name, b.rc, b.out.String())
+	return b.rc
+}
+
+// waitUntil polls cond for up to 20 s and fails the test with what when it
+// never holds.
+func waitUntil(t *testing.T, what string, cond func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(20 * time.Second)
+	for !cond() {
+		if time.Now().After(deadline) {
+			t.Fatalf("waited 20 s for %s", what)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+func exists(path string) bool {
+	_, err := os.Lstat(path)
+	return err == nil
+}
+
+// holdLock takes the lock the script takes, from the test process, and keeps
+// it until the test ends: a run beside it then finds it held.
+func (e *scriptEnv) holdLock() {
+	e.t.Helper()
+	f, err := os.OpenFile(filepath.Join(e.statusDir, ".lock"), os.O_RDWR|os.O_CREATE|os.O_APPEND, 0o600)
+	if err != nil {
+		e.t.Fatal(err)
+	}
+	e.t.Cleanup(func() { _ = f.Close() })
+	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		e.t.Fatalf("take the lock: %v", err)
+	}
+}
+
+// 13-REVIEW-2 IN-02: a check (holzkube-manager-update-check.service) and the
+// hourly update (holzkube-manager-update.service) run the same script, and
+// nothing ordered them. Every run that may record takes one lock in the
+// status directory first, waits a bounded time for it, and gives up without
+// recording when it stays held. These cases run two copies of the script
+// against one set of stand-ins, as root, and stop one where the other would
+// overlap it.
+func TestUpdateScriptRunsOneAtATime(t *testing.T) {
+	t.Parallel()
+	requireUserNamespace(t)
+	if _, err := exec.LookPath("flock"); err != nil {
+		t.Skip("flock (util-linux) is not installed; the script runs unlocked then")
+	}
+
+	// The race the review describes: a check that looked before the update
+	// installed, and recorded after it, overwrote "updated" with "available"
+	// -- for a release that was by then installed.
+	t.Run("an update waits for a running check", func(t *testing.T) {
+		t.Parallel()
+		e := newScriptEnv(t, fakeInstalled, true)
+		gate := filepath.Join(e.dir, "list-gate")
+		check := e.start("check", true, []string{"HKM_STUB_LIST_GATE=" + gate}, "--check")
+		waitUntil(t, "the check to ask for the release list", func() bool { return exists(gate + ".ready") || check.exited() })
+
+		asked := filepath.Join(e.dir, "update-asked-for-the-lock")
+		update := e.start("update", true, []string{"HKM_STUB_FLOCK_LOG=" + asked})
+		waitUntil(t, "the update to ask for the lock or end", func() bool { return exists(asked) || update.exited() })
+		if update.exited() {
+			t.Errorf("the update ended while a check was looking; it must wait for it")
+		}
+		e.write(gate, "", 0o644)
+
+		if rc := check.wait(); rc != 0 {
+			t.Errorf("check exit = %d, want 0", rc)
+		}
+		if rc := update.wait(); rc != 0 {
+			t.Errorf("update exit = %d, want 0", rc)
+		}
+		e.wantStatus(OutcomeUpdated, ptr(fakeRelease), ptr(fakeRelease))
+		if got := e.binVersion(); got != "holzkube-managerd "+fakeRelease {
+			t.Errorf("installed binary answers %q, want the release's", got)
+		}
+		info, err := os.Lstat(filepath.Join(e.statusDir, ".lock"))
+		if err != nil {
+			t.Fatalf("no lock file: %v", err)
+		}
+		if !info.Mode().IsRegular() || info.Mode().Perm() != 0o600 {
+			t.Errorf("lock file mode = %v, want a regular file 0600: the daemon's user could otherwise hold it", info.Mode())
+		}
+	})
+
+	// The other order: the update has installed and waits for the service to
+	// come up healthy; a check started then waits until it has recorded.
+	t.Run("a check waits for a running update", func(t *testing.T) {
+		t.Parallel()
+		e := newScriptEnv(t, fakeInstalled, true)
+		gate := filepath.Join(e.dir, "health-gate")
+		update := e.start("update", true, []string{"HKM_STUB_HEALTH_GATE=" + gate})
+		waitUntil(t, "the update to reach its health check", func() bool { return exists(gate + ".ready") || update.exited() })
+
+		asked := filepath.Join(e.dir, "check-asked-for-the-lock")
+		check := e.start("check", true, []string{"HKM_STUB_FLOCK_LOG=" + asked}, "--check")
+		waitUntil(t, "the check to ask for the lock or end", func() bool { return exists(asked) || check.exited() })
+		if check.exited() {
+			t.Errorf("the check ended while an update was installing; it must wait for it")
+		}
+		e.write(gate, "", 0o644)
+
+		if rc := update.wait(); rc != 0 {
+			t.Errorf("update exit = %d, want 0", rc)
+		}
+		if rc := check.wait(); rc != 0 {
+			t.Errorf("check exit = %d, want 0", rc)
+		}
+		// The check looked after the install, so it found it current.
+		e.wantStatus(OutcomeCurrent, ptr(fakeRelease), ptr(fakeRelease))
+	})
+
+	// Held beyond the wait: the run gives up, says why, and records nothing --
+	// the holder records, and a record written beside it is the race.
+	for _, tc := range []struct {
+		name, article string
+		args          []string
+	}{{"check", "a", []string{"--check"}}, {"update", "an", nil}} {
+		t.Run(tc.article+" "+tc.name+" gives up on a held lock and records nothing", func(t *testing.T) {
+			t.Parallel()
+			e := newScriptEnv(t, fakeInstalled, true)
+			e.recordCalls()
+			before := `{"checked_at": "2026-09-28T09:00:12Z", "installed": "0.1.0", "latest": "0.1.0", "outcome": "current"}` + "\n"
+			e.write(filepath.Join(e.statusDir, "status.json"), before, 0o644)
+			e.holdLock()
+			run := e.start(tc.name, true, []string{"HOLZKUBE_MANAGER_UPDATE_LOCK_WAIT=1"}, tc.args...)
+			if rc := run.wait(); rc != 1 {
+				t.Errorf("exit = %d, want 1", rc)
+			}
+			if out := run.out.String(); !strings.Contains(out, "ein anderer Lauf") {
+				t.Errorf("the run does not say another run holds the lock:\n%s", out)
+			}
+			if got, err := os.ReadFile(filepath.Join(e.statusDir, "status.json")); err != nil || string(got) != before {
+				t.Errorf("status.json = %q (%v), want it untouched: %q", got, err, before)
+			}
+			e.wantInstalledNothingAtAll(fakeInstalled)
+		})
+	}
+
+	// A lock is the kernel's, on an open file: it ends with the last process
+	// holding it. A run killed outright -- SIGKILL to the whole group, as
+	// systemd's last step does -- leaves the file behind and no lock, and the
+	// next run goes ahead at once.
+	t.Run("a run killed while holding the lock does not hold the next", func(t *testing.T) {
+		t.Parallel()
+		e := newScriptEnv(t, fakeInstalled, true)
+		ready := filepath.Join(e.dir, "list-requested")
+		e.extra = append(e.extra, "HKM_STUB_LIST_BLOCK="+ready)
+		_ = e.runSignalled(true, ready, syscall.SIGKILL, "--check")
+		if !exists(filepath.Join(e.statusDir, ".lock")) {
+			t.Fatalf("the killed run left no lock file; this case needs one to show it does not hold the next run")
+		}
+		e.extra = []string{"HOLZKUBE_MANAGER_UPDATE_LOCK_WAIT=5"}
+		if rc := e.run(true, "--check"); rc != 0 {
+			t.Fatalf("exit = %d, want 0: a dead run's lock held this one", rc)
+		}
+		e.wantStatus(OutcomeAvailable, ptr(fakeInstalled), ptr(fakeRelease))
+	})
+}
+
+// wantInstalledNothingAtAll is wantInstalledNothing for a run that gave up
+// before it looked: not even the release list was asked for.
+func (e *scriptEnv) wantInstalledNothingAtAll(installed string) {
+	e.t.Helper()
+	if got := e.binVersion(); got != "holzkube-managerd "+installed {
+		e.t.Errorf("installed binary answers %q, want %q", got, "holzkube-managerd "+installed)
+	}
+	if _, err := os.Lstat(e.previous); !errors.Is(err, os.ErrNotExist) {
+		e.t.Errorf("%s exists (%v): the run kept a previous binary", e.previous, err)
+	}
+	if urls, err := os.ReadFile(filepath.Join(e.dir, "curl-urls")); err == nil {
+		e.t.Errorf("the run asked curl for:\n%s", urls)
+	}
+	if calls, err := os.ReadFile(filepath.Join(e.dir, "systemctl-calls")); err == nil {
+		e.t.Errorf("the run called systemctl:\n%s", calls)
+	}
 }
 
 // pyQuote is s as a Python string literal.
