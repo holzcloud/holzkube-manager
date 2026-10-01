@@ -112,8 +112,8 @@ func newScriptEnv(t *testing.T, installed string, checksumOK bool) *scriptEnv {
 	e.write(filepath.Join(e.stubs, "journalctl"), "#!/usr/bin/env bash\nexit 0\n", 0o755)
 	e.write(filepath.Join(e.stubs, "sleep"),
 		"#!/usr/bin/env bash\nif [[ -n ${HKM_STUB_SLEEP_BLOCK:-} ]]; then touch \"$HKM_STUB_SLEEP_BLOCK\"; exec /bin/sleep 60; fi\nexit 0\n", 0o755)
-	if real, err := exec.LookPath("flock"); err == nil {
-		e.flock = real
+	if flockPath, err := exec.LookPath("flock"); err == nil {
+		e.flock = flockPath
 		e.write(filepath.Join(e.stubs, "flock"), flockStub, 0o755)
 	}
 	return e
@@ -935,7 +935,7 @@ func TestUpdateScriptRunsOneAtATime(t *testing.T) {
 		e := newScriptEnv(t, fakeInstalled, true)
 		gate := filepath.Join(e.dir, "list-gate")
 		check := e.start("check", true, []string{"HKM_STUB_LIST_GATE=" + gate}, "--check")
-		waitUntil(t, "the check to ask for the release list", func() bool { return exists(gate + ".ready") || check.exited() })
+		waitUntil(t, "the check to ask for the release list", func() bool { return exists(gate+".ready") || check.exited() })
 
 		asked := filepath.Join(e.dir, "update-asked-for-the-lock")
 		update := e.start("update", true, []string{"HKM_STUB_FLOCK_LOG=" + asked})
@@ -971,7 +971,7 @@ func TestUpdateScriptRunsOneAtATime(t *testing.T) {
 		e := newScriptEnv(t, fakeInstalled, true)
 		gate := filepath.Join(e.dir, "health-gate")
 		update := e.start("update", true, []string{"HKM_STUB_HEALTH_GATE=" + gate})
-		waitUntil(t, "the update to reach its health check", func() bool { return exists(gate + ".ready") || update.exited() })
+		waitUntil(t, "the update to reach its health check", func() bool { return exists(gate+".ready") || update.exited() })
 
 		asked := filepath.Join(e.dir, "check-asked-for-the-lock")
 		check := e.start("check", true, []string{"HKM_STUB_FLOCK_LOG=" + asked}, "--check")
