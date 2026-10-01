@@ -439,9 +439,7 @@ func (b *Box) withdraw(id string) {
 	switch {
 	case err == nil || errors.Is(err, fsstore.ErrTookEffect):
 		b.last.State = StateWithdrawn
-		b.cfg.Logger.Warn("host order withdrawn: the helper did not pick up the order within "+
-			seconds(b.cfg.PickupTimeout)+"; check `systemctl status holzkube-manager-host.path`",
-			"id", id, "action", string(b.last.Action))
+		b.logWithdrawn()
 		logTidyingError(b.cfg.Logger, err)
 	case errors.Is(err, fs.ErrNotExist):
 		// The helper took it: the ordinary case, nothing to do.
@@ -450,6 +448,30 @@ func (b *Box) withdraw(id string) {
 		// pending, which is the truth.
 		b.cfg.Logger.Error("could not withdraw a host order", "id", id, "action", string(b.last.Action), "err", err)
 	}
+}
+
+// logWithdrawn says why the last order, just withdrawn, was not picked up.
+// Usually nothing watched for it, and the path unit is the place to look. But
+// a helper waiting for an update check picks up nothing either, and then the
+// path unit is healthy: the routes refuse while the helper is busy (Busy), so
+// this is left to a clock that stepped while a check ran (13-REVIEW-2 V-01).
+// The helper's own record tells the two apart; b.mu is held.
+func (b *Box) logWithdrawn() {
+	o := *b.last
+	waited := "the helper did not pick up the order within " + seconds(b.cfg.PickupTimeout)
+	if b.cfg.FS != nil {
+		now := b.cfg.Now()
+		if r, err := ReadResult(b.cfg.FS, b.cfg.ResultPath); err == nil && CheckHeld(r, o.ID, o.PlacedAt, b.boot(now)) {
+			b.cfg.Logger.Warn("host order withdrawn: "+waited+
+				", because it was waiting for an update check, which holds every other order; "+
+				"`journalctl -u holzkube-manager-update-check` says what the check did",
+				"id", o.ID, "action", string(o.Action),
+				"check", r.ID, "check_outcome", string(r.Outcome), "check_recorded", r.At.Format(time.RFC3339))
+			return
+		}
+	}
+	b.cfg.Logger.Warn("host order withdrawn: "+waited+"; check `systemctl status holzkube-manager-host.path`",
+		"id", o.ID, "action", string(o.Action))
 }
 
 // logTidyingError logs what failed after a placement or a claim had already

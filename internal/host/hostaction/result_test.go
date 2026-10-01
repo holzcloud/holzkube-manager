@@ -334,3 +334,40 @@ func TestCheckRunning(t *testing.T) {
 		}
 	}
 }
+
+// TestCheckHeld: the helper was waiting for a check while an order lay in the
+// slot when its last record is another order's check without an end (from this
+// boot), or one whose end came after the placement.
+func TestCheckHeld(t *testing.T) {
+	t.Parallel()
+
+	placed := time.Date(2026, 9, 30, 16, 0, 5, 734e6, time.UTC)
+	booted := placed.Add(-time.Hour)
+	rec := func(id string, a Action, o Outcome, at time.Time) Result {
+		return Result{ID: id, Action: a, Outcome: o, At: at}
+	}
+	const check, order = "c0ffee00c0ffee11", "0123456789abcdef"
+
+	cases := []struct {
+		name string
+		r    Result
+		boot time.Time
+		want bool
+	}{
+		{"a check started before the placement, no end", rec(check, CheckUpdate, OutcomeStarted, placed.Add(-time.Minute)), booted, true},
+		{"a check started in the future (the clock went back)", rec(check, CheckUpdate, OutcomeStarted, placed.Add(time.Hour)), booted, true},
+		{"a check started, the boot unknown", rec(check, CheckUpdate, OutcomeStarted, placed.Add(-time.Minute)), time.Time{}, true},
+		{"a check started before the last boot", rec(check, CheckUpdate, OutcomeStarted, booted.Add(-time.Minute)), booted, false},
+		{"a check done after the placement", rec(check, CheckUpdate, OutcomeDone, placed.Add(3*time.Second)), booted, true},
+		{"a check failed in the placement's second", rec(check, CheckUpdate, OutcomeFailed, placed.Truncate(time.Second)), booted, true},
+		{"a check done the second before the placement", rec(check, CheckUpdate, OutcomeDone, placed.Truncate(time.Second).Add(-time.Second)), booted, false},
+		{"this order's own record", rec(order, CheckUpdate, OutcomeStarted, placed.Add(time.Second)), booted, false},
+		{"a check rejected", rec(check, CheckUpdate, OutcomeRejected, placed.Add(time.Second)), booted, false},
+		{"an update started", rec(check, Update, OutcomeStarted, placed.Add(-time.Minute)), booted, false},
+	}
+	for _, tc := range cases {
+		if got := CheckHeld(tc.r, order, placed, tc.boot); got != tc.want {
+			t.Errorf("%s: CheckHeld = %v, want %v", tc.name, got, tc.want)
+		}
+	}
+}

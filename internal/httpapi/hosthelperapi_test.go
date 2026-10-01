@@ -657,6 +657,11 @@ func TestHostActionsWaitForARunningCheck(t *testing.T) {
 	if want := fmt.Sprintf("RESULT_WITHIN_MS = %d * 1000", int(hostaction.ResultWithin/time.Second)); !strings.Contains(string(src), want) {
 		t.Errorf("web/src/components/HostActions.tsx has no %s; the page and hostaction.ResultWithin disagree", want)
 	}
+	// And a check for as long as the routes hold its record to be running
+	// (13-REVIEW-2 V-04 c): past it the page says "no answer".
+	if want := fmt.Sprintf("CHECK_WITHIN_MS = %d * 60 * 1000", int(hostaction.HelperServiceLimit/time.Minute)); hostaction.HelperServiceLimit%time.Minute != 0 || !strings.Contains(string(src), want) {
+		t.Errorf("web/src/components/HostActions.tsx has no %s; the page and hostaction.HelperServiceLimit disagree", want)
+	}
 }
 
 // TestABusyRefusalKeepsTheToken (13-REVIEW-2 V-04): the action route refuses

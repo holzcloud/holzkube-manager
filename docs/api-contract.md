@@ -1834,7 +1834,12 @@ out a reboot nobody asked for any more. So:
   order's `state` is then `withdrawn` and stays so, and the daemon logs a
   warning naming `systemctl status holzkube-manager-host.path`. The path unit
   starts the helper within a second of the order appearing; ten seconds
-  without a pickup means nothing is watching.
+  without a pickup means nothing is watching -- unless the helper was waiting
+  for an update check, which the routes refuse orders during (`busy`) but a
+  wall clock that stepped meanwhile can hide. When the helper's own record says
+  so -- another order's `check-update` without an end, or one that ended after
+  this order was placed -- the warning names the check unit's journal instead,
+  and the page says the helper was busy with a check.
 - **The shutdown withdrawal.** A daemon that stops while its last order still
   waits withdraws it the same way as it stops, and logs that nothing was done:
   at boot the helper can run before the daemon starts, so the startup

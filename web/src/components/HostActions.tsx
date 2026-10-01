@@ -871,6 +871,11 @@ function phaseSentence(phase: OrderPhase, order: HostOrder, host: Host): ReactNo
         <>the helper could not carry it out. {JOURNAL} says why.</>
       )
     case 'not-picked-up':
+      // A helper waiting for a check picks up nothing, and its path unit is
+      // healthy: the helper's record says so (13-REVIEW-2 V-01).
+      if (checkHeld(order, host)) {
+        return 'the helper did not pick up the order within 10 s, so holzkube-manager withdrew it. Nothing was done. The helper was busy with an update check, which holds every other order until it ends; place the order again once it has.'
+      }
       return (
         <>
           the helper did not pick up the order within 10 s, so holzkube-manager withdrew it. Nothing
@@ -953,6 +958,32 @@ function checkSentence(u: UpdateStatus): ReactNode {
       return <>The check failed, and nothing was installed. {CHECK_JOURNAL} says why.</>
     default:
       return outcomeSentence(u)
+  }
+}
+
+/**
+ * Whether the helper's last record says it was waiting for an update check
+ * while `order` lay in the slot -- hostaction.CheckHeld, which the daemon's
+ * withdrawal warning asks too: another order's check with no end yet (and not
+ * from before the last boot), or one whose end was recorded after `order` was
+ * placed. The slot holds one order, so such a check was already running.
+ */
+function checkHeld(order: HostOrder, host: Host): boolean {
+  const result = host.actions.result
+  if (!result.readable || result.value.action !== 'check-update' || result.value.id === order.id) {
+    return false
+  }
+  const at = Date.parse(result.value.at)
+  switch (result.value.outcome) {
+    case 'started': {
+      const boot = bootTime(host)
+      return boot === null || at + 1000 > boot
+    }
+    case 'done':
+    case 'failed':
+      return at >= Math.floor(Date.parse(order.placed_at) / 1000) * 1000
+    default:
+      return false
   }
 }
 

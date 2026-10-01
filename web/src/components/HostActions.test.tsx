@@ -1698,6 +1698,54 @@ describe('HostOrderStatus', () => {
       RED,
       true,
     ],
+    // 13-REVIEW-2 V-01: the helper was waiting for a check, not missing.
+    [
+      'not picked up while the helper waited for a check',
+      order('reboot', 'withdrawn'),
+      later({
+        result: resultFor('c0ffee00c0ffee11', 'check-update', 'started', '2026-09-28T10:00:01Z'),
+      }),
+      'not-picked-up',
+      'Restart host — the helper did not pick up the order within 10 s, so holzkube-manager withdrew it. Nothing was done. The helper was busy with an update check, which holds every other order until it ends; place the order again once it has.',
+      RED,
+      true,
+    ],
+    [
+      'not picked up, a check that ended after the placement',
+      order('reboot', 'withdrawn'),
+      later({
+        result: resultFor('c0ffee00c0ffee11', 'check-update', 'done', '2026-09-28T10:00:09Z'),
+      }),
+      'not-picked-up',
+      'Restart host — the helper did not pick up the order within 10 s, so holzkube-manager withdrew it. Nothing was done. The helper was busy with an update check, which holds every other order until it ends; place the order again once it has.',
+      RED,
+      true,
+    ],
+    [
+      'not picked up, a check that ended before the placement',
+      order('reboot', 'withdrawn'),
+      later({
+        result: resultFor('c0ffee00c0ffee11', 'check-update', 'done', '2026-09-28T10:00:04Z'),
+      }),
+      'not-picked-up',
+      'Restart host — the helper did not pick up the order within 10 s, so holzkube-manager withdrew it. Nothing was done. Check that the helper is running: systemctl status holzkube-manager-host.path',
+      RED,
+      true,
+    ],
+    [
+      'not picked up, a check started before the last boot',
+      order('reboot', 'withdrawn'),
+      later(
+        {
+          result: resultFor('c0ffee00c0ffee11', 'check-update', 'started', '2026-09-28T09:00:00Z'),
+        },
+        { uptime: 60 },
+      ),
+      'not-picked-up',
+      'Restart host — the helper did not pick up the order within 10 s, so holzkube-manager withdrew it. Nothing was done. Check that the helper is running: systemctl status holzkube-manager-host.path',
+      RED,
+      true,
+    ],
     [
       'back, restart service',
       order('restart-service'),

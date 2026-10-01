@@ -109,6 +109,28 @@ func CheckRunning(r Result, boot, now time.Time) bool {
 	return boot.IsZero() || r.At.Add(time.Second).After(boot)
 }
 
+// CheckHeld reports whether r, the helper's last record, says the helper was
+// waiting for an update check while the order id, placed at placed, lay in
+// the slot: a check of another order that has no end yet -- started, and not
+// from before the last boot (boot as in CheckRunning) -- or one whose end was
+// recorded after that placement. The slot holds one order, so a check that
+// ended after this one was placed was already running when it was. It is the
+// withdrawal's diagnosis, and the page's "not picked up" sentence asks the
+// same: a helper busy with a check is not a path unit that stopped.
+func CheckHeld(r Result, id string, placed, boot time.Time) bool {
+	if r.Action != CheckUpdate || r.ID == id {
+		return false
+	}
+	switch r.Outcome {
+	case OutcomeStarted:
+		return boot.IsZero() || r.At.Add(time.Second).After(boot)
+	case OutcomeDone, OutcomeFailed:
+		return !r.At.Before(placed.Truncate(time.Second))
+	default:
+		return false
+	}
+}
+
 // idPattern is the id as the daemon generates it: 8 random bytes in lowercase
 // hex.
 var idPattern = regexp.MustCompile(`^[0-9a-f]{16}$`)

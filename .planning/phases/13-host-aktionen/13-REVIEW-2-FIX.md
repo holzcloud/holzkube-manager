@@ -190,3 +190,163 @@ A commit not made by this fixer (466aa67, docs) landed between 7dc7b58 and
 _Fixed: 2026-10-01_
 _Fixer: Claude (gsd-code-fixer)_
 _Iteration: 1_
+
+## Round 2 — A1-helper-busy
+
+**Source:** the adversarial verification of the fixes above, items V-01..V-04,
+V-20..V-22, V-24, V-25. **Where it ran:** the operator's Raspberry Pi 5
+(aarch64), main checkout, no worktree, Go from `~/.local/go` (no `-race`: this
+kernel refuses ThreadSanitizer), Node through nvm. Root-namespace helper tests
+ran (`unshare --user --map-root-user`, verified with `-v`: the
+`TestHostScriptAsRoot` subtests report PASS, not SKIP). Nothing installed:
+`/usr/local/sbin/holzkube-manager-host` and
+`/etc/systemd/system/holzkube-manager-update-check.service` are absent before
+and after. `holzkube-manager.service`: `ActiveEnterTimestamp=Tue 2026-09-29
+20:25:38 CEST, NRestarts=0` before and after. Nothing pushed, no release, no
+changelog entry.
+
+**Correction of the report above.** Its "Not changed" paragraph under WR-01
+said a check could cause a withdrawal only in the milliseconds between its
+status write and the end of its unit. That was wrong (V-20): the update script
+writes `checked_at` when it exits, so an hourly or manual run that ended
+during a check unlocked the routes for the rest of the check. The design below
+removes the update status from the question.
+
+### Design: the helper's own word
+
+The recommended design, without deviation in substance:
+
+- The helper records the end of a check: after its blocking
+  `systemctl start holzkube-manager-update-check.service` returns 0 it writes
+  `<id> check-update done`; non-zero still writes `failed`. The four other
+  orders keep `started` as their last word (their `systemctl` queues a job or
+  restarts a service). `ReadResult` accepts `done` for `check-update` only and
+  still refuses `done` with `- -` or for any other action; the root script
+  tests parse every record with it, so writer and reader stay one format.
+- `hostaction.CheckRunning(r, boot, now)`: the last record is a `check-update`
+  `started`, `0 <= age < HelperServiceLimit`, and not from before the last
+  boot (`r.At + 1 s > boot`, the record being rounded down to its second;
+  boot unknown means only the limit counts). The update status has no say.
+- `hostaction.Box.Busy()` = that, or a check this Box placed that the helper
+  has taken (file gone, not withdrawn) and recorded nothing for yet, for at
+  most `ResultWithin` (1 min, the page's `RESULT_WITHIN_MS`). `Box.Place` asks
+  `busyLocked()` under the slot's mutex and returns `ErrBusy`; the action
+  route answers that as the same 409. Boot comes from `SinceBoot`
+  (CLOCK_BOOTTIME, `host.OS().BootTime`, wired in `main.go`).
+- **One deviation, with its reason:** the page no longer recomputes the rule.
+  `GET /api/v1/host` carries `actions.busy` (= `Box.Busy()`), and the page
+  turns its buttons off by it. A second copy of the rule in TypeScript was the
+  drift V-04(c)/V-23 describe, and the Box's memory of its own check cannot be
+  mirrored from the page anyway. `Collector.CheckRunning` is gone.
+- On the page a check is finished only by the helper's `done` (or `failed`),
+  never by an update status that appears meanwhile; its answer is the update
+  status only when that was recorded within the check (no older than the
+  placement, or than 3 min before the `done` record for an order the page
+  knows only from that record), otherwise the box says, in slate, that what it
+  found is not in the update status this page reads.
+
+**The frozen older helper (testdata, 8b64a06)** never records a check: it
+rejects `check-update <id>` as an unknown form and records `- - rejected`, and
+the daemon's `Outdated` keeps it from being placed (409
+`conflict.host-helper-outdated`). Its records therefore never make `busy` true;
+`TestAnOlderHelperRefusesTheCheck` and the outdated API tests stay green
+unchanged. A helper from main between aa4d4e9 and 1388949 (knows the check,
+does not record `done`) would hold the routes for 3 min after each successful
+check; it was never released (`git tag --contains aa4d4e9` is empty) and is
+not installed on this Pi. Nothing tells it apart from the current helper, by
+decision: the marker line names orders, not records.
+
+### Per item
+
+- **V-01 [warning] — fixed** (1388949, 29197b2, and the last commit). Busy is
+  the helper's own record; the hourly run, a manual run or a future-dated
+  status no longer ends it (API rows "an hourly run recorded since", "an update
+  status in its own second", "an update status from the future" are refused).
+  The withdrawal diagnosis: under the new rule a busy helper can make an order
+  lie only when the wall clock misleads the age test (a record dated in the
+  future after a step back, a forward step past the limit). For that remainder
+  the Box reads the helper's record when it withdraws (`CheckHeld`: another
+  order's check with no end since boot, or one that ended after this placement)
+  and then names the check unit's journal instead of the path unit; the page's
+  "not picked up" sentence says the helper was busy with a check. `CheckHeld`
+  is in Go and its page copy is `checkHeld`.
+- **V-02 [info] — fixed.** A reboot or power loss mid-check no longer holds
+  the routes (boot clause); a successful check whose answer the daemon cannot
+  read no longer holds them (the update status is not asked). What remains: a
+  helper killed mid-check (systemd's own limit, a manual kill) holds them up
+  to 3 min from its record, which is when systemd has ended it anyway.
+- **V-03 [info] — fixed.** The Box's memory covers the window between the
+  helper's rename and its `started` record.
+- **V-04 [info] — fixed.** (a) `TestABusyRefusalKeepsTheToken`: refused as
+  busy, the same token replayed after the check is `done` gets 202. (b) the
+  page's `age >= 0` guard no longer exists (the page reads `actions.busy`);
+  the Go guard is held by `TestCheckRunning` "recorded in the future" and the
+  API row "a check recorded in the future". (c) `TestHostActionsWaitForARunningCheck`
+  now reads `CHECK_WITHIN_MS = 3 * 60 * 1000` and `RESULT_WITHIN_MS = 60 * 1000`
+  from HostActions.tsx against `HelperServiceLimit` and `ResultWithin` (this
+  overlaps V-23, which another fixer owns; the buttons themselves no longer
+  depend on `CHECK_WITHIN_MS`).
+- **V-20 [info] — fixed** (the correction above, and the diagnosis now reads
+  the helper's record).
+- **V-21 [info] — fixed.** No cause it lists can hold the routes any more:
+  none of them is a `started` record without an end, except the power loss,
+  which the boot clause ends.
+- **V-22 [info] — fixed.** `Place` refuses under its lock (`ErrBusy`);
+  `TestAHelperBusyAtPlacementIsRefusedAsBusy` shows the route answers it as
+  409 `conflict.host-helper-busy` with the token spent and nothing placed.
+- **V-24 [info] — fixed.** HOST-HELPER.md (the order table's note, the `last`
+  line with `done`, the exit codes), docs/api-contract.md (record fields, the
+  check's records, the busy row, `actions.busy`, the withdrawal warning), and
+  docs/guide.md (the `failed` bullet names the check unit's journal for a
+  check -- this overlaps V-05 --, the "not picked up" bullet, and "One order at
+  a time" now says a running check turns all five off, for at most 3 min and
+  not past a reboot).
+- **V-25 [info] — fixed.** As root: `check-update` against a stand-in
+  `systemctl` that exits 1 records `<id> check-update failed`, exit 1; one that
+  exits 0 records `done`, exit 0; in both the stand-in saw `started` for that
+  id while it ran.
+
+### Red runs (exit codes read from the command itself; every fault restored, `cmp` 0, then green)
+
+Helper and reader (`go test ./internal/host/hostaction -run 'TestHostScriptAsRoot|TestReadResult'`, each exit 1):
+no `done` record (`valid_check-update`); `|| true` around systemctl (both
+"systemctl fails" rows: `last = ... "done"/"started", want "failed"`);
+`--no-block` for the check; `done` for every order (four `valid_*` rows);
+`started` recorded after systemctl (all seven); reader accepting `done` for
+any action; reader without `done`; reader accepting `- - done`.
+
+Busy (exit 1 each): `CheckRunning` ignoring the boot (unit row, Box row, API
+row "the machine up for 20 s"); the future-record guard removed
+(`TestCheckRunning`, `TestTheWithdrawalNamesABusyHelper`); the Box's memory
+removed; `Place` unguarded (Box tests and the placement-race API test);
+`ResultWithin` replaced by 3 min ("a minute without a record"); **the busy
+refusal moved after `CheckOnce`** (`TestABusyRefusalKeepsTheToken`: replay
+403 `forbidden.confirmation-invalid`, the only failing test); the `ErrBusy`
+mapping removed (placement-race test, 500); the confirm route's refusal
+removed (all six busy rows); `actions.busy` not sent (six rows);
+`RESULT_WITHIN_MS` and `CHECK_WITHIN_MS` changed in HostActions.tsx.
+
+**An injection that first did not inject:** reinstating "an update status at
+or after the record ends the check" inside `Box.busyLocked` left the API test
+green (exit 0). The harness gave the Box a filesystem without the status file
+that the host reader saw, so the reinstated clause had nothing to read. The
+fixture now puts the status on both, as on the host, and the same injection
+exits 1 with the three V-01 rows failing.
+
+Diagnosis (exit 1 each): the warning ignoring `CheckHeld`; `CheckHeld`
+ignoring the boot; `CheckHeld` taking any end as after the placement.
+
+Page (vitest jsdom, exit 1 each): no `done` branch in `orderPhase`; no
+tolerance for an order known only from its `done` record; no freshness for a
+done check's answer; the schema without `done`; `actions.busy` ignored; a check
+finished by the update status; `checkHeld` ignored; `checkHeld` ignoring the
+boot.
+
+### Final suites (Pi, main checkout)
+
+- `go test ./internal/... ./cmd/... -count=1`: exit 0, 41 `ok`, no other lines.
+- `./bin/task lint:go`: exit 0, 0 issues.
+- `npx vitest run --project jsdom` (web/): exit 0, 56 files, 783 tests.
+- `npm --prefix web run test:browser`: exit 0, 5 files, 23 tests.
+- `npm run typecheck`: exit 0; `npm run lint`: exit 0.
+- `go test ./internal/publicrepo/` before each commit: exit 0.
