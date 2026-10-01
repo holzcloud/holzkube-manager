@@ -790,14 +790,24 @@ func TestBusyFromTheCheckThisBoxPlaced(t *testing.T) {
 	b.wantPlaced(t, "the check recorded done")
 }
 
+// TestBusyFromTheCheckThisBoxPlacedEnds: the Box's memory of a check it placed
+// ends after a minute without a record, with a withdrawal, and with another
+// order taken. The minute is written out, not as ResultWithin: a test in terms
+// of the constant passes at any value of it, and the page's RESULT_WITHIN_MS
+// is held to the constant, not to this test (13-REVIEW-2 round 3, I2).
+// ResultWithin = 3 min goes red here.
 func TestBusyFromTheCheckThisBoxPlacedEnds(t *testing.T) {
+	if ResultWithin != time.Minute {
+		t.Errorf("ResultWithin = %v, want 1m0s: the helper records started within milliseconds, and the page says "+
+			"\"no answer\" after a minute", ResultWithin)
+	}
 	t.Run("a minute without a record", func(t *testing.T) {
 		b := newBusyRig(t)
 		if _, err := b.box.Place(CheckUpdate); err != nil {
 			t.Fatal(err)
 		}
 		b.pickUp(t)
-		b.now = b.now.Add(ResultWithin - time.Second)
+		b.now = b.now.Add(59 * time.Second)
 		b.wantRefused(t, "59 s without a record")
 		b.now = b.now.Add(time.Second)
 		b.wantPlaced(t, "a minute without a record")
