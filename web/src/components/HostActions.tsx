@@ -24,6 +24,7 @@ import {
   type HostHelperMissing,
   type HostHelperOutdated,
   type HostOrder,
+  type HostUpdateScript,
   roleAtLeast,
 } from '@/api'
 import { Problem } from '@/components/Problem'
@@ -188,6 +189,8 @@ export const REASON = {
     'Host actions need the holzkube-manager-host helper, which is not installed. The note below says what to install.',
   helperOutdated:
     'Check for updates needs a newer holzkube-manager-host helper. The note below says how to reinstall it.',
+  updateScript:
+    'Both update buttons need the update script, which is not installed. The note below says how to install it.',
   reader: 'Host actions need the operator role. You are signed in as a reader.',
   hostname: 'The hostname could not be read, so there is nothing to type to confirm a host action.',
   notAnswering: 'holzkube-manager is not answering; host actions return when it does.',
@@ -207,9 +210,11 @@ export const REASON = {
  * helper reason stands for it once the container has been ruled out, because
  * the routes refuse exactly when it is false and the page must not offer more.
  *
- * One reason applies to the check alone, and is not asked here: an installed
- * helper older than the check (`actions.outdated`), which carries out the four
- * other orders. actionReason adds it, after every reason here (D-15, D-16).
+ * Two reasons apply to some buttons only, and are not asked here: the update
+ * script both update actions end in is missing (`actions.update_script`), and
+ * an installed helper is older than the check (`actions.outdated`), which
+ * carries out the four other orders. actionReason adds them, after every
+ * reason here (D-15, D-16, 13-REVIEW-2 IN-04).
  */
 export function disabledReason(
   host: Host,
@@ -262,10 +267,16 @@ export function disabledReason(
   return null
 }
 
+/** The two actions that end in the update script (hostaction.NeedsUpdateScript). */
+export const UPDATE_SCRIPT_ACTIONS: readonly HostAction[] = ['check-update', 'update']
+
 /**
- * Why one button is off: the group's reason if there is one, else, for the
- * check, an installed helper too old for it -- the routes refuse the check
- * then (409 conflict.host-helper-outdated), and only the check.
+ * Why one button is off: the group's reason if there is one; else, for the two
+ * update actions, a missing update script (409
+ * conflict.host-update-script-missing); else, for the check, an installed
+ * helper too old for it (409 conflict.host-helper-outdated). The routes ask in
+ * the same order, so the page's line and a refused client name the same
+ * reason -- and with the script first, both update buttons share one line.
  */
 export function actionReason(
   action: HostAction,
@@ -274,6 +285,9 @@ export function actionReason(
 ): string | null {
   if (groupReason !== null) {
     return groupReason
+  }
+  if (UPDATE_SCRIPT_ACTIONS.includes(action) && host.actions.update_script.length > 0) {
+    return REASON.updateScript
   }
   if (action === 'check-update' && host.actions.outdated.length > 0) {
     return REASON.helperOutdated
@@ -305,14 +319,17 @@ export function HostActions({
   const reasonLine = useRef<HTMLParagraphElement | null>(null)
   const hostname = host.device.hostname.readable ? host.device.hostname.value : ''
   const reason = disabledReason(host, sessionRole, pollFailed, order)
-  // The one line under the group: the group's reason, else the check's own.
-  // No other button has one of its own, so there is never more than one.
+  // The one line under the group: the group's reason, else the check's own --
+  // which is the update script's when that is missing, the reason both update
+  // buttons share, and the older helper's otherwise. The update button has no
+  // reason the check lacks, so there is never more than one line.
   const line = reason ?? actionReason('check-update', null, host)
   // Whom the line describes: the group when its reason applies to all five,
-  // else the check button alone -- the four that are on are not described as
-  // needing a newer helper (13-REVIEW-2 V-27).
-  const describes: 'group' | 'check-update' | null =
-    reason !== null ? 'group' : line !== null ? 'check-update' : null
+  // else each button it is the reason of -- the ones that are on are not
+  // described as needing anything (13-REVIEW-2 V-27).
+  const describesGroup = reason !== null
+  const describes = (action: HostAction) =>
+    !describesGroup && line !== null && actionReason(action, null, host) === line
 
   return (
     <div className="flex flex-col items-end gap-1 max-md:w-full max-md:items-stretch">
@@ -321,7 +338,7 @@ export function HostActions({
           min-content width, which would push the phone grid past the edge. */}
       <fieldset
         aria-label="Host actions"
-        aria-describedby={describes === 'group' ? 'host-actions-reason' : undefined}
+        aria-describedby={describesGroup ? 'host-actions-reason' : undefined}
         className="m-0 flex min-w-0 flex-wrap gap-2 border-0 p-0 max-md:grid max-md:grid-cols-2"
       >
         {HOST_ACTIONS.map((action) => {
@@ -350,7 +367,7 @@ export function HostActions({
                   action === 'check-update' && 'max-md:col-span-2',
                 )}
                 disabled={actionReason(action, reason, host) !== null}
-                aria-describedby={describes === action ? 'host-actions-reason' : undefined}
+                aria-describedby={describes(action) ? 'host-actions-reason' : undefined}
                 onClick={(e) => {
                   opener.current = e.currentTarget
                   setPending(action)
@@ -1294,6 +1311,39 @@ export function HostHelperNotice({
         key: m.item,
         path: m.path,
         sentence: MISSING_SENTENCE[m.item],
+      }))}
+      commands={commands}
+    />
+  )
+}
+
+/** What the update script is and where it comes from (13-REVIEW-2 IN-04). */
+const UPDATE_SCRIPT_SENTENCE: Record<HostUpdateScript['item'], ReactNode> = {
+  'update-script': <>the update script, from {DEPLOY('deploy/holzkube-manager-update.sh')}</>,
+}
+
+/**
+ * The update script both update actions end in is missing (13-REVIEW-2
+ * IN-04): their two buttons are off, the other three are not. Its path, and
+ * the one command that installs it -- the server's copy, which the install
+ * guide is held to byte for byte. Shown beside the helper's notices, since
+ * neither of their commands installs it.
+ */
+export function HostUpdateScriptNotice({
+  updateScript,
+  commands,
+}: {
+  updateScript: HostUpdateScript[]
+  commands: string[]
+}) {
+  return (
+    <HelperInstallNotice
+      heading="The update buttons need the update script, which is not installed"
+      explanation="Check for updates and Check for updates and install both run it, and stay off until it is there; the other three buttons do not need it."
+      pieces={updateScript.map((u) => ({
+        key: u.item,
+        path: u.path,
+        sentence: UPDATE_SCRIPT_SENTENCE[u.item],
       }))}
       commands={commands}
     />

@@ -15,7 +15,8 @@ import (
 
 // helperInstalledFS is a root filesystem on which the helper is installed the
 // way deploy/HOST-HELPER.md installs it: the shipped script's own bytes, both
-// unit files, the path unit enabled, and the check unit.
+// unit files, the path unit enabled, and the check unit -- beside the update
+// script both update orders end in, as the reference installation has it.
 func helperInstalledFS(t *testing.T) fstest.MapFS {
 	t.Helper()
 	return fstest.MapFS{
@@ -26,6 +27,9 @@ func helperInstalledFS(t *testing.T) fstest.MapFS {
 		"etc/systemd/system/holzkube-manager-host.service":                 {Data: []byte("[Service]\n"), Mode: 0o644},
 		"etc/systemd/system/paths.target.wants/holzkube-manager-host.path": {Data: []byte(hostaction.PathUnitPath), Mode: fs.ModeSymlink | 0o777},
 		"etc/systemd/system/holzkube-manager-update-check.service":         {Data: []byte("[Service]\n"), Mode: 0o644},
+		"usr/local/sbin/holzkube-manager-update": {
+			Data: []byte("#!/usr/bin/env bash\n"), Mode: 0o755, Sys: &syscall.Stat_t{Uid: 0, Gid: 0},
+		},
 	}
 }
 
@@ -65,6 +69,14 @@ func TestReadCarriesActions(t *testing.T) {
 	olderNotEnabled := olderHelperFS(t)
 	delete(olderNotEnabled, "etc/systemd/system/paths.target.wants/holzkube-manager-host.path")
 
+	noUpdateScript := helperInstalledFS(t)
+	delete(noUpdateScript, "usr/local/sbin/holzkube-manager-update")
+	updateScriptNotRoots := helperInstalledFS(t)
+	updateScriptNotRoots["usr/local/sbin/holzkube-manager-update"] = &fstest.MapFile{
+		Data: []byte("#!/usr/bin/env bash\n"), Mode: 0o755, Sys: &syscall.Stat_t{Uid: 1000},
+	}
+	updateScript := []hostaction.Missing{{Item: hostaction.MissingUpdateScript, Path: hostaction.UpdateScriptPath}}
+
 	scriptOutdated := hostaction.Missing{Item: hostaction.OutdatedScript, Path: hostaction.HelperScriptPath}
 	checkUnit := hostaction.Missing{Item: hostaction.OutdatedCheckUnit, Path: hostaction.UpdateCheckUnitPath}
 
@@ -80,10 +92,18 @@ func TestReadCarriesActions(t *testing.T) {
 		wantAvailable bool
 		wantMissing   []hostaction.Missing
 		wantOutdated  []hostaction.Missing
-		wantContainer bool
+		// wantUpdateScript nil: an empty list.
+		wantUpdateScript []hostaction.Missing
+		wantContainer    bool
 	}{
 		{name: "installed, not in a container", fsys: helperInstalledFS(t), wantAvailable: true, wantMissing: []hostaction.Missing{}, wantOutdated: []hostaction.Missing{}},
-		{name: "nothing installed", fsys: fstest.MapFS{}, wantMissing: allMissing, wantOutdated: []hostaction.Missing{}},
+		// The update script is asked for whatever missing says: the
+		// helper's install commands do not install it.
+		{name: "nothing installed", fsys: fstest.MapFS{}, wantMissing: allMissing, wantOutdated: []hostaction.Missing{}, wantUpdateScript: updateScript},
+		// Only the two update actions need it, so available stays true
+		// (13-REVIEW-2 IN-04).
+		{name: "no update script", fsys: noUpdateScript, wantAvailable: true, wantMissing: []hostaction.Missing{}, wantOutdated: []hostaction.Missing{}, wantUpdateScript: updateScript},
+		{name: "an update script uid 1000 owns", fsys: updateScriptNotRoots, wantAvailable: true, wantMissing: []hostaction.Missing{}, wantOutdated: []hostaction.Missing{}, wantUpdateScript: updateScript},
 		{name: "installed, in a container", fsys: inContainer, wantMissing: []hostaction.Missing{}, wantOutdated: []hostaction.Missing{}, wantContainer: true},
 		{name: "no Box", fsys: helperInstalledFS(t), noBox: true, wantMissing: []hostaction.Missing{}, wantOutdated: []hostaction.Missing{}},
 		// The four older orders work with an older helper: available stays
@@ -122,6 +142,20 @@ func TestReadCarriesActions(t *testing.T) {
 			if !reflect.DeepEqual(a.Outdated, tc.wantOutdated) {
 				t.Errorf("actions.outdated = %+v, want %+v", a.Outdated, tc.wantOutdated)
 			}
+			wantUpdateScript := tc.wantUpdateScript
+			if wantUpdateScript == nil {
+				wantUpdateScript = []hostaction.Missing{}
+			}
+			if a.UpdateScript == nil {
+				t.Errorf("actions.update_script is nil; on the wire that is null, and the page reads a list")
+			}
+			if !reflect.DeepEqual(a.UpdateScript, wantUpdateScript) {
+				t.Errorf("actions.update_script = %+v, want %+v", a.UpdateScript, wantUpdateScript)
+			}
+			if !reflect.DeepEqual(a.UpdateScriptInstallCommands, hostaction.UpdateScriptInstallCommands) {
+				t.Errorf("actions.update_script_install_commands = %q, want hostaction.UpdateScriptInstallCommands %q",
+					a.UpdateScriptInstallCommands, hostaction.UpdateScriptInstallCommands)
+			}
 			if !reflect.DeepEqual(a.InstallCommands, hostaction.InstallCommands) {
 				t.Errorf("actions.install_commands = %q, want hostaction.InstallCommands %q", a.InstallCommands, hostaction.InstallCommands)
 			}
@@ -140,7 +174,7 @@ func TestReadCarriesActions(t *testing.T) {
 			// And on the wire: the four keys are there, and missing and
 			// outdated are lists.
 			wire, _ := marshalView(t, v)["actions"].(map[string]any)
-			for _, key := range []string{"available", "missing", "outdated", "install_commands"} {
+			for _, key := range []string{"available", "missing", "outdated", "update_script", "install_commands", "update_script_install_commands"} {
 				if _, ok := wire[key]; !ok {
 					t.Errorf("actions.%s is not in the answer: %v", key, wire)
 				}
@@ -150,6 +184,9 @@ func TestReadCarriesActions(t *testing.T) {
 			}
 			if _, ok := wire["outdated"].([]any); !ok {
 				t.Errorf("actions.outdated on the wire = %#v, want a list", wire["outdated"])
+			}
+			if _, ok := wire["update_script"].([]any); !ok {
+				t.Errorf("actions.update_script on the wire = %#v, want a list", wire["update_script"])
 			}
 		})
 	}
@@ -167,6 +204,33 @@ func TestInstallCommandsAreNotShared(t *testing.T) {
 	v.Actions.InstallCommands[0] = "changed"
 	if hostaction.InstallCommands[0] == "changed" {
 		t.Error("the answer's install commands are hostaction.InstallCommands itself, not a copy")
+	}
+}
+
+// TestUnsupportedPlatformUpdateScript: a platform without systemd still says
+// whether the update script is there, as it says what of the helper is
+// missing, and the list is never null.
+func TestUnsupportedPlatformUpdateScript(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name string
+		fsys fstest.MapFS
+		want int
+	}{
+		{"with the update script", helperInstalledFS(t), 0},
+		{"without it", fstest.MapFS{}, 1},
+	} {
+		v := New(Config{
+			FS: tc.fsys, Sys: newUnsupportedSys(), Now: func() time.Time { return fixedNow },
+			Actions: hostaction.NewBox(hostaction.Config{FS: tc.fsys, DataDir: t.TempDir()}),
+		}).Read(context.Background())
+		if v.Actions.UpdateScript == nil || len(v.Actions.UpdateScript) != tc.want {
+			t.Errorf("%s: actions.update_script on an unsupported platform = %#v, want %d items", tc.name, v.Actions.UpdateScript, tc.want)
+		}
+		if !reflect.DeepEqual(v.Actions.UpdateScriptInstallCommands, hostaction.UpdateScriptInstallCommands) {
+			t.Errorf("%s: actions.update_script_install_commands = %q", tc.name, v.Actions.UpdateScriptInstallCommands)
+		}
 	}
 }
 

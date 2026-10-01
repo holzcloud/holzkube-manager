@@ -2074,6 +2074,91 @@ describe('the older-helper notice', () => {
   })
 })
 
+const UPDATE_SCRIPT_HEADING = 'The update buttons need the update script, which is not installed'
+const UPDATE_SCRIPT = { item: 'update-script', path: '/usr/local/sbin/holzkube-manager-update' }
+const UPDATE_SCRIPT_COMMANDS = [
+  'sudo install -o root -g root -m 0755 deploy/holzkube-manager-update.sh /usr/local/sbin/holzkube-manager-update',
+]
+
+/** The helper installed, the update script not (13-REVIEW-2 IN-04). */
+function updateScriptMissing(overrides: Record<string, unknown> = {}) {
+  return helperInstalled({
+    update_script: [UPDATE_SCRIPT],
+    update_script_install_commands: UPDATE_SCRIPT_COMMANDS,
+    ...overrides,
+  })
+}
+
+function updateScriptNotice(): HTMLElement | null {
+  return screen.queryByText(UPDATE_SCRIPT_HEADING)?.closest('div') ?? null
+}
+
+describe('the update-script notice (13-REVIEW-2 IN-04)', () => {
+  it('names the script, says which buttons need it in one sentence, and shows the command', () => {
+    wrap(<HostView host={hostShape({ actions: updateScriptMissing() })} stale={null} />)
+
+    const notice = updateScriptNotice()
+    if (notice === null) throw new Error('no update-script notice')
+    expect(notice).toHaveClass('border-slate-500/40')
+    expect(notice).toHaveTextContent(
+      'Check for updates and Check for updates and install both run it, and stay off until it is there; the other three buttons do not need it.',
+    )
+    const items = within(notice).getAllByRole('listitem')
+    expect(items.map((li) => li.textContent)).toEqual([
+      '/usr/local/sbin/holzkube-manager-update — the update script, from deploy/holzkube-manager-update.sh',
+    ])
+    expect(within(items[0] as HTMLElement).getByText(UPDATE_SCRIPT.path)).toHaveClass(
+      'font-mono',
+      'break-all',
+    )
+    // The server's command, not a copy of the page's own.
+    expect(notice.querySelector('pre')?.textContent).toBe(UPDATE_SCRIPT_COMMANDS.join('\n'))
+    expect(within(notice).queryByRole('button')).toBeNull()
+    expect(helperNotice()).toBeNull()
+    expect(olderNotice()).toBeNull()
+  })
+
+  it('shows nothing when the update script is there', () => {
+    wrap(
+      <HostView
+        host={hostShape({ actions: updateScriptMissing({ update_script: [] }) })}
+        stale={null}
+      />,
+    )
+    expect(updateScriptNotice()).toBeNull()
+  })
+
+  it.each([
+    [
+      'the helper notice',
+      { available: false, missing: [SCRIPT], install_commands: INSTALL_COMMANDS },
+      helperNotice,
+    ],
+    [
+      'the older-helper notice',
+      { outdated: [CHECK_UNIT], install_commands: INSTALL_COMMANDS },
+      olderNotice,
+    ],
+  ])('stands beside %s: neither set of commands installs it', (_, overrides, other) => {
+    wrap(<HostView host={hostShape({ actions: updateScriptMissing(overrides) })} stale={null} />)
+    const first = other()
+    const notice = updateScriptNotice()
+    if (first === null || notice === null) throw new Error('want both notices')
+    expect(first.compareDocumentPosition(notice) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(document.querySelectorAll('pre')).toHaveLength(2)
+  })
+
+  it('shows nothing in a container: the container notice already says why', () => {
+    wrap(
+      <HostView
+        host={hostShape({ container: true, actions: updateScriptMissing({ available: false }) })}
+        stale={null}
+      />,
+    )
+    expect(updateScriptNotice()).toBeNull()
+  })
+})
+
 describe('HostPage', () => {
   // The page reads the session's role for the host actions (D-16). Answered
   // here, so no test reaches the network for it.

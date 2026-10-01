@@ -56,6 +56,23 @@ import (
 // the helper starts. Outdated reports what of the two is not there. It is
 // asked only while Detect reports nothing missing: the install commands
 // install everything, the newer script and the check unit with it.
+//
+// Is the update script there? (13-REVIEW-2 IN-04)
+//
+// Both update orders end in the reference installation's update script,
+// UpdateScriptPath: update starts holzkube-manager-update.service, which runs
+// it, and check-update starts the check unit, which runs it with --check. The
+// helper's install commands do not install it -- it is the update mechanism's,
+// and an installation that never set that up has none -- so a helper
+// installed completely can still carry out both orders into a unit that fails.
+// UpdateScriptMissing asks for it the way Detect asks for the helper's script:
+// a regular file, executable, owned by uid 0 and writable by nobody else. A
+// script somebody other than root may change is somebody else's code run as
+// root, and is not called installed either. Only the two update orders need
+// it; reboot, poweroff and restart-service go through without it. It is asked
+// whatever Detect says, because the helper's install commands do not bring it:
+// an operator who installs the helper should learn in the same reading that
+// the update buttons need one more file.
 
 // The helper's files, as the operator installs them (deploy/HOST-HELPER.md).
 const (
@@ -77,6 +94,8 @@ const (
 	// UpdateScriptPath is the reference installation's update script,
 	// installed from deploy/holzkube-manager-update.sh. The hourly timer runs
 	// it to update; the check unit runs it with --check, which only looks.
+	// UpdateScriptMissing asks for it, and UpdateScriptInstallCommands
+	// installs it.
 	UpdateScriptPath = "/usr/local/sbin/holzkube-manager-update"
 )
 
@@ -99,6 +118,27 @@ const MaxHelperScriptSize = 64 << 10
 // originalOrders are the orders of 13-01, which every helper without the
 // marker line knows.
 var originalOrders = []Action{Reboot, Poweroff, RestartService, Update}
+
+// UpdateScriptInstallCommands installs the update script, run from the root
+// of an unpacked release archive (or a checkout): the archive carries
+// deploy/holzkube-manager-update.sh. The host page shows it while the script
+// is missing, and deploy/HOST-HELPER.md carries the same line, held to this
+// slice byte for byte by a test.
+var UpdateScriptInstallCommands = []string{
+	"sudo install -o root -g root -m 0755 deploy/holzkube-manager-update.sh /usr/local/sbin/holzkube-manager-update",
+}
+
+// MissingUpdateScript is the item UpdateScriptMissing reports: the update
+// script is absent, or not something root may run as root (not regular, not
+// executable, not owned by uid 0, or writable by group or other).
+const MissingUpdateScript = "update-script"
+
+// NeedsUpdateScript reports whether the order a ends in the update script:
+// update and check-update. The routes refuse exactly these two while
+// UpdateScriptMissing reports anything.
+func NeedsUpdateScript(a Action) bool {
+	return a == Update || a == CheckUpdate
+}
 
 // What the check needs that can be outdated, in the order Outdated reports
 // them. Reported as Missing, with these items.
@@ -128,7 +168,8 @@ const (
 // Missing is one piece of the helper that is not installed.
 type Missing struct {
 	// Item is MissingScript, MissingPathUnit or MissingNotEnabled -- or, in
-	// Outdated's list, OutdatedScript or OutdatedCheckUnit.
+	// Outdated's list, OutdatedScript or OutdatedCheckUnit, and in
+	// UpdateScriptMissing's, MissingUpdateScript.
 	Item string `json:"item"`
 	// Path is the absolute path of the file that was found wanting.
 	Path string `json:"path"`
@@ -191,7 +232,14 @@ func Detect(fsys fs.FS) []Missing {
 // uid 0. An owner that cannot be told is no proof, and counts as not
 // installed.
 func scriptInstalled(fsys fs.FS) bool {
-	info, err := fs.Stat(fsys, fsName(HelperScriptPath))
+	return rootExecutable(fsys, HelperScriptPath)
+}
+
+// rootExecutable reports whether the file at path is one root may run: a
+// regular file, executable, writable by nobody but its owner, and owned by
+// uid 0. An owner that cannot be told is no proof, and counts as no.
+func rootExecutable(fsys fs.FS, path string) bool {
+	info, err := fs.Stat(fsys, fsName(path))
 	if err != nil || !info.Mode().IsRegular() {
 		return false
 	}
@@ -299,4 +347,22 @@ func Outdated(fsys fs.FS) []Missing {
 // Box's FS. Empty, never nil, when the helper is new enough.
 func (b *Box) Outdated() []Missing {
 	return Outdated(b.cfg.FS)
+}
+
+// UpdateScriptMissing reports whether the update script both update orders
+// end in is missing on the machine fsys is rooted at ("/"): one
+// MissingUpdateScript item when UpdateScriptPath is not a regular executable
+// file owned by uid 0 and writable by nobody else, else an empty list. It
+// never returns nil, and never reads the file.
+func UpdateScriptMissing(fsys fs.FS) []Missing {
+	if rootExecutable(fsys, UpdateScriptPath) {
+		return []Missing{}
+	}
+	return []Missing{{Item: MissingUpdateScript, Path: UpdateScriptPath}}
+}
+
+// UpdateScript reports whether the update script is missing, read through the
+// Box's FS. Empty, never nil, when it is installed.
+func (b *Box) UpdateScript() []Missing {
+	return UpdateScriptMissing(b.cfg.FS)
 }

@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -85,11 +86,13 @@ func hostHelperHarnessUp(t *testing.T, boxFS fs.FS, collectorFS fs.FS, up func()
 type hostHelperView struct {
 	Container bool `json:"container"`
 	Actions   struct {
-		Available       *bool                `json:"available"`
-		Missing         []hostaction.Missing `json:"missing"`
-		Outdated        []hostaction.Missing `json:"outdated"`
-		Busy            *bool                `json:"busy"`
-		InstallCommands []string             `json:"install_commands"`
+		Available                   *bool                `json:"available"`
+		Missing                     []hostaction.Missing `json:"missing"`
+		Outdated                    []hostaction.Missing `json:"outdated"`
+		UpdateScript                []hostaction.Missing `json:"update_script"`
+		Busy                        *bool                `json:"busy"`
+		InstallCommands             []string             `json:"install_commands"`
+		UpdateScriptInstallCommands []string             `json:"update_script_install_commands"`
 	} `json:"actions"`
 }
 
@@ -156,9 +159,16 @@ func readHelperView(t *testing.T, h *harness) hostHelperView {
 	if v.Actions.Outdated == nil {
 		t.Error("actions.outdated is null or absent; the page reads a list")
 	}
+	if v.Actions.UpdateScript == nil {
+		t.Error("actions.update_script is null or absent; the page reads a list")
+	}
 	if !reflect.DeepEqual(v.Actions.InstallCommands, hostaction.InstallCommands) {
 		t.Errorf("actions.install_commands = %q, want hostaction.InstallCommands %q",
 			v.Actions.InstallCommands, hostaction.InstallCommands)
+	}
+	if !reflect.DeepEqual(v.Actions.UpdateScriptInstallCommands, hostaction.UpdateScriptInstallCommands) {
+		t.Errorf("actions.update_script_install_commands = %q, want hostaction.UpdateScriptInstallCommands %q",
+			v.Actions.UpdateScriptInstallCommands, hostaction.UpdateScriptInstallCommands)
 	}
 	return v
 }
@@ -219,9 +229,9 @@ func TestHostActionsNeedTheHelper(t *testing.T) {
 		h := hostHelperHarness(t, helperState(t, nil), fstest.MapFS{})
 
 		v := readHelperView(t, h)
-		if !*v.Actions.Available || len(v.Actions.Missing) != 0 || len(v.Actions.Outdated) != 0 {
-			t.Errorf("installed: actions = available %v, missing %+v, outdated %+v; want available, nothing missing or outdated",
-				*v.Actions.Available, v.Actions.Missing, v.Actions.Outdated)
+		if !*v.Actions.Available || len(v.Actions.Missing) != 0 || len(v.Actions.Outdated) != 0 || len(v.Actions.UpdateScript) != 0 {
+			t.Errorf("installed: actions = available %v, missing %+v, outdated %+v, update_script %+v; want available, nothing missing or outdated",
+				*v.Actions.Available, v.Actions.Missing, v.Actions.Outdated, v.Actions.UpdateScript)
 		}
 		resp, raw := h.do(t, http.MethodPost, "/api/v1/host/confirm", map[string]string{
 			"action": "host.update", "typed": "example-host",
@@ -783,4 +793,171 @@ func TestAHelperBusyAtPlacementIsRefusedAsBusy(t *testing.T) {
 		t.Errorf("POST %s: %q %q, want conflict.host-helper-busy %q", path, p.Code, p.Detail, checkBusyDetail)
 	}
 	requireNothingPlaced(t, h, path)
+}
+
+// TestHostUpdateActionsNeedTheUpdateScript (13-REVIEW-2 IN-04): both update
+// orders end in /usr/local/sbin/holzkube-manager-update, which the helper's
+// install commands do not install. While it is not a root-owned executable
+// nobody else may change, the confirm route and the action route refuse
+// update and check-update with 409 conflict.host-update-script-missing --
+// before a token is issued or checked, and before anything is placed -- and
+// actions.update_script names it. reboot, poweroff and restart-service go
+// through over the same helper.
+func TestHostUpdateActionsNeedTheUpdateScript(t *testing.T) {
+	t.Parallel()
+
+	const code = "conflict.host-update-script-missing"
+	const detail = "The update script /usr/local/sbin/holzkube-manager-update is not installed, so no order was placed. The Host page says how to install it."
+	want := []hostaction.Missing{{Item: hostaction.MissingUpdateScript, Path: hostaction.UpdateScriptPath}}
+	updateActions := []hostaction.Action{hostaction.Update, hostaction.CheckUpdate}
+
+	// refusedBoth wants code from the confirm route and the action route of
+	// both update actions, no token and nothing placed.
+	refusedBoth := func(t *testing.T, h *harness, code string) {
+		t.Helper()
+		for _, a := range updateActions {
+			resp, raw := h.do(t, http.MethodPost, "/api/v1/host/confirm", map[string]string{
+				"action": "host." + string(a), "typed": "example-host",
+			})
+			if resp.StatusCode != http.StatusConflict {
+				t.Errorf("POST /api/v1/host/confirm for host.%s: %d, want 409 %s (%s)", a, resp.StatusCode, code, raw)
+			} else if p := decodeProblem(t, resp, raw); p.Code != code {
+				t.Errorf("POST /api/v1/host/confirm for host.%s: code %q, want %q", a, p.Code, code)
+			}
+			if strings.Contains(string(raw), `"token"`) {
+				t.Errorf("POST /api/v1/host/confirm for host.%s handed out a token: %s", a, raw)
+			}
+
+			tok := sessionHostToken(t, h.confirmer, h.srv.URL, h.client, "host."+string(a))
+			path := "/api/v1/host/actions/" + string(a)
+			resp, raw = h.do(t, http.MethodPost, path, map[string]string{"confirmation": tok})
+			if resp.StatusCode != http.StatusConflict {
+				t.Errorf("POST %s with a valid host token: %d, want 409 %s (%s)", path, resp.StatusCode, code, raw)
+			} else if p := decodeProblem(t, resp, raw); p.Code != code {
+				t.Errorf("POST %s: code %q, want %q", path, p.Code, code)
+			}
+			requireNothingPlaced(t, h, path)
+		}
+	}
+
+	cases := []struct {
+		name string
+		edit func(m fstest.MapFS)
+	}{
+		{"absent", func(m fstest.MapFS) { delete(m, helperUpdateScript) }},
+		{"owned by uid 1000", func(m fstest.MapFS) {
+			m[helperUpdateScript] = &fstest.MapFile{Data: []byte("#!/bin/sh\n"), Mode: 0o755, Sys: &syscall.Stat_t{Uid: 1000}}
+		}},
+		{"writable by its group", func(m fstest.MapFS) {
+			m[helperUpdateScript] = &fstest.MapFile{Data: []byte("#!/bin/sh\n"), Mode: 0o775, Sys: &syscall.Stat_t{Uid: 0}}
+		}},
+		{"a directory", func(m fstest.MapFS) {
+			m[helperUpdateScript] = &fstest.MapFile{Mode: fs.ModeDir | 0o755, Sys: &syscall.Stat_t{Uid: 0}}
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			h := hostHelperHarness(t, helperState(t, tc.edit), fstest.MapFS{})
+
+			v := readHelperView(t, h)
+			if !*v.Actions.Available || len(v.Actions.Missing) != 0 || len(v.Actions.Outdated) != 0 {
+				t.Errorf("actions = available %v, missing %+v, outdated %+v; want available: the helper is installed",
+					*v.Actions.Available, v.Actions.Missing, v.Actions.Outdated)
+			}
+			if !reflect.DeepEqual(v.Actions.UpdateScript, want) {
+				t.Errorf("actions.update_script = %+v, want %+v", v.Actions.UpdateScript, want)
+			}
+
+			refusedBoth(t, h, code)
+			resp, raw := h.do(t, http.MethodPost, "/api/v1/host/confirm", map[string]string{
+				"action": "host.update", "typed": "example-host",
+			})
+			if p := decodeProblem(t, resp, raw); p.Detail != detail {
+				t.Errorf("detail = %q, want %q", p.Detail, detail)
+			}
+
+			// The control: the three that do not need it go through.
+			for _, a := range []hostaction.Action{hostaction.Reboot, hostaction.Poweroff, hostaction.RestartService} {
+				requireGoesThrough(t, h, a)
+				if err := os.Remove(h.dataDir + "/" + hostaction.OrderFileName); err != nil {
+					t.Fatal(err)
+				}
+			}
+		})
+	}
+
+	// The order of the refusals: container, missing, update script, outdated,
+	// busy.
+	t.Run("in a container", func(t *testing.T) {
+		t.Parallel()
+		h := hostHelperHarness(t, helperState(t, func(m fstest.MapFS) { delete(m, helperUpdateScript) }),
+			fstest.MapFS{".dockerenv": {}})
+		refusedBoth(t, h, "conflict.host-in-container")
+	})
+	t.Run("missing", func(t *testing.T) {
+		t.Parallel()
+		h := hostHelperHarness(t, helperState(t, func(m fstest.MapFS) {
+			delete(m, helperUpdateScript)
+			delete(m, helperWantsLink)
+		}), fstest.MapFS{})
+		refusedBoth(t, h, "conflict.host-helper-missing")
+		// Named all the same: the helper's install commands do not bring it.
+		if v := readHelperView(t, h); !reflect.DeepEqual(v.Actions.UpdateScript, want) {
+			t.Errorf("actions.update_script = %+v while the helper is missing, want %+v", v.Actions.UpdateScript, want)
+		}
+	})
+	t.Run("outdated", func(t *testing.T) {
+		t.Parallel()
+		h := hostHelperHarness(t, helperState(t, func(m fstest.MapFS) {
+			delete(m, helperUpdateScript)
+			delete(m, helperCheckUnit)
+		}), fstest.MapFS{})
+		// The reason both buttons share comes before the check's own.
+		refusedBoth(t, h, code)
+	})
+	t.Run("busy", func(t *testing.T) {
+		t.Parallel()
+		started := "c0ffee00c0ffee11 check-update started " + time.Now().UTC().Add(-5*time.Second).Truncate(time.Second).Format(time.RFC3339)
+		h := hostHelperHarnessUp(t, helperState(t, func(m fstest.MapFS) {
+			delete(m, helperUpdateScript)
+			helperRecorded(started)(m)
+		}), fstest.MapFS{}, func() (time.Duration, error) { return time.Hour, nil })
+		refusedBoth(t, h, code)
+		// The three others are refused as busy.
+		tok := sessionHostToken(t, h.confirmer, h.srv.URL, h.client, "host.reboot")
+		resp, raw := h.do(t, http.MethodPost, "/api/v1/host/actions/reboot", map[string]string{"confirmation": tok})
+		if resp.StatusCode != http.StatusConflict {
+			t.Errorf("POST reboot: %d, want 409 conflict.host-helper-busy (%s)", resp.StatusCode, raw)
+		} else if p := decodeProblem(t, resp, raw); p.Code != "conflict.host-helper-busy" {
+			t.Errorf("POST reboot: code %q, want conflict.host-helper-busy", p.Code)
+		}
+		requireNothingPlaced(t, h, "reboot")
+	})
+
+	// The page turns off exactly the buttons the routes refuse: its list of
+	// the actions that need the script is NeedsUpdateScript's.
+	src, err := os.ReadFile("../../web/src/components/HostActions.tsx")
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := regexp.MustCompile(`(?m)^export const UPDATE_SCRIPT_ACTIONS: readonly HostAction\[\] = \[([^\]]*)\]$`).FindAllStringSubmatch(string(src), -1)
+	if len(m) != 1 {
+		t.Fatalf("web/src/components/HostActions.tsx declares UPDATE_SCRIPT_ACTIONS %d times on one line, want once", len(m))
+	}
+	var page []string
+	for _, w := range strings.Split(m[0][1], ",") {
+		page = append(page, strings.Trim(strings.TrimSpace(w), "'"))
+	}
+	var server []string
+	for _, a := range hostaction.Actions() {
+		if hostaction.NeedsUpdateScript(a) {
+			server = append(server, string(a))
+		}
+	}
+	slices.Sort(page)
+	slices.Sort(server)
+	if !reflect.DeepEqual(page, server) {
+		t.Errorf("the page's UPDATE_SCRIPT_ACTIONS is %q, hostaction.NeedsUpdateScript names %q; the page and the routes disagree", page, server)
+	}
 }

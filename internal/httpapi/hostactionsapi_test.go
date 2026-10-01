@@ -39,6 +39,9 @@ const (
 	helperWantsLink   = "etc/systemd/system/paths.target.wants/holzkube-manager-host.path"
 	helperCheckUnit   = "etc/systemd/system/holzkube-manager-update-check.service"
 	helperStateDir    = "var/lib/holzkube-manager-host"
+	// helperUpdateScript is not the helper's: the update script both update
+	// orders end in, which the reference installation has beside it.
+	helperUpdateScript = "usr/local/sbin/holzkube-manager-update"
 )
 
 // overlayFS serves some names from a MapFS and everything else from a real
@@ -96,10 +99,11 @@ func installedHelperFS(t *testing.T) (fsys fs.FS, stateDir string) {
 			ModTime: time.Now(),
 			Sys:     &syscall.Stat_t{Uid: 0, Gid: 0},
 		},
-		helperPathUnit:    {Data: []byte("[Path]\nPathExists=" + hostaction.ReferenceOrderPath + "\n"), Mode: 0o644},
-		helperServiceUnit: {Data: []byte("[Service]\nType=oneshot\n"), Mode: 0o644},
-		helperWantsLink:   {Data: []byte("/" + helperPathUnit), Mode: fs.ModeSymlink | 0o777},
-		helperCheckUnit:   {Data: []byte("[Service]\nType=oneshot\nExecStart=" + hostaction.UpdateScriptPath + " --check\n"), Mode: 0o644},
+		helperPathUnit:     {Data: []byte("[Path]\nPathExists=" + hostaction.ReferenceOrderPath + "\n"), Mode: 0o644},
+		helperServiceUnit:  {Data: []byte("[Service]\nType=oneshot\n"), Mode: 0o644},
+		helperWantsLink:    {Data: []byte("/" + helperPathUnit), Mode: fs.ModeSymlink | 0o777},
+		helperCheckUnit:    {Data: []byte("[Service]\nType=oneshot\nExecStart=" + hostaction.UpdateScriptPath + " --check\n"), Mode: 0o644},
+		helperUpdateScript: {Data: []byte("#!/usr/bin/env bash\n"), Mode: 0o755, Sys: &syscall.Stat_t{Uid: 0, Gid: 0}},
 	}
 	return overlayFS{fixed: fixed, disk: os.DirFS(root)}, stateDir
 }

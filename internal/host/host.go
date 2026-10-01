@@ -152,6 +152,19 @@ type Actions struct {
 	// empty while anything is Missing: the install commands install
 	// everything, the newer script and the check unit with it.
 	Outdated []hostaction.Missing `json:"outdated"`
+	// UpdateScript lists the update script when it is missing: one item,
+	// update-script, path hostaction.UpdateScriptPath, when that is not a
+	// regular executable file owned by root and writable by nobody else
+	// (hostaction.UpdateScriptMissing). Both update actions end in it, and
+	// the routes refuse those two while it is not empty (409
+	// conflict.host-update-script-missing); reboot, poweroff and
+	// restart-service do not need it, so Available stays as it is. Asked
+	// whatever Missing says -- the helper's install commands do not install
+	// it. Never null; empty when this instance has no host actions.
+	UpdateScript []hostaction.Missing `json:"update_script"`
+	// UpdateScriptInstallCommands install the update script, exactly
+	// hostaction.UpdateScriptInstallCommands.
+	UpdateScriptInstallCommands []string `json:"update_script_install_commands"`
 	// Busy is whether the helper is busy with an update check right now
 	// (hostaction.Box.Busy): it picks up nothing else until the check ends,
 	// and the routes refuse every host action while it is true (409

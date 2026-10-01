@@ -71,7 +71,9 @@ Putting new code on a host that runs as root is your decision, every time.
   `/usr/local/sbin/holzkube-manager-update`, as the reference installation
   has it: `update` starts `holzkube-manager-update.service`, which runs it,
   and `check-update` starts `holzkube-manager-update-check.service`, which
-  runs it with `--check`.
+  runs it with `--check`. The install commands below do not install it; see
+  [The update script](#the-update-script). The other three orders do not
+  need it.
 
 ## Install
 
@@ -91,6 +93,32 @@ The page checks for the script (owned by root and writable by nobody else),
 the helper's two unit files, and the entry `systemctl enable` makes in
 `/etc/systemd/system/paths.target.wants/`. Only the path unit is enabled: the
 check unit has no `[Install]` section, and nothing but the helper starts it.
+
+## The update script
+
+**Check for updates** and **Check for updates and install** both end in
+`/usr/local/sbin/holzkube-manager-update`, the script the hourly update runs.
+The helper's install commands do not install it: it belongs to the update
+mechanism, which replaces it itself after a healthy update. A machine set up
+without it gets both update buttons switched off, with a note under the
+page's header that names the file and shows the one command that installs it,
+from the root of the unpacked release archive:
+
+<!-- update-script-command:begin -->
+```sh
+sudo install -o root -g root -m 0755 deploy/holzkube-manager-update.sh /usr/local/sbin/holzkube-manager-update
+```
+<!-- update-script-command:end -->
+
+The page counts it as installed when it is a regular file, executable, owned
+by root and writable by nobody else -- the same test as for the helper's own
+script, read from the file alone. Restart service, Restart host and Shut down
+host do not need it and stay on. Until it is there, holzkube-manager refuses
+both update actions with `409 conflict.host-update-script-missing` before it
+issues a confirmation or places an order.
+
+`update` also needs `holzkube-manager-update.service`, the unit the hourly
+timer starts; the page does not look for that one.
 
 ## Check that it works
 
