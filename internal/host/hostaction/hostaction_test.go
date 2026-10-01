@@ -822,3 +822,80 @@ func TestBusyFromTheCheckThisBoxPlacedEnds(t *testing.T) {
 		b.wantPlaced(t, "an update taken, nothing recorded for it")
 	})
 }
+
+// TestTheWithdrawalNamesABusyHelper (13-REVIEW-2 V-01): an order the helper did
+// not pick up because it was waiting for an update check is not a sign of a
+// stopped path unit, and the warning must not send the operator there. The
+// routes refuse while the helper is busy, so such an order is placed only when
+// the clock misleads the busy rule -- here a check recorded in the future (the
+// clock went back) -- or when the check ended after the order was placed.
+func TestTheWithdrawalNamesABusyHelper(t *testing.T) {
+	const check = "c0ffee00c0ffee11"
+	for _, tc := range []struct {
+		name string
+		// before is recorded before the placement, after (if set) between the
+		// placement and the withdrawal.
+		before, after func(t *testing.T, b *busyRig)
+		busy          bool
+	}{
+		{
+			name:   "a check recorded in the future, still without an end",
+			before: func(t *testing.T, b *busyRig) { b.record(t, check, CheckUpdate, OutcomeStarted, -time.Hour) },
+			busy:   true,
+		},
+		{
+			name:   "a check that ended after the order was placed",
+			before: func(t *testing.T, b *busyRig) { b.record(t, check, CheckUpdate, OutcomeStarted, -time.Hour) },
+			after: func(t *testing.T, b *busyRig) {
+				b.now = b.now.Add(5 * time.Second)
+				b.record(t, check, CheckUpdate, OutcomeDone, 0)
+			},
+			busy: true,
+		},
+		{
+			name:   "a check that ended before the order was placed",
+			before: func(t *testing.T, b *busyRig) { b.record(t, check, CheckUpdate, OutcomeDone, 5*time.Second) },
+		},
+		{
+			name: "a check started before the last boot",
+			before: func(t *testing.T, b *busyRig) {
+				b.up = time.Minute
+				b.record(t, check, CheckUpdate, OutcomeStarted, 2*time.Minute)
+			},
+		},
+		{
+			name:   "an older reboot",
+			before: func(t *testing.T, b *busyRig) { b.record(t, "0123456789abcdef", Reboot, OutcomeRejected, time.Hour) },
+		},
+		{name: "nothing recorded", before: func(*testing.T, *busyRig) {}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			b := newBusyRig(t)
+			tc.before(t, b)
+			o, err := b.box.Place(Reboot)
+			if err != nil {
+				t.Fatalf("Place(reboot): %v -- the case needs an order the routes let through", err)
+			}
+			if tc.after != nil {
+				tc.after(t, b)
+			}
+			b.timers.fire(t, 0)
+
+			warns := b.logs.at(slog.LevelWarn)
+			if len(warns) != 1 {
+				t.Fatalf("the withdrawal logged %d warnings, want exactly 1: %q", len(warns), warns)
+			}
+			names := func(s string) bool { return strings.Contains(warns[0], s) }
+			if !names(o.ID) || !names("10 s") {
+				t.Errorf("the warning %q does not name the order and the timeout", warns[0])
+			}
+			if tc.busy {
+				if names("holzkube-manager-host.path") || !names("update check") || !names("holzkube-manager-update-check") || !names(check) {
+					t.Errorf("the helper was waiting for check %s, and the warning says %q", check, warns[0])
+				}
+			} else if !names("systemctl status holzkube-manager-host.path") || names("update check") {
+				t.Errorf("nothing held the helper, and the warning says %q, want the path unit", warns[0])
+			}
+		})
+	}
+}

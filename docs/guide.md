@@ -308,12 +308,16 @@ header follows the order from start to end:
 - **Shut down host** says the host is shut down, and that holzkube-manager
   answers again once somebody switches the machine on;
 - **rejected** or **failed** means the helper did nothing, or could not do it;
-  `journalctl -u holzkube-manager-host` says why;
+  `journalctl -u holzkube-manager-host` says why -- for a failed **Check for
+  updates**, `journalctl -u holzkube-manager-update-check`, since the check
+  itself is what failed;
 - **not picked up within 10 s, withdrawn** means nothing was watching for the
   order -- the helper's path unit is stopped or was never enabled. holzkube-manager
   takes the order back so that nobody starting the helper later carries out a
   restart that was no longer wanted; nothing was done. `systemctl status
-  holzkube-manager-host.path` shows what the unit is doing;
+  holzkube-manager-host.path` shows what the unit is doing. If the helper was
+  busy with an update check instead, the box says so, and the order can simply
+  be placed again once the check has finished;
 - **no answer** means the page stopped waiting: the helper took the order but
   recorded nothing within a minute, or an action it started was not reported
   done within 15 minutes -- the host did not restart, no finished update
@@ -324,7 +328,12 @@ header follows the order from start to end:
 
 One order at a time: while one waits for the helper, and while a restart or
 shutdown it started is still under way, the buttons are off, and a second
-order is refused. An order that still waits when holzkube-manager stops is
+order is refused. While **Check for updates** runs -- from whichever page or
+client it was placed -- all five are off too: the helper waits for the check
+and picks up nothing else until it records the check done or failed, so
+holzkube-manager refuses every host action meanwhile. A check that never
+records an end holds them for at most 3 minutes, the helper's own limit, and
+not past a restart of the machine. An order that still waits when holzkube-manager stops is
 withdrawn as it stops, and one it finds when it starts is withdrawn too. The
 helper can run at boot before holzkube-manager does, though, and for an order
 that was left behind all the same -- a power cut in the seconds before the
