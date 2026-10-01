@@ -3556,9 +3556,22 @@ change does. That is not an oversight in either direction: the account's own
 change defends against a stolen session, and the reset exists precisely because
 nobody has the old password any more.
 
-**Single sign-on binds on first use and only when there is exactly one
-account.** With two, there is no answer to "which account is this identity", and
-guessing one is how a new provider subject takes over somebody else's account.
+**Single sign-on binds on first use and only when there is exactly one account
+for a person.** With two, there is no answer to "which account is this
+identity", and guessing one is how a new provider subject takes over somebody
+else's account. Service accounts do not count: they can never sign in through
+the provider, so they are never the answer and never make it ambiguous. With
+more than one person account no identity is linked, and there is no operation
+that links a chosen account — so an unlinked account stays unlinked until it is
+the only person account again.
+
+On an address that accepts only single sign-on, a sign-in is refused before the
+browser leaves for the provider in two cases only, both counted over person
+accounts: `sso_error=setup-required` when there is none, and
+`sso_error=bind-host` when there are people and none of them is linked — which
+is what the callback on that address would answer anyway, since linking is
+refused there. When any person is linked the flow proceeds, and which subject
+comes back is the callback's question.
 
 ### Service accounts
 

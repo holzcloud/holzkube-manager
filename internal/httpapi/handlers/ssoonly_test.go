@@ -1,6 +1,7 @@
 package handlers_test
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"testing"
@@ -8,6 +9,7 @@ import (
 
 	"github.com/holzcloud/holzkube-manager/internal/auth/oidc"
 	"github.com/holzcloud/holzkube-manager/internal/httpapi"
+	"github.com/holzcloud/holzkube-manager/internal/model"
 	"github.com/holzcloud/holzkube-manager/internal/talos"
 )
 
@@ -341,5 +343,120 @@ func TestSignInBeforeSetupOnSSOOnlyHostSaysSetupIsRequired(t *testing.T) {
 	}
 	if got := loc.Query().Get("sso_error"); got != "setup-required" {
 		t.Errorf("sso_error = %q, want setup-required", got)
+	}
+}
+
+// startCode begins a sign-in on the public address and answers the sso_error
+// it was refused with, or "" when it was not refused before leaving.
+//
+// The made-up issuer cannot be discovered, so a start that is not refused early
+// ends as provider-unreachable; that is reported as "" too, because what these
+// tests ask is only whether the pre-check let the flow through.
+func startCode(t *testing.T, c *client) string {
+	t.Helper()
+	resp, body := c.do(http.MethodGet, "/api/v1/auth/oidc/start", nil, c.asHost(publicHost))
+	if resp.StatusCode != http.StatusFound {
+		return ""
+	}
+	loc, err := resp.Location()
+	if err != nil {
+		t.Fatalf("no Location header: %v (body %s)", err, body)
+	}
+	code := loc.Query().Get("sso_error")
+	if code == "provider-unreachable" {
+		return ""
+	}
+	return code
+}
+
+// addPerson creates a second account for a person, through the service rather
+// than the route: this harness does not register the account routes.
+func addPerson(t *testing.T, s *server, id, username string) model.User {
+	t.Helper()
+	u, err := s.deps.Auth.CreateUser(context.Background(), id, username,
+		"a-long-enough-passphrase", model.RoleOperator)
+	if err != nil {
+		t.Fatalf("create %s: %v", username, err)
+	}
+	return u
+}
+
+// plantIdentity links an account to a provider identity directly in the store.
+func plantIdentity(t *testing.T, s *server, username, subject string) {
+	t.Helper()
+	users, err := s.deps.Store.Users().List(context.Background())
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	for _, u := range users {
+		if u.Username != username {
+			continue
+		}
+		u.Issuer = "https://idp.example.com/application/o/holzkube-manager/"
+		u.Subject = subject
+		if _, err := s.deps.Store.Users().Put(context.Background(), u); err != nil {
+			t.Fatalf("plant binding on %s: %v", username, err)
+		}
+		return
+	}
+	t.Fatalf("no account named %s", username)
+}
+
+// Several accounts, one of them linked: the pre-check cannot know which
+// subject is about to arrive, so it lets the flow through and leaves that to
+// the callback. It used to answer setup-required for any instance with more
+// than one account -- linked or not.
+func TestSignInProceedsOnSSOOnlyHostWhenALinkedAccountIsOneOfSeveral(t *testing.T) {
+	t.Parallel()
+
+	s := newServerWith(t, 5*time.Minute, nil, talos.Mode{}, withSSOOnly(publicHost), withProvider(t))
+	c := s.newClient(t)
+	c.setup()
+	addPerson(t, s, "person-two-0000000000000000000000", "second-person")
+	plantIdentity(t, s, testUser, "subject-0f3a9c")
+
+	if got := startCode(t, c); got != "" {
+		t.Errorf("sso_error = %q, want the flow to proceed: a linked account is one of several", got)
+	}
+}
+
+// A service account never signs in through the provider, so it is not one of
+// the accounts an arriving identity could belong to. One unlinked person and
+// a service account is the "nothing linked yet" case: bind-host, the answer
+// the callback on this address gives.
+//
+// The service account carries a planted binding, so that a pre-check counting
+// every account rather than people would see "something is linked" and let
+// the flow through.
+func TestSignInOnSSOOnlyHostCountsOnlyPeople(t *testing.T) {
+	t.Parallel()
+
+	s := newServerWith(t, 5*time.Minute, nil, talos.Mode{}, withSSOOnly(publicHost), withProvider(t))
+	c := s.newClient(t)
+	c.setup()
+	if _, _, err := s.deps.Auth.CreateServiceAccount(context.Background(),
+		"service-0000000000000000000000000", "ci-bot", model.RoleReader); err != nil {
+		t.Fatalf("create service account: %v", err)
+	}
+	plantIdentity(t, s, "ci-bot", "subject-planted")
+
+	if got := startCode(t, c); got != "bind-host" {
+		t.Errorf("sso_error = %q, want bind-host: the only person is not linked", got)
+	}
+}
+
+// Several people and none linked: still bind-host, because that is what the
+// callback on this address answers before it counts anything. Saying
+// setup-required here told the operator to run a wizard that had already run.
+func TestSignInOnSSOOnlyHostWithSeveralUnlinkedPeopleSaysBindHost(t *testing.T) {
+	t.Parallel()
+
+	s := newServerWith(t, 5*time.Minute, nil, talos.Mode{}, withSSOOnly(publicHost), withProvider(t))
+	c := s.newClient(t)
+	c.setup()
+	addPerson(t, s, "person-two-0000000000000000000000", "second-person")
+
+	if got := startCode(t, c); got != "bind-host" {
+		t.Errorf("sso_error = %q, want bind-host", got)
 	}
 }

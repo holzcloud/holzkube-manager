@@ -57,9 +57,19 @@ func (s *Service) FindByIdentity(ctx context.Context, issuer, subject string) (m
 // unbinding is a deliberate act with its own operation, UnlinkIdentity, behind
 // an admin role and the re-authentication window, not a side effect of somebody
 // signing in.
-func (s *Service) BindIdentity(ctx context.Context, u model.User, issuer, subject string) (model.User, error) {
+//
+// The account is re-read from the store by its ID, and the stored record is
+// what gets the binding. The caller's copy usually comes from Users or
+// SinglePersonAccount, which strip the password hash -- writing that copy back
+// would erase the password at the moment single sign-on first worked, and with
+// it the break-glass way in.
+func (s *Service) BindIdentity(ctx context.Context, account model.User, issuer, subject string) (model.User, error) {
 	if issuer == "" || subject == "" {
 		return model.User{}, errors.New("auth: refusing to bind an empty identity")
+	}
+	u, err := s.store.Users().Get(ctx, account.ID)
+	if err != nil {
+		return model.User{}, fmt.Errorf("auth: read the account to bind: %w", err)
 	}
 	if u.HasIdentityBinding() {
 		if constantTimeEqual(u.Issuer, issuer) && constantTimeEqual(u.Subject, subject) {
@@ -116,22 +126,54 @@ func (s *Service) UnlinkIdentity(ctx context.Context, id model.UserID) (model.Us
 	return saved, nil
 }
 
-// SingleAccount returns the sole operator account.
-//
-// holzkube-manager is a single-operator tool: setup creates one account and
-// refuses to create a second. This returns ErrNoIdentityBinding's sibling
-// condition -- no account at all -- as ErrInvalidCredentials, so that a caller
-// racing an unfinished setup cannot tell "no accounts yet" from "wrong
-// credentials".
-func (s *Service) SingleAccount(ctx context.Context) (model.User, error) {
-	users, err := s.store.Users().List(ctx)
+// ErrNoPersonAccount is returned by SinglePersonAccount when no account for a
+// person exists -- before setup, or with only service accounts.
+var ErrNoPersonAccount = errors.New("auth: there is no account for a person")
+
+// ErrSeveralPersonAccounts is returned by SinglePersonAccount when more than
+// one account for a person exists.
+var ErrSeveralPersonAccounts = errors.New("auth: there is more than one account for a person")
+
+// PersonAccounts returns every account for a person, with password hashes
+// stripped as Users strips them.
+func (s *Service) PersonAccounts(ctx context.Context) ([]model.User, error) {
+	users, err := s.Users(ctx)
 	if err != nil {
-		return model.User{}, fmt.Errorf("auth: list users: %w", err)
+		return nil, err
 	}
-	if len(users) != 1 {
-		return model.User{}, ErrInvalidCredentials
+	people := make([]model.User, 0, len(users))
+	for _, u := range users {
+		if !u.IsService() {
+			people = append(people, u)
+		}
 	}
-	return users[0], nil
+	return people, nil
+}
+
+// SinglePersonAccount returns the only account for a person.
+//
+// The question it answers is who an identity arriving from the provider can
+// belong to, and only a person ever signs in through the provider. So service
+// accounts never make the answer ambiguous: counting them, as the function
+// this replaced did, blocked first-use linking on every instance that had any
+// automation (operator decision, 2026-10-01).
+//
+// "None" and "several" are separate errors because both callers -- the OIDC
+// sign-in pre-check and first-use binding -- answer them differently: the
+// first is "run setup", the second is "nothing can be linked automatically".
+func (s *Service) SinglePersonAccount(ctx context.Context) (model.User, error) {
+	people, err := s.PersonAccounts(ctx)
+	if err != nil {
+		return model.User{}, err
+	}
+	switch len(people) {
+	case 0:
+		return model.User{}, ErrNoPersonAccount
+	case 1:
+		return people[0], nil
+	default:
+		return model.User{}, ErrSeveralPersonAccounts
+	}
 }
 
 func constantTimeEqual(a, b string) bool {

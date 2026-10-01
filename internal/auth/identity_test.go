@@ -109,3 +109,51 @@ func TestUnlinkIdentityRefusesAnUnlinkedAccount(t *testing.T) {
 		t.Fatalf("UnlinkIdentity on an unlinked account: %v, want ErrNotLinked", err)
 	}
 }
+
+func TestSinglePersonAccountIgnoresServiceAccounts(t *testing.T) {
+	t.Parallel()
+	svc, st := newTestService(t, time.Hour)
+
+	person := putAccount(t, st, "u-person", "somebody", model.KindPerson, "", "")
+	putAccount(t, st, "u-service", "ci-bot", model.KindService, "", "")
+
+	got, err := svc.SinglePersonAccount(context.Background())
+	if err != nil {
+		t.Fatalf("SinglePersonAccount with one person and a service account: %v", err)
+	}
+	if got.ID != person.ID {
+		t.Errorf("SinglePersonAccount = %q, want the person %q", got.ID, person.ID)
+	}
+	if got.PasswordHash != "" {
+		t.Errorf("SinglePersonAccount returned a password hash")
+	}
+}
+
+func TestSinglePersonAccountRefusesSeveralPeople(t *testing.T) {
+	t.Parallel()
+	svc, st := newTestService(t, time.Hour)
+
+	putAccount(t, st, "u-one", "first", model.KindPerson, "", "")
+	// An account from before service accounts existed has no kind at all, and
+	// is a person.
+	putAccount(t, st, "u-two", "second", "", "", "")
+
+	if _, err := svc.SinglePersonAccount(context.Background()); !errors.Is(err, ErrSeveralPersonAccounts) {
+		t.Errorf("SinglePersonAccount with two people: %v, want ErrSeveralPersonAccounts", err)
+	}
+}
+
+func TestSinglePersonAccountWithNobody(t *testing.T) {
+	t.Parallel()
+	svc, st := newTestService(t, time.Hour)
+
+	if _, err := svc.SinglePersonAccount(context.Background()); !errors.Is(err, ErrNoPersonAccount) {
+		t.Errorf("SinglePersonAccount with no account: %v, want ErrNoPersonAccount", err)
+	}
+
+	// Service accounts alone are still nobody an identity could belong to.
+	putAccount(t, st, "u-service", "ci-bot", model.KindService, "", "")
+	if _, err := svc.SinglePersonAccount(context.Background()); !errors.Is(err, ErrNoPersonAccount) {
+		t.Errorf("SinglePersonAccount with only a service account: %v, want ErrNoPersonAccount", err)
+	}
+}

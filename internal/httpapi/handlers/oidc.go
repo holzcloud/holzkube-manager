@@ -169,20 +169,41 @@ func oidcStart(d httpapi.Deps, w http.ResponseWriter, r *http.Request, sudo bool
 // A missing binding is the only case that can be decided in advance. A binding
 // to a *different* subject cannot: the subject arrives with the token, so that
 // one still surfaces in the callback.
+//
+// The three answers are over accounts for people only, because only a person
+// signs in through the provider:
+//
+//   - no person account: setup-required. Setup is refused on this address too,
+//     and with only service accounts there is nothing to link either.
+//   - a linked person among them: the flow proceeds. Which subject arrives is
+//     the callback's question.
+//   - people, none linked: bind-host. That is exactly what the callback on this
+//     address answers, because bindFirstIdentity refuses an SSO-only host
+//     before it counts anything -- so this discloses nothing the finished flow
+//     would not.
+//
+// It used to ask for the one account and answer setup-required whenever there
+// was not exactly one: an instance with several accounts refused every sign-in
+// on this address, a linked one included, and told the operator to run a
+// wizard that had already run.
 func refuseUnlinkedOnSSOOnlyHost(d httpapi.Deps, w http.ResponseWriter, r *http.Request) bool {
 	if !d.SSOOnly(r) {
 		return false
 	}
 
-	u, err := d.Auth.SingleAccount(r.Context())
+	people, err := d.Auth.PersonAccounts(r.Context())
 	if err != nil {
-		// No account yet. Setup is refused here too, so there is nothing this
-		// address can offer until the wizard has run on the local network.
+		httpapi.WriteInternal(w, r, d.Logger, err)
+		return true
+	}
+	if len(people) == 0 {
 		failSignIn(w, r, "setup-required")
 		return true
 	}
-	if u.HasIdentityBinding() {
-		return false
+	for _, u := range people {
+		if u.HasIdentityBinding() {
+			return false
+		}
 	}
 
 	failSignIn(w, r, "bind-host")
@@ -352,21 +373,25 @@ var errBindFromUntrustedHost = errors.New("oidc: first binding must not happen o
 // errBindBeforeSetup is returned when no operator account exists yet.
 var errBindBeforeSetup = errors.New("oidc: setup has not created an account yet")
 
-// errBindAmbiguous is returned when this instance has more than one account.
+// errBindAmbiguous is returned when this instance has more than one account
+// for a person.
 //
 // Binding on first sign-in is trust on first use, and trust on first use needs
-// somebody to trust. With one account there is no question about which account
+// somebody to trust. With one person there is no question about which account
 // an arriving identity belongs to; with two there is no answer, and the
 // plausible-looking guesses -- match on username, take the admin, take the
 // first -- are each a way for a new subject at the provider to take over
 // somebody else's account.
 //
-// So the binding becomes deliberate rather than automatic. What that costs is
-// one step for an operator who has just added a second account; what it buys
-// is that adding an account never silently changes who a provider identity
-// signs in as.
-var errBindAmbiguous = errors.New("oidc: this instance has more than one account, so a first " +
-	"binding cannot be inferred")
+// Only accounts for people count. A service account never signs in through the
+// provider, so it is never a candidate and never makes the answer ambiguous.
+//
+// With more than one person, no identity can be linked at all: there is no
+// operation that links a chosen account, so an unlinked account stays unlinked
+// until it is the only person account again. That is the price of never
+// guessing, and the accounts page says so before an unlink rather than after.
+var errBindAmbiguous = errors.New("oidc: this instance has more than one account for a person, " +
+	"so a first binding cannot be inferred")
 
 // bindFirstIdentity links the provider identity to the one operator account.
 //
@@ -388,16 +413,14 @@ func bindFirstIdentity(d httpapi.Deps, r *http.Request, issuer string, identity 
 		return model.User{}, errBindFromUntrustedHost
 	}
 
-	u, err := d.Auth.SingleAccount(r.Context())
-	if err != nil {
-		// Two different conditions arrive here as one error, and they are
-		// worth telling apart: no account at all is "run setup", and several
-		// accounts is "an admin has to link this one deliberately".
-		users, listErr := d.Auth.Users(r.Context())
-		if listErr == nil && len(users) > 1 {
-			return model.User{}, errBindAmbiguous
-		}
+	u, err := d.Auth.SinglePersonAccount(r.Context())
+	switch {
+	case errors.Is(err, auth.ErrNoPersonAccount):
 		return model.User{}, errBindBeforeSetup
+	case errors.Is(err, auth.ErrSeveralPersonAccounts):
+		return model.User{}, errBindAmbiguous
+	case err != nil:
+		return model.User{}, err
 	}
 
 	bound, err := d.Auth.BindIdentity(r.Context(), u, issuer, identity.Subject)
