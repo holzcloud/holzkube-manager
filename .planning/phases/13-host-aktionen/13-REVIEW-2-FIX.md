@@ -751,3 +751,193 @@ Tue 2026-09-29 20:25:38 CEST, NRestarts 0. Nothing was pushed or released.
   `npm run test:browser` exit 0, 5 files and 23 tests. `npm run lint` exit 0
   (2 old warnings and 1 info in DataTable.tsx and wall.test.tsx, untouched).
   `npm run typecheck` exit 0.
+
+## Remaining notes — IN-02, IN-03
+
+Ran on the operator's Pi (aarch64), in the main checkout, no worktree, no
+`-race`. Every exit code below was read from the command itself, not through a
+pipe. Every injection was restored and checked with `cmp` against the
+pre-injection copy, then the suite went green again. `holzkube-manager.service`
+was the same before and after: ActiveEnterTimestamp Tue 2026-09-29 20:25:38
+CEST, NRestarts 0. Its unit, the hourly update unit and timer, and
+`/var/lib/holzkube-manager` were not touched; nothing was installed, pushed or
+released, and there is no changelog entry.
+
+| Item | Outcome | Commits |
+|------|---------|---------|
+| IN-02 check and hourly update race on the status file | fixed | 30d1eb5, 3c32ee4, c47f2ac (lint) |
+| IN-03 check unit's sandbox could be tighter | fixed; the run under the system manager stays V-26 | 5bd85d0 |
+
+### IN-02
+
+**How the script is installed and replaced.** The script is
+`/usr/local/sbin/holzkube-manager-update`. The hourly
+`holzkube-manager-update.service` and the check unit both exec it, and after a
+healthy update it replaces itself from the release archive. The hourly unit is
+the operator's own (`/etc/systemd/system`), not shipped: oneshot, no timeout,
+`PrivateTmp=true`. So both modes run the same file, except for the moment a
+running old script replaces itself.
+
+**Choice: flock(1) in the script, on `$STATUS_DIR/.lock`.** systemd ordering
+was not used, for these reasons:
+
+- `After=` on the check unit only orders jobs queued together. It does not
+  make an hourly run wait for a check already running, and that half would
+  need the operator's unshipped hourly unit changed.
+- `Conflicts=` would stop an update in the middle of an install.
+- A unit-level wait does not count against `TimeoutStartSec`. It would break
+  the check unit's worst-case sum against the helper's 3 min.
+- Neither covers a manual `sudo holzkube-manager-update`.
+
+The lock covers both directions and manual runs.
+
+- **Where the lock is taken.** The run takes it before it reads the installed
+  version, and before the EXIT trap. A run that gives up therefore records
+  nothing; a record written beside the holder would be the race again.
+- **Wait bounds.** `--check` waits 60 s, so wait plus curl's 30 s stays under
+  the check unit's `TimeoutStartSec=2min`. Every other run waits 600 s. The
+  check unit can never run longer than 2min40s.
+- **Override.** `HOLZKUBE_MANAGER_UPDATE_LOCK_WAIT` replaces either wait. Only
+  the tests use it.
+- **Who cannot hold the lock.** The file is 0600 root, created under umask 077.
+  The daemon's user reads `status.json` but cannot open the lock, so it cannot
+  hold off an update. A non-root `--check` may not record, so it does not lock.
+
+**Keeping the hourly update going.** The hourly update must not stop on the
+lock itself. If flock is missing, the status directory is unusable, the file
+cannot be opened, or flock fails with any exit code other than its conflict
+code (`-E 75`), the run goes ahead unlocked, as before. It also logs a WARNUNG.
+Only a lock held for real makes a run wait. After 600 s the hourly run exits 1
+with a message naming the lock, and the timer fires again the next hour.
+
+**Stale locks.** The lock is the kernel's and ends with the last process that
+holds the descriptor. A dead run's `.lock` file blocks nothing. Children inherit
+the descriptor; the longest-lived one is curl, bounded by `--max-time 300`.
+None of them daemonizes.
+
+**Compatibility.**
+
+- An old installed script with the new units behaves exactly as before.
+- A new script with old units works. Both write the status directory: the
+  hourly unit has no sandbox, and every check unit has had
+  `StateDirectory=`.
+- Only the self-replacement moment is unlocked: an old running script beside a
+  new one.
+
+**Reversibility.** High. A later release can drop the lock, and the leftover
+empty `.lock` is harmless; nothing reads it.
+
+**Not changed.**
+
+- `--rollback` stays unlocked. It is the path someone takes under time
+  pressure.
+- The page comment in HostActions.tsx ("would run the update script twice")
+  still holds for older scripts, and the page's main reason (the helper is
+  busy) is unchanged.
+
+**Red runs** (`go test ./internal/host/updatestatus/ -run TestUpdateScriptRunsOneAtATime`):
+
+- **HEAD's script, before the fix.** Exit 1, all five subtests red:
+  - "an update waits for a running check": the update ended while the check
+    looked; outcome "available", want "updated". This is the review's race,
+    reproduced.
+  - "a check waits for a running update": the check ended beside the install;
+    outcome "updated", want "current".
+  - Both give-up subtests: exit 0, want 1, and status.json overwritten.
+  - The killed-run subtest: no lock file.
+- **`umask 077` disabled.** Exit 1: lock file mode -rw-rw-r--.
+- **Give-up that goes on instead of failing.** Exit 1. Done on both the first
+  form and the `-E 75` form; both give-up subtests went red with status.json
+  rewritten.
+- **A `setsid /bin/sleep 301 &` child holding the descriptor.** Exit 1: the
+  next run waited 5 s and failed ("a dead run's lock held this one"). The
+  orphans were killed afterwards (`pgrep` count 0).
+- **"An update whose flock fails goes ahead unlocked"** (stub flock exit 71),
+  against 30d1eb5's script: exit 1, want 0. The real-world form of that fault
+  was seen under a seccomp filter denying flock: the script waited 60 s and
+  blamed "another run".
+- Restored: the package is green. 67 PASS in the first green run, plus the
+  flock-error subtest after.
+
+### IN-03
+
+**Added to the check unit:** `SystemCallFilter=@system-service`,
+`SystemCallErrorNumber=EPERM`, `ProtectProc=invisible`, `ProcSubset=pid`,
+`PrivateIPC=true`. TestTheCheckUnitRunsOnlyTheCheck lists exactly these five,
+with their values.
+
+**Already there:** ProtectKernel*, ProtectClock, ProtectHostname,
+LockPersonality, RestrictNamespaces, RestrictRealtime, RestrictSUIDSGID,
+SystemCallArchitectures, UMask.
+
+**Not added:**
+
+- `RemoveIPC=`. systemd.exec(5) on this host: "It has no effect on IPC objects
+  owned by the root user."
+- `IPAddressDeny=` for RFC 1918 or link-local ranges. The reference host's
+  `/etc/resolv.conf` names an IPv4 resolver in an RFC 1918 network, and IPv6
+  resolvers are often link-local, so DNS would break.
+
+**What `--check` needs,** measured against the real GitHub API with a daemon
+binary built from this tree as `HOLZKUBE_MANAGER_BIN` and scratch paths for
+everything else:
+
+- **System calls.** `strace -f` of a root run (user namespace, status
+  directory created by the run) plus the lock-wait path: 78 distinct system
+  calls, `comm` against the expanded `@system-service` set: none outside it.
+  Executed: bash, readlink, uname, install, python3 (×5), flock, curl, awk,
+  mktemp, chmod, mv, and holzkube-managerd `--version` (×2).
+- **/proc.** It reads `/proc/self/{auxv,cgroup,mountinfo,maps}` (Go),
+  `/proc/sys/vm/overcommit_memory` (glibc) and `/proc/filesystems`
+  (coreutils/libselinux).
+- **The filter under systemd.** A user-manager transient service running the
+  script with `SystemCallFilter=@system-service` and the *kill* action (plus
+  NoNewPrivileges, MemoryDenyWriteExecute, RestrictAddressFamilies,
+  PrivateIPC): exit 0, and "available" was recorded. Controls:
+  - `~flock` added: "Bad system call".
+  - `~connect` added: "die Release-Liste ... ist nicht lesbar", exit 1.
+
+  So the filter was live.
+- **ProtectProc and ProcSubset.** The user manager does not apply them
+  (mountinfo showed plain proc, /proc/meminfo readable). They were measured
+  instead with `unshare -Urpfm` and `mount -t proc -o
+  subset=pid,hidepid=invisible`: /proc/meminfo and /proc/sys were absent, and
+  `--check` as root exited 0 with the status recorded.
+- **Not measured together.** All five keys at once, under the system manager
+  as root with the token file and `update.conf`, are the human item. V-26
+  instructions are extended in 13-VERIFICATION.md and 13-UAT.md #17: no
+  "Bad system call", "Operation not permitted" or "ohne Sperre" in the
+  journal, `.lock` -rw------- root, and the security exposure near 1.9.
+
+**systemd-analyze** (systemd 257) on a scratch copy of the committed unit
+(ExecStart pointed at a stub):
+
+- `verify`: exit 0 with 0 bytes of output.
+- `security --offline=true`: exposure 3.4 before the change, 1.9 after.
+
+**Red runs** (`-run '^(TestUnitsVerify|TestUnitsAgree|TestTheCheckUnitRunsOnlyTheCheck)$'`):
+
+- New keys against the old allow-list: exit 1, five "is not a line this unit
+  may carry".
+- `ProcSubset=` line removed: exit 1, "has no ProcSubset=".
+- `ProtectProc=default`: exit 1.
+- `ProcSubset=pids`: exit 1. The allow-list failed, and so did TestUnitsVerify;
+  `systemd-analyze verify` on a scratch copy said "Failed to parse
+  ProcSubset=pids, ignoring" with exit 0.
+- `SystemCallFilter=@system-servce`: exit 1, both tests.
+- Restored (`cmp`): green.
+
+### Final suites (Pi, main checkout)
+
+- **`go test ./internal/... ./cmd/... -count=1`.** Exit 0, 41 `ok`, nothing
+  else, on the third run. The first two runs were exit 1, each with one
+  timeout in `internal/upgrade` TestANodeSaysHowItBooted ("talos: Get ... timed
+  out", once at 42 s and once at 30 s). The package does not depend on
+  anything changed here (`go list -deps -test` shows no
+  updatestatus/hostaction, and it reads nothing in deploy/). Alone it passed
+  in 2.8 s, and the whole package in 25.8 s. It is a timing-sensitive live
+  test under full load (load average around 5 from other processes), not a
+  regression. It is worth watching.
+- `./bin/task lint:go`: exit 0, 0 issues (after c47f2ac).
+- `go test ./internal/publicrepo/` before each commit: exit 0.
+- web/ was not touched, so no web suite was run.
