@@ -220,8 +220,9 @@ case $action in
   # "done". Erst eines von beiden sagt dem Daemon, dass dieser Helfer wieder
   # Auftraege abholt -- nicht der Update-Status, den auch der stuendliche
   # Lauf schreibt (13-REVIEW-2 V-01). Die Unit begrenzt sich
-  # selbst (TimeoutStartSec=2min plus TimeoutStopSec=15s), unter der Grenze
-  # dieses Dienstes (3min).
+  # selbst: TimeoutStartSec=2min, danach bis zu viermal TimeoutStopSec=10s,
+  # wenn ein Prozess kein Signal beendet -- hoechstens 2min40s, unter der
+  # Grenze dieses Dienstes (3min).
   check-update)    cmd=(start holzkube-manager-update-check.service) ;;
   *)               reject "unbekannte Aktion" "$size" ;;
 esac
