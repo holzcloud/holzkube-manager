@@ -198,6 +198,14 @@ describe('the layout guard’s fixtures', () => {
     expect(Array.isArray(installedActions.outdated)).toBe(true)
   })
 
+  it('carries `busy` in both /host fixtures as written, as the daemon sends it', () => {
+    // The same reasoning for busy (13-REVIEW-2 V-01): the schema reads a
+    // missing one as false, which would hide a fixture that lost the key.
+    const raw = (v: unknown) => (v as { actions: Record<string, unknown> }).actions
+    expect(raw(fixtures['/api/v1/host']).busy).toBe(false)
+    expect((helperInstalled as Record<string, unknown>).busy).toBe(false)
+  })
+
   it("previews m-cp-1's reset as the server builds it, with the disk rows showing", () => {
     // The Reset dialog renders its disk checkboxes only when the chosen mode
     // needs disks. Without this answer the audit's request reaches its own

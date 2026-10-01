@@ -3219,12 +3219,24 @@ export const hostSchema = z.object({
        * which then reads as nothing outdated.
        */
       outdated: z.array(hostHelperOutdatedSchema).nullish().transform(orEmpty),
+      /**
+       * Whether the helper is busy with an update check (13-REVIEW-2 V-01):
+       * it picks up nothing else until the check ends, and the routes refuse
+       * every action meanwhile (409 conflict.host-helper-busy). The server
+       * decides it from the helper's own record; the page only reads it.
+       * Absent from a daemon before it, which then reads as not busy.
+       */
+      busy: z
+        .boolean()
+        .nullish()
+        .transform((v) => v ?? false),
       install_commands: z.array(z.string()).nullish().transform(orEmpty),
     })
     .default({
       available: false,
       missing: [],
       outdated: [],
+      busy: false,
       install_commands: [],
       order: null,
       result: {

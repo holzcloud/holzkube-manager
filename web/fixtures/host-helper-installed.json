@@ -10,5 +10,6 @@
   "available": true,
   "missing": [],
   "outdated": [],
+  "busy": false,
   "install_commands": []
 }

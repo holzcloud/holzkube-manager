@@ -3405,6 +3405,7 @@
         { "item": "path-unit", "path": "/etc/systemd/system/holzkube-manager-host.path" }
       ],
       "outdated": [],
+      "busy": false,
       "install_commands": [
         "sudo install -o root -g root -m 0755 deploy/holzkube-manager-host.sh /usr/local/sbin/holzkube-manager-host",
         "sudo install -o root -g root -m 0644 deploy/holzkube-manager-host.path deploy/holzkube-manager-host.service deploy/holzkube-manager-update-check.service /etc/systemd/system/",

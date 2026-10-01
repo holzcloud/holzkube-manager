@@ -223,42 +223,42 @@ describe('HostActions: the five buttons and the one reason they are off', () => 
     expectOffBecause('An update check is running; wait for it to finish.')
   })
 
-  // 13-REVIEW-2 WR-01: the routes refuse every order while the helper waits
-  // for a check (409 conflict.host-helper-busy), whoever placed it -- so the
-  // page reads the same two things, the helper's record and the update status,
-  // even for a check it does not follow.
+  // 13-REVIEW-2 WR-01, V-01: the routes refuse every order while the helper
+  // waits for a check (409 conflict.host-helper-busy), whoever placed it. The
+  // server says so in actions.busy, from the helper's own record, and the page
+  // reads that and nothing else -- not the update status, which the hourly run
+  // writes while a check runs too.
   describe('a check the page does not follow (another tab or client placed it)', () => {
     const checkAt = '2026-09-28T10:04:35Z'
     const checkStarted = { order: null, result: resultFor(ID, 'check-update', 'started', checkAt) }
 
-    it('while the helper waits for it: all five off, as the routes refuse', () => {
-      actions({ host: later(checkStarted) })
+    it('while the server says the helper is busy: all five off, as the routes refuse', () => {
+      actions({ host: later({ ...checkStarted, busy: true }) })
       expectOffBecause('An update check is running; wait for it to finish.')
     })
 
-    it('with only an older update status: still off', () => {
-      const older = { ...sameSecond('current'), checked_at: '2026-09-28T09:00:00Z' }
-      actions({ host: later(checkStarted, { update: older }) })
+    it('with an update status newer than the check: still off while busy', () => {
+      const newer = { ...sameSecond('current'), checked_at: '2026-09-28T10:04:50Z' }
+      actions({ host: later({ ...checkStarted, busy: true }, { update: newer }) })
       expectOffBecause('An update check is running; wait for it to finish.')
     })
 
     it.each([
-      ['its answer arrived', { update: { ...sameSecond('available'), checked_at: checkAt } }],
-      ['it started 3 min ago, the helper service limit', { observed: '2026-09-28T10:07:35Z' }],
-    ] as const)('once %s: offers them again', (_, when) => {
-      actions({ host: later(checkStarted, when) })
+      ['the server says it is over', checkStarted],
+      [
+        'the helper recorded it done',
+        { order: null, result: resultFor(ID, 'check-update', 'done', checkAt) },
+      ],
+    ] as const)('once %s: offers them again', (_, actionsNow) => {
+      actions({ host: later({ ...actionsNow, busy: false }) })
       expect(reasonLine()).toBeNull()
       for (const b of headerButtons()) {
         expect(b).toBeEnabled()
       }
     })
 
-    it.each([
-      ['a check that failed', resultFor(ID, 'check-update', 'failed', checkAt)],
-      ['an update started', resultFor(ID, 'update', 'started', checkAt)],
-    ])('%s: offers them', (_, result) => {
-      actions({ host: later({ order: null, result }) })
-      expect(reasonLine()).toBeNull()
+    it('a daemon that does not say: not busy', () => {
+      expect(later({ order: null }).actions.busy).toBe(false)
     })
   })
 
@@ -1390,15 +1390,17 @@ describe('orderPhase: every phase from server fields', () => {
       false,
       'update-finished',
     ],
+    // 13-REVIEW-2 V-01: a check is over when the helper records it, not when
+    // an update status appears -- the hourly run may write one meanwhile.
     [
-      'check, the status in the same second as the placement: finished',
+      'check started, an update status since: still started',
       subSecond('check-update'),
       later(
         { order: subSecond('check-update'), result: resultFor(ID, 'check-update', 'started') },
-        { update: sameSecond('available') },
+        { observed: SOON, update: sameSecond('available') },
       ),
       false,
-      'update-finished',
+      'started',
     ],
     [
       'check, a status the second before the placement does not finish it',

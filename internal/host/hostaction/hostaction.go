@@ -117,6 +117,18 @@ const ReferenceOrderPath = "/var/lib/holzkube-manager/" + OrderFileName
 // and the new order was not placed.
 var ErrPending = errors.New("hostaction: an order is already waiting for the helper")
 
+// ErrBusy means the helper is busy with a check (Box.Busy): it picks up
+// nothing until the check ends, so the new order was not placed.
+var ErrBusy = errors.New("hostaction: the helper is busy with an update check")
+
+// ResultWithin is how long after its placement an order the helper took may
+// go without a record for its id before nobody expects one any more. The
+// helper records "started" within milliseconds of taking an order; a minute
+// without it means the helper was ended or could not write. The page waits as
+// long before it says "no answer" (RESULT_WITHIN_MS in
+// web/src/components/HostActions.tsx).
+const ResultWithin = time.Minute
+
 // OrderState is where the last placed order is, as far as this process can
 // tell without asking the helper.
 type OrderState string
@@ -191,6 +203,11 @@ type Config struct {
 	AfterFunc func(d time.Duration, f func()) (stop func() bool)
 	// Now is the clock the placement time comes from. Nil means time.Now.
 	Now func() time.Time
+	// SinceBoot is how long the machine has been up (CLOCK_BOOTTIME), so that
+	// Busy can tell a check record from before the last boot. Production:
+	// host.OS().BootTime. Nil, or an error, means the boot is unknown, and a
+	// started check is then held only by HelperServiceLimit.
+	SinceBoot func() (time.Duration, error)
 	// Rand is where order ids come from. Nil means crypto/rand.Reader.
 	Rand io.Reader
 	// Logger receives what the Box has to say. Nil discards it.
@@ -285,7 +302,8 @@ func (b *Box) orderPath() string {
 }
 
 // Place places one order for a. It returns ErrPending when an order already
-// waits, and the placed order otherwise.
+// waits, ErrBusy when the helper is busy with a check (Busy), and the placed
+// order otherwise.
 //
 // The line is the action, one space, the id, one newline -- the whole of what
 // the helper accepts (D-01).
@@ -306,6 +324,13 @@ func (b *Box) Place(a Action) (Order, error) {
 
 	b.mu.Lock()
 	defer b.mu.Unlock()
+
+	// Under the same lock as the placement and as the memory busyLocked
+	// reads, so no check this Box placed can be taken between the question
+	// and the link (13-REVIEW-2 V-03, V-22).
+	if b.busyLocked() {
+		return Order{}, ErrBusy
+	}
 
 	err := b.cfg.Place(b.orderPath(), data)
 	switch {
@@ -334,6 +359,69 @@ func (b *Box) Place(a Action) (Order, error) {
 		b.stop = b.cfg.AfterFunc(b.cfg.PickupTimeout, func() { b.withdraw(id) })
 	}
 	return o, nil
+}
+
+// Busy reports whether the helper is busy with a check right now, so that no
+// order should be placed: the host action routes refuse with 409
+// conflict.host-helper-busy while it is true, before they look at the token,
+// and the host answer carries it as actions.busy, which turns the page's
+// buttons off. Place asks the same question under its lock.
+//
+// Busy is either of two things:
+//
+//   - the helper's last record is a check it has started and not ended
+//     (CheckRunning): its own word, read now;
+//   - the last order this Box placed is a check the helper has taken -- its
+//     file is gone, it was not withdrawn -- and has not recorded anything for
+//     yet, less than ResultWithin after its placement. That is the moment
+//     between the helper's rename and its "started" record, in which the
+//     record alone still shows the order before (13-REVIEW-2 V-03).
+func (b *Box) Busy() bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.busyLocked()
+}
+
+// busyLocked is Busy with b.mu held.
+func (b *Box) busyLocked() bool {
+	now := b.cfg.Now()
+	// A Box without an FS (only tests build one) reads no record.
+	r, readErr := Result{}, ErrNoResult
+	if b.cfg.FS != nil {
+		r, readErr = ReadResult(b.cfg.FS, b.cfg.ResultPath)
+	}
+	if readErr == nil && CheckRunning(r, b.boot(now), now) {
+		return true
+	}
+
+	l := b.last
+	if l == nil || l.Action != CheckUpdate || l.State == StateWithdrawn {
+		return false
+	}
+	if readErr == nil && r.ID == l.ID {
+		// The helper has recorded this check; CheckRunning decided above.
+		return false
+	}
+	if age := now.Sub(l.PlacedAt); age < 0 || age >= ResultWithin {
+		return false
+	}
+	// Taken: the name is gone. Still there (or not to be told) is pending,
+	// and the placement's link refuses that by itself.
+	_, err := os.Lstat(b.orderPath())
+	return errors.Is(err, fs.ErrNotExist)
+}
+
+// boot is when the machine last booted by now's clock, or the zero time when
+// that cannot be read.
+func (b *Box) boot(now time.Time) time.Time {
+	if b.cfg.SinceBoot == nil {
+		return time.Time{}
+	}
+	up, err := b.cfg.SinceBoot()
+	if err != nil || up <= 0 {
+		return time.Time{}
+	}
+	return now.Add(-up)
 }
 
 // withdraw is the pickup timer of the order id. It claims the order only while

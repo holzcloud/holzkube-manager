@@ -109,10 +109,13 @@ import (
 // busy with a check (409 conflict.host-helper-busy, 13-REVIEW-2 WR-01). The
 // helper waits for the check unit, up to its service's 3-min limit, and picks
 // up nothing meanwhile; an order placed then would lie in the slot until the
-// Box withdrew it after 10 s. host.Collector.CheckRunning answers it from the
-// helper's result and the update status, the two readings the page turns its
-// buttons off by. Both routes ask it where they ask the check's own question,
-// so no token is issued and no order placed.
+// Box withdrew it after 10 s. hostaction.Box.Busy answers it from the
+// helper's own record of the check -- started and not yet done or failed --
+// and the check the Box placed last, and GET /api/v1/host carries the same
+// answer as actions.busy, which the page turns its buttons off by. Both routes
+// ask it where they ask the check's own question, so no token is issued and
+// none is spent. Place asks it once more under the slot's lock: a check taken
+// between the question and the placement is refused there, with the same 409.
 
 // hostIntentTarget is the Machine field of every host action's confirmation
 // intent. A machine id is a UUID, and the inventory's pseudo ids use prefixes
@@ -281,7 +284,7 @@ func confirmHostAction(d httpapi.Deps) http.HandlerFunc {
 		}
 		// Every action, after the check's own refusal: no token while the
 		// helper waits for a check and can pick up nothing else.
-		if d.Host.CheckRunning() {
+		if d.HostActions.Busy() {
 			httpapi.WriteProblem(w, r, httpapi.Conflict(httpapi.CodeHostHelperBusy, hostHelperBusyDetail))
 			return
 		}
@@ -344,8 +347,9 @@ func hostAction(d httpapi.Deps, a hostaction.Action) http.HandlerFunc {
 			return
 		}
 		// Every action: while the helper waits for a check it picks up
-		// nothing, so nothing is placed for it to leave lying.
-		if d.Host.CheckRunning() {
+		// nothing, so nothing is placed for it to leave lying. Before the
+		// body and the token, so a refused client keeps its token.
+		if d.HostActions.Busy() {
 			httpapi.WriteProblem(w, r, httpapi.Conflict(httpapi.CodeHostHelperBusy, hostHelperBusyDetail))
 			return
 		}
@@ -373,6 +377,12 @@ func hostAction(d httpapi.Deps, a hostaction.Action) http.HandlerFunc {
 		}
 
 		order, err := d.HostActions.Place(a)
+		if errors.Is(err, hostaction.ErrBusy) {
+			// The helper took a check in the moment since Busy above. The
+			// token is spent; nothing was placed.
+			httpapi.WriteProblem(w, r, httpapi.Conflict(httpapi.CodeHostHelperBusy, hostHelperBusyDetail))
+			return
+		}
 		if errors.Is(err, hostaction.ErrPending) {
 			httpapi.WriteProblem(w, r, httpapi.Conflict(httpapi.CodeHostOrderPending,
 				"Another host action is still waiting for the helper. Wait for it to be answered, then try again."))

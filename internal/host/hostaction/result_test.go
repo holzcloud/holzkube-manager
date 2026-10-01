@@ -290,39 +290,46 @@ func TestReadResultPath(t *testing.T) {
 
 func ptr(s string) *string { return &s }
 
-// TestCheckRunning (13-REVIEW-2 WR-01): the helper is busy with a check while
-// its last record is a check it started, younger than its service's limit,
-// and the update script has recorded no run since. At the edges: the limit
-// itself is over, and an answer in the check's own second counts.
+// TestCheckRunning (13-REVIEW-2 WR-01, V-01, V-02): the helper is busy with a
+// check while its last record is a check it started -- not done, not failed
+// -- younger than its service's limit and not from before the last boot.
+// Nobody else's word ends it: there is no update status in the question.
 func TestCheckRunning(t *testing.T) {
 	t.Parallel()
 
 	at := time.Date(2026, 9, 30, 16, 0, 0, 0, time.UTC)
 	check := Result{ID: "c0ffee00c0ffee11", Action: CheckUpdate, Outcome: OutcomeStarted, At: at}
 	with := func(f func(r *Result)) Result { r := check; f(&r); return r }
+	noBoot := time.Time{}
+	bootedAt := at.Add(-time.Hour)
 
 	cases := []struct {
-		name     string
-		r        Result
-		answered time.Time
-		now      time.Time
-		want     bool
+		name string
+		r    Result
+		boot time.Time
+		now  time.Time
+		want bool
 	}{
-		{"just started, never answered", check, time.Time{}, at, true},
-		{"5 s in, the last answer an hour old", check, at.Add(-time.Hour), at.Add(5 * time.Second), true},
-		{"an answer the second before it began", check, at.Add(-time.Second), at.Add(5 * time.Second), true},
-		{"one second short of the limit", check, time.Time{}, at.Add(HelperServiceLimit - time.Second), true},
-		{"at the limit", check, time.Time{}, at.Add(HelperServiceLimit), false},
-		{"answered in its own second", check, at, at.Add(5 * time.Second), false},
-		{"answered after", check, at.Add(2 * time.Second), at.Add(5 * time.Second), false},
-		{"recorded in the future", check, time.Time{}, at.Add(-time.Second), false},
-		{"failed", with(func(r *Result) { r.Outcome = OutcomeFailed }), time.Time{}, at.Add(5 * time.Second), false},
-		{"rejected", with(func(r *Result) { r.Outcome = OutcomeRejected }), time.Time{}, at.Add(5 * time.Second), false},
-		{"an update started", with(func(r *Result) { r.Action = Update }), time.Time{}, at.Add(5 * time.Second), false},
-		{"a reboot started", with(func(r *Result) { r.Action = Reboot }), time.Time{}, at.Add(5 * time.Second), false},
+		{"just started", check, bootedAt, at, true},
+		{"5 s in", check, bootedAt, at.Add(5 * time.Second), true},
+		{"5 s in, the boot unknown", check, noBoot, at.Add(5 * time.Second), true},
+		{"one second short of the limit", check, bootedAt, at.Add(HelperServiceLimit - time.Second), true},
+		{"at the limit", check, bootedAt, at.Add(HelperServiceLimit), false},
+		{"recorded in the future", check, bootedAt, at.Add(-time.Second), false},
+		{"done", with(func(r *Result) { r.Outcome = OutcomeDone }), bootedAt, at.Add(5 * time.Second), false},
+		{"failed", with(func(r *Result) { r.Outcome = OutcomeFailed }), bootedAt, at.Add(5 * time.Second), false},
+		{"rejected", with(func(r *Result) { r.Outcome = OutcomeRejected }), bootedAt, at.Add(5 * time.Second), false},
+		{"an update started", with(func(r *Result) { r.Action = Update }), bootedAt, at.Add(5 * time.Second), false},
+		{"a reboot started", with(func(r *Result) { r.Action = Reboot }), bootedAt, at.Add(5 * time.Second), false},
+		// V-02: a reboot mid-check ended whatever the helper waited for.
+		{"the machine booted 40 s after it began", check, at.Add(40 * time.Second), at.Add(80 * time.Second), false},
+		// The record rounds down to its second: written 0.4 s after a boot
+		// that is not before it. A record whose second ended at the boot is.
+		{"recorded in the second the machine booted", check, at.Add(400 * time.Millisecond), at.Add(5 * time.Second), true},
+		{"recorded the second before the boot", check, at.Add(time.Second), at.Add(5 * time.Second), false},
 	}
 	for _, tc := range cases {
-		if got := CheckRunning(tc.r, tc.answered, tc.now); got != tc.want {
+		if got := CheckRunning(tc.r, tc.boot, tc.now); got != tc.want {
 			t.Errorf("%s: CheckRunning = %v, want %v", tc.name, got, tc.want)
 		}
 	}
