@@ -42,6 +42,9 @@ const (
 	// helperUpdateScript is not the helper's: the update script both update
 	// orders end in, which the reference installation has beside it.
 	helperUpdateScript = "usr/local/sbin/holzkube-manager-update"
+	// helperUpdateUnit is not the helper's either: the hourly update's
+	// service, which the update order starts (13-16).
+	helperUpdateUnit = "etc/systemd/system/holzkube-manager-update.service"
 )
 
 // overlayFS serves some names from a MapFS and everything else from a real
@@ -71,7 +74,10 @@ func (o overlayFS) ReadLink(name string) (string, error) { return fs.ReadLink(o.
 // way deploy/HOST-HELPER.md installs it: the script -- the shipped script's own
 // bytes, so the daemon reads the marker line this release ships -- regular,
 // 0755 and owned by uid 0, both unit files, the path unit enabled (its
-// paths.target.wants symlink), and the check unit. Everything else -- the helper's state directory in particular --
+// paths.target.wants symlink), and the check unit -- and beside it what the
+// reference installation has for the two update orders: the update script and
+// the hourly update's unit, a regular 0644 file. Everything else -- the
+// helper's state directory in particular --
 // is a real temporary directory, returned as stateDir, which the script run
 // writes into and the Box reads back through fsys.
 func installedHelperFS(t *testing.T) (fsys fs.FS, stateDir string) {
@@ -104,6 +110,7 @@ func installedHelperFS(t *testing.T) (fsys fs.FS, stateDir string) {
 		helperWantsLink:    {Data: []byte("/" + helperPathUnit), Mode: fs.ModeSymlink | 0o777},
 		helperCheckUnit:    {Data: []byte("[Service]\nType=oneshot\nExecStart=" + hostaction.UpdateScriptPath + " --check\n"), Mode: 0o644},
 		helperUpdateScript: {Data: []byte("#!/usr/bin/env bash\n"), Mode: 0o755, Sys: &syscall.Stat_t{Uid: 0, Gid: 0}},
+		helperUpdateUnit:   {Data: []byte("[Service]\nType=oneshot\nExecStart=" + hostaction.UpdateScriptPath + "\n"), Mode: 0o644},
 	}
 	return overlayFS{fixed: fixed, disk: os.DirFS(root)}, stateDir
 }

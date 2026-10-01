@@ -85,6 +85,19 @@ import (
 // operator: the update script replaces the daemon's binary and itself, never
 // a unit, so a newer unit comes from repeating the install commands with a
 // newer archive.
+//
+// The update order needs the service: without it the helper's
+// `systemctl start --no-block` queues a start for a unit that does not exist
+// and records failed. UpdateUnitMissing asks for UpdateUnitPath the way
+// Outdated asks for the check unit: a regular file, read through fs.Stat, so a
+// symlink counts by what it points to -- a unit linked from elsewhere
+// (systemctl link) is installed, a mask (a symlink to /dev/null) or a link to
+// nothing is not. It looks only in /etc/systemd/system, where the install
+// commands put it and where Detect looks for the helper's units; a unit kept
+// in another directory of systemd's search path is reported missing. Only
+// update needs it: check-update starts the check unit, and the other three no
+// update unit at all. Like the update script, it is asked whatever Detect
+// says, because the helper's install commands do not bring it.
 
 // The helper's files, as the operator installs them (deploy/HOST-HELPER.md).
 const (
@@ -178,6 +191,19 @@ var UpdateUnitInstallCommands = []string{
 	"sudo systemctl enable --now holzkube-manager-update.timer",
 }
 
+// MissingUpdateUnit is the item UpdateUnitMissing reports: the hourly
+// update's service is not a regular file at UpdateUnitPath -- absent, a
+// directory, masked (a symlink to /dev/null) or a symlink to nothing.
+const MissingUpdateUnit = "update-unit"
+
+// NeedsUpdateUnit reports whether the order a starts the hourly update's
+// service: update only. check-update starts the check unit, which Outdated
+// asks for. The routes refuse exactly update while UpdateUnitMissing reports
+// anything.
+func NeedsUpdateUnit(a Action) bool {
+	return a == Update || a == CheckUpdate
+}
+
 // MissingUpdateScript is the item UpdateScriptMissing reports: the update
 // script is absent, or not something root may run as root (not regular, not
 // executable, not owned by uid 0, or writable by group or other).
@@ -218,8 +244,9 @@ const (
 // Missing is one piece of the helper that is not installed.
 type Missing struct {
 	// Item is MissingScript, MissingPathUnit or MissingNotEnabled -- or, in
-	// Outdated's list, OutdatedScript or OutdatedCheckUnit, and in
-	// UpdateScriptMissing's, MissingUpdateScript.
+	// Outdated's list, OutdatedScript or OutdatedCheckUnit, in
+	// UpdateScriptMissing's, MissingUpdateScript, and in UpdateUnitMissing's,
+	// MissingUpdateUnit.
 	Item string `json:"item"`
 	// Path is the absolute path of the file that was found wanting.
 	Path string `json:"path"`
@@ -415,4 +442,25 @@ func UpdateScriptMissing(fsys fs.FS) []Missing {
 // Box's FS. Empty, never nil, when it is installed.
 func (b *Box) UpdateScript() []Missing {
 	return UpdateScriptMissing(b.cfg.FS)
+}
+
+// UpdateUnitMissing reports whether the hourly update's service, which the
+// update order starts, is missing on the machine fsys is rooted at ("/"): one
+// MissingUpdateUnit item when UpdateUnitPath is not a regular file once
+// symlinks are followed, else an empty list. It looks only at
+// /etc/systemd/system, never reads the file, and never returns nil.
+func UpdateUnitMissing(fsys fs.FS) []Missing {
+	// fs.Stat, not fs.Lstat: systemctl link leaves a symlink to a real unit,
+	// which is installed; systemctl mask leaves one to /dev/null, which is
+	// not a regular file and so not installed.
+	if info, err := fs.Stat(fsys, fsName(UpdateUnitPath)); err == nil && info.Mode().IsRegular() {
+		return []Missing{}
+	}
+	return []Missing{{Item: MissingUpdateUnit, Path: UpdateUnitPath}}
+}
+
+// UpdateUnit reports whether the hourly update's service is missing, read
+// through the Box's FS. Empty, never nil, when it is installed.
+func (b *Box) UpdateUnit() []Missing {
+	return UpdateUnitMissing(b.cfg.FS)
 }

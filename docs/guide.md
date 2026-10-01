@@ -361,8 +361,11 @@ three buttons stay on, and a note under the header names the file and the one
 command that installs it from the release archive -- the one in
 [Updating itself every hour](#updating-itself-every-hour). Both come on with
 the next reading of the page. **Check for updates and install** also needs
-`holzkube-manager-update.service`, the unit your hourly update timer starts;
-the page does not look for that one, and without it that order fails.
+`holzkube-manager-update.service`, the unit the hourly update timer starts
+([Updating itself every hour](#updating-itself-every-hour)); until it is
+installed, holzkube-manager refuses that order with
+`409 conflict.host-update-unit-missing` before it issues a confirmation or
+places an order. **Check for updates** and the other three do not need it.
 
 **What the page shows once you have pressed one.** A status box under the
 header follows the order from start to end:

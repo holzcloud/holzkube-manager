@@ -122,7 +122,10 @@ both update actions with `409 conflict.host-update-script-missing` before it
 issues a confirmation or places an order.
 
 `update` also needs `holzkube-manager-update.service`, the unit the hourly
-timer starts: see the next section.
+timer starts: see the next section. Until it is installed, holzkube-manager
+refuses **Check for updates and install** with
+`409 conflict.host-update-unit-missing` before it issues a confirmation or
+places an order. **Check for updates** and the other three do not need it.
 
 ## The hourly update
 
@@ -160,6 +163,14 @@ sudo systemctl enable --now holzkube-manager-update.timer
 The first line creates the directory the previous binary is kept in: the unit
 lets the script write there, but cannot create it. Only the timer is enabled;
 the service has no `[Install]` section.
+
+holzkube-manager looks for the service at
+`/etc/systemd/system/holzkube-manager-update.service`: a regular file, or a
+link to one. Until it is there -- or while it is masked -- holzkube-manager
+refuses **Check for updates and install** with
+`409 conflict.host-update-unit-missing` before it issues a confirmation or
+places an order. **Check for updates**, which starts the check unit, and the
+other three do not need it.
 
 These lines replace units of the same name that were written by hand. To see
 what is there first:
