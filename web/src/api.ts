@@ -3266,7 +3266,7 @@ export const api = {
     sendJSON('GET', `/api/v1/host/history?range=${range}`, historySchema),
 
   /**
-   * The four host actions (Phase 13). The daemon carries none of them out: it
+   * The five host actions (Phase 13). The daemon carries none of them out: it
    * places an order for a root-owned helper. Every one needs the hostname
    * typed (confirm), then the token and an open sudo window (place) -- a 428
    * there opens the password prompt through the shared interceptor and
