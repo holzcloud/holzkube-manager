@@ -104,6 +104,15 @@ import (
 // for a check the helper would refuse, and no order is placed. The helper's own
 // refusal of every word it does not know stays the lock; this keeps the page
 // and the routes from offering what it would refuse.
+//
+// And every action is asked a fourth question, last: whether the helper is
+// busy with a check (409 conflict.host-helper-busy, 13-REVIEW-2 WR-01). The
+// helper waits for the check unit, up to its service's 3-min limit, and picks
+// up nothing meanwhile; an order placed then would lie in the slot until the
+// Box withdrew it after 10 s. host.Collector.CheckRunning answers it from the
+// helper's result and the update status, the two readings the page turns its
+// buttons off by. Both routes ask it where they ask the check's own question,
+// so no token is issued and no order placed.
 
 // hostIntentTarget is the Machine field of every host action's confirmation
 // intent. A machine id is a UUID, and the inventory's pseudo ids use prefixes
@@ -220,6 +229,10 @@ const (
 	// hostHelperOutdatedDetail is the check's own refusal: the four older
 	// orders still go through.
 	hostHelperOutdatedDetail = "The installed holzkube-manager-host helper does not carry out an update check yet, so no order was placed. The Host page says what to reinstall."
+	// hostHelperBusyDetail begins with the page's own reason line for a
+	// running check (REASON.checkRunning in web/src/components/HostActions.tsx),
+	// so the button's reason and the refusal say the same thing.
+	hostHelperBusyDetail = "An update check is running; wait for it to finish. No order was placed."
 )
 
 // confirmHostAction hands out a token for one host action, to somebody who
@@ -264,6 +277,12 @@ func confirmHostAction(d httpapi.Deps) http.HandlerFunc {
 		// the installed helper would refuse.
 		if body.Action == hostActionName(hostaction.CheckUpdate) && len(d.HostActions.Outdated()) > 0 {
 			httpapi.WriteProblem(w, r, httpapi.Conflict(httpapi.CodeHostHelperOutdated, hostHelperOutdatedDetail))
+			return
+		}
+		// Every action, after the check's own refusal: no token while the
+		// helper waits for a check and can pick up nothing else.
+		if d.Host.CheckRunning() {
+			httpapi.WriteProblem(w, r, httpapi.Conflict(httpapi.CodeHostHelperBusy, hostHelperBusyDetail))
 			return
 		}
 
@@ -322,6 +341,12 @@ func hostAction(d httpapi.Deps, a hostaction.Action) http.HandlerFunc {
 		// The check alone: an older helper refuses it, so it is not placed.
 		if a == hostaction.CheckUpdate && len(d.HostActions.Outdated()) > 0 {
 			httpapi.WriteProblem(w, r, httpapi.Conflict(httpapi.CodeHostHelperOutdated, hostHelperOutdatedDetail))
+			return
+		}
+		// Every action: while the helper waits for a check it picks up
+		// nothing, so nothing is placed for it to leave lying.
+		if d.Host.CheckRunning() {
+			httpapi.WriteProblem(w, r, httpapi.Conflict(httpapi.CodeHostHelperBusy, hostHelperBusyDetail))
 			return
 		}
 

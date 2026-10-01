@@ -65,6 +65,40 @@ type Result struct {
 	At time.Time `json:"at"`
 }
 
+// HelperServiceLimit is holzkube-manager-host.service's TimeoutStartSec: the
+// longest the helper can be busy with one order before systemd ends it.
+// TestTheCheckUnitRunsOnlyTheCheck holds it to the shipped unit.
+const HelperServiceLimit = 3 * time.Minute
+
+// CheckRunning reports whether r, the helper's last record, is a check the
+// helper is still waiting for (13-REVIEW-2 WR-01). The helper starts the
+// check unit blocking, so while the check runs its service stays activating,
+// the path unit cannot start it a second time, and an order placed then
+// would lie in the slot until the Box withdrew it. So the routes refuse
+// every host action while this is true.
+//
+// answered is when the update script last recorded a run (updatestatus's
+// checked_at), the zero time when it has recorded none or its file cannot be
+// read. The helper records nothing when a check succeeds -- "started" stays
+// its last word -- so a check is over when the update script has recorded a
+// run since the check began (the same second counts: both record whole
+// seconds, and the helper records before it starts the unit), when the helper
+// recorded something else, or once HelperServiceLimit has passed, after which
+// systemd has ended the helper whatever the check did. A record from the
+// future (the clock went back) is not trusted to hold the routes shut.
+//
+// The page turns its buttons off by the same readings (orderPhase's
+// "update-finished" for a check), so it never offers what this refuses.
+func CheckRunning(r Result, answered, now time.Time) bool {
+	if r.Action != CheckUpdate || r.Outcome != OutcomeStarted {
+		return false
+	}
+	if age := now.Sub(r.At); age < 0 || age >= HelperServiceLimit {
+		return false
+	}
+	return answered.Before(r.At)
+}
+
 // idPattern is the id as the daemon generates it: 8 random bytes in lowercase
 // hex.
 var idPattern = regexp.MustCompile(`^[0-9a-f]{16}$`)

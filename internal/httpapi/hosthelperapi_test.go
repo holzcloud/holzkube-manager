@@ -13,6 +13,7 @@ import (
 	"syscall"
 	"testing"
 	"testing/fstest"
+	"time"
 
 	"github.com/holzcloud/holzkube-manager/internal/auth"
 	"github.com/holzcloud/holzkube-manager/internal/host"
@@ -419,4 +420,194 @@ func TestHostCheckNeedsANewerHelper(t *testing.T) {
 				v.Actions.Outdated, v.Actions.Missing)
 		}
 	})
+}
+
+// The paths, as an fs.FS rooted at "/" names them, of the helper's result
+// and of the update script's status file.
+const (
+	helperResultName = helperStateDir + "/last"
+	updateStatusName = "var/lib/holzkube-manager-update/status.json"
+)
+
+// checkBusyDetail is the refusal's detail: the page's own reason line for a
+// running check, and that nothing was placed.
+const checkBusyDetail = "An update check is running; wait for it to finish. No order was placed."
+
+// helperRecorded puts the helper's result line into the fixture.
+func helperRecorded(line string) func(m fstest.MapFS) {
+	return func(m fstest.MapFS) {
+		m[helperResultName] = &fstest.MapFile{Data: []byte(line + "\n"), Mode: 0o644}
+	}
+}
+
+// updateRecorded is a filesystem holding a status file the update script
+// wrote at checkedAt.
+func updateRecorded(checkedAt time.Time) fstest.MapFS {
+	return fstest.MapFS{updateStatusName: {
+		Data: []byte(`{"checked_at":"` + checkedAt.UTC().Format(time.RFC3339) +
+			`","installed":"v0.2.0","latest":"v0.2.0","outcome":"current"}` + "\n"),
+		Mode: 0o644,
+	}}
+}
+
+// requireGoesThrough confirms and places action and wants 200 and 202: the
+// control that a harness which refuses does so for the reason under test.
+func requireGoesThrough(t *testing.T, h *harness, action hostaction.Action) {
+	t.Helper()
+	resp, raw := h.confirmAndPlace(t, action, "example-host")
+	if resp.StatusCode != http.StatusAccepted {
+		t.Errorf("confirm and place %s: %d, want 202 (%s)", action, resp.StatusCode, raw)
+	}
+	if _, err := os.Lstat(h.dataDir + "/" + hostaction.OrderFileName); err != nil {
+		t.Errorf("no %s order was placed: %v", action, err)
+	}
+}
+
+// TestHostActionsWaitForARunningCheck (13-REVIEW-2 WR-01): the helper carries
+// out a check blocking -- it waits for the check unit, up to its own service's
+// limit -- so while one runs it picks up nothing else. An order placed then
+// would lie in the slot until the Box withdrew it after 10 s, with a sentence
+// blaming the path unit. So while the helper's last record is a check it has
+// started, younger than that limit, and the update status is not yet newer
+// than it, both routes refuse every host action with 409
+// conflict.host-helper-busy: no token, nothing placed. The page turns the
+// buttons off by the same two readings.
+//
+// The refusals keep their order: container, missing, outdated, busy.
+func TestHostActionsWaitForARunningCheck(t *testing.T) {
+	t.Parallel()
+
+	// Every time is taken inside the subtest, just before its harness is
+	// built: the subtests run in parallel with the whole package, and a
+	// "5 s ago" taken when the test began can be minutes old by then.
+	const id = "c0ffee00c0ffee11"
+	stamp := func(at time.Time) string { return at.UTC().Truncate(time.Second).Format(time.RFC3339) }
+	checkStarted := func(ago time.Duration) func(now time.Time) func(m fstest.MapFS) {
+		return func(now time.Time) func(m fstest.MapFS) {
+			return helperRecorded(id + " check-update started " + stamp(now.Add(-ago)))
+		}
+	}
+	recorded := func(action, outcome string, ago time.Duration) func(now time.Time) func(m fstest.MapFS) {
+		return func(now time.Time) func(m fstest.MapFS) {
+			return helperRecorded(id + " " + action + " " + outcome + " " + stamp(now.Add(-ago)))
+		}
+	}
+	noStatus := func(time.Time) fstest.MapFS { return fstest.MapFS{} }
+	statusAgo := func(ago time.Duration) func(now time.Time) fstest.MapFS {
+		return func(now time.Time) fstest.MapFS { return updateRecorded(now.Add(-ago)) }
+	}
+	type fixture struct {
+		name   string
+		edit   func(now time.Time) func(m fstest.MapFS)
+		status func(now time.Time) fstest.MapFS
+	}
+	build := func(t *testing.T, f fixture) *harness {
+		t.Helper()
+		now := time.Now()
+		var edit func(m fstest.MapFS)
+		if f.edit != nil {
+			edit = f.edit(now)
+		}
+		return hostHelperHarness(t, helperState(t, edit), f.status(now))
+	}
+
+	busy := []fixture{
+		{"a check started 5 s ago, no update status yet", checkStarted(5 * time.Second), noStatus},
+		{"a check started 5 s ago, the update status from an hour before", checkStarted(5 * time.Second), statusAgo(time.Hour)},
+		// The check unit may take 2 min and its stop 15 s: still the helper's.
+		{"a check started 2 min 15 s ago", checkStarted(135 * time.Second), noStatus},
+	}
+	for _, tc := range busy {
+		t.Run("refused: "+tc.name, func(t *testing.T) {
+			t.Parallel()
+			h := build(t, tc)
+
+			requireRefused(t, h, "conflict.host-helper-busy")
+			requireCheckRefused(t, h, "conflict.host-helper-busy")
+
+			tok := sessionHostToken(t, h.confirmer, h.srv.URL, h.client, "host.reboot")
+			resp, raw := h.do(t, http.MethodPost, "/api/v1/host/actions/reboot", map[string]string{"confirmation": tok})
+			if resp.StatusCode == http.StatusConflict {
+				if p := decodeProblem(t, resp, raw); p.Detail != checkBusyDetail {
+					t.Errorf("detail = %q, want %q", p.Detail, checkBusyDetail)
+				}
+			}
+			requireNothingPlaced(t, h, "/api/v1/host/actions/reboot")
+
+			// Available stays true: the helper is installed; the page reads
+			// the running check from the result and the update status.
+			if v := readHelperView(t, h); !*v.Actions.Available {
+				t.Error("actions.available = false while a check runs; the helper is installed")
+			}
+		})
+	}
+
+	// The controls: the same fixture with the check over, or never a check,
+	// goes through -- so the refusals above are the running check's.
+	through := []fixture{
+		{"the check's answer arrived", checkStarted(5 * time.Second), statusAgo(0)},
+		{"the answer in the second the check started", checkStarted(5 * time.Second), statusAgo(5 * time.Second)},
+		{"a check started 4 min ago, past the helper's 3-min limit", checkStarted(4 * time.Minute), noStatus},
+		{"a check that failed", recorded("check-update", "failed", 5*time.Second), noStatus},
+		{"an update started", recorded("update", "started", 5*time.Second), noStatus},
+		{"a check recorded in the future (the clock went back)", checkStarted(-time.Hour), noStatus},
+		{"nothing recorded", nil, noStatus},
+	}
+	for _, tc := range through {
+		t.Run("goes through: "+tc.name, func(t *testing.T) {
+			t.Parallel()
+			requireGoesThrough(t, build(t, tc), hostaction.Reboot)
+		})
+	}
+
+	// The order: a container, a missing piece and an older helper are each
+	// asked before the running check.
+	t.Run("in a container and busy", func(t *testing.T) {
+		t.Parallel()
+		h := build(t, fixture{edit: checkStarted(5 * time.Second), status: func(time.Time) fstest.MapFS {
+			return fstest.MapFS{".dockerenv": {}}
+		}})
+		requireRefused(t, h, "conflict.host-in-container")
+	})
+	t.Run("missing and busy", func(t *testing.T) {
+		t.Parallel()
+		h := build(t, fixture{edit: func(now time.Time) func(m fstest.MapFS) {
+			return func(m fstest.MapFS) {
+				checkStarted(5 * time.Second)(now)(m)
+				delete(m, helperWantsLink)
+			}
+		}, status: noStatus})
+		requireRefused(t, h, "conflict.host-helper-missing")
+	})
+	t.Run("outdated and busy", func(t *testing.T) {
+		t.Parallel()
+		h := build(t, fixture{edit: func(now time.Time) func(m fstest.MapFS) {
+			return func(m fstest.MapFS) {
+				checkStarted(5 * time.Second)(now)(m)
+				delete(m, helperCheckUnit)
+			}
+		}, status: noStatus})
+		requireCheckRefused(t, h, "conflict.host-helper-outdated")
+		// The four older actions are refused as busy.
+		for _, action := range []string{"reboot", "update"} {
+			tok := sessionHostToken(t, h.confirmer, h.srv.URL, h.client, "host."+action)
+			resp, raw := h.do(t, http.MethodPost, "/api/v1/host/actions/"+action, map[string]string{"confirmation": tok})
+			if resp.StatusCode != http.StatusConflict {
+				t.Errorf("POST %s: %d, want 409 conflict.host-helper-busy (%s)", action, resp.StatusCode, raw)
+			} else if p := decodeProblem(t, resp, raw); p.Code != "conflict.host-helper-busy" {
+				t.Errorf("POST %s: code %q, want conflict.host-helper-busy", action, p.Code)
+			}
+			requireNothingPlaced(t, h, action)
+		}
+	})
+
+	// The page's reason line for a running check is the refusal's first
+	// sentence, so the greyed-out button and a refused client read the same.
+	src, err := os.ReadFile("../../web/src/components/HostActions.tsx")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "checkRunning: '" + strings.TrimSuffix(checkBusyDetail, " No order was placed.") + "'"; !strings.Contains(string(src), want) {
+		t.Errorf("web/src/components/HostActions.tsx has no %s; the page's reason and the refusal disagree", want)
+	}
 }

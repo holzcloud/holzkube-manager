@@ -55,8 +55,9 @@ import { cn } from '@/lib/utils'
  * Everything the block decides -- whether the buttons are on, and if not, why
  * -- is drawn from that one answer and the session's role. The server is the
  * lock (the routes refuse a reader, a container, a missing helper, a second
- * order, and the check to a helper too old for it); the page only never offers
- * what the route will refuse.
+ * order, the check to a helper too old for it, and every order while the
+ * helper waits for a check); the page only never offers what the route will
+ * refuse.
  */
 
 /** Each action's label, as its button, its status box and its dialog name it. */
@@ -251,7 +252,39 @@ export function disabledReason(
       return REASON.pending
     }
   }
+  // A check the page does not follow -- another tab or client placed it --
+  // holds the helper all the same, and the routes refuse every order meanwhile
+  // (409 conflict.host-helper-busy, whose detail begins with this sentence).
+  if (helperWaitsForCheck(host)) {
+    return REASON.checkRunning
+  }
   return null
+}
+
+/**
+ * Whether the helper is still waiting for a check, by the readings the routes
+ * refuse by (hostaction.CheckRunning): its last record is a check it started,
+ * less than its service's limit ago, and the update status has recorded no
+ * run since. The helper records nothing when a check succeeds, so the update
+ * status is what says it is over; both record whole seconds, and the same
+ * second counts as over.
+ */
+export function helperWaitsForCheck(host: Host): boolean {
+  const result = host.actions.result
+  if (
+    !result.readable ||
+    result.value.action !== 'check-update' ||
+    result.value.outcome !== 'started'
+  ) {
+    return false
+  }
+  const at = Date.parse(result.value.at)
+  const age = Date.parse(host.observed_at) - at
+  if (!(age >= 0 && age < CHECK_WITHIN_MS)) {
+    return false
+  }
+  const update = host.service.update
+  return !(update.readable && Date.parse(update.value.checked_at) >= at)
 }
 
 /**
@@ -604,7 +637,8 @@ export const STARTED_WITHIN_MS = 15 * 60 * 1000
 /**
  * The same for a started check. The helper waits for the check unit inside
  * its own service, whose TimeoutStartSec is 3 min; a check that has recorded
- * nothing by then will not.
+ * nothing by then will not. It is also how long the routes refuse orders
+ * after a check began without an answer (hostaction.HelperServiceLimit).
  */
 export const CHECK_WITHIN_MS = 3 * 60 * 1000
 

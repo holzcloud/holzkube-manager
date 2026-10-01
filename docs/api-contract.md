@@ -1771,6 +1771,7 @@ the service keeps running.
 | `409` | `conflict.host-in-container` | the daemon runs in a container. There are host actions only with the systemd installation; the confirm route refuses too, and nothing is placed. Asked first. Detail: "Host actions are only available with the systemd installation." |
 | `409` | `conflict.host-helper-missing` | the root helper is not installed completely (see `actions.missing` below). The confirm route refuses too, and the action route refuses before it looks at the token: nothing is placed. Detail: "The holzkube-manager-host helper is not installed, so no order was placed. The Host page says what to install." |
 | `409` | `conflict.host-helper-outdated` | `check-update` only: the helper is installed but older than this daemon (see `actions.outdated` below) -- its script does not carry out the check, or the check unit is not installed. The confirm route refuses `host.check-update` before the hostname is compared, and the action route refuses before it looks at the token: no token, nothing placed. The four other actions still go through. Asked after the two above. Detail: "The installed holzkube-manager-host helper does not carry out an update check yet, so no order was placed. The Host page says what to reinstall." |
+| `409` | `conflict.host-helper-busy` | every action: the helper is still carrying out an update check. It waits for the check unit and picks up nothing else meanwhile, so an order placed then would only be withdrawn after 10 s. Busy means the helper's last record (`actions.result`) is a `check-update` it `started` less than 3 min ago (its service's limit) and the update status (`service.update`) has recorded no run since -- the same readings the page turns its buttons off by. The confirm route refuses before the hostname is compared, the action route before it looks at the token: no token, nothing placed. Asked after the three above. Detail: "An update check is running; wait for it to finish. No order was placed." |
 | `409` | `conflict.host-order-pending` | an order still waits for the helper. There is one slot and no queue: the second order is refused and the first stays exactly as it was. Detail: "Another host action is still waiting for the helper. Wait for it to be answered, then try again." |
 | `428` | `sudo.required` | the action routes only: the session's sudo window is not open. The client asks for the password again and replays the request with the same token. |
 | `403` | `forbidden.role` | the session is a reader's. |
@@ -1781,7 +1782,8 @@ The two refusals about the machine, container and helper, come before the body
 is read, on both routes: a client that has not been told yet learns it before
 the operator has typed anything that would be thrown away. The check's own
 refusal, an older helper, comes after them: on the action route before the body,
-on the confirm route as soon as the body names the check.
+on the confirm route as soon as the body names the check. A running check comes
+last, in the same place, for every action.
 
 **The order file.** `<data directory>/host-order`, mode `0600`, holding exactly
 one line and nothing else -- no user, no time, no parameter; who asked is in the
