@@ -50,7 +50,8 @@ var (
 	// ErrNotAServiceAccount reports a token operation aimed at a person.
 	ErrNotAServiceAccount = errors.New("auth: that account is a person, not a service account")
 
-	// ErrNotAPerson reports a password operation aimed at a service account.
+	// ErrNotAPerson reports a password or single sign-on operation aimed at a
+	// service account, which has neither.
 	ErrNotAPerson = errors.New("auth: that account is a service account and has no password")
 
 	// ErrInvalidToken reports a token that authenticates nothing.

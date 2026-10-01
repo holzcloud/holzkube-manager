@@ -337,11 +337,18 @@ const (
 	// carry the authority.
 	CodeNoCertificateAuthority = "conflict.no-certificate-authority"
 
-	// CodeNotAPerson: a password operation aimed at a service account, which
-	// has none. The mirror of conflict.not-a-service-account, and it is a
-	// named conflict rather than the login path's deliberately blank refusal
-	// because this caller has already proven which account it is.
+	// CodeNotAPerson: a password or single sign-on operation aimed at a
+	// service account, which has neither. The mirror of
+	// conflict.not-a-service-account, and it is a named conflict rather than
+	// the login path's deliberately blank refusal because this caller has
+	// already proven which account it is.
 	CodeNotAPerson = "conflict.not-a-person"
+
+	// CodeNotLinked: an unlink asked of an account that is not linked to an
+	// identity provider. A named conflict rather than a quiet success, because
+	// a success here would write an audit record of something that did not
+	// happen.
+	CodeNotLinked = "conflict.not-linked"
 
 	// CodeCertificateRejected: a freshly minted client certificate reached no
 	// node, so the old one was kept. Its own code because it is the *safe*

@@ -19,6 +19,10 @@ var ErrNoIdentityBinding = errors.New("auth: no account is bound to this identit
 // provider identity.
 var ErrAlreadyBound = errors.New("auth: the account is already bound to another identity")
 
+// ErrNotLinked is returned when an unlink is asked of an account that has no
+// provider binding.
+var ErrNotLinked = errors.New("auth: the account is not linked to an identity provider")
+
 // FindByIdentity returns the account bound to (issuer, subject).
 //
 // Both halves are compared in constant time. They are not secrets, but a
@@ -87,6 +91,19 @@ func (s *Service) UnlinkIdentity(ctx context.Context, id model.UserID) (model.Us
 	u, err := s.store.Users().Get(ctx, id)
 	if err != nil {
 		return model.User{}, err
+	}
+
+	// A service account signs in with a token and never through the provider,
+	// so a binding on one can only have been planted -- and "unlinking" it
+	// would bless that as a thing that happens rather than remove it. Checked
+	// before the binding, so that a planted one is still refused.
+	if u.IsService() {
+		return model.User{}, ErrNotAPerson
+	}
+	// An unlink that changes nothing would still write a success record into
+	// the audit archive, and that is a record of nothing.
+	if !u.HasIdentityBinding() {
+		return model.User{}, ErrNotLinked
 	}
 
 	u.Issuer = ""

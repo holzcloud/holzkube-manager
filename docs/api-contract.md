@@ -3508,14 +3508,36 @@ account with it is a 400.
 `GET /api/v1/users` lists them. No password hash is ever reported, and there is
 no route that returns one — `auth.Users` strips it before the handler sees it,
 so the HTTP layer has nothing to leak. `linked_identity` says whether the
-account signs in through the identity provider; the issuer and subject are not
-reported, because they are somebody's identity at a third party.
+account signs in through the identity provider. `linked_provider` carries the
+issuer's **host only** (and its port, when it has one), and is absent when the
+account is not linked: "which provider" is what an admin deciding whether to
+unlink needs, and the issuer's path adds nothing to that. The subject is never
+reported, because it is somebody's identifier at a third party.
 
 `POST /api/v1/users`, `POST /api/v1/users/{id}/role`,
-`POST /api/v1/users/{id}/password` and `DELETE /api/v1/users/{id}` are all
-**Destructive** and behind the sudo window. Each changes who can reach cluster
-PKI, which is the argument that made the operator's own password change
-destructive.
+`POST /api/v1/users/{id}/password`, `DELETE /api/v1/users/{id}` and
+`DELETE /api/v1/users/{id}/identity` are all **Destructive** and behind the sudo
+window. Each changes who can reach cluster PKI, which is the argument that made
+the operator's own password change destructive.
+
+`DELETE /api/v1/users/{id}/identity` unlinks an account's single sign-on: both
+halves of the binding, issuer and subject, are removed, so the next first-use
+sign-in through the provider can link a different identity. Admin only. It
+answers `200` with the account view (the same shape as a role change), so a
+client sees `linked_identity` false. The route is registered whether or not a
+provider is configured — a binding left over from a provider that has since been
+switched off is exactly the one that needs removing. It is audited as
+`user.identity-unlink` with **no parameters recorded**: the account is in the
+path, and an issuer or subject a client sends in a body is redacted rather than
+kept in an archive nothing removes from. It **ends no session**, the caller's
+included: a session belongs to the account, and the account — its ID, role and
+password — is unchanged; the binding only decides which account the next
+provider sign-in resolves to. Removing an account is what ends its sessions.
+
+| Code | Status | Means |
+|---|---|---|
+| `conflict.not-linked` | 409 | the account is not linked to single sign-on, so there is nothing to unlink. |
+| `conflict.not-a-person` | 409 | the account is a service account, which signs in with a token and is never linked. |
 
 Two refusals are the same rule seen from different sides, and they are separate
 codes because the remedy differs:
@@ -3561,7 +3583,10 @@ The mirror of that is the two routes that take a password — `POST
 /api/v1/account/password` and `POST /api/v1/auth/sudo` — which answer 409
 `conflict.not-a-person` to a service account: it authenticates with a token and
 has no password to change and none to re-authenticate with — and does not need
-one, since its token already satisfies the re-authentication window. Both routes
+one, since its token already satisfies the re-authentication window. `DELETE
+/api/v1/users/{id}/identity` answers the same code for a service account: it
+never signs in through the provider, so a binding on one can only have been
+planted, and unlinking it would bless that rather than remove it. Both routes
 are genuinely reachable by a service account: each needs only `RoleReader`, and
 a bearer token satisfies the CSRF check and the sudo window, so every gate in
 front of them hands the request through. Both answered `500 internal.unexpected`
