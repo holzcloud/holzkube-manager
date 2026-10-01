@@ -1725,7 +1725,16 @@ function status(
 }
 
 describe('HostOrderStatus', () => {
-  type Row = [string, HostOrder, Host, ReturnType<typeof orderPhase>, string, string, boolean]
+  type Row = [
+    string,
+    HostOrder,
+    Host,
+    ReturnType<typeof orderPhase>,
+    string,
+    string,
+    boolean,
+    ('held' | 'order' | 'result')?,
+  ]
   const updated = {
     checked_at: '2026-09-28T10:00:45Z',
     installed: 'v0.2.0',
@@ -2090,6 +2099,36 @@ describe('HostOrderStatus', () => {
       'Check for updates — finished. v0.1.0 is installed and is the newest release; there is nothing to install.',
       EMERALD,
       true,
+      'result',
+    ],
+    // 13-REVIEW-2 round 3, I4: the window back to the end minus the longest
+    // check is for an order known only from that record. An order this page
+    // or the daemon reports was placed when it says: a status from before
+    // that is an earlier run's, however close to the check's end.
+    [
+      'check placed here, done, a status from before the placement',
+      { ...order('check-update'), placed_at: '2026-09-28T10:01:00Z' },
+      later(
+        { result: resultFor(ID, 'check-update', 'done', '2026-09-28T10:01:03Z') },
+        { update: { ...checked('available'), checked_at: '2026-09-28T09:58:10Z' } },
+      ),
+      'update-finished',
+      'Check for updates — finished, but what it found is not in the update status holzkube-manager reads. journalctl -u holzkube-manager-update-check says what it found.',
+      SLATE,
+      true,
+    ],
+    [
+      "check the daemon reports, done, a status from before the daemon's placement",
+      { ...order('check-update'), placed_at: '2026-09-28T10:01:00Z' },
+      later(
+        { result: resultFor(ID, 'check-update', 'done', '2026-09-28T10:01:03Z') },
+        { update: { ...checked('available'), checked_at: '2026-09-28T09:58:10Z' } },
+      ),
+      'update-finished',
+      'Check for updates — finished, but what it found is not in the update status holzkube-manager reads. journalctl -u holzkube-manager-update-check says what it found.',
+      SLATE,
+      true,
+      'order',
     ],
     [
       'check done, the update status not recorded',
@@ -2134,13 +2173,13 @@ describe('HostOrderStatus', () => {
 
   it.each(rows)(
     '%s: its sentence, its colour, and Dismiss status only when final',
-    (_, o, host, phase, sentence, colour, final) => {
-      status(host, o, phase)
+    (_, o, host, phase, sentence, colour, final, from = 'held') => {
+      status(host, o, phase, { from })
       const box = screen.getByRole('status')
       expect(box.querySelector('p')?.textContent).toBe(sentence)
       expect(box).toHaveClass(colour)
       expect(box).toHaveTextContent(
-        `Order ${ID} · placed ${new Date(o.placed_at).toLocaleTimeString()}`,
+        `Order ${ID} · ${from === 'result' ? 'recorded' : 'placed'} ${new Date(o.placed_at).toLocaleTimeString()}`,
       )
       expect(within(box).queryByRole('button', { name: 'Dismiss status' }) !== null).toBe(final)
     },
@@ -2185,7 +2224,9 @@ describe('HostOrderStatus', () => {
       'Check for updates — the check failed, and nothing was installed. journalctl -u holzkube-manager-update-check says why.'
     const failedStatus = (at: string) => ({ ...updatedShape, checked_at: at, outcome: 'failed' })
     const sentence = (host: Host, o: HostOrder = order('check-update')) => {
-      const { unmount } = status(host, o, orderPhase(o, host))
+      // An order given here with the record's time is one known only from it.
+      const from = o.placed_at === order('check-update').placed_at ? 'held' : 'result'
+      const { unmount } = status(host, o, orderPhase(o, host), { from })
       const box = screen.getByRole('status')
       const said = { text: box.querySelector('p')?.textContent, red: box.classList.contains(RED) }
       unmount()
@@ -2262,6 +2303,83 @@ describe('HostOrderStatus', () => {
         red: false,
       })
     })
+  })
+
+  // 13-REVIEW-2 round 3, I4: the box said what the check found; the next
+  // hourly run writes a newer update status, which is not the check's answer
+  // (V-07) -- and must not take back the one already said.
+  it("a later run does not take back a finished check's answer", () => {
+    const o = order('check-update')
+    const done = { result: resultFor(ID, 'check-update', 'done', '2026-09-28T10:00:08Z') }
+    const answered = later(done, { update: checked('current') })
+    const box = (host: Host) => (
+      <HostOrderStatus
+        host={host}
+        followed={{ order: o, from: 'held' }}
+        phase={orderPhase(o, host)}
+        takeFocus={false}
+        onDismiss={() => undefined}
+      />
+    )
+    const said =
+      'Check for updates — finished. v0.1.0 is installed and is the newest release; there is nothing to install.'
+    const { rerender } = render(box(answered))
+    expect(screen.getByRole('status').querySelector('p')?.textContent).toBe(said)
+    expect(screen.getByRole('status')).toHaveClass(EMERALD)
+
+    rerender(
+      box(
+        later(done, {
+          observed: '2026-09-28T11:00:30Z',
+          update: { ...checked('failed'), checked_at: '2026-09-28T11:00:20Z' },
+        }),
+      ),
+    )
+    expect(screen.getByRole('status').querySelector('p')?.textContent).toBe(said)
+    expect(screen.getByRole('status')).toHaveClass(EMERALD)
+  })
+
+  it("the answer kept is the followed check's, never another order's", () => {
+    const first = order('check-update')
+    const second: HostOrder = {
+      ...first,
+      id: 'c0ffee00c0ffee11',
+      placed_at: '2026-09-28T11:00:05Z',
+    }
+    const box = (o: HostOrder, host: Host) => (
+      <HostOrderStatus
+        host={host}
+        followed={{ order: o, from: 'held' }}
+        phase={orderPhase(o, host)}
+        takeFocus={false}
+        onDismiss={() => undefined}
+      />
+    )
+    const { rerender } = render(
+      box(
+        first,
+        later(
+          { result: resultFor(ID, 'check-update', 'done', '2026-09-28T10:00:08Z') },
+          { update: checked('current') },
+        ),
+      ),
+    )
+    expect(screen.getByRole('status')).toHaveClass(EMERALD)
+    // The second check ended without a status of its own: the first's answer
+    // is not its.
+    rerender(
+      box(
+        second,
+        later(
+          { result: resultFor(second.id, 'check-update', 'done', '2026-09-28T11:00:09Z') },
+          { observed: '2026-09-28T11:00:10Z', update: checked('current') },
+        ),
+      ),
+    )
+    expect(screen.getByRole('status').querySelector('p')?.textContent).toBe(
+      'Check for updates — finished, but what it found is not in the update status holzkube-manager reads. journalctl -u holzkube-manager-update-check says what it found.',
+    )
+    expect(screen.getByRole('status')).toHaveClass(SLATE)
   })
 
   it('says when the helper recorded an order it only knows from the result', () => {

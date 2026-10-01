@@ -531,6 +531,11 @@ Rules that go with the copy:
   status recorded within the check -- not older than the placement, and not
   newer than the helper's `done` (a later run's is not its answer, and the
   box then says "finished, but what it found is not in the update status").
+  Only an order known from the helper's record alone, whose time is the
+  `done` and not the placement, reaches back the check's longest run (3 min)
+  before it. An answer the box has said stays said while the box follows
+  that check: the next hourly run does not take it back (13-REVIEW-2 round 3,
+  I4).
 - **One failed check, one sentence** (13-REVIEW-2 WR-02, V-07): whether the
   helper recorded the order failed or the check ended and its own update
   status says failed, the box says "the check failed, and nothing was

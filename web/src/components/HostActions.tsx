@@ -892,7 +892,17 @@ function timeOf(ms: number): string {
   return new Date(ms).toLocaleTimeString()
 }
 
-function phaseSentence(phase: OrderPhase, order: HostOrder, host: Host): ReactNode {
+/**
+ * The box's sentence for `order` in `phase`. `answer` is what a finished check
+ * found (HostOrderStatus keeps it, checkAnswer reads it); it is asked only for
+ * a check.
+ */
+function phaseSentence(
+  phase: OrderPhase,
+  order: HostOrder,
+  host: Host,
+  answer: UpdateStatus | null,
+): ReactNode {
   const result = host.actions.result
   switch (phase) {
     case 'placed':
@@ -933,7 +943,6 @@ function phaseSentence(phase: OrderPhase, order: HostOrder, host: Host): ReactNo
       )
     case 'update-finished': {
       if (order.action === 'check-update') {
-        const answer = checkAnswer(order, host)
         if (answer === null) {
           return (
             <>
@@ -1055,9 +1064,12 @@ function checkHeld(order: HostOrder, host: Host): boolean {
  * that. The update script records it as the check ends, just before the helper
  * records the check done; so it is the check's when it is no older than the
  * order's placement -- or, when the helper has recorded this check done, than
- * the longest a check can take before that record. (An order the page knows
- * only from the helper's record has the record's time as its placement, which
- * for a done check is its end.) Anything older is an earlier run's, left
+ * the longest a check can take before that record, for an order the page
+ * knows only from the helper's record (`from` 'result'): its time is the
+ * record's, which for a done check is its end, not the placement. An order
+ * this page placed, or the daemon reports, was placed when it says, and a
+ * status from before that is not its answer however close it lies to the end
+ * (13-REVIEW-2 round 3, I4). Anything older is an earlier run's, left
  * because the check could not record its own. And with the helper's done
  * record there, anything newer than it is a later run's -- the hourly update
  * after the check, which may have failed where the check did not: the box
@@ -1065,7 +1077,7 @@ function checkHeld(order: HostOrder, host: Host): boolean {
  * status says now (13-REVIEW-2 V-07). Both times are whole seconds, and the
  * script writes before the helper records.
  */
-function checkAnswer(order: HostOrder, host: Host): UpdateStatus | null {
+function checkAnswer({ order, from }: Followed, host: Host): UpdateStatus | null {
   const u = host.service.update
   if (!u.readable) {
     return null
@@ -1079,7 +1091,9 @@ function checkAnswer(order: HostOrder, host: Host): UpdateStatus | null {
     if (checked > end) {
       return null
     }
-    since = Math.min(since, end - CHECK_WITHIN_MS)
+    if (from === 'result') {
+      since = Math.min(since, end - CHECK_WITHIN_MS)
+    }
   }
   return checked >= since ? u.value : null
 }
@@ -1091,7 +1105,12 @@ const GOOD_OUTCOMES: Record<'update' | 'check-update', ReadonlyArray<string>> = 
 }
 
 /** The box's colour set: slate under way, emerald done, red when nothing (good) happened. */
-function phaseColour(phase: OrderPhase, host: Host, order: HostOrder): string {
+function phaseColour(
+  phase: OrderPhase,
+  host: Host,
+  order: HostOrder,
+  answer: UpdateStatus | null,
+): string {
   switch (phase) {
     case 'back':
       return EMERALD
@@ -1099,7 +1118,6 @@ function phaseColour(phase: OrderPhase, host: Host, order: HostOrder): string {
       if (order.action === 'check-update') {
         // A check that ended without an answer this page can read is neither
         // news nor a fault it can name.
-        const answer = checkAnswer(order, host)
         if (answer === null) {
           return SLATE
         }
@@ -1148,16 +1166,28 @@ export function HostOrderStatus({
     }
   }, [id, takeFocus])
 
+  // What a finished check found, kept once the box has said it: the next
+  // hourly run writes a newer update status, which is not the check's answer
+  // (checkAnswer), and must not take back the one already said (13-REVIEW-2
+  // round 3, I4). Kept per order id, and only while the box follows it.
+  const finishedCheck = phase === 'update-finished' && order.action === 'check-update'
+  const read = finishedCheck ? checkAnswer(followed, host) : null
+  const [kept, setKept] = useState<{ id: string; answer: UpdateStatus } | null>(null)
+  if (read !== null && (kept?.id !== id || kept.answer.checked_at !== read.checked_at)) {
+    setKept({ id, answer: read })
+  }
+  const answer = read ?? (finishedCheck && kept?.id === id ? kept.answer : null)
+
   return (
     <div
       ref={box}
       role="status"
       tabIndex={-1}
-      className={`rounded-md border px-3 py-2 text-sm ${phaseColour(phase, host, order)}`}
+      className={`rounded-md border px-3 py-2 text-sm ${phaseColour(phase, host, order, answer)}`}
     >
       <p>
         <span className="font-semibold">{HOST_ACTION_LABEL[order.action]}</span> —{' '}
-        {phaseSentence(phase, order, host)}
+        {phaseSentence(phase, order, host, answer)}
       </p>
       <p className="mt-1 text-xs tabular-nums">
         Order <span className="font-mono">{order.id}</span> ·{' '}
