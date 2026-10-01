@@ -57,6 +57,20 @@
 #   - Kein Environment=, kein EnvironmentFile=: was das Skript an Einstellungen
 #     kennt, liest es selbst aus /etc/holzkube-manager/update.conf, wie beim
 #     stuendlichen Lauf.
+#   - SystemCallFilter=@system-service mit SystemCallErrorNumber=EPERM: das
+#     Nachsehen (bash, flock, curl, python3, awk, install, mktemp, chmod, mv,
+#     readlink, uname und holzkube-managerd --version) brauchte, mit strace
+#     gemessen, 78 verschiedene Systemaufrufe, alle in dieser Gruppe
+#     (13-REVIEW-2 IN-03). Der Helfer hat keinen Filter, weil logind und
+#     reboot ihn braeuchten; das gilt hier nicht.
+#   - ProtectProc=invisible und ProcSubset=pid: das Nachsehen liest aus /proc
+#     nur /proc/self (Go: auxv, cgroup, mountinfo, maps); /proc/sys und
+#     /proc/filesystems, die glibc und coreutils versuchen, fehlen dann, und
+#     beide kommen ohne aus. PrivateIPC=true: keine IPC-Objekte, nirgends.
+#   - Kein RemoveIPC=: wirkt nicht fuer root. Kein IPAddressDeny= fuer LAN-
+#     oder Link-Local-Bereiche: der Resolver aus /etc/resolv.conf liegt oft
+#     genau dort (auf der Referenzinstallation in einem RFC-1918-Netz), und
+#     ohne Namensaufloesung findet curl GitHub nicht.
 [Unit]
 Description=holzkube-manager - nach einem neueren Release sehen, nichts installieren
 Documentation=https://github.com/holzcloud/holzkube-manager/blob/main/deploy/HOST-HELPER.md
@@ -88,3 +102,8 @@ RestrictSUIDSGID=true
 LockPersonality=true
 MemoryDenyWriteExecute=true
 SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+ProtectProc=invisible
+ProcSubset=pid
+PrivateIPC=true
