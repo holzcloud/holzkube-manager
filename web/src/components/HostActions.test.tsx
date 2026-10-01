@@ -1174,6 +1174,26 @@ describe('orderPhase: every phase from server fields', () => {
       false,
       'failed',
     ],
+    // 13-REVIEW-2 WR-02: how a check usually fails. The update script records
+    // failed, the unit fails, and the helper records failed for the order --
+    // the helper's word comes first.
+    [
+      'check failed, as the helper records it',
+      order('check-update'),
+      later({ order: order('check-update'), result: resultFor(ID, 'check-update', 'failed') }),
+      false,
+      'failed',
+    ],
+    [
+      'check failed, the update status failed too',
+      order('check-update'),
+      later(
+        { order: order('check-update'), result: resultFor(ID, 'check-update', 'failed') },
+        { update: { ...sameSecond('failed'), checked_at: '2026-09-28T10:00:06Z' } },
+      ),
+      false,
+      'failed',
+    ],
     [
       "another order's result",
       order('reboot'),
@@ -1638,6 +1658,15 @@ describe('HostOrderStatus', () => {
       true,
     ],
     [
+      'check failed, as the helper records it',
+      order('check-update'),
+      later({ result: resultFor(ID, 'check-update', 'failed') }, { update: checked('failed') }),
+      'failed',
+      'Check for updates — the check could not look for a newer release, and nothing was installed. journalctl -u holzkube-manager-update-check says why.',
+      RED,
+      true,
+    ],
+    [
       'not picked up',
       order('reboot', 'withdrawn'),
       later({}),
@@ -1829,6 +1858,22 @@ describe('HostOrderStatus', () => {
       'update-finished',
     )
     expect(screen.getByText('journalctl -u holzkube-manager-update-check').tagName).toBe('CODE')
+  })
+
+  // 13-REVIEW-2 WR-02: the phase taken from the readings, not handed in -- the
+  // way a failed check reaches the box -- names the check unit's journal, not
+  // the helper's, whose only line is that the order failed.
+  it("a failed check, read as the page reads it, points at the check unit's journal", () => {
+    const host = later(
+      { order: order('check-update'), result: resultFor(ID, 'check-update', 'failed') },
+      { update: { ...updatedShape, checked_at: '2026-09-28T10:00:07Z', outcome: 'failed' } },
+    )
+    const o = order('check-update')
+    status(host, o, orderPhase(o, host))
+    const box = screen.getByRole('status')
+    expect(box).toHaveTextContent('the check could not look for a newer release')
+    expect(screen.getByText('journalctl -u holzkube-manager-update-check').tagName).toBe('CODE')
+    expect(screen.queryByText('journalctl -u holzkube-manager-host')).toBeNull()
   })
 
   it('says when the helper recorded an order it only knows from the result', () => {

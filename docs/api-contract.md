@@ -1759,7 +1759,7 @@ answered; the `202` is written before the helper can act.
 **What `check-update` runs.** The helper starts
 `holzkube-manager-update-check.service` and waits for it (no `--no-block`), so
 the order's result follows the check: `started` is recorded as it begins, and
-becomes `failed` when the check could not look (the unit failed or was ended). That unit, a oneshot installed with the helper, runs
+becomes `failed` when the check could not look (the unit failed or was ended); the reason is in the check unit's journal (`journalctl -u holzkube-manager-update-check`), and the page points there, since the helper's own journal says only that the order failed. That unit, a oneshot installed with the helper, runs
 `/usr/local/sbin/holzkube-manager-update --check`: the update script's look,
 which compares the installed version with the newest release and records
 `current`, `available` or `failed` in the status file the host answer already
