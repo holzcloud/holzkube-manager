@@ -456,3 +456,155 @@ V-27 change is an attribute. `readme-images.mjs` not run, no picture committed.
   info are in DataTable.tsx and wall.test.tsx, untouched).
 - No class changed, so `task test:layout` was not needed.
 - `go test ./internal/publicrepo/` before each commit: exit 0.
+
+## Round 2 — B-unit-guard
+
+Owner of V-09..V-19 (and V-26 as a human item). Ran on the operator's Pi
+(aarch64, systemd 257.13), main checkout, no worktree; Go 1.27.1 from
+`~/.local/go`, no `-race`. Nothing installed: the helper units, the check unit
+and `/usr/local/sbin` are untouched, and the only systemd units started were
+transient units in the user manager (`systemd-run --user`) for the timing
+measurement. `holzkube-manager.service` before and after:
+ActiveEnterTimestamp `Tue 2026-09-29 20:25:38 CEST`, NRestarts 0.
+
+Commits: `95d5be0` (timeout model, TimeoutStopSec=10s), and the allow-list
+commit that carries this section.
+
+### Design
+
+- **`readUnitFile` refuses what systemd would read differently** (V-15):
+  `refuseAmbiguousUnitBytes` fails on invalid UTF-8, a byte-order mark
+  anywhere, any control character but tab and newline (so `\r` and NUL), and
+  any line ending in a backslash, comments included. `TestUnitsVerify` runs
+  the same guard over its three sources before its `^ExecStart=` rewrite.
+- **Allow-lists, not deny-lists** (V-14, V-16..V-19, V-10..V-12):
+  `wantExactly(u, sections, spec)` requires exactly the listed sections in
+  order, and exactly the listed keys, each once, each with its value (exact,
+  or a check function). Any other key fails naming `file:line`. The check
+  unit's list: `[Unit]` Description (non-empty) and Documentation (the
+  guide); `[Service]` Type, ExecStart (`UpdateScriptPath --check`),
+  TimeoutStartSec and TimeoutStopSec (positive spans, then the model),
+  StateDirectory, CapabilityBoundingSet (empty), RestrictAddressFamilies (the
+  four, any order), and the nineteen hardening lines.
+- **Same discipline for the helper's service and path unit** (task item;
+  `TestUnitsAgree` was a deny-list for both): the service list carries
+  `TimeoutStartSec` with a check that it equals `HelperServiceLimit` (so
+  `TimeoutSec=` or another value cannot desynchronise the routes), and
+  `ReadWritePaths=-/var/lib/holzkube-manager`, `RestrictAddressFamilies=AF_UNIX`
+  plus the hardening; the path unit's list is `PathExists=`, `Unit=` and
+  `WantedBy=paths.target`. `TestTheCheckUnitRunsOnlyTheCheck` still pins
+  `HelperServiceLimit` to the service on its own, refusing `TimeoutSec=`.
+- **The timeout model is systemd's** (V-09, V-13): `checkUnitWorstCase =
+  start + 4 x stop` (stop-sigterm, stop-sigkill, final-sigterm,
+  final-sigkill, each armed with TimeoutStopSec; true only because the list
+  rules out SendSIGKILL=, FinalKillSignal=, TimeoutStartFailureMode=,
+  TimeoutAbortSec=, TimeoutSec=, ExecStop*/ExecStopPost and ordering). The
+  test wants it at least `checkUnitMargin` (15 s) below the helper's limit.
+  Measured on the Pi, transient user units, TimeoutStartSec=3s
+  TimeoutStopSec=2s: 3.25 s (killed by SIGTERM), 5.47 s (ignores SIGTERM),
+  11.98 s (KillSignal= and FinalKillSignal=SIGCONT, surviving every signal) =
+  3 + 4 x 2. The unit goes to `TimeoutStopSec=10s`: worst case 2min40s, 20 s
+  under 3min. The comments in the unit and in `holzkube-manager-host.sh` now
+  state that bound and why the kill keys are absent; the busy rows that named
+  "2 min 15 s" (hostaction_test.go, hosthelperapi_test.go) now name 2 min 40 s.
+
+### Per item
+
+| ID | Outcome |
+|----|---------|
+| V-09 | fixed: model start + 4 x stop with a 15 s margin; TimeoutStopSec 15s -> 10s (95d5be0) |
+| V-10 | fixed: TimeoutSec= is off both services' lists; the helper's TimeoutStartSec is checked against HelperServiceLimit in the allow-list, and the span reader refuses TimeoutSec= |
+| V-11 | fixed: SendSIGKILL= is off the list |
+| V-12 | fixed: FinalKillSignal=, TimeoutStartFailureMode=/TimeoutAbortSec=, After= are off the list |
+| V-13 | fixed: unit and helper-script comments state 2min40s = 2min + 4 x 10s and name the keys that would change it (95d5be0) |
+| V-14 | fixed: [Unit] allows Description and Documentation only |
+| V-15 | fixed: refuseAmbiguousUnitBytes (CR, NUL, BOM, control chars, invalid UTF-8, trailing backslash), in readUnitFile and TestUnitsVerify |
+| V-16 | fixed: BindPaths=, BindReadOnlyPaths=, RootDirectory= (and every other mount key) are off the list |
+| V-17 | fixed: PassEnvironment= is off the list |
+| V-18 | fixed: StandardOutput=/StandardError= are off the list |
+| V-19 | fixed: as V-14, the guard is an allow-list |
+| V-26 | human verification item, below |
+
+### Red runs (exit code read from the command itself; each fault restored, `cmp` 0 against the pre-injection copy and against `git show HEAD:`, then green)
+
+Commit 95d5be0, `go test ./internal/host/hostaction -run
+TestTheCheckUnitRunsOnlyTheCheck -count=1`: the unit as at the commit before
+(`TimeoutStopSec=15s`) exit 1, "TimeoutStartSec 2m0s + 4 x TimeoutStopSec 15s
+= 3m0s ... want ... at least 15s below the helper service's 3m0s";
+`TimeoutStopSec=12s` exit 1; `11s` exit 0 (the boundary, 2m44s + 15 s =
+2m59s). Restored, exit 0.
+
+Allow-list commit, a script writing each injection byte-exact into the
+shipped file, running `go test ./internal/host/hostaction -run
+'^(TestUnitsVerify|TestUnitsAgree|TestTheCheckUnitRunsOnlyTheCheck)$'
+-count=1`, and restoring; 39 injections, every one `exit=1`, every restore
+`cmp` 0, then the whole package exit 0. Into the check unit: OnSuccess=,
+Wants=, OnFailure=, After=holzkube-manager-update.service; `# nur
+nachsehen\rExecStartPost=... --force`; `\rExecStart=\rExecStart=... --force`;
+`# x\0ExecStartPost=...`; `\xEF\xBB\xBFExecStartPost=...`; `# x\rRestrictAddressFamilies=`;
+a comment ending in `\` before ExecStart=; `Type=oneshot \` (an assignment
+continued into ExecStart=); TimeoutSec=5min; SendSIGKILL=no;
+FinalKillSignal=SIGCONT; TimeoutStartFailureMode=abort + TimeoutAbortSec=5min;
+BindPaths=/usr/local/bin; BindReadOnlyPaths= over update.conf;
+RootDirectory=; PassEnvironment=BASH_ENV ...; StandardOutput=file: and
+truncate: on the daemon binary; TimeoutStopSec=15s, 31s, absent, 90s;
+--check removed; ExecStartPost=... --force; AF_PACKET; DynamicUser=true; a
+second [Service]; an [Install]. Into the helper's service: TimeoutSec=1min
+after TimeoutStartSec=3min; TimeoutStartSec=5min; Wants=; an ExecStartPost=
+behind `\r`; CapabilityBoundingSet=; PassEnvironment=. Into the path unit:
+PathChanged=; MakeDirectory=true. Each failure names the line, e.g.
+`holzkube-manager-update-check.service:58: [Unit] OnSuccess=holzkube-manager-update.service is not a line this unit may carry`.
+
+Control, the same injections against the previous guard (`git show
+HEAD:internal/host/hostaction/units_test.go`, restored `cmp` 0 afterwards):
+OnSuccess=, Wants=, the `\r`- and BOM-hidden ExecStartPost=, the comment
+ending in `\`, TimeoutSec=5min, SendSIGKILL=no, FinalKillSignal=SIGCONT,
+TimeoutStartFailureMode=abort, BindPaths=, PassEnvironment=,
+StandardOutput=file:, helper TimeoutSec=1min and helper Wants= all **exit 0**;
+so the injections inject and the new guard is what catches them.
+PathChanged= and the assignment continuation were already red before
+(TestUnitsAgree's trigger list; systemd-analyze's "no ExecStart=").
+
+`systemd-analyze verify --man=no` on scratch copies (ExecStart= pointed at a
+stub): the three shipped units exit 0 with **no output**. With a hidden
+`ExecStartPost=/nonexistent/hidden-*` behind `\r`, behind NUL and behind a
+BOM, each exit 1 with "Command /nonexistent/hidden-cr|nul|bom is not
+executable": systemd 257 reads all three hidden lines. `Description=x \`
+before ExecStart= gives "Unknown key 'Description' in section [Service]" and
+"Service has no ExecStart=": systemd joins an assignment's continuation. A
+continuation on a comment line it does not join (the control above stayed
+green, TestUnitsVerify included); the guard refuses both anyway.
+
+### V-26: human verification item (cannot be done here without installing)
+
+Nobody has run the check unit under its real sandbox. That needs root and an
+installed unit, so it is the operator's step. After installing the helper as
+deploy/HOST-HELPER.md says, from a release that carries this unit (it has
+`TimeoutStopSec=10s`; `systemctl cat holzkube-manager-update-check.service`
+shows which one is installed):
+
+```sh
+sudo systemctl start holzkube-manager-update-check.service; echo "exit=$?"
+systemctl show holzkube-manager-update-check.service -p Result -p ExecMainStatus
+journalctl -u holzkube-manager-update-check.service -b --no-pager -n 50
+sudo cat /var/lib/holzkube-manager-update/status.json
+```
+
+Expected: `exit=0`, `Result=success`, `ExecMainStatus=0`; the journal shows
+the script comparing the installed version with the newest release and no
+"Permission denied", "Operation not permitted", "Could not resolve host" or
+"Address family not supported"; `status.json` has a `checked_at` from just
+now and the daemon user can read it (`sudo -u holzkube-manager cat` on the
+same path). A failure here points at a directive of the unit (most likely
+RestrictAddressFamilies=, MemoryDenyWriteExecute= for python3, or
+ProtectSystem=strict with the StateDirectory=).
+
+### Final suites (Pi, main checkout)
+
+- `go test ./internal/host/hostaction/ ./internal/httpapi/ -count=1 -v`:
+  exit 0, no SKIP (TestUnitsVerify ran systemd-analyze; the root-namespace
+  script tests ran under unshare).
+- `go test ./internal/... ./cmd/... -count=1`: exit 0, 41 `ok`, no other lines.
+- `./bin/task lint:go`: exit 0, 0 issues.
+- `go test ./internal/publicrepo/` before each commit: exit 0.
+- web/ not touched, so no web suite was run.

@@ -1,7 +1,6 @@
 package hostaction
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
@@ -16,6 +15,7 @@ import (
 	"testing"
 	"testing/fstest"
 	"time"
+	"unicode/utf8"
 
 	"gopkg.in/yaml.v3"
 
@@ -31,12 +31,14 @@ import (
 //   - TestUnitsVerify: systemd itself accepts all three units, read by its
 //     output and not only by its exit code, with a negative control;
 //   - TestUnitsAgree: the units' paths and the script's defaults are the
-//     paths this package uses, and the service carries the hardening D-18
-//     asks for and none that would break a reboot;
+//     paths this package uses, and the path unit and the service carry
+//     exactly the lines listed for them -- the hardening D-18 asks for and
+//     none that would break a reboot;
 //   - TestTheHelperNamesItsOrders: the script's marker line, its pattern, its
 //     case arms and Actions() are the same words;
-//   - TestTheCheckUnitRunsOnlyTheCheck: the check unit runs the update
-//     script's --check and nothing else, sandboxed, below the helper's limit;
+//   - TestTheCheckUnitRunsOnlyTheCheck: the check unit carries exactly the
+//     lines listed for it, so it runs the update script's --check and nothing
+//     else, sandboxed, and its worst case ends below the helper's limit;
 //   - TestInstallCommandsMatchTheGuide: the guide's install block is
 //     InstallCommands, byte for byte;
 //   - TestGuideKeepsTheDaemonsHardening: the guide names the daemon's
@@ -76,11 +78,46 @@ type unitAssignment struct {
 // order and its assignments. This is not a unit parser -- systemd-analyze is
 // that -- only enough to compare names and values. Comments (# and ;) and
 // blank lines are skipped; a line that is neither a section header nor an
-// assignment fails the test rather than being ignored.
+// assignment fails the test rather than being ignored, and so does a file
+// systemd would split into other lines than this reader does
+// (refuseAmbiguousUnitBytes).
 type unitFile struct {
 	name        string
 	sections    []string
 	assignments []unitAssignment
+}
+
+// refuseAmbiguousUnitBytes fails unless systemd and readUnitFile see the same
+// lines in data (13-REVIEW-2 V-15). systemd 257 also ends a line at a bare
+// carriage return or a NUL, drops a UTF-8 byte-order mark before a key, and
+// joins a line ending in a backslash with the next one; this reader splits on
+// newlines only. So "# a comment\rExecStartPost=..." is a comment here and a
+// command to systemd, and every check on the parsed lines would be blind to
+// it. Rather than imitate systemd's reader, a unit file of this repository
+// carries none of that: valid UTF-8, no byte-order mark, no control character
+// but the tab and the newline, and no line ending in a backslash -- comment
+// lines included, so the question of whether systemd continues a comment does
+// not arise.
+func refuseAmbiguousUnitBytes(t *testing.T, path string, data []byte) {
+	t.Helper()
+	if !utf8.Valid(data) {
+		t.Fatalf("%s is not valid UTF-8; systemd and these tests could read it differently", path)
+	}
+	for i, line := range strings.Split(string(data), "\n") {
+		n := i + 1
+		if strings.ContainsRune(line, '\uFEFF') {
+			t.Fatalf("%s:%d: a UTF-8 byte-order mark; systemd drops it before a key, so the line is not what it looks like", path, n)
+		}
+		for _, r := range line {
+			if (r < 0x20 && r != '\t') || r == 0x7f {
+				t.Fatalf("%s:%d: control character %U; systemd ends a line at a carriage return or a NUL, "+
+					"so what follows it could be an assignment this test never reads", path, n, r)
+			}
+		}
+		if strings.HasSuffix(strings.TrimRight(line, " \t"), `\`) {
+			t.Fatalf("%s:%d: the line ends in a backslash; systemd joins it with the next line, this test does not", path, n)
+		}
+	}
 }
 
 func readUnitFile(t *testing.T, path string) unitFile {
@@ -89,11 +126,12 @@ func readUnitFile(t *testing.T, path string) unitFile {
 	if err != nil {
 		t.Fatalf("read %s: %v", path, err)
 	}
+	refuseAmbiguousUnitBytes(t, path, data)
 	u := unitFile{name: filepath.Base(path)}
 	section := ""
-	sc := bufio.NewScanner(strings.NewReader(string(data)))
-	for n := 1; sc.Scan(); n++ {
-		line := strings.TrimSpace(sc.Text())
+	for i, raw := range strings.Split(string(data), "\n") {
+		n := i + 1
+		line := strings.TrimSpace(raw)
 		switch {
 		case line == "" || strings.HasPrefix(line, "#") || strings.HasPrefix(line, ";"):
 			continue
@@ -113,58 +151,112 @@ func readUnitFile(t *testing.T, path string) unitFile {
 			})
 		}
 	}
-	if err := sc.Err(); err != nil {
-		t.Fatalf("read %s: %v", path, err)
-	}
 	return u
 }
 
-// values returns every value assigned to key in section, in file order.
-func (u unitFile) values(section, key string) []string {
-	var out []string
-	for _, a := range u.assignments {
-		if a.section == section && a.key == key {
-			out = append(out, a.value)
-		}
-	}
-	return out
+// unitLine is one line a unit may carry: its section, its key, and the value
+// it must have -- want exactly, or, when check is set, whatever check accepts
+// (check returns why not, or "").
+type unitLine struct {
+	section, key string
+	want         string
+	check        func(value string) string
 }
 
-// lines returns every assignment of key, in any section.
-func (u unitFile) lines(key string) []unitAssignment {
-	var out []unitAssignment
-	for _, a := range u.assignments {
-		if a.key == key {
-			out = append(out, a)
-		}
-	}
-	return out
-}
-
-func (u unitFile) hasSection(name string) bool {
-	for _, s := range u.sections {
-		if s == name {
-			return true
-		}
-	}
-	return false
-}
-
-// wantOnly fails unless key is assigned in section, and every assignment is
-// want. A second, later line with another value is what systemd would use, so
-// "the first one is right" is not enough.
-func wantOnly(t *testing.T, u unitFile, section, key, want string) {
+// wantExactly holds u to an allow-list: exactly these sections, in this
+// order, each once, and exactly these lines, each once and with its value.
+// Any other key fails, naming its line -- whatever it is. A list of keys a
+// unit must not carry only ever names the ones somebody thought of
+// (13-REVIEW-2 V-14, V-19: OnSuccess=, Wants=, BindPaths=, PassEnvironment=,
+// StandardOutput=file:, TimeoutSec=, SendSIGKILL= all passed one), and every
+// line systemd knows is one more way for a unit to do something else. A key
+// assigned twice fails too: systemd uses the later line, or for list keys
+// both, or resets the list on an empty one.
+func wantExactly(t *testing.T, u unitFile, sections []string, spec []unitLine) {
 	t.Helper()
-	got := u.values(section, key)
-	if len(got) == 0 {
-		t.Errorf("%s: [%s] has no %s=; want %s=%s", u.name, section, key, key, want)
-		return
+	if !slices.Equal(u.sections, sections) {
+		t.Errorf("%s: sections %q, want exactly %q", u.name, u.sections, sections)
 	}
-	for _, v := range got {
-		if v != want {
-			t.Errorf("%s: [%s] %s=%s, want %s=%s (every assignment: %q)", u.name, section, key, v, key, want, got)
+	type slot struct{ section, key string }
+	allowed := map[slot]unitLine{}
+	for _, l := range spec {
+		allowed[slot{l.section, l.key}] = l
+	}
+	seen := map[slot]int{}
+	for _, a := range u.assignments {
+		s := slot{a.section, a.key}
+		l, ok := allowed[s]
+		if !ok {
+			t.Errorf("%s:%d: [%s] %s=%s is not a line this unit may carry", u.name, a.line, a.section, a.key, a.value)
+			continue
+		}
+		if first, twice := seen[s]; twice {
+			t.Errorf("%s:%d: [%s] %s= a second time (first on line %d); systemd would use the later line, or both",
+				u.name, a.line, a.section, a.key, first)
+			continue
+		}
+		seen[s] = a.line
+		switch {
+		case l.check != nil:
+			if why := l.check(a.value); why != "" {
+				t.Errorf("%s:%d: [%s] %s=%s: %s", u.name, a.line, a.section, a.key, a.value, why)
+			}
+		case a.value != l.want:
+			t.Errorf("%s:%d: [%s] %s=%s, want %s=%s", u.name, a.line, a.section, a.key, a.value, a.key, l.want)
 		}
 	}
+	for _, l := range spec {
+		if _, ok := seen[slot{l.section, l.key}]; !ok {
+			t.Errorf("%s: [%s] has no %s=", u.name, l.section, l.key)
+		}
+	}
+}
+
+// helperGuideURL is every helper unit's Documentation=.
+const helperGuideURL = "https://github.com/holzcloud/holzkube-manager/blob/main/deploy/HOST-HELPER.md"
+
+// unitHeader is the [Unit] section every helper unit carries, and all it may:
+// a description and the guide. No dependency, no ordering, no OnSuccess= or
+// OnFailure= -- nothing that starts another unit or holds this one back.
+func unitHeader() []unitLine {
+	return []unitLine{
+		{section: "Unit", key: "Description", check: func(v string) string {
+			if v == "" {
+				return "an empty description"
+			}
+			return ""
+		}},
+		{section: "Unit", key: "Documentation", want: helperGuideURL},
+	}
+}
+
+// hardening is the sandbox both services carry, value for value.
+func hardening() []unitLine {
+	var out []unitLine
+	for _, kv := range [][2]string{
+		{"NoNewPrivileges", "true"},
+		{"ProtectSystem", "strict"},
+		{"ProtectHome", "true"},
+		{"PrivateTmp", "true"},
+		{"PrivateDevices", "true"},
+		{"ProtectKernelTunables", "true"},
+		{"ProtectKernelModules", "true"},
+		{"ProtectKernelLogs", "true"},
+		{"ProtectControlGroups", "true"},
+		{"ProtectClock", "true"},
+		{"ProtectHostname", "true"},
+		{"RestrictNamespaces", "true"},
+		{"RestrictRealtime", "true"},
+		{"RestrictSUIDSGID", "true"},
+		{"LockPersonality", "true"},
+		{"MemoryDenyWriteExecute", "true"},
+		{"SystemCallArchitectures", "native"},
+		{"StateDirectoryMode", "0755"},
+		{"UMask", "0022"},
+	} {
+		out = append(out, unitLine{section: "Service", key: kv[0], want: kv[1]})
+	}
+	return out
 }
 
 // TestUnitsVerify runs systemd-analyze verify over copies of the three units:
@@ -206,6 +298,11 @@ func TestUnitsVerify(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read the check unit: %v", err)
 	}
+	// The ExecStart= rewrite below finds lines by newline, as systemd would
+	// not if a line hid behind a carriage return (13-REVIEW-2 V-15).
+	refuseAmbiguousUnitBytes(t, shippedPathUnit, pathSrc)
+	refuseAmbiguousUnitBytes(t, shippedService, serviceSrc)
+	refuseAmbiguousUnitBytes(t, shippedCheckUnit, checkSrc)
 
 	verify := func(t *testing.T, service string) (string, int) {
 		t.Helper()
@@ -278,7 +375,13 @@ func TestUnitsVerify(t *testing.T) {
 }
 
 // TestUnitsAgree holds the units, the script's defaults and this package's
-// paths to one another, and the service to the hardening D-18 asks for.
+// paths to one another, and the path unit and the service to an allow-list
+// (wantExactly) that includes the hardening D-18 asks for.
+//
+// Faults injected and seen red: TimeoutSec=1min after TimeoutStartSec=3min
+// and TimeoutStartSec=5min in the service; Wants=, PassEnvironment=,
+// CapabilityBoundingSet= and an ExecStartPost= behind a carriage return in
+// it; PathChanged= and MakeDirectory= in the path unit.
 func TestUnitsAgree(t *testing.T) {
 	t.Parallel()
 
@@ -294,101 +397,51 @@ func TestUnitsAgree(t *testing.T) {
 		t.Errorf("the shipped service is %s, Detect looks for %s", service.name, ServiceUnitPath)
 	}
 
-	// The path unit: one trigger, on the order, starting the service, pulled
-	// in by paths.target.
-	triggers := []string{"PathExists", "PathExistsGlob", "PathChanged", "PathModified", "DirectoryNotEmpty"}
-	var found []unitAssignment
-	for _, k := range triggers {
-		found = append(found, path.lines(k)...)
-	}
-	if len(found) != 1 || found[0].key != "PathExists" || found[0].value != ReferenceOrderPath {
-		t.Errorf("%s: triggers %+v, want exactly PathExists=%s", path.name, found, ReferenceOrderPath)
-	}
-	wantOnly(t, path, "Path", "Unit", filepath.Base(ServiceUnitPath))
-	wantOnly(t, path, "Install", "WantedBy", "paths.target")
+	// The path unit, line for line (13-REVIEW-2 V-14..V-19, as for the check
+	// unit): one trigger, on the order, starting the service, pulled in by
+	// paths.target. No other trigger -- a second one would start the helper
+	// without an order -- and no MakeDirectory=, which would create a missing
+	// data directory as root 0755, in which the daemon then refuses to start.
+	wantExactly(t, path, []string{"Unit", "Path", "Install"}, append(unitHeader(),
+		unitLine{section: "Path", key: "PathExists", want: ReferenceOrderPath},
+		unitLine{section: "Path", key: "Unit", want: filepath.Base(ServiceUnitPath)},
+		unitLine{section: "Install", key: "WantedBy", want: "paths.target"},
+	))
 	if filepath.Dir(WantsLinkPath) != filepath.Join(filepath.Dir(PathUnitPath), "paths.target.wants") ||
 		filepath.Base(WantsLinkPath) != filepath.Base(PathUnitPath) {
 		t.Errorf("WantsLinkPath %s is not where `systemctl enable` links a unit with WantedBy=paths.target", WantsLinkPath)
 	}
-	// MakeDirectory= would create a missing data directory as root 0755, and
-	// the daemon then refuses to start in it.
-	if l := path.lines("MakeDirectory"); len(l) > 0 {
-		t.Errorf("%s:%d: MakeDirectory= in the path unit", path.name, l[0].line)
-	}
 
-	// The service: runs the installed script, once per start.
-	wantOnly(t, service, "Service", "ExecStart", HelperScriptPath)
-	wantOnly(t, service, "Service", "Type", "oneshot")
-	if v := service.values("Service", "TimeoutStartSec"); len(v) == 0 || v[len(v)-1] == "" || v[len(v)-1] == "infinity" || v[len(v)-1] == "0" {
-		t.Errorf("%s: TimeoutStartSec=%q; a oneshot has no start limit without one", service.name, v)
-	}
-	// Its own state, where the daemon reads the result.
+	// The service, line for line: it runs the installed script, once per
+	// start, below the limit the daemon assumes (HelperServiceLimit); writes
+	// its own state, where the daemon reads the result, and the daemon's
+	// directory, where the consuming rm needs it under ProtectSystem=strict;
+	// and carries the hardening D-18 asks for. What it leaves out is left out
+	// by not being on the list: no [Install] (only the path unit starts it),
+	// no RemainAfterExit= (an active oneshot never runs a second order), no
+	// capability or system-call restriction (the reboot goes through logind,
+	// by polkit or CAP_SYS_BOOT, and entering the daemon's 0700 directory
+	// takes CAP_DAC_OVERRIDE -- Pitfall 7), no Environment= (the script's
+	// overrides are for tests), and no TimeoutSec=, which would set the start
+	// limit behind TimeoutStartSec='s back (13-REVIEW-2 V-10).
 	resultDir := filepath.Dir(DefaultResultPath)
 	if filepath.Dir(resultDir) != "/var/lib" {
 		t.Errorf("DefaultResultPath %s is not under /var/lib, where StateDirectory= puts it", DefaultResultPath)
 	}
-	wantOnly(t, service, "Service", "StateDirectory", filepath.Base(resultDir))
-	// The consuming rm: ProtectSystem=strict makes the daemon's directory
-	// read-only without this line.
-	orderDir := filepath.Dir(ReferenceOrderPath)
-	rw := service.values("Service", "ReadWritePaths")
-	hasOrderDir := false
-	for _, v := range rw {
-		for _, f := range strings.Fields(v) {
-			if strings.TrimPrefix(f, "-") == orderDir {
-				hasOrderDir = true
+	wantExactly(t, service, []string{"Unit", "Service"}, append(append(unitHeader(),
+		unitLine{section: "Service", key: "Type", want: "oneshot"},
+		unitLine{section: "Service", key: "ExecStart", want: HelperScriptPath},
+		unitLine{section: "Service", key: "TimeoutStartSec", check: func(v string) string {
+			if d := systemdSpan(t, v); d != HelperServiceLimit {
+				return "HelperServiceLimit is " + HelperServiceLimit.String() + "; the routes would hold orders back " +
+					"for a different time than systemd lets the helper wait for a check"
 			}
-		}
-	}
-	if !hasOrderDir {
-		t.Errorf("%s: ReadWritePaths=%q does not name %s; under ProtectSystem=strict the script cannot remove the order", service.name, rw, orderDir)
-	}
-
-	// D-18: hardened as far as a reboot allows.
-	for _, kv := range [][2]string{
-		{"NoNewPrivileges", "true"},
-		{"ProtectSystem", "strict"},
-		{"ProtectHome", "true"},
-		{"PrivateTmp", "true"},
-		{"PrivateDevices", "true"},
-		{"ProtectKernelTunables", "true"},
-		{"ProtectKernelModules", "true"},
-		{"ProtectKernelLogs", "true"},
-		{"ProtectControlGroups", "true"},
-		{"ProtectClock", "true"},
-		{"ProtectHostname", "true"},
-		{"RestrictAddressFamilies", "AF_UNIX"},
-		{"RestrictNamespaces", "true"},
-		{"RestrictRealtime", "true"},
-		{"RestrictSUIDSGID", "true"},
-		{"LockPersonality", "true"},
-		{"MemoryDenyWriteExecute", "true"},
-		{"SystemCallArchitectures", "native"},
-		{"StateDirectoryMode", "0755"},
-		{"UMask", "0022"},
-	} {
-		wantOnly(t, service, "Service", kv[0], kv[1])
-	}
-
-	// And nothing that stops it from working. No [Install]: only the path
-	// unit starts it. No RemainAfterExit: an active oneshot never runs a
-	// second order. No capability or system-call restriction: the reboot goes
-	// through logind (polkit or CAP_SYS_BOOT), and entering the daemon's 0700
-	// directory takes CAP_DAC_OVERRIDE (Pitfall 7). No Environment: the
-	// script's overrides are for tests.
-	if service.hasSection("Install") {
-		t.Errorf("%s has an [Install] section; only the path unit may start it", service.name)
-	}
-	for _, key := range []string{"RemainAfterExit", "Environment", "EnvironmentFile", "CapabilityBoundingSet", "AmbientCapabilities", "SystemCallFilter"} {
-		if l := service.lines(key); len(l) > 0 {
-			t.Errorf("%s:%d: %s=%s must not be in the helper's service", service.name, l[0].line, key, l[0].value)
-		}
-	}
-	for _, key := range []string{"Environment", "EnvironmentFile"} {
-		if l := path.lines(key); len(l) > 0 {
-			t.Errorf("%s:%d: %s= in the path unit", path.name, l[0].line, key)
-		}
-	}
+			return ""
+		}},
+		unitLine{section: "Service", key: "StateDirectory", want: filepath.Base(resultDir)},
+		unitLine{section: "Service", key: "ReadWritePaths", want: "-" + filepath.Dir(ReferenceOrderPath)},
+		unitLine{section: "Service", key: "RestrictAddressFamilies", want: "AF_UNIX"},
+	), hardening()...))
 
 	// The script's defaults are the same paths.
 	script, err := os.ReadFile(shippedScript)
@@ -587,12 +640,13 @@ func systemdSpan(t *testing.T, s string) time.Duration {
 const checkUnitMargin = 15 * time.Second
 
 // checkUnitWorstCase is the longest the helper's blocking `systemctl start` of
-// the check unit can take, as systemd 257 runs a oneshot with its default
-// kill settings (13-REVIEW-2 V-09, V-13). When the start limit runs out
-// (TimeoutStartFailureMode=, by default, terminate), systemd walks
-// stop-sigterm, stop-sigkill, final-sigterm and final-sigkill and arms
-// TimeoutStopSec= for each of them (there is no ExecStop= or ExecStopPost= in
-// between); the start job ends only after the last. Processes that SIGKILL ends -- the
+// the check unit can take, as systemd 257 runs a oneshot with only the keys
+// TestTheCheckUnitRunsOnlyTheCheck allows (13-REVIEW-2 V-09..V-13). When the
+// start limit runs out (TimeoutStartFailureMode= is not allowed, so the
+// default, terminate), systemd walks stop-sigterm, stop-sigkill, final-sigterm
+// and final-sigkill and arms TimeoutStopSec= for each of them (there is no
+// ExecStop= or ExecStopPost= in between: they are not allowed either); the
+// start job ends only after the last. Processes that SIGKILL ends -- the
 // usual case -- cut that short after the second; one stuck in uninterruptible
 // sleep (an SD card stalling under curl) goes through all four. Measured on
 // the Pi with a transient unit, TimeoutStartSec=3s and TimeoutStopSec=2s:
@@ -601,24 +655,43 @@ const checkUnitMargin = 15 * time.Second
 // the same states) -- start + 4 x stop.
 //
 // SendSIGKILL=no, FinalKillSignal=, TimeoutAbortSec=, TimeoutSec= and any
-// ordering would each change this sum.
+// ordering would each change this sum, and none of them is on the list; that
+// the list is closed is what makes this the worst case.
 func checkUnitWorstCase(start, stop time.Duration) time.Duration {
 	return start + 4*stop
 }
 
 // TestTheCheckUnitRunsOnlyTheCheck: the check unit runs as root, and the only
 // thing it may run is the update script's look -- never the update itself.
-// So its one command is UpdateScriptPath --check; it is a oneshot whose
-// worst case (checkUnitWorstCase) ends below the helper's own limit (the
-// helper waits for it and must still record failed); it writes only the
-// update status directory the daemon reads; it may reach the network, which the helper's own service may not; and it
-// carries no [Install] (nothing starts it but the helper), no RemainAfterExit
-// (a second check would never run), no environment and no capability.
+// So it is held to an allow-list (wantExactly), line for line, and anything
+// not on it fails, naming its line: its one command is UpdateScriptPath
+// --check, and no ExecStartPre=, ExecStartPost=, ExecStop= or other Exec line
+// runs anything else as root (13-REVIEW-2 WR-04); its [Unit] section starts
+// nothing (no OnSuccess=, OnFailure=, Wants=, Requires=, BindsTo=, Upholds=:
+// holzkube-manager-update.service is the full update, V-14, V-19) and waits
+// for nothing (no After=); it puts nothing over the script or the update.conf
+// it sources (no BindPaths=, BindReadOnlyPaths=, RootDirectory=, V-16), takes
+// no environment from anywhere (no Environment=, EnvironmentFile=,
+// PassEnvironment=, V-17), and writes nowhere but the update status directory
+// the daemon reads (no ReadWritePaths=, no StandardOutput=file:, V-18); it may
+// reach the network, which the helper's own service may not, but only as far
+// as GitHub needs; it runs as root with no capability (no User=, Group=,
+// DynamicUser=: the sandbox is reasoned for root with an empty bounding set,
+// writing a directory only root owns and reading a token only root may read);
+// it carries no [Install] (nothing starts it but the helper) and no
+// RemainAfterExit= (a second check would never run); and its worst case ends
+// below the helper's limit, with checkUnitMargin to spare, because the helper
+// waits for it and must still record failed (WR-03, V-09).
 //
 // Faults injected and seen red: --check removed from ExecStart=; an
 // ExecStartPost= running the update with --force; AF_PACKET added to
 // RestrictAddressFamilies=; DynamicUser=true; TimeoutStopSec= absent, 90s
-// and 1min; TimeoutStopSec=15s, the shipped value before V-09.
+// and 1min; OnSuccess= and Wants=holzkube-manager-update.service;
+// BindPaths=; PassEnvironment=; StandardOutput=file:; TimeoutSec=;
+// SendSIGKILL=no; FinalKillSignal=; TimeoutStartFailureMode=abort; After=;
+// TimeoutStopSec=15s, the shipped value before V-09; an ExecStartPost= behind
+// a carriage return or a NUL in a comment; a byte-order mark before one; a
+// backslash at the end of the line before ExecStart=.
 func TestTheCheckUnitRunsOnlyTheCheck(t *testing.T) {
 	t.Parallel()
 
@@ -629,111 +702,67 @@ func TestTheCheckUnitRunsOnlyTheCheck(t *testing.T) {
 		t.Errorf("the shipped check unit is %s, the helper starts and the guide installs %s", check.name, UpdateCheckUnitPath)
 	}
 
-	wantOnly(t, check, "Service", "ExecStart", UpdateScriptPath+" --check")
-	// And no other command, in any section (13-REVIEW-2 WR-04): ExecStartPre,
-	// ExecStartPost, ExecCondition, ExecStop, ExecStopPost and ExecReload all
-	// run as root too, and one line of them -- the update with --force -- would
-	// install a release on every check.
-	if n := len(check.lines("ExecStart")); n != 1 {
-		t.Errorf("%s has %d ExecStart= lines, want exactly 1", check.name, n)
-	}
-	for _, a := range check.assignments {
-		if strings.HasPrefix(a.key, "Exec") && a.key != "ExecStart" {
-			t.Errorf("%s:%d: [%s] %s=%s; the check unit runs its one ExecStart= and nothing else",
-				check.name, a.line, a.section, a.key, a.value)
-		}
-	}
-	wantOnly(t, check, "Service", "Type", "oneshot")
 	statusDir := filepath.Dir(updatestatus.DefaultPath)
 	if filepath.Dir(statusDir) != "/var/lib" {
 		t.Errorf("updatestatus.DefaultPath %s is not under /var/lib, where StateDirectory= puts it", updatestatus.DefaultPath)
 	}
-	wantOnly(t, check, "Service", "StateDirectory", filepath.Base(statusDir))
-	for _, kv := range [][2]string{
-		{"NoNewPrivileges", "true"},
-		{"CapabilityBoundingSet", ""},
-		{"ProtectSystem", "strict"},
-		{"ProtectHome", "true"},
-		{"PrivateTmp", "true"},
-		{"PrivateDevices", "true"},
-		{"ProtectKernelTunables", "true"},
-		{"ProtectKernelModules", "true"},
-		{"ProtectKernelLogs", "true"},
-		{"ProtectControlGroups", "true"},
-		{"ProtectClock", "true"},
-		{"ProtectHostname", "true"},
-		{"RestrictNamespaces", "true"},
-		{"RestrictRealtime", "true"},
-		{"RestrictSUIDSGID", "true"},
-		{"LockPersonality", "true"},
-		{"MemoryDenyWriteExecute", "true"},
-		{"SystemCallArchitectures", "native"},
-		{"StateDirectoryMode", "0755"},
-		{"UMask", "0022"},
-	} {
-		wantOnly(t, check, "Service", kv[0], kv[1])
-	}
-
-	// The network: the look asks GitHub for the release list -- AF_INET and
-	// AF_INET6 for that, AF_UNIX and AF_NETLINK for name resolution -- and
-	// nothing more (13-REVIEW-2 WR-04): exactly these four, in any order.
-	families := check.lines("RestrictAddressFamilies")
-	if len(families) != 1 {
-		t.Errorf("%s: %d RestrictAddressFamilies= lines, want exactly one", check.name, len(families))
-	} else {
-		got := strings.Fields(families[0].value)
-		slices.Sort(got)
-		if want := []string{"AF_INET", "AF_INET6", "AF_NETLINK", "AF_UNIX"}; !slices.Equal(got, want) {
-			t.Errorf("%s: RestrictAddressFamilies=%s, want exactly %s: the network GitHub needs and nothing more",
-				check.name, families[0].value, strings.Join(want, " "))
+	positiveSpan := func(v string) string {
+		if systemdSpan(t, v) <= 0 {
+			return "want a limit above 0; 0 means none"
 		}
+		return ""
 	}
+	wantExactly(t, check, []string{"Unit", "Service"}, append(append(unitHeader(),
+		unitLine{section: "Service", key: "Type", want: "oneshot"},
+		unitLine{section: "Service", key: "ExecStart", want: UpdateScriptPath + " --check"},
+		unitLine{section: "Service", key: "TimeoutStartSec", check: positiveSpan},
+		unitLine{section: "Service", key: "TimeoutStopSec", check: positiveSpan},
+		unitLine{section: "Service", key: "StateDirectory", want: filepath.Base(statusDir)},
+		unitLine{section: "Service", key: "CapabilityBoundingSet", want: ""},
+		// The look asks GitHub for the release list -- AF_INET and AF_INET6
+		// for that, AF_UNIX and AF_NETLINK for name resolution -- and nothing
+		// more (13-REVIEW-2 WR-04): exactly these four, in any order.
+		unitLine{section: "Service", key: "RestrictAddressFamilies", check: func(v string) string {
+			got := strings.Fields(v)
+			slices.Sort(got)
+			if want := []string{"AF_INET", "AF_INET6", "AF_NETLINK", "AF_UNIX"}; !slices.Equal(got, want) {
+				return "want exactly " + strings.Join(want, " ") + ": the network GitHub needs and nothing more"
+			}
+			return ""
+		}},
+	), hardening()...))
 
-	// Below the helper's limit: the helper waits for this unit.
-	lastSpan := func(u unitFile) time.Duration {
-		v := u.values("Service", "TimeoutStartSec")
-		if len(v) == 0 {
-			t.Fatalf("%s has no TimeoutStartSec=; a oneshot has no start limit without one", u.name)
+	// Below the helper's limit. The allow-list above has made both keys appear
+	// exactly once, and ruled out every other key that changes the sum.
+	span := func(u unitFile, key string) time.Duration {
+		var v []string
+		for _, a := range u.assignments {
+			switch {
+			case a.section != "Service":
+			case a.key == "TimeoutSec":
+				t.Fatalf("%s:%d: TimeoutSec=%s sets both limits; this test reads TimeoutStartSec= and TimeoutStopSec= only",
+					u.name, a.line, a.value)
+			case a.key == key:
+				v = append(v, a.value)
+			}
 		}
-		return systemdSpan(t, v[len(v)-1])
+		if len(v) != 1 {
+			t.Fatalf("%s: %d %s= lines, want exactly one", u.name, len(v), key)
+		}
+		return systemdSpan(t, v[0])
 	}
 	// The daemon's idea of the helper's limit is the unit's: the routes hold
 	// every order back while a check is younger than it (CheckRunning).
-	if h := lastSpan(service); h != HelperServiceLimit {
+	helper := span(service, "TimeoutStartSec")
+	if helper != HelperServiceLimit {
 		t.Errorf("%s: TimeoutStartSec is %v, HelperServiceLimit is %v; the routes would hold orders back "+
-			"for a different time than systemd lets the helper wait for a check", service.name, h, HelperServiceLimit)
+			"for a different time than systemd lets the helper wait for a check", service.name, helper, HelperServiceLimit)
 	}
-	// The worst case is systemd's (checkUnitWorstCase): the start limit, then
-	// up to four stop limits when a process survives the kills, and the
-	// helper's blocking systemctl start returns only once the unit has
-	// stopped (13-REVIEW-2 WR-03, V-09). Both must be set, and the worst case
-	// at least checkUnitMargin below the helper's limit, or systemd ends the
-	// helper before it can record failed.
-	stopSpan := func(u unitFile) time.Duration {
-		v := u.values("Service", "TimeoutStopSec")
-		if len(v) == 0 {
-			t.Fatalf("%s has no TimeoutStopSec=; the default (90 s) on top of TimeoutStartSec= is not bounded here", u.name)
-		}
-		return systemdSpan(t, v[len(v)-1])
-	}
-	start, stop, helper := lastSpan(check), stopSpan(check), lastSpan(service)
-	if worst := checkUnitWorstCase(start, stop); start <= 0 || stop <= 0 || worst+checkUnitMargin > helper {
+	start, stop := span(check, "TimeoutStartSec"), span(check, "TimeoutStopSec")
+	if worst := checkUnitWorstCase(start, stop); worst+checkUnitMargin > helper {
 		t.Errorf("%s: TimeoutStartSec %v + 4 x TimeoutStopSec %v = %v, systemd's worst case for the start the helper waits for; "+
-			"want both above 0 and the sum at least %v below the helper service's %v, or systemd ends the helper before it can record failed",
+			"want it at least %v below the helper service's %v, or systemd ends the helper before it can record failed",
 			check.name, start, stop, worst, checkUnitMargin, helper)
-	}
-
-	if check.hasSection("Install") {
-		t.Errorf("%s has an [Install] section; only the helper may start it", check.name)
-	}
-	// User=, Group= and DynamicUser= are left out too: the sandbox above is
-	// reasoned for root with an empty bounding set, writing a directory only
-	// root owns, and reading a token only root may read.
-	for _, key := range []string{"RemainAfterExit", "Environment", "EnvironmentFile", "AmbientCapabilities", "ReadWritePaths",
-		"User", "Group", "DynamicUser", "SupplementaryGroups"} {
-		if l := check.lines(key); len(l) > 0 {
-			t.Errorf("%s:%d: %s=%s must not be in the check unit", check.name, l[0].line, key, l[0].value)
-		}
 	}
 
 	// And the helper starts exactly this unit for a check-update order.
