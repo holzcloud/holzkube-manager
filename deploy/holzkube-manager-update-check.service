@@ -27,9 +27,11 @@
 #   - RestrictAddressFamilies= mit AF_INET und AF_INET6: das Skript fragt
 #     GitHub nach der Release-Liste. AF_UNIX und AF_NETLINK braucht die
 #     Namensaufloesung.
-#   - TimeoutStartSec=2min: ein oneshot hat sonst keine Startgrenze. Der Helfer
-#     wartet auf diese Unit, und seine eigene Grenze ist 3min; diese liegt
-#     darunter, damit der Helfer noch "failed" festhalten kann, wenn sie
+#   - TimeoutStartSec=2min und TimeoutStopSec=15s: ein oneshot hat sonst
+#     keine Startgrenze. Laeuft sie ab, schickt systemd SIGTERM und wartet
+#     TimeoutStopSec (sonst 90 s) bis SIGKILL, und erst dann endet der Start,
+#     auf den der Helfer wartet. Zusammen 2min15s, unter der Grenze des
+#     Helfers (3min), damit er noch "failed" festhalten kann, wenn diese Unit
 #     abgebrochen wird. curl im Skript hat ohnehin --max-time 30.
 #   - CapabilityBoundingSet= leer: alles, was das Nachsehen liest oder
 #     schreibt, gehoert root; keine Capability ist noetig.
@@ -48,6 +50,7 @@ Documentation=https://github.com/holzcloud/holzkube-manager/blob/main/deploy/HOS
 Type=oneshot
 ExecStart=/usr/local/sbin/holzkube-manager-update --check
 TimeoutStartSec=2min
+TimeoutStopSec=15s
 StateDirectory=holzkube-manager-update
 StateDirectoryMode=0755
 UMask=0022
