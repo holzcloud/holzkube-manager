@@ -121,11 +121,19 @@ func redirectURI(r *http.Request) string {
 	return scheme + "://" + r.Host + "/api/v1/auth/oidc/callback"
 }
 
+// oidcStart sends the browser to the provider.
+//
+// It answers every caller the same way, whatever this instance holds. It used
+// to refuse a sign-in on an SSO-only address before leaving -- setup-required
+// with no person account, bind-host with people and none linked, through to
+// the provider when somebody was linked -- to save a round trip that was bound
+// to end in "not linked". Each of those answers told an anonymous caller, with
+// no account at the provider at all, something about this instance's accounts
+// that finishing the flow would not have: the callback on that address answers
+// every identity that is not linked with bind-host, before it counts anything.
+// It also showed the moment an unlink opened the first-use window. The round
+// trip is the cheaper price.
 func oidcStart(d httpapi.Deps, w http.ResponseWriter, r *http.Request, sudo bool) {
-	if !sudo && refuseUnlinkedOnSSOOnlyHost(d, w, r) {
-		return
-	}
-
 	flow, err := oidc.NewFlowState(redirectURI(r), sudo)
 	if err != nil {
 		httpapi.WriteInternal(w, r, d.Logger, err)
@@ -153,67 +161,6 @@ func oidcStart(d httpapi.Deps, w http.ResponseWriter, r *http.Request, sudo bool
 	// it. The genuinely attacker-shaped redirect in this flow is the one back to
 	// the application afterwards, and that is the constant afterAuth.
 	http.Redirect(w, r, url, http.StatusFound) //nolint:gosec // target derives from the configured issuer, not from the request
-}
-
-// refuseUnlinkedOnSSOOnlyHost answers a sign-in that cannot possibly succeed,
-// before the browser is sent anywhere, and reports whether it did.
-//
-// On an SSO-only host the first binding of an identity is refused (see
-// bindFirstIdentity). Without this check the operator learns that only at the
-// very end: the page offers the button, the provider authenticates them, and
-// the callback then says the account is not linked. Every step of that
-// round-trip was already doomed when the button was drawn.
-//
-// The check is here rather than in a field on GET /api/v1/system/status, which
-// is what would let the page grey the button out. That endpoint answers before
-// authentication, and "this instance has no identity linked yet" is a fact
-// about its state that an anonymous caller on the public address has no reason
-// to be told. Refusing at the start of a flow the caller deliberately began
-// discloses the same thing to somebody who could have discovered it by
-// finishing the flow anyway, and to nobody else.
-//
-// A missing binding is the only case that can be decided in advance. A binding
-// to a *different* subject cannot: the subject arrives with the token, so that
-// one still surfaces in the callback.
-//
-// The three answers are over accounts for people only, because only a person
-// signs in through the provider:
-//
-//   - no person account: setup-required. Setup is refused on this address too,
-//     and with only service accounts there is nothing to link either.
-//   - a linked person among them: the flow proceeds. Which subject arrives is
-//     the callback's question.
-//   - people, none linked: bind-host. That is exactly what the callback on this
-//     address answers, because bindFirstIdentity refuses an SSO-only host
-//     before it counts anything -- so this discloses nothing the finished flow
-//     would not.
-//
-// It used to ask for the one account and answer setup-required whenever there
-// was not exactly one: an instance with several accounts refused every sign-in
-// on this address, a linked one included, and told the operator to run a
-// wizard that had already run.
-func refuseUnlinkedOnSSOOnlyHost(d httpapi.Deps, w http.ResponseWriter, r *http.Request) bool {
-	if !d.SSOOnly(r) {
-		return false
-	}
-
-	people, err := d.Auth.PersonAccounts(r.Context())
-	if err != nil {
-		httpapi.WriteInternal(w, r, d.Logger, err)
-		return true
-	}
-	if len(people) == 0 {
-		failSignIn(w, r, "setup-required")
-		return true
-	}
-	for _, u := range people {
-		if u.HasIdentityBinding() {
-			return false
-		}
-	}
-
-	failSignIn(w, r, "bind-host")
-	return true
 }
 
 // failSignIn ends a failed sign-in the way a browser navigation has to end:
@@ -377,8 +324,17 @@ func completeLogin(d httpapi.Deps, w http.ResponseWriter, r *http.Request, ident
 // provider arrives on a host where the local password is not accepted.
 var errBindFromUntrustedHost = errors.New("oidc: first binding must not happen on an SSO-only host")
 
-// errBindBeforeSetup is returned when no operator account exists yet.
+// errBindBeforeSetup is returned when no account exists yet.
 var errBindBeforeSetup = errors.New("oidc: setup has not created an account yet")
+
+// errBindNoPerson is returned when accounts exist and none of them is a person:
+// only service accounts are left, which never sign in through the provider.
+//
+// It is not setup-required, because setup refuses to run once any account
+// exists (setup.already-completed). The remedy is an admin creating an account
+// for a person -- with an admin service account's token if no person is left,
+// since a token satisfies the sudo window.
+var errBindNoPerson = errors.New("oidc: there is no account for a person, only service accounts")
 
 // errBindAmbiguous is returned when this instance has more than one account
 // for a person.
@@ -423,6 +379,13 @@ func bindFirstIdentity(d httpapi.Deps, r *http.Request, issuer string, identity 
 	u, err := d.Auth.SinglePersonAccount(r.Context())
 	switch {
 	case errors.Is(err, auth.ErrNoPersonAccount):
+		everyone, listErr := d.Auth.Users(r.Context())
+		if listErr != nil {
+			return model.User{}, listErr
+		}
+		if len(everyone) > 0 {
+			return model.User{}, errBindNoPerson
+		}
 		return model.User{}, errBindBeforeSetup
 	case errors.Is(err, auth.ErrSeveralPersonAccounts):
 		return model.User{}, errBindAmbiguous
@@ -497,6 +460,8 @@ func bindCode(err error) string {
 		return "bind-host"
 	case errors.Is(err, errBindBeforeSetup):
 		return "setup-required"
+	case errors.Is(err, errBindNoPerson):
+		return "no-person"
 	case errors.Is(err, errBindAmbiguous):
 		return "bind-ambiguous"
 	case errors.Is(err, auth.ErrAlreadyBound):

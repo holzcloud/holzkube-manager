@@ -260,44 +260,6 @@ func withProvider(t *testing.T) depOption {
 	return func(d *httpapi.Deps) { d.OIDC = p }
 }
 
-// A sign-in that cannot succeed is refused before the browser leaves.
-//
-// On an SSO-only host the first binding of an identity is refused, so offering
-// the button, sending the operator through the provider and only then saying
-// "this account is not linked" wastes a full round trip that was doomed when
-// the page rendered. The refusal is a redirect back to the sign-in page rather
-// than a problem document, because these routes are navigations: JSON in the
-// address bar is exactly where this flow used to leave people standing.
-func TestSignInIsRefusedBeforeLeavingWhenTheAccountIsNotLinked(t *testing.T) {
-	t.Parallel()
-
-	s := newServerWith(t, 5*time.Minute, nil, talos.Mode{}, withSSOOnly(publicHost), withProvider(t))
-	c := s.newClient(t)
-	c.setup() // creates the account; it has no identity binding
-
-	resp, _ := c.do(http.MethodGet, "/api/v1/auth/oidc/start", nil, c.asHost(publicHost))
-	if resp.StatusCode != http.StatusFound {
-		t.Fatalf("start on the public host = %d, want 302 back to the sign-in page", resp.StatusCode)
-	}
-
-	loc, err := resp.Location()
-	if err != nil {
-		t.Fatalf("no Location header: %v", err)
-	}
-	if loc.Path != "/login" {
-		t.Errorf("redirected to %q, want /login", loc.Path)
-	}
-	if got := loc.Query().Get("sso_error"); got != "bind-host" {
-		t.Errorf("sso_error = %q, want bind-host", got)
-	}
-
-	// The provider is a fiction, so anything that reached discovery would fail
-	// noisily. Nothing did: the refusal happened first.
-	if loc.Host == "idp.example.com" {
-		t.Error("the browser was sent to the provider anyway")
-	}
-}
-
 // On an address that still accepts the password, the same request is not
 // refused early -- there is nothing to refuse, because binding is allowed
 // there. It fails later, at discovery, which is the fiction in this harness.
@@ -324,39 +286,18 @@ func TestSignInIsNotRefusedEarlyOnALinkableHost(t *testing.T) {
 	}
 }
 
-// Before setup has run, an SSO-only address has nothing to offer at all: the
-// wizard is refused there too, so there is no account an identity could bind
-// to.
-func TestSignInBeforeSetupOnSSOOnlyHostSaysSetupIsRequired(t *testing.T) {
-	t.Parallel()
-
-	s := newServerWith(t, 5*time.Minute, nil, talos.Mode{}, withSSOOnly(publicHost), withProvider(t))
-	c := s.newClient(t)
-
-	resp, _ := c.do(http.MethodGet, "/api/v1/auth/oidc/start", nil, c.asHost(publicHost))
-	if resp.StatusCode != http.StatusFound {
-		t.Fatalf("start before setup = %d, want 302", resp.StatusCode)
-	}
-	loc, err := resp.Location()
-	if err != nil {
-		t.Fatalf("no Location header: %v", err)
-	}
-	if got := loc.Query().Get("sso_error"); got != "setup-required" {
-		t.Errorf("sso_error = %q, want setup-required", got)
-	}
-}
-
 // startCode begins a sign-in on the public address and answers the sso_error
 // it was refused with, or "" when it was not refused before leaving.
 //
 // The made-up issuer cannot be discovered, so a start that is not refused early
 // ends as provider-unreachable; that is reported as "" too, because what these
-// tests ask is only whether the pre-check let the flow through.
+// tests ask is only whether the start let the flow through. Anything but a
+// redirect is a failure of its own.
 func startCode(t *testing.T, c *client) string {
 	t.Helper()
 	resp, body := c.do(http.MethodGet, "/api/v1/auth/oidc/start", nil, c.asHost(publicHost))
 	if resp.StatusCode != http.StatusFound {
-		return ""
+		t.Fatalf("start on the public host = %d, want a redirect (body %s)", resp.StatusCode, body)
 	}
 	loc, err := resp.Location()
 	if err != nil {
@@ -402,61 +343,66 @@ func plantIdentity(t *testing.T, s *server, username, subject string) {
 	t.Fatalf("no account named %s", username)
 }
 
-// Several accounts, one of them linked: the pre-check cannot know which
-// subject is about to arrive, so it lets the flow through and leaves that to
-// the callback. It used to answer setup-required for any instance with more
-// than one account -- linked or not.
-func TestSignInProceedsOnSSOOnlyHostWhenALinkedAccountIsOneOfSeveral(t *testing.T) {
+// The start of a sign-in on the public address answers every caller the same
+// way, whatever this instance holds: it sends the browser to the provider, and
+// the callback decides. It used to refuse early -- setup-required with no
+// person account, bind-host with people and none linked -- and each of those
+// told an anonymous caller with no account at the provider something about
+// this instance's accounts that finishing the flow would not have, since the
+// callback there answers every unlinked identity with bind-host before it
+// counts anything.
+func TestSignInStartOnSSOOnlyHostDisclosesNothingAboutAccounts(t *testing.T) {
 	t.Parallel()
 
-	s := newServerWith(t, 5*time.Minute, nil, talos.Mode{}, withSSOOnly(publicHost), withProvider(t))
-	c := s.newClient(t)
-	c.setup()
-	addPerson(t, s, "person-two-0000000000000000000000", "second-person")
-	plantIdentity(t, s, testUser, "subject-0f3a9c")
-
-	if got := startCode(t, c); got != "" {
-		t.Errorf("sso_error = %q, want the flow to proceed: a linked account is one of several", got)
+	cases := []struct {
+		name  string
+		state func(t *testing.T, s *server, c *client)
+	}{
+		{"before setup", func(*testing.T, *server, *client) {}},
+		{"one person, not linked", func(_ *testing.T, _ *server, c *client) { c.setup() }},
+		{"one person, linked", func(t *testing.T, s *server, c *client) {
+			c.setup()
+			plantIdentity(t, s, testUser, "subject-0f3a9c")
+		}},
+		{"several people, none linked", func(t *testing.T, s *server, c *client) {
+			c.setup()
+			addPerson(t, s, "person-two-0000000000000000000000", "second-person")
+		}},
+		{"several people, one linked", func(t *testing.T, s *server, c *client) {
+			c.setup()
+			addPerson(t, s, "person-two-0000000000000000000000", "second-person")
+			plantIdentity(t, s, testUser, "subject-0f3a9c")
+		}},
+		{"only a service account", func(t *testing.T, s *server, c *client) {
+			c.setup()
+			if _, _, err := s.deps.Auth.CreateServiceAccount(context.Background(),
+				"service-0000000000000000000000000", "ci-bot", model.RoleAdmin); err != nil {
+				t.Fatalf("create service account: %v", err)
+			}
+			users, err := s.deps.Store.Users().List(context.Background())
+			if err != nil {
+				t.Fatalf("list: %v", err)
+			}
+			for _, u := range users {
+				if u.Username == testUser {
+					if err := s.deps.Auth.DeleteUser(context.Background(), u.ID); err != nil {
+						t.Fatalf("delete the person: %v", err)
+					}
+				}
+			}
+		}},
 	}
-}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			s := newServerWith(t, 5*time.Minute, nil, talos.Mode{}, withSSOOnly(publicHost), withProvider(t))
+			c := s.newClient(t)
+			tc.state(t, s, c)
 
-// A service account never signs in through the provider, so it is not one of
-// the accounts an arriving identity could belong to. One unlinked person and
-// a service account is the "nothing linked yet" case: bind-host, the answer
-// the callback on this address gives.
-//
-// The service account carries a planted binding, so that a pre-check counting
-// every account rather than people would see "something is linked" and let
-// the flow through.
-func TestSignInOnSSOOnlyHostCountsOnlyPeople(t *testing.T) {
-	t.Parallel()
-
-	s := newServerWith(t, 5*time.Minute, nil, talos.Mode{}, withSSOOnly(publicHost), withProvider(t))
-	c := s.newClient(t)
-	c.setup()
-	if _, _, err := s.deps.Auth.CreateServiceAccount(context.Background(),
-		"service-0000000000000000000000000", "ci-bot", model.RoleReader); err != nil {
-		t.Fatalf("create service account: %v", err)
-	}
-	plantIdentity(t, s, "ci-bot", "subject-planted")
-
-	if got := startCode(t, c); got != "bind-host" {
-		t.Errorf("sso_error = %q, want bind-host: the only person is not linked", got)
-	}
-}
-
-// Several people and none linked: still bind-host, because that is what the
-// callback on this address answers before it counts anything. Saying
-// setup-required here told the operator to run a wizard that had already run.
-func TestSignInOnSSOOnlyHostWithSeveralUnlinkedPeopleSaysBindHost(t *testing.T) {
-	t.Parallel()
-
-	s := newServerWith(t, 5*time.Minute, nil, talos.Mode{}, withSSOOnly(publicHost), withProvider(t))
-	c := s.newClient(t)
-	c.setup()
-	addPerson(t, s, "person-two-0000000000000000000000", "second-person")
-
-	if got := startCode(t, c); got != "bind-host" {
-		t.Errorf("sso_error = %q, want bind-host", got)
+			if got := startCode(t, c); got != "" {
+				t.Errorf("sso_error = %q before leaving for the provider; the start must not depend on "+
+					"the accounts here", got)
+			}
+		})
 	}
 }

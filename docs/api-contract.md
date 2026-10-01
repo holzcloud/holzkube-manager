@@ -3602,13 +3602,45 @@ intent record cannot be written is not made (`sso_error=link-unrecorded`). It
 happens only on an address that accepts the password: on an SSO-only address the
 callback links nothing (`sso_error=bind-host`).
 
-On an address that accepts only single sign-on, a sign-in is refused before the
-browser leaves for the provider in two cases only, both counted over person
-accounts: `sso_error=setup-required` when there is none, and
-`sso_error=bind-host` when there are people and none of them is linked — which
-is what the callback on that address would answer anyway, since linking is
-refused there. When any person is linked the flow proceeds, and which subject
-comes back is the callback's question.
+**`GET /api/v1/auth/oidc/start` answers every caller the same way**, whatever
+accounts this instance holds: it sends the browser to the provider, and the
+callback decides. It used to refuse early on an address that accepts only single
+sign-on — `setup-required` with no person account, `bind-host` with people and
+none linked — and each of those told an anonymous caller, with no account at the
+provider, something about this instance's accounts that finishing the flow would
+not have: the callback on that address answers every identity that is not
+linked with `bind-host` before it counts anything.
+
+**Where a sign-in or a re-authentication ends when it fails.** These routes are
+browser navigations, so a failure is a `302` with a stable code in the query
+string rather than a problem document (which would render as raw JSON in the
+address bar). A failed sign-in goes to `/login?sso_error=<code>`, a failed
+provider re-authentication to `/?sudo_error=<code>`; the page owns the sentence.
+`internal/httpapi/handlers/redirect_codes_test.go` holds every code `oidc.go`
+can send to a sentence on the page and a row here.
+
+| `sso_error` | Means |
+|---|---|
+| `denied` | the provider refused the sign-in (`error=` on the callback), typically an account not assigned to this application. |
+| `provider-unreachable` | discovery failed; the local account still works where the password is accepted. |
+| `no-flow` | the callback found no flow in this session: it took too long, or started in another browser. |
+| `state-mismatch` | the callback's `state` is not the one this session started with. |
+| `no-code` | the provider returned no authorisation code. |
+| `exchange-failed` | the code could not be exchanged or the ID token not verified; the server log has the detail. |
+| `bind-host` | the identity is not linked to any account, and linking is refused on this address (SSO-only). Linking happens from an address that accepts the password. |
+| `setup-required` | there is no account at all; setup creates the first one, from an address that accepts the password. |
+| `no-person` | accounts exist and none is a person — only service accounts, which never sign in through the provider. Setup refuses once any account exists, so the remedy is an admin creating an account for a person: under Settings → Accounts, or with an admin service account's token through `POST /api/v1/users`. |
+| `bind-ambiguous` | more than one account for a person, so a first-use link cannot be inferred. |
+| `other-identity` | the one person account is already linked to a different identity. |
+| `account-changed` | the account kept changing while the link was being written (a revision conflict, retried once); nothing was linked. Sign in again. |
+| `link-unrecorded` | the audit archive could not record the link, so it was not made. |
+
+| `sudo_error` | Means |
+|---|---|
+| `oidc.not-linked` | the signed-in account is not linked to the provider (a password session of an unlinked account), so the provider cannot confirm for it. |
+| `oidc.other-identity` | the re-authentication came back as a different identity than the one signed in. |
+| `oidc.no-auth-time` | the provider sent no `auth_time` claim, so freshness cannot be proven. |
+| `oidc.not-fresh` | the provider answered from an older session despite `prompt=login`. |
 
 ### Service accounts
 

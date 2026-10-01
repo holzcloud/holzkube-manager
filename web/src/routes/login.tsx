@@ -249,11 +249,16 @@ export type LoginReason = 'required' | 'expired' | 'signed-out' | 'unlinked' | u
  */
 const ssoErrorText: Record<string, string> = {
   'bind-host':
-    'This account is not linked to single sign-on yet. Linking has to happen from the local network: ' +
-    'sign in through single sign-on there. It links on first use only while there is exactly one ' +
-    'account for a person (service accounts do not count).',
+    'This identity is not linked to an account here, and linking is refused on this address. ' +
+    'Linking happens from the local network: sign in through single sign-on there. It links on ' +
+    'first use only while there is exactly one account for a person (service accounts do not count).',
   'setup-required':
-    'This instance has no operator account yet. It has to be created from the local network.',
+    'This instance has no account yet. Setup creates the first one, from the local network.',
+  'no-person':
+    'This instance has no account for a person — only service accounts, which never sign in ' +
+    'through the identity provider — so there is nothing single sign-on could link. An admin ' +
+    'creates an account for a person under Settings → Accounts; with no person left, an admin ' +
+    'service account’s token can create one through the API (POST /api/v1/users).',
   'other-identity': 'This instance is linked to a different account at the identity provider.',
   'link-unrecorded':
     'Single sign-on would have linked this account, but the audit log could not record it, so ' +

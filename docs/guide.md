@@ -509,10 +509,18 @@ any of this is consulted.
 `--sso-only-hosts` without a configured provider is refused at start: that host
 would decline the password and have nothing to offer instead.
 
-On the public address a single sign-on is refused before the browser leaves for
-the provider only when no person account is linked yet (`bind-host`), or when
-there is no account at all (`setup-required`). As soon as one person is linked,
-the sign-in goes through to the provider, however many accounts there are.
+On the public address a single sign-on always goes to the provider first, and
+the answer comes back from there: an identity that is not linked to an account
+is told so (`bind-host`), whatever the instance holds. The address does not tell
+anybody, before they have signed in at the provider, whether anything here is
+linked.
+
+On the local network address, the answers before anything is linked are:
+`setup-required` when there is no account at all (setup creates the first), and
+`no-person` when only service accounts are left — setup refuses then, because
+accounts exist, so an admin creates an account for a person under Settings →
+Accounts, or with an admin service account's token through
+`POST /api/v1/users` when no person is left.
 
 ### Linking the account to a provider identity
 

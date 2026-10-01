@@ -98,9 +98,11 @@ func TestFirstUseBindCountsOnlyPeople(t *testing.T) {
 			wantErr: errBindBeforeSetup,
 		},
 		{
-			name:     "only a service account is setup too",
+			// Not setup-required: setup refuses once any account exists, so
+			// that answer would name a remedy that cannot work.
+			name:     "only a service account is no person, not setup",
 			accounts: []account{{"u-service", model.KindService}},
-			wantErr:  errBindBeforeSetup,
+			wantErr:  errBindNoPerson,
 		},
 	}
 
