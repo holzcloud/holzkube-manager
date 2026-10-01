@@ -6,10 +6,10 @@ current_phase: 14
 current_phase_name: telefon-tippziele
 status: verifying
 stopped_at: Completed 13-15-PLAN.md
-last_updated: "2026-09-30T16:04:10.969Z"
+last_updated: "2026-10-01T20:49:12.767Z"
 last_activity: 2026-09-30
 last_activity_desc: Phase 14 execution started
-state_head: b7ecc83f79548d170e6daf23018215d430d9b28f
+state_head: 05f1279ea651a1654f48e17742cb4e92522c1cd5
 progress:
   total_phases: 4
   completed_phases: 2
@@ -161,6 +161,12 @@ Siehe `PROJECT.md`, die `MILESTONE-*.md`-Dateien und für v1.18 den Abschnitt
   `deploy/`, installiert wird nichts. Bis der Betreiber installiert, zeigt der
   Pi „nicht hinterlegt" und gesperrte Aktionen; das ist der Soll-Zustand, keine
   Lücke.
+
+### Quick Tasks Completed
+
+| # | Description | Date | Commit | Directory |
+|---|-------------|------|--------|-----------|
+| 261001-sa9 | Unlink single sign-on (admin, sudo, audit); person accounts only for SSO linking; SSO-only pre-check removed; review fixes CR-01, WR-01..07 | 2026-10-01 | 05f1279 | [261001-sa9-unlink-single-sign-on](./quick/261001-sa9-unlink-single-sign-on/) |
 
 ## Session Continuity
 
