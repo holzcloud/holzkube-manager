@@ -762,6 +762,17 @@ func TestTheCheckUnitRunsOnlyTheCheck(t *testing.T) {
 			}
 			return ""
 		}},
+		// The check's own sandbox beyond the shared one (13-REVIEW-2
+		// IN-03). Every system call the look makes -- bash, flock, curl,
+		// python3, coreutils and holzkube-managerd --version, measured with
+		// strace -- is in @system-service, and it reads nothing in /proc
+		// but /proc/self. The helper's service carries none of these:
+		// logind and reboot need what they take away.
+		unitLine{section: "Service", key: "SystemCallFilter", want: "@system-service"},
+		unitLine{section: "Service", key: "SystemCallErrorNumber", want: "EPERM"},
+		unitLine{section: "Service", key: "ProtectProc", want: "invisible"},
+		unitLine{section: "Service", key: "ProcSubset", want: "pid"},
+		unitLine{section: "Service", key: "PrivateIPC", want: "true"},
 	), hardening()...))
 
 	// Below the helper's limit. The allow-list above has made both keys appear

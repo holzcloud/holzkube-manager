@@ -112,7 +112,7 @@ expected: Following deploy/HOST-HELPER.md on the Pi, /host shows all five action
 result: [pending]
 
 ### 17. The check unit under its real sandbox (V-26)
-expected: After installing, `systemctl start holzkube-manager-update-check.service` reaches GitHub and records current/available in the update status; `journalctl -u holzkube-manager-update-check` shows no sandbox denial.
+expected: After installing, `systemctl start holzkube-manager-update-check.service` reaches GitHub and records current/available in the update status; `journalctl -u holzkube-manager-update-check` shows no sandbox denial (no "Operation not permitted", "Bad system call" or "ohne Sperre"; the IN-03 keys SystemCallFilter=, ProtectProc=, ProcSubset=, PrivateIPC= are in force), and /var/lib/holzkube-manager-update/.lock is -rw------- root root.
 result: [pending]
 
 ### 18. Restart service and Shut down host, once each
