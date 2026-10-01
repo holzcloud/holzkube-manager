@@ -253,8 +253,9 @@ fi
 #     kann auch niemand anderes sie sperren -- der Dienstbenutzer des Daemons,
 #     der status.json liest, haelt so kein Update auf.
 #   - Was die Sperre selbst verhindert, haelt kein Update auf: fehlt flock, ist
-#     das Verzeichnis nicht verwendbar oder die Datei nicht zu oeffnen, laeuft
-#     das Skript wie vorher ohne. Nur eine Sperre, die ein anderer Lauf
+#     das Verzeichnis nicht verwendbar, die Datei nicht zu oeffnen oder scheitert
+#     flock an etwas anderem als einer gehaltenen Sperre, laeuft das Skript wie
+#     vorher ohne. Nur eine Sperre, die ein anderer Lauf
 #     wirklich haelt, laesst es warten.
 #
 # Ohne Sperre bleiben --help, eine unbekannte Option, die Weigerung ohne root
@@ -273,10 +274,25 @@ take_lock() {
     return 0
   fi
   umask "$old"
-  flock -n 9 && return 0
+  # Nur 75 heisst "gehalten" (-E). Jeder andere Fehler von flock ist einer
+  # von flock selbst und kein anderer Lauf; dann geht es ohne Sperre weiter,
+  # statt jede Stunde zu warten und aufzugeben.
+  local rc=0
+  flock -n -E 75 9 || rc=$?
+  case $rc in
+    0)  return 0 ;;
+    75) ;;
+    *)  log "WARNUNG: flock endete mit $rc - dieser Lauf laeuft ohne Sperre."; return 0 ;;
+  esac
   log "Ein anderer Lauf des Update-Skripts laeuft; warte hoechstens $wait s auf ihn ..."
-  flock -w "$wait" 9 || fail "ein anderer Lauf des Update-Skripts haelt $lock seit ueber $wait s.
-Dieser Lauf hat nichts nachgesehen, nichts installiert und nichts festgehalten."
+  rc=0
+  flock -w "$wait" -E 75 9 || rc=$?
+  case $rc in
+    0)  return 0 ;;
+    75) fail "ein anderer Lauf des Update-Skripts haelt $lock seit ueber $wait s.
+Dieser Lauf hat nichts nachgesehen, nichts installiert und nichts festgehalten." ;;
+    *)  log "WARNUNG: flock endete mit $rc - dieser Lauf laeuft ohne Sperre."; return 0 ;;
+  esac
 }
 
 LOCK_WAIT=${HOLZKUBE_MANAGER_UPDATE_LOCK_WAIT:-}
