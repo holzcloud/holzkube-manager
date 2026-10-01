@@ -580,8 +580,8 @@ func systemdSpan(t *testing.T, s string) time.Duration {
 
 // TestTheCheckUnitRunsOnlyTheCheck: the check unit runs as root, and the only
 // thing it may run is the update script's look -- never the update itself.
-// So its one command is UpdateScriptPath --check; it is a oneshot that ends
-// below the helper's own limit (the helper waits for it and must still record
+// So its one command is UpdateScriptPath --check; it is a oneshot whose
+// start and stop limits together end below the helper's own limit (the helper waits for it and must still record
 // failed); it writes only the update status directory the daemon reads; it
 // may reach the network, which the helper's own service may not; and it
 // carries no [Install] (nothing starts it but the helper), no RemainAfterExit
@@ -660,9 +660,22 @@ func TestTheCheckUnitRunsOnlyTheCheck(t *testing.T) {
 		t.Errorf("%s: TimeoutStartSec is %v, HelperServiceLimit is %v; the routes would hold orders back "+
 			"for a different time than systemd lets the helper wait for a check", service.name, h, HelperServiceLimit)
 	}
-	if c, h := lastSpan(check), lastSpan(service); c <= 0 || c >= h {
-		t.Errorf("%s: TimeoutStartSec is %v, want more than 0 and less than the helper service's %v -- "+
-			"the helper waits for the check and must still record failed when systemd ends it", check.name, c, h)
+	// The worst case is the start limit plus the stop limit: when the start
+	// times out, systemd sends SIGTERM and waits TimeoutStopSec (default
+	// 90 s) before SIGKILL, and the helper's blocking systemctl start returns
+	// only once the unit has stopped (13-REVIEW-2 WR-03). Both must be set,
+	// and their sum below the helper's limit, or systemd ends the helper
+	// before it can record failed.
+	stopSpan := func(u unitFile) time.Duration {
+		v := u.values("Service", "TimeoutStopSec")
+		if len(v) == 0 {
+			t.Fatalf("%s has no TimeoutStopSec=; the default (90 s) on top of TimeoutStartSec= is not bounded here", u.name)
+		}
+		return systemdSpan(t, v[len(v)-1])
+	}
+	if c, stop, h := lastSpan(check), stopSpan(check), lastSpan(service); c <= 0 || stop <= 0 || c+stop >= h {
+		t.Errorf("%s: TimeoutStartSec %v + TimeoutStopSec %v = %v, want both above 0 and the sum below the helper service's %v -- "+
+			"the helper waits for the check and must still record failed when systemd ends it", check.name, c, stop, c+stop, h)
 	}
 
 	if check.hasSection("Install") {

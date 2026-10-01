@@ -213,7 +213,8 @@ case $action in
   # Suche. Scheitert sie (GitHub nicht erreichbar, das Update-Skript fehlt),
   # scheitert systemctl, und unten steht "failed" fuer genau diesen Auftrag,
   # statt dass die Seite bis "keine Antwort" wartet. Die Unit begrenzt sich
-  # selbst (TimeoutStartSec=2min), unter der Grenze dieses Dienstes (3min).
+  # selbst (TimeoutStartSec=2min plus TimeoutStopSec=15s), unter der Grenze
+  # dieses Dienstes (3min).
   check-update)    cmd=(start holzkube-manager-update-check.service) ;;
   *)               reject "unbekannte Aktion" "$size" ;;
 esac
