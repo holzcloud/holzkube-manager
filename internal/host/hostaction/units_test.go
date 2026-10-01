@@ -15,6 +15,7 @@ import (
 	"testing"
 	"testing/fstest"
 	"time"
+	"unicode"
 	"unicode/utf8"
 
 	"gopkg.in/yaml.v3"
@@ -95,9 +96,10 @@ type unitFile struct {
 // command to systemd, and every check on the parsed lines would be blind to
 // it. Rather than imitate systemd's reader, a unit file of this repository
 // carries none of that: valid UTF-8, no byte-order mark, no control character
-// but the tab and the newline, and no line ending in a backslash -- comment
-// lines included, so the question of whether systemd continues a comment does
-// not arise.
+// but the tab and the newline, no white space but the space and the tab (the
+// Unicode kinds this reader trims and systemd keeps), and no line ending in a
+// backslash -- comment lines included, so the question of whether systemd
+// continues a comment does not arise.
 func refuseAmbiguousUnitBytes(t *testing.T, path string, data []byte) {
 	t.Helper()
 	if !utf8.Valid(data) {
@@ -112,6 +114,15 @@ func refuseAmbiguousUnitBytes(t *testing.T, path string, data []byte) {
 			if (r < 0x20 && r != '\t') || r == 0x7f {
 				t.Fatalf("%s:%d: control character %U; systemd ends a line at a carriage return or a NUL, "+
 					"so what follows it could be an assignment this test never reads", path, n, r)
+			}
+			// strings.TrimSpace and strings.Fields strip Unicode white space
+			// (U+0085, U+00A0, U+2028, ...); systemd's is the space, the tab
+			// and the line ends only. "TimeoutStopSec=10s\u00a0" is 10s here
+			// and a value systemd refuses -- falling back to 90 s -- there
+			// (13-REVIEW-2 round 3, I5).
+			if unicode.IsSpace(r) && r != ' ' && r != '\t' {
+				t.Fatalf("%s:%d: white space %U that systemd does not take for white space, "+
+					"while this test strips it; the value would not be the one checked", path, n, r)
 			}
 		}
 		if strings.HasSuffix(strings.TrimRight(line, " \t"), `\`) {
