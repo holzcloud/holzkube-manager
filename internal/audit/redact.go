@@ -130,6 +130,13 @@ var allowlist = map[string][]string{
 	// Likewise: the account comes from the path and there is no body.
 	"user.delete": {},
 
+	// Linking single sign-on on first use. It has no request body at all: the
+	// callback that links is a GET, which the audit middleware does not
+	// record, so the OIDC handler writes this record itself, from values it
+	// built. The account it linked and the provider's host are what it says;
+	// the subject and the issuer's path never.
+	"user.identity-link": {AccountParam, AccountUsernameParam, "provider"},
+
 	// Unlinking single sign-on: the account comes from the path and there is
 	// no body. The issuer and subject it removes are a person's identity at a
 	// third party, and this archive is one nothing ever removes from -- so

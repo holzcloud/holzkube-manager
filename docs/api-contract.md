@@ -3592,6 +3592,16 @@ more than one person account no identity is linked, and there is no operation
 that links a chosen account — so an unlinked account stays unlinked until it is
 the only person account again.
 
+**A first-use link is audited.** The callback that links is a `GET`, which the
+audit middleware does not record, so the handler writes the record itself:
+action `user.identity-link`, actor `anonymous` (nobody is signed in yet), with
+`account`, `account_username` and `provider` (the issuer's host) in `params` and
+the caller's address in `src_ip` — never the subject. The outcome is `success`,
+or `error` with the `sso_error` code the sign-in page was given. A link whose
+intent record cannot be written is not made (`sso_error=link-unrecorded`). It
+happens only on an address that accepts the password: on an SSO-only address the
+callback links nothing (`sso_error=bind-host`).
+
 On an address that accepts only single sign-on, a sign-in is refused before the
 browser leaves for the provider in two cases only, both counted over person
 accounts: `sso_error=setup-required` when there is none, and

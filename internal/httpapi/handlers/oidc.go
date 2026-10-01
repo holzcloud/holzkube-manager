@@ -7,9 +7,11 @@ import (
 	"net/url"
 	"time"
 
+	"github.com/holzcloud/holzkube-manager/internal/audit"
 	"github.com/holzcloud/holzkube-manager/internal/auth"
 	"github.com/holzcloud/holzkube-manager/internal/auth/oidc"
 	"github.com/holzcloud/holzkube-manager/internal/httpapi"
+	"github.com/holzcloud/holzkube-manager/internal/httpapi/middleware"
 	"github.com/holzcloud/holzkube-manager/internal/model"
 	"github.com/holzcloud/holzkube-manager/internal/store"
 )
@@ -428,7 +430,25 @@ func bindFirstIdentity(d httpapi.Deps, r *http.Request, issuer string, identity 
 		return model.User{}, err
 	}
 
+	// Recorded before it happens, like every audited mutation: a link that
+	// cannot be recorded is not made.
+	seq, err := recordLinkAttempt(d, r, u, issuer)
+	if err != nil {
+		d.Logger.ErrorContext(r.Context(), "a first-use link could not be recorded, so it was not made",
+			"error", err)
+		return model.User{}, errLinkNotRecorded
+	}
+
 	bound, err := d.Auth.BindIdentity(r.Context(), u, issuer, identity.Subject)
+	outcome, cause := audit.OutcomeSuccess, error(nil)
+	if err != nil {
+		outcome, cause = audit.OutcomeError, errors.New(bindCode(err))
+	}
+	if oerr := d.Audit.Outcome(r.Context(), seq, outcome, cause); oerr != nil {
+		// The intent is durable, and an intent with no outcome is the designed
+		// signal that something went wrong after it.
+		d.Logger.WarnContext(r.Context(), "a first-use link's outcome could not be recorded", "error", oerr)
+	}
 	if err != nil {
 		return model.User{}, err
 	}
@@ -437,27 +457,72 @@ func bindFirstIdentity(d httpapi.Deps, r *http.Request, issuer string, identity 
 	return bound, nil
 }
 
-func writeBindProblem(d httpapi.Deps, w http.ResponseWriter, r *http.Request, err error) {
+// errLinkNotRecorded is returned when the audit archive refused the record of a
+// first-use link, which is then not made.
+var errLinkNotRecorded = errors.New("oidc: the first-use link could not be recorded")
+
+// recordLinkAttempt writes the intent record of a first-use link.
+//
+// The callback is a GET, and the audit middleware records only mutating
+// methods -- so the one sign-in that hands an account, usually the only admin,
+// to a provider identity would otherwise leave nothing but a log line, while
+// the unlink before it is in the archive. Nobody is signed in yet, so the actor
+// is "anonymous"; the record says which account, which provider (its host, as
+// the account list shows it) and from which address. Never the subject.
+func recordLinkAttempt(d httpapi.Deps, r *http.Request, u model.User, issuer string) (uint64, error) {
+	if d.Audit == nil {
+		return 0, errors.New("the audit log is not configured")
+	}
+	params := audit.Params("user.identity-link", map[string]any{
+		audit.AccountParam:         string(u.ID),
+		audit.AccountUsernameParam: u.Username,
+		"provider":                 providerHost(issuer),
+	})
+	params[middleware.RequestIDParam] = middleware.RequestIDFromContext(r.Context())
+	// No session: the one this request carries is about to be rotated by the
+	// sign-in, so its handle would correlate with nothing that follows.
+	return d.Audit.Attempt(r.Context(), audit.Record{
+		Actor:  "anonymous",
+		SrcIP:  middleware.ClientIP(r),
+		Action: "user.identity-link",
+		Params: params,
+	})
+}
+
+// bindCode is the stable code a failed first-use link ends with: the sign-in
+// page's sso_error, and the cause in the link's audit record.
+func bindCode(err error) string {
 	switch {
 	case errors.Is(err, errBindFromUntrustedHost):
-		failSignIn(w, r, "bind-host")
+		return "bind-host"
 	case errors.Is(err, errBindBeforeSetup):
-		failSignIn(w, r, "setup-required")
+		return "setup-required"
 	case errors.Is(err, errBindAmbiguous):
-		failSignIn(w, r, "bind-ambiguous")
+		return "bind-ambiguous"
 	case errors.Is(err, auth.ErrAlreadyBound):
-		failSignIn(w, r, "other-identity")
+		return "other-identity"
 	case errors.Is(err, store.ErrConflict):
-		// The account kept changing while the bind was written (BindIdentity
-		// already re-read it once). Signing in again is the whole remedy, and
-		// a problem document reached by navigation would say it as raw JSON.
-		failSignIn(w, r, "account-changed")
+		return "account-changed"
+	case errors.Is(err, errLinkNotRecorded):
+		return "link-unrecorded"
 	default:
-		// An unexpected failure keeps its problem document and its request id:
-		// this one is a bug report, not something the operator can act on from
-		// the sign-in page.
-		httpapi.WriteInternal(w, r, d.Logger, err)
+		return ""
 	}
+}
+
+func writeBindProblem(d httpapi.Deps, w http.ResponseWriter, r *http.Request, err error) {
+	if code := bindCode(err); code != "" {
+		// account-changed: the account kept changing while the bind was
+		// written (BindIdentity already re-read it once). Signing in again is
+		// the whole remedy, and a problem document reached by navigation would
+		// say it as raw JSON.
+		failSignIn(w, r, code)
+		return
+	}
+	// An unexpected failure keeps its problem document and its request id:
+	// this one is a bug report, not something the operator can act on from the
+	// sign-in page.
+	httpapi.WriteInternal(w, r, d.Logger, err)
 }
 
 // sudoIdentityRefusal says why a provider re-authentication cannot confirm for

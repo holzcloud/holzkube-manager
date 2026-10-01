@@ -226,6 +226,24 @@ describe('the accounts table', () => {
     expect(within(dialog).getByText(/2 accounts for people/i)).toBeInTheDocument()
   })
 
+  /**
+   * After an unlink, with one person, the next single sign-on from the local
+   * network links that account, whoever completes it. That window is said
+   * before the click, with what closes it.
+   */
+  it('says who links the account next, and to link again right away', async () => {
+    const user = userEvent.setup()
+    wrap([
+      account({ id: 'u1', username: 'linked', linked_identity: true }),
+      account({ id: 'u2', username: 'ci-bot', kind: 'service' }),
+    ])
+
+    await user.click(screen.getByRole('button', { name: 'Unlink single sign-on' }))
+    const dialog = await screen.findByRole('dialog')
+    expect(within(dialog).getByText(/whoever completes it/i)).toBeInTheDocument()
+    expect(within(dialog).getByText(/link it again right after this/i)).toBeInTheDocument()
+  })
+
   /** A service account never signs in through the provider, so it does not count. */
   it('does not count a service account as somebody who blocks linking', async () => {
     const user = userEvent.setup()

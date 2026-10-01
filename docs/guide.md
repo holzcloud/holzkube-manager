@@ -528,6 +528,18 @@ offering it to whoever reaches the public name first. In practice: sign in
 through the provider once from the local network, and the public address works
 from then on.
 
+**Who can link, and when.** While the one person account is not linked — on a
+fresh install, after an unlink, or once the instance is down to one person — the
+first single sign-on that completes from an address that accepts the password
+links that account, whoever completes it. Nothing ties the provider's account to
+yours beyond that: it is trust on first use. The window is open from the unlink
+(or from setup) until the next such sign-in, and it is as small as you make it:
+link right after unlinking, then check Settings → Accounts — your account should
+say `single sign-on via` the provider you expect. Every link is in the audit log
+as `user.identity-link`, with the account, the provider's host and the address
+it came from (never the `sub`), and a link that was refused is there too, with
+the reason.
+
 **Unlinking.** Settings → Accounts → **Unlink single sign-on** removes an
 account's link, issuer and `sub` both, so that the next first sign-in can link a
 different identity. The Sign-in column shows which provider an account is linked
@@ -574,9 +586,17 @@ The order, using `192.168.1.10` as the local network address and
 2. On `https://192.168.1.10:8443`, sign in with the password.
 3. Settings → Accounts → **Unlink single sign-on** on your account, confirm, and
    re-authenticate with the password.
-4. Sign out, then sign in through single sign-on on `192.168.1.10`. That first
-   sign-in links the new provider's identity.
-5. The public address (`manager.example.com`) works again.
+4. Sign out, then sign in through single sign-on on `192.168.1.10` — right
+   away: until this sign-in, whoever completes a single sign-on at the new
+   provider from the local network links your account. That first sign-in links
+   the new provider's identity.
+5. Settings → Accounts should say `single sign-on via auth.example.com` on your
+   account. The public address (`manager.example.com`) works again.
+
+If you did step 3 from a session that came in through single sign-on, that
+session ended with the link and you are on the sign-in page: sign in with the
+password (step 2), not through single sign-on, if the issuer still points at the
+old provider.
 
 Why this order: unlinking while the old provider is still configured lets one
 click re-link the identity you just removed, because the old provider usually

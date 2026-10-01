@@ -460,6 +460,13 @@ function UnlinkSingleSignOn({
               </DialogDescription>
             )}
           </DialogHeader>
+          {user.kind !== 'service' && personCount === 1 && (
+            <p className="text-muted-foreground text-sm">
+              Until it is linked again, the next single sign-on from the local network links this
+              account — whoever completes it at the configured provider. Link it again right after
+              this, and check here that it says the provider you expect.
+            </p>
+          )}
           {user.kind !== 'service' && personCount > 1 && (
             <p className="text-muted-foreground text-sm">
               This instance has {personCount} accounts for people (service accounts do not count).

@@ -8,6 +8,7 @@ package handlers
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -19,6 +20,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/holzcloud/holzkube-manager/internal/audit"
 	"github.com/holzcloud/holzkube-manager/internal/auth"
 	"github.com/holzcloud/holzkube-manager/internal/auth/oidc"
 	"github.com/holzcloud/holzkube-manager/internal/httpapi"
@@ -53,11 +55,17 @@ func rulesDeps(t *testing.T) (httpapi.Deps, *fsstore.Store) {
 	if err != nil {
 		t.Fatalf("auth.New: %v", err)
 	}
+	al, err := audit.Open(dir)
+	if err != nil {
+		t.Fatalf("audit.Open: %v", err)
+	}
+	t.Cleanup(func() { _ = al.Close() })
 	// No IsSSOOnly: every request is from the local network, which is where
 	// binding is allowed at all.
 	return httpapi.Deps{
 		Store:  st,
 		Auth:   au,
+		Audit:  al,
 		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
 	}, st
 }
@@ -353,5 +361,131 @@ func TestUnlinkingYourOwnLinkEndsTheSessionThatCameThroughIt(t *testing.T) {
 	}
 	if len(sessions) != 0 {
 		t.Errorf("%d session records survive; the ended one was not destroyed", len(sessions))
+	}
+}
+
+// linkRecords answers the archive's user.identity-link records.
+func linkRecords(t *testing.T, d httpapi.Deps) []audit.Record {
+	t.Helper()
+	page, err := d.Audit.Query(context.Background(), audit.Filter{Action: "user.identity-link"})
+	if err != nil {
+		t.Fatalf("query audit: %v", err)
+	}
+	return page.Items
+}
+
+// A first-use link hands an account -- usually the only admin -- to whoever
+// completed the sign-in. The callback is a GET, which the audit middleware does
+// not record, so the link writes its own record: the account and the
+// provider's host, from which address, and how it ended. Never the subject.
+func TestAFirstUseLinkIsInTheAuditArchive(t *testing.T) {
+	t.Parallel()
+	d, st := callbackDeps(t, false)
+	if _, err := st.Users().Put(context.Background(), model.User{
+		ID: "u-person", Username: "somebody", Role: model.RoleAdmin, Kind: model.KindPerson,
+		PasswordHash: plantedHash, CreatedAt: time.Now(),
+	}); err != nil {
+		t.Fatalf("put person: %v", err)
+	}
+
+	if rec, _ := completeLoginAs(t, d, "subject-0f3a9c"); rec.Header().Get("Location") != "/" {
+		t.Fatalf("the first sign-in did not link: %d %q", rec.Code, rec.Header().Get("Location"))
+	}
+
+	var attempt, success bool
+	for _, rec := range linkRecords(t, d) {
+		encoded, err := json.Marshal(rec)
+		if err != nil {
+			t.Fatalf("marshal: %v", err)
+		}
+		for _, never := range []string{"subject-0f3a9c", "/application/o/"} {
+			if strings.Contains(string(encoded), never) {
+				t.Errorf("the link record carries %q: %s", never, encoded)
+			}
+		}
+		switch rec.Outcome {
+		case audit.OutcomeAttempt:
+			attempt = true
+			if rec.Actor != "anonymous" {
+				t.Errorf("actor = %q, want anonymous: nobody was signed in yet", rec.Actor)
+			}
+			if rec.Params["account"] != "u-person" || rec.Params["account_username"] != "somebody" ||
+				rec.Params["provider"] != "idp.example.com" {
+				t.Errorf("the record does not say what was linked to what: %v", rec.Params)
+			}
+		case audit.OutcomeSuccess:
+			success = true
+		}
+	}
+	if !attempt || !success {
+		t.Fatalf("no complete record of the link: attempt %v, success %v", attempt, success)
+	}
+}
+
+// A refused link is recorded too, with the code the sign-in page was given.
+func TestARefusedFirstUseLinkIsInTheAuditArchive(t *testing.T) {
+	t.Parallel()
+	d, st := callbackDeps(t, false)
+	if _, err := st.Users().Put(context.Background(), model.User{
+		ID: "u-person", Username: "somebody", Role: model.RoleAdmin, Kind: model.KindPerson,
+		PasswordHash: plantedHash, CreatedAt: time.Now(),
+	}); err != nil {
+		t.Fatalf("put person: %v", err)
+	}
+	// Linked meanwhile to somebody else: what a lost race looks like.
+	r := httptest.NewRequest(http.MethodGet, "https://192.168.1.10:8443/api/v1/auth/oidc/callback", nil)
+	if _, err := bindFirstIdentity(d, r, rulesIssuer, oidc.Identity{Subject: "subject-7d21e4"}); err != nil {
+		t.Fatalf("first bind: %v", err)
+	}
+	if _, err := bindFirstIdentity(d, r, rulesIssuer, oidc.Identity{Subject: "subject-0f3a9c"}); !errors.Is(err, auth.ErrAlreadyBound) {
+		t.Fatalf("second bind: %v, want ErrAlreadyBound", err)
+	}
+
+	var refused bool
+	for _, rec := range linkRecords(t, d) {
+		if rec.Outcome == audit.OutcomeError && strings.Contains(string(mustJSON(t, rec)), "other-identity") {
+			refused = true
+		}
+	}
+	if !refused {
+		t.Errorf("the refused link left no error record naming other-identity: %d records", len(linkRecords(t, d)))
+	}
+}
+
+func mustJSON(t *testing.T, v any) []byte {
+	t.Helper()
+	b, err := json.Marshal(v)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	return b
+}
+
+// The window an unlink opens is the local network's: on an address that only
+// accepts single sign-on the callback links nothing, even with exactly one
+// unlinked person -- and records nothing, because nothing was attempted.
+func TestAFirstUseLinkNeverHappensOnAnSSOOnlyAddress(t *testing.T) {
+	t.Parallel()
+	d, st := callbackDeps(t, true)
+	if _, err := st.Users().Put(context.Background(), model.User{
+		ID: "u-person", Username: "somebody", Role: model.RoleAdmin, Kind: model.KindPerson,
+		PasswordHash: plantedHash, CreatedAt: time.Now(),
+	}); err != nil {
+		t.Fatalf("put person: %v", err)
+	}
+
+	rec, cookies := completeLoginAs(t, d, "subject-0f3a9c")
+	if loc := rec.Header().Get("Location"); loc != "/login?sso_error=bind-host" {
+		t.Errorf("answer = %d %q, want /login?sso_error=bind-host", rec.Code, loc)
+	}
+	if who := signedInAs(t, d, cookies); who != "" {
+		t.Errorf("signed in as %q on an SSO-only address", who)
+	}
+	stored, err := st.Users().Get(context.Background(), "u-person")
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if stored.HasIdentityBinding() {
+		t.Errorf("the account was linked on an SSO-only address")
 	}
 }

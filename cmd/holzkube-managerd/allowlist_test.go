@@ -76,6 +76,10 @@ func TestEveryAllowlistedActionIsAReachableRoute(t *testing.T) {
 		"auth.login",
 		"auth.logout",
 		"auth.sudo",
+		// The first-use link through the identity provider happens in the
+		// OIDC callback, a GET, which the audit middleware does not record;
+		// the handler writes the record itself.
+		"user.identity-link",
 	} {
 		emitted[action] = true
 	}
