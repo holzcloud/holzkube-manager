@@ -218,6 +218,21 @@ describe('the layout guard’s fixtures', () => {
     ])
   })
 
+  it('carries `update_unit` in both /host fixtures as written, the unit there in both', () => {
+    // The same reasoning (13-17): the schema reads a missing update_unit and
+    // update_unit_install_commands as [], which would hide a fixture that
+    // lost the keys. The reference installation has the hourly update's
+    // unit, so neither picture shows a note about it.
+    const raw = (v: unknown) => (v as { actions: Record<string, unknown> }).actions
+    const demoActions = raw(fixtures['/api/v1/host'])
+    const installedActions = helperInstalled as Record<string, unknown>
+
+    expect(demoActions.update_unit).toEqual([])
+    expect(installedActions.update_unit).toEqual([])
+    expect(Array.isArray(demoActions.update_unit_install_commands)).toBe(true)
+    expect(Array.isArray(installedActions.update_unit_install_commands)).toBe(true)
+  })
+
   it('carries `busy` in both /host fixtures as written, as the daemon sends it', () => {
     // The same reasoning for busy (13-REVIEW-2 V-01): the schema reads a
     // missing one as false, which would hide a fixture that lost the key.

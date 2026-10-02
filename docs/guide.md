@@ -125,7 +125,8 @@ block replaces units of the same name written by hand; to see what is there
 first, run `systemctl cat holzkube-manager-update.service
 holzkube-manager-update.timer`. The update script replaces the binary and
 itself, never a unit, so a newer unit from a newer archive comes only by
-repeating that block.
+repeating that block. While the service is not installed, the Host page keeps
+**Check for updates and install** off and shows this block under its header.
 
 To see it work:
 
@@ -360,12 +361,32 @@ is not owned by root, or others may change it -- **Check for updates** and
 three buttons stay on, and a note under the header names the file and the one
 command that installs it from the release archive -- the one in
 [Updating itself every hour](#updating-itself-every-hour). Both come on with
-the next reading of the page. **Check for updates and install** also needs
-`holzkube-manager-update.service`, the unit the hourly update timer starts
-([Updating itself every hour](#updating-itself-every-hour)); until it is
-installed, holzkube-manager refuses that order with
-`409 conflict.host-update-unit-missing` before it issues a confirmation or
-places an order. **Check for updates** and the other three do not need it.
+the next reading of the page.
+
+**Without the hourly update's unit.** **Check for updates and install** starts
+`holzkube-manager-update.service`, the unit the hourly update timer starts too,
+and neither the helper's install commands nor the update script's install it.
+Where `/etc/systemd/system/holzkube-manager-update.service` is missing -- or is
+masked -- **Check for updates and install** stays off with its own line saying
+so, the other four buttons stay on, and a note under the header names the file
+and shows the four commands that install it and its hourly timer, the block in
+[Updating itself every hour](#updating-itself-every-hour). The button comes on
+with the next reading of the page once the unit is installed. holzkube-manager
+refuses the order the same way (`409 conflict.host-update-unit-missing`),
+before it issues a confirmation or places an order, should anything ask for it
+anyway.
+
+**Which reason comes first.** holzkube-manager asks in this order and refuses
+an order for the first that applies: a container, the helper missing, the update
+script, the hourly update's unit, a helper older than the check, a check already
+running. On the page, a reason that holds for all five buttons -- a container,
+the helper missing, a reader's role, a lost connection, an order under way, a
+check running -- is said once, for the group. Otherwise each button gets its own
+reason in the order above, and those share the one line beneath the buttons, in
+button order: with an older helper and no hourly update unit, the line says
+first why **Check for updates** is off and then why **Check for updates and
+install** is; with the update script missing as well, its one sentence covers
+both update buttons.
 
 **What the page shows once you have pressed one.** A status box under the
 header follows the order from start to end:

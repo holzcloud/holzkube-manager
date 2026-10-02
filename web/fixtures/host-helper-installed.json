@@ -13,5 +13,7 @@
   "update_script": [],
   "busy": false,
   "install_commands": [],
-  "update_script_install_commands": []
+  "update_script_install_commands": [],
+  "update_unit": [],
+  "update_unit_install_commands": []
 }

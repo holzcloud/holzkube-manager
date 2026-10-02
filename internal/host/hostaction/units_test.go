@@ -1623,6 +1623,8 @@ func TestTheFixtureShowsTheRealInstallCommands(t *testing.T) {
 			UpdateScript                []Missing       `json:"update_script"`
 			InstallCommands             []string        `json:"install_commands"`
 			UpdateScriptInstallCommands []string        `json:"update_script_install_commands"`
+			UpdateUnit                  []Missing       `json:"update_unit"`
+			UpdateUnitInstallCommands   []string        `json:"update_unit_install_commands"`
 			Result                      struct {
 				Readable bool `json:"readable"`
 				Reason   *struct {
@@ -1651,6 +1653,17 @@ func TestTheFixtureShowsTheRealInstallCommands(t *testing.T) {
 	// and the README's picture stays the helper notice alone.
 	if a.UpdateScript == nil || len(a.UpdateScript) != 0 {
 		t.Errorf("the fixture's update_script is %#v, want an empty list: the reference installation has the update script", a.UpdateScript)
+	}
+
+	// The same for the hourly update's unit (13-17): the reference
+	// installation has it, so the picture shows no note about it, and the
+	// commands the page would show are UpdateUnitInstallCommands, byte for
+	// byte.
+	if got, want := strings.Join(a.UpdateUnitInstallCommands, "\n"), strings.Join(UpdateUnitInstallCommands, "\n"); got != want {
+		t.Errorf("the fixture's update_unit_install_commands differ from UpdateUnitInstallCommands.\nfixture:\n%q\nUpdateUnitInstallCommands:\n%q", got, want)
+	}
+	if a.UpdateUnit == nil || len(a.UpdateUnit) != 0 {
+		t.Errorf("the fixture's update_unit is %#v, want an empty list: the reference installation has the hourly update's unit", a.UpdateUnit)
 	}
 
 	// Nothing installed: what Detect reports on an empty machine, in its order.
@@ -1693,5 +1706,47 @@ func TestTheFixtureShowsTheRealInstallCommands(t *testing.T) {
 	}
 	if a.Result.Readable || a.Result.Reason == nil || a.Result.Reason.Code != "host-action.no-result" {
 		t.Errorf("the fixture's actions.result is not the no-result reading the server sends when the helper recorded nothing")
+	}
+}
+
+// TestThePageNeedsTheUpdateUnitWhereTheRoutesDo: the host page turns off
+// exactly the buttons the routes refuse while the hourly update's unit is
+// missing. Its UPDATE_UNIT_ACTIONS, declared once on one line, names the
+// actions NeedsUpdateUnit is true for -- compared sorted, since the page lists
+// them in button order and Actions() in its own (13-REVIEW-2-FIX: comparing
+// in declaration order failed on the correct list).
+//
+// Fault injected and seen red (13-17): UPDATE_UNIT_ACTIONS widened with
+// 'check-update'.
+func TestThePageNeedsTheUpdateUnitWhereTheRoutesDo(t *testing.T) {
+	t.Parallel()
+
+	src, err := os.ReadFile(filepath.Join("..", "..", "..", "web", "src", "components", "HostActions.tsx"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := regexp.MustCompile(`(?m)^export const UPDATE_UNIT_ACTIONS: readonly HostAction\[\] = \[([^\]]*)\]$`).FindAllStringSubmatch(string(src), -1)
+	if len(m) != 1 {
+		t.Fatalf("web/src/components/HostActions.tsx declares UPDATE_UNIT_ACTIONS %d times on one line, want once", len(m))
+	}
+	var page []string
+	for _, w := range strings.Split(m[0][1], ",") {
+		if w = strings.Trim(strings.TrimSpace(w), "'"); w != "" {
+			page = append(page, w)
+		}
+	}
+	var server []string
+	for _, a := range Actions() {
+		if NeedsUpdateUnit(a) {
+			server = append(server, string(a))
+		}
+	}
+	if len(server) == 0 {
+		t.Fatal("NeedsUpdateUnit is true for no action; the comparison would hold nothing")
+	}
+	slices.Sort(page)
+	slices.Sort(server)
+	if !slices.Equal(page, server) {
+		t.Errorf("the page's UPDATE_UNIT_ACTIONS is %q, hostaction.NeedsUpdateUnit names %q; the page and the routes disagree", page, server)
 	}
 }
