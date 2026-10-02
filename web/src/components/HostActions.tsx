@@ -1394,7 +1394,7 @@ export function HostUpdateUnitNotice({
   return (
     <HelperInstallNotice
       heading="Check for updates and install needs the update unit, which is not installed"
-      explanation="That button starts holzkube-manager-update.service, the unit the hourly update runs, and stays off until it is installed. The other four buttons do not need it. The commands install the unit and its hourly timer; the first hourly run follows within minutes."
+      explanation="That button starts holzkube-manager-update.service, the unit the hourly update runs, and stays off until it is installed. The other four buttons do not need it. The commands install the unit and its hourly timer; the first hourly run follows within minutes. They replace a unit of the same name; systemctl cat holzkube-manager-update.service shows what is there."
       pieces={updateUnit.map((u) => ({
         key: u.item,
         path: u.path,
@@ -1430,7 +1430,7 @@ export function HostUpdateTimerNotice({
   return (
     <HelperInstallNotice
       heading="Nothing runs the update every hour"
-      explanation="holzkube-manager-update.timer is what starts the update every hour, and it is not installed or not enabled here. Check for updates and install still works when you press it; nothing else starts it, so the Update check row stops getting newer. The commands install the unit and its timer and enable the timer; where only the timer is not enabled, the last line alone is enough."
+      explanation="holzkube-manager-update.timer is what starts the update every hour, and it is not installed or not enabled here. Check for updates and install still works when you press it; nothing else starts it, so the Update check row stops getting newer. The commands install the unit and its timer and enable the timer; where only the timer is not enabled, the last line alone is enough. They replace units of the same name; systemctl cat holzkube-manager-update.service holzkube-manager-update.timer shows what is there."
       pieces={updateTimer.map((u) => ({
         key: u.item,
         path: u.path,

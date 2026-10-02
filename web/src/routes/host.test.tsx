@@ -2195,7 +2195,7 @@ describe('the update-unit notice (13-17)', () => {
     if (notice === null) throw new Error('no update-unit notice')
     expect(notice).toHaveClass('border-slate-500/40')
     expect(notice).toHaveTextContent(
-      'That button starts holzkube-manager-update.service, the unit the hourly update runs, and stays off until it is installed. The other four buttons do not need it. The commands install the unit and its hourly timer; the first hourly run follows within minutes.',
+      'That button starts holzkube-manager-update.service, the unit the hourly update runs, and stays off until it is installed. The other four buttons do not need it. The commands install the unit and its hourly timer; the first hourly run follows within minutes. They replace a unit of the same name; systemctl cat holzkube-manager-update.service shows what is there.',
     )
     const items = within(notice).getAllByRole('listitem')
     expect(items.map((li) => li.textContent)).toEqual([
@@ -2290,7 +2290,7 @@ describe('the update-timer notice (13-REVIEW-3 WR-03)', () => {
     if (notice === null) throw new Error('no update-timer notice')
     expect(notice).toHaveClass('border-slate-500/40')
     expect(notice).toHaveTextContent(
-      'holzkube-manager-update.timer is what starts the update every hour, and it is not installed or not enabled here. Check for updates and install still works when you press it; nothing else starts it, so the Update check row stops getting newer. The commands install the unit and its timer and enable the timer; where only the timer is not enabled, the last line alone is enough.',
+      'holzkube-manager-update.timer is what starts the update every hour, and it is not installed or not enabled here. Check for updates and install still works when you press it; nothing else starts it, so the Update check row stops getting newer. The commands install the unit and its timer and enable the timer; where only the timer is not enabled, the last line alone is enough. They replace units of the same name; systemctl cat holzkube-manager-update.service holzkube-manager-update.timer shows what is there.',
     )
     const items = within(notice).getAllByRole('listitem')
     expect(items.map((li) => li.textContent)).toEqual([
