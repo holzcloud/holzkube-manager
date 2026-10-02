@@ -1,5 +1,15 @@
 [
   {
+    "version": "v0.2.2",
+    "date": "2026-10-02",
+    "changes": [
+      {
+        "icon": "🩹",
+        "text": "Fixed: the navigation's name and tagline fit on one line each. The bar is a little wider (240 px); the tagline had broken onto two lines and the name could run past the edge."
+      }
+    ]
+  },
+  {
     "version": "v0.2.1",
     "date": "2026-10-02",
     "changes": [
