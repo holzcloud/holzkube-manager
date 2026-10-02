@@ -123,7 +123,7 @@ jobs:
           fi
 
       - name: Test Go
-        run: go test ./... -count=1 -race
+        run: go test ./... -count=1 -race -timeout 20m
 
       # Last, because it starts the product and drives a browser over every
       # route, and because it needs the binary the Build step above produced.
@@ -170,8 +170,13 @@ jobs:
       # -count=1 -race matches Taskfile's `test` target. Sessions, a hash-chained
       # audit log and a concurrent file store are exactly what the race detector
       # is for, and a CI gate weaker than the local one is not a gate.
+      #
+      # -timeout 20m: internal/httpapi takes about 3 min under -race on Linux
+      # and 550-600 s on this macOS runner -- measured on the v0.2.0 and v0.2.1
+      # runs, and v0.2.2's first run hit go test's default 10 min and panicked
+      # with no test failing. The limit is for a hang, not for a slow runner.
       - name: Test Go
-        run: go test ./... -count=1 -race
+        run: go test ./... -count=1 -race -timeout 20m
 
   release:
     name: Release
