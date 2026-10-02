@@ -73,8 +73,8 @@ var (
 	// "Running it as a service" installs, so that following the guide gives
 	// the layout the hourly update replaces and restarts.
 	shippedDaemonUnit = filepath.Join(deployDir, "holzkube-manager.service")
-	shippedScript      = filepath.Join(deployDir, "holzkube-manager-host.sh")
-	shippedGuide       = filepath.Join(deployDir, "HOST-HELPER.md")
+	shippedScript     = filepath.Join(deployDir, "holzkube-manager-host.sh")
+	shippedGuide      = filepath.Join(deployDir, "HOST-HELPER.md")
 	// userGuide is docs/guide.md, which carries the update script's and the
 	// hourly update's install commands too.
 	userGuide         = filepath.Join("..", "..", "..", "docs", "guide.md")
@@ -1493,7 +1493,7 @@ func TestTheDaemonUnitIsTheLayoutTheUpdateNeeds(t *testing.T) {
 	script := string(data)
 	scriptDefault := func(name, env string) string {
 		t.Helper()
-		m := regexp.MustCompile(`(?m)^` + name + `=\$\{` + env + `:-([^}]+)\}$`).FindAllStringSubmatch(script, -1)
+		m := regexp.MustCompile(`(?m)^`+name+`=\$\{`+env+`:-([^}]+)\}$`).FindAllStringSubmatch(script, -1)
 		if len(m) != 1 {
 			t.Fatalf("the update script sets %s from %s %d times, want exactly 1", name, env, len(m))
 		}
