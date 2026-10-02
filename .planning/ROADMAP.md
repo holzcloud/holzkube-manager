@@ -173,7 +173,7 @@ Waves: 1 → {01, 02} · 2 → {03, 04} · 3 → {05} · 4 → {06} · 5 → {07
   5. `deploy/` enthält Path-Unit, Service-Unit, Skript und eine Anleitung zur Installation; `systemd-analyze verify` nimmt die Units an, und die Anleitung verlangt keine Zeile weniger Härtung an der Unit des Daemons (`NoNewPrivileges`, kein `AF_UNIX`, `ProcSubset=pid` bleiben).
 
 **Research**: Path-Units — `PathChanged` gegen `PathModified` gegen `DirectoryNotEmpty`, und wie ein Auftrag, den der Daemon per Rename atomar ablegt, genau einmal abgeholt wird; wie der Daemon ohne D-Bus erkennt, ob der Helfer installiert ist.
-**Plans:** 15/17 plans executed (2 gap-closure plans; 4 plans for HACT-04 „nur suchen" added 2026-09-30; 2 plans for the shipped hourly update added 2026-10-01)
+**Plans:** 16/17 plans executed (2 gap-closure plans; 4 plans for HACT-04 „nur suchen" added 2026-09-30; 2 plans for the shipped hourly update added 2026-10-01)
 **UI hint**: yes
 
 Plans:
@@ -205,7 +205,7 @@ Plans:
 - [x] 13-15-PLAN.md — Hinweis mit Befehlen für einen alten Helfer, Fixtures; README, Anleitung, HOST-HELPER.md, Vertrag, `host.png`; D-08 nach 13-12 gelesen, `./bin/task ci` auf dem Pi (HACT-04)
 
 **Stündliches Update ausgeliefert** *(Entscheidung des Betreibers 2026-10-01: `holzkube-manager-update.service` und `.timer` in `deploy/` und im Release-Archiv, mit Tests und Anleitung wie der Helfer; die selbstgemachten Units auf dem Pi bleiben unberührt)*
-- [ ] 13-16-PLAN.md — Tracer: Service und Timer in `deploy/`, verhaltensgleich mit den Units des Betreibers und Zeile für Zeile gehärtet, soweit Installieren und Neustarten es zulassen; `systemd-analyze verify` nach Ausgabe mit Gegenproben, Allow-List samt Timer-Schlüsseln, Zeitvertrag Update/Check/Helfer/Sperre, `UpdateUnitInstallCommands` = HOST-HELPER.md = Anleitung, Archiv trägt jede Datei aus `deploy/`; beide Routen verweigern `update` ohne die Unit mit 409 `conflict.host-update-unit-missing` (HACT-08, HACT-04)
+- [x] 13-16-PLAN.md — Tracer: Service und Timer in `deploy/`, verhaltensgleich mit den Units des Betreibers und Zeile für Zeile gehärtet, soweit Installieren und Neustarten es zulassen; `systemd-analyze verify` nach Ausgabe mit Gegenproben, Allow-List samt Timer-Schlüsseln, Zeitvertrag Update/Check/Helfer/Sperre, `UpdateUnitInstallCommands` = HOST-HELPER.md = Anleitung, Archiv trägt jede Datei aus `deploy/`; beide Routen verweigern `update` ohne die Unit mit 409 `conflict.host-update-unit-missing` (HACT-08, HACT-04)
 - [ ] 13-17-PLAN.md — `actions.update_unit` und die Befehle in GET /api/v1/host; nur „Check for updates and install" aus, mit Grund und Hinweis; Fixtures, Seite = Routen per Go-Test, Vertrag, Anleitung; Layout-Dump gegen 13-15, `./bin/task ci` auf dem Pi, Produktionsdienst und die Units des Betreibers unberührt (HACT-04)
 
 **Cross-cutting constraints:**
@@ -266,5 +266,5 @@ Waves: 1 → {01, 02} · 2 → {03} · 3 → {04} · 4 → {05} · 5 → {06} ·
 |-------|-----------|----------------|--------|-----------|
 | 11. Host-Seite — Gerät, Dienst, Live-Werte | v1.18 | 7/7 | Complete    | 2026-09-28 |
 | 12. Host wie ein Knoten — Verlauf, Warnung, Wand | v1.18 | 8/8 | Complete    | 2026-09-29 |
-| 13. Host-Aktionen über einen root-eigenen Helfer | v1.18 | 15/15 | In Progress|  |
+| 13. Host-Aktionen über einen root-eigenen Helfer | v1.18 | 16/17 | In Progress|  |
 | 14. Telefon — Tippziele, die ein Daumen trifft | v1.18 | 7/7 | In Progress|  |
