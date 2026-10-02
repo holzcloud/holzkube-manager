@@ -1,6 +1,6 @@
 ---
 name: release
-description: Cut a new holzkube-manager version. Use when the operator asks for a new release, a new version, or a new beta — "baue eine neue Version", "neues Release", "mach eine Beta". Merges everything to main, has GitHub Actions build and publish the tagged release for linux/amd64 and linux/arm64, and verifies what an operator would actually download.
+description: Cut a new holzkube-manager version. Use when the operator asks for a new release, a new version, or a new beta — "baue eine neue Version", "neues Release", "mach eine Beta". Merges everything to main, has GitHub Actions build and publish the tagged release for linux/arm64 (Raspberry Pi 5, the only target since 2026-10-02), and verifies what an operator would actually download.
 ---
 
 # Cutting a release
@@ -79,7 +79,7 @@ itself.
 
 7. **Dispatch.** `mcp__github__actions_run_trigger`, method `run_workflow`,
    workflow `ci.yml`, ref `main`, inputs `{tag, notes}`. The job creates the tag
-   with its own token, but only after `ci` and `test-macos` are green on that
+   with its own token, but only after `ci` is green on that
    commit — the dispatch does not skip the gate, it queues behind it.
 
 8. **Watch it.** The run queues behind any in-flight run on `main`: same
@@ -88,7 +88,7 @@ itself.
    fifteen minutes end to end, most of it the two gates.
 
 9. **Read the verification step.** `Verify the release an operator would
-   download` checks the release the API now serves: both linux architectures,
+   download` checks the release the API now serves: the linux/arm64 archive,
    exactly one daemon archive each, `checksums.txt`, that it is a published
    prerelease and not a draft, and that its page carries the changelog entry.
    If it fails, the release exists and is wrong — say so
@@ -101,13 +101,14 @@ itself.
 The operator runs this on a Raspberry Pi. **linux/arm64 is the production
 target** (see CLAUDE.md).
 
-This session's container is x86_64 with no qemu-user and no binfmt_misc, so an
-arm64 binary cannot be run here at all. Every end-to-end check ever made in this
-repository has therefore been of the amd64 artifact. Say that when reporting a
-release: "verified" without naming the architecture reads as a claim about the
-one the operator actually starts, and it has never been true of it.
+Since 2026-10-02 it is the only architecture released. Sessions on the
+operator's Pi run arm64 natively, and the Pi's hourly timer installs a new
+release within the hour -- its journal (`journalctl -u holzkube-manager-update`)
+is the real end-to-end check. A cloud container (x86_64, no qemu-user, no
+binfmt_misc) cannot run the arm64 binary at all, and no amd64 artifact exists
+any more to run instead. Say where a check ran when reporting a release.
 
-What is honestly checkable here for arm64: the archive is present, its checksum
+What is honestly checkable from a cloud container for arm64: the archive is present, its checksum
 matches, it contains `holzkube-managerd`, and `file` says ARM aarch64. Check
 those, and say what they do not cover.
 

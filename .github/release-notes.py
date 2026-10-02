@@ -56,8 +56,8 @@ def render(tag: str, annotation: str = "") -> str:
         "",
         "---",
         "",
-        "**Install or update:** download the archive for your machine below — "
-        "`linux_arm64` for a Raspberry Pi, `linux_amd64` otherwise — or run "
+        "**Install or update:** download the `linux_arm64` archive below "
+        "(builds are for the Raspberry Pi 5 only for now) — or run "
         "`sudo holzkube-manager-update` on a host that already has it. "
         "The [guide](https://github.com/holzcloud/holzkube-manager/blob/main/docs/guide.md) "
         "has the rest.",

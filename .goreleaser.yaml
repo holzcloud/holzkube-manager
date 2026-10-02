@@ -26,17 +26,16 @@ builds:
       - -trimpath
     ldflags:
       - -s -w -X main.version={{ .Version }}
+    # The operator's decision, 2026-10-02: for now a release carries builds for
+    # the Raspberry Pi 5 only. The daemon is Linux-only in practice anyway --
+    # the Host page reads /proc and /sys, the update and the host helper are
+    # systemd units -- and every other target was an archive nobody installed
+    # and, for darwin, a CI job that held up the release. The source still
+    # compiles elsewhere; it is just not shipped.
     goos:
       - linux
-      - darwin
     goarch:
-      - amd64
       - arm64
-    ignore:
-      # Intel macOS is not a target: holzkube-manager runs beside the cluster, and the
-      # Apple hosts that do so are arm64.
-      - goos: darwin
-        goarch: amd64
 
   # The command-line client is its own build and its own archive, because it is
   # a different thing in a different place: the daemon runs beside the cluster
@@ -51,18 +50,11 @@ builds:
       - -trimpath
     ldflags:
       - -s -w -X main.version={{ .Version }}
+    # Raspberry Pi 5 only, like the daemon (see above).
     goos:
       - linux
-      - darwin
-      - windows
     goarch:
-      - amd64
       - arm64
-    # No ignore list, and the reasoning is the daemon's inverted. Intel macOS
-    # is excluded above because nothing runs a cluster on one; people very much
-    # still type commands on one. Windows is here for the same reason and only
-    # for this binary: a terminal is a terminal, and nothing in this tool
-    # touches a path, a signal or a socket that would behave differently there.
 
 archives:
   - id: default
@@ -109,10 +101,6 @@ archives:
       - holzkubectl
     formats:
       - tar.gz
-    format_overrides:
-      - goos: windows
-        formats:
-          - zip
     name_template: "holzkubectl_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
     files:
       - LICENSE

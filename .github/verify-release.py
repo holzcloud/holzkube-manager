@@ -36,7 +36,9 @@ import urllib.request
 # The architectures a release must carry. Named here rather than derived from
 # the response, because deriving them from what arrived would make this agree
 # with whatever it is handed.
-REQUIRED_LINUX_ARCHES = ("amd64", "arm64")
+# linux/arm64 alone since 2026-10-02: the operator's releases are for the
+# Raspberry Pi 5 only (.goreleaser.yaml).
+REQUIRED_LINUX_ARCHES = ("arm64",)
 
 DAEMON_PREFIX = "holzkube-manager_"
 

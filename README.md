@@ -7,7 +7,7 @@
   <a href="https://github.com/holzcloud/holzkube-manager/releases"><img src="https://img.shields.io/github/v/release/holzcloud/holzkube-manager?include_prereleases&style=flat-square&color=ef7a4d&labelColor=150e08" alt="Latest release"></a>
   <a href="https://github.com/holzcloud/holzkube-manager/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/holzcloud/holzkube-manager/ci.yml?branch=main&style=flat-square&labelColor=150e08&label=CI" alt="CI"></a>
   <img src="https://img.shields.io/badge/Talos-v1.12%20–%20v1.14-ef7a4d?style=flat-square&labelColor=150e08" alt="Talos v1.12 to v1.14">
-  <img src="https://img.shields.io/badge/linux-arm64%20·%20amd64-ef7a4d?style=flat-square&labelColor=150e08" alt="linux arm64 and amd64">
+  <img src="https://img.shields.io/badge/Raspberry%20Pi%205-linux%2Farm64-ef7a4d?style=flat-square&labelColor=150e08" alt="Raspberry Pi 5, linux/arm64">
   <a href="LICENSE"><img src="https://img.shields.io/github/license/holzcloud/holzkube-manager?style=flat-square&color=ef7a4d&labelColor=150e08" alt="AGPL-3.0"></a>
   <a href="https://github.com/sponsors/holzcloud"><img src="https://img.shields.io/badge/sponsor-%E2%99%A5-ef7a4d?style=flat-square&labelColor=150e08&logo=githubsponsors&logoColor=ea4aaa" alt="Sponsor"></a>
 </p>
@@ -126,9 +126,9 @@ main actions: the build fails when a control on any of them is under 44px.
 
 ## Quick start
 
-Download the archive for your machine from the
-[newest release](https://github.com/holzcloud/holzkube-manager/releases)
-(`linux_arm64` for a Raspberry Pi, `linux_amd64` otherwise), then:
+Download the `linux_arm64` archive from the
+[newest release](https://github.com/holzcloud/holzkube-manager/releases) --
+releases are built for the Raspberry Pi 5 only for now -- then:
 
 ```sh
 tar xzf holzkube-manager_*_linux_arm64.tar.gz

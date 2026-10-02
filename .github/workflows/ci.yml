@@ -122,6 +122,9 @@ jobs:
             sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
           fi
 
+      # -timeout 20m: internal/httpapi alone takes about 3 min under -race here;
+      # the default 10 min once cut a run off with no test failing (on the
+      # macOS runner this workflow no longer has). The limit is for a hang.
       - name: Test Go
         run: go test ./... -count=1 -race -timeout 20m
 
@@ -140,49 +143,11 @@ jobs:
       - name: Measure the layout at a phone width and a desk width
         run: npm --prefix web run test:layout
 
-  test-macos:
-    name: Go tests (macOS)
-    runs-on: macos-latest
-    permissions:
-      contents: read
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
-          cache-dependency-path: go.sum
-
-      # The package COMPILES without a bundle -- internal/httpapi/dist/.gitkeep is
-      # tracked and the embed pattern is `all:dist`, which matches dotfiles -- but
-      # it does not TEST without one. TestCSPHashMatchesTheServedShell and
-      # TestForeignHostIsRefused both GET "/", and serveIndex answers 404 when
-      # dist/index.html is missing, so the bundle has to be built here as well.
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-          cache: npm
-          cache-dependency-path: web/package-lock.json
-
-      - name: Build the web bundle
-        run: npm --prefix web ci && npm --prefix web run build
-
-      # -count=1 -race matches Taskfile's `test` target. Sessions, a hash-chained
-      # audit log and a concurrent file store are exactly what the race detector
-      # is for, and a CI gate weaker than the local one is not a gate.
-      #
-      # -timeout 20m: internal/httpapi takes about 3 min under -race on Linux
-      # and 550-600 s on this macOS runner -- measured on the v0.2.0 and v0.2.1
-      # runs, and v0.2.2's first run hit go test's default 10 min and panicked
-      # with no test failing. The limit is for a hang, not for a slow runner.
-      - name: Test Go
-        run: go test ./... -count=1 -race -timeout 20m
-
   release:
     name: Release
-    # macos-latest is arm64, the only darwin target .goreleaser.yaml builds, so
-    # both gates guard the tag. Drop test-macos from this list if that job goes.
-    needs: [ci, test-macos]
+    # The only gate since releases carry linux/arm64 alone (2026-10-02): the
+    # macOS job tested a darwin build that is no longer shipped.
+    needs: [ci]
     # Either a tag was pushed, or this run was asked to create one. Both reach
     # goreleaser with a tag at HEAD, which is the only state it can release from.
     if: startsWith(github.ref, 'refs/tags/v') || inputs.tag != ''

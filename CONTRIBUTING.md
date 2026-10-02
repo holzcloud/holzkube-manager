@@ -12,8 +12,9 @@ A public report is a working attack against every running instance.
 
 ## Prerequisites
 
-These are the versions the project is developed and tested against on
-darwin/arm64. Others may work; these are the ones known to.
+These are the versions the project is developed and tested against, on
+the Raspberry Pi 5 (linux/arm64) it is released for. Others may work; these
+are the ones known to.
 
 - **Go 1.26.7.** `go.mod` declares `go 1.26` with `toolchain go1.26.7`, so a machine
   whose Go predates 1.26.7 fetches the pinned toolchain by itself.

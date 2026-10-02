@@ -6,6 +6,10 @@
       {
         "icon": "🩹",
         "text": "Fixed: the navigation's name and tagline fit on one line each. The bar is a little wider (240 px); the tagline had broken onto two lines and the name could run past the edge."
+      },
+      {
+        "icon": "📦",
+        "text": "Releases are built for the Raspberry Pi 5 only for now (linux/arm64). The archives for amd64, macOS and Windows are gone, for the daemon and for holzkubectl; a Pi updating itself notices nothing."
       }
     ]
   },

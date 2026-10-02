@@ -335,7 +335,7 @@ const icon = readFileSync(join(root, 'web/public/favicon.svg'), 'utf8').replace(
       <div class="t" style="font-size:72px">holzkube-manager</div>
     </div>
     <div class="s" style="font-size:25px;line-height:1.38;margin:20px 0 24px">Self-hosted management for Talos Linux and Kubernetes.<br>One binary, running beside your cluster.</div>
-    <div class="pills"><span>Alpha</span><span>Talos Linux</span><span>Kubernetes</span><span>Single binary</span><span>arm64 · amd64</span></div>
+    <div class="pills"><span>Alpha</span><span>Talos Linux</span><span>Kubernetes</span><span>Single binary</span><span>Raspberry Pi 5</span></div>
   </div>
   <div style="position:absolute;right:30px;top:0;bottom:0;width:680px;perspective:1200px;display:flex;align-items:center;justify-content:center">
     <div style="width:540px;height:338px;border-radius:14px;overflow:hidden;transform:rotateY(-12deg) rotateX(5deg) rotateZ(.5deg);

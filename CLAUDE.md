@@ -14,9 +14,13 @@ maintained; where it and a later file disagree, the later file wins.
 production target.** It manages a Talos cluster on the LAN; the daemon runs
 beside the cluster, not in it.
 
-So `linux/arm64` is the architecture that matters. amd64 is still built — the
-ROADMAP's OPS-05 is an amd64 hardware run and the Talos nodes themselves are
-amd64 — but when only one can be checked, the one to check is arm64.
+So `linux/arm64` is the architecture that matters, and **since 2026-10-02 it is
+the only one released**: the operator wants builds for the Raspberry Pi 5 only
+for now. `.goreleaser.yaml` builds the daemon and `holzkubectl` for linux/arm64
+alone, there is no macOS CI job, and `verify-release.py` requires the one
+archive. The source still compiles elsewhere (the Talos nodes it manages are
+amd64, which is a different matter: Image Factory images, not our builds).
+Adding a target back is the operator's call.
 
 ## This repository is public
 

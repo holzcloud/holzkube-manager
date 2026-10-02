@@ -37,7 +37,7 @@ body:
       label: Host OS and architecture
       description: >-
         The machine holzkube-managerd runs on, which is outside the cluster — not a node.
-      placeholder: Debian 12, linux/amd64
+      placeholder: Raspberry Pi OS (Debian 13), linux/arm64
     validations:
       required: true
 
