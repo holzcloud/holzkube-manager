@@ -201,7 +201,11 @@ export function Sidebar({ open = false, onNavigate }: { open?: boolean; onNaviga
     <nav
       aria-label="Main navigation"
       className={cn(
-        'flex h-full w-56 shrink-0 flex-col gap-1 border-r border-border bg-sidebar p-3',
+        // 240px and not 224: measured in Chromium with Manrope, the name needs
+        // 138px and the tagline 146px, and at 224px the text beside the mark
+        // had 145px -- the tagline broke onto two lines and, wherever the font
+        // renders a little wider, the name ran past the bar's edge.
+        'flex h-full w-60 shrink-0 flex-col gap-1 border-r border-border bg-sidebar p-3',
         // Below md: out of the flow, over the page, and off the left edge until
         // asked for. transform rather than display, so it slides rather than
         // appears -- on a phone an element that simply exists where nothing was
@@ -232,7 +236,9 @@ export function Sidebar({ open = false, onNavigate }: { open?: boolean; onNaviga
           <span className="font-heading whitespace-nowrap text-base font-semibold tracking-tight">
             holzkube-manager
           </span>
-          <p className="text-xs text-muted-foreground">Talos cluster management</p>
+          <p className="whitespace-nowrap text-xs text-muted-foreground">
+            Talos cluster management
+          </p>
           <AlphaBadge className="mt-1 inline-block" />
         </div>
       </div>
