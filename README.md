@@ -57,7 +57,9 @@ did.
   it does not; the update script and its two systemd units ship, sandboxed, in
   `deploy/` of every release archive (`holzkube-manager-update.service` and
   `holzkube-manager-update.timer`), and the Host page shows what the last run
-  found
+  found. It updates the daemon run as the guide's `holzkube-manager.service`
+  (also in `deploy/`), and on a machine laid out otherwise refuses and says
+  why rather than install a binary nobody runs
 - **Apps** — everything that runs, grouped by what was installed, with its CPU
   and memory now and over the day
 - **Kubernetes** — workloads, pods and why one is broken, events, storage,
@@ -136,9 +138,12 @@ Open `https://<host>:8443` and create the first account in the browser. The
 certificate is self-signed; compare the fingerprint your browser shows with the
 `sha256_fingerprint` line in the log before accepting it.
 
-To keep it up to date, install the update script and its hourly timer from the
-same archive, as the guide's
-[Updating itself every hour](docs/guide.md#updating-itself-every-hour) shows.
+To keep it running, install it as a service from the same archive, as the
+guide's [Running it as a service](docs/guide.md#running-it-as-a-service)
+shows; to keep it up to date as well, add the update script and its hourly
+timer from [Updating itself every hour](docs/guide.md#updating-itself-every-hour).
+The hourly update needs the service: it replaces
+`/usr/local/bin/holzkube-managerd` and restarts `holzkube-manager.service`.
 
 Prefer a container? `docker compose up -d --build` in a checkout builds the
 image from the [`compose.yaml`](compose.yaml) in this repository. To build from source you

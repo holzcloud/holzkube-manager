@@ -74,6 +74,10 @@ archives:
     files:
       - LICENSE
       - README.md
+      # The daemon's own unit travels so the operator can run it as the
+      # service the hourly update replaces and restarts (docs/guide.md,
+      # "Running it as a service"). Nothing installs or replaces it.
+      - deploy/holzkube-manager.service
       # The update script travels with the daemon and replaces itself on the
       # host after a healthy update, so a change to the update path needs no
       # hand work on the host.

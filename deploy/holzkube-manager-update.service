@@ -40,12 +40,12 @@
 #     selbst: auf die Sperre wartet es hoechstens 600 s, die Release-Liste
 #     hoechstens 30 s, zwei Downloads je 300 s, zwei Neustarts von
 #     holzkube-manager.service mit systemds 90 s je Grenze (4 x Stop + Start =
-#     450 s je Neustart), die Gesundheitspruefung 20 x (5 s + 1 s), dazu rund
-#     60 s eigene Arbeit (tar, sha256sum, install, cp, journalctl, python3) --
-#     zusammen etwa 38,5 min. Die Grenze ist ein Netz darueber und nie das,
-#     was ein echtes Update beendet: ein Abbruch zwischen install und Neustart
-#     liesse das neue Binary unter dem alten Prozess liegen, und die naechste
-#     Stunde hielte es fuer aktuell. Start + 4 x Stop = 47 min, unter der
+#     450 s je Neustart), die Gesundheitspruefung vorher 3 x und nachher 20 x
+#     (5 s + 1 s), dazu rund 60 s eigene Arbeit (tar, sha256sum, install, cp,
+#     journalctl, python3) -- zusammen etwa 39 min. Die Grenze ist ein Netz
+#     darueber und nie das, was ein echtes Update beendet: ein Abbruch
+#     zwischen install und Neustart liesse das neue Binary unter dem alten
+#     Prozess liegen, und die naechste Stunde hielte es fuer aktuell. Start + 4 x Stop = 47 min, unter der
 #     Stunde, die der Timer wartet. Die Seite hoert nach 15 min auf zu warten;
 #     der Lauf geht weiter und haelt fest, was er tat, und die Zeile "Update
 #     check" der Host-Seite zeigt es. Darum auch kein TimeoutSec=,

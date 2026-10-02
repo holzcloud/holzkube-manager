@@ -189,6 +189,48 @@ func (e *scriptEnv) run(asRoot bool, args ...string) int {
 	return exitErr.ExitCode()
 }
 
+// runOutput is run that also returns what the script printed.
+func (e *scriptEnv) runOutput(asRoot bool, args ...string) (string, int) {
+	e.t.Helper()
+	var cmd *exec.Cmd
+	if asRoot {
+		cmd = exec.Command("unshare", append([]string{"--user", "--map-root-user", "bash", e.script}, args...)...)
+	} else {
+		cmd = exec.Command("bash", append([]string{e.script}, args...)...)
+	}
+	cmd.Env = e.env()
+	cmd.Dir = e.dir
+	out, err := cmd.CombinedOutput()
+	e.t.Logf("update script %v (root=%v):\n%s", args, asRoot, out)
+	if err == nil {
+		return string(out), 0
+	}
+	var exitErr *exec.ExitError
+	if !errors.As(err, &exitErr) {
+		e.t.Fatalf("run the update script: %v", err)
+	}
+	return string(out), exitErr.ExitCode()
+}
+
+// wantRefusedBeforeDownload asserts a run that refused before it touched
+// anything: the installed binary unchanged, no previous copy kept, GitHub
+// never asked, and no restart. It needs recordCalls before the run.
+func (e *scriptEnv) wantRefusedBeforeDownload(installed string) {
+	e.t.Helper()
+	if got := e.binVersion(); got != "holzkube-managerd "+installed {
+		e.t.Errorf("installed binary answers %q, want %q", got, "holzkube-managerd "+installed)
+	}
+	if _, err := os.Lstat(e.previous); !errors.Is(err, os.ErrNotExist) {
+		e.t.Errorf("%s exists (%v): the run kept a previous binary", e.previous, err)
+	}
+	if urls, err := os.ReadFile(filepath.Join(e.dir, "curl-urls")); err == nil && strings.Contains(string(urls), "/repos/") {
+		e.t.Errorf("the run asked GitHub before it refused:\n%s", urls)
+	}
+	if calls, err := os.ReadFile(filepath.Join(e.dir, "systemctl-calls")); err == nil && strings.Contains(string(calls), "restart") {
+		e.t.Errorf("the run restarted the service:\n%s", calls)
+	}
+}
+
 // runSignalled starts the script, waits until a stub has created ready, and
 // sends sig to the whole process group -- as systemctl stop does to the unit's
 // cgroup and a terminal does on Ctrl-C. It returns the exit code, -1 when the
@@ -378,7 +420,9 @@ func releaseArchive(t *testing.T, daemon string) []byte {
 // or at the health check until the test opens the gate: the request creates
 // GATE.ready, waits until the file GATE exists (at most 30 s, then it fails),
 // and then answers as usual. Two runs started with different gates can so be
-// stopped exactly where they would overlap.
+// stopped exactly where they would overlap. The health gate holds only a
+// health check after a restart (the systemctl stub arms it): the one the
+// script asks before it touches anything is not the one a test waits for.
 const curlStub = `#!/usr/bin/env bash
 [[ -n ${HKM_STUB_PWD:-} ]] && pwd >> "$HKM_STUB_PWD"
 gate() {
@@ -405,7 +449,7 @@ case "$url" in
   */releases/assets/11|*/releases/assets/12) cp "$HKM_STUB_FIXTURES/archive.tar.gz" "$out" ;;
   */releases/assets/13) cp "$HKM_STUB_FIXTURES/checksums.txt" "$out" ;;
   "$HKM_STUB_HEALTH_URL")
-    [[ -n ${HKM_STUB_HEALTH_GATE:-} ]] && gate "$HKM_STUB_HEALTH_GATE"
+    [[ -n ${HKM_STUB_HEALTH_GATE:-} && -e $HKM_STUB_HEALTH_GATE.armed ]] && gate "$HKM_STUB_HEALTH_GATE"
     [[ ${HKM_STUB_HEALTHY:-1} == 1 ]] || exit 7
     echo '{"audit_chain":"intact"}' ;;
   *) echo "curl stub: unexpected URL $url" >&2; exit 2 ;;
@@ -424,13 +468,40 @@ const flockStub = `#!/usr/bin/env bash
 exec "$HKM_STUB_FLOCK_REAL" "$@"
 `
 
-// systemctlStub answers restart and is-active; HKM_STUB_SYSTEMCTL_LOG, when
-// set, names a file each call appends its argv to.
+// systemctlStub answers restart, is-active and the two properties the script
+// reads with show; HKM_STUB_SYSTEMCTL_LOG, when set, names a file each call
+// appends its argv to.
+//
+// By default the daemon's unit is the reference one: loaded, and its
+// ExecStart= runs HOLZKUBE_MANAGER_BIN, the binary the script replaces.
+// HKM_STUB_LOAD_STATE and HKM_STUB_EXEC_PATH say otherwise (an empty
+// HKM_STUB_EXEC_PATH is a unit without ExecStart=, and two paths in it, space
+// separated, a unit with two). is-active answers
+// HKM_STUB_HEALTHY after a restart; before one, HKM_STUB_ACTIVE when it is
+// set -- the daemon as the script finds it, before it touches anything.
 const systemctlStub = `#!/usr/bin/env bash
 [[ -n ${HKM_STUB_SYSTEMCTL_LOG:-} ]] && printf '%s\n' "$*" >> "$HKM_STUB_SYSTEMCTL_LOG"
 case "$1" in
-  restart) exit 0 ;;
-  is-active) [[ ${HKM_STUB_HEALTHY:-1} == 1 ]] && exit 0; exit 3 ;;
+  restart)
+    touch "$HKM_STUB_FIXTURES/.restarted"
+    [[ -n ${HKM_STUB_HEALTH_GATE:-} ]] && touch "$HKM_STUB_HEALTH_GATE.armed"
+    exit 0 ;;
+  is-active)
+    active=${HKM_STUB_HEALTHY:-1}
+    [[ -e $HKM_STUB_FIXTURES/.restarted ]] || active=${HKM_STUB_ACTIVE:-$active}
+    [[ $active == 1 ]] && exit 0; exit 3 ;;
+  show)
+    prop="" prev=""
+    for a in "$@"; do [[ $prev == -p ]] && prop=$a; prev=$a; done
+    case $prop in
+      LoadState) printf '%s\n' "${HKM_STUB_LOAD_STATE-loaded}" ;;
+      ExecStart)
+        for p in ${HKM_STUB_EXEC_PATH-$HOLZKUBE_MANAGER_BIN}; do
+          printf '{ path=%s ; argv[]=%s ; ignore_errors=no ; start_time=[n/a] ; stop_time=[n/a] ; pid=0 ; code=(null) ; status=0/0 }\n' "$p" "$p"
+        done ;;
+      *) echo "systemctl stub: unexpected property $prop" >&2; exit 1 ;;
+    esac
+    exit 0 ;;
   *) exit 0 ;;
 esac
 `
@@ -730,6 +801,76 @@ func TestUpdateScriptAsRoot(t *testing.T) {
 		if got := e.binVersion(); got != "holzkube-managerd "+fakeInstalled {
 			t.Errorf("installed binary answers %q, want it untouched", got)
 		}
+	})
+
+	// 13-REVIEW-3 CR-01: the script replaces $BIN and restarts $SERVICE, and
+	// "updated" or "current" is true only where $SERVICE runs $BIN and
+	// answers at $HEALTH_URL. On any other host the run used to install a
+	// binary nobody starts and then record "current" every hour, or record
+	// "updated" for a process still running the old one, or roll back every
+	// hour. It now refuses before it downloads anything, records failed, and
+	// says why. A --check only looks and is not asked (it calls no systemctl).
+	for _, tc := range []struct {
+		name      string
+		installed string
+		env       []string
+		says      string
+	}{
+		{"no daemon unit", fakeInstalled, []string{"HKM_STUB_LOAD_STATE=not-found"}, "LoadState=not-found"},
+		{"no daemon unit, the binary already the newest", fakeRelease, []string{"HKM_STUB_LOAD_STATE=not-found"}, "LoadState=not-found"},
+		{"a masked daemon unit", fakeInstalled, []string{"HKM_STUB_LOAD_STATE=masked"}, "LoadState=masked"},
+		{"a daemon unit that runs another binary", fakeInstalled, []string{"HKM_STUB_EXEC_PATH=/opt/holzkube-manager/holzkube-managerd"}, "/opt/holzkube-manager/holzkube-managerd"},
+		{"a daemon unit without ExecStart", fakeInstalled, []string{"HKM_STUB_EXEC_PATH="}, "nicht genau ein ExecStart="},
+		{"a daemon unit with two ExecStart", fakeInstalled, []string{"HKM_STUB_EXEC_PATH=/bin/true /bin/true"}, "nicht genau ein ExecStart="},
+		{"a running daemon that does not answer at the health URL", fakeInstalled, []string{"HKM_STUB_ACTIVE=1", "HKM_STUB_HEALTHY=0"}, testHealthURL},
+	} {
+		t.Run(tc.name+" is refused before the download and recorded failed", func(t *testing.T) {
+			t.Parallel()
+			e := newScriptEnv(t, tc.installed, true)
+			e.recordCalls()
+			e.extra = append(e.extra, tc.env...)
+			out, rc := e.runOutput(true)
+			if rc != 1 {
+				t.Errorf("exit = %d, want 1", rc)
+			}
+			e.wantStatus(OutcomeFailed, ptr(tc.installed), nil)
+			e.wantRefusedBeforeDownload(tc.installed)
+			if !strings.Contains(out, tc.says) {
+				t.Errorf("the refusal does not name %q:\n%s", tc.says, out)
+			}
+		})
+	}
+
+	// The same layout reached through a link: the unit runs a path that
+	// resolves to $BIN, so the restart runs what the script installed.
+	t.Run("a daemon unit that runs a link to the binary updates", func(t *testing.T) {
+		t.Parallel()
+		e := newScriptEnv(t, fakeInstalled, true)
+		link := filepath.Join(e.dir, "opt", "holzkube-managerd")
+		if err := os.MkdirAll(filepath.Dir(link), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(e.bin, link); err != nil {
+			t.Fatal(err)
+		}
+		e.extra = append(e.extra, "HKM_STUB_EXEC_PATH="+link)
+		if rc := e.run(true); rc != 0 {
+			t.Fatalf("exit = %d, want 0", rc)
+		}
+		e.wantStatus(OutcomeUpdated, ptr(fakeRelease), ptr(fakeRelease))
+	})
+
+	// A daemon that is not running is not asked at the health URL before the
+	// update: the update may be what brings it back, and the health check
+	// after the restart decides.
+	t.Run("a stopped daemon is updated and checked after the restart", func(t *testing.T) {
+		t.Parallel()
+		e := newScriptEnv(t, fakeInstalled, true)
+		e.extra = append(e.extra, "HKM_STUB_ACTIVE=0")
+		if rc := e.run(true); rc != 0 {
+			t.Fatalf("exit = %d, want 0", rc)
+		}
+		e.wantStatus(OutcomeUpdated, ptr(fakeRelease), ptr(fakeRelease))
 	})
 
 	t.Run("rollback records nothing", func(t *testing.T) {

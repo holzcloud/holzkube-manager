@@ -129,6 +129,20 @@ places an order. **Check for updates** and the other three do not need it.
 
 ## The hourly update
 
+The update assumes the layout the release is built for: the daemon installed
+as `/usr/local/bin/holzkube-managerd`, run by `holzkube-manager.service`, and
+answering on `https://127.0.0.1:8443` (the default `--listen`, or
+`0.0.0.0:8443`). `deploy/holzkube-manager.service` and docs/guide.md's
+"Running it as a service" set it up that way. Each run that may install
+checks it before it downloads anything -- the unit is loaded, its
+`ExecStart=` runs that binary, and a running service answers at that
+address -- and otherwise refuses, records `failed` and says why in
+`journalctl -u holzkube-manager-update`, instead of installing a binary nobody
+runs and calling it current. Two lines in `/etc/holzkube-manager/update.conf`
+adjust it for a differently laid out machine: `HOLZKUBE_MANAGER_SERVICE=` for a
+daemon unit of another name, `HOLZKUBE_MANAGER_HEALTH_URL=` for a daemon that
+listens only on an address of the network.
+
 The release archive carries the two units that run the update script:
 
 - `holzkube-manager-update.service` runs the script above, with no argument:

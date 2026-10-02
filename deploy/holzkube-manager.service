@@ -1,0 +1,78 @@
+# holzkube-manager.service -- holzkube-managerd selbst, als systemd-Dienst.
+#
+# Das ist der Aufbau, fuer den das Release gebaut ist und den das stuendliche
+# Update ersetzt: das Binary unter /usr/local/bin/holzkube-managerd, diese
+# Unit unter genau diesem Namen, die Daten in /var/lib/holzkube-manager, und
+# der Daemon antwortet unter https://127.0.0.1:8443. Das Update-Skript prueft
+# genau das, bevor es etwas laedt, und verweigert sich sonst
+# (deploy/holzkube-manager-update.sh, check_host).
+#
+# Installiert wird sie von niemandem ausser dem Betreiber, von Hand, aus dem
+# Release-Archiv: docs/guide.md, "Running it as a service". Das Update-Skript
+# ersetzt das Binary, nie diese Unit.
+#
+# Warum die Zeilen so sind, wie sie sind:
+#
+#   - Kein HOLZKUBE_MANAGER_LISTEN: der Daemon lauscht dann auf 127.0.0.1:8443,
+#     und dort fragt die Gesundheitspruefung des Updates. Was ein Host anders
+#     will -- im LAN erreichbar (0.0.0.0:8443), erlaubte Host-Namen, Single
+#     Sign-on --, gehoert in /etc/holzkube-manager/holzkube-managerd.env, eine
+#     Zeile NAME=Wert je Option. Diese Unit bleibt so dieselbe, wenn man sie
+#     aus einem neueren Archiv wiederholt. Wer nur eine LAN-Adresse bindet,
+#     setzt HOLZKUBE_MANAGER_HEALTH_URL in /etc/holzkube-manager/update.conf.
+#   - User= und Group= sind ein Systembenutzer, den die Installationsbefehle
+#     anlegen. Kein DynamicUser=: der Host-Helfer schreibt als root in das
+#     Datenverzeichnis, und das soll ein festes Verzeichnis sein, kein Symlink.
+#   - StateDirectory= mit 0700 und UMask=0077: das Datenverzeichnis haelt die
+#     Schluessel der Cluster; der Store startet nicht, wenn es fuer andere
+#     lesbar ist.
+#   - Type=simple: ob der Dienst wirklich hochkam, sagt die
+#     Gesundheitspruefung des Updates, nicht der Startauftrag.
+#   - Die Haertung ist die der Referenzinstallation, Zeile fuer Zeile; der
+#     Host-Helfer verlangt keine davon zurueck (deploy/HOST-HELPER.md, "The
+#     service's own unit stays as it is").
+[Unit]
+Description=holzkube-manager - Verwaltungsoberflaeche fuer Talos und Kubernetes
+Documentation=https://github.com/holzcloud/holzkube-manager/blob/main/docs/guide.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=holzkube-manager
+Group=holzkube-manager
+ExecStart=/usr/local/bin/holzkube-managerd
+Environment=HOLZKUBE_MANAGER_DATA_DIR=/var/lib/holzkube-manager
+EnvironmentFile=-/etc/holzkube-manager/holzkube-managerd.env
+StateDirectory=holzkube-manager
+StateDirectoryMode=0700
+UMask=0077
+Restart=on-failure
+RestartSec=5s
+NoNewPrivileges=true
+CapabilityBoundingSet=
+AmbientCapabilities=
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectProc=invisible
+ProcSubset=pid
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+RestrictAddressFamilies=AF_INET AF_INET6
+LockPersonality=true
+MemoryDenyWriteExecute=true
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+
+[Install]
+WantedBy=multi-user.target

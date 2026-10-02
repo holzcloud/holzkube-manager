@@ -82,11 +82,71 @@ certificate authority: it cannot sign anything else.
 There is no private CA and nothing is installed into your system trust store.
 To use your own certificate instead, pass `--tls-cert` and `--tls-key`.
 
+### Running it as a service
+
+On a machine that keeps holzkube-manager running -- a Raspberry Pi beside the
+cluster, say -- it runs as a systemd service. Every release archive carries
+the unit in `deploy/holzkube-manager.service`. From the root of the unpacked
+archive:
+
+<!-- daemon-unit-commands:begin -->
+```sh
+sudo useradd --system --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin holzkube-manager
+sudo install -o root -g root -m 0755 holzkube-managerd /usr/local/bin/holzkube-managerd
+sudo install -o root -g root -m 0644 deploy/holzkube-manager.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now holzkube-manager.service
+```
+<!-- daemon-unit-commands:end -->
+
+The service runs as the system user `holzkube-manager`, keeps its data in
+`/var/lib/holzkube-manager`, and listens on `127.0.0.1:8443`, the default.
+`journalctl -u holzkube-manager` shows the certificate's fingerprint.
+
+Settings go into `/etc/holzkube-manager/holzkube-managerd.env`, one
+`NAME=value` line per option from [Configuration](#configuration), not into
+the unit: the unit then stays the same when you take a newer one from a newer
+archive. To reach it from other machines on the network, for example:
+
+```sh
+sudo install -d -o root -g root -m 0700 /etc/holzkube-manager
+sudoedit /etc/holzkube-manager/holzkube-managerd.env
+```
+
+```
+HOLZKUBE_MANAGER_LISTEN=0.0.0.0:8443
+HOLZKUBE_MANAGER_ALLOWED_HOSTS=192.168.1.10,homeserver
+```
+
+and `sudo systemctl restart holzkube-manager.service`.
+
+This is the layout the hourly update below replaces and restarts: the binary
+at `/usr/local/bin/holzkube-managerd`, run by `holzkube-manager.service`,
+answering on `https://127.0.0.1:8443` -- which `0.0.0.0:8443` does too. A
+machine already running holzkube-manager under a unit of its own keeps it;
+the update needs only these three things to be true of it.
+
 ### Updating itself every hour
 
-On a machine where holzkube-manager runs as a systemd service, it can keep
+On a machine where holzkube-manager runs as the service above, it can keep
 itself up to date. Every release archive carries what that takes in `deploy/`:
 the update script and its two systemd units.
+
+**What it needs.** The update replaces `/usr/local/bin/holzkube-managerd`,
+restarts `holzkube-manager.service` and then asks
+`https://127.0.0.1:8443/api/v1/system/status` whether it came back. Each run
+that may install checks that first, before it downloads anything: that the
+unit is installed, that its `ExecStart=` runs that binary, and that a running
+service answers at that address. Where one of them is not true it refuses,
+records **failed** -- the Host page's **Update check** row shows it -- and
+`journalctl -u holzkube-manager-update` says which and why. Without the
+check it would install a binary nobody runs and call it current, or roll
+back every hour. On a machine laid out differently, two settings in
+`/etc/holzkube-manager/update.conf` adjust it: `HOLZKUBE_MANAGER_SERVICE=` for
+a unit with another name, and `HOLZKUBE_MANAGER_HEALTH_URL=` for a daemon that
+listens only on an address of the network (`--listen 192.168.1.10:8443` gives
+`HOLZKUBE_MANAGER_HEALTH_URL=https://192.168.1.10:8443/api/v1/system/status`).
+A binary somewhere other than `/usr/local/bin` it does not update.
 
 A run of the update looks for the newest release that is not a draft,
 downloads it, checks its checksum and runs the new binary's `--version` before

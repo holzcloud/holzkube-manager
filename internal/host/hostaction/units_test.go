@@ -20,6 +20,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/holzcloud/holzkube-manager/internal/config"
 	"github.com/holzcloud/holzkube-manager/internal/host/updatestatus"
 )
 
@@ -68,6 +69,10 @@ var (
 	// service the timer and the helper's update order start, and the timer.
 	shippedUpdateUnit  = filepath.Join(deployDir, "holzkube-manager-update.service")
 	shippedUpdateTimer = filepath.Join(deployDir, "holzkube-manager-update.timer")
+	// The daemon's own unit (13-REVIEW-3 CR-01): what docs/guide.md's
+	// "Running it as a service" installs, so that following the guide gives
+	// the layout the hourly update replaces and restarts.
+	shippedDaemonUnit = filepath.Join(deployDir, "holzkube-manager.service")
 	shippedScript      = filepath.Join(deployDir, "holzkube-manager-host.sh")
 	shippedGuide       = filepath.Join(deployDir, "HOST-HELPER.md")
 	// userGuide is docs/guide.md, which carries the update script's and the
@@ -282,9 +287,9 @@ func hardening() []unitLine {
 	return out
 }
 
-// TestUnitsVerify runs systemd-analyze verify over copies of the five units:
-// the path unit, the helper's service, the check unit it starts, and the
-// hourly update's service and timer.
+// TestUnitsVerify runs systemd-analyze verify over copies of the six units:
+// the path unit, the helper's service, the check unit it starts, the hourly
+// update's service and timer, and the daemon's own unit.
 //
 // Its exit code alone says nothing about the hardening: an unknown key
 // ("ProtectHom=true") or a bad value is reported as a warning, the line is
@@ -323,7 +328,7 @@ func TestUnitsVerify(t *testing.T) {
 			"Install systemd, or set %s=1 to skip this knowingly -- the test then reports SKIPPED, not verified.", err, noSystemdAnalyze)
 	}
 
-	// The five shipped files, in the order verify is given them, each with
+	// The six shipped files, in the order verify is given them, each with
 	// the arguments its ExecStart= keeps after the stub; a file without
 	// ExecStart= (the path unit, the timer) has none to rewrite.
 	type shipped struct {
@@ -337,6 +342,7 @@ func TestUnitsVerify(t *testing.T) {
 		{path: shippedCheckUnit, execArgs: " --check", hasExec: true},
 		{path: shippedUpdateUnit, hasExec: true},
 		{path: shippedUpdateTimer},
+		{path: shippedDaemonUnit, hasExec: true},
 	}
 	src := map[string]string{}
 	for _, u := range units {
@@ -350,7 +356,7 @@ func TestUnitsVerify(t *testing.T) {
 		src[u.path] = string(data)
 	}
 
-	// verify writes all five units into one temporary directory -- with the
+	// verify writes all six units into one temporary directory -- with the
 	// content in replace instead of the shipped one where replace names a
 	// file -- and runs systemd-analyze verify over them.
 	verify := func(t *testing.T, replace map[string]string) (string, int) {
@@ -413,6 +419,7 @@ func TestUnitsVerify(t *testing.T) {
 		{shippedService, "ProtectHome=true", "ProtectHom=true"},
 		{shippedUpdateUnit, "ProtectHome=true", "ProtectHom=true"},
 		{shippedUpdateTimer, "OnUnitActiveSec=1h", "OnUnitActivSec=1h"},
+		{shippedDaemonUnit, "ProtectHome=true", "ProtectHom=true"},
 	} {
 		misspelt := strings.Replace(src[c.path], "\n"+c.line+"\n", "\n"+c.misspelt+"\n", 1)
 		if misspelt == src[c.path] {
@@ -1127,7 +1134,9 @@ func scriptFunctionBody(t *testing.T, script, name string) string {
 // The shape is held too: exactly two download call sites, one api call
 // site, three `systemctl restart "$SERVICE"` lines (--rollback's, the
 // install's, the roll back's; one run reaches at most two) and one seq health
-// loop. A change to any of them fails here until the model above is redone.
+// loop, wait_healthy, called twice: before anything is touched and after the
+// restart (13-REVIEW-3 CR-01). A change to any of them fails here until the
+// model above is redone.
 //
 // Faults injected and seen red (13-16): TimeoutStartSec=20min;
 // TimeoutStopSec=5min (start + 4 x stop past the hour); --no-block dropped
@@ -1162,7 +1171,25 @@ func TestTheUpdateTimingContract(t *testing.T) {
 	checkLock := scriptSeconds(t, script, "the check's lock wait", regexp.MustCompile(`(?m)^\s*\[\[ \$CHECK_ONLY -eq 1 \]\] && LOCK_WAIT=([0-9]+)$`))
 	apiMax := scriptSeconds(t, scriptFunctionBody(t, script, "api"), "api()'s --max-time", regexp.MustCompile(`--max-time ([0-9]+)\b`))
 	downloadMax := scriptSeconds(t, scriptFunctionBody(t, script, "download"), "download()'s --max-time", regexp.MustCompile(`--max-time ([0-9]+)\b`))
-	tries := scriptNumber(t, script, "the health loop's tries", regexp.MustCompile(`(?m)^\s*for _ in \$\(seq 1 ([0-9]+)\); do$`))
+	// The health loop is wait_healthy N: once before anything is touched
+	// (13-REVIEW-3 CR-01, a running daemon must answer before it is
+	// replaced) and once after the restart. Both count.
+	waitBody := scriptFunctionBody(t, script, "wait_healthy")
+	if !strings.Contains(waitBody, "local tries=$1") || !regexp.MustCompile(`(?m)^\s*for _ in \$\(seq 1 "\$tries"\); do$`).MatchString(waitBody) {
+		t.Errorf("wait_healthy() does not loop over its argument as the timing model assumes:\n%s", waitBody)
+	}
+	waitCalls := regexp.MustCompile(`(?m)^[^#\n]*\bwait_healthy ([0-9]+)\b`).FindAllStringSubmatch(script, -1)
+	if len(waitCalls) != 2 {
+		t.Errorf("the update script calls wait_healthy %d times, the timing model counts 2 (before the install and after the restart); redo the model", len(waitCalls))
+	}
+	tries := 0
+	for _, c := range waitCalls {
+		n, err := strconv.Atoi(c[1])
+		if err != nil {
+			t.Fatalf("wait_healthy %s: %v", c[1], err)
+		}
+		tries += n
+	}
 	healthMax := scriptSeconds(t, script, "the health check's --max-time", regexp.MustCompile(`curl -sk --max-time ([0-9]+) "\$HEALTH_URL"`))
 	pause := scriptSeconds(t, script, "the health loop's sleep", regexp.MustCompile(`(?m)^\s*sleep ([0-9]+)$`))
 
@@ -1171,7 +1198,7 @@ func TestTheUpdateTimingContract(t *testing.T) {
 
 	unit := readUnitFile(t, shippedUpdateUnit)
 	start, stop := unitSpan(t, unit, "Service", "TimeoutStartSec"), unitSpan(t, unit, "Service", "TimeoutStopSec")
-	t.Logf("update worst case %v (lock %v + list %v + 2 x download %v + 2 x restart %v + %d x (%v + %v) + local %v); "+
+	t.Logf("update worst case %v (lock %v + list %v + 2 x download %v + 2 x restart %v + %d health tries x (%v + %v) + local %v); "+
 		"TimeoutStartSec %v leaves %v above it, margin wanted %v",
 		worst, updateLock, apiMax, downloadMax, daemonRestartWorstCase, tries, healthMax, pause, updateLocalWork,
 		start, start-worst, updateUnitMargin)
@@ -1437,6 +1464,114 @@ var weakening = []*regexp.Regexp{
 	regexp.MustCompile(`systemctl edit( --\S+)* holzkube-manager(\.service)?([\s` + "`" + `]|$)`),
 	regexp.MustCompile(`holzkube-manager\.service\.d`),
 	regexp.MustCompile(`(?i)sudoers\.d`),
+}
+
+// TestTheDaemonUnitIsTheLayoutTheUpdateNeeds: the update script replaces one
+// binary and restarts one unit, and asks one address whether it came back
+// (13-REVIEW-3 CR-01). deploy/holzkube-manager.service, which the guide's
+// "Running it as a service" installs, is that layout: its name is the
+// script's SERVICE, its ExecStart= the script's BIN, it sets no --listen, so
+// the daemon answers on its default -- the host and port of the script's
+// HEALTH_URL -- and its data directory is
+// the one the helper's path unit watches. It carries every hardening line the
+// helper guide names as the reference unit's, and the guide's install block
+// installs it, the binary to BIN, and starts it under that name.
+//
+// Faults injected and seen red (13-REVIEW-3): ExecStart= moved to
+// /opt/holzkube-manager/holzkube-managerd; Environment=HOLZKUBE_MANAGER_LISTEN=
+// 192.168.1.10:8443 added; ProtectProc=invisible removed; the guide's install
+// block installing the binary to /usr/bin.
+func TestTheDaemonUnitIsTheLayoutTheUpdateNeeds(t *testing.T) {
+	t.Parallel()
+
+	data, err := os.ReadFile(shippedUpdater)
+	if err != nil {
+		t.Fatalf("read the update script: %v", err)
+	}
+	script := string(data)
+	scriptDefault := func(name, env string) string {
+		t.Helper()
+		m := regexp.MustCompile(`(?m)^` + name + `=\$\{` + env + `:-([^}]+)\}$`).FindAllStringSubmatch(script, -1)
+		if len(m) != 1 {
+			t.Fatalf("the update script sets %s from %s %d times, want exactly 1", name, env, len(m))
+		}
+		return m[0][1]
+	}
+	service := scriptDefault("SERVICE", "HOLZKUBE_MANAGER_SERVICE")
+	bin := scriptDefault("BIN", "HOLZKUBE_MANAGER_BIN")
+	healthURL := scriptDefault("HEALTH_URL", "HOLZKUBE_MANAGER_HEALTH_URL")
+
+	if got := filepath.Base(shippedDaemonUnit); got != service {
+		t.Errorf("the daemon's unit ships as %s, the update script restarts %s", got, service)
+	}
+	if got := helperArm(t, RestartService); got != "restart "+service {
+		t.Errorf("the helper's %s arm runs systemctl %s, want restart %s", RestartService, got, service)
+	}
+
+	unit := readUnitFile(t, shippedDaemonUnit)
+	values := map[string][]string{}
+	for _, a := range unit.assignments {
+		if a.section == "Service" {
+			values[a.key] = append(values[a.key], a.value)
+		}
+	}
+	if got := values["ExecStart"]; len(got) != 1 || got[0] != bin {
+		t.Errorf("%s: ExecStart=%q, want exactly %s, the binary the update script replaces", unit.name, got, bin)
+	}
+	if got := values["Type"]; len(got) != 1 || got[0] != "simple" {
+		t.Errorf("%s: Type=%q, want simple: the update's health check, not the start job, says whether it came up", unit.name, got)
+	}
+	env := map[string]string{}
+	for _, v := range values["Environment"] {
+		k, val, _ := strings.Cut(v, "=")
+		env[k] = val
+	}
+	if v, ok := env["HOLZKUBE_MANAGER_LISTEN"]; ok {
+		t.Errorf("%s sets HOLZKUBE_MANAGER_LISTEN=%s; the update's health check asks %s, so the shipped unit keeps the default", unit.name, v, healthURL)
+	}
+	if got := env["HOLZKUBE_MANAGER_DATA_DIR"]; got != "/var/lib/holzkube-manager" {
+		t.Errorf("%s: HOLZKUBE_MANAGER_DATA_DIR=%q, want /var/lib/holzkube-manager, the directory the helper watches", unit.name, got)
+	}
+	if got := values["StateDirectory"]; len(got) != 1 || got[0] != "holzkube-manager" {
+		t.Errorf("%s: StateDirectory=%q, want holzkube-manager", unit.name, got)
+	}
+	pathUnit := readUnitFile(t, shippedPathUnit)
+	for _, a := range pathUnit.assignments {
+		if a.key == "PathExists" && filepath.Dir(a.value) != env["HOLZKUBE_MANAGER_DATA_DIR"] {
+			t.Errorf("the helper watches %s, outside the daemon unit's data directory %s", a.value, env["HOLZKUBE_MANAGER_DATA_DIR"])
+		}
+	}
+	for _, line := range daemonHardening {
+		k, v, _ := strings.Cut(line, "=")
+		if got := values[k]; len(got) != 1 || got[0] != v {
+			t.Errorf("%s: %s=%q, want exactly %s, as the helper guide names the reference unit's", unit.name, k, got, line)
+		}
+	}
+
+	// The default --listen, from the daemon's own option table.
+	cfg, err := config.LoadWith(nil, nil, t.TempDir())
+	if err != nil {
+		t.Fatalf("load the daemon's defaults: %v", err)
+	}
+	if !strings.HasPrefix(healthURL, "https://"+cfg.Listen+"/") {
+		t.Errorf("the update script asks %s, the daemon listens on %s by default", healthURL, cfg.Listen)
+	}
+
+	guideData, err := os.ReadFile(userGuide)
+	if err != nil {
+		t.Fatalf("read the guide: %v", err)
+	}
+	guide := string(guideData)
+	block := guideBlockNamed(t, guide, "daemon-unit-commands")
+	for _, want := range []string{
+		" holzkube-managerd " + bin + "\n",
+		" deploy/" + service + " /etc/systemd/system/\n",
+		"sudo systemctl enable --now " + service,
+	} {
+		if !strings.Contains(block+"\n", want) {
+			t.Errorf("the guide's daemon install block has no %q:\n%s", strings.TrimSpace(want), block)
+		}
+	}
 }
 
 // TestGuideKeepsTheDaemonsHardening: the guide says the daemon's unit stays as

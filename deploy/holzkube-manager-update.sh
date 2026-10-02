@@ -10,6 +10,13 @@
 # Voraussetzungen auf dem Host: curl, tar, python3, systemd. Alle sind auf einem
 # Debian-Standardsystem vorhanden; jq bewusst nicht, weil es das nicht ist.
 #
+# Und der Aufbau, fuer den das Release gebaut ist: der Daemon als
+# /usr/local/bin/holzkube-managerd, gestartet von holzkube-manager.service,
+# erreichbar unter https://127.0.0.1:8443 (das voreingestellte --listen, oder
+# 0.0.0.0:8443). Ein Lauf, der installieren darf, prueft das, bevor er
+# irgendetwas laedt, und verweigert sich sonst mit einem Grund (docs/guide.md,
+# "Running it as a service").
+#
 # Ist das Repository oeffentlich, braucht es nichts weiter. Ist es privat, legt
 # man einen fine-grained PAT mit "Contents: read" auf genau dieses Repository
 # nach /etc/holzkube-manager/github-token, root-only 0600 - mehr Rechte braucht
@@ -49,12 +56,20 @@ cd /
 # dieses Hosts anfassen darf:
 #
 #   HOLZKUBE_MANAGER_UPDATE_CONF        /etc/holzkube-manager/update.conf
+#   HOLZKUBE_MANAGER_SERVICE            holzkube-manager.service
 #   HOLZKUBE_MANAGER_BIN                /usr/local/bin/holzkube-managerd
 #   HOLZKUBE_MANAGER_PREVIOUS           /usr/local/lib/holzkube-manager/holzkube-managerd.previous
 #   HOLZKUBE_MANAGER_TOKEN_FILE         /etc/holzkube-manager/github-token
 #   HOLZKUBE_MANAGER_HEALTH_URL         https://127.0.0.1:8443/api/v1/system/status
 #   HOLZKUBE_MANAGER_UPDATE_STATUS_DIR  /var/lib/holzkube-manager-update
 #   HOLZKUBE_MANAGER_UPDATE_LOCK_WAIT   60 mit --check, sonst 600 (Sekunden)
+#
+# update.conf wird unten gelesen, bevor diese Werte gelten, und darf darum
+# zwei davon fuer einen Host setzen, der anders aufgebaut ist:
+# HOLZKUBE_MANAGER_SERVICE (die Unit des Daemons heisst anders) und
+# HOLZKUBE_MANAGER_HEALTH_URL (der Daemon lauscht nicht auf 127.0.0.1:8443).
+# Die Pfade nicht: holzkube-manager-update.service darf nur die
+# voreingestellten schreiben.
 
 # Woher die Releases kommen. Ein Repo, seit die beiden am 2026-09-03 wieder
 # zusammengelegt wurden. CONF darf es ueberschreiben, ohne das Skript zu
@@ -66,7 +81,7 @@ CONF=${HOLZKUBE_MANAGER_UPDATE_CONF:-/etc/holzkube-manager/update.conf}
 # shellcheck source=/dev/null
 [[ -r $CONF ]] && . "$CONF"
 
-SERVICE=holzkube-manager.service
+SERVICE=${HOLZKUBE_MANAGER_SERVICE:-holzkube-manager.service}
 BIN=${HOLZKUBE_MANAGER_BIN:-/usr/local/bin/holzkube-managerd}
 PREVIOUS=${HOLZKUBE_MANAGER_PREVIOUS:-/usr/local/lib/holzkube-manager/holzkube-managerd.previous}
 TOKEN_FILE=${HOLZKUBE_MANAGER_TOKEN_FILE:-/etc/holzkube-manager/github-token}
@@ -89,7 +104,7 @@ for arg in "$@"; do
     --check)    CHECK_ONLY=1 ;;
     --force)    FORCE=1 ;;
     --rollback) ROLLBACK=1 ;;
-    -h|--help)  sed -n '2,29p' "$SELF" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help)  awk 'NR == 1 { next } /^#/ { sub(/^# ?/, ""); print; next } { exit }' "$SELF"; exit 0 ;;
     *) echo "FEHLER: unbekannte Option $arg" >&2; exit 1 ;;
   esac
 done
@@ -323,6 +338,79 @@ command -v curl    >/dev/null || fail "curl fehlt"
 command -v tar     >/dev/null || fail "tar fehlt"
 command -v python3 >/dev/null || fail "python3 fehlt"
 
+# healthy fragt einmal, ob der Dienst laeuft und unter $HEALTH_URL antwortet.
+healthy() {
+  systemctl is-active --quiet "$SERVICE" \
+    && curl -sk --max-time 5 "$HEALTH_URL" | grep -q '"audit_chain"'
+}
+
+# wait_healthy fragt hoechstens $1 Mal, mit einer Sekunde Pause dazwischen.
+wait_healthy() {
+  local tries=$1
+  for _ in $(seq 1 "$tries"); do
+    healthy && return 0
+    sleep 1
+  done
+  return 1
+}
+
+# --- Passt dieser Host zu dem, was das Skript ersetzt? ----------------------
+# Ein Update ersetzt $BIN und startet $SERVICE neu, und "updated" oder
+# "current" ist nur dort wahr, wo $SERVICE genau $BIN startet und unter
+# $HEALTH_URL antwortet. Sonst installierte das Skript ein Binary, das niemand
+# startet, und hielte es ab der naechsten Stunde fuer aktuell; oder es hielte
+# "updated" fest, waehrend der alte Prozess weiterlaeuft; oder es rollte jede
+# Stunde zurueck, weil die Pruefung eine Adresse fragt, auf der niemand
+# lauscht (13-REVIEW-3 CR-01). Darum fragt jeder Lauf, der installieren darf,
+# zuerst -- ohne Netz, ohne etwas anzufassen -- und verweigert sich sonst: das
+# haelt "failed" fest, und hier steht, warum.
+#
+# Gefragt wird, was der Neustart ausfuehren wird: ExecStart= der geladenen
+# Unit, wie PID 1 sie kennt. Ein Pfad, der ueber einen Symlink auf $BIN zeigt,
+# zaehlt; ein Wrapper, ein anderer Pfad oder mehr als ein ExecStart= nicht.
+# Laeuft der Dienst gerade nicht, wird er vorher nicht gefragt: das Update
+# kann das sein, was ihn zurueckbringt, und die Pruefung nach dem Neustart
+# entscheidet.
+#
+# --check fragt das nicht: es installiert nichts und startet nichts neu.
+check_host() {
+  local load exec_paths resolved
+  load=$(systemctl show --value -p LoadState "$SERVICE" 2>/dev/null) || load=""
+  [[ $load == loaded ]] || fail "$SERVICE ist hier nicht installiert (LoadState=${load:-unbekannt}).
+Dieses Skript ersetzt $BIN und startet $SERVICE neu. Ohne diese Unit laege ein
+neues Binary da, das niemand startet, und die naechste Stunde hielte es fuer
+aktuell. Wie der Daemon als $SERVICE laeuft, sagt docs/guide.md, \"Running it
+as a service\"; heisst seine Unit anders, gehoert ihr Name als
+HOLZKUBE_MANAGER_SERVICE nach $CONF. Nichts geladen, nichts installiert."
+
+  exec_paths=$(systemctl show --value -p ExecStart "$SERVICE" 2>/dev/null \
+    | sed -n 's/^{ path=\([^ ;]*\) ;.*$/\1/p') || exec_paths=""
+  if [[ -z $exec_paths || $exec_paths == *$'\n'* ]]; then
+    fail "$SERVICE hat nicht genau ein ExecStart=, das sich lesen laesst.
+Ein Update ersetzt $BIN; ob der Neustart das ausfuehrt, ist so nicht zu sagen.
+Nichts geladen, nichts installiert."
+  fi
+  resolved=$(readlink -f -- "$exec_paths" 2>/dev/null) || resolved=""
+  [[ $exec_paths == "$BIN" || $resolved == "$BIN" ]] || fail "$SERVICE startet $exec_paths, nicht $BIN.
+Ein Update ersetzte $BIN, der Neustart liesse $exec_paths laufen, und die
+Pruefung danach saehe den alten Prozess als das neue Release. Nichts geladen,
+nichts installiert."
+
+  if systemctl is-active --quiet "$SERVICE"; then
+    wait_healthy 3 || fail "$SERVICE laeuft, antwortet aber nicht unter $HEALTH_URL.
+Nach einem Update scheiterte dieselbe Pruefung, und jede Stunde rollte zurueck.
+Lauscht der Daemon nicht auf 127.0.0.1:8443 (--listen), gehoert die Adresse,
+unter der er antwortet, als HOLZKUBE_MANAGER_HEALTH_URL nach $CONF. Nichts
+geladen, nichts installiert."
+  else
+    log "$SERVICE laeuft gerade nicht; ob es unter $HEALTH_URL antwortet, zeigt der Neustart."
+  fi
+}
+
+if [[ $CHECK_ONLY -eq 0 ]]; then
+  check_host
+fi
+
 # Der Token ist optional, und zwar nach Lage des Repositories statt nach
 # Konfiguration: ein oeffentliches Release laedt anonym, ein privates nicht. Die
 # Datei wird gelesen, wenn sie da ist, und sonst nicht vermisst - so muss beim
@@ -504,13 +592,7 @@ systemctl restart "$SERVICE"
 # Ein Update, das den Dienst kaputtmacht und "fertig" meldet, ist schlimmer als
 # eines, das scheitert: niemand sieht nach.
 ok=0
-for _ in $(seq 1 20); do
-  if systemctl is-active --quiet "$SERVICE" \
-     && curl -sk --max-time 5 "$HEALTH_URL" | grep -q '"audit_chain"'; then
-    ok=1; break
-  fi
-  sleep 1
-done
+wait_healthy 20 && ok=1
 
 if [[ $ok -eq 1 ]]; then
   # Das Archiv traegt dieses Skript mit. Es ersetzt sich erst, nachdem der
