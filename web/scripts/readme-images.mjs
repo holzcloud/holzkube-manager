@@ -61,19 +61,6 @@ async function card(file, width, height, body) {
 }
 
 await card(
-  'banner.png',
-  1280,
-  320,
-  `<div style="display:flex;align-items:center;gap:44px;height:100%;padding:0 72px">
-    <div style="width:168px;height:168px;flex:none;display:grid;place-items:center">${sized(168)}</div>
-    <div>
-      <div class="t" style="font-size:64px">holzkube-manager</div>
-      <div class="s" style="font-size:22px;margin:14px 0 22px">Self-hosted management for Talos Linux and Kubernetes.<br>One binary, running beside your cluster.</div>
-      <div class="pills"><span>Talos Linux</span><span>Kubernetes</span><span>Live hardware</span><span>Single binary</span><span>arm64 · amd64</span></div>
-    </div>
-  </div>`,
-)
-await card(
   'social.png',
   1280,
   640,
@@ -312,6 +299,55 @@ await strip.setContent(`<!doctype html><style>
     box-shadow: 0 18px 40px rgb(0 0 0 / .35) }
 </style><div>${phones.map((b) => `<img src="data:image/png;base64,${b}">`).join('')}</div>`)
 await strip.screenshot({ path: join(shots, 'phone.png'), omitBackground: true })
+
+// The banner: the family's arrangement (holzcloud-design, the same for every
+// program) -- the app icon and the name, the sentence, a row of what it is with
+// the first one filled, and the dashboard on a screen turned slightly towards
+// the text. The screen is this daemon's own dashboard on the demo homelab,
+// taken at 1440x900 and 5/3 so that it stays sharp at the size it is drawn.
+const hero = await context(1440, 900, 5 / 3)
+await hero.page.goto(base + '/')
+await hero.page.waitForTimeout(3000)
+await hero.page.mouse.move(0, 0)
+const dashboard = (await hero.page.screenshot({ type: 'jpeg', quality: 90 })).toString('base64')
+await hero.c.close()
+const icon = readFileSync(join(root, 'web/public/favicon.svg'), 'utf8').replace(/<!--[\s\S]*?-->/g, '')
+{
+  const page = await browser.newPage({ viewport: { width: 1600, height: 400 }, deviceScaleFactor: 2 })
+  await page.setContent(`<!doctype html><meta charset="utf-8"><style>
+    @font-face { font-family: Manrope; src: url(${font}) format("woff2"); font-weight: 200 800 }
+    * { margin: 0; box-sizing: border-box }
+    html, body { width: 1600px; height: 400px; overflow: hidden }
+    body { font-family: Manrope, sans-serif; color: #f6efe6; position: relative; display: flex; align-items: center;
+      background: radial-gradient(520px 380px at 120px 80px, color-mix(in oklab, #ef7a4d 22%, transparent), transparent 70%),
+        radial-gradient(600px 400px at 1300px 200px, color-mix(in oklab, #ef7a4d 10%, transparent), transparent 70%), #140806 }
+    .t { font-weight: 780; letter-spacing: -.035em; line-height: 1 }
+    .s { color: rgb(246 239 230 / .82); font-weight: 450 }
+    .pills { display: flex; gap: 12px; flex-wrap: wrap }
+    .pills span { font-size: 17px; font-weight: 600; padding: 8px 16px; border-radius: 999px; color: #ef7a4d;
+      border: 1.5px solid color-mix(in oklab, #ef7a4d 45%, transparent); background: color-mix(in oklab, #ef7a4d 8%, transparent) }
+    .pills span:first-child { background: #ef7a4d; color: #140806; border-color: #ef7a4d }
+    .icon svg { width: 96px; height: 96px; display: block }
+  </style>
+  <div style="padding-left:80px;width:860px;flex:none">
+    <div style="display:flex;align-items:center;gap:26px">
+      <div class="icon" style="border-radius:22px;overflow:hidden;box-shadow:0 10px 30px rgb(0 0 0 / .45)">${icon}</div>
+      <div class="t" style="font-size:72px">holzkube-manager</div>
+    </div>
+    <div class="s" style="font-size:25px;line-height:1.38;margin:20px 0 24px">Self-hosted management for Talos Linux and Kubernetes.<br>One binary, running beside your cluster.</div>
+    <div class="pills"><span>Alpha</span><span>Talos Linux</span><span>Kubernetes</span><span>Single binary</span><span>arm64 · amd64</span></div>
+  </div>
+  <div style="position:absolute;right:30px;top:0;bottom:0;width:680px;perspective:1200px;display:flex;align-items:center;justify-content:center">
+    <div style="width:540px;height:338px;border-radius:14px;overflow:hidden;transform:rotateY(-12deg) rotateX(5deg) rotateZ(.5deg);
+      border:1px solid color-mix(in oklab, #ef7a4d 40%, transparent);
+      box-shadow:-34px 40px 60px rgb(0 0 0 / .6), 0 0 0 6px color-mix(in oklab, #ef7a4d 8%, transparent)">
+      <img src="data:image/jpeg;base64,${dashboard}" style="width:100%;height:100%;object-fit:cover;object-position:0 0;display:block">
+    </div>
+  </div>`)
+  await page.evaluate(() => document.fonts.ready)
+  await page.screenshot({ path: join(brand, 'banner.png') })
+  await page.close()
+}
 
 await browser.close()
 // The daemon writes its metrics history into `dir` on SIGTERM; removing the

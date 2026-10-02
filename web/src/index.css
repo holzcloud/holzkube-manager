@@ -18,6 +18,15 @@
    and .github/scripts/check-design.sh fails the build on the first value
    that no longer matches. A copy drifts; this one cannot drift silently.
 
+   One family is copied from elsewhere: the accent. holzcloud-design's
+   tokens.css carries brass #F0AE5F, holzcloud's own; holzkube-manager's brand
+   colour is Glut #EF7A4D since 2026-10 (the owner's decision,
+   docs/brand/README.md), and the interface accent follows it. --hc-brass,
+   -soft, -wash, --hc-wash-brass and --hc-pane-lift therefore hold Glut, the
+   values of the holzkube scope in holzcloud-design's css/programs.css (since
+   v1.1.0), and check-design.sh compares those five with that scope.
+   The names stay: renaming forty uses would churn without changing a pixel.
+
    Everything below --hc-* is a mapping, not a new palette. shadcn's
    semantic names (--background, --card, --primary, --ring, --sidebar-*)
    are redefined in terms of the tokens. Nothing in this file invents a
@@ -30,7 +39,7 @@
   --hc-ground: #0a0705;
   --hc-ground-2: #140d08;
   --hc-wash-warm: rgb(138 83 38 / 0.55);
-  --hc-wash-brass: rgb(240 174 95 / 0.28);
+  --hc-wash-brass: rgb(239 122 77 / 0.28);
   --hc-wash-violet: rgb(107 63 122 / 0.26);
   --hc-ground-image:
     radial-gradient(60% 50% at 20% 16%, var(--hc-wash-warm) 0%, transparent 100%),
@@ -54,16 +63,21 @@
      strength - which their positions make geometrically impossible, so
      the real page is always better than this:
 
-       damping   ink-3   brass   danger
-       1.00      2.91    3.67    2.69     every role fails
-       0.45      4.16    6.44    4.72     ink-3 still fails
-       0.28      4.69    7.97    5.84     all roles hold
+       damping   ink-3   accent  danger
+       1.00      3.10    2.82    2.98     every role fails
+       0.45      4.28    4.70    4.98     ink-3 still fails
+       0.28      4.75    5.68    6.01     all roles hold
+
+     Re-measured for the Glut accent (2026-10): the accent wash is redder
+     and darker than brass was, so ink-3 and danger gain a little and the
+     accent itself, being darker, has less to stand on. Brass measured
+     4.69 / 7.97 / 5.84 at 0.28.
 
      The --hc-* tokens above keep the template's values untouched, so
      check-design.sh still compares like with like. Only the image this
      application paints is different, and it says so here. */
   --hk-wash-warm: rgb(138 83 38 / 0.154);
-  --hk-wash-brass: rgb(240 174 95 / 0.078);
+  --hk-wash-brass: rgb(239 122 77 / 0.078);
   --hk-wash-violet: rgb(107 63 122 / 0.073);
   --hk-ground-image:
     radial-gradient(60% 50% at 20% 16%, var(--hk-wash-warm) 0%, transparent 100%),
@@ -71,10 +85,12 @@
     radial-gradient(55% 48% at 60% 95%, var(--hk-wash-violet) 0%, transparent 100%),
     linear-gradient(160deg, var(--hc-ground-2) 0%, var(--hc-ground) 100%);
 
-  /* ── Bernstein ─────────────────────────────────────────────────── */
-  --hc-brass: #f0ae5f;
-  --hc-brass-soft: rgb(240 174 95 / 0.4);
-  --hc-brass-wash: rgb(240 174 95 / 0.1);
+  /* ── Akzent: Glut ──────────────────────────────────────────────────
+     Named brass for history; the value is Glut #EF7A4D. --hc-on-brass is
+     the template's own dark ink and stays: 6.88:1 on Glut. */
+  --hc-brass: #ef7a4d;
+  --hc-brass-soft: rgb(239 122 77 / 0.4);
+  --hc-brass-wash: rgb(239 122 77 / 0.1);
   --hc-on-brass: #150e08;
 
   /* ── Schrift ───────────────────────────────────────────────────── */
@@ -86,7 +102,7 @@
   --hc-pane: rgb(255 248 240 / 0.055);
   --hc-pane-solid: #20150d;
   --hc-pane-edge: rgb(255 226 190 / 0.14);
-  --hc-pane-lift: rgb(240 174 95 / 0.4);
+  --hc-pane-lift: rgb(239 122 77 / 0.4);
   --hc-hairline: rgb(255 226 190 / 0.1);
   --hc-pane-bar: rgb(14 9 5 / 0.55);
   --hc-pane-bar-solid: rgb(14 9 5 / 0.97);
@@ -132,7 +148,7 @@
   /* ══════════════════════════════════════════════════════════════════
      The light counterpart.
 
-     holzcloud-design is a dark language: one ground, one ink, one brass.
+     holzcloud-design is a dark language: one ground, one ink, one accent.
      This application has a theme toggle and therefore needs a light half
      the template does not define. It is derived rather than invented -
      the same warm family, mirrored, and every value below was measured
@@ -141,30 +157,34 @@
        ink on ground              17.20  (dark: 17.61)
        ink-2 on ground             7.69  (dark:  8.66)
        ink-3 on ground             5.60  (dark:  5.11)  AA for body text
-       brass-ink on ground         5.84  (dark: 10.45)
+       brass-ink on ground         6.07  (dark: Glut itself, 7.23)
 
-     --hc-brass stays #F0AE5F as a FILL - it is the brand - but at 1.79 on
-     paper it cannot carry text or a border. --hcl-brass-ink is that same
-     hue taken down to where it can, and it is not a new colour: #8A5326
-     is the base of --hc-wash-warm, already in the template.
+     --hc-brass stays Glut #EF7A4D as a FILL - it is the brand - but at
+     2.58 on paper it cannot carry text or a border. --hcl-brass-ink is
+     that same hue taken down to where it can: #8F4B31 is Glut in OKLCH
+     (hue 41) at L 0.49, C 0.10 - 6.07 on the ground, 6.52 on white, so
+     it keeps the 5.84 / 6.28 the brass-era #8A5326 measured. The chroma
+     is held at 0.10 rather than Glut's proportion because the redder ink
+     sits close to --hcl-danger #A32C1A: 6.4 apart in OKLab, the most this
+     hue allows at that lightness.
 
      ink-3 sits at .65 rather than the .60 that mirrors the dark half, and
      the difference was measured rather than chosen: where all three light
-     washes overlap, the ground lifts to #EBDCCF and .60 falls to 4.38:1 -
+     washes overlap, the ground lifts to #ECD7CD and .60 falls to 4.33:1 -
      under AA, on the role that carries field hints and table captions.
-     .65 holds 5.12 at that point and 5.60 on the plain ground.
+     .65 holds 5.04 at that point and 5.60 on the plain ground.
      ══════════════════════════════════════════════════════════════════ */
   --hcl-ground: #fbf6ef;
   --hcl-ground-2: #f5ede2;
   --hcl-ground-image:
     radial-gradient(60% 50% at 20% 16%, rgb(138 83 38 / 0.07) 0%, transparent 100%),
-    radial-gradient(46% 40% at 84% 26%, rgb(240 174 95 / 0.1) 0%, transparent 100%),
+    radial-gradient(46% 40% at 84% 26%, rgb(239 122 77 / 0.1) 0%, transparent 100%),
     radial-gradient(55% 48% at 60% 95%, rgb(107 63 122 / 0.05) 0%, transparent 100%),
     linear-gradient(160deg, var(--hcl-ground-2) 0%, var(--hcl-ground) 100%);
   --hcl-ink: #1a120b;
   --hcl-ink-2: rgb(26 18 11 / 0.74);
   --hcl-ink-3: rgb(26 18 11 / 0.65);
-  --hcl-brass-ink: #8a5326;
+  --hcl-brass-ink: #8f4b31;
   --hcl-pane: #ffffff;
   --hcl-pane-edge: rgb(26 18 11 / 0.22);
   --hcl-hairline: rgb(26 18 11 / 0.12);
@@ -181,15 +201,15 @@
   --card-foreground: var(--hcl-ink);
   --popover: var(--hcl-pane);
   --popover-foreground: var(--hcl-ink);
-  /* Brass is the primary action, and the dark ink on it is the template's
-     own --hc-on-brass: 9.95:1, so a filled button reads at any size. */
+  /* Glut is the primary action, and the dark ink on it is the template's
+     own --hc-on-brass: 6.88:1, over AA's 4.5 at any size. */
   --primary: var(--hc-brass);
   --primary-foreground: var(--hc-on-brass);
   --secondary: var(--hcl-ground-2);
   --secondary-foreground: var(--hcl-ink);
   --muted: var(--hcl-ground-2);
   --muted-foreground: var(--hcl-ink-3);
-  --accent: rgb(240 174 95 / 0.18);
+  --accent: rgb(239 122 77 / 0.18);
   --accent-foreground: var(--hcl-brass-ink);
   /* G-01-4 held: the destructive badge is text-destructive on
      bg-destructive/10. #A32C1A on that wash over white is 5.88:1, up from
@@ -202,22 +222,23 @@
   --border: var(--hcl-pane-edge);
   /* G-01-2 held: an input's fill is the same white as the card, so its
      border is the only cue that a control is there - WCAG 1.4.11's 3:1.
-     #8A5326 is 6.28:1 on white, well clear of it. */
+     #8F4B31 is 6.52:1 on white, well clear of it. */
   --input: var(--hcl-brass-ink);
   /* G-01-3 held: the focus indicator must carry on its own, not as a
-     halo. 5.84:1 on the ground, 6.28 on a pane. */
+     halo. 6.07:1 on the ground, 6.52 on a pane. */
   --ring: var(--hcl-brass-ink);
   --chart-1: var(--hc-brass);
   --chart-2: var(--hcl-brass-ink);
   --chart-3: var(--hcl-info);
   --chart-4: var(--hcl-ok);
   --chart-5: var(--hcl-warn);
-  /* Live charts (2026-09-26). Two series at most per chart - brass and a
-     cool blue, stepped into each mode's band and run through the dataviz
-     validator on the pane they sit on (#ffffff here, #20150d dark): every
-     check passes, worst adjacent CVD dE 26. Status is NOT drawn from these:
+  /* Live charts (2026-09-26). Two series at most per chart - Glut and a
+     cool blue, stepped into each mode's band (Glut's OKLCH hue 41 at L 0.58
+     here, 0.645 dark, C 0.15) and run through the dataviz validator on the
+     pane they sit on (#ffffff here, #20150d dark): every check passes,
+     worst adjacent CVD dE 24. Status is NOT drawn from these:
      a meter that means "too hot" uses --viz-ok/--viz-warn/--viz-danger. */
-  --viz-series-1: #b0651c;
+  --viz-series-1: #c15529;
   --viz-series-2: #2a78d6;
   --viz-grid: var(--hcl-hairline);
   --viz-track: rgb(26 18 11 / 0.08);
@@ -232,10 +253,10 @@
   --sidebar-primary: var(--hc-brass);
   --sidebar-primary-foreground: var(--hc-on-brass);
   /* G-01-5 held: the active nav pill was a 5/255 step off its sidebar and
-     the active label looked like the inactive ones. Brass at 18% is a
+     the active label looked like the inactive ones. Glut at 18% is a
      step no one can miss, and the label takes --accent-foreground with
      it, so colour and weight both change. */
-  --sidebar-accent: rgb(240 174 95 / 0.18);
+  --sidebar-accent: rgb(239 122 77 / 0.18);
   --sidebar-accent-foreground: var(--hcl-brass-ink);
   --sidebar-border: var(--hcl-pane-edge);
   --sidebar-ring: var(--hcl-brass-ink);
@@ -304,7 +325,8 @@
 /* ── shadcn-Abbildung, dunkel ─────────────────────────────────────
    This is the template in its native form; nothing here is derived.
    Measured on the dark ground: ink 17.61, ink-2 8.66, ink-3 5.11,
-   brass 10.45, danger 7.65, ok 9.63, warn 11.68, info 9.58. */
+   Glut 7.23, danger 7.65, ok 9.63, warn 11.68, info 9.58. Glut on its
+   own wash over a pane (the active nav pill, --accent-foreground) 5.57. */
 .dark {
   color-scheme: dark;
   --background: var(--hc-ground);
@@ -337,7 +359,7 @@
   --chart-3: var(--hc-ok);
   --chart-4: var(--hc-warn);
   --chart-5: var(--hc-danger);
-  --viz-series-1: #c47a2c;
+  --viz-series-1: #d7693e;
   --viz-series-2: #3987e5;
   --viz-grid: var(--hc-hairline);
   --viz-track: rgb(255 226 190 / 0.08);
@@ -358,8 +380,8 @@
   * {
     /* G-01-3: this outline - not the component's ring - is what paints
        when :focus-visible does not match, e.g. a click into a field. It
-       is the ring colour at full strength: brass at 9.30:1 on a dark
-       pane, #8A5326 at 5.84 on light paper. */
+       is the ring colour at full strength: Glut at 6.44:1 on a dark
+       pane, #8F4B31 at 6.07 on light paper. */
     @apply border-border outline-ring;
   }
   body {
@@ -400,7 +422,7 @@
     mask-repeat: repeat;
   }
   /* On paper the same texture at the same opacity is dirt rather than
-     depth - the brass has nothing to glow against. Half strength. */
+     depth - the accent has nothing to glow against. Half strength. */
   :root:not(.dark) body::before {
     opacity: 0.045;
   }

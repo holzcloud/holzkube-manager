@@ -14,10 +14,11 @@ its top face.
 | `social.png` | the card GitHub shows when the repository is shared (Settings → Social preview), 1280×640 |
 
 Glut `#EF7A4D` is the brand colour of the mark, the banner and the README
-badges. The plank is wood: `#C98B4F`, lit `#E0A869`, grain `#9B6534`. The
-interface itself still uses its own brass `#F0AE5F` (`--hc-brass` in
-`web/src/index.css`); the brand colour and the interface accent are separate
-decisions.
+badges, and since 2026-10 also the accent of the interface: `--hc-brass` in
+`web/src/index.css` holds `#EF7A4D` (the name is older than the colour), and on
+light paper text and borders take the darker `#8F4B31`, which keeps the
+contrast the brass-era ink had. The plank is wood: `#C98B4F`, lit `#E0A869`,
+grain `#9B6534`.
 
 The PNGs here, the home-screen icons and every picture in `../screenshots` are rendered, not drawn:
 

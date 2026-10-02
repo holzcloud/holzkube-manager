@@ -20,7 +20,7 @@ import { LIVE_WINDOW_MS } from '@/hooks/useLiveSeries'
 export interface LiveSeries {
   key: string
   label: string
-  /** Categorical slot: 1 is brass, 2 is blue. Validated as a pair. */
+  /** Categorical slot: 1 is Glut, 2 is blue. Validated as a pair. */
   slot: 1 | 2
   points: Point[]
 }
