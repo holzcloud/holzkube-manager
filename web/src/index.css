@@ -18,12 +18,13 @@
    and .github/scripts/check-design.sh fails the build on the first value
    that no longer matches. A copy drifts; this one cannot drift silently.
 
-   One family departs from that copy on purpose: the accent. holzcloud-design
-   v1.0.2 carries brass #F0AE5F; holzkube-manager's brand colour is Glut
-   #EF7A4D since 2026-10 (the owner's decision, docs/brand/README.md), and the
-   interface accent follows it. --hc-brass, -soft, -wash, --hc-wash-brass and
-   --hc-pane-lift therefore hold Glut, and check-design.sh will report
-   those five against v1.0.2 until the design system carries Glut itself.
+   One family is copied from elsewhere: the accent. holzcloud-design's
+   tokens.css carries brass #F0AE5F, holzcloud's own; holzkube-manager's brand
+   colour is Glut #EF7A4D since 2026-10 (the owner's decision,
+   docs/brand/README.md), and the interface accent follows it. --hc-brass,
+   -soft, -wash, --hc-wash-brass and --hc-pane-lift therefore hold Glut, the
+   values of the holzkube scope in holzcloud-design's css/programs.css (since
+   v1.1.0), and check-design.sh compares those five with that scope.
    The names stay: renaming forty uses would churn without changing a pixel.
 
    Everything below --hc-* is a mapping, not a new palette. shadcn's
