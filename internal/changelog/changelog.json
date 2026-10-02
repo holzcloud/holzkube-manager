@@ -24,6 +24,10 @@
         "text": "Settings → Accounts can unlink an account from single sign-on, so you can move to another identity provider. Unlinking ends the sessions that came in through that link; the next single sign-on from the local network links the new provider and is recorded in the audit log. Service accounts no longer block linking, and an address that only accepts single sign-on no longer answers \"setup required\" when there is more than one account."
       },
       {
+        "icon": "🎨",
+        "text": "A new mark and a new colour: the wooden plank with its node, in Glut. The interface's accent follows it — buttons, the selected navigation entry, focus rings and the first line of every chart are Glut now instead of brass. Text and borders in that colour still meet their contrast targets in the light and the dark theme."
+      },
+      {
         "icon": "⚠️",
         "text": "Not yet run on real hardware: the host helper, the shipped update units under their sandbox, and the phone hand test. Install the helper per deploy/HOST-HELPER.md and start with Check for updates, which changes nothing."
       }
