@@ -1,5 +1,35 @@
 [
   {
+    "version": "v0.2.0",
+    "date": "2026-10-02",
+    "changes": [
+      {
+        "icon": "🖥️",
+        "text": "New Host page: the machine holzkube-manager runs on — device, service, live CPU, memory, filesystems, temperatures and network, with history over 1 h, 6 h and 24 h, a warning that names its reason, and a tile on the wall. What the service's hardening hides is shown as \"not readable\", never as 0."
+      },
+      {
+        "icon": "🔁",
+        "text": "Five host actions on /host: check for updates (installs nothing), check for updates and install, restart the service, restart the host, shut it down. Each needs the operator role, a fresh re-authentication and the typed host name, and is in the audit log. holzkube-manager never does them itself: a small root-owned helper from deploy/ carries them out, and the page says what to install while it is missing or too old."
+      },
+      {
+        "icon": "📦",
+        "text": "The hourly update now ships as units in deploy/ (holzkube-manager-update.service and .timer, plus a unit for the daemon itself). The update script checks the host before it installs, rolls back when the restart fails, and never runs twice at once. Your hand-made units keep working; deploy/HOST-HELPER.md says how to switch to the shipped ones."
+      },
+      {
+        "icon": "📱",
+        "text": "On a phone every control is at least 44 px, also inside menus and dialogs; the build fails when one is smaller. Nothing changes above tablet width."
+      },
+      {
+        "icon": "🔐",
+        "text": "Settings → Accounts can unlink an account from single sign-on, so you can move to another identity provider. Unlinking ends the sessions that came in through that link; the next single sign-on from the local network links the new provider and is recorded in the audit log. Service accounts no longer block linking, and an address that only accepts single sign-on no longer answers \"setup required\" when there is more than one account."
+      },
+      {
+        "icon": "⚠️",
+        "text": "Not yet run on real hardware: the host helper, the shipped update units under their sandbox, and the phone hand test. Install the helper per deploy/HOST-HELPER.md and start with Check for updates, which changes nothing."
+      }
+    ]
+  },
+  {
     "version": "v0.1.0",
     "date": "2026-09-27",
     "changes": [
