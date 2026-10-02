@@ -439,14 +439,10 @@ func fakeDaemon(version string) string {
 	return "#!/bin/sh\necho \"holzkube-managerd " + version + "\"\n"
 }
 
-func releaseArchive(t *testing.T, daemon string) []byte {
-	t.Helper()
-	return releaseArchiveWith(t, daemon, "")
-}
-
-// releaseArchiveWith is releaseArchive that also carries
-// deploy/holzkube-manager-update.sh with the content script, unless it is
-// empty -- as a real release does, and as the script replaces itself from.
+// releaseArchiveWith is the release archive with daemon as holzkube-managerd
+// and, unless script is empty, deploy/holzkube-manager-update.sh with that
+// content -- as a real release carries it, and as the script replaces itself
+// from.
 func releaseArchiveWith(t *testing.T, daemon, script string) []byte {
 	t.Helper()
 	var buf bytes.Buffer
