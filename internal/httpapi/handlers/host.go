@@ -293,8 +293,9 @@ const (
 	hostUpdateScriptMissingDetail = "The update script /usr/local/sbin/holzkube-manager-update is not installed, so no order was placed. The Host page says how to install it."
 	// hostUpdateUnitMissingDetail is the update action's refusal while the
 	// unit it starts is not installed: the other four still go through.
-	hostUpdateUnitMissingDetail = "The unit holzkube-manager-update.service is not installed, so no order was placed. " +
-		`deploy/HOST-HELPER.md, "The hourly update", says how to install it.`
+	// It points at the page, which shows the note with the commands since
+	// 13-17, as the update script's refusal does (13-REVIEW-3 IN-01).
+	hostUpdateUnitMissingDetail = "The unit holzkube-manager-update.service is not installed, so no order was placed. The Host page says how to install it."
 )
 
 // confirmHostAction hands out a token for one host action, to somebody who

@@ -816,8 +816,9 @@ func TestHostUpdateNeedsTheUpdateUnit(t *testing.T) {
 	t.Parallel()
 
 	const code = "conflict.host-update-unit-missing"
-	const detail = "The unit holzkube-manager-update.service is not installed, so no order was placed. " +
-		`deploy/HOST-HELPER.md, "The hourly update", says how to install it.`
+	// The page shows the note since 13-17, so the detail points at it, as the
+	// update script's sibling refusal does (13-REVIEW-3 IN-01).
+	const detail = "The unit holzkube-manager-update.service is not installed, so no order was placed. The Host page says how to install it."
 
 	// refusedUpdate wants code from the confirm route and the action route of
 	// update, no token and nothing placed.
