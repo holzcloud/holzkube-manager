@@ -198,6 +198,7 @@ func (c *Collector) readUnsupported(v View, now time.Time) View {
 		Outdated:                    []hostaction.Missing{},
 		UpdateScript:                []hostaction.Missing{},
 		UpdateUnit:                  []hostaction.Missing{},
+		UpdateTimer:                 []hostaction.Missing{},
 		InstallCommands:             slices.Clone(hostaction.InstallCommands),
 		UpdateScriptInstallCommands: slices.Clone(hostaction.UpdateScriptInstallCommands),
 		UpdateUnitInstallCommands:   slices.Clone(hostaction.UpdateUnitInstallCommands),
@@ -207,6 +208,7 @@ func (c *Collector) readUnsupported(v View, now time.Time) View {
 		v.Actions.Missing = c.cfg.Actions.Missing()
 		v.Actions.UpdateScript = c.cfg.Actions.UpdateScript()
 		v.Actions.UpdateUnit = c.cfg.Actions.UpdateUnit()
+		v.Actions.UpdateTimer = c.cfg.Actions.UpdateTimer()
 	}
 	return v
 }
@@ -239,6 +241,7 @@ func (c *Collector) readActions(container bool) Actions {
 			Outdated:                    []hostaction.Missing{},
 			UpdateScript:                []hostaction.Missing{},
 			UpdateUnit:                  []hostaction.Missing{},
+			UpdateTimer:                 []hostaction.Missing{},
 			InstallCommands:             slices.Clone(hostaction.InstallCommands),
 			UpdateScriptInstallCommands: slices.Clone(hostaction.UpdateScriptInstallCommands),
 			UpdateUnitInstallCommands:   slices.Clone(hostaction.UpdateUnitInstallCommands),
@@ -258,9 +261,10 @@ func (c *Collector) readActions(container bool) Actions {
 		Missing:   missing,
 		Outdated:  outdated,
 		// Whatever missing says: the helper's install commands install
-		// neither the update script nor the hourly update's unit.
+		// neither the update script nor the hourly update's unit and timer.
 		UpdateScript:                box.UpdateScript(),
 		UpdateUnit:                  box.UpdateUnit(),
+		UpdateTimer:                 box.UpdateTimer(),
 		InstallCommands:             slices.Clone(hostaction.InstallCommands),
 		UpdateScriptInstallCommands: slices.Clone(hostaction.UpdateScriptInstallCommands),
 		UpdateUnitInstallCommands:   slices.Clone(hostaction.UpdateUnitInstallCommands),

@@ -233,6 +233,16 @@ describe('the layout guard’s fixtures', () => {
     expect(Array.isArray(installedActions.update_unit_install_commands)).toBe(true)
   })
 
+  it('carries `update_timer` in both /host fixtures as written, the timer there in both', () => {
+    // The same reasoning (13-REVIEW-3 WR-03): the schema reads a missing
+    // update_timer as [], which would hide a fixture that lost the key. The
+    // reference installation has the timer enabled, so neither picture shows
+    // a note about it.
+    const raw = (v: unknown) => (v as { actions: Record<string, unknown> }).actions
+    expect(raw(fixtures['/api/v1/host']).update_timer).toEqual([])
+    expect((helperInstalled as Record<string, unknown>).update_timer).toEqual([])
+  })
+
   it('carries `busy` in both /host fixtures as written, as the daemon sends it', () => {
     // The same reasoning for busy (13-REVIEW-2 V-01): the schema reads a
     // missing one as false, which would hide a fixture that lost the key.

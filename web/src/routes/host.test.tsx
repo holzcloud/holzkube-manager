@@ -2258,6 +2258,101 @@ describe('the update-unit notice (13-17)', () => {
   })
 })
 
+const UPDATE_TIMER_HEADING = 'Nothing runs the update every hour'
+const UPDATE_TIMER = {
+  item: 'update-timer',
+  path: '/etc/systemd/system/holzkube-manager-update.timer',
+}
+const UPDATE_TIMER_NOT_ENABLED = {
+  item: 'update-timer-not-enabled',
+  path: '/etc/systemd/system/timers.target.wants/holzkube-manager-update.timer',
+}
+
+/** The helper, the update script and the update unit installed, the timer not (13-REVIEW-3 WR-03). */
+function updateTimerMissing(overrides: Record<string, unknown> = {}) {
+  return helperInstalled({
+    update_unit: [],
+    update_timer: [UPDATE_TIMER],
+    update_unit_install_commands: UPDATE_UNIT_COMMANDS,
+    ...overrides,
+  })
+}
+
+function updateTimerNotice(): HTMLElement | null {
+  return screen.queryByText(UPDATE_TIMER_HEADING)?.closest('div') ?? null
+}
+
+describe('the update-timer notice (13-REVIEW-3 WR-03)', () => {
+  it('says nothing runs hourly, names the timer, and shows the commands that install and enable it', () => {
+    wrap(<HostView host={hostShape({ actions: updateTimerMissing() })} stale={null} />)
+
+    const notice = updateTimerNotice()
+    if (notice === null) throw new Error('no update-timer notice')
+    expect(notice).toHaveClass('border-slate-500/40')
+    expect(notice).toHaveTextContent(
+      'holzkube-manager-update.timer is what starts the update every hour, and it is not installed or not enabled here. Check for updates and install still works when you press it; nothing else starts it, so the Update check row stops getting newer. The commands install the unit and its timer and enable the timer; where only the timer is not enabled, the last line alone is enough.',
+    )
+    const items = within(notice).getAllByRole('listitem')
+    expect(items.map((li) => li.textContent)).toEqual([
+      '/etc/systemd/system/holzkube-manager-update.timer — the timer, from deploy/holzkube-manager-update.timer',
+    ])
+    expect(notice.querySelector('pre')?.textContent).toBe(UPDATE_UNIT_COMMANDS.join('\n'))
+    expect(within(notice).queryByRole('button')).toBeNull()
+    expect(updateUnitNotice()).toBeNull()
+  })
+
+  it('names the missing enablement when the timer is there but not enabled', () => {
+    wrap(
+      <HostView
+        host={hostShape({
+          actions: updateTimerMissing({ update_timer: [UPDATE_TIMER_NOT_ENABLED] }),
+        })}
+        stale={null}
+      />,
+    )
+    const notice = updateTimerNotice()
+    if (notice === null) throw new Error('no update-timer notice')
+    expect(
+      within(notice)
+        .getAllByRole('listitem')
+        .map((li) => li.textContent),
+    ).toEqual([
+      '/etc/systemd/system/timers.target.wants/holzkube-manager-update.timer — the entry systemctl enable makes for the timer',
+    ])
+  })
+
+  it('shows nothing when the timer is installed and enabled', () => {
+    wrap(
+      <HostView
+        host={hostShape({ actions: updateTimerMissing({ update_timer: [] }) })}
+        stale={null}
+      />,
+    )
+    expect(updateTimerNotice()).toBeNull()
+  })
+
+  it("leaves it to the update-unit notice when the unit is missing too: that one's commands install both", () => {
+    wrap(
+      <HostView
+        host={hostShape({ actions: updateTimerMissing({ update_unit: [UPDATE_UNIT] }) })}
+        stale={null}
+      />,
+    )
+    expect(updateUnitNotice()).not.toBeNull()
+    expect(updateTimerNotice()).toBeNull()
+  })
+
+  it('shows nothing in a container: the container notice already says why', () => {
+    wrap(
+      <HostView
+        host={hostShape({ container: true, actions: updateTimerMissing({ available: false }) })}
+        stale={null}
+      />,
+    )
+    expect(updateTimerNotice()).toBeNull()
+  })
+})
+
 describe('HostPage', () => {
   // The page reads the session's role for the host actions (D-16). Answered
   // here, so no test reaches the network for it.

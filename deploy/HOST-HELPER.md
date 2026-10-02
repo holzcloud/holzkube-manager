@@ -202,6 +202,14 @@ refuses **Check for updates and install** with
 places an order. **Check for updates**, which starts the check unit, and the
 other three do not need it.
 
+It looks for the timer the same way, from files: a regular file (or a link to
+one) at `/etc/systemd/system/holzkube-manager-update.timer`, and the link
+`systemctl enable` leaves at
+`/etc/systemd/system/timers.target.wants/holzkube-manager-update.timer`. With
+either missing, nothing is refused -- the button starts the service, not the
+timer -- but the Host page says that nothing runs the update every hour. It
+does not see a timer stopped with `systemctl stop` until the next boot.
+
 These lines replace units of the same name that were written by hand;
 skipping the block keeps them as they are.
 

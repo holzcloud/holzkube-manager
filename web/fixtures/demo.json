@@ -3417,6 +3417,7 @@
         "sudo install -o root -g root -m 0755 deploy/holzkube-manager-update.sh /usr/local/sbin/holzkube-manager-update"
       ],
       "update_unit": [],
+      "update_timer": [],
       "update_unit_install_commands": [
         "sudo install -d -o root -g root -m 0755 /usr/local/lib/holzkube-manager",
         "sudo install -o root -g root -m 0644 deploy/holzkube-manager-update.service deploy/holzkube-manager-update.timer /etc/systemd/system/",

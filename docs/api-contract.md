@@ -1887,6 +1887,7 @@ out a reboot nobody asked for any more. So:
     "sudo install -o root -g root -m 0755 deploy/holzkube-manager-update.sh /usr/local/sbin/holzkube-manager-update"
   ],
   "update_unit": [],
+  "update_timer": [],
   "update_unit_install_commands": [
     "sudo install -d -o root -g root -m 0755 /usr/local/lib/holzkube-manager",
     "sudo install -o root -g root -m 0644 deploy/holzkube-manager-update.service deploy/holzkube-manager-update.timer /etc/systemd/system/",
@@ -1981,6 +1982,18 @@ out a reboot nobody asked for any more. So:
   install commands nor the update script's install it; it is empty when the
   daemon was started without host actions. Where `update_script` is listed
   too, the routes refuse `update` for the script first.
+- `update_timer` says whether anything runs the update every hour, never
+  `null`, read from files as `missing` is: one item,
+  `{"item": "update-timer", "path": "/etc/systemd/system/holzkube-manager-update.timer"}`,
+  when that path is not a regular file once symlinks are followed (absent, a
+  directory, masked); else
+  `{"item": "update-timer-not-enabled", "path": "/etc/systemd/system/timers.target.wants/holzkube-manager-update.timer"}`
+  when the link `systemctl enable` makes is not there (never enabled, or
+  disabled); else empty. Nothing is refused for it: `update` starts the
+  service, not the timer, and works without it. It is asked whatever
+  `missing` and `update_unit` say; it is empty when the daemon was started
+  without host actions. Not seen: a timer stopped with `systemctl stop` until
+  the next boot, and a timer of another name that starts the service.
 - `busy` is whether the helper is busy with an update check right now, exactly
   the question behind `409 conflict.host-helper-busy` (above): its last record
   is a `check-update` it `started` and has not recorded `done` or `failed` for,
@@ -2020,6 +2033,9 @@ operator installs it -- the same object reads:
   "install_commands": ["…the four lines above…"],
   "update_script_install_commands": ["…the line above…"],
   "update_unit": [],
+  "update_timer": [
+    {"item": "update-timer", "path": "/etc/systemd/system/holzkube-manager-update.timer"}
+  ],
   "update_unit_install_commands": ["…the four update-unit lines above…"]
 }
 ```
@@ -2085,8 +2101,28 @@ line under the buttons carries both sentences, the check's first. With the
 update script missing as well, the script's reason covers both update buttons,
 as the routes refuse in that order.
 
+With the hourly update's unit installed and its timer missing or not enabled,
+all five actions are offered as before, and nothing runs the update every
+hour:
+
+```json
+"actions": {
+  "available": true,
+  "update_unit": [],
+  "update_timer": [
+    {"item": "update-timer-not-enabled", "path": "/etc/systemd/system/timers.target.wants/holzkube-manager-update.timer"}
+  ]
+}
+```
+
+The Host page then shows a note under the header, after the update unit's
+place, that says nothing runs the update every hour, names each entry of
+`update_timer` and shows `update_unit_install_commands`. While `update_unit`
+is listed, that note is not shown: the update unit's note carries the same
+commands.
+
 A daemon started without host actions sends `available: false`, `missing: []`,
-`outdated: []`, `update_script: []`, `update_unit: []` and the result reason "This instance was started without host
+`outdated: []`, `update_script: []`, `update_unit: []`, `update_timer: []` and the result reason "This instance was started without host
 actions."
 
 ### GET /api/v1/host/history: the host's last day

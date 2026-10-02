@@ -464,6 +464,19 @@ refuses the order the same way (`409 conflict.host-update-unit-missing`),
 before it issues a confirmation or places an order, should anything ask for it
 anyway.
 
+**Without the hourly timer.** `holzkube-manager-update.timer` is what runs the
+update every hour. Where the unit is installed and
+`/etc/systemd/system/holzkube-manager-update.timer` is missing or masked, or is
+there but was never enabled or has been disabled (no
+`/etc/systemd/system/timers.target.wants/holzkube-manager-update.timer`), every
+button stays on -- **Check for updates and install** starts the unit, not the
+timer -- and a note under the header says that nothing runs the update every
+hour, names what is missing and shows the same four commands; where only the
+enablement is missing, their last line is enough. holzkube-manager reads this
+from those two files, as it reads the helper's, so it does not see a timer
+stopped with `systemctl stop` (it starts again at the next boot) or a timer of
+another name. Without the note, the **Update check** row's age is the sign.
+
 **Which reason comes first.** holzkube-manager asks in this order and refuses
 an order for the first that applies: a container, the helper missing, the update
 script, the hourly update's unit, a helper older than the check, a check already

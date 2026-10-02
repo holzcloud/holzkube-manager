@@ -57,9 +57,10 @@ did.
   it does not; the update script and its two systemd units ship, sandboxed, in
   `deploy/` of every release archive (`holzkube-manager-update.service` and
   `holzkube-manager-update.timer`), and the Host page shows what the last run
-  found. It updates the daemon run as the guide's `holzkube-manager.service`
-  (also in `deploy/`), and on a machine laid out otherwise refuses and says
-  why rather than install a binary nobody runs
+  found, and says so when no timer is there to run it. It updates the daemon
+  run as the guide's `holzkube-manager.service` (also in `deploy/`), and on a
+  machine laid out otherwise refuses and says why rather than install a
+  binary nobody runs
 - **Apps** — everything that runs, grouped by what was installed, with its CPU
   and memory now and over the day
 - **Kubernetes** — workloads, pods and why one is broken, events, storage,

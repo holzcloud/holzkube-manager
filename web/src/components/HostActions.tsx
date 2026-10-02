@@ -25,6 +25,7 @@ import {
   type HostHelperOutdated,
   type HostOrder,
   type HostUpdateScript,
+  type HostUpdateTimer,
   type HostUpdateUnit,
   roleAtLeast,
 } from '@/api'
@@ -1398,6 +1399,42 @@ export function HostUpdateUnitNotice({
         key: u.item,
         path: u.path,
         sentence: UPDATE_UNIT_SENTENCE[u.item],
+      }))}
+      commands={commands}
+    />
+  )
+}
+
+/** What keeps the timer from starting the update (13-REVIEW-3 WR-03). */
+const UPDATE_TIMER_SENTENCE: Record<HostUpdateTimer['item'], ReactNode> = {
+  'update-timer': <>the timer, from {DEPLOY('deploy/holzkube-manager-update.timer')}</>,
+  'update-timer-not-enabled': <>the entry systemctl enable makes for the timer</>,
+}
+
+/**
+ * The hourly update's timer is missing or not enabled (13-REVIEW-3 WR-03):
+ * nothing is off -- Check for updates and install starts the service, not the
+ * timer -- but nothing runs the update every hour, and the page's Update
+ * check row would only grow older. What is missing, and the same commands as
+ * the update-unit notice, which install the unit and the timer and enable the
+ * timer. Shown only while the unit itself is there: otherwise the update-unit
+ * notice says it, with the same commands.
+ */
+export function HostUpdateTimerNotice({
+  updateTimer,
+  commands,
+}: {
+  updateTimer: HostUpdateTimer[]
+  commands: string[]
+}) {
+  return (
+    <HelperInstallNotice
+      heading="Nothing runs the update every hour"
+      explanation="holzkube-manager-update.timer is what starts the update every hour, and it is not installed or not enabled here. Check for updates and install still works when you press it; nothing else starts it, so the Update check row stops getting newer. The commands install the unit and its timer and enable the timer; where only the timer is not enabled, the last line alone is enough."
+      pieces={updateTimer.map((u) => ({
+        key: u.item,
+        path: u.path,
+        sentence: UPDATE_TIMER_SENTENCE[u.item],
       }))}
       commands={commands}
     />

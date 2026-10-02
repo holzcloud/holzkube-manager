@@ -20,6 +20,7 @@ import {
   HostHelperOutdatedNotice,
   HostOrderStatus,
   HostUpdateScriptNotice,
+  HostUpdateTimerNotice,
   HostUpdateUnitNotice,
   orderPhase,
   outcomeSentence,
@@ -258,6 +259,17 @@ export function HostView({
           commands={host.actions.update_unit_install_commands}
         />
       )}
+      {/* The timer, once the unit is there: the button works without it, but
+          nothing runs the update hourly. While the unit is missing, its
+          notice says it, with the same commands (13-REVIEW-3 WR-03). */}
+      {!host.container &&
+        host.actions.update_unit.length === 0 &&
+        host.actions.update_timer.length > 0 && (
+          <HostUpdateTimerNotice
+            updateTimer={host.actions.update_timer}
+            commands={host.actions.update_unit_install_commands}
+          />
+        )}
 
       <div className={isStale ? 'space-y-5 opacity-60' : 'space-y-5'}>
         <div className="grid gap-4 lg:grid-cols-2">

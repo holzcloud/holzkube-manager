@@ -175,6 +175,15 @@ type Actions struct {
 	// whatever Missing says -- the helper's install commands do not install
 	// it. Never null; empty when this instance has no host actions.
 	UpdateUnit []hostaction.Missing `json:"update_unit"`
+	// UpdateTimer lists what keeps the hourly update from running every
+	// hour (13-REVIEW-3 WR-03): update-timer when hostaction.UpdateTimerPath
+	// is not a regular file once symlinks are followed, else
+	// update-timer-not-enabled when its timers.target.wants link is not
+	// there (hostaction.UpdateTimerMissing). Nothing is refused for it: Check
+	// for updates and install starts the service, not the timer. Asked
+	// whatever Missing and UpdateUnit say. Never null; empty when this
+	// instance has no host actions.
+	UpdateTimer []hostaction.Missing `json:"update_timer"`
 	// UpdateUnitInstallCommands install the hourly update's unit and its
 	// timer, exactly hostaction.UpdateUnitInstallCommands.
 	UpdateUnitInstallCommands []string `json:"update_unit_install_commands"`

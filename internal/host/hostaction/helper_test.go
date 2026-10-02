@@ -520,6 +520,134 @@ func TestUpdateUnitMissing(t *testing.T) {
 	}
 }
 
+// TestUpdateTimerMissing: the timer that starts the hourly update, read from
+// files as the helper's path unit is (13-REVIEW-3 WR-03). With the service
+// installed and the timer absent, masked or not enabled, Check for updates
+// and install works and nothing runs hourly; the page says so. The timer file
+// is read through symlinks (systemctl link), the enablement link is not
+// (Detect's paths.target.wants link is read the same way).
+//
+// Faults injected and seen red (13-REVIEW-3): the wants link not asked;
+// fs.Lstat for the timer file; the timer not asked at all.
+func TestUpdateTimerMissing(t *testing.T) {
+	t.Parallel()
+
+	timer := &fstest.MapFile{Data: []byte("[Timer]\nOnUnitActiveSec=1h\n"), Mode: 0o644}
+	link := &fstest.MapFile{Data: []byte(""), Mode: fs.ModeSymlink | 0o777}
+	notInstalled := []Missing{{Item: MissingUpdateTimer, Path: UpdateTimerPath}}
+	notEnabled := []Missing{{Item: MissingUpdateTimerNotEnabled, Path: UpdateTimerWantsLinkPath}}
+
+	// onDisk is a root with the timer's directory and its wants directory,
+	// and whatever put puts there.
+	onDisk := func(t *testing.T, put func(t *testing.T, root, timerFile, wantsLink string)) fs.FS {
+		t.Helper()
+		root := t.TempDir()
+		timerFile := filepath.Join(root, filepath.FromSlash(fsName(UpdateTimerPath)))
+		wantsLink := filepath.Join(root, filepath.FromSlash(fsName(UpdateTimerWantsLinkPath)))
+		for _, d := range []string{filepath.Dir(timerFile), filepath.Dir(wantsLink)} {
+			if err := os.MkdirAll(d, 0o755); err != nil {
+				t.Fatal(err)
+			}
+		}
+		put(t, root, timerFile, wantsLink)
+		return os.DirFS(root)
+	}
+
+	cases := []struct {
+		name string
+		fsys func(t *testing.T) fs.FS
+		want []Missing
+	}{
+		{"installed and enabled", func(*testing.T) fs.FS {
+			return fstest.MapFS{fsName(UpdateTimerPath): timer, fsName(UpdateTimerWantsLinkPath): link}
+		}, []Missing{}},
+		{"installed and enabled, on disk", func(t *testing.T) fs.FS {
+			return onDisk(t, func(t *testing.T, _, timerFile, wantsLink string) {
+				t.Helper()
+				if err := os.WriteFile(timerFile, timer.Data, 0o644); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Symlink("../holzkube-manager-update.timer", wantsLink); err != nil {
+					t.Fatal(err)
+				}
+			})
+		}, []Missing{}},
+		{"linked from elsewhere (systemctl link) and enabled", func(t *testing.T) fs.FS {
+			return onDisk(t, func(t *testing.T, root, timerFile, wantsLink string) {
+				t.Helper()
+				elsewhere := filepath.Join(root, "opt", filepath.Base(UpdateTimerPath))
+				if err := os.MkdirAll(filepath.Dir(elsewhere), 0o755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(elsewhere, timer.Data, 0o644); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Symlink(elsewhere, timerFile); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Symlink(elsewhere, wantsLink); err != nil {
+					t.Fatal(err)
+				}
+			})
+		}, []Missing{}},
+		{"installed, not enabled", func(*testing.T) fs.FS {
+			return fstest.MapFS{fsName(UpdateTimerPath): timer}
+		}, notEnabled},
+		// The first line of the removal block, disable --now, alone.
+		{"installed, disabled on disk", func(t *testing.T) fs.FS {
+			return onDisk(t, func(t *testing.T, _, timerFile, _ string) {
+				t.Helper()
+				if err := os.WriteFile(timerFile, timer.Data, 0o644); err != nil {
+					t.Fatal(err)
+				}
+			})
+		}, notEnabled},
+		{"absent", func(*testing.T) fs.FS { return fstest.MapFS{} }, notInstalled},
+		// An enablement link left behind without the file is still no timer.
+		{"absent, a wants link left behind", func(*testing.T) fs.FS {
+			return fstest.MapFS{fsName(UpdateTimerWantsLinkPath): link}
+		}, notInstalled},
+		{"masked: a symlink to /dev/null", func(t *testing.T) fs.FS {
+			return onDisk(t, func(t *testing.T, _, timerFile, wantsLink string) {
+				t.Helper()
+				if err := os.Symlink("/dev/null", timerFile); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Symlink("../holzkube-manager-update.timer", wantsLink); err != nil {
+					t.Fatal(err)
+				}
+			})
+		}, notInstalled},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			fsys := tc.fsys(t)
+			got := UpdateTimerMissing(fsys)
+			if got == nil {
+				t.Fatal("UpdateTimerMissing returned nil; it must be a list, never null")
+			}
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Errorf("UpdateTimerMissing = %+v, want %+v", got, tc.want)
+			}
+			if box := NewBox(Config{FS: fsys, DataDir: t.TempDir()}).UpdateTimer(); !reflect.DeepEqual(box, tc.want) {
+				t.Errorf("Box.UpdateTimer = %+v, want %+v", box, tc.want)
+			}
+		})
+	}
+
+	// The wants link is the one systemctl enable makes for the shipped
+	// timer's WantedBy=.
+	unit := readUnitFile(t, shippedUpdateTimer)
+	for _, a := range unit.assignments {
+		if a.section == "Install" && a.key == "WantedBy" {
+			if want := "/etc/systemd/system/" + a.value + ".wants/" + filepath.Base(UpdateTimerPath); want != UpdateTimerWantsLinkPath {
+				t.Errorf("UpdateTimerWantsLinkPath = %s, the shipped timer's WantedBy=%s makes %s", UpdateTimerWantsLinkPath, a.value, want)
+			}
+		}
+	}
+}
+
 // TestNeedsUpdateUnit: only update starts holzkube-manager-update.service.
 // check-update starts the check unit, which Outdated already asks for, and
 // the other three start no update unit at all.

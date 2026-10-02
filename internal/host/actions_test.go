@@ -16,8 +16,8 @@ import (
 // helperInstalledFS is a root filesystem on which the helper is installed the
 // way deploy/HOST-HELPER.md installs it: the shipped script's own bytes, both
 // unit files, the path unit enabled, and the check unit -- beside the update
-// script both update orders end in and the hourly update's unit the update
-// order starts, as the reference installation has them.
+// script both update orders end in, the hourly update's unit the update
+// order starts and its timer, enabled, as the reference installation has them.
 func helperInstalledFS(t *testing.T) fstest.MapFS {
 	t.Helper()
 	return fstest.MapFS{
@@ -31,7 +31,9 @@ func helperInstalledFS(t *testing.T) fstest.MapFS {
 		"usr/local/sbin/holzkube-manager-update": {
 			Data: []byte("#!/usr/bin/env bash\n"), Mode: 0o755, Sys: &syscall.Stat_t{Uid: 0, Gid: 0},
 		},
-		"etc/systemd/system/holzkube-manager-update.service": {Data: []byte("[Service]\n"), Mode: 0o644},
+		"etc/systemd/system/holzkube-manager-update.service":                   {Data: []byte("[Service]\n"), Mode: 0o644},
+		"etc/systemd/system/holzkube-manager-update.timer":                     {Data: []byte("[Timer]\n"), Mode: 0o644},
+		"etc/systemd/system/timers.target.wants/holzkube-manager-update.timer": {Data: []byte(hostaction.UpdateTimerPath), Mode: fs.ModeSymlink | 0o777},
 	}
 }
 
@@ -86,6 +88,15 @@ func TestReadCarriesActions(t *testing.T) {
 	updateUnitMasked["etc/systemd/system/holzkube-manager-update.service"] = &fstest.MapFile{Data: []byte("/dev/null"), Mode: fs.ModeSymlink | 0o777}
 	updateUnit := []hostaction.Missing{{Item: hostaction.MissingUpdateUnit, Path: hostaction.UpdateUnitPath}}
 
+	// 13-REVIEW-3 WR-03: the timer, read and reported, never refused for.
+	noTimer := helperInstalledFS(t)
+	delete(noTimer, "etc/systemd/system/holzkube-manager-update.timer")
+	delete(noTimer, "etc/systemd/system/timers.target.wants/holzkube-manager-update.timer")
+	timerNotEnabled := helperInstalledFS(t)
+	delete(timerNotEnabled, "etc/systemd/system/timers.target.wants/holzkube-manager-update.timer")
+	updateTimer := []hostaction.Missing{{Item: hostaction.MissingUpdateTimer, Path: hostaction.UpdateTimerPath}}
+	updateTimerNotEnabled := []hostaction.Missing{{Item: hostaction.MissingUpdateTimerNotEnabled, Path: hostaction.UpdateTimerWantsLinkPath}}
+
 	scriptOutdated := hostaction.Missing{Item: hostaction.OutdatedScript, Path: hostaction.HelperScriptPath}
 	checkUnit := hostaction.Missing{Item: hostaction.OutdatedCheckUnit, Path: hostaction.UpdateCheckUnitPath}
 
@@ -105,14 +116,20 @@ func TestReadCarriesActions(t *testing.T) {
 		wantUpdateScript []hostaction.Missing
 		// wantUpdateUnit nil: an empty list.
 		wantUpdateUnit []hostaction.Missing
-		wantContainer  bool
+		// wantUpdateTimer nil: an empty list.
+		wantUpdateTimer []hostaction.Missing
+		wantContainer   bool
 	}{
 		{name: "installed, not in a container", fsys: helperInstalledFS(t), wantAvailable: true, wantMissing: []hostaction.Missing{}, wantOutdated: []hostaction.Missing{}},
 		// The update script is asked for whatever missing says: the
 		// helper's install commands do not install it.
 		// The update unit too: the helper's install commands do not install
 		// it either.
-		{name: "nothing installed", fsys: fstest.MapFS{}, wantMissing: allMissing, wantOutdated: []hostaction.Missing{}, wantUpdateScript: updateScript, wantUpdateUnit: updateUnit},
+		{name: "nothing installed", fsys: fstest.MapFS{}, wantMissing: allMissing, wantOutdated: []hostaction.Missing{}, wantUpdateScript: updateScript, wantUpdateUnit: updateUnit, wantUpdateTimer: updateTimer},
+		// The timer starts nothing the button needs: available stays true,
+		// and update_unit empty -- only that nothing runs hourly is said.
+		{name: "no update timer", fsys: noTimer, wantAvailable: true, wantMissing: []hostaction.Missing{}, wantOutdated: []hostaction.Missing{}, wantUpdateTimer: updateTimer},
+		{name: "the update timer not enabled", fsys: timerNotEnabled, wantAvailable: true, wantMissing: []hostaction.Missing{}, wantOutdated: []hostaction.Missing{}, wantUpdateTimer: updateTimerNotEnabled},
 		// Only the two update actions need it, so available stays true
 		// (13-REVIEW-2 IN-04).
 		{name: "no update script", fsys: noUpdateScript, wantAvailable: true, wantMissing: []hostaction.Missing{}, wantOutdated: []hostaction.Missing{}, wantUpdateScript: updateScript},
@@ -184,6 +201,16 @@ func TestReadCarriesActions(t *testing.T) {
 			if !reflect.DeepEqual(a.UpdateUnit, wantUpdateUnit) {
 				t.Errorf("actions.update_unit = %+v, want %+v", a.UpdateUnit, wantUpdateUnit)
 			}
+			wantUpdateTimer := tc.wantUpdateTimer
+			if wantUpdateTimer == nil {
+				wantUpdateTimer = []hostaction.Missing{}
+			}
+			if a.UpdateTimer == nil {
+				t.Errorf("actions.update_timer is nil; on the wire that is null, and the page reads a list")
+			}
+			if !reflect.DeepEqual(a.UpdateTimer, wantUpdateTimer) {
+				t.Errorf("actions.update_timer = %+v, want %+v", a.UpdateTimer, wantUpdateTimer)
+			}
 			if !reflect.DeepEqual(a.UpdateUnitInstallCommands, hostaction.UpdateUnitInstallCommands) {
 				t.Errorf("actions.update_unit_install_commands = %q, want hostaction.UpdateUnitInstallCommands %q",
 					a.UpdateUnitInstallCommands, hostaction.UpdateUnitInstallCommands)
@@ -206,7 +233,7 @@ func TestReadCarriesActions(t *testing.T) {
 			// And on the wire: the keys are there, and the readings are
 			// lists.
 			wire, _ := marshalView(t, v)["actions"].(map[string]any)
-			for _, key := range []string{"available", "missing", "outdated", "update_script", "update_unit", "install_commands", "update_script_install_commands", "update_unit_install_commands"} {
+			for _, key := range []string{"available", "missing", "outdated", "update_script", "update_unit", "update_timer", "install_commands", "update_script_install_commands", "update_unit_install_commands"} {
 				if _, ok := wire[key]; !ok {
 					t.Errorf("actions.%s is not in the answer: %v", key, wire)
 				}
@@ -222,6 +249,9 @@ func TestReadCarriesActions(t *testing.T) {
 			}
 			if _, ok := wire["update_unit"].([]any); !ok {
 				t.Errorf("actions.update_unit on the wire = %#v, want a list", wire["update_unit"])
+			}
+			if _, ok := wire["update_timer"].([]any); !ok {
+				t.Errorf("actions.update_timer on the wire = %#v, want a list", wire["update_timer"])
 			}
 		})
 	}

@@ -132,7 +132,12 @@ const (
 	// minutes after boot and then an hour after its last start, installed
 	// from deploy/holzkube-manager-update.timer by the operator, never by the
 	// update script. It is the one of the two that is enabled.
+	// UpdateTimerMissing asks for it (13-REVIEW-3 WR-03).
 	UpdateTimerPath = "/etc/systemd/system/holzkube-manager-update.timer"
+	// UpdateTimerWantsLinkPath is what `systemctl enable
+	// holzkube-manager-update.timer` creates: the timer's
+	// WantedBy=timers.target.
+	UpdateTimerWantsLinkPath = "/etc/systemd/system/timers.target.wants/holzkube-manager-update.timer"
 )
 
 // HelperOrdersMarker begins the one line in the helper script that names the
@@ -204,6 +209,20 @@ func NeedsUpdateUnit(a Action) bool {
 	return a == Update
 }
 
+// What UpdateTimerMissing reports, in this order (13-REVIEW-3 WR-03). Neither
+// refuses anything: Check for updates and install starts the service, not the
+// timer, and works without it. They say that nothing runs the update hourly.
+const (
+	// MissingUpdateTimer: the timer is not a regular file at
+	// UpdateTimerPath -- absent, a directory, masked, or a symlink to
+	// nothing.
+	MissingUpdateTimer = "update-timer"
+	// MissingUpdateTimerNotEnabled: the timer is there, but
+	// UpdateTimerWantsLinkPath is not, so it does not start at boot -- it was
+	// never enabled, or was disabled.
+	MissingUpdateTimerNotEnabled = "update-timer-not-enabled"
+)
+
 // MissingUpdateScript is the item UpdateScriptMissing reports: the update
 // script is absent, or not something root may run as root (not regular, not
 // executable, not owned by uid 0, or writable by group or other).
@@ -245,8 +264,9 @@ const (
 type Missing struct {
 	// Item is MissingScript, MissingPathUnit or MissingNotEnabled -- or, in
 	// Outdated's list, OutdatedScript or OutdatedCheckUnit, in
-	// UpdateScriptMissing's, MissingUpdateScript, and in UpdateUnitMissing's,
-	// MissingUpdateUnit.
+	// UpdateScriptMissing's, MissingUpdateScript, in UpdateUnitMissing's,
+	// MissingUpdateUnit, and in UpdateTimerMissing's, MissingUpdateTimer or
+	// MissingUpdateTimerNotEnabled.
 	Item string `json:"item"`
 	// Path is the absolute path of the file that was found wanting.
 	Path string `json:"path"`
@@ -463,4 +483,31 @@ func UpdateUnitMissing(fsys fs.FS) []Missing {
 // through the Box's FS. Empty, never nil, when it is installed.
 func (b *Box) UpdateUnit() []Missing {
 	return UpdateUnitMissing(b.cfg.FS)
+}
+
+// UpdateTimerMissing reports whether the timer that starts the hourly update
+// is missing on the machine fsys is rooted at ("/"), read from files as the
+// helper's path unit is: MissingUpdateTimer when UpdateTimerPath is not a
+// regular file once symlinks are followed, else MissingUpdateTimerNotEnabled
+// when UpdateTimerWantsLinkPath does not exist, else an empty list. It never
+// returns nil.
+//
+// What it cannot see: a timer stopped with systemctl stop (it starts again at
+// the next boot), and a timer of another name that starts the service.
+func UpdateTimerMissing(fsys fs.FS) []Missing {
+	if info, err := fs.Stat(fsys, fsName(UpdateTimerPath)); err != nil || !info.Mode().IsRegular() {
+		return []Missing{{Item: MissingUpdateTimer, Path: UpdateTimerPath}}
+	}
+	// Lstat, as for the helper's paths.target.wants link: the link's target
+	// is the timer file, asked above.
+	if _, err := fs.Lstat(fsys, fsName(UpdateTimerWantsLinkPath)); err != nil {
+		return []Missing{{Item: MissingUpdateTimerNotEnabled, Path: UpdateTimerWantsLinkPath}}
+	}
+	return []Missing{}
+}
+
+// UpdateTimer reports whether the hourly update's timer is missing or not
+// enabled, read through the Box's FS. Empty, never nil, when it is both.
+func (b *Box) UpdateTimer() []Missing {
+	return UpdateTimerMissing(b.cfg.FS)
 }

@@ -3102,6 +3102,19 @@ export const hostUpdateUnitSchema = z.object({
 
 export type HostUpdateUnit = z.infer<typeof hostUpdateUnitSchema>
 
+/**
+ * What keeps the hourly update from running every hour (13-REVIEW-3 WR-03):
+ * /etc/systemd/system/holzkube-manager-update.timer is not there (absent,
+ * a directory, masked), or it is and its timers.target.wants link is not --
+ * never enabled, or disabled. Nothing is refused for it.
+ */
+export const hostUpdateTimerSchema = z.object({
+  item: z.enum(['update-timer', 'update-timer-not-enabled']),
+  path: z.string(),
+})
+
+export type HostUpdateTimer = z.infer<typeof hostUpdateTimerSchema>
+
 /** The machine holzkube-manager runs on: GET /api/v1/host (Phase 11). */
 export const hostSchema = z.object({
   observed_at: z.string(),
@@ -3268,6 +3281,13 @@ export const hostSchema = z.object({
        */
       update_unit: z.array(hostUpdateUnitSchema).nullish().transform(orEmpty),
       /**
+       * The hourly update's timer, when it is missing or not enabled: nothing
+       * is refused for it -- Check for updates and install starts the
+       * service -- but nothing runs the update hourly. Absent from a daemon
+       * before it, which then reads as nothing missing.
+       */
+      update_timer: z.array(hostUpdateTimerSchema).nullish().transform(orEmpty),
+      /**
        * Whether the helper is busy with an update check (13-REVIEW-2 V-01):
        * it picks up nothing else until the check ends, and the routes refuse
        * every action meanwhile (409 conflict.host-helper-busy). The server
@@ -3290,6 +3310,7 @@ export const hostSchema = z.object({
       outdated: [],
       update_script: [],
       update_unit: [],
+      update_timer: [],
       busy: false,
       install_commands: [],
       update_script_install_commands: [],
