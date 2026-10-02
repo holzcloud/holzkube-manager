@@ -1,9 +1,8 @@
-<!-- The tab icon: the mark with two rings instead of three. At 16 pixels the
-     third ring is not a ring but a smear. -->
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
-  <defs><clipPath id="hk-hex"><polygon points="32.00,4.00 56.25,18.00 56.25,46.00 32.00,60.00 7.75,46.00 7.75,18.00"/></clipPath></defs>
-  <g clip-path="url(#hk-hex)">
-    <rect width="64" height="64" fill="#F0AE5F"/>
-    <g fill="none" stroke="#150E08" stroke-width="5"><circle cx="31" cy="31.2" r="6.5"/><circle cx="32" cy="32" r="17.5"/></g>
-  </g>
+<!-- The app icon: the mark on its dark tile (#140806) - the tab icon and the
+     mark inside the app. The home-screen PNGs are the bare mark on the same
+     colour, rendered by web/scripts/readme-images.mjs. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="200" height="200" role="img" aria-label="holzkube">
+<rect width="200" height="200" rx="44" fill="#140806"/>
+<defs><clipPath id="holzkubetop"><path d="M100 52 L146 75 L100 98 L54 75 Z"/></clipPath></defs><path d="M100 52 L146 75 L100 98 L54 75 Z" fill="#EF7A4D"/><path d="M54 75 L100 98 L100 146 L54 123 Z" fill="#EF7A4D" opacity=".72"/><path d="M146 75 L100 98 L100 146 L146 123 Z" fill="#EF7A4D" opacity=".48"/><g clip-path="url(#holzkubetop)" fill="none" stroke="#140806" stroke-width="2.6" opacity=".45"><ellipse cx="96" cy="74" rx="10" ry="5"/><ellipse cx="96" cy="74" rx="20" ry="10"/><ellipse cx="96" cy="74" rx="31" ry="15.5"/></g>
+<rect x="26" y="146" width="148" height="26" rx="9" fill="#C98B4F"/><rect x="26" y="146" width="148" height="6" rx="3" fill="#E0A869" opacity=".7"/><path d="M40 160 C70 156 108 165 160 159" stroke="#9B6534" stroke-width="2.6" fill="none" stroke-linecap="round"/><path d="M58 166 C84 163 118 168 140 165" stroke="#9B6534" stroke-width="2" fill="none" stroke-linecap="round" opacity=".7"/><ellipse cx="120" cy="158" rx="6" ry="3" stroke="#9B6534" stroke-width="2" fill="none"/>
 </svg>

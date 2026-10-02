@@ -1,11 +1,7 @@
-<!-- holzkube-manager — Ringwabe: Jahresringe, in ein Sechseck geschnitten.
-     Das Sechseck ist der Knoten, die Ringe sind die Holzcloud-Marke. Die Ringe
-     sitzen leicht aus der Mitte, wie in einem Stamm, der ungleich gewachsen ist. -->
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64"
-     role="img" aria-label="holzkube-manager">
-  <defs><clipPath id="hk-hex"><polygon points="32.00,4.00 56.25,18.00 56.25,46.00 32.00,60.00 7.75,46.00 7.75,18.00"/></clipPath></defs>
-  <g clip-path="url(#hk-hex)">
-    <rect width="64" height="64" fill="#F0AE5F"/>
-    <g fill="none" stroke="#150E08" stroke-width="3.6"><circle cx="29.8" cy="30.4" r="4.8"/><circle cx="30.9" cy="31.2" r="12"/><circle cx="32" cy="32" r="19.2"/></g>
-  </g>
+<!-- holzkube-manager - "wood plus element": a wooden plank carries the
+     project's element. Here the element is the node: an isometric cube in Glut
+     #EF7A4D, the annual rings of the Holzcloud mark cut into its top face. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="20 40 160 136" width="160" height="136" role="img" aria-label="holzkube">
+<defs><clipPath id="holzkubetop"><path d="M100 52 L146 75 L100 98 L54 75 Z"/></clipPath></defs><path d="M100 52 L146 75 L100 98 L54 75 Z" fill="#EF7A4D"/><path d="M54 75 L100 98 L100 146 L54 123 Z" fill="#EF7A4D" opacity=".72"/><path d="M146 75 L100 98 L100 146 L146 123 Z" fill="#EF7A4D" opacity=".48"/><g clip-path="url(#holzkubetop)" fill="none" stroke="#140806" stroke-width="2.6" opacity=".45"><ellipse cx="96" cy="74" rx="10" ry="5"/><ellipse cx="96" cy="74" rx="20" ry="10"/><ellipse cx="96" cy="74" rx="31" ry="15.5"/></g>
+<rect x="26" y="146" width="148" height="26" rx="9" fill="#C98B4F"/><rect x="26" y="146" width="148" height="6" rx="3" fill="#E0A869" opacity=".7"/><path d="M40 160 C70 156 108 165 160 159" stroke="#9B6534" stroke-width="2.6" fill="none" stroke-linecap="round"/><path d="M58 166 C84 163 118 168 140 165" stroke="#9B6534" stroke-width="2" fill="none" stroke-linecap="round" opacity=".7"/><ellipse cx="120" cy="158" rx="6" ry="3" stroke="#9B6534" stroke-width="2" fill="none"/>
 </svg>

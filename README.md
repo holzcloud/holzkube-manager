@@ -4,12 +4,12 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/status-alpha-ec8272?style=flat-square&labelColor=150e08" alt="Status: alpha">
-  <a href="https://github.com/holzcloud/holzkube-manager/releases"><img src="https://img.shields.io/github/v/release/holzcloud/holzkube-manager?include_prereleases&style=flat-square&color=f0ae5f&labelColor=150e08" alt="Latest release"></a>
+  <a href="https://github.com/holzcloud/holzkube-manager/releases"><img src="https://img.shields.io/github/v/release/holzcloud/holzkube-manager?include_prereleases&style=flat-square&color=ef7a4d&labelColor=150e08" alt="Latest release"></a>
   <a href="https://github.com/holzcloud/holzkube-manager/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/holzcloud/holzkube-manager/ci.yml?branch=main&style=flat-square&labelColor=150e08&label=CI" alt="CI"></a>
-  <img src="https://img.shields.io/badge/Talos-v1.12%20–%20v1.14-f0ae5f?style=flat-square&labelColor=150e08" alt="Talos v1.12 to v1.14">
-  <img src="https://img.shields.io/badge/linux-arm64%20·%20amd64-f0ae5f?style=flat-square&labelColor=150e08" alt="linux arm64 and amd64">
-  <a href="LICENSE"><img src="https://img.shields.io/github/license/holzcloud/holzkube-manager?style=flat-square&color=f0ae5f&labelColor=150e08" alt="AGPL-3.0"></a>
-  <a href="https://github.com/sponsors/holzcloud"><img src="https://img.shields.io/badge/sponsor-%E2%99%A5-f0ae5f?style=flat-square&labelColor=150e08&logo=githubsponsors&logoColor=ea4aaa" alt="Sponsor"></a>
+  <img src="https://img.shields.io/badge/Talos-v1.12%20–%20v1.14-ef7a4d?style=flat-square&labelColor=150e08" alt="Talos v1.12 to v1.14">
+  <img src="https://img.shields.io/badge/linux-arm64%20·%20amd64-ef7a4d?style=flat-square&labelColor=150e08" alt="linux arm64 and amd64">
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/holzcloud/holzkube-manager?style=flat-square&color=ef7a4d&labelColor=150e08" alt="AGPL-3.0"></a>
+  <a href="https://github.com/sponsors/holzcloud"><img src="https://img.shields.io/badge/sponsor-%E2%99%A5-ef7a4d?style=flat-square&labelColor=150e08&logo=githubsponsors&logoColor=ea4aaa" alt="Sponsor"></a>
 </p>
 
 <p align="center">
