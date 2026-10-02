@@ -99,6 +99,13 @@
 #     Eine solche Zeile kommt erst hinein, wenn sie als root durch ein echtes
 #     Installieren und einen echten Neustart gemessen ist -- auf dem Host des
 #     Betreibers ist das seine Entscheidung.
+#   - Auch die Zeilen, die drin sind, hat noch kein echtes Installieren und
+#     kein echter Neustart als root unter systemd durchlaufen: die Tests
+#     fuehren das Skript als root in einem User-Namespace aus, nicht in
+#     dieser Unit. Darum der Schritt "Check one real run" in
+#     deploy/HOST-HELPER.md, mit dem Weg zurueck. Was update.conf an Pfaden
+#     woandershin legt, ist hier nicht schreibbar; das Skript sagt das, bevor
+#     es nachsieht, statt still nichts festzuhalten (13-REVIEW-3 WR-02).
 [Unit]
 Description=holzkube-manager - Update aus dem neuesten Release, stuendlich und auf Auftrag
 Documentation=https://github.com/holzcloud/holzkube-manager/blob/main/deploy/HOST-HELPER.md

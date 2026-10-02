@@ -157,13 +157,29 @@ The release archive carries the two units that run the update script:
   (`/var/lib/holzkube-manager-update`). On the network it needs GitHub and
   the health check on `127.0.0.1:8443`. Every line of the unit
   says in its comment why it is there, and which sandbox lines are left out
-  and why.
+  and why. **The sandbox has not yet been seen through a real install and
+  restart as root**: the tests run the script as root in a user namespace,
+  not under systemd. The check after the install block below is that
+  measurement, on your machine.
 - `holzkube-manager-update.timer` starts it 5 minutes after boot and then an
   hour after its last run, whoever started that run, each time with up to 5
   minutes of random delay.
 
 Install both, from the root of the unpacked release archive, after the update
-script's own command above:
+script's own command above. If units of these names are already there --
+written by hand before the release carried them -- keep a copy first, and
+take back what `systemctl enable` may have done for a hand-made service (the
+shipped one has no `[Install]` section, so its old `*.wants/` link would stay
+and run the update at every boot as well):
+
+```sh
+systemctl cat holzkube-manager-update.service holzkube-manager-update.timer
+sudo install -d -o root -g root -m 0700 /root/holzkube-manager-units-before
+sudo cp -a /etc/systemd/system/holzkube-manager-update.service /etc/systemd/system/holzkube-manager-update.timer /root/holzkube-manager-units-before/
+sudo systemctl disable holzkube-manager-update.service 2>/dev/null || true
+```
+
+Then:
 
 <!-- update-unit-commands:begin -->
 ```sh
@@ -186,21 +202,53 @@ refuses **Check for updates and install** with
 places an order. **Check for updates**, which starts the check unit, and the
 other three do not need it.
 
-These lines replace units of the same name that were written by hand. To see
-what is there first:
+These lines replace units of the same name that were written by hand;
+skipping the block keeps them as they are.
+
+**Check one real run.** `list-timers` and the journal show that a run
+happened, not that the sandbox lets it install and restart. So start one by
+hand -- `systemctl start` waits until it ends -- and look at what it did:
 
 ```sh
-systemctl cat holzkube-manager-update.service holzkube-manager-update.timer
-```
-
-Skipping the block keeps them as they are.
-
-To see it work:
-
-```sh
+sudo systemctl start holzkube-manager-update.service
+systemctl show -p Result holzkube-manager-update.service
+journalctl -u holzkube-manager-update -n 30 --no-pager
+cat /var/lib/holzkube-manager-update/status.json
 systemctl list-timers holzkube-manager-update.timer
-journalctl -u holzkube-manager-update
 ```
+
+It worked when `Result=success`, the journal says `Bereits aktuell.`
+("already current") or `Aktualisiert auf ...` ("updated to"), `status.json`
+says `"outcome": "current"` or `"updated"` with a `checked_at` of a moment
+ago, and the timer lists its next run. If a newer release is out, this run
+installs it and restarts holzkube-manager, so the page is gone for a few
+seconds; with the newest installed, it only looks. The run that matters most
+is the first one that does install: until one has, the sandbox's `install`
+and `systemctl restart` have not been seen as root.
+
+`Result=exit-code` and a journal line with `Read-only file system`,
+`Permission denied` or `Operation not permitted` mean the sandbox stopped
+it. To go back to the units you had:
+
+```sh
+sudo cp -a /root/holzkube-manager-units-before/. /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now holzkube-manager-update.timer
+```
+
+and let the project know what the journal said.
+
+**update.conf.** `/etc/holzkube-manager/update.conf` is read by the script as
+root, and may move what the script uses. Under this unit only two of those
+settings work: `HOLZKUBE_MANAGER_SERVICE` and `HOLZKUBE_MANAGER_HEALTH_URL`
+(see above). The unit lets the script write the four directories named
+above and nothing else, so an update.conf that sets
+`HOLZKUBE_MANAGER_BIN`, `HOLZKUBE_MANAGER_PREVIOUS` or
+`HOLZKUBE_MANAGER_UPDATE_STATUS_DIR` somewhere else is refused: the run ends
+before it looks, with exit code 1 and a journal line naming the directory it
+cannot write. With the status directory moved it cannot record that, so the
+Host page's **Update check** row stops getting newer;
+`systemctl status holzkube-manager-update` shows the failure.
 
 The update script replaces the daemon and itself, never a unit. A newer unit
 from a newer archive is taken by repeating the block above. To stop and remove

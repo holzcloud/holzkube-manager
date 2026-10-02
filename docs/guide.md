@@ -169,7 +169,19 @@ sudo install -o root -g root -m 0755 deploy/holzkube-manager-update.sh /usr/loca
 ```
 <!-- update-script-command:end -->
 
-and then the service that runs it and the timer that starts it every hour:
+and then the service that runs it and the timer that starts it every hour.
+If units of these names are already there, written by hand, keep a copy
+first and take back a hand-made service's own enablement (the shipped one
+has no `[Install]` section, so an old `*.wants/` link would also run it at
+every boot):
+
+```sh
+sudo install -d -o root -g root -m 0700 /root/holzkube-manager-units-before
+sudo cp -a /etc/systemd/system/holzkube-manager-update.service /etc/systemd/system/holzkube-manager-update.timer /root/holzkube-manager-units-before/
+sudo systemctl disable holzkube-manager-update.service 2>/dev/null || true
+```
+
+Then:
 
 <!-- update-unit-commands:begin -->
 ```sh
@@ -181,20 +193,35 @@ sudo systemctl enable --now holzkube-manager-update.timer
 <!-- update-unit-commands:end -->
 
 The service runs as root, in a sandbox that lets it write only where the
-binary, the script, the previous binary and the status file live. The second
-block replaces units of the same name written by hand; to see what is there
-first, run `systemctl cat holzkube-manager-update.service
+binary, the script, the previous binary and the status file live -- so
+`/etc/holzkube-manager/update.conf` may not move any of those: a run that
+cannot write one ends before it looks and names it in its journal. That
+sandbox has not yet been seen through a real install and restart as root.
+The block replaces units of the same name written by hand; to see what is
+there first, run `systemctl cat holzkube-manager-update.service
 holzkube-manager-update.timer`. The update script replaces the binary and
 itself, never a unit, so a newer unit from a newer archive comes only by
 repeating that block. While the service is not installed, the Host page keeps
 **Check for updates and install** off and shows this block under its header.
 
-To see it work:
+To see it work, start one run by hand -- `systemctl start` waits for it --
+and look at what it did:
 
 ```sh
-systemctl list-timers holzkube-manager-update.timer
-journalctl -u holzkube-manager-update
+sudo systemctl start holzkube-manager-update.service
+systemctl show -p Result holzkube-manager-update.service
+journalctl -u holzkube-manager-update -n 30 --no-pager
+cat /var/lib/holzkube-manager-update/status.json
 ```
+
+`Result=success` and an `outcome` of `current` or `updated` with a
+`checked_at` of a moment ago mean it works. If a newer release is out, this
+run installs it and restarts holzkube-manager. A `Result=exit-code` with
+`Read-only file system` or `Permission denied` in the journal means the
+sandbox stopped it; put the copied units back with
+`sudo cp -a /root/holzkube-manager-units-before/. /etc/systemd/system/`,
+`sudo systemctl daemon-reload` and
+`sudo systemctl enable --now holzkube-manager-update.timer`.
 
 `deploy/HOST-HELPER.md`, "The hourly update", says more, including how to
 remove it.

@@ -141,6 +141,12 @@ TMP=""
 # root an, wenn es fehlt. Dieselbe Frage stellen das Festhalten und die Sperre
 # unten: wer festhalten darf, sperrt, und wer nicht festhalten darf, braucht
 # keine Sperre.
+#
+# 1 heisst: verweigert, weil das Verzeichnis nicht sicher ist (oder ohne root
+# nicht schreibbar). 2 heisst: root kann es nicht anlegen oder nicht
+# schreiben -- ein Dateisystem, das fuer diesen Prozess nur lesbar ist, wie
+# ProtectSystem=strict alles ausser ReadWritePaths= macht. Das zweite beendet
+# einen Lauf als root weiter unten, statt still nichts festzuhalten.
 status_dir_ok() {
   local dir=${STATUS_DIR:-}
   [[ -n $dir ]] || return 1
@@ -149,7 +155,7 @@ status_dir_ok() {
   if [[ ! -d $dir ]]; then
     # Anlegen darf es nur root, und dann so, wie es gehoert.
     [[ $EUID -eq 0 ]] || return 1
-    install -d -o root -g root -m 0755 "$dir" || return 1
+    install -d -o root -g root -m 0755 "$dir" 2>/dev/null || return 2
   fi
   # Als root nur in ein Verzeichnis, das root gehoert und in das niemand sonst
   # schreiben kann. Gehoert es root, ist aber gruppen- oder weltschreibbar,
@@ -161,6 +167,8 @@ status_dir_ok() {
   if [[ $EUID -eq 0 ]]; then
     python3 -I -c 'import os, stat, sys; s = os.lstat(sys.argv[1]); sys.exit(0 if stat.S_ISDIR(s.st_mode) and s.st_uid == 0 and not s.st_mode & 0o022 else 1)' "$dir" \
       || return 1
+    [[ -w $dir ]] || return 2
+    return 0
   fi
   # --check ohne root: nicht schreibbar heisst nichts festhalten.
   [[ -w $dir ]]
@@ -310,6 +318,28 @@ Dieser Lauf hat nichts nachgesehen, nichts installiert und nichts festgehalten."
   esac
 }
 
+# Als root muss das Statusverzeichnis schreibbar sein. Ist es das nicht --
+# meist ein HOLZKUBE_MANAGER_UPDATE_STATUS_DIR in update.conf, das aus dem
+# heraus zeigt, was holzkube-manager-update.service schreiben darf --, liefe
+# jeder Lauf ohne Sperre und hielte nichts fest, und die Host-Seite zeigte
+# fuer immer den letzten Lauf davor (13-REVIEW-3 WR-02). Also endet er hier,
+# laut, bevor er nachsieht. Ein Verzeichnis, das aus Sicherheitsgruenden
+# nicht benutzt wird (Symlink, nicht root's, fuer andere schreibbar), haelt
+# wie bisher kein Update auf; das steht als Warnung im Journal.
+if [[ $EUID -eq 0 ]]; then
+  sd_rc=0
+  status_dir_ok || sd_rc=$?
+  case $sd_rc in
+    0) ;;
+    2) fail "$STATUS_DIR ist fuer diesen Lauf nicht schreibbar und nicht anzulegen.
+Ohne das Verzeichnis gaebe es weder Sperre noch Festhalten. Die Unit darf nur
+/var/lib/holzkube-manager-update schreiben; ein
+HOLZKUBE_MANAGER_UPDATE_STATUS_DIR in $CONF, das woanders hinzeigt, geht dort
+nicht. Nichts nachgesehen, nichts installiert." ;;
+    *) log "WARNUNG: $STATUS_DIR wird nicht benutzt (ein Symlink, nicht root's oder fuer andere schreibbar): dieser Lauf haelt nichts fest und laeuft ohne Sperre." ;;
+  esac
+fi
+
 LOCK_WAIT=${HOLZKUBE_MANAGER_UPDATE_LOCK_WAIT:-}
 if [[ ! $LOCK_WAIT =~ ^[0-9]+$ ]]; then
   LOCK_WAIT=600
@@ -373,6 +403,15 @@ wait_healthy() {
 # entscheidet.
 #
 # --check fragt das nicht: es installiert nichts und startet nichts neu.
+writable_dir() {
+  local dir=$1 what=$2
+  [[ -d $dir && -w $dir ]] || fail "$dir ist nicht schreibbar ($what).
+Die Unit darf nur /usr/local/bin, /usr/local/sbin und
+/usr/local/lib/holzkube-manager schreiben (das letzte nur, wenn es schon da
+ist); ein HOLZKUBE_MANAGER_BIN oder HOLZKUBE_MANAGER_PREVIOUS in $CONF, das
+woanders hinzeigt, geht dort nicht. Nichts geladen, nichts installiert."
+}
+
 check_host() {
   local load exec_paths resolved
   load=$(systemctl show --value -p LoadState "$SERVICE" 2>/dev/null) || load=""
@@ -395,6 +434,18 @@ Nichts geladen, nichts installiert."
 Ein Update ersetzte $BIN, der Neustart liesse $exec_paths laufen, und die
 Pruefung danach saehe den alten Prozess als das neue Release. Nichts geladen,
 nichts installiert."
+
+  # Schreiben darf holzkube-manager-update.service nur in die voreingestellten
+  # Verzeichnisse. Zeigt update.conf $BIN oder $PREVIOUS woanders hin, scheiterte
+  # das install mitten im Lauf; das wird vorher gesagt (13-REVIEW-3 WR-02).
+  writable_dir "$(dirname "$BIN")" "das Verzeichnis des Daemons"
+  local prev_dir
+  prev_dir=$(dirname "$PREVIOUS")
+  if [[ -d $prev_dir ]]; then
+    writable_dir "$prev_dir" "das Verzeichnis der vorigen Version"
+  else
+    writable_dir "$(dirname "$prev_dir")" "das Verzeichnis, in dem $prev_dir angelegt wird"
+  fi
 
   if systemctl is-active --quiet "$SERVICE"; then
     wait_healthy 3 || fail "$SERVICE laeuft, antwortet aber nicht unter $HEALTH_URL.
@@ -612,8 +663,13 @@ if [[ $ok -eq 1 ]]; then
   # auf dem Host.
   if tar -xzf "$TMP/$ASSET_NAME" -C "$TMP" deploy/holzkube-manager-update.sh 2>/dev/null; then
     if ! cmp -s "$TMP/deploy/holzkube-manager-update.sh" "$SELF"; then
-      install -o root -g root -m 0755 "$TMP/deploy/holzkube-manager-update.sh" "$SELF"
-      log "Update-Skript erneuert: $SELF"
+      # Ein Verzeichnis, das sich nicht schreiben laesst, macht aus einem
+      # gesunden Update kein gescheitertes; das alte Skript bleibt.
+      if install -o root -g root -m 0755 "$TMP/deploy/holzkube-manager-update.sh" "$SELF"; then
+        log "Update-Skript erneuert: $SELF"
+      else
+        log "WARNUNG: $SELF liess sich nicht ersetzen; es bleibt das bisherige Skript."
+      fi
     fi
   fi
   OUTCOME=updated

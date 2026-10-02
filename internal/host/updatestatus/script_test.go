@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"syscall"
 	"testing"
@@ -124,7 +125,13 @@ func newScriptEnv(t *testing.T, installed string, checksumOK bool) *scriptEnv {
 // on an amd64 runner alike. checksumOK false writes a wrong sha256.
 func (e *scriptEnv) setRelease(daemon string, checksumOK bool) {
 	e.t.Helper()
-	archive := releaseArchive(e.t, daemon)
+	e.setReleaseWith(daemon, "", checksumOK)
+}
+
+// setReleaseWith is setRelease with an update script in the archive too.
+func (e *scriptEnv) setReleaseWith(daemon, script string, checksumOK bool) {
+	e.t.Helper()
+	archive := releaseArchiveWith(e.t, daemon, script)
 	e.write(filepath.Join(e.dir, "fixtures", "archive.tar.gz"), string(archive), 0o644)
 	sum := sha256.Sum256(archive)
 	hexSum := hex.EncodeToString(sum[:])
@@ -210,6 +217,50 @@ func (e *scriptEnv) runOutput(asRoot bool, args ...string) (string, int) {
 		e.t.Fatalf("run the update script: %v", err)
 	}
 	return string(out), exitErr.ExitCode()
+}
+
+// runReadOnly runs the script as root in a user and mount namespace of its
+// own in which each of ro is bind-mounted read-only onto itself -- what
+// ProtectSystem=strict does to every path a unit's ReadWritePaths= does not
+// name: open(2) and access(2) answer EROFS there, for root too.
+func (e *scriptEnv) runReadOnly(ro []string, args ...string) (string, int) {
+	e.t.Helper()
+	const prog = `set -e
+n=$1; shift
+for ((i = 0; i < n; i++)); do
+  mount --bind "$1" "$1"
+  mount -o remount,bind,ro "$1"
+  shift
+done
+exec bash "$@"`
+	argv := append([]string{"--user", "--map-root-user", "--mount", "bash", "-c", prog, "_", strconv.Itoa(len(ro))}, ro...)
+	argv = append(argv, e.script)
+	argv = append(argv, args...)
+	cmd := exec.Command("unshare", argv...)
+	cmd.Env = e.env()
+	cmd.Dir = e.dir
+	out, err := cmd.CombinedOutput()
+	e.t.Logf("update script %v (root=true, read-only %v):\n%s", args, ro, out)
+	if err == nil {
+		return string(out), 0
+	}
+	var exitErr *exec.ExitError
+	if !errors.As(err, &exitErr) {
+		e.t.Fatalf("run the update script: %v", err)
+	}
+	return string(out), exitErr.ExitCode()
+}
+
+// requireReadOnlyMounts skips when this host cannot bind-mount read-only in
+// an unprivileged user and mount namespace, naming what unshare said.
+func requireReadOnlyMounts(t *testing.T) {
+	t.Helper()
+	dir := t.TempDir()
+	out, err := exec.Command("unshare", "--user", "--map-root-user", "--mount", "bash", "-c",
+		`mount --bind "$1" "$1" && mount -o remount,bind,ro "$1" && ! touch "$1/x" 2>/dev/null`, "_", dir).CombinedOutput()
+	if err != nil {
+		t.Skipf("no read-only bind mount in a user namespace here: %v: %s", err, out)
+	}
 }
 
 // wantRefusedBeforeDownload asserts a run that refused before it touched
@@ -390,14 +441,28 @@ func fakeDaemon(version string) string {
 
 func releaseArchive(t *testing.T, daemon string) []byte {
 	t.Helper()
+	return releaseArchiveWith(t, daemon, "")
+}
+
+// releaseArchiveWith is releaseArchive that also carries
+// deploy/holzkube-manager-update.sh with the content script, unless it is
+// empty -- as a real release does, and as the script replaces itself from.
+func releaseArchiveWith(t *testing.T, daemon, script string) []byte {
+	t.Helper()
 	var buf bytes.Buffer
 	gz := gzip.NewWriter(&buf)
 	tw := tar.NewWriter(gz)
-	if err := tw.WriteHeader(&tar.Header{Name: "holzkube-managerd", Mode: 0o755, Size: int64(len(daemon)), Typeflag: tar.TypeReg}); err != nil {
-		t.Fatal(err)
+	files := [][2]string{{"holzkube-managerd", daemon}}
+	if script != "" {
+		files = append(files, [2]string{"deploy/holzkube-manager-update.sh", script})
 	}
-	if _, err := tw.Write([]byte(daemon)); err != nil {
-		t.Fatal(err)
+	for _, f := range files {
+		if err := tw.WriteHeader(&tar.Header{Name: f[0], Mode: 0o755, Size: int64(len(f[1])), Typeflag: tar.TypeReg}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := tw.Write([]byte(f[1])); err != nil {
+			t.Fatal(err)
+		}
 	}
 	if err := tw.Close(); err != nil {
 		t.Fatal(err)
@@ -973,6 +1038,137 @@ func TestUpdateScriptAsRoot(t *testing.T) {
 
 	// /tmp belongs to the host's root, which a user namespace maps to the
 	// overflow uid: from inside, it is a directory root does not own.
+	// 13-REVIEW-3 WR-02: holzkube-manager-update.service may write only the
+	// default paths (ReadWritePaths=, ProtectSystem=strict). An update.conf
+	// that moves one of them elsewhere gets EROFS there, as root. A status
+	// directory that cannot be written used to be dropped without a word --
+	// no record and no lock -- and an install directory to fail half-way.
+	// Each now ends the run before it looks, naming the directory.
+	t.Run("read-only paths", func(t *testing.T) {
+		t.Parallel()
+		requireReadOnlyMounts(t)
+
+		t.Run("a status directory root cannot write fails before it looks", func(t *testing.T) {
+			t.Parallel()
+			for _, args := range [][]string{nil, {"--check"}} {
+				e := newScriptEnv(t, fakeInstalled, true)
+				e.recordCalls()
+				out, rc := e.runReadOnly([]string{e.statusDir}, args...)
+				if rc != 1 {
+					t.Errorf("%v: exit = %d, want 1", args, rc)
+				}
+				if !strings.Contains(out, e.statusDir) || !strings.Contains(out, "nicht schreibbar") {
+					t.Errorf("%v: the run does not say it cannot write %s:\n%s", args, e.statusDir, out)
+				}
+				e.wantNoStatus(e.statusDir)
+				e.wantInstalledNothingAtAll(fakeInstalled)
+			}
+		})
+
+		t.Run("a status directory root cannot create fails before it looks", func(t *testing.T) {
+			t.Parallel()
+			e := newScriptEnv(t, fakeInstalled, true)
+			e.recordCalls()
+			parent := filepath.Join(e.dir, "var-lib")
+			if err := os.Mkdir(parent, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			e.statusDir = filepath.Join(parent, "holzkube-manager-update")
+			out, rc := e.runReadOnly([]string{parent})
+			if rc != 1 {
+				t.Errorf("exit = %d, want 1", rc)
+			}
+			if !strings.Contains(out, e.statusDir) {
+				t.Errorf("the run does not name %s:\n%s", e.statusDir, out)
+			}
+			e.wantInstalledNothingAtAll(fakeInstalled)
+		})
+
+		for _, tc := range []struct {
+			name string
+			ro   func(e *scriptEnv) string
+		}{
+			{"the binary's directory", func(e *scriptEnv) string { return filepath.Dir(e.bin) }},
+			{"the previous binary's directory", func(e *scriptEnv) string {
+				d := filepath.Dir(e.previous)
+				if err := os.MkdirAll(d, 0o755); err != nil {
+					t.Fatal(err)
+				}
+				return d
+			}},
+			{"the previous binary's parent, with its directory missing", func(e *scriptEnv) string {
+				parent := filepath.Join(e.dir, "usr-local")
+				e.previous = filepath.Join(parent, "lib-holzkube-manager", "holzkube-managerd.previous")
+				if err := os.Mkdir(parent, 0o755); err != nil {
+					t.Fatal(err)
+				}
+				return parent
+			}},
+		} {
+			t.Run(tc.name+" read-only is refused before the download", func(t *testing.T) {
+				t.Parallel()
+				e := newScriptEnv(t, fakeInstalled, true)
+				e.recordCalls()
+				ro := tc.ro(e)
+				out, rc := e.runReadOnly([]string{ro})
+				if rc != 1 {
+					t.Errorf("exit = %d, want 1", rc)
+				}
+				e.wantStatus(OutcomeFailed, ptr(fakeInstalled), nil)
+				e.wantRefusedBeforeDownload(fakeInstalled)
+				if !strings.Contains(out, "nicht schreibbar") {
+					t.Errorf("the refusal does not say what it cannot write:\n%s", out)
+				}
+			})
+		}
+
+		// The script replaces itself after a healthy update. A directory it
+		// cannot write does not turn that update into a failure: the daemon
+		// is updated and healthy, and the old script stays.
+		t.Run("a script that cannot replace itself still records updated", func(t *testing.T) {
+			t.Parallel()
+			e := newScriptEnv(t, fakeInstalled, true)
+			sbin := filepath.Join(e.dir, "sbin")
+			old, err := os.ReadFile(e.script)
+			if err != nil {
+				t.Fatal(err)
+			}
+			e.script = filepath.Join(sbin, "holzkube-manager-update")
+			e.write(e.script, string(old), 0o755)
+			e.setReleaseWith(fakeDaemon(fakeRelease), string(old)+"# newer\n", true)
+			out, rc := e.runReadOnly([]string{sbin})
+			if rc != 0 {
+				t.Errorf("exit = %d, want 0", rc)
+			}
+			e.wantStatus(OutcomeUpdated, ptr(fakeRelease), ptr(fakeRelease))
+			if got, _ := os.ReadFile(e.script); string(got) != string(old) {
+				t.Errorf("the script changed in a read-only directory")
+			}
+			if !strings.Contains(out, "WARNUNG") {
+				t.Errorf("the run does not say it kept the old script:\n%s", out)
+			}
+		})
+	})
+
+	// The same with the directory writable: the archive's script replaces
+	// this one after the healthy update (the control for the case above).
+	t.Run("a healthy update replaces the script from the archive", func(t *testing.T) {
+		t.Parallel()
+		e := newScriptEnv(t, fakeInstalled, true)
+		old, err := os.ReadFile(e.script)
+		if err != nil {
+			t.Fatal(err)
+		}
+		e.setReleaseWith(fakeDaemon(fakeRelease), string(old)+"# newer\n", true)
+		if rc := e.run(true); rc != 0 {
+			t.Fatalf("exit = %d, want 0", rc)
+		}
+		e.wantStatus(OutcomeUpdated, ptr(fakeRelease), ptr(fakeRelease))
+		if got, _ := os.ReadFile(e.script); string(got) != string(old)+"# newer\n" {
+			t.Errorf("the script was not replaced from the archive")
+		}
+	})
+
 	t.Run("status directory owned by another uid", func(t *testing.T) {
 		const foreign = "/tmp"
 		planted := filepath.Join(foreign, "status.json")
