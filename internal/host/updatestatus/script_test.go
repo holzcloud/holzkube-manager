@@ -479,12 +479,20 @@ exec "$HKM_STUB_FLOCK_REAL" "$@"
 // separated, a unit with two). is-active answers
 // HKM_STUB_HEALTHY after a restart; before one, HKM_STUB_ACTIVE when it is
 // set -- the daemon as the script finds it, before it touches anything.
+// HKM_STUB_RESTART_FAIL=all fails every restart, =second only the second (the
+// roll back's), as systemctl does when the start job fails.
 const systemctlStub = `#!/usr/bin/env bash
 [[ -n ${HKM_STUB_SYSTEMCTL_LOG:-} ]] && printf '%s\n' "$*" >> "$HKM_STUB_SYSTEMCTL_LOG"
 case "$1" in
   restart)
     touch "$HKM_STUB_FIXTURES/.restarted"
+    echo x >> "$HKM_STUB_FIXTURES/.restarts"
     [[ -n ${HKM_STUB_HEALTH_GATE:-} ]] && touch "$HKM_STUB_HEALTH_GATE.armed"
+    n=$(wc -l < "$HKM_STUB_FIXTURES/.restarts")
+    case ${HKM_STUB_RESTART_FAIL:-} in
+      all) echo "Job for $2 failed." >&2; exit 1 ;;
+      second) [[ $n -eq 2 ]] && { echo "Job for $2 failed." >&2; exit 1; } ;;
+    esac
     exit 0 ;;
   is-active)
     active=${HKM_STUB_HEALTHY:-1}
@@ -858,6 +866,49 @@ func TestUpdateScriptAsRoot(t *testing.T) {
 			t.Fatalf("exit = %d, want 0", rc)
 		}
 		e.wantStatus(OutcomeUpdated, ptr(fakeRelease), ptr(fakeRelease))
+	})
+
+	// 13-REVIEW-3 WR-01: a failed systemctl restart after the install used
+	// to end the run right there, under set -e: no health check, no roll
+	// back, the new binary under the old process, recorded as installed --
+	// and from the next hour on "current". A failed restart now goes the way
+	// a failed health check goes: back to the previous binary. Here the old
+	// process still answers, which is what made the next hour's "current"
+	// look true.
+	t.Run("a failed restart rolls back, even with the old process answering", func(t *testing.T) {
+		t.Parallel()
+		e := newScriptEnv(t, fakeInstalled, true)
+		e.recordCalls()
+		e.extra = append(e.extra, "HKM_STUB_RESTART_FAIL=all")
+		if rc := e.run(true); rc != 1 {
+			t.Errorf("exit = %d, want 1", rc)
+		}
+		e.wantStatus(OutcomeRolledBack, ptr(fakeInstalled), ptr(fakeRelease))
+		if got := e.binVersion(); got != "holzkube-managerd "+fakeInstalled {
+			t.Errorf("installed binary answers %q, want the previous one back", got)
+		}
+		calls, err := os.ReadFile(filepath.Join(e.dir, "systemctl-calls"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if n := strings.Count(string(calls), "restart "); n != 2 {
+			t.Errorf("systemctl restart called %d times, want 2 (the install's and the roll back's):\n%s", n, calls)
+		}
+	})
+
+	// The roll back's own restart failing does not skip what it records: the
+	// previous binary is back on disk, and the run says it rolled back.
+	t.Run("a roll back whose restart fails still records rolled-back", func(t *testing.T) {
+		t.Parallel()
+		e := newScriptEnv(t, fakeInstalled, true)
+		e.extra = append(e.extra, "HKM_STUB_HEALTHY=0", "HKM_STUB_RESTART_FAIL=second")
+		if rc := e.run(true); rc != 1 {
+			t.Errorf("exit = %d, want 1", rc)
+		}
+		e.wantStatus(OutcomeRolledBack, ptr(fakeInstalled), ptr(fakeRelease))
+		if got := e.binVersion(); got != "holzkube-managerd "+fakeInstalled {
+			t.Errorf("installed binary answers %q, want the previous one back", got)
+		}
 	})
 
 	// A daemon that is not running is not asked at the health URL before the

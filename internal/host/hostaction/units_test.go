@@ -1159,7 +1159,9 @@ func TestTheUpdateTimingContract(t *testing.T) {
 	}{
 		{"download call sites", regexp.MustCompile(`(?m)(^|[^\w-])download -o `), 2},
 		{"api call sites", regexp.MustCompile(`(?m)(^|[^\w-])api "`), 1},
-		{`systemctl restart "$SERVICE" lines`, regexp.MustCompile(`(?m)^\s*systemctl restart "\$SERVICE"$`), 3},
+		// Any line that runs it, bare or as an if's condition (13-REVIEW-3
+		// WR-01: a failed restart goes to the roll back, not out under set -e).
+		{`systemctl restart "$SERVICE" lines`, regexp.MustCompile(`(?m)^[^#\n]*\bsystemctl restart "\$SERVICE"`), 3},
 		{"seq health loops", regexp.MustCompile(`(?m)^\s*for _ in \$\(seq `), 1},
 	} {
 		if n := len(c.re.FindAllString(script, -1)); n != c.want {

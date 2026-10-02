@@ -148,7 +148,7 @@ The release archive carries the two units that run the update script:
 - `holzkube-manager-update.service` runs the script above, with no argument:
   it looks for a newer release, downloads and checks it, installs it,
   restarts holzkube-manager and goes back to the previous binary if the
-  service does not come back healthy. **Check for updates and install**
+  restart fails or the service does not come back healthy. **Check for updates and install**
   starts it, through the helper, and so does the timer. It runs as root,
   because it replaces root's binary and restarts the service, in a sandbox:
   it may write only the daemon binary's directory (`/usr/local/bin`), its own

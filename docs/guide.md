@@ -151,8 +151,9 @@ A binary somewhere other than `/usr/local/bin` it does not update.
 A run of the update looks for the newest release that is not a draft,
 downloads it, checks its checksum and runs the new binary's `--version` before
 the service is touched. Then it installs the binary, restarts the service and
-checks that it answers on `127.0.0.1:8443` within about 20 seconds; if it does
-not, it goes back to the previous binary. What happened is recorded in
+checks that it answers on `127.0.0.1:8443` within about 20 seconds; if the
+restart fails or the service does not answer, it goes back to the previous
+binary and records **rolled-back**. What happened is recorded in
 `/var/lib/holzkube-manager-update/status.json`, and the Host page's **Update
 check** row shows it.
 

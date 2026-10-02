@@ -586,13 +586,23 @@ fi
 # install(1) ersetzt atomar. Der laufende Prozess haelt seine alte Inode, also
 # passiert bis zum Neustart nichts.
 install -o root -g root -m 0755 "$TMP/holzkube-managerd" "$BIN"
-systemctl restart "$SERVICE"
 
 # --- Nachsehen, ob es wirklich laeuft ---------------------------------------
 # Ein Update, das den Dienst kaputtmacht und "fertig" meldet, ist schlimmer als
 # eines, das scheitert: niemand sieht nach.
+#
+# Ein gescheiterter Neustart geht denselben Weg wie eine gescheiterte
+# Pruefung: zurueck. Unter set -e endete der Lauf frueher genau hier -- ohne
+# Pruefung, ohne Rueckweg, das neue Binary unter dem alten Prozess, und ab der
+# naechsten Stunde "current" (13-REVIEW-3 WR-01). Gefragt wird nach einem
+# gescheiterten Neustart auch nicht mehr: antwortet dann der alte Prozess, ist
+# das nicht das neue Release.
 ok=0
-wait_healthy 20 && ok=1
+if systemctl restart "$SERVICE"; then
+  wait_healthy 20 && ok=1
+else
+  log "systemctl restart $SERVICE scheiterte."
+fi
 
 if [[ $ok -eq 1 ]]; then
   # Das Archiv traegt dieses Skript mit. Es ersetzt sich erst, nachdem der
@@ -618,7 +628,12 @@ log "Der Dienst ist nach dem Update nicht gesund geworden - rolle zurueck."
 journalctl -u "$SERVICE" --no-pager -n 20 -o cat || true
 if [[ -x $PREVIOUS ]]; then
   install -o root -g root -m 0755 "$PREVIOUS" "$BIN"
-  systemctl restart "$SERVICE"
+  # Scheitert auch dieser Neustart, liegt die vorige Version trotzdem wieder
+  # da, und das wird festgehalten; warum er scheiterte, sagt das Journal des
+  # Dienstes.
+  if ! systemctl restart "$SERVICE"; then
+    log "WARNUNG: auch der Neustart mit der vorigen Version scheiterte; journalctl -u $SERVICE sagt warum."
+  fi
   # Ohne vorherige Version bleibt OUTCOME leer, und Exit 1 wird zu "failed".
   OUTCOME=rolled-back
   log "Zurueckgerollt auf $("$BIN" --version)."
