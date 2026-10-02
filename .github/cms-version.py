@@ -62,7 +62,8 @@ BARE = r"(?<![\w./-])" + V + r"(?!\.?\d)(?![\w-])"
 
 
 def tag_link(repo: str) -> str:
-    return r"github\.com/holzcloud/" + re.escape(repo) + r"/releases/tag/v" + V + r"(?![\w.-])"
+    """A release link; repo is a regex, so a renamed repository can be named too."""
+    return r"github\.com/holzcloud/(?:" + repo + r")/releases/tag/v" + V + r"(?![\w.-])"
 
 
 # Each rule: (where, regex with exactly one group around the version, count
@@ -93,19 +94,21 @@ PROJECTS = {
             ("stand", BARE, 2),
         ],
     },
+    # The repository was renamed from holzIce to holzBar on 2026-10-02; the
+    # pages may carry either name while they catch up, so both are accepted.
     "holzice": {
-        "slug": "holzice",
+        "slug": ("holzice", "holzbar"),
         "pages": 5,
         "rules": [
             ("stand", BARE, 1),
-            ("stand text", tag_link("holzIce"), 1),
-            ("text", r"github\.com/holzcloud/holzIce/releases/download/v" + V + r"/", 1),
-            ("text", r"holzIce-" + V + r"\.zip", 2),
+            ("stand text", tag_link("holzIce|holzBar"), 1),
+            ("text", r"github\.com/holzcloud/(?:holzIce|holzBar)/releases/download/v" + V + r"/", 1),
+            ("text", r"(?:holzIce|holzBar)-" + V + r"\.zip", 2),
         ],
     },
 }
 # The names the release workflows use, so a caller can pass its repository.
-ALIASES = {"hauscloud.ch": "hauscloud", "holzIce": "holzice"}
+ALIASES = {"hauscloud.ch": "hauscloud", "holzIce": "holzice", "holzBar": "holzice", "holzbar": "holzice"}
 
 
 class Refused(Exception):
@@ -265,12 +268,13 @@ def warn(msg: str):
     print(f"::warning::{msg}" if os.environ.get("GITHUB_ACTIONS") else f"warning: {msg}")
 
 
-def project_pages(cms: CMS, slug: str, expected: int) -> list:
+def project_pages(cms: CMS, slug, expected: int) -> list:
+    slugs = (slug,) if isinstance(slug, str) else tuple(slug)
     listed = cms.call("list_pages", {"website": WEBSITE, "status": "all", "limit": 500})
-    pages = [p for p in listed.get("pages", []) if p.get("slug") == slug]
+    pages = [p for p in listed.get("pages", []) if p.get("slug") in slugs]
     if len(pages) != expected:
         raise Refused(f"website {WEBSITE} has {len(pages)} pages with the address "
-                      f"'{slug}', expected {expected} (one per language)")
+                      f"{' or '.join(slugs)}, expected {expected} (one per language)")
     return pages
 
 
