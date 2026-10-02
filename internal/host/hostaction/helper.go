@@ -73,6 +73,31 @@ import (
 // whatever Detect says, because the helper's install commands do not bring it:
 // an operator who installs the helper should learn in the same reading that
 // the update buttons need one more file.
+//
+// The hourly update's units (operator decision 2026-10-01)
+//
+// The update script runs every hour from holzkube-manager-update.service,
+// which holzkube-manager-update.timer starts, and the helper's update order
+// starts the same service by name, with --no-block. Until 13-16 those two
+// units existed only as what an operator wrote by hand; now both ship in
+// deploy/ and the release archive, and UpdateUnitInstallCommands installs
+// them. As with the helper, nothing installs or replaces them but the
+// operator: the update script replaces the daemon's binary and itself, never
+// a unit, so a newer unit comes from repeating the install commands with a
+// newer archive.
+//
+// The update order needs the service: without it the helper's
+// `systemctl start --no-block` queues a start for a unit that does not exist
+// and records failed. UpdateUnitMissing asks for UpdateUnitPath the way
+// Outdated asks for the check unit: a regular file, read through fs.Stat, so a
+// symlink counts by what it points to -- a unit linked from elsewhere
+// (systemctl link) is installed, a mask (a symlink to /dev/null) or a link to
+// nothing is not. It looks only in /etc/systemd/system, where the install
+// commands put it and where Detect looks for the helper's units; a unit kept
+// in another directory of systemd's search path is reported missing. Only
+// update needs it: check-update starts the check unit, and the other three no
+// update unit at all. Like the update script, it is asked whatever Detect
+// says, because the helper's install commands do not bring it.
 
 // The helper's files, as the operator installs them (deploy/HOST-HELPER.md).
 const (
@@ -97,6 +122,17 @@ const (
 	// UpdateScriptMissing asks for it, and UpdateScriptInstallCommands
 	// installs it.
 	UpdateScriptPath = "/usr/local/sbin/holzkube-manager-update"
+	// UpdateUnitPath is the hourly update's service, installed from
+	// deploy/holzkube-manager-update.service by the operator, never by the
+	// update script. It runs UpdateScriptPath with no argument, as root. The
+	// timer at UpdateTimerPath starts it hourly, and the helper's update
+	// order starts it by name with --no-block, so nobody waits for it.
+	UpdateUnitPath = "/etc/systemd/system/holzkube-manager-update.service"
+	// UpdateTimerPath is the timer that starts UpdateUnitPath's service five
+	// minutes after boot and then an hour after its last start, installed
+	// from deploy/holzkube-manager-update.timer by the operator, never by the
+	// update script. It is the one of the two that is enabled.
+	UpdateTimerPath = "/etc/systemd/system/holzkube-manager-update.timer"
 )
 
 // HelperOrdersMarker begins the one line in the helper script that names the
@@ -126,6 +162,46 @@ var originalOrders = []Action{Reboot, Poweroff, RestartService, Update}
 // slice byte for byte by a test.
 var UpdateScriptInstallCommands = []string{
 	"sudo install -o root -g root -m 0755 deploy/holzkube-manager-update.sh /usr/local/sbin/holzkube-manager-update",
+}
+
+// UpdateUnitInstallCommands installs the hourly update's two units, run from
+// the root of an unpacked release archive (or a checkout): the archive
+// carries deploy/holzkube-manager-update.service and
+// deploy/holzkube-manager-update.timer.
+//
+// The first line exists because the service makes
+// /usr/local/lib/holzkube-manager writable -- the update script keeps the
+// previous binary there -- but under ProtectSystem=strict cannot create it:
+// its ReadWritePaths= entry carries "-", so a directory that does not exist
+// is skipped, /usr/local/lib stays read-only, and the script's own install -d
+// of it fails. Then both units
+// go into /etc/systemd/system, daemon-reload makes systemd see them, and only
+// the timer is enabled; the service has no [Install] section, and only the
+// timer and the helper start it.
+//
+// The lines replace units of the same name an operator wrote by hand. This
+// is the one copy: deploy/HOST-HELPER.md and docs/guide.md carry the same
+// lines, held to this slice byte for byte by a test -- a test and not an
+// embed, as for InstallCommands, because a package under internal/ cannot
+// embed a file from deploy/.
+var UpdateUnitInstallCommands = []string{
+	"sudo install -d -o root -g root -m 0755 /usr/local/lib/holzkube-manager",
+	"sudo install -o root -g root -m 0644 deploy/holzkube-manager-update.service deploy/holzkube-manager-update.timer /etc/systemd/system/",
+	"sudo systemctl daemon-reload",
+	"sudo systemctl enable --now holzkube-manager-update.timer",
+}
+
+// MissingUpdateUnit is the item UpdateUnitMissing reports: the hourly
+// update's service is not a regular file at UpdateUnitPath -- absent, a
+// directory, masked (a symlink to /dev/null) or a symlink to nothing.
+const MissingUpdateUnit = "update-unit"
+
+// NeedsUpdateUnit reports whether the order a starts the hourly update's
+// service: update only. check-update starts the check unit, which Outdated
+// asks for. The routes refuse exactly update while UpdateUnitMissing reports
+// anything.
+func NeedsUpdateUnit(a Action) bool {
+	return a == Update || a == CheckUpdate
 }
 
 // MissingUpdateScript is the item UpdateScriptMissing reports: the update
@@ -168,8 +244,9 @@ const (
 // Missing is one piece of the helper that is not installed.
 type Missing struct {
 	// Item is MissingScript, MissingPathUnit or MissingNotEnabled -- or, in
-	// Outdated's list, OutdatedScript or OutdatedCheckUnit, and in
-	// UpdateScriptMissing's, MissingUpdateScript.
+	// Outdated's list, OutdatedScript or OutdatedCheckUnit, in
+	// UpdateScriptMissing's, MissingUpdateScript, and in UpdateUnitMissing's,
+	// MissingUpdateUnit.
 	Item string `json:"item"`
 	// Path is the absolute path of the file that was found wanting.
 	Path string `json:"path"`
@@ -365,4 +442,25 @@ func UpdateScriptMissing(fsys fs.FS) []Missing {
 // Box's FS. Empty, never nil, when it is installed.
 func (b *Box) UpdateScript() []Missing {
 	return UpdateScriptMissing(b.cfg.FS)
+}
+
+// UpdateUnitMissing reports whether the hourly update's service, which the
+// update order starts, is missing on the machine fsys is rooted at ("/"): one
+// MissingUpdateUnit item when UpdateUnitPath is not a regular file once
+// symlinks are followed, else an empty list. It looks only at
+// /etc/systemd/system, never reads the file, and never returns nil.
+func UpdateUnitMissing(fsys fs.FS) []Missing {
+	// fs.Stat, not fs.Lstat: systemctl link leaves a symlink to a real unit,
+	// which is installed; systemctl mask leaves one to /dev/null, which is
+	// not a regular file and so not installed.
+	if info, err := fs.Stat(fsys, fsName(UpdateUnitPath)); err == nil && info.Mode().IsRegular() {
+		return []Missing{}
+	}
+	return []Missing{{Item: MissingUpdateUnit, Path: UpdateUnitPath}}
+}
+
+// UpdateUnit reports whether the hourly update's service is missing, read
+// through the Box's FS. Empty, never nil, when it is installed.
+func (b *Box) UpdateUnit() []Missing {
+	return UpdateUnitMissing(b.cfg.FS)
 }

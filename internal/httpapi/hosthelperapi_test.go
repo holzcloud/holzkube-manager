@@ -795,6 +795,158 @@ func TestAHelperBusyAtPlacementIsRefusedAsBusy(t *testing.T) {
 	requireNothingPlaced(t, h, path)
 }
 
+// TestHostUpdateNeedsTheUpdateUnit (13-16): the update order starts
+// holzkube-manager-update.service, which neither the helper's install commands
+// nor the update script's install. While /etc/systemd/system holds no regular
+// file under its name -- absent, a directory, or masked (a symlink to
+// /dev/null) -- the confirm route and the action route refuse update with 409
+// conflict.host-update-unit-missing, before a token is issued or checked and
+// before anything is placed. check-update, reboot, poweroff and
+// restart-service start no such unit and go through over the same helper.
+//
+// The order of the refusals: container, missing, update script, update unit,
+// outdated, busy. The unit after the script, because the script is the reason
+// both update buttons share; before busy, because waiting will not cure it.
+//
+// Faults injected and seen red (13-16): the action route's question removed;
+// the confirm route's removed; the unit's question moved before the update
+// script's; the unit dropped from installedHelperFS (the round trips that
+// place update).
+func TestHostUpdateNeedsTheUpdateUnit(t *testing.T) {
+	t.Parallel()
+
+	const code = "conflict.host-update-unit-missing"
+	const detail = "The unit holzkube-manager-update.service is not installed, so no order was placed. " +
+		`deploy/HOST-HELPER.md, "The hourly update", says how to install it.`
+
+	// refusedUpdate wants code from the confirm route and the action route of
+	// update, no token and nothing placed.
+	refusedUpdate := func(t *testing.T, h *harness, code string) {
+		t.Helper()
+		resp, raw := h.do(t, http.MethodPost, "/api/v1/host/confirm", map[string]string{
+			"action": "host.update", "typed": "example-host",
+		})
+		if resp.StatusCode != http.StatusConflict {
+			t.Errorf("POST /api/v1/host/confirm for host.update: %d, want 409 %s (%s)", resp.StatusCode, code, raw)
+		} else if p := decodeProblem(t, resp, raw); p.Code != code {
+			t.Errorf("POST /api/v1/host/confirm for host.update: code %q, want %q", p.Code, code)
+		}
+		if strings.Contains(string(raw), `"token"`) {
+			t.Errorf("POST /api/v1/host/confirm for host.update handed out a token: %s", raw)
+		}
+
+		tok := sessionHostToken(t, h.confirmer, h.srv.URL, h.client, "host.update")
+		const path = "/api/v1/host/actions/update"
+		resp, raw = h.do(t, http.MethodPost, path, map[string]string{"confirmation": tok})
+		if resp.StatusCode != http.StatusConflict {
+			t.Errorf("POST %s with a valid host token: %d, want 409 %s (%s)", path, resp.StatusCode, code, raw)
+		} else if p := decodeProblem(t, resp, raw); p.Code != code {
+			t.Errorf("POST %s: code %q, want %q", path, p.Code, code)
+		}
+		requireNothingPlaced(t, h, path)
+	}
+
+	// masked is the helper installed with the update unit masked the way
+	// systemctl mask does it: a real symlink to /dev/null, which fs.Stat
+	// follows on disk as it does on the host.
+	masked := func(t *testing.T) fs.FS {
+		t.Helper()
+		fsys, stateDir := installedHelperFS(t)
+		o, ok := fsys.(overlayFS)
+		if !ok {
+			t.Fatalf("installedHelperFS returned %T, not an overlayFS", fsys)
+		}
+		delete(o.fixed, helperUpdateUnit)
+		root := strings.TrimSuffix(stateDir, filepath.FromSlash("/"+helperStateDir))
+		unitFile := filepath.Join(root, filepath.FromSlash(helperUpdateUnit))
+		if err := os.MkdirAll(filepath.Dir(unitFile), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink("/dev/null", unitFile); err != nil {
+			t.Fatal(err)
+		}
+		return o
+	}
+
+	cases := []struct {
+		name string
+		fsys func(t *testing.T) fs.FS
+	}{
+		{"absent", func(t *testing.T) fs.FS {
+			return helperState(t, func(m fstest.MapFS) { delete(m, helperUpdateUnit) })
+		}},
+		{"a directory", func(t *testing.T) fs.FS {
+			return helperState(t, func(m fstest.MapFS) {
+				m[helperUpdateUnit] = &fstest.MapFile{Mode: fs.ModeDir | 0o755}
+			})
+		}},
+		{"masked", masked},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			h := hostHelperHarness(t, tc.fsys(t), fstest.MapFS{})
+
+			v := readHelperView(t, h)
+			if !*v.Actions.Available || len(v.Actions.Missing) != 0 || len(v.Actions.Outdated) != 0 || len(v.Actions.UpdateScript) != 0 {
+				t.Errorf("actions = available %v, missing %+v, outdated %+v, update_script %+v; want the helper and the script installed",
+					*v.Actions.Available, v.Actions.Missing, v.Actions.Outdated, v.Actions.UpdateScript)
+			}
+
+			refusedUpdate(t, h, code)
+			resp, raw := h.do(t, http.MethodPost, "/api/v1/host/confirm", map[string]string{
+				"action": "host.update", "typed": "example-host",
+			})
+			if p := decodeProblem(t, resp, raw); p.Detail != detail {
+				t.Errorf("detail = %q, want %q", p.Detail, detail)
+			}
+
+			// The control: the four that start no update unit go through,
+			// the check included -- last, because a check the helper has
+			// taken and not yet answered makes it busy for every order after.
+			for _, a := range []hostaction.Action{hostaction.Reboot, hostaction.Poweroff, hostaction.RestartService, hostaction.CheckUpdate} {
+				requireGoesThrough(t, h, a)
+				if err := os.Remove(h.dataDir + "/" + hostaction.OrderFileName); err != nil {
+					t.Fatal(err)
+				}
+			}
+		})
+	}
+
+	// The order of the refusals, each with the unit missing too.
+	noUnit := func(edit func(m fstest.MapFS)) func(m fstest.MapFS) {
+		return func(m fstest.MapFS) {
+			delete(m, helperUpdateUnit)
+			if edit != nil {
+				edit(m)
+			}
+		}
+	}
+	t.Run("in a container", func(t *testing.T) {
+		t.Parallel()
+		h := hostHelperHarness(t, helperState(t, noUnit(nil)), fstest.MapFS{".dockerenv": {}})
+		refusedUpdate(t, h, "conflict.host-in-container")
+	})
+	t.Run("helper missing", func(t *testing.T) {
+		t.Parallel()
+		h := hostHelperHarness(t, helperState(t, noUnit(func(m fstest.MapFS) { delete(m, helperWantsLink) })), fstest.MapFS{})
+		refusedUpdate(t, h, "conflict.host-helper-missing")
+	})
+	t.Run("update script missing too", func(t *testing.T) {
+		t.Parallel()
+		h := hostHelperHarness(t, helperState(t, noUnit(func(m fstest.MapFS) { delete(m, helperUpdateScript) })), fstest.MapFS{})
+		refusedUpdate(t, h, "conflict.host-update-script-missing")
+	})
+	t.Run("busy too", func(t *testing.T) {
+		t.Parallel()
+		started := "c0ffee00c0ffee11 check-update started " + time.Now().UTC().Add(-5*time.Second).Truncate(time.Second).Format(time.RFC3339)
+		h := hostHelperHarnessUp(t, helperState(t, noUnit(helperRecorded(started))), fstest.MapFS{},
+			func() (time.Duration, error) { return time.Hour, nil })
+		// The unit before busy: waiting will not cure it.
+		refusedUpdate(t, h, code)
+	})
+}
+
 // TestHostUpdateActionsNeedTheUpdateScript (13-REVIEW-2 IN-04): both update
 // orders end in /usr/local/sbin/holzkube-manager-update, which the helper's
 // install commands do not install. While it is not a root-owned executable

@@ -185,6 +185,16 @@ const (
 	// GET /api/v1/host names the command that installs the script.
 	CodeHostUpdateScriptMissing = "conflict.host-update-script-missing"
 
+	// CodeHostUpdateUnitMissing: the update action was asked for while the
+	// unit it starts, holzkube-manager-update.service, is not installed in
+	// /etc/systemd/system -- absent, not a regular file, or masked (13-16).
+	// The helper would start a unit that does not exist and record failed. A
+	// conflict for the same reason as a missing helper: the request is well
+	// formed, and this machine cannot carry it out. No token was issued and no
+	// order placed; check-update, reboot, poweroff and restart-service still
+	// work, and deploy/HOST-HELPER.md, "The hourly update", installs the unit.
+	CodeHostUpdateUnitMissing = "conflict.host-update-unit-missing"
+
 	// CodeHostHelperBusy: a host action was asked for while the root helper
 	// is still carrying out an update check (13-REVIEW-2 WR-01). The helper
 	// waits for the check unit, so it picks up nothing else until the check

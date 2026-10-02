@@ -1,0 +1,33 @@
+# holzkube-manager-update.timer -- startet holzkube-manager-update.service,
+# das ganze Update, stuendlich.
+#
+# Der Zeitplan ist der, mit dem die Referenzinstallation laeuft: 5 min nach dem
+# Booten, danach eine Stunde nach dem letzten Start des Dienstes, gleich, wer
+# ihn startete -- dieser Timer oder der Host-Helfer fuer die Schaltflaeche
+# "Check for updates and install". Jedes Mal mit bis zu 5 min zufaelliger
+# Verzoegerung, also wandert die Stunde (gemessen: Starts rund 62 min
+# auseinander).
+#
+# Installiert wird er von niemandem ausser dem Betreiber, von Hand, zusammen
+# mit dem Dienst, aus dem Release-Archiv: deploy/HOST-HELPER.md, "The hourly
+# update". Das Update-Skript ersetzt keine Unit.
+#
+# Warum die Zeilen so sind, wie sie sind:
+#
+#   - Kein Persistent=: es wirkt nur zusammen mit OnCalendar=, und das hat
+#     dieser Timer nicht.
+#   - Kein Unit=: derselbe Name heisst holzkube-manager-update.service, genau
+#     der Name, den der Helfer startet.
+#   - enable --now auf einer Maschine, die laenger als 5 min laeuft: OnBootSec=
+#     ist dann schon verstrichen, der erste Lauf folgt binnen Minuten.
+[Unit]
+Description=holzkube-manager - stuendlich nach einem neueren Release sehen und es installieren
+Documentation=https://github.com/holzcloud/holzkube-manager/blob/main/deploy/HOST-HELPER.md
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=1h
+RandomizedDelaySec=5min
+
+[Install]
+WantedBy=timers.target

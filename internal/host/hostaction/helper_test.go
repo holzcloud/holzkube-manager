@@ -3,6 +3,7 @@ package hostaction
 import (
 	"io/fs"
 	"os"
+	"path/filepath"
 	"reflect"
 	"slices"
 	"strings"
@@ -400,5 +401,138 @@ func TestNeedsUpdateScript(t *testing.T) {
 	}
 	if want := []Action{Update, CheckUpdate}; !reflect.DeepEqual(need, want) {
 		t.Errorf("NeedsUpdateScript is true for %v, want exactly %v", need, want)
+	}
+}
+
+// TestUpdateUnitMissing (13-16): the update order starts
+// holzkube-manager-update.service, which the helper's install commands do not
+// install. The daemon asks for its unit file where the hourly update's install
+// commands put it, /etc/systemd/system, from the file alone: a regular file is
+// installed, wherever a symlink to it points (systemctl link); anything else --
+// absent, a directory, a mask (a symlink to /dev/null), a symlink to nothing --
+// is one update-unit item.
+//
+// The symlink cases are real symlinks in a temporary directory, read through
+// os.DirFS, so fs.Stat follows them as it does on the host. Fault injected and
+// seen red: fs.Lstat in place of fs.Stat (the systemctl-link case).
+func TestUpdateUnitMissing(t *testing.T) {
+	t.Parallel()
+
+	missing := []Missing{{Item: MissingUpdateUnit, Path: UpdateUnitPath}}
+	unit := &fstest.MapFile{Data: []byte("[Service]\nType=oneshot\n"), Mode: 0o644}
+
+	// onDisk is a root with the unit's directory and, if put is set, what
+	// put puts under the unit's name (given its absolute path on disk).
+	onDisk := func(t *testing.T, put func(t *testing.T, root, unitFile string)) fs.FS {
+		t.Helper()
+		root := t.TempDir()
+		dir := filepath.Join(root, filepath.FromSlash(fsName(filepath.Dir(UpdateUnitPath))))
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if put != nil {
+			put(t, root, filepath.Join(dir, filepath.Base(UpdateUnitPath)))
+		}
+		return os.DirFS(root)
+	}
+	symlink := func(target func(root string) string) func(t *testing.T, root, unitFile string) {
+		return func(t *testing.T, root, unitFile string) {
+			t.Helper()
+			if err := os.Symlink(target(root), unitFile); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+
+	withUnit := installedFS()
+	withUnit[fsName(UpdateScriptPath)] = &fstest.MapFile{Data: []byte("#!/usr/bin/env bash\n"), Mode: 0o755, Sys: &syscall.Stat_t{Uid: 0}}
+	helperAndScript := installedFS()
+	helperAndScript[fsName(UpdateScriptPath)] = withUnit[fsName(UpdateScriptPath)]
+	withUnit[fsName(UpdateUnitPath)] = unit
+
+	cases := []struct {
+		name string
+		fsys func(t *testing.T) fs.FS
+		want []Missing
+	}{
+		{"installed: a regular file", func(*testing.T) fs.FS { return fstest.MapFS{fsName(UpdateUnitPath): unit} }, []Missing{}},
+		{"installed beside the helper and the update script", func(*testing.T) fs.FS { return withUnit }, []Missing{}},
+		{"a regular file on disk", func(t *testing.T) fs.FS {
+			return onDisk(t, func(t *testing.T, _, unitFile string) {
+				t.Helper()
+				if err := os.WriteFile(unitFile, unit.Data, 0o644); err != nil {
+					t.Fatal(err)
+				}
+			})
+		}, []Missing{}},
+		// systemctl link: the name in /etc/systemd/system points at a unit
+		// file elsewhere, which systemd loads.
+		{"a symlink to a regular unit elsewhere", func(t *testing.T) fs.FS {
+			return onDisk(t, func(t *testing.T, root, unitFile string) {
+				t.Helper()
+				elsewhere := filepath.Join(root, "opt", filepath.Base(UpdateUnitPath))
+				if err := os.MkdirAll(filepath.Dir(elsewhere), 0o755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(elsewhere, unit.Data, 0o644); err != nil {
+					t.Fatal(err)
+				}
+				symlink(func(string) string { return elsewhere })(t, root, unitFile)
+			})
+		}, []Missing{}},
+		{"absent", func(*testing.T) fs.FS { return fstest.MapFS{} }, missing},
+		{"absent on disk", func(t *testing.T) fs.FS { return onDisk(t, nil) }, missing},
+		// The helper's install commands and the update script's do not bring
+		// it.
+		{"absent, the helper and the update script installed", func(*testing.T) fs.FS { return helperAndScript }, missing},
+		{"a directory", func(t *testing.T) fs.FS {
+			return onDisk(t, func(t *testing.T, _, unitFile string) {
+				t.Helper()
+				if err := os.Mkdir(unitFile, 0o755); err != nil {
+					t.Fatal(err)
+				}
+			})
+		}, missing},
+		// systemctl mask: a symlink to /dev/null, which systemd refuses to
+		// start.
+		{"masked: a symlink to /dev/null", func(t *testing.T) fs.FS {
+			return onDisk(t, symlink(func(string) string { return "/dev/null" }))
+		}, missing},
+		{"a symlink to nothing", func(t *testing.T) fs.FS {
+			return onDisk(t, symlink(func(root string) string { return filepath.Join(root, "gone") }))
+		}, missing},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			fsys := tc.fsys(t)
+			got := UpdateUnitMissing(fsys)
+			if got == nil {
+				t.Fatal("UpdateUnitMissing returned nil; it must be a list, never null")
+			}
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Errorf("UpdateUnitMissing = %+v, want %+v", got, tc.want)
+			}
+			if box := NewBox(Config{FS: fsys, DataDir: t.TempDir()}).UpdateUnit(); !reflect.DeepEqual(box, tc.want) {
+				t.Errorf("Box.UpdateUnit = %+v, want %+v", box, tc.want)
+			}
+		})
+	}
+}
+
+// TestNeedsUpdateUnit: only update starts holzkube-manager-update.service.
+// check-update starts the check unit, which Outdated already asks for, and
+// the other three start no update unit at all.
+func TestNeedsUpdateUnit(t *testing.T) {
+	t.Parallel()
+
+	var need []Action
+	for _, a := range Actions() {
+		if NeedsUpdateUnit(a) {
+			need = append(need, a)
+		}
+	}
+	if want := []Action{Update}; !reflect.DeepEqual(need, want) {
+		t.Errorf("NeedsUpdateUnit is true for %v, want exactly %v", need, want)
 	}
 }

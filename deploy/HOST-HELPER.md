@@ -74,6 +74,10 @@ Putting new code on a host that runs as root is your decision, every time.
   runs it with `--check`. The install commands below do not install it; see
   [The update script](#the-update-script). The other three orders do not
   need it.
+- For `update`, also the unit it starts,
+  `/etc/systemd/system/holzkube-manager-update.service`, which the release
+  archive carries with its hourly timer; see
+  [The hourly update](#the-hourly-update).
 
 ## Install
 
@@ -118,7 +122,81 @@ both update actions with `409 conflict.host-update-script-missing` before it
 issues a confirmation or places an order.
 
 `update` also needs `holzkube-manager-update.service`, the unit the hourly
-timer starts; the page does not look for that one.
+timer starts: see the next section. Until it is installed, holzkube-manager
+refuses **Check for updates and install** with
+`409 conflict.host-update-unit-missing` before it issues a confirmation or
+places an order. **Check for updates** and the other three do not need it.
+
+## The hourly update
+
+The release archive carries the two units that run the update script:
+
+- `holzkube-manager-update.service` runs the script above, with no argument:
+  it looks for a newer release, downloads and checks it, installs it,
+  restarts holzkube-manager and goes back to the previous binary if the
+  service does not come back healthy. **Check for updates and install**
+  starts it, through the helper, and so does the timer. It runs as root,
+  because it replaces root's binary and restarts the service, in a sandbox:
+  it may write only the daemon binary's directory (`/usr/local/bin`), its own
+  (`/usr/local/sbin`), the previous binary's
+  (`/usr/local/lib/holzkube-manager`) and its status directory
+  (`/var/lib/holzkube-manager-update`). On the network it needs GitHub and
+  the health check on `127.0.0.1:8443`. Every line of the unit
+  says in its comment why it is there, and which sandbox lines are left out
+  and why.
+- `holzkube-manager-update.timer` starts it 5 minutes after boot and then an
+  hour after its last run, whoever started that run, each time with up to 5
+  minutes of random delay.
+
+Install both, from the root of the unpacked release archive, after the update
+script's own command above:
+
+<!-- update-unit-commands:begin -->
+```sh
+sudo install -d -o root -g root -m 0755 /usr/local/lib/holzkube-manager
+sudo install -o root -g root -m 0644 deploy/holzkube-manager-update.service deploy/holzkube-manager-update.timer /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now holzkube-manager-update.timer
+```
+<!-- update-unit-commands:end -->
+
+The first line creates the directory the previous binary is kept in: the unit
+lets the script write there, but cannot create it. Only the timer is enabled;
+the service has no `[Install]` section.
+
+holzkube-manager looks for the service at
+`/etc/systemd/system/holzkube-manager-update.service`: a regular file, or a
+link to one. Until it is there -- or while it is masked -- holzkube-manager
+refuses **Check for updates and install** with
+`409 conflict.host-update-unit-missing` before it issues a confirmation or
+places an order. **Check for updates**, which starts the check unit, and the
+other three do not need it.
+
+These lines replace units of the same name that were written by hand. To see
+what is there first:
+
+```sh
+systemctl cat holzkube-manager-update.service holzkube-manager-update.timer
+```
+
+Skipping the block keeps them as they are.
+
+To see it work:
+
+```sh
+systemctl list-timers holzkube-manager-update.timer
+journalctl -u holzkube-manager-update
+```
+
+The update script replaces the daemon and itself, never a unit. A newer unit
+from a newer archive is taken by repeating the block above. To stop and remove
+the hourly update:
+
+```sh
+sudo systemctl disable --now holzkube-manager-update.timer
+sudo rm /etc/systemd/system/holzkube-manager-update.service /etc/systemd/system/holzkube-manager-update.timer
+sudo systemctl daemon-reload
+```
 
 ## Check that it works
 

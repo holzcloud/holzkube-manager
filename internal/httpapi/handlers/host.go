@@ -109,6 +109,20 @@ import (
 // condition that waiting will not cure, so it is named before the transient
 // one.
 //
+// The update action alone is asked the next question: whether the unit it
+// starts, holzkube-manager-update.service, is installed in
+// /etc/systemd/system (409 conflict.host-update-unit-missing, 13-16). Neither
+// the helper's install commands nor the update script's bring it; the
+// hourly update's do, from deploy/HOST-HELPER.md "The hourly update".
+// hostaction.UpdateUnitMissing reads it from the file -- a regular file, a
+// symlink followed, so a mask counts as missing -- and check-update, which
+// starts the check unit, is not asked. It comes after the update script,
+// because the script is the reason both update buttons share and the page
+// shows one line for it; before the older helper only by convention, since
+// the two never apply to the same action; and before busy, because waiting
+// will not cure it either. The full order is: container, missing, update
+// script, update unit, outdated, busy.
+//
 // The check alone is asked the question after that: whether the
 // installed helper is new enough for it (409 conflict.host-helper-outdated).
 // A helper installed before check-update existed carries out the four older
@@ -175,6 +189,17 @@ func needsUpdateScript(name string) bool {
 	for _, a := range hostaction.Actions() {
 		if hostActionName(a) == name {
 			return hostaction.NeedsUpdateScript(a)
+		}
+	}
+	return false
+}
+
+// needsUpdateUnit reports whether the host action named name (host.update)
+// is one hostaction.NeedsUpdateUnit names.
+func needsUpdateUnit(name string) bool {
+	for _, a := range hostaction.Actions() {
+		if hostActionName(a) == name {
+			return hostaction.NeedsUpdateUnit(a)
 		}
 	}
 	return false
@@ -266,6 +291,10 @@ const (
 	// hostUpdateScriptMissingDetail is the two update actions' refusal: the
 	// other three still go through.
 	hostUpdateScriptMissingDetail = "The update script /usr/local/sbin/holzkube-manager-update is not installed, so no order was placed. The Host page says how to install it."
+	// hostUpdateUnitMissingDetail is the update action's refusal while the
+	// unit it starts is not installed: the other four still go through.
+	hostUpdateUnitMissingDetail = "The unit holzkube-manager-update.service is not installed, so no order was placed. " +
+		`deploy/HOST-HELPER.md, "The hourly update", says how to install it.`
 )
 
 // confirmHostAction hands out a token for one host action, to somebody who
@@ -310,6 +339,12 @@ func confirmHostAction(d httpapi.Deps) http.HandlerFunc {
 		// for an order that ends in a script that is not there.
 		if needsUpdateScript(body.Action) && len(d.HostActions.UpdateScript()) > 0 {
 			httpapi.WriteProblem(w, r, httpapi.Conflict(httpapi.CodeHostUpdateScriptMissing, hostUpdateScriptMissingDetail))
+			return
+		}
+		// The update, before anything is typed against: no token for an
+		// order that starts a unit that is not there.
+		if needsUpdateUnit(body.Action) && len(d.HostActions.UpdateUnit()) > 0 {
+			httpapi.WriteProblem(w, r, httpapi.Conflict(httpapi.CodeHostUpdateUnitMissing, hostUpdateUnitMissingDetail))
 			return
 		}
 		// The check, before anything is typed against: no token for an order
@@ -381,6 +416,12 @@ func hostAction(d httpapi.Deps, a hostaction.Action) http.HandlerFunc {
 		// is placed while it is not there.
 		if hostaction.NeedsUpdateScript(a) && len(d.HostActions.UpdateScript()) > 0 {
 			httpapi.WriteProblem(w, r, httpapi.Conflict(httpapi.CodeHostUpdateScriptMissing, hostUpdateScriptMissingDetail))
+			return
+		}
+		// The update alone: it starts holzkube-manager-update.service, so it
+		// is not placed while that unit is not installed.
+		if hostaction.NeedsUpdateUnit(a) && len(d.HostActions.UpdateUnit()) > 0 {
+			httpapi.WriteProblem(w, r, httpapi.Conflict(httpapi.CodeHostUpdateUnitMissing, hostUpdateUnitMissingDetail))
 			return
 		}
 		// The check alone: an older helper refuses it, so it is not placed.
