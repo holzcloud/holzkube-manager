@@ -5,16 +5,16 @@ milestone_name: Host & Telefon
 current_phase: 14
 current_phase_name: telefon-tippziele
 status: verifying
-stopped_at: Completed 13-16-PLAN.md
-last_updated: "2026-10-02T04:14:35.456Z"
+stopped_at: Completed 13-17-PLAN.md
+last_updated: "2026-10-02T04:57:09.209Z"
 last_activity: 2026-09-30
 last_activity_desc: Phase 14 execution started
-state_head: 442a6020f2fb38aca09fbf72059f97613ad5a123
+state_head: 735a7680cf981bb719251d03aa937621c4bac26b
 progress:
   total_phases: 4
   completed_phases: 2
   total_plans: 39
-  completed_plans: 38
+  completed_plans: 39
   percent: 50
 ---
 
@@ -152,6 +152,7 @@ Siehe `PROJECT.md`, die `MILESTONE-*.md`-Dateien und für v1.18 den Abschnitt
 - [Phase 13]: 13-15: D-08's route/opener/index/tag key turns an index shift across a tag boundary into ONLY BEFORE/AFTER pairs; 'no control disappeared' is judged by re-keying /host by opener, tag and name
 - [Phase 13]: 13-16: update is refused with 409 conflict.host-update-unit-missing while holzkube-manager-update.service is not a regular file in /etc/systemd/system; order container, missing, update script, update unit, outdated, busy
 - [Phase 13]: 13-16: CapabilityBoundingSet=, SystemCallFilter=, ProtectProc= and ProcSubset= stay out of the shipped update unit until a real install and restart through it is measured as root
+- [Phase 13]: 13-17: single-button reasons share one line in button order (at most two sentences); actionReason asks group, update script, update unit, older helper, as the routes do
 
 ### Blockers/Concerns
 
@@ -172,8 +173,8 @@ Siehe `PROJECT.md`, die `MILESTONE-*.md`-Dateien und für v1.18 den Abschnitt
 
 ## Session Continuity
 
-Last session: 2026-10-02T04:14:35.261Z
-Stopped at: Completed 13-16-PLAN.md
+Last session: 2026-10-02T04:57:09.026Z
+Stopped at: Completed 13-17-PLAN.md
 Resume file: None
 Next: `/gsd-plan-phase 11`
 
@@ -219,3 +220,4 @@ Next: `/gsd-plan-phase 11`
 | Phase 13 P14 | 20min | 2 tasks | 15 files |
 | Phase 13 P15 | 75min | 3 tasks | 11 files |
 | Phase 13 P16 | elapsed 2026-10-01 18:10 to 2026-10-02 06:15 CEST with a pause | 3 tasks | 14 files |
+| Phase 13 P17 | 41min | 3 tasks | 14 files |
