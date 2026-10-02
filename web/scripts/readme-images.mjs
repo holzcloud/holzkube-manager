@@ -32,6 +32,10 @@ const browser = await chromium.launch({ executablePath })
 // --- brand ------------------------------------------------------------------
 
 const mark = readFileSync(join(brand, 'holzkube-mark.svg'), 'utf8').replace(/<!--[\s\S]*?-->/, '')
+// The mark is wider than it is tall; it is scaled to a width and keeps its
+// own proportions, read from its width and height attributes.
+const [, mw, mh] = mark.match(/width="([\d.]+)" height="([\d.]+)"/)
+const sized = (w) => mark.replace(`width="${mw}" height="${mh}"`, `width="${w}" height="${Math.round((w * mh) / mw)}"`)
 // Inlined: a page made with setContent has no origin that may read file://.
 const font = `data:font/woff2;base64,${readFileSync(
   join(root, 'web/node_modules/@fontsource-variable/manrope/files/manrope-latin-wght-normal.woff2'),
@@ -48,8 +52,8 @@ async function card(file, width, height, body) {
     .t { font-weight: 760; letter-spacing: -.035em; line-height: 1 }
     .s { color: #d8c8b4 }
     .pills { display: flex; gap: 10px; flex-wrap: wrap }
-    .pills span { font-size: 15px; font-weight: 600; color: #f0ae5f; padding: 6px 13px;
-      border: 1px solid rgb(240 174 95 / .35); border-radius: 999px; background: rgb(240 174 95 / .08) }
+    .pills span { font-size: 15px; font-weight: 600; color: #ef7a4d; padding: 6px 13px;
+      border: 1px solid rgb(239 122 77 / .35); border-radius: 999px; background: rgb(239 122 77 / .08) }
   </style>${body}`)
   await page.evaluate(() => document.fonts.ready)
   await page.screenshot({ path: join(brand, file) })
@@ -61,7 +65,7 @@ await card(
   1280,
   320,
   `<div style="display:flex;align-items:center;gap:44px;height:100%;padding:0 72px">
-    <div style="width:168px;height:168px;flex:none">${mark.replace('width="64" height="64"', 'width="168" height="168"')}</div>
+    <div style="width:168px;height:168px;flex:none;display:grid;place-items:center">${sized(168)}</div>
     <div>
       <div class="t" style="font-size:64px">holzkube-manager</div>
       <div class="s" style="font-size:22px;margin:14px 0 22px">Self-hosted management for Talos Linux and Kubernetes.<br>One binary, running beside your cluster.</div>
@@ -74,16 +78,16 @@ await card(
   1280,
   640,
   `<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;gap:34px">
-    <div style="width:220px;height:220px">${mark.replace('width="64" height="64"', 'width="220" height="220"')}</div>
+    <div style="width:220px;height:220px;display:grid;place-items:center">${sized(220)}</div>
     <div class="t" style="font-size:76px">holzkube-manager</div>
     <div class="s" style="font-size:26px">Talos Linux and Kubernetes, managed from one binary.</div>
   </div>`,
 )
 
-// The home-screen icon: the mark on the ground colour, opaque, because iOS
-// fills a transparent corner with black and Android masks to its own shape. The
+// The home-screen icon: the mark on the icon's tile colour, opaque, because iOS
+// fills a transparent corner with black and Android masks to its own shape --
+// so the tile of favicon.svg is not drawn here, the platform cuts its own. The
 // mark stays inside the middle 64%, the safe zone of a maskable icon.
-const favicon = readFileSync(join(root, 'web/public/favicon.svg'), 'utf8').replace(/<!--[\s\S]*?-->/, '')
 for (const [file, size] of [
   ['apple-touch-icon.png', 180],
   ['icon-192.png', 192],
@@ -91,9 +95,9 @@ for (const [file, size] of [
 ]) {
   const page = await browser.newPage({ viewport: { width: size, height: size }, deviceScaleFactor: 1 })
   const inner = Math.round(size * 0.64)
-  await page.setContent(`<!doctype html><style>html,body{margin:0;background:#150e08}
+  await page.setContent(`<!doctype html><style>html,body{margin:0;background:#140806}
     div{width:${size}px;height:${size}px;display:grid;place-items:center}</style>
-    <div>${favicon.replace('width="64" height="64"', `width="${inner}" height="${inner}"`)}</div>`)
+    <div>${sized(inner)}</div>`)
   await page.screenshot({ path: join(root, 'web/public', file) })
   await page.close()
 }
