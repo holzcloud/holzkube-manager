@@ -280,3 +280,25 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ inputs.tag != '' && inputs.tag || github.ref_name }}
         run: python3 .github/verify-release.py "$GITHUB_REPOSITORY" "$TAG"
+
+  # holzcloud.ch shows the released version on the project page in five
+  # languages. This writes it there through the CMS, after the release above
+  # exists, and reads it back. .github/cms-version.py is a copy of
+  # holzcloud-design's tools/cms-version.py (that repository is private, so
+  # its reusable workflow cannot be called from here). Without the CMS_TOKEN
+  # secret it prints a notice and succeeds; a failure here leaves the release
+  # itself untouched.
+  holzcloud-ch:
+    name: Show the version on holzcloud.ch
+    needs: [release]
+    if: startsWith(github.ref, 'refs/tags/v') || inputs.tag != ''
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Write the version into the project pages and read it back
+        env:
+          CMS_TOKEN: ${{ secrets.CMS_TOKEN }}
+          TAG: ${{ inputs.tag != '' && inputs.tag || github.ref_name }}
+        run: python3 .github/cms-version.py --project holzkube-manager --version "$TAG"
