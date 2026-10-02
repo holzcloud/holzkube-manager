@@ -201,7 +201,7 @@ const MissingUpdateUnit = "update-unit"
 // asks for. The routes refuse exactly update while UpdateUnitMissing reports
 // anything.
 func NeedsUpdateUnit(a Action) bool {
-	return a == Update || a == CheckUpdate
+	return a == Update
 }
 
 // MissingUpdateScript is the item UpdateScriptMissing reports: the update
