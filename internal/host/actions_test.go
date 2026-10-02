@@ -16,7 +16,8 @@ import (
 // helperInstalledFS is a root filesystem on which the helper is installed the
 // way deploy/HOST-HELPER.md installs it: the shipped script's own bytes, both
 // unit files, the path unit enabled, and the check unit -- beside the update
-// script both update orders end in, as the reference installation has it.
+// script both update orders end in and the hourly update's unit the update
+// order starts, as the reference installation has them.
 func helperInstalledFS(t *testing.T) fstest.MapFS {
 	t.Helper()
 	return fstest.MapFS{
@@ -30,6 +31,7 @@ func helperInstalledFS(t *testing.T) fstest.MapFS {
 		"usr/local/sbin/holzkube-manager-update": {
 			Data: []byte("#!/usr/bin/env bash\n"), Mode: 0o755, Sys: &syscall.Stat_t{Uid: 0, Gid: 0},
 		},
+		"etc/systemd/system/holzkube-manager-update.service": {Data: []byte("[Service]\n"), Mode: 0o644},
 	}
 }
 
@@ -77,6 +79,13 @@ func TestReadCarriesActions(t *testing.T) {
 	}
 	updateScript := []hostaction.Missing{{Item: hostaction.MissingUpdateScript, Path: hostaction.UpdateScriptPath}}
 
+	noUpdateUnit := helperInstalledFS(t)
+	delete(noUpdateUnit, "etc/systemd/system/holzkube-manager-update.service")
+	// systemctl mask: a symlink to /dev/null, not a regular file.
+	updateUnitMasked := helperInstalledFS(t)
+	updateUnitMasked["etc/systemd/system/holzkube-manager-update.service"] = &fstest.MapFile{Data: []byte("/dev/null"), Mode: fs.ModeSymlink | 0o777}
+	updateUnit := []hostaction.Missing{{Item: hostaction.MissingUpdateUnit, Path: hostaction.UpdateUnitPath}}
+
 	scriptOutdated := hostaction.Missing{Item: hostaction.OutdatedScript, Path: hostaction.HelperScriptPath}
 	checkUnit := hostaction.Missing{Item: hostaction.OutdatedCheckUnit, Path: hostaction.UpdateCheckUnitPath}
 
@@ -94,16 +103,25 @@ func TestReadCarriesActions(t *testing.T) {
 		wantOutdated  []hostaction.Missing
 		// wantUpdateScript nil: an empty list.
 		wantUpdateScript []hostaction.Missing
-		wantContainer    bool
+		// wantUpdateUnit nil: an empty list.
+		wantUpdateUnit []hostaction.Missing
+		wantContainer  bool
 	}{
 		{name: "installed, not in a container", fsys: helperInstalledFS(t), wantAvailable: true, wantMissing: []hostaction.Missing{}, wantOutdated: []hostaction.Missing{}},
 		// The update script is asked for whatever missing says: the
 		// helper's install commands do not install it.
-		{name: "nothing installed", fsys: fstest.MapFS{}, wantMissing: allMissing, wantOutdated: []hostaction.Missing{}, wantUpdateScript: updateScript},
+		// The update unit too: the helper's install commands do not install
+		// it either.
+		{name: "nothing installed", fsys: fstest.MapFS{}, wantMissing: allMissing, wantOutdated: []hostaction.Missing{}, wantUpdateScript: updateScript, wantUpdateUnit: updateUnit},
 		// Only the two update actions need it, so available stays true
 		// (13-REVIEW-2 IN-04).
 		{name: "no update script", fsys: noUpdateScript, wantAvailable: true, wantMissing: []hostaction.Missing{}, wantOutdated: []hostaction.Missing{}, wantUpdateScript: updateScript},
 		{name: "an update script uid 1000 owns", fsys: updateScriptNotRoots, wantAvailable: true, wantMissing: []hostaction.Missing{}, wantOutdated: []hostaction.Missing{}, wantUpdateScript: updateScript},
+		// Only Check for updates and install needs the hourly update's
+		// unit, so available stays true (13-16, 409
+		// conflict.host-update-unit-missing).
+		{name: "no update unit", fsys: noUpdateUnit, wantAvailable: true, wantMissing: []hostaction.Missing{}, wantOutdated: []hostaction.Missing{}, wantUpdateUnit: updateUnit},
+		{name: "the update unit masked", fsys: updateUnitMasked, wantAvailable: true, wantMissing: []hostaction.Missing{}, wantOutdated: []hostaction.Missing{}, wantUpdateUnit: updateUnit},
 		{name: "installed, in a container", fsys: inContainer, wantMissing: []hostaction.Missing{}, wantOutdated: []hostaction.Missing{}, wantContainer: true},
 		{name: "no Box", fsys: helperInstalledFS(t), noBox: true, wantMissing: []hostaction.Missing{}, wantOutdated: []hostaction.Missing{}},
 		// The four older orders work with an older helper: available stays
@@ -156,6 +174,20 @@ func TestReadCarriesActions(t *testing.T) {
 				t.Errorf("actions.update_script_install_commands = %q, want hostaction.UpdateScriptInstallCommands %q",
 					a.UpdateScriptInstallCommands, hostaction.UpdateScriptInstallCommands)
 			}
+			wantUpdateUnit := tc.wantUpdateUnit
+			if wantUpdateUnit == nil {
+				wantUpdateUnit = []hostaction.Missing{}
+			}
+			if a.UpdateUnit == nil {
+				t.Errorf("actions.update_unit is nil; on the wire that is null, and the page reads a list")
+			}
+			if !reflect.DeepEqual(a.UpdateUnit, wantUpdateUnit) {
+				t.Errorf("actions.update_unit = %+v, want %+v", a.UpdateUnit, wantUpdateUnit)
+			}
+			if !reflect.DeepEqual(a.UpdateUnitInstallCommands, hostaction.UpdateUnitInstallCommands) {
+				t.Errorf("actions.update_unit_install_commands = %q, want hostaction.UpdateUnitInstallCommands %q",
+					a.UpdateUnitInstallCommands, hostaction.UpdateUnitInstallCommands)
+			}
 			if !reflect.DeepEqual(a.InstallCommands, hostaction.InstallCommands) {
 				t.Errorf("actions.install_commands = %q, want hostaction.InstallCommands %q", a.InstallCommands, hostaction.InstallCommands)
 			}
@@ -171,10 +203,10 @@ func TestReadCarriesActions(t *testing.T) {
 				}
 			}
 
-			// And on the wire: the four keys are there, and missing and
-			// outdated are lists.
+			// And on the wire: the keys are there, and the readings are
+			// lists.
 			wire, _ := marshalView(t, v)["actions"].(map[string]any)
-			for _, key := range []string{"available", "missing", "outdated", "update_script", "install_commands", "update_script_install_commands"} {
+			for _, key := range []string{"available", "missing", "outdated", "update_script", "update_unit", "install_commands", "update_script_install_commands", "update_unit_install_commands"} {
 				if _, ok := wire[key]; !ok {
 					t.Errorf("actions.%s is not in the answer: %v", key, wire)
 				}
@@ -187,6 +219,9 @@ func TestReadCarriesActions(t *testing.T) {
 			}
 			if _, ok := wire["update_script"].([]any); !ok {
 				t.Errorf("actions.update_script on the wire = %#v, want a list", wire["update_script"])
+			}
+			if _, ok := wire["update_unit"].([]any); !ok {
+				t.Errorf("actions.update_unit on the wire = %#v, want a list", wire["update_unit"])
 			}
 		})
 	}
@@ -204,6 +239,41 @@ func TestInstallCommandsAreNotShared(t *testing.T) {
 	v.Actions.InstallCommands[0] = "changed"
 	if hostaction.InstallCommands[0] == "changed" {
 		t.Error("the answer's install commands are hostaction.InstallCommands itself, not a copy")
+	}
+
+	// The same for the update script's and the update unit's commands, in
+	// every branch that fills them: a Box, no Box, an unsupported platform.
+	for _, tc := range []struct {
+		name string
+		cfg  func() Config
+	}{
+		{"a Box", func() Config {
+			fsys := fstest.MapFS{}
+			return Config{FS: fsys, Sys: tracerSys(), Now: func() time.Time { return fixedNow },
+				Actions: hostaction.NewBox(hostaction.Config{FS: fsys, DataDir: t.TempDir()})}
+		}},
+		{"no Box", func() Config {
+			return Config{FS: fstest.MapFS{}, Sys: tracerSys(), Now: func() time.Time { return fixedNow }}
+		}},
+		{"an unsupported platform", func() Config {
+			return Config{FS: fstest.MapFS{}, Sys: newUnsupportedSys(), Now: func() time.Time { return fixedNow }}
+		}},
+	} {
+		a := New(tc.cfg()).Read(context.Background()).Actions
+		if len(a.UpdateScriptInstallCommands) == 0 || len(a.UpdateUnitInstallCommands) == 0 {
+			t.Fatalf("%s: no update script or update unit install commands in the answer", tc.name)
+		}
+		keepScript, keepUnit := hostaction.UpdateScriptInstallCommands[0], hostaction.UpdateUnitInstallCommands[0]
+		a.UpdateScriptInstallCommands[0] = "changed"
+		a.UpdateUnitInstallCommands[0] = "changed"
+		if hostaction.UpdateScriptInstallCommands[0] != keepScript {
+			hostaction.UpdateScriptInstallCommands[0] = keepScript
+			t.Errorf("%s: the answer's update_script_install_commands are hostaction.UpdateScriptInstallCommands itself, not a copy", tc.name)
+		}
+		if hostaction.UpdateUnitInstallCommands[0] != keepUnit {
+			hostaction.UpdateUnitInstallCommands[0] = keepUnit
+			t.Errorf("%s: the answer's update_unit_install_commands are hostaction.UpdateUnitInstallCommands itself, not a copy", tc.name)
+		}
 	}
 }
 
@@ -230,6 +300,39 @@ func TestUnsupportedPlatformUpdateScript(t *testing.T) {
 		}
 		if !reflect.DeepEqual(v.Actions.UpdateScriptInstallCommands, hostaction.UpdateScriptInstallCommands) {
 			t.Errorf("%s: actions.update_script_install_commands = %q", tc.name, v.Actions.UpdateScriptInstallCommands)
+		}
+	}
+}
+
+// TestUnsupportedPlatformUpdateUnit: a platform without systemd still says
+// whether the hourly update's unit is there, from the Box as the update
+// script is, and the list is never null -- also without a Box.
+func TestUnsupportedPlatformUpdateUnit(t *testing.T) {
+	t.Parallel()
+
+	withoutUnit := helperInstalledFS(t)
+	delete(withoutUnit, "etc/systemd/system/holzkube-manager-update.service")
+	for _, tc := range []struct {
+		name  string
+		fsys  fstest.MapFS
+		noBox bool
+		want  int
+	}{
+		{"with the update unit", helperInstalledFS(t), false, 0},
+		{"without it", withoutUnit, false, 1},
+		{"nothing installed", fstest.MapFS{}, false, 1},
+		{"no Box", fstest.MapFS{}, true, 0},
+	} {
+		cfg := Config{FS: tc.fsys, Sys: newUnsupportedSys(), Now: func() time.Time { return fixedNow }}
+		if !tc.noBox {
+			cfg.Actions = hostaction.NewBox(hostaction.Config{FS: tc.fsys, DataDir: t.TempDir()})
+		}
+		v := New(cfg).Read(context.Background())
+		if v.Actions.UpdateUnit == nil || len(v.Actions.UpdateUnit) != tc.want {
+			t.Errorf("%s: actions.update_unit on an unsupported platform = %#v, want %d items", tc.name, v.Actions.UpdateUnit, tc.want)
+		}
+		if !reflect.DeepEqual(v.Actions.UpdateUnitInstallCommands, hostaction.UpdateUnitInstallCommands) {
+			t.Errorf("%s: actions.update_unit_install_commands = %q", tc.name, v.Actions.UpdateUnitInstallCommands)
 		}
 	}
 }

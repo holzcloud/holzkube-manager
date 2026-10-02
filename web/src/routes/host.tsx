@@ -20,6 +20,7 @@ import {
   HostHelperOutdatedNotice,
   HostOrderStatus,
   HostUpdateScriptNotice,
+  HostUpdateUnitNotice,
   orderPhase,
   outcomeSentence,
 } from '@/components/HostActions'
@@ -246,6 +247,15 @@ export function HostView({
         <HostUpdateScriptNotice
           updateScript={host.actions.update_script}
           commands={host.actions.update_script_install_commands}
+        />
+      )}
+      {/* The hourly update's unit, after the update script's note and beside
+          the others: none of their commands installs it, and only Check for
+          updates and install needs it. */}
+      {!host.container && host.actions.update_unit.length > 0 && (
+        <HostUpdateUnitNotice
+          updateUnit={host.actions.update_unit}
+          commands={host.actions.update_unit_install_commands}
         />
       )}
 

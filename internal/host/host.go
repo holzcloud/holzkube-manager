@@ -165,6 +165,19 @@ type Actions struct {
 	// UpdateScriptInstallCommands install the update script, exactly
 	// hostaction.UpdateScriptInstallCommands.
 	UpdateScriptInstallCommands []string `json:"update_script_install_commands"`
+	// UpdateUnit lists the hourly update's unit when it is missing: one
+	// item, update-unit, path hostaction.UpdateUnitPath, when that is not a
+	// regular file once symlinks are followed (hostaction.UpdateUnitMissing)
+	// -- absent, a directory, or masked. Check for updates and install
+	// starts that unit, and the routes refuse that one action while it is
+	// not empty (409 conflict.host-update-unit-missing); check-update and
+	// the other three do not need it, so Available stays as it is. Asked
+	// whatever Missing says -- the helper's install commands do not install
+	// it. Never null; empty when this instance has no host actions.
+	UpdateUnit []hostaction.Missing `json:"update_unit"`
+	// UpdateUnitInstallCommands install the hourly update's unit and its
+	// timer, exactly hostaction.UpdateUnitInstallCommands.
+	UpdateUnitInstallCommands []string `json:"update_unit_install_commands"`
 	// Busy is whether the helper is busy with an update check right now
 	// (hostaction.Box.Busy): it picks up nothing else until the check ends,
 	// and the routes refuse every host action while it is true (409

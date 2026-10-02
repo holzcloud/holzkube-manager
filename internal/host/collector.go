@@ -197,13 +197,16 @@ func (c *Collector) readUnsupported(v View, now time.Time) View {
 		Missing:                     []hostaction.Missing{},
 		Outdated:                    []hostaction.Missing{},
 		UpdateScript:                []hostaction.Missing{},
+		UpdateUnit:                  []hostaction.Missing{},
 		InstallCommands:             slices.Clone(hostaction.InstallCommands),
 		UpdateScriptInstallCommands: slices.Clone(hostaction.UpdateScriptInstallCommands),
+		UpdateUnitInstallCommands:   slices.Clone(hostaction.UpdateUnitInstallCommands),
 	}
 	if c.cfg.Actions != nil {
 		v.Actions.Order = c.cfg.Actions.Order()
 		v.Actions.Missing = c.cfg.Actions.Missing()
 		v.Actions.UpdateScript = c.cfg.Actions.UpdateScript()
+		v.Actions.UpdateUnit = c.cfg.Actions.UpdateUnit()
 	}
 	return v
 }
@@ -223,9 +226,10 @@ const (
 // Available is decided here and by the same two questions the routes ask
 // (InContainer, the Box's Missing), Outdated by the Box's Outdated, which the
 // routes ask for the check, UpdateScript by the Box's UpdateScript, which the
-// routes ask for both update actions, and Busy by the Box's Busy, which the
-// routes ask for every action -- so the page never offers a button the server
-// then refuses.
+// routes ask for both update actions, UpdateUnit by the Box's UpdateUnit,
+// which the routes ask for Check for updates and install, and Busy by the
+// Box's Busy, which the routes ask for every action -- so the page never
+// offers a button the server then refuses.
 func (c *Collector) readActions(container bool) Actions {
 	box := c.cfg.Actions
 	if box == nil {
@@ -234,8 +238,10 @@ func (c *Collector) readActions(container bool) Actions {
 			Missing:                     []hostaction.Missing{},
 			Outdated:                    []hostaction.Missing{},
 			UpdateScript:                []hostaction.Missing{},
+			UpdateUnit:                  []hostaction.Missing{},
 			InstallCommands:             slices.Clone(hostaction.InstallCommands),
 			UpdateScriptInstallCommands: slices.Clone(hostaction.UpdateScriptInstallCommands),
+			UpdateUnitInstallCommands:   slices.Clone(hostaction.UpdateUnitInstallCommands),
 		}
 	}
 	missing := box.Missing()
@@ -251,11 +257,13 @@ func (c *Collector) readActions(container bool) Actions {
 		Busy:      box.Busy(),
 		Missing:   missing,
 		Outdated:  outdated,
-		// Whatever missing says: the helper's install commands do not
-		// install the update script.
+		// Whatever missing says: the helper's install commands install
+		// neither the update script nor the hourly update's unit.
 		UpdateScript:                box.UpdateScript(),
+		UpdateUnit:                  box.UpdateUnit(),
 		InstallCommands:             slices.Clone(hostaction.InstallCommands),
 		UpdateScriptInstallCommands: slices.Clone(hostaction.UpdateScriptInstallCommands),
+		UpdateUnitInstallCommands:   slices.Clone(hostaction.UpdateUnitInstallCommands),
 	}
 	result, err := box.Result()
 	switch {

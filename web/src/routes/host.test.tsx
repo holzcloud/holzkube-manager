@@ -2159,6 +2159,105 @@ describe('the update-script notice (13-REVIEW-2 IN-04)', () => {
   })
 })
 
+const UPDATE_UNIT_HEADING =
+  'Check for updates and install needs the update unit, which is not installed'
+const UPDATE_UNIT = {
+  item: 'update-unit',
+  path: '/etc/systemd/system/holzkube-manager-update.service',
+}
+// Not the real commands on purpose: what is held is that the note shows the
+// answer's, whatever they are (the fixture test holds the real ones).
+const UPDATE_UNIT_COMMANDS = [
+  'sudo install -o root -g root -m 0644 deploy/holzkube-manager-update.service /etc/systemd/system/holzkube-manager-update.service',
+  'sudo install -o root -g root -m 0644 deploy/holzkube-manager-update.timer /etc/systemd/system/holzkube-manager-update.timer',
+  'sudo systemctl daemon-reload',
+  'sudo systemctl enable --now holzkube-manager-update.timer',
+]
+
+/** The helper and the update script installed, the hourly update's unit not (13-16). */
+function updateUnitMissing(overrides: Record<string, unknown> = {}) {
+  return helperInstalled({
+    update_unit: [UPDATE_UNIT],
+    update_unit_install_commands: UPDATE_UNIT_COMMANDS,
+    ...overrides,
+  })
+}
+
+function updateUnitNotice(): HTMLElement | null {
+  return screen.queryByText(UPDATE_UNIT_HEADING)?.closest('div') ?? null
+}
+
+describe('the update-unit notice (13-17)', () => {
+  it("names the unit, says which button needs it, and shows the answer's commands", () => {
+    wrap(<HostView host={hostShape({ actions: updateUnitMissing() })} stale={null} />)
+
+    const notice = updateUnitNotice()
+    if (notice === null) throw new Error('no update-unit notice')
+    expect(notice).toHaveClass('border-slate-500/40')
+    expect(notice).toHaveTextContent(
+      'That button starts holzkube-manager-update.service, the unit the hourly update runs, and stays off until it is installed. The other four buttons do not need it. The commands install the unit and its hourly timer; the first hourly run follows within minutes.',
+    )
+    const items = within(notice).getAllByRole('listitem')
+    expect(items.map((li) => li.textContent)).toEqual([
+      '/etc/systemd/system/holzkube-manager-update.service — the update unit, from deploy/holzkube-manager-update.service',
+    ])
+    expect(within(items[0] as HTMLElement).getByText(UPDATE_UNIT.path)).toHaveClass(
+      'font-mono',
+      'break-all',
+    )
+    expect(notice.querySelector('pre')?.textContent).toBe(UPDATE_UNIT_COMMANDS.join('\n'))
+    expect(within(notice).queryByRole('button')).toBeNull()
+    expect(helperNotice()).toBeNull()
+    expect(olderNotice()).toBeNull()
+    expect(updateScriptNotice()).toBeNull()
+  })
+
+  it('shows nothing when the update unit is there', () => {
+    wrap(
+      <HostView
+        host={hostShape({ actions: updateUnitMissing({ update_unit: [] }) })}
+        stale={null}
+      />,
+    )
+    expect(updateUnitNotice()).toBeNull()
+  })
+
+  it.each([
+    [
+      'the helper notice',
+      { available: false, missing: [SCRIPT], install_commands: INSTALL_COMMANDS },
+      helperNotice,
+    ],
+    [
+      'the older-helper notice',
+      { outdated: [CHECK_UNIT], install_commands: INSTALL_COMMANDS },
+      olderNotice,
+    ],
+    [
+      'the update-script notice',
+      { update_script: [UPDATE_SCRIPT], update_script_install_commands: UPDATE_SCRIPT_COMMANDS },
+      updateScriptNotice,
+    ],
+  ])('comes after %s: none of their commands installs it', (_, overrides, other) => {
+    wrap(<HostView host={hostShape({ actions: updateUnitMissing(overrides) })} stale={null} />)
+    const first = other()
+    const notice = updateUnitNotice()
+    if (first === null || notice === null) throw new Error('want both notices')
+    expect(first.compareDocumentPosition(notice) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(document.querySelectorAll('pre')).toHaveLength(2)
+  })
+
+  it('shows nothing in a container: the container notice already says why', () => {
+    wrap(
+      <HostView
+        host={hostShape({ container: true, actions: updateUnitMissing({ available: false }) })}
+        stale={null}
+      />,
+    )
+    expect(updateUnitNotice()).toBeNull()
+  })
+})
+
 describe('HostPage', () => {
   // The page reads the session's role for the host actions (D-16). Answered
   // here, so no test reaches the network for it.

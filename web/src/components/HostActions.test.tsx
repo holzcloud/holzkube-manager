@@ -59,6 +59,13 @@ const updateScript = [{ item: 'update-script', path: '/usr/local/sbin/holzkube-m
 const UPDATE_SCRIPT_NEEDED =
   'Both update buttons need the update script, which is not installed. The note below says how to install it.'
 
+/** The hourly update's unit, which Check for updates and install starts, is missing (13-16). */
+const updateUnit = [
+  { item: 'update-unit', path: '/etc/systemd/system/holzkube-manager-update.service' },
+]
+const UPDATE_UNIT_NEEDED =
+  "Check for updates and install needs the hourly update's unit, which is not installed. The note below says how to install it."
+
 /**
  * The demo host, renamed to the documentation hostname, with the helper
  * installed unless the test says otherwise.
@@ -456,6 +463,131 @@ describe('HostActions: the five buttons and the one reason they are off', () => 
       }
     },
   )
+
+  // 13-16/13-17: only Check for updates and install starts the hourly
+  // update's unit, so with it missing that one button is off, and the line
+  // describes it alone.
+  it('with the update unit missing: only Check for updates and install is off', () => {
+    actions({ host: hostWith({ update_unit: updateUnit }) })
+
+    const buttons = headerButtons()
+    expect(buttons.map((b) => b.textContent)).toEqual(LABELS)
+    expect(buttons.map((b) => b.hasAttribute('disabled'))).toEqual([
+      false,
+      true,
+      false,
+      false,
+      false,
+    ])
+    expect(reasonLine()?.textContent).toBe(UPDATE_UNIT_NEEDED)
+    expect(screen.getByRole('group', { name: 'Host actions' })).not.toHaveAttribute(
+      'aria-describedby',
+    )
+    expect(buttons.map((b) => b.getAttribute('aria-describedby'))).toEqual([
+      null,
+      'host-actions-reason',
+      null,
+      null,
+      null,
+    ])
+    expect(buttons[1]).toHaveAccessibleDescription(UPDATE_UNIT_NEEDED)
+    for (const b of [buttons[0], ...buttons.slice(2)]) {
+      expect(b).toHaveAccessibleDescription('')
+    }
+  })
+
+  // The two update buttons off for different reasons: the one line carries
+  // both sentences, in button order, and describes exactly those two.
+  it('with the update unit missing and an older helper: one line, both reasons, in button order', () => {
+    actions({ host: hostWith({ update_unit: updateUnit, outdated: olderScript }) })
+
+    const buttons = headerButtons()
+    expect(buttons.map((b) => b.hasAttribute('disabled'))).toEqual([
+      true,
+      true,
+      false,
+      false,
+      false,
+    ])
+    const both = `${CHECK_NEEDS_NEWER} ${UPDATE_UNIT_NEEDED}`
+    expect(reasonLine()?.textContent).toBe(both)
+    expect(screen.getByRole('group', { name: 'Host actions' })).not.toHaveAttribute(
+      'aria-describedby',
+    )
+    expect(buttons.map((b) => b.getAttribute('aria-describedby'))).toEqual([
+      'host-actions-reason',
+      'host-actions-reason',
+      null,
+      null,
+      null,
+    ])
+    for (const b of buttons.slice(2)) {
+      expect(b).toHaveAccessibleDescription('')
+    }
+  })
+
+  // The routes ask for the update script before the unit: with both missing,
+  // the script's reason covers both update buttons and the unit's is not said.
+  it('with the update unit and the update script missing: the script reason alone', () => {
+    actions({ host: hostWith({ update_unit: updateUnit, update_script: updateScript }) })
+
+    const buttons = headerButtons()
+    expect(buttons.map((b) => b.hasAttribute('disabled'))).toEqual([
+      true,
+      true,
+      false,
+      false,
+      false,
+    ])
+    expect(reasonLine()?.textContent).toBe(UPDATE_SCRIPT_NEEDED)
+    expect(buttons.map((b) => b.getAttribute('aria-describedby'))).toEqual([
+      'host-actions-reason',
+      'host-actions-reason',
+      null,
+      null,
+      null,
+    ])
+  })
+
+  it.each([
+    [
+      'a reader',
+      { role: 'reader' },
+      {},
+      'Host actions need the operator role. You are signed in as a reader.',
+    ],
+    [
+      'the helper missing',
+      {},
+      {
+        available: false,
+        missing: [{ item: 'script', path: '/usr/local/sbin/holzkube-manager-host' }],
+      },
+      'Host actions need the holzkube-manager-host helper, which is not installed. The note below says what to install.',
+    ],
+  ] as const)(
+    'with the update unit missing and %s: the group reason wins, nothing of the unit',
+    (_, opts, more, reason) => {
+      actions({ ...opts, host: hostWith({ update_unit: updateUnit, ...more }) })
+      expectOffBecause(reason)
+      expect(reasonLine()?.textContent).toBe(reason)
+    },
+  )
+
+  it('parses an answer without update_unit (a daemon before it) as nothing missing', () => {
+    const raw = structuredClone((demo as Record<string, unknown>)['/api/v1/host']) as Record<
+      string,
+      unknown
+    >
+    const {
+      update_unit: _dropped,
+      update_unit_install_commands: _alsoDropped,
+      ...older
+    } = raw.actions as Record<string, unknown>
+    const parsed = hostSchema.parse({ ...raw, actions: older }).actions
+    expect(parsed.update_unit).toEqual([])
+    expect(parsed.update_unit_install_commands).toEqual([])
+  })
 
   it('with the helper missing and the update script too: the group reason wins, all five off', () => {
     actions({
@@ -942,6 +1074,33 @@ describe('HostActions: one dialog per action', () => {
     const line = reasonLine()
     expect(line).toHaveTextContent(CHECK_NEEDS_NEWER)
     await vi.waitFor(() => expect(line).toHaveFocus())
+  })
+
+  // The update unit's reason in the dialog of the button it turns off.
+  it('the update dialog opened while the update unit goes missing carries the unit reason', async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const view = (updateUnitNow: ReadonlyArray<unknown>) => (
+      <QueryClientProvider client={client}>
+        <HostActions
+          host={hostWith({ update_unit: updateUnitNow })}
+          sessionRole="operator"
+          pollFailed={false}
+          order={null}
+          onPlaced={() => undefined}
+        />
+      </QueryClientProvider>
+    )
+    const { rerender } = render(view([]))
+    const trigger = screen.getByRole('button', { name: 'Check for updates and install' })
+    await userEvent.click(trigger)
+    await userEvent.type(screen.getByLabelText(/to confirm/), 'example-host')
+    rerender(view(updateUnit))
+    expect(trigger).toBeDisabled()
+    const dialog = screen.getByRole('dialog')
+    within(dialog).getByText(UPDATE_UNIT_NEEDED)
+    expect(
+      within(dialog).getByRole('button', { name: /^Check for updates and install/ }),
+    ).toBeDisabled()
   })
 
   // The check's reason is the check's alone: a restart's dialog stays usable.

@@ -3089,6 +3089,19 @@ export const hostUpdateScriptSchema = z.object({
 
 export type HostUpdateScript = z.infer<typeof hostUpdateScriptSchema>
 
+/**
+ * The hourly update's unit, which Check for updates and install starts, when
+ * it is missing (13-16): /etc/systemd/system/holzkube-manager-update.service
+ * is absent, a directory, or masked. The helper's install commands do not
+ * install it.
+ */
+export const hostUpdateUnitSchema = z.object({
+  item: z.enum(['update-unit']),
+  path: z.string(),
+})
+
+export type HostUpdateUnit = z.infer<typeof hostUpdateUnitSchema>
+
 /** The machine holzkube-manager runs on: GET /api/v1/host (Phase 11). */
 export const hostSchema = z.object({
   observed_at: z.string(),
@@ -3247,6 +3260,14 @@ export const hostSchema = z.object({
        */
       update_script: z.array(hostUpdateScriptSchema).nullish().transform(orEmpty),
       /**
+       * The hourly update's unit, when it is missing: Check for updates and
+       * install is refused while it is not empty (409
+       * conflict.host-update-unit-missing), the other four are not. Absent
+       * from a daemon before 13-17, which then reads as nothing missing --
+       * a daemon before 13-16 does not refuse for it either.
+       */
+      update_unit: z.array(hostUpdateUnitSchema).nullish().transform(orEmpty),
+      /**
        * Whether the helper is busy with an update check (13-REVIEW-2 V-01):
        * it picks up nothing else until the check ends, and the routes refuse
        * every action meanwhile (409 conflict.host-helper-busy). The server
@@ -3260,15 +3281,19 @@ export const hostSchema = z.object({
       install_commands: z.array(z.string()).nullish().transform(orEmpty),
       /** The command that installs the update script; the page shows it. */
       update_script_install_commands: z.array(z.string()).nullish().transform(orEmpty),
+      /** The commands that install the hourly update's unit and its timer; the page shows them. */
+      update_unit_install_commands: z.array(z.string()).nullish().transform(orEmpty),
     })
     .default({
       available: false,
       missing: [],
       outdated: [],
       update_script: [],
+      update_unit: [],
       busy: false,
       install_commands: [],
       update_script_install_commands: [],
+      update_unit_install_commands: [],
       order: null,
       result: {
         readable: false,
