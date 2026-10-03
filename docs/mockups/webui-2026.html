@@ -1,0 +1,287 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>holzkube-manager — UI-Mockup 2026</title>
+<style>
+  /* Farben: exakt die Tokens aus web/src/index.css (Glut #EF7A4D) */
+  :root {
+    --ground: #0a0705;
+    --ground-2: #140d08;
+    --pane: #150e08;
+    --pane-2: #1a120b;
+    --line: #20150d;
+    --ink: #F5EDE2;
+    --ink-2: #D9C6B4;
+    --ink-3: #B09A85;
+    --glut: #EF7A4D;
+    --glut-soft: #C15529;
+    --ok: #8CC271;
+    --warn: #B7860F;
+    --err: #A32C1A;
+    --tile: #140806;
+    --radius: 16px;
+    --safe-b: env(safe-area-inset-bottom, 0px);
+  }
+  * { box-sizing: border-box; margin: 0; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    font-family: Manrope, ui-sans-serif, system-ui, sans-serif;
+    background:
+      radial-gradient(60% 50% at 20% 16%, rgb(138 83 38 / 0.154) 0%, transparent 100%),
+      radial-gradient(46% 40% at 84% 26%, rgb(239 122 77 / 0.078) 0%, transparent 100%),
+      linear-gradient(160deg, var(--ground-2) 0%, var(--ground) 100%) fixed;
+    color: var(--ink);
+    min-height: 100dvh;
+  }
+  .num { font-family: ui-monospace, "JetBrains Mono", monospace; font-variant-numeric: tabular-nums; }
+
+  /* ── Shell ── */
+  .shell { display: flex; min-height: 100dvh; }
+  .rail {
+    position: sticky; top: 0; height: 100dvh; width: 72px; flex-shrink: 0;
+    display: flex; flex-direction: column; align-items: center; gap: 6px;
+    padding: 14px 0 calc(16px + var(--safe-b));
+    border-right: 1px solid var(--line);
+    background: rgb(21 14 8 / 0.6); backdrop-filter: blur(8px);
+  }
+  .logo { width: 40px; height: 40px; border-radius: 12px; margin-bottom: 14px; flex-shrink: 0; }
+  .nav-btn {
+    width: 48px; height: 48px; border-radius: 14px; border: 1px solid transparent;
+    background: none; color: var(--ink-3); display: grid; place-items: center;
+    cursor: pointer; position: relative; transition: color .15s, background .15s;
+  }
+  .nav-btn:hover { color: var(--ink); background: var(--pane-2); }
+  .nav-btn.active { color: var(--glut); background: rgb(239 122 77 / 0.1); border-color: rgb(239 122 77 / 0.25); }
+  .nav-btn .tip {
+    position: absolute; left: 58px; top: 50%; translate: 0 -50%;
+    background: var(--pane-2); border: 1px solid var(--line); border-radius: 8px;
+    padding: 6px 10px; font-size: 12px; white-space: nowrap; color: var(--ink-2);
+    opacity: 0; pointer-events: none; transition: opacity .12s; z-index: 30;
+  }
+  .nav-btn:hover .tip { opacity: 1; }
+  .spacer { flex: 1; }
+
+  main { flex: 1; min-width: 0; padding: 20px clamp(16px, 3vw, 32px) calc(96px + var(--safe-b)); max-width: 1200px; margin: 0 auto; }
+
+  /* ── Header ── */
+  .top { display: flex; align-items: center; gap: 12px; margin-bottom: 22px; }
+  .m-logo { display: none; width: 34px; height: 34px; border-radius: 10px; }
+  h1 { font-size: clamp(20px, 2.5vw, 26px); font-weight: 700; letter-spacing: -0.01em; }
+  .sub { color: var(--ink-3); font-size: 13px; margin-top: 3px; }
+  .top .grow { flex: 1; }
+  .pill {
+    display: inline-flex; align-items: center; gap: 7px; height: 36px; padding: 0 14px;
+    border-radius: 999px; border: 1px solid var(--line); background: var(--pane);
+    color: var(--ink-2); font-size: 13px; font-weight: 600;
+  }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); }
+  .dot.warn { background: var(--warn); }
+
+  /* ── Kartenraster ── */
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(270px, 1fr)); gap: 14px; }
+  .card {
+    background: var(--pane); border: 1px solid var(--line); border-radius: var(--radius);
+    padding: 18px; cursor: pointer; transition: border-color .15s, translate .15s;
+    text-decoration: none; color: inherit; display: block;
+  }
+  .card:hover, .card:focus-visible { border-color: rgb(239 122 77 / 0.45); translate: 0 -2px; }
+  .card:focus { outline: none; }
+  .card h3 { font-size: 15px; font-weight: 700; display: flex; align-items: center; gap: 8px; }
+  .card .meta { color: var(--ink-3); font-size: 12px; margin-top: 4px; }
+  .big { font-size: 34px; font-weight: 800; letter-spacing: -0.02em; margin: 14px 0 2px; }
+  .big small { font-size: 14px; color: var(--ink-3); font-weight: 600; margin-left: 6px; }
+  .spark { display: block; width: 100%; height: 44px; margin-top: 12px; }
+  .status {
+    font-size: 11px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
+    padding: 3px 8px; border-radius: 6px; margin-left: auto;
+  }
+  .status.ok { color: var(--ok); background: rgb(140 194 113 / .12); }
+  .status.warn { color: #E8C15C; background: rgb(183 134 15 / .14); }
+
+  /* ── NodeListe (mobil Karten-Rows) ── */
+  .section-title { margin: 28px 0 12px; font-size: 14px; font-weight: 700; color: var(--ink-2); }
+  .rows { display: grid; gap: 10px; }
+  .row {
+    display: flex; align-items: center; gap: 14px; padding: 14px 16px;
+    background: var(--pane); border: 1px solid var(--line); border-radius: 14px; cursor: pointer;
+  }
+  .row:hover { border-color: rgb(239 122 77 / 0.4); }
+  .row .name { font-weight: 700; font-size: 14px; }
+  .row .role { color: var(--ink-3); font-size: 12px; margin-top: 2px; }
+  .row .grow { flex: 1; min-width: 0; }
+  .row .temp { color: var(--ink-2); font-size: 13px; }
+
+  /* ── Bottom-Tabs & Sticky Bar (mobil) ── */
+  .bottomnav {
+    display: none; position: fixed; left: 0; right: 0; bottom: 0; z-index: 20;
+    padding: 8px 12px calc(10px + var(--safe-b));
+    background: rgb(10 7 5 / 0.82); backdrop-filter: blur(12px);
+    border-top: 1px solid var(--line);
+  }
+  .bottomnav .tabs { display: grid; grid-template-columns: repeat(5, 1fr); max-width: 480px; margin: 0 auto; }
+  .tab { background: none; border: none; color: var(--ink-3); display: grid; justify-items: center; gap: 3px;
+    font-size: 10px; font-weight: 600; padding: 6px 0; cursor: pointer; }
+  .tab.active { color: var(--glut); }
+  .sticky-action {
+    display: none; position: fixed; left: 12px; right: 12px; bottom: calc(76px + var(--safe-b)); z-index: 19;
+    max-width: 456px; margin: 0 auto;
+    background: var(--pane-2); border: 1px solid var(--line); border-radius: 16px;
+    padding: 10px; box-shadow: 0 8px 30px rgb(0 0 0 / .4);
+  }
+  .btn-primary {
+    width: 100%; height: 48px; border: none; border-radius: 12px; cursor: pointer;
+    background: var(--glut); color: #140806; font: 700 15px Manrope, sans-serif;
+    display: grid; place-items: center;
+  }
+  .btn-primary:active { background: var(--glut-soft); color: var(--ink); }
+
+  /* ── Desktop: Aktion oben rechts statt sticky ── */
+  .desk-cta {
+    display: inline-flex; align-items: center; gap: 8px; height: 40px; padding: 0 18px;
+    border: none; border-radius: 12px; background: var(--glut); color: #140806;
+    font: 700 14px Manrope, sans-serif; cursor: pointer;
+  }
+  .desk-cta:hover { background: var(--glut-soft); color: var(--ink); }
+
+  @media (max-width: 900px) {
+    .rail { display: none; }
+    .m-logo { display: block; }
+    .bottomnav, .sticky-action { display: block; }
+    .desk-cta { display: none; }
+    main { padding-bottom: calc(170px + var(--safe-b)); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    * { transition: none !important; translate: none !important; }
+  }
+</style>
+</head>
+<body>
+<div class="shell">
+
+  <!-- Icon-Sidebar (Desktop/Tablett) -->
+  <nav class="rail" aria-label="Hauptnavigation">
+    <svg class="logo" viewBox="0 0 200 200" aria-label="holzkube">
+      <rect width="200" height="200" rx="44" fill="#140806"/>
+      <path d="M100 52 L146 75 L100 98 L54 75 Z" fill="#EF7A4D"/>
+      <path d="M54 75 L100 98 L100 146 L54 123 Z" fill="#EF7A4D" opacity=".72"/>
+      <path d="M146 75 L100 98 L100 146 L146 123 Z" fill="#EF7A4D" opacity=".48"/>
+      <rect x="26" y="146" width="148" height="26" rx="9" fill="#C98B4F"/>
+      <rect x="26" y="146" width="148" height="6" rx="3" fill="#E0A869" opacity=".7"/>
+      <path d="M40 160 C70 156 108 165 160 159" stroke="#9B6534" stroke-width="2.6" fill="none" stroke-linecap="round"/>
+    </svg>
+    <button class="nav-btn active" aria-label="Übersicht"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/></svg><span class="tip">Übersicht</span></button>
+    <button class="nav-btn" aria-label="Cluster"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="8" rx="2"/><rect x="3" y="13" width="18" height="8" rx="2"/><circle cx="7" cy="7" r=".5" fill="currentColor"/><circle cx="7" cy="17" r=".5" fill="currentColor"/></svg><span class="tip">Cluster</span></button>
+    <button class="nav-btn" aria-label="Host"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6" rx="1"/><path d="M9 2v2M15 2v2M9 20v2M15 20v2M2 9h2M2 15h2M20 9h2M20 15h2"/></svg><span class="tip">Host</span></button>
+    <button class="nav-btn" aria-label="Jobs"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg><span class="tip">Jobs</span></button>
+    <button class="nav-btn" aria-label="Einstellungen"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19 12a7 7 0 0 0-.1-1.2l2-1.6-2-3.4-2.4 1a7 7 0 0 0-2-1.2L14 3h-4l-.5 2.6a7 7 0 0 0-2 1.2l-2.4-1-2 3.4 2 1.6A7 7 0 0 0 5 12c0 .4 0 .8.1 1.2l-2 1.6 2 3.4 2.4-1a7 7 0 0 0 2 1.2L10 21h4l.5-2.6a7 7 0 0 0 2-1.2l2.4 1 2-3.4-2-1.6c.1-.4.1-.8.1-1.2Z"/></svg><span class="tip">Einstellungen</span></button>
+    <div class="spacer"></div>
+    <button class="nav-btn" aria-label="Mehr (Audit, Images, Upgrades)"><svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/></svg><span class="tip">Mehr: Audit, Images, Upgrades</span></button>
+  </nav>
+
+  <main>
+    <div class="top">
+      <svg class="m-logo" viewBox="0 0 200 200" aria-label="holzkube">
+        <rect width="200" height="200" rx="44" fill="#140806"/>
+        <path d="M100 52 L146 75 L100 98 L54 75 Z" fill="#EF7A4D"/>
+        <path d="M54 75 L100 98 L100 146 L54 123 Z" fill="#EF7A4D" opacity=".72"/>
+        <path d="M146 75 L100 98 L100 146 L146 123 Z" fill="#EF7A4D" opacity=".48"/>
+        <rect x="26" y="146" width="148" height="26" rx="9" fill="#C98B4F"/>
+      </svg>
+      <div>
+        <h1>Übersicht</h1>
+        <div class="sub">homelab · 4 Nodes · Talos v1.13</div>
+      </div>
+      <div class="grow"></div>
+      <span class="pill"><span class="dot"></span>Cluster healthy</span>
+      <button class="desk-cta">Cluster aktualisieren</button>
+    </div>
+
+    <div class="grid">
+      <a class="card" href="#">
+        <h3>Nodes <span class="status ok">4/4 up</span></h3>
+        <div class="big num">4<small>online</small></div>
+        <div class="meta">Load 0.42 · alle erreichbar</div>
+        <svg class="spark" viewBox="0 0 200 44" preserveAspectRatio="none" aria-hidden="true"><polyline points="0,30 25,26 50,32 75,22 100,25 125,18 150,20 175,14 200,16" fill="none" stroke="#EF7A4D" stroke-width="2" stroke-linecap="round"/></svg>
+      </a>
+      <a class="card" href="#">
+        <h3>Host <span class="status warn">1 Warnung</span></h3>
+        <div class="big num">61<small>°C CPU</small></div>
+        <div class="meta">NVMe 71 °C &gt; Schwelle 70 °C</div>
+        <svg class="spark" viewBox="0 0 200 44" preserveAspectRatio="none" aria-hidden="true"><polyline points="0,34 25,30 50,28 75,24 100,22 125,20 150,14 175,12 200,10" fill="none" stroke="#B7860F" stroke-width="2" stroke-linecap="round"/></svg>
+      </a>
+      <a class="card" href="#">
+        <h3>Speicher</h3>
+        <div class="big num">38<small>% belegt</small></div>
+        <div class="meta">1.5 TB von 4 TB · Ceph healthy</div>
+        <svg class="spark" viewBox="0 0 200 44" preserveAspectRatio="none" aria-hidden="true"><polyline points="0,36 25,35 50,35 75,34 100,33 125,32 150,31 175,30 200,30" fill="none" stroke="#8CC271" stroke-width="2" stroke-linecap="round"/></svg>
+      </a>
+      <a class="card" href="#">
+        <h3>Pods</h3>
+        <div class="big num">112<small>running</small></div>
+        <div class="meta">2 pending · 0 crashed</div>
+        <svg class="spark" viewBox="0 0 200 44" preserveAspectRatio="none" aria-hidden="true"><polyline points="0,20 25,22 50,18 75,24 100,20 125,26 150,22 175,24 200,21" fill="none" stroke="#EF7A4D" stroke-width="2" stroke-linecap="round"/></svg>
+      </a>
+      <a class="card" href="#">
+        <h3>Zertifikate</h3>
+        <div class="big num">42<small>Tage</small></div>
+        <div class="meta">kubernetes client am längsten fällig</div>
+        <svg class="spark" viewBox="0 0 200 44" preserveAspectRatio="none" aria-hidden="true"><polyline points="0,12 25,13 50,14 75,16 100,18 125,20 150,24 175,28 200,32" fill="none" stroke="#EF7A4D" stroke-width="2" stroke-linecap="round"/></svg>
+      </a>
+      <a class="card" href="#">
+        <h3>Upgrades</h3>
+        <div class="big num">1<small>verfügbar</small></div>
+        <div class="meta">Talos v1.14.0 · bereit für gestaffeltes Rollout</div>
+        <svg class="spark" viewBox="0 0 200 44" preserveAspectRatio="none" aria-hidden="true"><line x1="0" y1="36" x2="200" y2="36" stroke="#20150d" stroke-width="2"/><polyline points="0,36 160,36 200,12" fill="none" stroke="#8CC271" stroke-width="2" stroke-linecap="round"/></svg>
+      </a>
+    </div>
+
+    <h2 class="section-title">Nodes</h2>
+    <div class="rows">
+      <div class="row" tabindex="0">
+        <span class="dot" aria-hidden="true"></span>
+        <div class="grow"><div class="name">talos-cp-01</div><div class="role">control-plane · talos v1.13.1</div></div>
+        <span class="temp num">Load 0.4</span>
+        <span class="temp num">54 °C</span>
+      </div>
+      <div class="row" tabindex="0">
+        <span class="dot" aria-hidden="true"></span>
+        <div class="grow"><div class="name">talos-cp-02</div><div class="role">control-plane · talos v1.13.1</div></div>
+        <span class="temp num">Load 0.3</span>
+        <span class="temp num">51 °C</span>
+      </div>
+      <div class="row" tabindex="0">
+        <span class="dot warn" aria-hidden="true"></span>
+        <div class="grow"><div class="name">talos-worker-01</div><div class="role">worker · talos v1.13.1</div></div>
+        <span class="temp num">Load 0.9</span>
+        <span class="temp num">68 °C</span>
+      </div>
+      <div class="row" tabindex="0">
+        <span class="dot" aria-hidden="true"></span>
+        <div class="grow"><div class="name">talos-worker-02</div><div class="role">worker · talos v1.13.1</div></div>
+        <span class="temp num">Load 0.2</span>
+        <span class="temp num">49 °C</span>
+      </div>
+    </div>
+  </main>
+</div>
+
+<!-- Sticky Action Bar: nur mobil -->
+<div class="sticky-action" role="demo">
+  <button class="btn-primary">Cluster aktualisieren</button>
+</div>
+
+<!-- Bottom-Tabs: nur mobil -->
+<nav class="bottomnav" aria-label="Hauptnavigation">
+  <div class="tabs">
+    <button class="tab active"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/></svg>Übersicht</button>
+    <button class="tab"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="8" rx="2"/><rect x="3" y="13" width="18" height="8" rx="2"/></svg>Cluster</button>
+    <button class="tab"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6" rx="1"/></svg>Host</button>
+    <button class="tab"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg>Jobs</button>
+    <button class="tab"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M4 12H2m20 0h-2M12 4V2m0 20v-2"/></svg>Einst.</button>
+  </div>
+</nav>
+
+</body>
+</html>
