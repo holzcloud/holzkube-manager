@@ -77,7 +77,7 @@ export function AppShell() {
           <button
             type="button"
             aria-label="Close the navigation"
-            className="fixed inset-0 z-40 bg-background/70"
+            className="fixed inset-0 z-40 bg-background/70 lg:hidden"
             onClick={() => setNavOpen(false)}
           />
         )}

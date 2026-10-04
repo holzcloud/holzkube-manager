@@ -46,40 +46,35 @@ function MetricCard({
   state?: 'default' | 'warn' | 'danger'
 }) {
   return (
-    <Button
-      asChild
-      variant="ghost"
-      className="group h-auto w-full justify-start rounded-2xl border border-border bg-card p-5 text-left hover:border-primary/45 hover:bg-card"
+    <Link
+      to={href}
+      className="group flex flex-col rounded-2xl border border-border bg-card p-5 transition-colors hover:border-primary/45 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
     >
-      <Link to={href} className="block">
-        <div className="flex w-full items-center gap-2">
-          <h3 className="text-sm font-semibold">{title}</h3>
-          {badge && (
-            <Badge
-              variant="outline"
-              className={cn(
-                'ml-auto',
-                state === 'warn' && 'border-amber-600/40 text-amber-700 dark:text-amber-300',
-                state === 'danger' && 'border-red-600/40 text-red-700 dark:text-red-300',
-              )}
-            >
-              {badge}
-            </Badge>
-          )}
-        </div>
-        <p className="mt-3 font-heading text-4xl font-bold tracking-tight tabular-nums">
-          {value}
-          {unit && (
-            <span className="ml-1.5 text-sm font-semibold text-muted-foreground">{unit}</span>
-          )}
-        </p>
-        <p className="mt-1 text-xs text-muted-foreground">{detail}</p>
-        <ArrowRight
-          aria-hidden="true"
-          className="mt-3 size-4 text-muted-foreground transition-transform group-hover:translate-x-0.5"
-        />
-      </Link>
-    </Button>
+      <div className="flex items-center gap-2">
+        <h3 className="text-sm font-semibold">{title}</h3>
+        {badge && (
+          <Badge
+            variant="outline"
+            className={cn(
+              'ml-auto',
+              state === 'warn' && 'border-amber-600/40 text-amber-700 dark:text-amber-300',
+              state === 'danger' && 'border-red-600/40 text-red-700 dark:text-red-300',
+            )}
+          >
+            {badge}
+          </Badge>
+        )}
+      </div>
+      <p className="mt-3 font-heading text-4xl font-bold tracking-tight tabular-nums">
+        {value}
+        {unit && <span className="ml-1.5 text-sm font-semibold text-muted-foreground">{unit}</span>}
+      </p>
+      <p className="mt-1 text-xs break-words text-muted-foreground">{detail}</p>
+      <ArrowRight
+        aria-hidden="true"
+        className="mt-auto size-4 pt-0 text-muted-foreground transition-transform group-hover:translate-x-0.5"
+      />
+    </Link>
   )
 }
 
@@ -159,7 +154,7 @@ function Dashboard() {
         />
       </div>
 
-      <div className="max-w-3xl rounded-2xl border border-border bg-card p-5">
+      <div className="rounded-2xl border border-border bg-card p-5">
         <div className="flex items-baseline justify-between gap-2">
           <div>
             <h2 className="font-heading text-base font-semibold">Recent activity</h2>
