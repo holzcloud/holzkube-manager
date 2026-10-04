@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
-import { Link, useNavigate, useSearch } from '@tanstack/react-router'
-import type { ReactNode } from 'react'
+import { Link, useNavigate, useRouterState, useSearch } from '@tanstack/react-router'
+import { type ReactNode, useEffect, useRef } from 'react'
 import { api, type KubernetesOverview } from '@/api'
 import { Problem } from '@/components/Problem'
 import {
@@ -115,6 +115,18 @@ export function KubernetesShell({ children }: { children: ReactNode }) {
   const search = useSearch({ strict: false }) as KubernetesSearch
   const { clusters, selected, namespace } = useClusterSelection()
 
+  // On a phone the sections are one row that scrolls sideways; the one being
+  // looked at is brought into view, so it is never the one that is hidden.
+  const strip = useRef<HTMLElement>(null)
+  const pathname = useRouterState({ select: (s) => s.location.pathname })
+  // biome-ignore lint/correctness/useExhaustiveDependencies: the path is what moves the active link
+  useEffect(() => {
+    const row = strip.current
+    const active = row?.querySelector<HTMLElement>('[aria-current="page"]')
+    if (row && active)
+      row.scrollLeft = active.offsetLeft - (row.clientWidth - active.clientWidth) / 2
+  }, [pathname])
+
   // The namespaces come from the overview, which every page reads anyway.
   const overview = useQuery({
     queryKey: ['kubernetes', selected, namespace],
@@ -198,13 +210,13 @@ export function KubernetesShell({ children }: { children: ReactNode }) {
         )}
       </div>
 
-      {/* Wrapping rather than scrolling sideways: a tab strip that scrolls hides
-          half of itself on a phone, and the thing it hides is the page somebody
-          is looking for. Three rows that are all visible beat one row that is
-          not. On a phone they sit in a four-column grid so the rows align. */}
+      {/* One row. On a phone it scrolls sideways and keeps the active section
+          in view, which costs one line of screen instead of three; from md up
+          there is room and the sections wrap. */}
       <nav
+        ref={strip}
         aria-label="Kubernetes sections"
-        className="grid grid-cols-4 gap-1 border-b pb-2 md:flex md:flex-wrap"
+        className="-mx-3 flex gap-1 overflow-x-auto border-b px-3 pb-2 [scrollbar-width:none] sm:-mx-4 sm:px-4 md:mx-0 md:flex-wrap md:overflow-visible md:px-0 [&::-webkit-scrollbar]:hidden"
       >
         {SECTIONS.map((section) => (
           <Link
@@ -216,7 +228,7 @@ export function KubernetesShell({ children }: { children: ReactNode }) {
             activeOptions={{ exact: section.to === '/kubernetes' }}
             className={cn(
               'rounded-md px-3 py-2 text-sm transition-colors',
-              'max-md:flex max-md:min-h-11 max-md:items-center max-md:justify-center max-md:px-1 max-md:text-xs',
+              'max-md:flex max-md:min-h-11 max-md:shrink-0 max-md:items-center max-md:whitespace-nowrap',
               'hover:bg-muted',
             )}
             activeProps={{ className: 'bg-muted font-medium' }}
