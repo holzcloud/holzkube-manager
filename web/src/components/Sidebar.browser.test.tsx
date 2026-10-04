@@ -106,9 +106,9 @@ afterEach(async () => {
   await page.viewport(1200, 900)
 })
 
-describe('the rail, at desk widths', () => {
-  it('keeps every icon inside the bar at 1280 px', async () => {
-    await page.viewport(1280, 800)
+describe('the rail, at tablet widths (md up to lg)', () => {
+  it('keeps every icon inside the bar at 900 px', async () => {
+    await page.viewport(900, 800)
     renderNavigation(false)
     const nav = await rail()
     const buttons = await nav.querySelectorAll('a, button')
