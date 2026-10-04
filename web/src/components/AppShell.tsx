@@ -77,7 +77,7 @@ export function AppShell() {
           <button
             type="button"
             aria-label="Close the navigation"
-            className="fixed inset-0 z-40 bg-background/70"
+            className="fixed inset-0 z-40 bg-background/70 lg:hidden"
             onClick={() => setNavOpen(false)}
           />
         )}
@@ -86,7 +86,7 @@ export function AppShell() {
           {/* 16px of padding on each side is 4% of a 390px phone. On a
               phone the bottom bar owns the last strip of the screen, so the
               content ends above it instead of under it. */}
-          <main className="min-h-0 flex-1 overflow-auto p-4 pb-20 md:p-6 md:pb-6">
+          <main className="min-h-0 flex-1 overflow-auto p-3 pb-20 sm:p-4 sm:pb-20 md:p-6 md:pb-6">
             <Outlet />
           </main>
         </div>

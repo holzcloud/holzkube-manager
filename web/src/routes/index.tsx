@@ -3,6 +3,7 @@ import { createRoute, Link } from '@tanstack/react-router'
 import { ArrowRight } from 'lucide-react'
 import { api } from '@/api'
 import { DataTable } from '@/components/DataTable'
+import { HealthField, StageBadge } from '@/components/HealthField'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -46,40 +47,72 @@ function MetricCard({
   state?: 'default' | 'warn' | 'danger'
 }) {
   return (
-    <Button
-      asChild
-      variant="ghost"
-      className="group h-auto w-full justify-start rounded-2xl border border-border bg-card p-5 text-left hover:border-primary/45 hover:bg-card"
+    <Link
+      to={href}
+      className="group flex flex-col rounded-2xl border border-border bg-card p-3 transition-colors sm:p-5 hover:border-primary/45 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
     >
-      <Link to={href} className="block">
-        <div className="flex w-full items-center gap-2">
-          <h3 className="text-sm font-semibold">{title}</h3>
-          {badge && (
-            <Badge
-              variant="outline"
-              className={cn(
-                'ml-auto',
-                state === 'warn' && 'border-amber-600/40 text-amber-700 dark:text-amber-300',
-                state === 'danger' && 'border-red-600/40 text-red-700 dark:text-red-300',
-              )}
-            >
-              {badge}
-            </Badge>
-          )}
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+        <h3 className="text-sm font-semibold">{title}</h3>
+        {badge && (
+          <Badge
+            variant="outline"
+            className={cn(
+              'max-sm:hidden sm:ml-auto',
+              state !== 'default' && 'max-sm:inline-flex',
+              state === 'warn' && 'border-amber-600/40 text-amber-700 dark:text-amber-300',
+              state === 'danger' && 'border-red-600/40 text-red-700 dark:text-red-300',
+            )}
+          >
+            {badge}
+          </Badge>
+        )}
+      </div>
+      <p className="mt-2 font-heading text-2xl sm:mt-3 sm:text-4xl font-bold tracking-tight tabular-nums">
+        {value}
+        {unit && <span className="ml-1.5 text-sm font-semibold text-muted-foreground">{unit}</span>}
+      </p>
+      <p className="mt-1 text-xs break-words text-muted-foreground max-sm:hidden">{detail}</p>
+    </Link>
+  )
+}
+
+/** A titled panel that fills the height it is given and scrolls inside itself. */
+function Panel({
+  title,
+  hint,
+  to,
+  toLabel,
+  className,
+  children,
+}: {
+  title: string
+  hint: string
+  to: string
+  toLabel: string
+  className?: string
+  children: React.ReactNode
+}) {
+  return (
+    <section
+      className={cn(
+        'flex min-h-0 flex-col rounded-2xl border border-border bg-card p-4 sm:p-5',
+        className,
+      )}
+    >
+      <div className="flex items-baseline justify-between gap-2">
+        <div>
+          <h2 className="font-heading text-base font-semibold">{title}</h2>
+          <p className="text-xs text-muted-foreground max-sm:hidden">{hint}</p>
         </div>
-        <p className="mt-3 font-heading text-4xl font-bold tracking-tight tabular-nums">
-          {value}
-          {unit && (
-            <span className="ml-1.5 text-sm font-semibold text-muted-foreground">{unit}</span>
-          )}
-        </p>
-        <p className="mt-1 text-xs text-muted-foreground">{detail}</p>
-        <ArrowRight
-          aria-hidden="true"
-          className="mt-3 size-4 text-muted-foreground transition-transform group-hover:translate-x-0.5"
-        />
-      </Link>
-    </Button>
+        <Button asChild variant="ghost" size="sm" className="text-muted-foreground">
+          <Link to={to}>
+            {toLabel}
+            <ArrowRight aria-hidden="true" className="size-4" />
+          </Link>
+        </Button>
+      </div>
+      <div className="mt-3 min-h-0 flex-1 overflow-auto sm:mt-4">{children}</div>
+    </section>
   )
 }
 
@@ -97,7 +130,7 @@ function Dashboard() {
   })
   const recent = useQuery({
     queryKey: ['audit', 'recent'],
-    queryFn: () => api.audit({ limit: 3 }),
+    queryFn: () => api.audit({ limit: 8 }),
   })
 
   const fleet = machines.data ?? []
@@ -108,7 +141,7 @@ function Dashboard() {
   const down = fleetByCondition('down')
 
   return (
-    <div className="space-y-6">
+    <div className="flex min-h-0 flex-col gap-6 lg:h-full">
       <div>
         <h1 className="font-heading text-2xl font-semibold tracking-tight">Dashboard</h1>
         <p className="text-sm text-muted-foreground">The fleet, as holzkube-manager last saw it.</p>
@@ -127,7 +160,7 @@ function Dashboard() {
         </div>
       )}
 
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+      <div className="grid grid-cols-3 gap-2 sm:gap-4">
         <MetricCard
           title="Clusters"
           value={clusters.isPending ? '…' : String(clusters.data?.length ?? 0)}
@@ -159,55 +192,118 @@ function Dashboard() {
         />
       </div>
 
-      <div className="max-w-3xl rounded-2xl border border-border bg-card p-5">
-        <div className="flex items-baseline justify-between gap-2">
-          <div>
-            <h2 className="font-heading text-base font-semibold">Recent activity</h2>
-            <p className="text-xs text-muted-foreground">
-              The three most recent audit records, newest first.
-            </p>
-          </div>
-          <Button asChild variant="ghost" size="sm" className="text-muted-foreground">
-            <Link to="/audit">
-              Audit log
-              <ArrowRight aria-hidden="true" className="size-4" />
-            </Link>
-          </Button>
-        </div>
-        {recent.isPending && <Skeleton className="mt-4 h-16 w-full" />}
-        {recent.isSuccess && recent.data.items.length === 0 && (
-          <p className="mt-4 text-sm text-muted-foreground">Nothing has been recorded yet.</p>
-        )}
-        {recent.isSuccess && recent.data.items.length > 0 && (
-          <div className="mt-4">
+      {/* The rest of the screen: the machines take two thirds and the
+          clusters and the latest records share the third. Each panel scrolls
+          inside itself, so a long fleet never pushes the others off screen. */}
+      <div className="grid min-h-0 flex-1 gap-4 lg:grid-cols-3">
+        <Panel
+          title="Machines"
+          hint="Every machine this instance knows, and how it answered last."
+          to="/nodes"
+          toLabel="All nodes"
+          className="lg:col-span-2"
+        >
+          {machines.isPending && <Skeleton className="h-24 w-full" />}
+          {machines.isSuccess && (
             <DataTable
-              label="Recent activity"
+              label="Machines"
               phone="rows"
-              rows={recent.data.items.slice(0, 3)}
-              keyOf={(record) => String(record.seq)}
-              empty="Nothing has been recorded yet."
+              rows={fleet}
+              keyOf={(m) => m.id}
+              empty="No machines yet."
               columns={[
                 {
-                  key: 'action',
-                  label: 'Action',
+                  key: 'host',
+                  label: 'Host',
                   role: 'identity',
-                  render: (record) => <span className="font-mono text-xs">{record.action}</span>,
+                  className: 'font-medium',
+                  render: (m) => (
+                    <Link
+                      to="/nodes/$uuid"
+                      params={{ uuid: m.id }}
+                      className="inline-flex items-center hover:underline max-md:min-h-11"
+                    >
+                      <HealthField field={m.hostname} render={(v) => v || m.id.slice(0, 8)} />
+                    </Link>
+                  ),
                 },
                 {
-                  key: 'ts',
-                  label: 'Time',
-                  className: 'tabular-nums',
-                  render: (record) => <span className="tabular-nums">{record.ts}</span>,
+                  key: 'state',
+                  label: 'State',
+                  render: (m) => <StageBadge stage={m.stage} />,
+                },
+                { key: 'role', label: 'Role', render: (m) => m.role || '—' },
+                {
+                  key: 'addr',
+                  label: 'Address',
+                  className: 'font-mono text-xs',
+                  render: (m) => <HealthField field={m.addr} />,
                 },
                 {
-                  key: 'actor',
-                  label: 'Actor',
-                  render: (record) => (record.actor === '' ? '—' : record.actor),
+                  key: 'talos',
+                  label: 'Talos',
+                  className: 'font-mono text-xs',
+                  render: (m) => <HealthField field={m.talos_version} />,
                 },
               ]}
             />
-          </div>
-        )}
+          )}
+        </Panel>
+
+        <div className="flex min-h-0 flex-col gap-4">
+          <Panel
+            title="Clusters"
+            hint="Nodes by condition, and how long the client certificate lasts."
+            to="/clusters"
+            toLabel="Clusters"
+          >
+            {clusters.isSuccess && clusters.data.length === 0 && (
+              <p className="text-sm text-muted-foreground">None imported yet.</p>
+            )}
+            <ul className="space-y-3">
+              {(clusters.data ?? []).map((c) => (
+                <li key={c.id} className="rounded-xl border border-border p-3">
+                  <div className="flex items-baseline justify-between gap-2">
+                    <span className="font-medium">{c.name}</span>
+                    <span className="text-xs text-muted-foreground tabular-nums">
+                      {c.nodes} {c.nodes === 1 ? 'node' : 'nodes'} · {c.control_plane} cp ·{' '}
+                      {c.workers} {c.workers === 1 ? 'worker' : 'workers'}
+                    </span>
+                  </div>
+                  <p className="mt-1 text-xs text-muted-foreground tabular-nums">
+                    {c.healthy} healthy · {c.degraded} degraded · {c.down} not answering ·
+                    certificate {c.client_cert_days_left} days left
+                  </p>
+                </li>
+              ))}
+            </ul>
+          </Panel>
+
+          <Panel
+            title="Recent activity"
+            hint="The latest audit records, newest first."
+            to="/audit"
+            toLabel="Audit log"
+            className="flex-1"
+          >
+            {recent.isPending && <Skeleton className="h-16 w-full" />}
+            {recent.isSuccess && recent.data.items.length === 0 && (
+              <p className="text-sm text-muted-foreground">Nothing has been recorded yet.</p>
+            )}
+            {recent.isSuccess && recent.data.items.length > 0 && (
+              <ul className="divide-y divide-border">
+                {recent.data.items.map((record) => (
+                  <li key={record.seq} className="py-2">
+                    <p className="truncate font-mono text-xs">{record.action}</p>
+                    <p className="text-xs text-muted-foreground tabular-nums">
+                      {record.ts} · {record.actor === '' ? '—' : record.actor}
+                    </p>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </Panel>
+        </div>
       </div>
     </div>
   )

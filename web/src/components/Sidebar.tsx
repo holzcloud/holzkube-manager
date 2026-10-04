@@ -203,7 +203,7 @@ const isActive = (pathname: string, path: string) =>
   path === '/' ? pathname === '/' : pathname === path || pathname.startsWith(`${path}/`)
 
 /**
- * The rail (md and up): the brand mark, one icon button per primary area, and
+ * The rail (md up to lg): the brand mark, one icon button per primary area, and
  * the ellipsis that opens the drawer with everything else. Tooltips come from
  * the title attribute; a hover CSS popover would be a second copy of what the
  * accessible name already says.
@@ -214,7 +214,7 @@ export function RailNav({ onOpenMore, moreOpen }: { onOpenMore?: () => void; mor
   return (
     <nav
       aria-label="Primary navigation"
-      className="hidden h-full w-20 shrink-0 flex-col items-center gap-1 border-r border-sidebar-border bg-sidebar px-2 py-3 md:flex"
+      className="hidden h-full w-20 shrink-0 flex-col items-center gap-1 border-r border-sidebar-border bg-sidebar px-2 py-3 md:flex lg:hidden"
     >
       <Link
         to="/"
@@ -327,15 +327,13 @@ export function NavDrawer({
       aria-label="Main navigation"
       className={cn(
         'flex h-full shrink-0 flex-col gap-1 bg-sidebar',
-        'max-md:fixed',
-        // Below md: out of the flow, over the page, off the left edge until asked for.
-        'max-md:fixed max-md:inset-y-0 max-md:left-0 max-md:z-50 max-md:w-72 max-md:border-r max-md:border-sidebar-border max-md:p-3 max-md:shadow-xl',
-        'max-md:overflow-y-auto max-md:transition-transform max-md:duration-200 max-md:ease-out',
-        open ? 'max-md:translate-x-0 max-md:visible' : 'max-md:-translate-x-full max-md:invisible',
-        // On md and up: a permanent column beside the rail, the desk's own
-        // list. The audit's desk pass reads the version button without opening
+                // Below md: out of the flow, over the page, off the left edge until asked for.
+        'max-lg:fixed max-lg:inset-y-0 max-lg:left-0 max-lg:z-50 max-lg:w-72 max-lg:border-r max-lg:border-sidebar-border max-lg:p-3 max-lg:shadow-xl',
+        'max-lg:overflow-y-auto max-lg:transition-transform max-lg:duration-200 max-lg:ease-out',
+        open ? 'max-lg:translate-x-0 max-lg:visible' : 'max-lg:-translate-x-full max-lg:invisible',
+        // From lg up: the permanent column, the desk's own list, alone. The audit's desk pass reads the version button without opening
         // anything, so the list is there rather than behind the ellipsis.
-        'md:sticky md:top-0 md:w-60 md:border-r md:border-sidebar-border md:p-3',
+        'lg:sticky lg:top-0 lg:w-60 lg:border-r lg:border-sidebar-border lg:p-3',
       )}
     >
       <div className="mb-3 flex items-center gap-2.5 px-2 pt-1">
