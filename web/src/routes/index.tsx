@@ -1,51 +1,111 @@
 import { useQuery } from '@tanstack/react-query'
 import { createRoute, Link } from '@tanstack/react-router'
+import { ArrowRight } from 'lucide-react'
 import { api } from '@/api'
 import { DataTable } from '@/components/DataTable'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
 import { useSystemStatus } from '@/hooks/useSession'
+import { cn } from '@/lib/utils'
 import { authenticatedRoute } from '@/routes/__root'
 
 /**
- * The fleet overview (D-29).
+ * The fleet overview (D-29), in the 2026 shell (docs/mockups/webui-2026.html).
  *
- * Phase 3 turned this from an instance status card into the page an operator
- * opens during an incident: one tile per cluster, a fleet-wide count of nodes
- * by condition, and only then the instance's own status.
+ * One card per fact an operator opens the dashboard for -- the fleet, the
+ * machines, the instance's own record-keeping -- with the number large and
+ * the detail one line under it, the way the mockup draws a card. What the
+ * mockup fills with sparklines is left out here: this page has no series
+ * endpoint for these numbers, and a line drawn from three points is
+ * decoration pretending to be data.
  *
- * The instance status moved into a supporting role and deliberately did not
+ * The instance status stays in a supporting role and deliberately does not
  * disappear. The audit chain-break warning is the one thing on this page that
- * says holzkube-manager's own record-keeping cannot be trusted, and a page that
- * dropped it while gaining cluster tiles would have traded the more important
- * fact for the more interesting one (D-15 from phase 1).
+ * says holzkube-manager's own record-keeping cannot be trusted, and a page
+ * that dropped it while gaining cluster tiles would have traded the more
+ * important fact for the more interesting one (D-15 from phase 1).
  */
+
+/** One metric card: the label, the big number, one line of detail. */
+function MetricCard({
+  title,
+  badge,
+  value,
+  unit,
+  detail,
+  href,
+  state = 'default',
+}: {
+  title: string
+  badge?: string
+  value: string
+  unit?: string
+  detail: string
+  href: string
+  state?: 'default' | 'warn' | 'danger'
+}) {
+  return (
+    <Button
+      asChild
+      variant="ghost"
+      className="group h-auto w-full justify-start rounded-2xl border border-border bg-card p-5 text-left hover:border-primary/45 hover:bg-card"
+    >
+      <Link to={href} className="block">
+        <div className="flex w-full items-center gap-2">
+          <h3 className="text-sm font-semibold">{title}</h3>
+          {badge && (
+            <Badge
+              variant="outline"
+              className={cn(
+                'ml-auto',
+                state === 'warn' && 'border-amber-600/40 text-amber-700 dark:text-amber-300',
+                state === 'danger' && 'border-red-600/40 text-red-700 dark:text-red-300',
+              )}
+            >
+              {badge}
+            </Badge>
+          )}
+        </div>
+        <p className="mt-3 font-heading text-4xl font-bold tracking-tight tabular-nums">
+          {value}
+          {unit && (
+            <span className="ml-1.5 text-sm font-semibold text-muted-foreground">{unit}</span>
+          )}
+        </p>
+        <p className="mt-1 text-xs text-muted-foreground">{detail}</p>
+        <ArrowRight
+          aria-hidden="true"
+          className="mt-3 size-4 text-muted-foreground transition-transform group-hover:translate-x-0.5"
+        />
+      </Link>
+    </Button>
+  )
+}
+
 function Dashboard() {
   const status = useSystemStatus()
-
   const clusters = useQuery({
     queryKey: ['clusters'],
     queryFn: () => api.clusters.list(),
     refetchInterval: 30_000,
   })
-
   const machines = useQuery({
     queryKey: ['machines'],
     queryFn: () => api.machines.list(),
     refetchInterval: 30_000,
   })
-
-  const fleet = machines.data ?? []
-  const unassigned = fleet.filter((m) => m.cluster === '')
-
-  // The only real data flow phase 1 has, and therefore the proof that
-  // store -> API -> UI works on records rather than on placeholders (D-13).
   const recent = useQuery({
     queryKey: ['audit', 'recent'],
     queryFn: () => api.audit({ limit: 3 }),
   })
+
+  const fleet = machines.data ?? []
+  const unassigned = fleet.filter((m) => m.cluster === '')
+  const fleetByCondition = (condition: string) => fleet.filter((m) => m.stage === condition).length
+
+  const up = fleet.length - fleetByCondition('down')
+  const down = fleetByCondition('down')
 
   return (
     <div className="space-y-6">
@@ -55,149 +115,71 @@ function Dashboard() {
       </div>
 
       {clusters.isSuccess && clusters.data.length === 0 && (
-        <Card className="max-w-2xl">
-          <CardHeader>
-            <CardTitle>No clusters yet</CardTitle>
-            <CardDescription>
-              Import the cluster you already run. holzkube-manager reads a control-plane node's own
-              configuration and fills the inventory from the cluster's membership.
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <Button asChild>
-              <Link to="/clusters">Import a cluster</Link>
-            </Button>
-          </CardContent>
-        </Card>
-      )}
-
-      {clusters.isSuccess && clusters.data.length > 0 && (
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-          {clusters.data.map((c) => (
-            <Card key={c.id}>
-              <CardHeader>
-                <CardTitle className="flex items-center justify-between gap-2 text-base">
-                  {c.name}
-                  {c.locked && (
-                    <Badge
-                      variant="outline"
-                      className="border-amber-600/40 text-amber-700 dark:text-amber-300"
-                    >
-                      read-only
-                    </Badge>
-                  )}
-                </CardTitle>
-                <CardDescription className="font-mono text-xs">{c.endpoint}</CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-1 text-sm">
-                <p>
-                  {c.nodes} node{c.nodes === 1 ? '' : 's'} — {c.control_plane} control plane,{' '}
-                  {c.workers} worker
-                </p>
-                {/* Three counts and not one health verdict: "the cluster is
-                    degraded" hides which of the two failures it is, and the
-                    difference decides what the operator does next. */}
-                <p>
-                  <span className="text-emerald-700 dark:text-emerald-300">
-                    {c.healthy} healthy
-                  </span>
-                  {', '}
-                  <span className="text-amber-700 dark:text-amber-300">{c.degraded} degraded</span>
-                  {', '}
-                  <span className="text-red-700 dark:text-red-300">{c.down} not answering</span>
-                  {c.checking > 0 && (
-                    <>
-                      {', '}
-                      <span className="text-muted-foreground">{c.checking} not checked yet</span>
-                    </>
-                  )}
-                </p>
-                <Button asChild variant="secondary" size="sm" className="mt-2">
-                  <Link to="/clusters">Open</Link>
-                </Button>
-              </CardContent>
-            </Card>
-          ))}
-
-          {unassigned.length > 0 && (
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-base">Not in a cluster</CardTitle>
-                <CardDescription>
-                  Machines holzkube-manager knows about that belong to no cluster. This is an
-                  ordinary state, not an error.
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <p className="text-sm">
-                  {unassigned.length} machine{unassigned.length === 1 ? '' : 's'}
-                </p>
-                <Button asChild variant="secondary" size="sm" className="mt-2">
-                  <Link to="/nodes">Open the node list</Link>
-                </Button>
-              </CardContent>
-            </Card>
-          )}
+        <div className="max-w-2xl rounded-2xl border border-border bg-card p-6">
+          <h2 className="font-heading text-base font-semibold">No clusters yet</h2>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Import the cluster you already run. holzkube-manager reads a control-plane node's own
+            configuration and fills the inventory from the cluster's membership.
+          </p>
+          <Button asChild className="mt-4">
+            <Link to="/clusters">Import a cluster</Link>
+          </Button>
         </div>
       )}
 
-      <Card className="max-w-2xl">
-        <CardHeader>
-          <CardTitle>Instance</CardTitle>
-          <CardDescription>Reported by this holzkube-manager process.</CardDescription>
-        </CardHeader>
-        <CardContent>
-          {status.isPending && <Skeleton className="h-16 w-full" />}
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+        <MetricCard
+          title="Clusters"
+          value={clusters.isPending ? '…' : String(clusters.data?.length ?? 0)}
+          detail={
+            clusters.isSuccess && clusters.data.length > 0
+              ? clusters.data.map((c) => c.name).join(' · ')
+              : 'None imported yet.'
+          }
+          href="/clusters"
+        />
+        <MetricCard
+          title="Machines"
+          badge={down > 0 ? `${down} down` : fleet.length > 0 ? 'all up' : undefined}
+          state={down > 0 ? 'danger' : 'default'}
+          value={machines.isPending ? '…' : String(fleet.length)}
+          unit="known"
+          detail={`${up} answering · ${unassigned.length} in no cluster`}
+          href="/nodes"
+        />
+        <MetricCard
+          title="Instance"
+          badge={
+            status.data ? (status.data.audit_chain.ok ? 'verified' : 'chain broken') : undefined
+          }
+          state={status.data && !status.data.audit_chain.ok ? 'danger' : 'default'}
+          value={status.isPending ? '…' : status.data?.setup_required ? 'setup' : 'ready'}
+          detail="holzkube-manager's own process and audit chain."
+          href="/settings"
+        />
+      </div>
 
-          {status.isError && (
-            <p className="text-sm text-muted-foreground">
-              The status endpoint did not answer. holzkube-manager itself may be restarting.
+      <div className="max-w-3xl rounded-2xl border border-border bg-card p-5">
+        <div className="flex items-baseline justify-between gap-2">
+          <div>
+            <h2 className="font-heading text-base font-semibold">Recent activity</h2>
+            <p className="text-xs text-muted-foreground">
+              The three most recent audit records, newest first.
             </p>
-          )}
-
-          {status.data && (
-            <dl className="grid grid-cols-[minmax(0,10rem)_1fr] gap-x-4 gap-y-3 text-sm">
-              <dt className="text-muted-foreground">Setup</dt>
-              <dd>
-                {status.data.setup_required
-                  ? 'No operator account exists yet.'
-                  : 'Operator account created.'}
-              </dd>
-
-              <dt className="text-muted-foreground">Audit chain</dt>
-              <dd className="flex items-center gap-2">
-                {status.data.audit_chain.ok ? (
-                  <Badge variant="secondary">Verified</Badge>
-                ) : (
-                  <Badge variant="destructive">Broken</Badge>
-                )}
-                <span className="text-muted-foreground">
-                  {status.data.audit_chain.ok
-                    ? 'Every record verifies against its predecessor.'
-                    : `First mismatch at line ${status.data.audit_chain.broken_at_line}.`}
-                </span>
-              </dd>
-
-              <dt className="text-muted-foreground">Audit file</dt>
-              <dd className="break-all font-mono text-xs">{status.data.audit_chain.file}</dd>
-            </dl>
-          )}
-        </CardContent>
-      </Card>
-
-      <Card className="max-w-2xl">
-        <CardHeader>
-          <CardTitle>Recent activity</CardTitle>
-          <CardDescription>The three most recent audit records, newest first.</CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          {recent.isPending && <Skeleton className="h-16 w-full" />}
-
-          {recent.isSuccess && recent.data.items.length === 0 && (
-            <p className="text-sm text-muted-foreground">Nothing has been recorded yet.</p>
-          )}
-
-          {recent.isSuccess && recent.data.items.length > 0 && (
+          </div>
+          <Button asChild variant="ghost" size="sm" className="text-muted-foreground">
+            <Link to="/audit">
+              Audit log
+              <ArrowRight aria-hidden="true" className="size-4" />
+            </Link>
+          </Button>
+        </div>
+        {recent.isPending && <Skeleton className="mt-4 h-16 w-full" />}
+        {recent.isSuccess && recent.data.items.length === 0 && (
+          <p className="mt-4 text-sm text-muted-foreground">Nothing has been recorded yet.</p>
+        )}
+        {recent.isSuccess && recent.data.items.length > 0 && (
+          <div className="mt-4">
             <DataTable
               label="Recent activity"
               phone="rows"
@@ -224,13 +206,9 @@ function Dashboard() {
                 },
               ]}
             />
-          )}
-
-          <Button asChild variant="secondary">
-            <Link to="/audit">Open the audit log</Link>
-          </Button>
-        </CardContent>
-      </Card>
+          </div>
+        )}
+      </div>
     </div>
   )
 }

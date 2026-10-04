@@ -6,6 +6,7 @@ import {
   Container,
   Cpu,
   Disc3,
+  Ellipsis,
   FileCog,
   HardDriveDownload,
   LayoutDashboard,
@@ -24,26 +25,17 @@ import { WhatsNew } from '@/components/WhatsNew'
 import { cn } from '@/lib/utils'
 
 /**
- * The permanent navigation (D-10).
+ * Every area this product has, as one list.
  *
- * Every area this product has is listed here, and phase 1 listed every area
- * that was known then. Later phases replace a placeholder page with a real one
- * and normally do not touch the navigation, which is the point -- nobody
- * rebuilds the shell under time pressure in the middle of the inventory phase.
- *
- * The list is not closed, and phase 2 proved it: Images was not among the eight
- * phase-1 areas, because the Image Factory work had not been scoped as an
- * operator-facing screen yet. A requirement that names a screen ("der Betreiber
- * stellt zusammen", "die UI warnt") wins over a claim that the navigation was
- * already complete. Adding an area is one entry here, one route in
- * `web/src/routeTree.ts`, and one entry in `web/scripts/layout-routes.json` --
- * the layout audit's route guard fails the gate on a router route that list
- * does not name, so a new screen cannot skip the phone check.
+ * The 2026 redesign splits it in two: the five areas an operator touches
+ * during an incident (PRIMARY_NAV, the mockup's choice) are on the rail and
+ * the phone's bottom bar; the rest (MORE_NAV) is behind the "More" button
+ * -- the rail's ellipsis and the phone's menu -- which opens the drawer that
+ * carries the full list, every area, with labels.
  *
  * `phase` is null for an area that exists now. Anything else names the phase
  * that builds it, and the placeholder page says so in plain English (D-09).
  */
-
 export interface NavArea {
   path: string
   label: string
@@ -159,156 +151,34 @@ export const NAV_AREAS: NavArea[] = [
   },
 ]
 
+const byPath = (path: string): NavArea => {
+  const area = NAV_AREAS.find((a) => a.path === path)
+  if (area === undefined) throw new Error(`No navigation area named ${path}`)
+  return area
+}
+
+/** The five areas the rail and the phone's tab bar carry (the mockup's choice). */
+export const PRIMARY_NAV: NavArea[] = ['/', '/clusters', '/host', '/jobs', '/settings'].map(byPath)
+
+/** Everything else, behind "More". */
+export const MORE_NAV: NavArea[] = NAV_AREAS.filter((area) => !PRIMARY_NAV.includes(area))
+
 /**
- * The navigation, permanent on a desk and a drawer on a phone.
- *
- * MEASURED, at 390px in Chromium against the running daemon, before this was
- * written: the bar is 224px of a 390px screen, which left main at 166px and,
- * after its own padding, 118px of usable content. Fifty-seven per cent of a
- * phone spent on navigation. The page never scrolled sideways, so nothing
- * announced it -- the content was simply squeezed, and on two screens pushed
- * out of reach entirely: seventeen elements clipped on /settings, including the
- * whole "New account" form and the button that changes a password.
- *
- * Below `md` it is therefore taken out of the flow and slid in over the page.
- * Above it, nothing changes: the desk layout was not the problem and is not
- * worth risking to fix the phone.
- *
- * `open` and `onNavigate` are owned by the shell rather than by this component,
- * because the header's button and the backdrop both have to reach the same
- * state, and a drawer that closed itself on navigation but not on a backdrop
- * click would be two rules for one thing.
+ * The host reading behind the Host mark, shared by the rail, the drawer and
+ * nothing else. On /host the page's own 3-s poll feeds the mark and this asks
+ * nothing of its own; elsewhere a 30-s refresh, no retry: a failed poll is
+ * shown as one, at once (T-12-14, RESEARCH Pattern 8).
  */
-export function Sidebar({ open = false, onNavigate }: { open?: boolean; onNavigate?: () => void }) {
-  // The Host entry's state mark (D-13), from the server's one decision -- the
-  // same ['host'] query /host polls, so the mark and the page cannot disagree.
-  //
-  // On /host the page's own 3-s poll feeds the mark and the sidebar asks
-  // nothing of its own: every observer of a query keeps its own interval, and
-  // a second caller of GET /api/v1/host would shorten the window /host's rates
-  // are computed over (RESEARCH Pattern 8). Elsewhere a 30-s refresh: the
-  // sidebar is on every page, and a whole host reading every 3 s on every
-  // screen is waste. No retry: a failed poll is shown as one, at once.
+export function useHostMark() {
   const onHostPage = useRouterState({ select: (s) => s.location.pathname === '/host' })
-  const host = useQuery({
+  return useQuery({
     queryKey: ['host'],
     queryFn: api.host,
     retry: false,
     refetchInterval: onHostPage ? false : 30_000,
   })
-
-  return (
-    <nav
-      aria-label="Main navigation"
-      className={cn(
-        // 240px and not 224: measured in Chromium with Manrope, the name needs
-        // 138px and the tagline 146px, and at 224px the text beside the mark
-        // had 145px -- the tagline broke onto two lines and, wherever the font
-        // renders a little wider, the name ran past the bar's edge.
-        'flex h-full w-60 shrink-0 flex-col gap-1 border-r border-border bg-sidebar p-3',
-        // Below md: out of the flow, over the page, and off the left edge until
-        // asked for. transform rather than display, so it slides rather than
-        // appears -- on a phone an element that simply exists where nothing was
-        // reads as the page having jumped.
-        'max-md:fixed max-md:inset-y-0 max-md:left-0 max-md:z-50 max-md:shadow-xl',
-        'max-md:transition-transform max-md:duration-200 max-md:ease-out',
-        // Below md the links are 44px tap targets, and thirteen of them plus
-        // the brand block and the footer notices are taller than an 844px
-        // phone. A drawer whose last entries sit below the screen with nothing
-        // to scroll is the vertical form of what the layout audit's CUT OFF
-        // line exists to catch, so the drawer scrolls on its own.
-        'max-md:overflow-y-auto',
-        open ? 'max-md:translate-x-0' : 'max-md:-translate-x-full',
-        // visibility and not aria-hidden/inert, and the reason is that `open`
-        // is false on a desk too: those are React props and cannot be scoped to
-        // a breakpoint, so hanging them off `open` would have made the
-        // permanent sidebar inert on every screen wide enough not to need a
-        // drawer. `visibility: hidden` takes the shut drawer out of the tab
-        // order and the accessibility tree, and a media query can carry it.
-        open ? 'max-md:visible' : 'max-md:invisible',
-        // Above md the drawer state means nothing: it is simply there.
-        'md:visible md:translate-x-0 md:shadow-none',
-      )}
-    >
-      <div className="mb-4 flex items-center gap-2.5 px-2 pt-1">
-        <img src="/favicon.svg" alt="" className="size-7 shrink-0" />
-        <div>
-          <span className="font-heading whitespace-nowrap text-base font-semibold tracking-tight">
-            holzkube-manager
-          </span>
-          <p className="whitespace-nowrap text-xs text-muted-foreground">
-            Talos cluster management
-          </p>
-          <AlphaBadge className="mt-1 inline-block" />
-        </div>
-      </div>
-
-      {/* UAT G-01-5: the active pill alone was a 5/255 step against the sidebar
-          and the active label was neither darker nor heavier than the rest, so
-          nothing reliably said which page was open. Three cues now do: a darker
-          pill, a semibold label, and a left bar that survives greyscale. */}
-      {NAV_AREAS.map((area) => (
-        <Link
-          key={area.path}
-          to={area.path}
-          activeOptions={{ exact: area.path === '/' }}
-          onClick={onNavigate}
-          className={cn(
-            'flex items-center gap-2 rounded-md border-l-2 border-transparent py-1.5 pr-2 pl-1.5 text-sm text-sidebar-foreground/70',
-            // A thumb-sized row on a phone (MOB-01); the desk keeps its 32px.
-            'max-md:min-h-11',
-            'hover:bg-sidebar-accent hover:text-sidebar-accent-foreground',
-            'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring',
-            // The active styles ride on the router's own data-status rather than
-            // on activeProps: activeProps is concatenated onto className without
-            // tailwind-merge, so `text-sidebar-accent-foreground` and the base
-            // `text-sidebar-foreground/70` both survived and stylesheet order --
-            // not intent -- decided the colour. A variant beats the bare
-            // utility on specificity, so this cannot silently lose again.
-            'data-[status=active]:border-sidebar-accent-foreground data-[status=active]:bg-sidebar-accent',
-            'data-[status=active]:font-semibold data-[status=active]:text-sidebar-accent-foreground',
-          )}
-        >
-          <area.icon aria-hidden="true" className="size-4 shrink-0" />
-          <span className="flex-1">{area.label}</span>
-          {area.path === '/host' && <HostMark host={host} />}
-          {area.phase !== null && (
-            /* The chip fill and the active row's highlight were the same
-               token, so the open page's badge lost its pill while every other
-               kept it. The border gives the chip an edge of its own. */
-            <span
-              className="rounded border border-sidebar-border bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground"
-              title={`This area is built in phase ${area.phase}.`}
-            >
-              P{area.phase}
-            </span>
-          )}
-        </Link>
-      ))}
-
-      {/* The build this instance is running, and the panel behind it. Above the
-          licence notice and below everything else, because it is the answer to
-          "what am I looking at" rather than a place to navigate to. */}
-      <div className="mt-auto px-2 pt-3">
-        <WhatsNew />
-        <AlphaNotice className="mt-1 text-[11px] leading-snug text-sidebar-foreground/60" />
-      </div>
-
-      {/* AGPL section 13: the running instance has to offer its own source. */}
-      <SourceNotice className="px-2 pt-1 text-xs text-sidebar-foreground/60" />
-    </nav>
-  )
 }
 
-/**
- * The mark in the Host entry, in the slot a P{n} chip would take. Nothing
- * before the first answer (nothing has been asked yet, and a grey ring would
- * claim "not readable"). When the latest poll failed, the ring with "did not
- * answer" -- never the state of an earlier answer: an unanswered question is
- * not an answer, and a green dot kept from before would vouch for a host
- * nobody heard from (the wall's rule, T-12-14). Otherwise the server's state,
- * with its summary as the title.
- */
 function HostMark({ host }: { host: { data?: Host; error: unknown } }) {
   if (host.error) {
     return (
@@ -326,5 +196,188 @@ function HostMark({ host }: { host: { data?: Host; error: unknown } }) {
       summary={host.data.health.summary}
       form="sidebar"
     />
+  )
+}
+
+const isActive = (pathname: string, path: string) =>
+  path === '/' ? pathname === '/' : pathname === path || pathname.startsWith(`${path}/`)
+
+/**
+ * The rail (md and up): the brand mark, one icon button per primary area, and
+ * the ellipsis that opens the drawer with everything else. Tooltips come from
+ * the title attribute; a hover CSS popover would be a second copy of what the
+ * accessible name already says.
+ */
+export function RailNav({ onOpenMore, moreOpen }: { onOpenMore?: () => void; moreOpen?: boolean }) {
+  const pathname = useRouterState({ select: (s) => s.location.pathname })
+  const host = useHostMark()
+  return (
+    <nav
+      aria-label="Primary navigation"
+      className="hidden h-full w-20 shrink-0 flex-col items-center gap-1 border-r border-sidebar-border bg-sidebar px-2 py-3 md:flex"
+    >
+      <Link
+        to="/"
+        aria-label="holzkube-manager — Dashboard"
+        className="mb-3 flex size-11 shrink-0 items-center justify-center rounded-xl focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+      >
+        <img src="/favicon.svg" alt="" className="size-9" />
+      </Link>
+      {PRIMARY_NAV.map((area) => {
+        const active = isActive(pathname, area.path)
+        return (
+          <Link
+            key={area.path}
+            to={area.path}
+            activeOptions={{ exact: area.path === '/' }}
+            title={area.label}
+            aria-current={active ? 'page' : undefined}
+            className={cn(
+              'flex size-12 shrink-0 flex-col items-center justify-center gap-1 rounded-xl border border-transparent transition-colors',
+              'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring',
+              active
+                ? 'border-primary/40 bg-sidebar-accent font-semibold text-sidebar-accent-foreground'
+                : 'text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground',
+            )}
+          >
+            <area.icon aria-hidden="true" className="size-5" />
+            {area.path === '/host' && <HostMark host={host} />}
+          </Link>
+        )
+      })}
+      <div className="mt-auto flex flex-col items-center gap-1.5">
+        <AlphaBadge />
+        <button
+          type="button"
+          aria-label="More navigation"
+          aria-expanded={moreOpen ?? false}
+          onClick={onOpenMore}
+          className={cn(
+            'flex size-12 shrink-0 items-center justify-center rounded-xl border border-transparent transition-colors',
+            'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring',
+            moreOpen
+              ? 'border-primary/40 bg-sidebar-accent font-semibold text-sidebar-accent-foreground'
+              : 'text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground',
+          )}
+        >
+          <Ellipsis aria-hidden="true" className="size-5" />
+        </button>
+      </div>
+    </nav>
+  )
+}
+
+/**
+ * The bottom tab bar (below md): the five primary areas with icon and label,
+ * thumb-sized targets (MOB-01), the same active cue the rail uses.
+ */
+export function BottomNav() {
+  const pathname = useRouterState({ select: (s) => s.location.pathname })
+  return (
+    <nav
+      aria-label="Bottom navigation"
+      className={cn(
+        'fixed inset-x-0 bottom-0 z-30 border-t border-sidebar-border bg-sidebar/95 backdrop-blur',
+        'pb-[env(safe-area-inset-bottom)] md:hidden',
+      )}
+    >
+      <div className="mx-auto grid max-w-md grid-cols-5">
+        {PRIMARY_NAV.map((area) => {
+          const active = isActive(pathname, area.path)
+          return (
+            <Link
+              key={area.path}
+              to={area.path}
+              activeOptions={{ exact: area.path === '/' }}
+              aria-current={active ? 'page' : undefined}
+              className={cn(
+                'flex min-h-14 flex-1 flex-col items-center justify-center gap-0.5 rounded-lg px-1 text-[10px] font-medium',
+                'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring',
+                active
+                  ? 'text-sidebar-accent-foreground'
+                  : 'text-sidebar-foreground/70 hover:text-foreground',
+              )}
+            >
+              <area.icon aria-hidden="true" className="size-5" />
+              <span className="w-full truncate text-center">{area.label}</span>
+            </Link>
+          )
+        })}
+      </div>
+    </nav>
+  )
+}
+
+/**
+ * The drawer: the full list, every area, with labels. Below md it slides in
+ * over the page; on md and up it grows out of the rail as a second column,
+ * so the "More" areas stay one tap away on a desk too.
+ */
+export function NavDrawer({
+  open = false,
+  onNavigate,
+}: {
+  open?: boolean
+  onNavigate?: () => void
+}) {
+  const host = useHostMark()
+  const pathname = useRouterState({ select: (s) => s.location.pathname })
+  return (
+    <nav
+      aria-label="Main navigation"
+      className={cn(
+        'flex h-full shrink-0 flex-col gap-1 bg-sidebar',
+        'max-md:fixed',
+        // Below md: out of the flow, over the page, off the left edge until asked for.
+        'max-md:fixed max-md:inset-y-0 max-md:left-0 max-md:z-50 max-md:w-72 max-md:border-r max-md:border-sidebar-border max-md:p-3 max-md:shadow-xl',
+        'max-md:overflow-y-auto max-md:transition-transform max-md:duration-200 max-md:ease-out',
+        open ? 'max-md:translate-x-0 max-md:visible' : 'max-md:-translate-x-full max-md:invisible',
+        // On md and up: a permanent column beside the rail, the desk's own
+        // list. The audit's desk pass reads the version button without opening
+        // anything, so the list is there rather than behind the ellipsis.
+        'md:sticky md:top-0 md:w-60 md:border-r md:border-sidebar-border md:p-3',
+      )}
+    >
+      <div className="mb-3 flex items-center gap-2.5 px-2 pt-1">
+        <img src="/favicon.svg" alt="" className="size-8 shrink-0" />
+        <div>
+          <span className="font-heading text-base font-semibold tracking-tight">
+            holzkube-manager
+          </span>
+          <p className="text-xs text-muted-foreground">Talos cluster management</p>
+        </div>
+      </div>
+      {NAV_AREAS.map((area) => (
+        <Link
+          key={area.path}
+          to={area.path}
+          activeOptions={{ exact: area.path === '/' }}
+          onClick={onNavigate}
+          className={cn(
+            'flex items-center gap-2 rounded-lg border-l-2 border-transparent py-1.5 pr-2 pl-2 text-sm',
+            // A thumb-sized row on a phone (MOB-01).
+            'max-md:min-h-11',
+            'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring',
+            // The active styles ride on the state this side computes, not on
+            // activeProps: that is concatenated onto className without
+            // tailwind-merge, so both colours survived and stylesheet order
+            // decided (UAT G-01-5).
+            isActive(pathname, area.path)
+              ? 'border-sidebar-accent-foreground bg-sidebar-accent font-semibold text-sidebar-accent-foreground'
+              : 'text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground',
+          )}
+        >
+          <area.icon aria-hidden="true" className="size-4 shrink-0" />
+          <span className="flex-1">{area.label}</span>
+          {area.path === '/host' && <HostMark host={host} />}
+        </Link>
+      ))}
+      <div className="mt-auto px-2 pt-3">
+        <WhatsNew />
+        <AlphaNotice className="mt-1 text-[11px] leading-snug text-sidebar-foreground/60" />
+      </div>
+      {/* AGPL section 13: the running instance has to offer its own source. */}
+      <SourceNotice className="px-2 pt-1 text-xs text-sidebar-foreground/60" />
+    </nav>
   )
 }
