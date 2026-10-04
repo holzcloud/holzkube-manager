@@ -270,6 +270,7 @@ async function shoot(page, route, file, { range, wait = 2500, through } = {}) {
 }
 
 const desk = await context(1440, 900, 1)
+await shoot(desk.page, '/', 'dashboard.png')
 await shoot(desk.page, '/clusters', 'clusters.png')
 await shoot(desk.page, '/nodes/m-cp-1', 'node-hardware.png', { range: '24 h' })
 await shoot(desk.page, '/kubernetes/apps', 'apps.png')

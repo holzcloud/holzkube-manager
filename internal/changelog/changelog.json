@@ -1,5 +1,15 @@
 [
   {
+    "version": "v0.3.0",
+    "date": "2026-10-04",
+    "changes": [
+      {
+        "icon": "🎨",
+        "text": "The interface is the 2026 redesign: on a desk and a tablet the navigation is an icon rail (Dashboard, Clusters, Host, Jobs, Settings) with the full list as a labelled column beside it, on a phone the five sit as a bottom tab bar with icons and labels. The dashboard shows the fleet as cards with one big number each -- clusters, machines, the instance's own state -- instead of stacked reports. Logo, colours and every rule the shell carries (the Host mark, the audit chain warning, the 44px phone targets) are unchanged."
+      }
+    ]
+  },
+  {
     "version": "v0.2.2",
     "date": "2026-10-02",
     "changes": [
