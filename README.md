@@ -83,6 +83,15 @@ did.
 
 ## A look around
 
+**The 2026 shell.** On a desk or a tablet the navigation is an icon rail —
+Dashboard, Clusters, Host, Jobs, Settings — with every area as a labelled
+column beside it; on a phone those five are the bottom tab bar and the rest
+sit behind the menu. The dashboard shows the fleet as cards with one big
+number each: the clusters, the machines (and how many are down), and the
+instance's own state including the audit chain.
+
+![The dashboard: the fleet as cards](docs/screenshots/dashboard.png)
+
 **Apps.** What is installed on the cluster, heaviest first, and the detail of
 one: its pods, where they run, and what it used over the day.
 

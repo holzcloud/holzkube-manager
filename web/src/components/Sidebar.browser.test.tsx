@@ -16,24 +16,26 @@ import { api, hostSchema } from '@/api'
 // the measurement measures the browser's defaults and nothing of ours.
 import '@/index.css'
 import demo from '../../fixtures/demo.json'
-import { Sidebar } from './Sidebar'
+import { BottomNav, NavDrawer, RailNav } from './Sidebar'
 
 /**
- * The brand block at the top of the navigation reads on one line each: the
- * name, and the tagline under it.
+ * The 2026 navigation, measured where it lives:
  *
- * At 224px the text beside the mark had 145px; the tagline needs 146px and
- * broke onto two lines, and the name, kept on one line by nowrap, ran past the
- * bar's right edge wherever the font came out a little wider -- which is how
- * it was noticed, on a picture of the app. Measured here in Chromium with the
- * product's own font, on the desk and in the phone drawer.
+ * - the rail at md and up: the brand mark at the top, every icon a thumb-sized
+ *   48px square, nothing of it past the bar's own edges;
+ * - the bottom tab bar below md: five labels, none clipped, none overlapping,
+ *   the bar exactly where the viewport ends;
+ * - the drawer's brand block, on one line each: the name, and the tagline
+ *   under it (the old measurement, on the new component that carries them).
  */
 
-function renderSidebar(open: boolean) {
+function renderNavigation(open: boolean) {
   const rootRoute = createRootRoute({
     component: () => (
       <>
-        <Sidebar open={open} />
+        <RailNav />
+        <NavDrawer open={open} />
+        <BottomNav />
         <Outlet />
       </>
     ),
@@ -51,7 +53,15 @@ function renderSidebar(open: boolean) {
   )
 }
 
-async function brandBlock() {
+async function rail() {
+  return screen.findByRole('navigation', { name: 'Primary navigation' })
+}
+
+async function bottomBar() {
+  return screen.findByRole('navigation', { name: 'Bottom navigation' })
+}
+
+async function drawerBrand() {
   const nav = await screen.findByRole('navigation', { name: 'Main navigation' })
   await document.fonts.ready
   const name = await screen.findByText('holzkube-manager')
@@ -62,13 +72,13 @@ async function brandBlock() {
 /**
  * Room each line must leave before the bar's edge. The same text comes out a
  * few pixels wider from one machine's font rendering to the next -- in this
- * browser the tagline needs exactly the 146px the old 224px bar left it, in the
- * app it got 145px and broke -- so fitting with nothing to spare is the defect,
- * not a pass.
+ * browser the tagline needs exactly the 146px the old 224px bar left it, in
+ * the app it got 145px and broke -- so fitting with nothing to spare is the
+ * defect, not a pass.
  */
 const SLACK_PX = 8
 
-function expectOneLineEach({ nav, name, tagline }: Awaited<ReturnType<typeof brandBlock>>) {
+function expectOneLineEach({ nav, name, tagline }: Awaited<ReturnType<typeof drawerBrand>>) {
   // The row the mark and the two lines sit in, inside the bar's padding and
   // its own: its content edge is where a line stops being inside the brand
   // block. (The column holding the lines is only as wide as its widest line,
@@ -96,16 +106,49 @@ afterEach(async () => {
   await page.viewport(1200, 900)
 })
 
-describe('the navigation brand block', () => {
+describe('the rail, at desk widths', () => {
+  it('keeps every icon inside the bar at 1280 px', async () => {
+    await page.viewport(1280, 800)
+    renderNavigation(false)
+    const nav = await rail()
+    const buttons = await nav.querySelectorAll('a, button')
+    expect(buttons.length).toBeGreaterThan(4)
+    for (const el of Array.from(buttons)) {
+      const r = el.getBoundingClientRect()
+      expect(r.width).toBeGreaterThanOrEqual(44)
+      expect(r.height).toBeGreaterThanOrEqual(44)
+      expect(r.right).toBeLessThanOrEqual(nav.getBoundingClientRect().right + 0.5)
+      expect(r.left).toBeGreaterThanOrEqual(nav.getBoundingClientRect().left - 0.5)
+    }
+  })
+})
+
+describe('the bottom tab bar, at phone widths', () => {
+  it('shows five labels, none clipped, none past the viewport', async () => {
+    await page.viewport(390, 844)
+    renderNavigation(false)
+    const nav = await bottomBar()
+    const labels = await nav.querySelectorAll('span')
+    expect(labels.length).toBe(5)
+    for (const el of Array.from(labels)) {
+      const r = el.getBoundingClientRect()
+      expect(r.right).toBeLessThanOrEqual(390 + 0.5)
+      expect(r.left).toBeGreaterThanOrEqual(-0.5)
+      expect(r.width).toBeGreaterThan(8)
+    }
+  })
+})
+
+describe('the drawer brand block', () => {
   it('keeps the name and the tagline on one line each at 1280 px', async () => {
     await page.viewport(1280, 800)
-    renderSidebar(false)
-    expectOneLineEach(await brandBlock())
+    renderNavigation(true)
+    expectOneLineEach(await drawerBrand())
   })
 
   it('keeps them on one line each in the open drawer at 390 px', async () => {
     await page.viewport(390, 844)
-    renderSidebar(true)
-    expectOneLineEach(await brandBlock())
+    renderNavigation(true)
+    expectOneLineEach(await drawerBrand())
   })
 })
