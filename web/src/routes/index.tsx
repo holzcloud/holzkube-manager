@@ -57,7 +57,8 @@ function MetricCard({
           <Badge
             variant="outline"
             className={cn(
-              'sm:ml-auto',
+              'max-sm:hidden sm:ml-auto',
+              state !== 'default' && 'max-sm:inline-flex',
               state === 'warn' && 'border-amber-600/40 text-amber-700 dark:text-amber-300',
               state === 'danger' && 'border-red-600/40 text-red-700 dark:text-red-300',
             )}

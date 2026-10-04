@@ -152,12 +152,12 @@ export function KubernetesShell({ children }: { children: ReactNode }) {
         </p>
       )}
 
-      <div className="flex flex-wrap items-center gap-3">
+      <div className="grid grid-cols-2 gap-3 md:flex md:flex-wrap md:items-center">
         {clusters.data !== undefined && clusters.data.length > 1 && (
-          <div className="flex items-center gap-2">
+          <div className="flex flex-col gap-1 md:flex-row md:items-center md:gap-2">
             <span className="text-muted-foreground text-sm">Cluster</span>
             <Select value={selected} onValueChange={(value) => setSearch({ cluster: value })}>
-              <SelectTrigger className="w-56 max-md:h-11" aria-label="Cluster">
+              <SelectTrigger className="w-full max-md:h-11 md:w-56" aria-label="Cluster">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -174,7 +174,7 @@ export function KubernetesShell({ children }: { children: ReactNode }) {
         {/* The namespace filter sits beside the cluster rather than inside the
             pods card, because it now narrows eight pages rather than one. */}
         {overview.data && (
-          <div className="flex items-center gap-2">
+          <div className="flex flex-col gap-1 md:flex-row md:items-center md:gap-2">
             <span className="text-muted-foreground text-sm">Namespace</span>
             <Select
               value={namespace === '' ? 'all' : namespace}
@@ -182,7 +182,7 @@ export function KubernetesShell({ children }: { children: ReactNode }) {
                 setSearch({ namespace: value === 'all' ? undefined : value })
               }
             >
-              <SelectTrigger className="w-56 max-md:h-11" aria-label="Namespace">
+              <SelectTrigger className="w-full max-md:h-11 md:w-56" aria-label="Namespace">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -201,8 +201,11 @@ export function KubernetesShell({ children }: { children: ReactNode }) {
       {/* Wrapping rather than scrolling sideways: a tab strip that scrolls hides
           half of itself on a phone, and the thing it hides is the page somebody
           is looking for. Three rows that are all visible beat one row that is
-          not. */}
-      <nav aria-label="Kubernetes sections" className="flex flex-wrap gap-1 border-b pb-2">
+          not. On a phone they sit in a four-column grid so the rows align. */}
+      <nav
+        aria-label="Kubernetes sections"
+        className="grid grid-cols-4 gap-1 border-b pb-2 md:flex md:flex-wrap"
+      >
         {SECTIONS.map((section) => (
           <Link
             key={section.to}
@@ -213,7 +216,7 @@ export function KubernetesShell({ children }: { children: ReactNode }) {
             activeOptions={{ exact: section.to === '/kubernetes' }}
             className={cn(
               'rounded-md px-3 py-2 text-sm transition-colors',
-              'max-md:min-h-11 max-md:flex-1 max-md:text-center',
+              'max-md:flex max-md:min-h-11 max-md:items-center max-md:justify-center max-md:px-1 max-md:text-xs',
               'hover:bg-muted',
             )}
             activeProps={{ className: 'bg-muted font-medium' }}
