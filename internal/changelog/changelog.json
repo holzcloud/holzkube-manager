@@ -5,7 +5,7 @@
     "changes": [
       {
         "icon": "🩹",
-        "text": "Fixed the redesign's navigation and dashboard. On a wide screen there is one navigation again, the labelled list; the icon rail only stands in for it on a tablet, instead of both columns side by side. The dashboard cards stack their label, number and detail instead of running into one clipped line, and the recent-activity card uses the full width."
+        "text": "Fixed the redesign's navigation and dashboard. On a wide screen there is one navigation again, the labelled list; the icon rail only stands in for it on a tablet. The dashboard now uses the whole screen: the three fact cards on top, below them the machines (host, state, role, address, Talos version) and, beside them, every cluster with its nodes and certificate and the latest audit records."
       }
     ]
   },
