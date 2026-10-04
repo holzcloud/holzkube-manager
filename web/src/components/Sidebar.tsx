@@ -327,7 +327,7 @@ export function NavDrawer({
       aria-label="Main navigation"
       className={cn(
         'flex h-full shrink-0 flex-col gap-1 bg-sidebar',
-                // Below md: out of the flow, over the page, off the left edge until asked for.
+        // Below md: out of the flow, over the page, off the left edge until asked for.
         'max-lg:fixed max-lg:inset-y-0 max-lg:left-0 max-lg:z-50 max-lg:w-72 max-lg:border-r max-lg:border-sidebar-border max-lg:p-3 max-lg:shadow-xl',
         'max-lg:overflow-y-auto max-lg:transition-transform max-lg:duration-200 max-lg:ease-out',
         open ? 'max-lg:translate-x-0 max-lg:visible' : 'max-lg:-translate-x-full max-lg:invisible',
