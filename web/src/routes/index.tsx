@@ -49,15 +49,15 @@ function MetricCard({
   return (
     <Link
       to={href}
-      className="group flex flex-col rounded-2xl border border-border bg-card p-5 transition-colors hover:border-primary/45 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+      className="group flex flex-col rounded-2xl border border-border bg-card p-3 transition-colors sm:p-5 hover:border-primary/45 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
     >
-      <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
         <h3 className="text-sm font-semibold">{title}</h3>
         {badge && (
           <Badge
             variant="outline"
             className={cn(
-              'ml-auto',
+              'sm:ml-auto',
               state === 'warn' && 'border-amber-600/40 text-amber-700 dark:text-amber-300',
               state === 'danger' && 'border-red-600/40 text-red-700 dark:text-red-300',
             )}
@@ -66,11 +66,11 @@ function MetricCard({
           </Badge>
         )}
       </div>
-      <p className="mt-3 font-heading text-4xl font-bold tracking-tight tabular-nums">
+      <p className="mt-2 font-heading text-2xl sm:mt-3 sm:text-4xl font-bold tracking-tight tabular-nums">
         {value}
         {unit && <span className="ml-1.5 text-sm font-semibold text-muted-foreground">{unit}</span>}
       </p>
-      <p className="mt-1 text-xs break-words text-muted-foreground">{detail}</p>
+      <p className="mt-1 text-xs break-words text-muted-foreground max-sm:hidden">{detail}</p>
     </Link>
   )
 }
@@ -94,14 +94,14 @@ function Panel({
   return (
     <section
       className={cn(
-        'flex min-h-0 flex-col rounded-2xl border border-border bg-card p-5',
+        'flex min-h-0 flex-col rounded-2xl border border-border bg-card p-4 sm:p-5',
         className,
       )}
     >
       <div className="flex items-baseline justify-between gap-2">
         <div>
           <h2 className="font-heading text-base font-semibold">{title}</h2>
-          <p className="text-xs text-muted-foreground">{hint}</p>
+          <p className="text-xs text-muted-foreground max-sm:hidden">{hint}</p>
         </div>
         <Button asChild variant="ghost" size="sm" className="text-muted-foreground">
           <Link to={to}>
@@ -110,7 +110,7 @@ function Panel({
           </Link>
         </Button>
       </div>
-      <div className="mt-4 min-h-0 flex-1 overflow-auto">{children}</div>
+      <div className="mt-3 min-h-0 flex-1 overflow-auto sm:mt-4">{children}</div>
     </section>
   )
 }
@@ -159,7 +159,7 @@ function Dashboard() {
         </div>
       )}
 
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+      <div className="grid grid-cols-3 gap-2 sm:gap-4">
         <MetricCard
           title="Clusters"
           value={clusters.isPending ? '…' : String(clusters.data?.length ?? 0)}

@@ -286,7 +286,7 @@ await wall.c.close()
 // Three phone screens side by side, as one picture.
 const phone = await context(390, 844, 2)
 const phones = []
-for (const route of ['/nodes/m-cp-1', '/kubernetes/apps', '/clusters']) {
+for (const route of ['/', '/nodes/m-cp-1', '/kubernetes/apps']) {
   await phone.page.goto(base + route)
   await phone.page.waitForTimeout(3000)
   phones.push((await phone.page.screenshot()).toString('base64'))
