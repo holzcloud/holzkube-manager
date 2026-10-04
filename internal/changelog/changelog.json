@@ -6,6 +6,10 @@
       {
         "icon": "🩹",
         "text": "Fixed the redesign's navigation and dashboard. On a wide screen there is one navigation again, the labelled list; the icon rail only stands in for it on a tablet. The dashboard now uses the whole screen: the three fact cards on top, below them the machines (host, state, role, address, Talos version) and, beside them, every cluster with its nodes and certificate and the latest audit records."
+      },
+      {
+        "icon": "📱",
+        "text": "On a phone the three fact cards sit in one row, and the Kubernetes sections are one row that scrolls sideways (the open one stays in view) instead of three rows."
       }
     ]
   },
