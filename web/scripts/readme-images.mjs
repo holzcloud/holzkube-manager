@@ -273,10 +273,6 @@ const desk = await context(1440, 900, 1)
 await shoot(desk.page, '/', 'dashboard.png')
 await shoot(desk.page, '/clusters', 'clusters.png')
 await shoot(desk.page, '/nodes/m-cp-1', 'node-hardware.png', { range: '24 h' })
-await shoot(desk.page, '/kubernetes/apps', 'apps.png')
-await shoot(desk.page, '/kubernetes/apps/media/Deployment/jellyfin', 'app-detail.png', { range: '24 h' })
-await shoot(desk.page, '/kubernetes', 'kubernetes.png')
-await shoot(desk.page, '/host', 'host.png', { range: '24 h', through: 'section[aria-labelledby="host-readings"]' })
 await desk.c.close()
 
 const wall = await context(1600, 900, 1)
@@ -292,14 +288,39 @@ for (const route of ['/', '/nodes/m-cp-1', '/kubernetes/apps']) {
   phones.push((await phone.page.screenshot()).toString('base64'))
 }
 await phone.c.close()
-const strip = await browser.newPage({ viewport: { width: 1400, height: 920 }, deviceScaleFactor: 1 })
+// The pictures sit on the brand's warm ground rather than on nothing, so they
+// read the same on GitHub's light and dark themes.
+const ground2 = `radial-gradient(60% 70% at 15% 20%, rgb(239 122 77 / .28), transparent 70%),
+  radial-gradient(50% 60% at 90% 90%, rgb(107 63 122 / .30), transparent 70%), #120a06`
+const strip = await browser.newPage({ viewport: { width: 1400, height: 960 }, deviceScaleFactor: 1 })
 await strip.setContent(`<!doctype html><style>
-  html, body { margin: 0; background: transparent }
-  div { display: flex; gap: 40px; justify-content: center; padding: 18px 0 }
-  img { width: 390px; height: 844px; border-radius: 34px; border: 10px solid #1d140c;
-    box-shadow: 0 18px 40px rgb(0 0 0 / .35) }
+  html, body { margin: 0; width: 1400px; height: 960px; background: ${ground2}; border-radius: 28px }
+  div { display: flex; gap: 48px; justify-content: center; align-items: center; height: 960px }
+  img { width: 390px; height: 844px; border-radius: 40px; border: 10px solid #1d140c;
+    box-shadow: 0 24px 50px rgb(0 0 0 / .5), 0 0 0 1.5px rgb(239 122 77 / .35) }
 </style><div>${phones.map((b) => `<img src="data:image/png;base64,${b}">`).join('')}</div>`)
 await strip.screenshot({ path: join(shots, 'phone.png'), omitBackground: true })
+
+// The showcase: the dashboard in a window, and a phone in front of it showing
+// the same screen -- one interface on a desk and in a hand.
+const deskShot = readFileSync(join(shots, 'dashboard.png')).toString('base64')
+const showcase = await browser.newPage({ viewport: { width: 1400, height: 860 }, deviceScaleFactor: 1 })
+await showcase.setContent(`<!doctype html><style>
+  html, body { margin: 0; width: 1400px; height: 860px; overflow: hidden; background: ${ground2}; border-radius: 28px }
+  .win { position: absolute; left: 60px; top: 70px; width: 1060px; border-radius: 16px; overflow: hidden;
+    border: 1px solid rgb(239 122 77 / .35); box-shadow: 0 30px 70px rgb(0 0 0 / .55) }
+  .bar { height: 30px; background: #1d140c; display: flex; align-items: center; gap: 8px; padding-left: 14px }
+  .bar i { width: 10px; height: 10px; border-radius: 50%; background: #4a3626; display: block }
+  .win img { display: block; width: 100% }
+  .ph { position: absolute; right: 70px; top: 150px; width: 300px; height: 650px; border-radius: 38px;
+    border: 9px solid #1d140c; object-fit: cover; object-position: 0 0;
+    box-shadow: 0 30px 60px rgb(0 0 0 / .6), 0 0 0 1.5px rgb(239 122 77 / .4) }
+</style>
+<div class="win"><div class="bar"><i></i><i></i><i></i></div><img src="data:image/png;base64,${deskShot}"></div>
+<img class="ph" src="data:image/png;base64,${phones[0]}">`)
+await showcase.screenshot({ path: join(shots, 'showcase.png'), omitBackground: true })
+await showcase.close()
+await strip.close()
 
 // The banner: the family's arrangement (holzcloud-design, the same for every
 // program) -- the app icon and the name, the sentence, a row of what it is with

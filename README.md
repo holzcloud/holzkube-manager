@@ -83,55 +83,33 @@ did.
 
 ## A look around
 
-**The 2026 shell.** On a desk or a tablet the navigation is an icon rail —
-Dashboard, Clusters, Host, Jobs, Settings — with every area as a labelled
-column beside it; on a phone those five are the bottom tab bar and the rest
-sit behind the menu. The dashboard shows the fleet as cards with one big
-number each: the clusters, the machines (and how many are down), and the
-instance's own state including the audit chain.
+![The dashboard on a desk and on a phone](docs/screenshots/showcase.png)
 
-![The dashboard: the fleet as cards](docs/screenshots/dashboard.png)
-
-**Apps.** What is installed on the cluster, heaviest first, and the detail of
-one: its pods, where they run, and what it used over the day.
-
-![Every app with its CPU and memory now](docs/screenshots/apps.png)
-
-![One app over the last 24 hours](docs/screenshots/app-detail.png)
+**Dashboard.** The fleet at a glance: the clusters, the machines and how many
+are down, and the instance's own state including the audit chain, with the
+machines, the clusters and the latest audit records laid out below. On a desk
+the full navigation stands beside it; on a tablet it folds to an icon rail.
 
 **Clusters.** Each cluster with its nodes, their condition and its
 certificate, and everything you do to a cluster in one place.
 
 ![Clusters](docs/screenshots/clusters.png)
 
-**Kubernetes.** What the cluster's own API server says — which is allowed to
-disagree with the machine API, and where the two differ, the difference is the
-answer.
+**One node.** Its processor, memory, disks and temperatures, live and over the
+last day, with the node's actions in the header.
 
-![How full the cluster is, per node](docs/screenshots/kubernetes.png)
+![One node, with its hardware over the last 24 hours](docs/screenshots/node-hardware.png)
 
-**The wall.** Every node and workload as a tile — the machine holzkube-manager
-runs on first among them — how full the cluster is and the latest warnings. It never scrolls, and it always says how old its answer is.
+**The wall.** Every node and workload as a tile -- the machine holzkube-manager
+runs on first among them -- how full the cluster is and the latest warnings. It
+never scrolls, and it always says how old its answer is.
 
 ![The wall](docs/screenshots/wall.png)
 
-**Host.** The machine holzkube-manager itself runs on: what it is, the service
-and its last update check, and how it is doing right now. A value the service's
-hardening hides says so, and says which line shows it, instead of reading 0.
-Here the processor has run past its warning line: the notice says which value
-crossed which threshold, and the day's curves show it climbing — with a gap
-where the service was stopped, not a line drawn across it. The five host
-actions sit in the header — the first only looks for a newer release and
-installs nothing — switched off here: the helper that carries them out is not
-installed yet, and the notice below the hardening note names what is missing
-and the commands that install it.
+**On a phone.** The five main areas are a tab bar under your thumb, the rest is
+behind the menu, and every control is at least 44px: the build fails otherwise.
 
-![The machine holzkube-manager runs on](docs/screenshots/host.png)
-
-**On a phone.** Every screen, one-handed, and the menus and dialogs behind its
-main actions: the build fails when a control on any of them is under 44px.
-
-![Three screens on a phone](docs/screenshots/phone.png)
+![The dashboard, a node and Kubernetes on a phone](docs/screenshots/phone.png)
 
 ## Quick start
 
