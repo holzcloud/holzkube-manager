@@ -164,7 +164,7 @@ export function ClusterCard({ cluster }: { cluster: Cluster }) {
           </dd>
         </dl>
 
-        <div className="flex flex-col gap-1">
+        <div className="flex flex-wrap gap-x-5 gap-y-1">
           <a
             href={api.clusters.talosconfigPath(cluster.id)}
             className="inline-flex items-center text-sm underline max-md:min-h-11"
@@ -212,31 +212,33 @@ export function ClusterCard({ cluster }: { cluster: Cluster }) {
           </a>
         </div>
 
-        <Button
-          size="sm"
-          variant="outline"
-          disabled={setLock.isPending}
-          onClick={() => setLock.mutate(!cluster.locked)}
-          title={
-            cluster.locked
-              ? 'Unlocking is itself a destructive action: it is what makes every other destructive action on this cluster reachable.'
-              : 'Lock this cluster so that nothing can change it.'
-          }
-        >
-          {cluster.locked ? (
-            <>
-              <LockOpen aria-hidden="true" className="size-4" /> Unlock
-            </>
-          ) : (
-            <>
-              <Lock aria-hidden="true" className="size-4" /> Lock
-            </>
-          )}
-        </Button>
+        <div className="flex flex-wrap items-start gap-2">
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={setLock.isPending}
+            onClick={() => setLock.mutate(!cluster.locked)}
+            title={
+              cluster.locked
+                ? 'Unlocking is itself a destructive action: it is what makes every other destructive action on this cluster reachable.'
+                : 'Lock this cluster so that nothing can change it.'
+            }
+          >
+            {cluster.locked ? (
+              <>
+                <LockOpen aria-hidden="true" className="size-4" /> Unlock
+              </>
+            ) : (
+              <>
+                <Lock aria-hidden="true" className="size-4" /> Lock
+              </>
+            )}
+          </Button>
 
-        <RenewCertificate clusterID={cluster.id} />
+          <RenewCertificate clusterID={cluster.id} />
 
-        <RotateAuthority clusterID={cluster.id} />
+          <RotateAuthority clusterID={cluster.id} />
+        </div>
 
         <ClusterScalePanel clusterID={cluster.id} />
 

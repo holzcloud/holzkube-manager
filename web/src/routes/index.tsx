@@ -260,7 +260,7 @@ function Dashboard() {
           )}
         </Panel>
 
-        <div className="flex min-h-0 flex-col gap-4">
+        <div className="grid min-h-0 gap-4 sm:grid-cols-2 lg:flex lg:flex-col">
           <Panel
             title="Clusters"
             hint="Nodes by condition, and how long the client certificate lasts."

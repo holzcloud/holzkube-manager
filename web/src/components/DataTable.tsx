@@ -207,10 +207,10 @@ function PhoneCard<T>({ columns, row }: { columns: Column<T>[]; row: T }) {
       </div>
 
       {facts.length > 0 && (
-        <dl className="mt-2 grid grid-cols-[minmax(0,auto)_minmax(0,1fr)] gap-x-3 gap-y-1 text-sm">
+        <dl className="mt-2 grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
           {facts.map((column) => (
-            <div key={column.key} className="contents">
-              <dt className="text-muted-foreground">{column.label}</dt>
+            <div key={column.key} className="min-w-0">
+              <dt className="text-muted-foreground text-xs">{column.label}</dt>
               <dd className="break-words">{column.render(row)}</dd>
             </div>
           ))}
@@ -285,10 +285,10 @@ function PhoneRow<T>({ columns, row }: { columns: Column<T>[]; row: T }) {
           </span>
         </summary>
 
-        <dl className="grid grid-cols-[minmax(0,auto)_minmax(0,1fr)] gap-x-3 gap-y-1 pb-3 text-sm">
+        <dl className="grid grid-cols-2 gap-x-4 gap-y-2 pb-3 text-sm">
           {detail.map((column) => (
-            <div key={column.key} className="contents">
-              <dt className="text-muted-foreground">{column.label}</dt>
+            <div key={column.key} className="min-w-0">
+              <dt className="text-muted-foreground text-xs">{column.label}</dt>
               <dd className="break-words">{column.render(row)}</dd>
             </div>
           ))}

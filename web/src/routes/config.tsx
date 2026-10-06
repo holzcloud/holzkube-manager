@@ -75,11 +75,16 @@ export function ConfigPage() {
         </div>
       )}
 
-      {chosen !== '' && (
-        <NodeConfig machine={machines.data?.find((m) => m.id === chosen)} machineID={chosen} />
-      )}
-
-      <PatchLibrary />
+      {/* Side by side from xl: the node's configuration and the change you draft
+          on the left, the saved patches you reuse on the right. */}
+      <div className="grid items-start gap-5 xl:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
+        <div className="space-y-5">
+          {chosen !== '' && (
+            <NodeConfig machine={machines.data?.find((m) => m.id === chosen)} machineID={chosen} />
+          )}
+        </div>
+        <PatchLibrary />
+      </div>
     </section>
   )
 }

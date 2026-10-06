@@ -66,90 +66,97 @@ export function NodesPage() {
   return (
     <section className="space-y-4">
       <Heading />
-      <DataTable
-        label="Machines"
-        rows={machines}
-        keyOf={(m) => m.id}
-        empty="No machines yet."
-        columns={[
-          {
-            key: 'host',
-            label: 'Host',
-            role: 'identity',
-            className: 'font-medium',
-            render: (m) => (
-              <>
-                <Link
-                  to="/nodes/$uuid"
-                  params={{ uuid: m.id }}
-                  // A whole line on a phone: measured 172x19 before, which is
-                  // under the 44px a thumb needs and was invisible to the guard
-                  // until it rendered rows at all (ledger 149).
-                  className="inline-flex items-center hover:underline max-md:min-h-11"
-                >
-                  <HealthField field={m.hostname} render={(v) => v || m.id.slice(0, 8)} />
-                </Link>
-                {m.lost_addr && (
-                  <Badge
-                    variant="outline"
-                    className="ml-2 border-amber-600/40 text-amber-700 dark:text-amber-300"
-                    title="A different machine answered at this one's last known address. This record was kept; the stranger got one of its own."
+      <div className="rounded-2xl border border-border bg-card p-4 max-md:border-0 max-md:bg-transparent max-md:p-0">
+        <DataTable
+          label="Machines"
+          rows={machines}
+          keyOf={(m) => m.id}
+          empty="No machines yet."
+          columns={[
+            {
+              key: 'host',
+              label: 'Host',
+              role: 'identity',
+              className: 'font-medium',
+              render: (m) => (
+                <>
+                  <Link
+                    to="/nodes/$uuid"
+                    params={{ uuid: m.id }}
+                    // A whole line on a phone: measured 172x19 before, which is
+                    // under the 44px a thumb needs and was invisible to the guard
+                    // until it rendered rows at all (ledger 149).
+                    className="inline-flex items-center hover:underline max-md:min-h-11"
                   >
-                    moved
-                  </Badge>
-                )}
-              </>
-            ),
-          },
-          { key: 'state', label: 'State', render: (m) => <MachineState machine={m} /> },
-          { key: 'role', label: 'Role', className: 'text-sm', render: (m) => m.role || '—' },
-          {
-            key: 'addr',
-            label: 'Address',
-            className: 'font-mono text-xs',
-            render: (m) => <HealthField field={m.addr} />,
-          },
-          {
-            key: 'talos',
-            label: 'Talos',
-            className: 'font-mono text-xs',
-            render: (m) => <HealthField field={m.talos_version} />,
-          },
-          {
-            key: 'kubernetes',
-            label: 'Kubernetes',
-            className: 'font-mono text-xs',
-            render: (m) => <HealthField field={m.kubernetes_version} />,
-          },
-          {
-            key: 'cluster',
-            label: 'Cluster',
-            className: 'text-sm',
-            render: (m) =>
-              m.cluster === '' ? (
-                <span className="text-muted-foreground" title="This machine belongs to no cluster.">
-                  —
-                </span>
-              ) : (
-                <Link
-                  to="/clusters"
-                  className="inline-flex items-center hover:underline max-md:min-h-11"
-                  title={`Cluster ${m.cluster}`}
-                >
-                  {m.cluster.slice(0, 8)}
-                </Link>
+                    <HealthField field={m.hostname} render={(v) => v || m.id.slice(0, 8)} />
+                  </Link>
+                  {m.lost_addr && (
+                    <Badge
+                      variant="outline"
+                      className="ml-2 border-amber-600/40 text-amber-700 dark:text-amber-300"
+                      title="A different machine answered at this one's last known address. This record was kept; the stranger got one of its own."
+                    >
+                      moved
+                    </Badge>
+                  )}
+                </>
               ),
-          },
-          {
-            key: 'refresh',
-            label: 'Ask now',
-            role: 'actions',
-            render: (m) => <RefreshButton machine={m} />,
-          },
-        ]}
-      />
+            },
+            { key: 'state', label: 'State', render: (m) => <MachineState machine={m} /> },
+            { key: 'role', label: 'Role', className: 'text-sm', render: (m) => m.role || '—' },
+            {
+              key: 'addr',
+              label: 'Address',
+              className: 'font-mono text-xs',
+              render: (m) => <HealthField field={m.addr} />,
+            },
+            {
+              key: 'talos',
+              label: 'Talos',
+              className: 'font-mono text-xs',
+              render: (m) => <HealthField field={m.talos_version} />,
+            },
+            {
+              key: 'kubernetes',
+              label: 'Kubernetes',
+              className: 'font-mono text-xs',
+              render: (m) => <HealthField field={m.kubernetes_version} />,
+            },
+            {
+              key: 'cluster',
+              label: 'Cluster',
+              className: 'text-sm',
+              render: (m) =>
+                m.cluster === '' ? (
+                  <span
+                    className="text-muted-foreground"
+                    title="This machine belongs to no cluster."
+                  >
+                    —
+                  </span>
+                ) : (
+                  <Link
+                    to="/clusters"
+                    className="inline-flex items-center hover:underline max-md:min-h-11"
+                    title={`Cluster ${m.cluster}`}
+                  >
+                    {m.cluster.slice(0, 8)}
+                  </Link>
+                ),
+            },
+            {
+              key: 'refresh',
+              label: 'Ask now',
+              role: 'actions',
+              render: (m) => <RefreshButton machine={m} />,
+            },
+          ]}
+        />
+      </div>
 
-      <MachineClasses />
+      <div className="rounded-2xl border border-border bg-card p-4">
+        <MachineClasses />
+      </div>
     </section>
   )
 }
