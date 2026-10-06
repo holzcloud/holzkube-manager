@@ -4559,7 +4559,9 @@ exists: `snapshot` carries `present`, `taken_at`, `bytes`, `fresh`, `valid_until
 and `max_age_minutes`. **Fresh is 60 minutes** (a snapshot dated in the future is
 not fresh), and every hop of a chain needs its own. An instance with nowhere to
 keep a snapshot answers `available: false` and refuses the start: no snapshot is
-never a pass.
+never a pass. Only one snapshot per cluster is taken at a time (a second answers
+`409 conflict.snapshot-in-progress`), one is cut off after 30 minutes, and asking
+for a cluster that has no machines creates nothing.
 
 ### Confirming an upgrade types the cluster's name
 
@@ -4723,6 +4725,7 @@ wants to set one.
 |---|---|---|
 | `conflict.upgrade-blocked` | 409 | the plan this run was built from has something in the way |
 | `conflict.snapshot-required` | 409 | a Talos upgrade was confirmed or submitted without a fresh etcd snapshot taken by this instance |
+| `conflict.snapshot-in-progress` | 409 | a snapshot of this cluster is already being taken; a second is refused, not queued |
 | `conflict.would-strand-kubernetes` | 409 | this upgrade would leave Kubernetes unsupported |
 | `conflict.last-voting-member` | 409 | removing this member would leave etcd without a quorum |
 | `conflict.unknown-schematic` | 409 | the node's Image Factory schematic could not be read |

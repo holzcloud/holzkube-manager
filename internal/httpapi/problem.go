@@ -335,6 +335,11 @@ const (
 	// the operator looking at the nodes.
 	CodeSnapshotRequired = "conflict.snapshot-required"
 
+	// CodeSnapshotInProgress: a snapshot of this cluster is already being taken.
+	// A second one is refused rather than queued, so that clicking cannot fill
+	// the disk.
+	CodeSnapshotInProgress = "conflict.snapshot-in-progress"
+
 	// CodeWouldStrand: this upgrade would leave the running Kubernetes version
 	// outside what the target Talos supports (UPG-06). It has its own code
 	// because it is the one refusal here that is about a state with no good

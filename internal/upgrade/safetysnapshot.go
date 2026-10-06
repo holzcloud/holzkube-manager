@@ -40,6 +40,17 @@ const SafetySnapshotMaxAge = time.Hour
 // every snapshot: the files are 0600 in a 0700 directory.
 const keepSafetySnapshots = 2
 
+// SafetySnapshotTimeout caps one snapshot. A snapshot has no total deadline at
+// the transport -- how long it takes is how large the etcd is -- but a node that
+// stalls must not hold a request, and the lock for its cluster, forever.
+const SafetySnapshotTimeout = 30 * time.Minute
+
+// ErrSnapshotInProgress reports a second snapshot asked for while one is
+// already being taken for the same cluster. It is refused rather than queued: a
+// queue of requests that each still take a snapshot when their turn comes is a
+// way to fill the disk by clicking.
+var ErrSnapshotInProgress = errors.New("upgrade: a snapshot of this cluster is already being taken")
+
 // ErrSnapshotRequired reports a Talos upgrade refused for want of a fresh
 // snapshot.
 var ErrSnapshotRequired = errors.New("upgrade: a fresh etcd snapshot is required before a Talos upgrade")
@@ -102,8 +113,12 @@ type SnapshotStore struct {
 	fs  FileOps
 	now func() time.Time
 
-	// mu keeps two takes for one cluster from interleaving their pruning.
+	// mu guards inflight and keeps pruning from interleaving. It is never held
+	// while a snapshot streams.
 	mu sync.Mutex
+
+	// inflight is the clusters a snapshot is being taken for.
+	inflight map[model.ClusterID]bool
 }
 
 // NewSnapshotStore keeps snapshots under dir, one subdirectory per cluster.
@@ -111,7 +126,7 @@ func NewSnapshotStore(dir string, ops FileOps, now func() time.Time) *SnapshotSt
 	if now == nil {
 		now = time.Now
 	}
-	return &SnapshotStore{dir: dir, fs: ops, now: now}
+	return &SnapshotStore{dir: dir, fs: ops, now: now, inflight: map[model.ClusterID]bool{}}
 }
 
 const snapshotStamp = "20060102T150405.000Z"
@@ -120,10 +135,29 @@ const snapshotStamp = "20060102T150405.000Z"
 // the URL, and it becomes a path.
 func (st *SnapshotStore) clusterDir(cluster model.ClusterID) (string, error) {
 	id := string(cluster)
-	if id == "" || id == "." || id == ".." || strings.ContainsAny(id, `/\`+"\x00") {
+	if !plainClusterID(id) {
 		return "", fmt.Errorf("upgrade: %q is not a cluster id a snapshot can be filed under", id)
 	}
 	return filepath.Join(st.dir, id), nil
+}
+
+// plainClusterID is the ids a directory is made for: letters, digits, dot,
+// dash and underscore, at most 128 of them, and not starting with a dot. The id
+// comes from a URL and becomes a path, and a directory is created for whatever
+// passes -- so what passes is narrow, and the handler checks that the cluster
+// exists before anything is created.
+func plainClusterID(id string) bool {
+	if id == "" || len(id) > 128 || id[0] == '.' {
+		return false
+	}
+	for _, r := range id {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '.', r == '-', r == '_':
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 // Latest describes the newest snapshot of a cluster, or says there is none.
@@ -186,13 +220,24 @@ func parseSnapshotName(name string) (time.Time, bool) {
 // truncated file with a new name would be a pass for a snapshot that cannot be
 // restored.
 func (st *SnapshotStore) write(cluster model.ClusterID, fn func(io.Writer) (int64, error)) (SafetySnapshot, error) {
-	st.mu.Lock()
-	defer st.mu.Unlock()
-
 	dir, err := st.clusterDir(cluster)
 	if err != nil {
 		return SafetySnapshot{}, err
 	}
+
+	st.mu.Lock()
+	if st.inflight[cluster] {
+		st.mu.Unlock()
+		return SafetySnapshot{}, ErrSnapshotInProgress
+	}
+	st.inflight[cluster] = true
+	st.mu.Unlock()
+	defer func() {
+		st.mu.Lock()
+		delete(st.inflight, cluster)
+		st.mu.Unlock()
+	}()
+
 	final := filepath.Join(dir, st.now().UTC().Format(snapshotStamp)+".snapshot")
 	n, err := st.fs.WriteStream(final, func(w io.Writer) (int64, error) {
 		n, ferr := fn(w)
@@ -209,7 +254,9 @@ func (st *SnapshotStore) write(cluster model.ClusterID, fn func(io.Writer) (int6
 	}
 	_ = n
 
+	st.mu.Lock()
 	st.prune(dir)
+	st.mu.Unlock()
 	return st.Latest(cluster)
 }
 
@@ -260,6 +307,19 @@ func (s *Service) TakeSafetySnapshot(ctx context.Context, cluster model.ClusterI
 	if s.snapshots == nil {
 		return SafetySnapshot{}, ErrNoSnapshotStore
 	}
+
+	// The cluster has to exist before a directory is made for it: an id nobody
+	// has would otherwise leave an empty directory behind each time.
+	machines, err := s.deps.Machines(ctx, cluster)
+	if err != nil {
+		return SafetySnapshot{}, err
+	}
+	if len(machines) == 0 {
+		return SafetySnapshot{}, fmt.Errorf("upgrade: cluster %s has no machines in the inventory", cluster)
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, SafetySnapshotTimeout)
+	defer cancel()
 	return s.snapshots.write(cluster, func(w io.Writer) (int64, error) {
 		return s.Snapshot(ctx, cluster, w)
 	})
@@ -275,7 +335,9 @@ func (s *Service) RequireSafetySnapshot(cluster model.ClusterID) error {
 		if errors.Is(err, ErrNoSnapshotStore) {
 			return err
 		}
-		return fmt.Errorf("%w: the snapshots could not be read (%v)", ErrSnapshotRequired, err)
+		// The reason is not in the message: it names a path in the data
+		// directory, and this message reaches a browser.
+		return fmt.Errorf("%w: the snapshots could not be read, so none can be counted", ErrSnapshotRequired)
 	}
 	if !snap.Fresh {
 		if !snap.Present {
