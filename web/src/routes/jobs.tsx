@@ -76,9 +76,11 @@ export function JobsPage() {
       {parked.length > 0 && (
         <div className="space-y-3">
           <h2 className="font-heading text-base font-semibold">Waiting for a decision</h2>
-          {parked.map((j) => (
-            <JobCard key={j.id} job={j} typical={typicalSecondsFor(j.kind, jobs)} />
-          ))}
+          <div className="grid gap-3 xl:grid-cols-2">
+            {parked.map((j) => (
+              <JobCard key={j.id} job={j} typical={typicalSecondsFor(j.kind, jobs)} />
+            ))}
+          </div>
         </div>
       )}
 
@@ -86,7 +88,7 @@ export function JobsPage() {
         <p className="text-sm text-muted-foreground">Nothing has been run yet.</p>
       )}
 
-      <div className="space-y-3">
+      <div className="grid items-start gap-3 xl:grid-cols-2">
         {rest.map((j) => (
           <JobCard key={j.id} job={j} typical={typicalSecondsFor(j.kind, jobs)} />
         ))}

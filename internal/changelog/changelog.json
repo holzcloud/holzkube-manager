@@ -10,6 +10,10 @@
       {
         "icon": "🛟",
         "text": "A Talos upgrade now needs a fresh etcd snapshot of the cluster, taken here, before it can be confirmed or started. The snapshot is taken from the Upgrades screen, kept on this machine (not in backups, the newest two per cluster) and counts for an hour. The server enforces it, not only the screen. Kubernetes upgrades are unchanged."
+      },
+      {
+        "icon": "📐",
+        "text": "The interface uses its space better. On a wide screen Settings, Config and Jobs sit in two columns and Nodes is a card; on a tablet the dashboard's clusters and recent activity sit side by side; a cluster's downloads and actions are one row each instead of a column of buttons; and on a phone a table row is a card with its values two to a line, about half as tall."
       }
     ]
   },

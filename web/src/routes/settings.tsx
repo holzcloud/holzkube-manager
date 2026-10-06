@@ -57,16 +57,25 @@ export function SettingsPage() {
         </p>
       </div>
 
-      <PasswordCard />
-      <AdminOnly>
-        <AccountsCard />
-      </AdminOnly>
-      <AdminOnly>
-        <WallLinksCard />
-      </AdminOnly>
-      <SupportCard />
-      <MetricsCard />
-      <BackupCard />
+      {/* Two columns from xl: the short cards sit side by side, and the two
+          that hold tables go across both. An admin-only wrapper that renders
+          nothing is hidden, so a reader does not get an empty row. */}
+      <div className="grid items-start gap-5 xl:grid-cols-2">
+        <PasswordCard />
+        <SupportCard />
+        <div className="empty:hidden xl:col-span-2">
+          <AdminOnly>
+            <AccountsCard />
+          </AdminOnly>
+        </div>
+        <div className="empty:hidden xl:col-span-2">
+          <AdminOnly>
+            <WallLinksCard />
+          </AdminOnly>
+        </div>
+        <MetricsCard />
+        <BackupCard />
+      </div>
     </section>
   )
 }
