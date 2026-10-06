@@ -68,7 +68,10 @@ did.
   command in a container
 - **Power** — stop, start, restart or force it, for a whole cluster, one node or
   one app; Wake-on-LAN brings a node back
-- **Lifecycle** — Talos upgrades built from Image Factory schematics,
+- **Lifecycle** — a button that asks whether a newer Talos exists (and a hint on
+  the dashboard), Talos upgrades built from Image Factory schematics, one node
+  at a time behind an etcd health gate and **never without a fresh etcd
+  snapshot taken first**,
   Kubernetes upgrades in `talosctl upgrade-k8s`'s order,
   SecureBoot, disk encryption, etcd snapshots and restore, certificate renewal
 - **A wall** — one page for a screen in the office that answers "is everything

@@ -1,5 +1,19 @@
 [
   {
+    "version": "v0.4.0",
+    "date": "2026-10-06",
+    "changes": [
+      {
+        "icon": "🔎",
+        "text": "A button on the Upgrades screen asks whether there is a newer Talos: it compares what your nodes report with the newest stable release this version can install, names the next run (Talos goes one minor at a time) and links the release notes. The dashboard shows a badge on a cluster that has an update. Asking changes nothing and reads no node."
+      },
+      {
+        "icon": "🛟",
+        "text": "A Talos upgrade now needs a fresh etcd snapshot of the cluster, taken here, before it can be confirmed or started. The snapshot is taken from the Upgrades screen, kept on this machine (not in backups, the newest two per cluster) and counts for an hour. The server enforces it, not only the screen. Kubernetes upgrades are unchanged."
+      }
+    ]
+  },
+  {
     "version": "v0.3.2",
     "date": "2026-10-05",
     "changes": [

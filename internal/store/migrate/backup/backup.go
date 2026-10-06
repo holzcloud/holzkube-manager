@@ -24,6 +24,12 @@ const (
 	// DirName is the subdirectory of the data directory that holds tarballs.
 	DirName = "backups"
 
+	// UpgradeSnapshotsDirName is where the etcd snapshots taken before a Talos
+	// upgrade are kept. They are copies of a cluster's database, not records of
+	// this instance, and each is as large as that database; they are left out of
+	// a backup for the reason the backups directory is.
+	UpgradeSnapshotsDirName = "upgrade-snapshots"
+
 	dirPerm  = 0o700
 	filePerm = 0o600
 )
@@ -33,7 +39,7 @@ const (
 // path.
 //
 // Excluded: the backups directory itself (a backup of the backups grows
-// quadratically), the process lock file (it is runtime state, and restoring a
+// quadratically), the etcd snapshots kept for Talos upgrades, the process lock file (it is runtime state, and restoring a
 // stale pid is worse than useless), and any half-written temporary record.
 //
 // The tarball is 0600 and lives inside the 0700 data directory, because it
@@ -151,7 +157,7 @@ func writeTree(tw *tar.Writer, root string) error {
 }
 
 func skip(rel string, d os.DirEntry) bool {
-	if rel == DirName && d.IsDir() {
+	if (rel == DirName || rel == UpgradeSnapshotsDirName) && d.IsDir() {
 		return true
 	}
 	if rel == store.LockFileName {

@@ -128,6 +128,16 @@ function Dashboard() {
     queryFn: () => api.machines.list(),
     refetchInterval: 30_000,
   })
+  // Is there a newer Talos. The same question the Upgrades screen asks, with the
+  // same key, so the two share one answer. A failure is not shown here: a
+  // dashboard without the hint is a dashboard, and the screen that asks says why.
+  const talosCheck = useQuery({
+    queryKey: ['upgrade', 'talos-check'],
+    queryFn: () => api.upgrades.talosCheck(),
+    staleTime: 10 * 60_000,
+    refetchInterval: 30 * 60_000,
+    retry: false,
+  })
   const recent = useQuery({
     queryKey: ['audit', 'recent'],
     queryFn: () => api.audit({ limit: 8 }),
@@ -270,6 +280,15 @@ function Dashboard() {
                       {c.workers} {c.workers === 1 ? 'worker' : 'workers'}
                     </span>
                   </div>
+                  {talosCheck.data?.clusters.find((u) => u.cluster === c.id)?.available && (
+                    <Link
+                      to="/upgrades"
+                      className="mt-1.5 inline-flex items-center rounded-full border border-primary/40 px-2 py-0.5 text-xs text-primary hover:bg-primary/10 max-md:min-h-11 max-md:px-3"
+                    >
+                      Talos {talosCheck.data.clusters.find((u) => u.cluster === c.id)?.newest}{' '}
+                      available
+                    </Link>
+                  )}
                   <p className="mt-1 text-xs text-muted-foreground tabular-nums">
                     {c.healthy} healthy · {c.degraded} degraded · {c.down} not answering ·
                     certificate {c.client_cert_days_left} days left

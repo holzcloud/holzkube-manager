@@ -4526,6 +4526,41 @@ deliberate. A wrong installer reference, an unreachable registry or a schematic
 that does not exist fails at the pull, while the node is still running the system
 it is running. Failing there costs nothing.
 
+### Is there a newer Talos, and the snapshot a start requires
+
+`GET /api/v1/upgrade/talos/check` answers, per cluster, whether a node runs
+something older than the newest stable Talos this installation can install and
+read. It is a read of the inventory (what each node last reported) and of the
+Image Factory's release list, and it reaches no node. It starts nothing. Each
+cluster entry carries `current` (every distinct version, oldest first), `newest`,
+`available`, and — when one is available — `next` (the version the next run
+installs: a cluster more than one minor behind is several runs), `runs` and
+`notes_url` (the release notes of `next`). When there is nothing to offer,
+`reason` says why: up to date, no version reported yet, no release in range.
+
+A release beyond the supported range is never offered, stable or not: this
+product could not read that cluster's configuration. The weekly upstream check
+is what raises it instead.
+
+**A Talos upgrade cannot be confirmed or started without a fresh etcd snapshot
+of the cluster, taken by this instance.** Talos asks for a snapshot before an
+upgrade because a cluster that loses its quorum comes back from one or not at
+all. The rule is the server's, so no screen and no API client can skip it:
+`POST /api/v1/clusters/{id}/upgrade/confirm` and `POST /api/v1/clusters/{id}/upgrade`
+answer `409 conflict.snapshot-required` for a Talos upgrade without one. A
+Kubernetes upgrade is not held by it.
+
+`POST /api/v1/clusters/{id}/upgrade/snapshot` (operator) takes the snapshot and
+keeps it in `upgrade-snapshots/` in the data directory — `0600` files in a `0700`
+directory, the newest two per cluster, written atomically so a stream that fails
+half way leaves nothing that counts. The file never leaves the server and is not
+part of a backup. `GET /api/v1/clusters/{id}/upgrade/snapshot` says whether one
+exists: `snapshot` carries `present`, `taken_at`, `bytes`, `fresh`, `valid_until`
+and `max_age_minutes`. **Fresh is 60 minutes** (a snapshot dated in the future is
+not fresh), and every hop of a chain needs its own. An instance with nowhere to
+keep a snapshot answers `available: false` and refuses the start: no snapshot is
+never a pass.
+
 ### Confirming an upgrade types the cluster's name
 
 Not a hostname. A rolling upgrade is not about one machine — there is no single
@@ -4687,6 +4722,7 @@ wants to set one.
 | code | HTTP | when |
 |---|---|---|
 | `conflict.upgrade-blocked` | 409 | the plan this run was built from has something in the way |
+| `conflict.snapshot-required` | 409 | a Talos upgrade was confirmed or submitted without a fresh etcd snapshot taken by this instance |
 | `conflict.would-strand-kubernetes` | 409 | this upgrade would leave Kubernetes unsupported |
 | `conflict.last-voting-member` | 409 | removing this member would leave etcd without a quorum |
 | `conflict.unknown-schematic` | 409 | the node's Image Factory schematic could not be read |

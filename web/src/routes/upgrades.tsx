@@ -1,6 +1,15 @@
-import { useMutation, useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { createRoute, Link } from '@tanstack/react-router'
-import { AlertTriangle, CheckCircle2, Download, Info, Lock, Unlock } from 'lucide-react'
+import {
+  AlertTriangle,
+  CheckCircle2,
+  Download,
+  ExternalLink,
+  Info,
+  Lock,
+  RefreshCw,
+  Unlock,
+} from 'lucide-react'
 import { useState } from 'react'
 import { api, type EtcdMemberList, type GateVerdict, type NodePlan, type UpgradePlan } from '@/api'
 import { Problem } from '@/components/Problem'
@@ -102,9 +111,13 @@ function UpgradePanel({ cluster, name }: { cluster: string; name: string }) {
     queryFn: () => api.upgrades.releases(),
   })
 
+  // `target` is for a plan asked for from the update banner, before the form's
+  // own state has caught up with the click.
   const plan = useMutation({
-    mutationFn: () =>
-      kubernetes ? api.upgrades.planKubernetes(cluster, to) : api.upgrades.plan(cluster, to),
+    mutationFn: (target?: string) =>
+      kubernetes
+        ? api.upgrades.planKubernetes(cluster, target ?? to)
+        : api.upgrades.plan(cluster, target ?? to),
   })
 
   const start = useMutation({
@@ -121,6 +134,16 @@ function UpgradePanel({ cluster, name }: { cluster: string; name: string }) {
         <CardTitle className="text-base">Roll the cluster forward</CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">
+        <TalosUpdateBanner
+          cluster={cluster}
+          onPlan={(version) => {
+            setKubernetes(false)
+            setTo(version)
+            plan.mutate(version)
+          }}
+          planning={plan.isPending}
+        />
+
         <div className="grid gap-3 sm:grid-cols-2">
           <div className="space-y-1.5">
             <Label htmlFor="upgrade-what">What</Label>
@@ -166,7 +189,7 @@ function UpgradePanel({ cluster, name }: { cluster: string; name: string }) {
 
         {releases.data?.notice && <Notice text={releases.data.notice} />}
 
-        <Button disabled={plan.isPending || !to} onClick={() => plan.mutate()}>
+        <Button disabled={plan.isPending || !to} onClick={() => plan.mutate(undefined)}>
           {plan.isPending ? 'Checking every node…' : 'Show me what this would do'}
         </Button>
         {plan.error ? <Problem error={plan.error} /> : null}
@@ -174,6 +197,8 @@ function UpgradePanel({ cluster, name }: { cluster: string; name: string }) {
         {plan.data && (
           <PlanView
             plan={plan.data}
+            cluster={cluster}
+            snapshotRequired={!kubernetes}
             clusterName={name}
             typed={typed}
             onTyped={setTyped}
@@ -188,8 +213,10 @@ function UpgradePanel({ cluster, name }: { cluster: string; name: string }) {
   )
 }
 
-function PlanView({
+export function PlanView({
   plan,
+  cluster,
+  snapshotRequired,
   clusterName,
   typed,
   onTyped,
@@ -199,6 +226,10 @@ function PlanView({
   started,
 }: {
   plan: UpgradePlan
+  cluster: string
+  /** A Talos upgrade needs a fresh etcd snapshot first; the server refuses
+   * the start without one, and the button says so before it is pressed. */
+  snapshotRequired: boolean
   clusterName: string
   typed: string
   onTyped: (v: string) => void
@@ -207,6 +238,9 @@ function PlanView({
   startError: unknown
   started: boolean
 }) {
+  const snapshot = useSafetySnapshot(cluster)
+  const snapshotFresh = snapshot.data?.snapshot.fresh === true
+
   return (
     <div className="space-y-4 border-t border-border pt-4">
       {plan.blocked && <Notice danger text={plan.block_reason} />}
@@ -239,6 +273,8 @@ function PlanView({
 
       <NodeTable nodes={plan.nodes} />
 
+      {snapshotRequired && <SafetySnapshotStep cluster={cluster} />}
+
       <div className="space-y-1.5">
         <Label htmlFor="upgrade-typed">
           Type <span className="font-mono">{clusterName}</span> to confirm
@@ -257,7 +293,12 @@ function PlanView({
 
       <Button
         variant="destructive"
-        disabled={plan.blocked || starting || typed.trim() !== clusterName}
+        disabled={
+          plan.blocked ||
+          starting ||
+          typed.trim() !== clusterName ||
+          (snapshotRequired && !snapshotFresh)
+        }
         onClick={onStart}
       >
         {starting ? 'Submitting…' : 'Start the rolling upgrade'}
@@ -272,6 +313,158 @@ function PlanView({
           . You can stop it after the node it is on.
         </p>
       )}
+    </div>
+  )
+}
+
+/**
+ * Is there a newer Talos? The answer comes from what the nodes last reported
+ * and the Image Factory's release list, so asking costs no node a connection
+ * and starts nothing. "Plan this update" fills the form and shows the plan --
+ * it does not start anything either: that is the confirmed, snapshotted flow
+ * below.
+ */
+export function TalosUpdateBanner({
+  cluster,
+  onPlan,
+  planning,
+}: {
+  cluster: string
+  onPlan: (version: string) => void
+  planning: boolean
+}) {
+  const check = useQuery({
+    queryKey: ['upgrade', 'talos-check'],
+    queryFn: () => api.upgrades.talosCheck(),
+    staleTime: 10 * 60_000,
+    retry: false,
+  })
+  const mine = check.data?.clusters.find((c) => c.cluster === cluster)
+
+  return (
+    <div className="space-y-2 rounded-md border border-border p-3">
+      <div className="flex flex-wrap items-center gap-2">
+        <p className="text-sm font-medium">Talos update</p>
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          disabled={check.isFetching}
+          onClick={() => void check.refetch()}
+        >
+          <RefreshCw aria-hidden="true" className={check.isFetching ? 'animate-spin' : ''} />
+          {check.isFetching ? 'Looking…' : 'Check for a Talos update'}
+        </Button>
+      </div>
+
+      {check.error ? <Problem error={check.error} /> : null}
+
+      {mine && !mine.available && (
+        <p className="text-sm text-muted-foreground">
+          {mine.reason || 'No newer Talos release for this cluster.'}
+          {mine.current.length > 0 && (
+            <span className="ml-1 font-mono text-xs">({mine.current.join(', ')})</span>
+          )}
+        </p>
+      )}
+
+      {mine?.available && (
+        <div className="space-y-2">
+          <p className="text-sm">
+            <span className="font-semibold">Talos {mine.newest} is available.</span>{' '}
+            <span className="text-muted-foreground">
+              This cluster runs <span className="font-mono">{mine.current.join(', ')}</span>.
+              {mine.runs > 1 &&
+                ` Talos upgrades one minor at a time, so this is ${mine.runs} runs; the first installs ${mine.next}.`}
+            </span>
+          </p>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button type="button" size="sm" disabled={planning} onClick={() => onPlan(mine.next)}>
+              {planning ? 'Checking every node…' : `Plan the update to ${mine.next}`}
+            </Button>
+            <a
+              className="inline-flex items-center gap-1 text-sm underline max-md:min-h-11"
+              href={mine.notes_url}
+              target="_blank"
+              rel="noreferrer noopener"
+            >
+              Release notes of {mine.next}
+              <ExternalLink aria-hidden="true" className="size-3.5" />
+            </a>
+          </div>
+          <p className="max-w-prose text-xs text-muted-foreground">
+            Read the release notes first, as Talos asks. Nothing starts from here: the plan shows
+            every node, the start needs a fresh etcd snapshot of this cluster and the cluster's name
+            typed.
+          </p>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function useSafetySnapshot(cluster: string) {
+  return useQuery({
+    queryKey: ['upgrade', 'snapshot', cluster],
+    queryFn: () => api.upgrades.snapshotState(cluster),
+    // The hour runs out while the screen is open; the button must notice.
+    refetchInterval: 30_000,
+  })
+}
+
+/**
+ * The etcd snapshot a Talos upgrade may not start without, taken by this
+ * instance and kept on it. Talos asks for one before an upgrade because a
+ * cluster that loses its quorum comes back from a snapshot or not at all, and
+ * a rolling upgrade is the operation that can cost one. The server refuses the
+ * start without it; this step is where it is taken.
+ */
+export function SafetySnapshotStep({ cluster }: { cluster: string }) {
+  const qc = useQueryClient()
+  const state = useSafetySnapshot(cluster)
+  const take = useMutation({
+    mutationFn: () => api.upgrades.takeSnapshot(cluster),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['upgrade', 'snapshot', cluster] }),
+  })
+
+  const snap = state.data?.snapshot
+  const fresh = snap?.fresh === true
+  const usable = state.data?.available !== false
+
+  return (
+    <div className="space-y-2 rounded-md border border-border p-3">
+      <p className="flex items-center gap-2 text-sm font-medium">
+        {fresh ? (
+          <CheckCircle2 aria-hidden="true" className="size-4" />
+        ) : (
+          <AlertTriangle aria-hidden="true" className="size-4 text-destructive" />
+        )}
+        etcd snapshot {fresh ? 'is fresh' : 'is required first'}
+      </p>
+      <p className="max-w-prose text-sm text-muted-foreground">
+        {!usable
+          ? 'This instance has nowhere to keep a snapshot, so a Talos upgrade cannot be started from it.'
+          : fresh && snap
+            ? `Taken ${new Date(snap.taken_at).toLocaleTimeString()}, ${(snap.bytes / 1_048_576).toFixed(1)} MiB, good until ${new Date(snap.valid_until).toLocaleTimeString()}. Kept on this server, not in backups.`
+            : snap?.present
+              ? `The newest is from ${new Date(snap.taken_at).toLocaleString()}, older than the ${snap.max_age_minutes} minutes an upgrade may start on.`
+              : 'There is none for this cluster yet. It is the one thing that brings the cluster back if a node takes its quorum with it.'}
+      </p>
+      <Button
+        type="button"
+        size="sm"
+        variant="outline"
+        disabled={take.isPending || !usable}
+        onClick={() => take.mutate()}
+      >
+        <Download aria-hidden="true" />
+        {take.isPending
+          ? 'Taking the snapshot…'
+          : fresh
+            ? 'Take a new one'
+            : 'Take the snapshot now'}
+      </Button>
+      {take.error ? <Problem error={take.error} /> : null}
     </div>
   )
 }

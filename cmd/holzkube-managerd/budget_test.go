@@ -1528,6 +1528,29 @@ var routeBudgets = slices.Concat([]routeBudget{
 			"screen about.",
 	},
 	{
+		route:         "GET /api/v1/upgrade/talos/check",
+		calls:         []upstreamCall{{name: "Factory: versions", class: jsonCall}},
+		routeDeadline: handlers.EtcdRouteBudget,
+		verdict:       withinBudget,
+		clipping:      uncut,
+		why: "One Image Factory call, like the release list it is built on, and nothing on a node: " +
+			"the versions compared are the ones the inventory last observed, which is what lets " +
+			"the dashboard ask without dialling the fleet. The answer starts nothing.",
+	},
+	{
+		route:         "POST /api/v1/clusters/{id}/upgrade/snapshot",
+		calls:         nil,
+		routeDeadline: 0,
+		verdict:       withinBudget,
+		clipping:      uncut,
+		why: "The same EtcdSnapshot stream as the download route, written into the data directory " +
+			"instead of to the caller, so the same reasoning: the stream deadline class carries a " +
+			"first-byte deadline and an idle timeout and no total one, because how long a snapshot " +
+			"takes is how large the etcd is, and a total deadline here would fail the very " +
+			"snapshot the upgrade is waiting for. The handler clears the write deadline for the " +
+			"same reason, because the answer comes after the last byte.",
+	},
+	{
 		route:         "GET /api/v1/upgrade/releases",
 		calls:         []upstreamCall{{name: "Factory: versions", class: jsonCall}},
 		routeDeadline: handlers.EtcdRouteBudget,
@@ -1825,6 +1848,10 @@ func TestEveryRouteThatReachesUpstreamHasABudgetRow(t *testing.T) {
 		"POST /api/v1/host/actions/restart-service",
 		"POST /api/v1/host/actions/update",
 		"POST /api/v1/host/actions/check-update",
+		// The state of a cluster's safety snapshot reads one directory in the
+		// data directory. It reaches no node: the snapshot was taken earlier,
+		// by the POST that has its own row.
+		"GET /api/v1/clusters/{id}/upgrade/snapshot",
 	} {
 		noUpstream[r] = true
 	}
