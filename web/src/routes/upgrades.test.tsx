@@ -2,8 +2,15 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
-import type { EtcdMemberList, GateVerdict } from '@/api'
-import { EtcdPanel, GatePanel, MemberTable } from '@/routes/upgrades'
+import type { EtcdMemberList, GateVerdict, UpgradePlan } from '@/api'
+import {
+  EtcdPanel,
+  GatePanel,
+  MemberTable,
+  PlanView,
+  SafetySnapshotStep,
+  TalosUpdateBanner,
+} from '@/routes/upgrades'
 
 /**
  * The two claims this screen makes that are not about layout.
@@ -254,5 +261,209 @@ describe('the etcd snapshot card', () => {
     wrapEtcd()
     expect(screen.getByLabelText(/Skip the snapshot's integrity check/i)).not.toBeChecked()
     expect(screen.getByText(/had already lost quorum/i)).toBeInTheDocument()
+  })
+})
+
+/**
+ * Is there a newer Talos, and the snapshot a start requires.
+ *
+ * The banner starts nothing -- it names the next run and opens the plan -- and
+ * the start button is not pressable without a fresh snapshot, in the browser
+ * as well as on the server. The server's refusal is the rule
+ * (internal/httpapi, TestATalosUpgradeCannotStartWithoutAFreshSnapshot); these
+ * pin that the screen says it before somebody types a cluster's name.
+ */
+describe('the Talos update banner and the snapshot step', () => {
+  function stub(responses: Record<string, unknown>, calls: string[] = []) {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+        const path = String(input)
+        calls.push(`${init?.method ?? 'GET'} ${path}`)
+        const key = Object.keys(responses).find((k) => path.includes(k))
+        return Promise.resolve(
+          new Response(JSON.stringify(key ? responses[key] : {}), {
+            status: key ? 200 : 404,
+            headers: { 'Content-Type': 'application/json' },
+          }),
+        )
+      }),
+    )
+  }
+
+  function inClient(ui: React.ReactElement) {
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    })
+    return render(<QueryClientProvider client={client}>{ui}</QueryClientProvider>)
+  }
+
+  const behind = {
+    checked_at: '2026-10-06T12:00:00Z',
+    notice: '',
+    clusters: [
+      {
+        cluster: 'c-1',
+        name: 'homelab',
+        current: ['v1.12.6'],
+        newest: 'v1.14.2',
+        available: true,
+        next: 'v1.13.9',
+        runs: 2,
+        notes_url: 'https://github.com/siderolabs/talos/releases/tag/v1.13.9',
+      },
+    ],
+  }
+
+  it('names the update, the next run and the release notes, and plans only when asked', async () => {
+    const user = userEvent.setup()
+    stub({ '/upgrade/talos/check': behind })
+    const onPlan = vi.fn()
+    inClient(<TalosUpdateBanner cluster="c-1" onPlan={onPlan} planning={false} />)
+
+    expect(await screen.findByText(/Talos v1\.14\.2 is available/)).toBeInTheDocument()
+    // More than one minor behind: the first run is not the newest version.
+    expect(screen.getByText(/2 runs; the first installs v1\.13\.9/)).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: /Release notes of v1\.13\.9/ })).toHaveAttribute(
+      'href',
+      'https://github.com/siderolabs/talos/releases/tag/v1.13.9',
+    )
+    expect(onPlan).not.toHaveBeenCalled()
+
+    await user.click(screen.getByRole('button', { name: /Plan the update to v1\.13\.9/ }))
+    expect(onPlan).toHaveBeenCalledWith('v1.13.9')
+  })
+
+  it('says why there is nothing to offer instead of staying silent', async () => {
+    stub({
+      '/upgrade/talos/check': {
+        checked_at: '',
+        notice: '',
+        clusters: [
+          {
+            cluster: 'c-1',
+            name: 'homelab',
+            current: ['v1.14.2'],
+            newest: 'v1.14.2',
+            available: false,
+            reason: 'Every node already runs the newest release this installation supports.',
+          },
+        ],
+      },
+    })
+    inClient(<TalosUpdateBanner cluster="c-1" onPlan={vi.fn()} planning={false} />)
+
+    expect(await screen.findByText(/already runs the newest release/)).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Plan the update/ })).not.toBeInTheDocument()
+  })
+
+  it('asks the server again when told to check', async () => {
+    const user = userEvent.setup()
+    const calls: string[] = []
+    stub({ '/upgrade/talos/check': behind }, calls)
+    inClient(<TalosUpdateBanner cluster="c-1" onPlan={vi.fn()} planning={false} />)
+    await screen.findByText(/is available/)
+    const before = calls.filter((c) => c.includes('talos/check')).length
+
+    await user.click(screen.getByRole('button', { name: /Check for a Talos update/ }))
+    await vi.waitFor(() =>
+      expect(calls.filter((c) => c.includes('talos/check')).length).toBeGreaterThan(before),
+    )
+  })
+
+  const none = {
+    snapshot: { cluster: 'c-1', present: false, fresh: false, max_age_minutes: 60 },
+    available: true,
+  }
+  const fresh = {
+    snapshot: {
+      cluster: 'c-1',
+      present: true,
+      fresh: true,
+      taken_at: '2026-10-06T12:00:00Z',
+      valid_until: '2026-10-06T13:00:00Z',
+      bytes: 5_242_880,
+      max_age_minutes: 60,
+    },
+    available: true,
+  }
+
+  it('says a snapshot is required first, and takes one on request', async () => {
+    const user = userEvent.setup()
+    const calls: string[] = []
+    stub({ '/upgrade/snapshot': none }, calls)
+    inClient(<SafetySnapshotStep cluster="c-1" />)
+
+    expect(await screen.findByText(/snapshot is required first/)).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: /Take the snapshot now/ }))
+    await vi.waitFor(() => expect(calls).toContain('POST /api/v1/clusters/c-1/upgrade/snapshot'))
+  })
+
+  it('shows a fresh snapshot with its size and how long it is good for', async () => {
+    stub({ '/upgrade/snapshot': fresh })
+    inClient(<SafetySnapshotStep cluster="c-1" />)
+    expect(await screen.findByText(/snapshot is fresh/)).toBeInTheDocument()
+    expect(screen.getByText(/5\.0 MiB/)).toBeInTheDocument()
+    expect(screen.getByText(/not in backups/)).toBeInTheDocument()
+  })
+
+  it('offers no way to take one on an instance that has nowhere to keep it', async () => {
+    stub({ '/upgrade/snapshot': { ...none, available: false } })
+    inClient(<SafetySnapshotStep cluster="c-1" />)
+    expect(await screen.findByText(/nowhere to keep a snapshot/)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Take the snapshot now/ })).toBeDisabled()
+  })
+
+  const plan = {
+    cluster: 'c-1',
+    to: 'v1.14.2',
+    chain: [],
+    strand: { blocked: false, sentence: 'Kubernetes stays supported.', remedy: '' },
+    gate_preview: {
+      ok: true,
+      reason: '',
+      input: { members: [], voting: 3, statuses: {}, unreachable: [], alarms: [], max_raft_lag: 0 },
+    },
+    nodes: [],
+    blocked: false,
+    block_reason: '',
+  } as unknown as UpgradePlan
+
+  function planView(snapshotRequired: boolean) {
+    inClient(
+      <PlanView
+        plan={plan}
+        cluster="c-1"
+        snapshotRequired={snapshotRequired}
+        clusterName="homelab"
+        typed="homelab"
+        onTyped={vi.fn()}
+        onStart={vi.fn()}
+        starting={false}
+        startError={null}
+        started={false}
+      />,
+    )
+  }
+
+  it('does not let a Talos upgrade start on a typed name alone', async () => {
+    stub({ '/upgrade/snapshot': none })
+    planView(true)
+    await screen.findByText(/snapshot is required first/)
+    expect(screen.getByRole('button', { name: /Start the rolling upgrade/ })).toBeDisabled()
+  })
+
+  it('lets it start once the snapshot is fresh', async () => {
+    stub({ '/upgrade/snapshot': fresh })
+    planView(true)
+    await screen.findByText(/snapshot is fresh/)
+    expect(screen.getByRole('button', { name: /Start the rolling upgrade/ })).toBeEnabled()
+  })
+
+  it('does not hold a Kubernetes upgrade for one', async () => {
+    stub({ '/upgrade/snapshot': none })
+    planView(false)
+    expect(screen.queryByText(/snapshot is required/)).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Start the rolling upgrade/ })).toBeEnabled()
   })
 })

@@ -3581,5 +3581,33 @@
         [1790589540000,55.6], [1790589555000,55.4], [1790589570000,55.2], [1790589585000,55.3], [1790589600000,55.4]
       ]
     }
+  },
+  "/api/v1/upgrade/talos/check": {
+    "checked_at": "2026-09-19T10:31:00Z",
+    "notice": "The versions are what each node last reported, compared with the newest stable release this installation can install and read.",
+    "clusters": [
+      {
+        "cluster": "c-homelab",
+        "name": "homelab",
+        "current": [
+          "v1.13.9",
+          "v1.14.2"
+        ],
+        "newest": "v1.14.2",
+        "available": true,
+        "next": "v1.14.2",
+        "runs": 1,
+        "notes_url": "https://github.com/siderolabs/talos/releases/tag/v1.14.2"
+      }
+    ]
+  },
+  "/api/v1/clusters/c-homelab/upgrade/snapshot": {
+    "snapshot": {
+      "cluster": "c-homelab",
+      "present": false,
+      "fresh": false,
+      "max_age_minutes": 60
+    },
+    "available": true
   }
 }

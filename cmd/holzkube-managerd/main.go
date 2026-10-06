@@ -39,6 +39,7 @@ import (
 	"github.com/holzcloud/holzkube-manager/internal/provision"
 	"github.com/holzcloud/holzkube-manager/internal/rotateca"
 	"github.com/holzcloud/holzkube-manager/internal/store/fsstore"
+	"github.com/holzcloud/holzkube-manager/internal/store/migrate/backup"
 	"github.com/holzcloud/holzkube-manager/internal/streamhub"
 	"github.com/holzcloud/holzkube-manager/internal/support"
 	"github.com/holzcloud/holzkube-manager/internal/talos"
@@ -494,7 +495,23 @@ func run(args []string) error {
 			return nil, errors.New("this instance was started without an Image Factory client")
 		}
 		return factory.Versions(ctx)
-	})
+	}).WithSnapshots(upgrade.NewSnapshotStore(
+		filepath.Join(cfg.DataDir, backup.UpgradeSnapshotsDirName),
+		upgrade.FileOps{
+			WriteStream: fsstore.WriteStreamAtomic,
+			List: func(dir string) ([]upgrade.DirFile, error) {
+				entries, err := fsstore.ListDir(dir)
+				out := make([]upgrade.DirFile, 0, len(entries))
+				for _, e := range entries {
+					out = append(out, upgrade.DirFile{Name: e.Name, Size: e.Size, IsDir: e.IsDir})
+				}
+				return out, err
+			},
+			Remove:     fsstore.RemoveFile,
+			TempPrefix: fsstore.TempPrefix,
+		},
+		time.Now,
+	))
 
 	// The support-bundle collector. It uses the same connector, the same
 	// inventory and the same audit reader everything else does -- a bundle

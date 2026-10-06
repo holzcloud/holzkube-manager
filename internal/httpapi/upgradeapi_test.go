@@ -93,7 +93,7 @@ func newUpgradeHarnessWith(t *testing.T, secureBoot bool) *upgradeHarness {
 
 			return upgrade.NewService(deps, func(context.Context) ([]string, error) {
 				return []string{"v1.13.9", "v1.14.0", "v1.14.1", "v1.15.0-rc.1"}, nil
-			})
+			}).WithSnapshots(upgrade.NewSnapshotStore(t.TempDir(), snapshotOps(), time.Now))
 		}),
 	)
 
@@ -298,6 +298,10 @@ func TestSubmittingABlockedUpgradeIsRefused(t *testing.T) {
 		t.Fatalf("unlock: %d (%s)", resp.StatusCode, raw)
 	}
 
+	// The snapshot first: without one the start is refused for that, and this
+	// test is about the plan's block.
+	h.takeSnapshot(t, cluster)
+
 	resp, raw = h.do(t, http.MethodPost,
 		"/api/v1/clusters/"+string(cluster)+"/upgrade",
 		map[string]any{"to": "v1.12.3", "confirmation": "anything"})
@@ -306,6 +310,106 @@ func TestSubmittingABlockedUpgradeIsRefused(t *testing.T) {
 	}
 	if !strings.Contains(string(raw), "upgrade-blocked") {
 		t.Errorf("the refusal does not carry the upgrade-blocked code: %s", raw)
+	}
+}
+
+func (h *upgradeHarness) takeSnapshot(t *testing.T, cluster model.ClusterID) {
+	t.Helper()
+	resp, raw := h.do(t, http.MethodPost, "/api/v1/clusters/"+string(cluster)+"/upgrade/snapshot", map[string]any{})
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("take the safety snapshot: %d (%s)", resp.StatusCode, raw)
+	}
+}
+
+// A Talos upgrade is not started, and not even confirmed, without a fresh
+// etcd snapshot taken by this instance. This is the server's rule and not the
+// screen's: the request below is the one the screen sends.
+func TestATalosUpgradeCannotStartWithoutAFreshSnapshot(t *testing.T) {
+	t.Parallel()
+
+	h := newUpgradeHarness(t)
+	resp, raw := h.do(t, http.MethodPost, "/api/v1/auth/sudo", map[string]string{"password": testPass})
+	if resp.StatusCode != http.StatusNoContent && resp.StatusCode != http.StatusOK {
+		t.Fatalf("sudo: %d (%s)", resp.StatusCode, raw)
+	}
+	cluster := h.clusterID(t)
+	resp, raw = h.do(t, http.MethodPost, "/api/v1/clusters/"+string(cluster)+"/lock", map[string]any{"locked": false})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("unlock: %d (%s)", resp.StatusCode, raw)
+	}
+	base := "/api/v1/clusters/" + string(cluster)
+
+	// Nothing taken yet: the state says so, and both the confirmation and the
+	// start are refused with the snapshot's own code.
+	resp, raw = h.do(t, http.MethodGet, base+"/upgrade/snapshot", nil)
+	if resp.StatusCode != http.StatusOK || !strings.Contains(string(raw), `"present":false`) {
+		t.Fatalf("the state of no snapshot: %d (%s)", resp.StatusCode, raw)
+	}
+	for _, c := range []struct {
+		path, name string
+		body       map[string]any
+	}{
+		{base + "/upgrade/confirm", "confirm",
+			map[string]any{"kind": "cluster.upgrade-talos", "to": "v1.14.1", "typed": "homelab"}},
+		{base + "/upgrade", "start", map[string]any{"to": "v1.14.1", "confirmation": "x"}},
+	} {
+		resp, raw = h.do(t, http.MethodPost, c.path, c.body)
+		if resp.StatusCode != http.StatusConflict || !strings.Contains(string(raw), "snapshot-required") {
+			t.Fatalf("%s without a snapshot answered %d (%s), want 409 conflict.snapshot-required",
+				c.name, resp.StatusCode, raw)
+		}
+	}
+
+	// A Kubernetes upgrade is not Talos' etcd-quorum risk and is not held by
+	// this rule: it must not answer with the snapshot's code.
+	resp, raw = h.do(t, http.MethodPost, base+"/upgrade/kubernetes",
+		map[string]any{"to": "v1.35.0", "confirmation": "x"})
+	if strings.Contains(string(raw), "snapshot-required") {
+		t.Fatalf("a Kubernetes upgrade was held for a snapshot: %d (%s)", resp.StatusCode, raw)
+	}
+
+	// After taking one the same request gets past the snapshot gate.
+	h.takeSnapshot(t, cluster)
+	resp, raw = h.do(t, http.MethodGet, base+"/upgrade/snapshot", nil)
+	if !strings.Contains(string(raw), `"fresh":true`) {
+		t.Fatalf("the state after taking one: %d (%s)", resp.StatusCode, raw)
+	}
+	resp, raw = h.do(t, http.MethodPost, base+"/upgrade/confirm",
+		map[string]any{"kind": "cluster.upgrade-talos", "to": "v1.14.1", "typed": "homelab"})
+	if strings.Contains(string(raw), "snapshot-required") {
+		t.Fatalf("a fresh snapshot did not lift the refusal: %d (%s)", resp.StatusCode, raw)
+	}
+}
+
+func TestTheUpdateCheckNamesTheNextRunAndStartsNothing(t *testing.T) {
+	t.Parallel()
+
+	h := newUpgradeHarness(t)
+	resp, raw := h.do(t, http.MethodGet, "/api/v1/upgrade/talos/check", nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("check: %d (%s)", resp.StatusCode, raw)
+	}
+	var body struct {
+		Clusters []struct {
+			Name      string   `json:"name"`
+			Current   []string `json:"current"`
+			Available bool     `json:"available"`
+			Next      string   `json:"next"`
+		} `json:"clusters"`
+		Notice string `json:"notice"`
+	}
+	if err := json.Unmarshal(raw, &body); err != nil {
+		t.Fatalf("decode: %v (%s)", err, raw)
+	}
+	if len(body.Clusters) != 1 || body.Clusters[0].Name != "homelab" {
+		t.Fatalf("clusters = %+v", body.Clusters)
+	}
+	if body.Notice == "" {
+		t.Error("the answer does not say what it is")
+	}
+	c := body.Clusters[0]
+	if c.Available && c.Next == "" {
+		t.Errorf("an update is available and no next run is named: %+v", c)
 	}
 }
 
@@ -448,5 +552,23 @@ func TestUpgradingASecureBootNodeDoesNotTakeSecureBootAway(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// snapshotOps is the data directory's own primitives, the ones main hands the
+// upgrade service.
+func snapshotOps() upgrade.FileOps {
+	return upgrade.FileOps{
+		WriteStream: fsstore.WriteStreamAtomic,
+		List: func(dir string) ([]upgrade.DirFile, error) {
+			entries, err := fsstore.ListDir(dir)
+			out := make([]upgrade.DirFile, 0, len(entries))
+			for _, e := range entries {
+				out = append(out, upgrade.DirFile{Name: e.Name, Size: e.Size, IsDir: e.IsDir})
+			}
+			return out, err
+		},
+		Remove:     fsstore.RemoveFile,
+		TempPrefix: fsstore.TempPrefix,
 	}
 }

@@ -55,6 +55,36 @@ func UpgradeRoutes(d httpapi.Deps) []httpapi.Route {
 			Handler:         handler(upgradeReleases(d)),
 		},
 		{
+			// Is there a newer Talos than each cluster runs? Reads the
+			// inventory and the Image Factory's release list, no node, and
+			// starts nothing.
+			Method:          http.MethodGet,
+			Pattern:         "/api/v1/upgrade/talos/check",
+			RequiresSession: true,
+			MinRole:         model.RoleReader,
+			Handler:         handler(talosUpdateCheck(d)),
+		},
+		{
+			Method:          http.MethodGet,
+			Pattern:         "/api/v1/clusters/{id}/upgrade/snapshot",
+			RequiresSession: true,
+			MinRole:         model.RoleReader,
+			Handler:         handler(safetySnapshotState(d)),
+		},
+		{
+			// Takes the etcd snapshot a Talos upgrade may not start without
+			// and keeps it in the data directory. The file never leaves the
+			// server, which is why an operator may ask for it where the
+			// download of a snapshot is for admins.
+			Method:          http.MethodPost,
+			Pattern:         "/api/v1/clusters/{id}/upgrade/snapshot",
+			RequiresSession: true,
+			MinRole:         model.RoleOperator,
+			Action:          "upgrade.snapshot",
+			ClusterScope:    clusterFromPathID,
+			Handler:         handler(takeSafetySnapshot(d)),
+		},
+		{
 			// A read that touches every node. POST because it carries the
 			// target version and the cluster; nothing on any node changes.
 			Method:          http.MethodPost,
@@ -296,6 +326,13 @@ func confirmUpgrade(d httpapi.Deps) http.HandlerFunc {
 			return
 		}
 
+		// Before the plan is even built: the answer does not depend on it, and
+		// the operator should not type a cluster name to be told afterwards.
+		if problem := requireSnapshot(d, kind, cluster); problem != nil {
+			httpapi.WriteProblem(w, r, problem)
+			return
+		}
+
 		ctx, cancel := budgetedContext(r, UpgradeReadRouteBudget)
 		defer cancel()
 
@@ -342,6 +379,14 @@ func submitUpgrade(d httpapi.Deps, kind model.JobKind) http.HandlerFunc {
 
 		cluster := model.ClusterID(r.PathValue("id"))
 
+		// Checked again here and not only at the confirmation: the token can
+		// outlive the hour, and a client can call this route without ever
+		// having been to the confirmation.
+		if problem := requireSnapshot(d, kind, cluster); problem != nil {
+			httpapi.WriteProblem(w, r, problem)
+			return
+		}
+
 		ctx, cancel := budgetedContext(r, UpgradeReadRouteBudget)
 		defer cancel()
 
@@ -385,6 +430,110 @@ func submitUpgrade(d httpapi.Deps, kind model.JobKind) http.HandlerFunc {
 			"job":   j,
 			"topic": string(jobs.Topic(j.ID)),
 		})
+	}
+}
+
+// talosUpdateCheck answers "is there a newer Talos" for every cluster at once.
+func talosUpdateCheck(d httpapi.Deps) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if p := upgradeConfigured(d); p != nil {
+			httpapi.WriteProblem(w, r, p)
+			return
+		}
+		if p := inventoryConfigured(d); p != nil {
+			httpapi.WriteProblem(w, r, p)
+			return
+		}
+
+		ctx, cancel := budgetedContext(r, EtcdRouteBudget)
+		defer cancel()
+
+		clusters, err := d.Inventory.Clusters(ctx)
+		if err != nil {
+			writeInventoryError(w, r, d, err)
+			return
+		}
+
+		checks := make([]upgrade.UpdateCheck, 0, len(clusters))
+		for _, c := range clusters {
+			check, cerr := d.Upgrade.CheckTalos(ctx, c.ID, c.Name)
+			if cerr != nil {
+				writeUpgradeError(w, r, d, cerr)
+				return
+			}
+			checks = append(checks, check)
+		}
+
+		writeJSON(w, http.StatusOK, map[string]any{
+			"checked_at": time.Now().UTC().Format(time.RFC3339),
+			"clusters":   checks,
+			"notice": "The versions are what each node last reported, compared with the newest stable " +
+				"release this installation can install and read. Nothing here changes a node: an " +
+				"update is planned, confirmed with a fresh etcd snapshot and started on the " +
+				"Upgrades screen.",
+		})
+	}
+}
+
+func safetySnapshotState(d httpapi.Deps) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if p := upgradeConfigured(d); p != nil {
+			httpapi.WriteProblem(w, r, p)
+			return
+		}
+		snap, err := d.Upgrade.SafetySnapshotOf(model.ClusterID(r.PathValue("id")))
+		if err != nil && !errors.Is(err, upgrade.ErrNoSnapshotStore) {
+			writeUpgradeError(w, r, d, err)
+			return
+		}
+		// No store is a state worth showing rather than an error: the screen
+		// says there is nowhere to keep one, and the start stays refused.
+		writeJSON(w, http.StatusOK, map[string]any{
+			"snapshot":  snap,
+			"available": err == nil,
+		})
+	}
+}
+
+func takeSafetySnapshot(d httpapi.Deps) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if p := upgradeConfigured(d); p != nil {
+			httpapi.WriteProblem(w, r, p)
+			return
+		}
+
+		// No total deadline: the snapshot is a stream of an etcd database, and
+		// how long it takes is how large that database is. The route is not
+		// marked Streaming -- its response is a small JSON document -- so the
+		// handler clears the write deadline the way the restore clears the
+		// read one.
+		rc := http.NewResponseController(w)
+		_ = rc.SetWriteDeadline(time.Time{})
+
+		snap, err := d.Upgrade.TakeSafetySnapshot(r.Context(), model.ClusterID(r.PathValue("id")))
+		if err != nil {
+			writeUpgradeError(w, r, d, err)
+			return
+		}
+		writeJSON(w, http.StatusCreated, map[string]any{"snapshot": snap, "available": true})
+	}
+}
+
+// requireSnapshot refuses a Talos upgrade that has no fresh snapshot behind it.
+func requireSnapshot(d httpapi.Deps, kind model.JobKind, cluster model.ClusterID) *httpapi.Problem {
+	if kind != upgrade.JobKindTalosUpgrade {
+		return nil
+	}
+	err := d.Upgrade.RequireSafetySnapshot(cluster)
+	if err == nil {
+		return nil
+	}
+	return &httpapi.Problem{
+		Type:   httpapi.TypeConflict,
+		Title:  "Take an etcd snapshot first",
+		Status: http.StatusConflict,
+		Detail: err.Error(),
+		Code:   httpapi.CodeSnapshotRequired,
 	}
 }
 
@@ -689,6 +838,8 @@ func writeUpgradeError(w http.ResponseWriter, r *http.Request, d httpapi.Deps, e
 			Detail: err.Error(),
 			Code:   httpapi.CodeWouldStrand,
 		})
+	case errors.Is(err, upgrade.ErrNoSnapshotStore):
+		httpapi.WriteProblem(w, r, httpapi.Upstream("upstream.upgrade-unavailable", err.Error()))
 	case errors.Is(err, upgrade.ErrNoPath):
 		httpapi.WriteProblem(w, r, httpapi.Validation(err.Error()))
 	case errors.Is(err, upgrade.ErrLastVotingMember):

@@ -25,6 +25,10 @@ type Service struct {
 	// function because the list comes from the Image Factory and this package
 	// has no business knowing that.
 	releases func(ctx context.Context) ([]string, error)
+
+	// snapshots keeps the safety snapshot a Talos upgrade may not start
+	// without. Nil means there is nowhere to keep one, and a start is refused.
+	snapshots *SnapshotStore
 }
 
 // NewService wires one up.

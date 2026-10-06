@@ -324,6 +324,10 @@ var allowlist = map[string][]string{
 	"upgrade.talos":           {"to"},
 	"upgrade.kubernetes":      {"to"},
 
+	// Taking the safety snapshot a Talos upgrade requires first. The cluster is
+	// in the path and the request has no body, so nothing may appear in clear.
+	"upgrade.snapshot": {},
+
 	// The member removal names its member in the path and the cluster in the
 	// path; there is no body worth permitting anything out of. It is listed so
 	// the table shows it.

@@ -328,6 +328,13 @@ const (
 	// showing the plan does not need the code to tell it what to render.
 	CodeUpgradeBlocked = "conflict.upgrade-blocked"
 
+	// CodeSnapshotRequired: a Talos upgrade was confirmed or submitted without
+	// a fresh etcd snapshot of the cluster taken by this instance. It is its
+	// own code because the way out is a button the screen already shows -- take
+	// the snapshot -- and a client that treated it as a blocked plan would send
+	// the operator looking at the nodes.
+	CodeSnapshotRequired = "conflict.snapshot-required"
+
 	// CodeWouldStrand: this upgrade would leave the running Kubernetes version
 	// outside what the target Talos supports (UPG-06). It has its own code
 	// because it is the one refusal here that is about a state with no good

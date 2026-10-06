@@ -835,6 +835,7 @@ jobs/                  long-running operations, so a restart resumes them
 patches/               reusable configuration patches, versioned
 bootstrap/             the etcd bootstrap lease and its intent records
 backups/               tarballs, from a migration or from `backup`
+upgrade-snapshots/     the etcd snapshots a Talos upgrade requires first (not in backups)
 ```
 
 It is plain files on purpose: readable, and backed up with `cp` — or with the
@@ -1079,6 +1080,44 @@ The fact is read from the node rather than remembered from when this
 installation provisioned it, because it may not have been the one that did. A
 node that will not answer is blocked rather than upgraded on a guess: either
 guess is wrong for half a mixed fleet.
+
+### Updating Talos
+
+The **Upgrades** screen starts with a button, *Check for a Talos update*. It
+compares what each node last reported with the newest stable Talos this
+installation can install and read, and it says what it found: up to date, or
+*Talos v1.14.2 is available*, with the release notes of the version the next run
+installs. The dashboard shows the same finding as a small badge on the cluster.
+Asking reads no node and starts nothing. A release newer than the range this
+build supports is not offered, however stable: the product could not read that
+cluster's configuration (the weekly upstream check is what raises those).
+
+A cluster more than one minor behind is several runs, because Talos upgrades one
+minor at a time. The banner names the first run, and each hop is planned,
+snapshotted and confirmed on its own, with the health gate looking again in
+between. There is no "update to latest" button, on purpose.
+
+*Plan the update to vX* fills in the form and shows the plan: every node, in the
+order it will be walked (control plane first), with the installer it will get
+(SecureBoot read from the node, never assumed), the schematic, and the health
+gate's numbers. Then two things stand between the plan and the start:
+
+1. **A fresh etcd snapshot, taken here.** Talos asks for a snapshot before an
+   upgrade because a cluster that loses its quorum comes back from one or not at
+   all, and a rolling upgrade is the operation that can cost a quorum. *Take the
+   snapshot now* streams it from a control-plane node into `upgrade-snapshots/`
+   in the data directory (`0600`, the newest two per cluster, not in backups). It
+   counts for **60 minutes**. The server refuses to confirm or start a Talos
+   upgrade without one -- an API client gets `409 conflict.snapshot-required` --
+   and an instance that cannot keep snapshots refuses too. A failed or empty
+   stream leaves nothing that counts as a snapshot.
+2. **The cluster's name, typed.**
+
+The job then upgrades one node at a time, with the health gate evaluated before
+each, and verifies every node afterwards (version, schematic, services). It does
+not undo an upgrade; see *It verifies upgrades and does not undo them* below for
+what a rollback is and is not. The snapshot is the way back from the one failure
+a rollback cannot help with.
 
 ### Upgrading Kubernetes
 

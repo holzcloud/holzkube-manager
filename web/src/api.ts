@@ -1797,6 +1797,65 @@ export const releasesSchema = z.object({
   notice: z.string().default(''),
 })
 
+/**
+ * Is there a newer Talos than a cluster runs (GET /api/v1/upgrade/talos/check).
+ * It reads the inventory and the Image Factory's release list and starts
+ * nothing; `next` is the version the next run installs, which is not `newest`
+ * for a cluster more than one minor behind.
+ */
+export const updateCheckSchema = z.object({
+  cluster: z.string(),
+  name: z.string(),
+  current: z
+    .array(z.string())
+    .nullish()
+    .transform((v) => v ?? []),
+  newest: z.string().default(''),
+  available: z.boolean(),
+  next: z.string().default(''),
+  runs: z.number().default(0),
+  notes_url: z.string().default(''),
+  reason: z.string().default(''),
+})
+
+export type UpdateCheck = z.infer<typeof updateCheckSchema>
+
+export const talosCheckSchema = z.object({
+  checked_at: z.string().default(''),
+  clusters: z
+    .array(updateCheckSchema)
+    .nullish()
+    .transform((v) => v ?? []),
+  notice: z.string().default(''),
+})
+
+export type TalosCheck = z.infer<typeof talosCheckSchema>
+
+/**
+ * The etcd snapshot a Talos upgrade may not start without. The server refuses
+ * the start without a fresh one; this is what the screen shows about it.
+ */
+export const safetySnapshotSchema = z.object({
+  snapshot: z.object({
+    cluster: z.string(),
+    present: z.boolean(),
+    taken_at: z
+      .string()
+      .nullish()
+      .transform((v) => v ?? ''),
+    bytes: z.number().default(0),
+    fresh: z.boolean(),
+    valid_until: z
+      .string()
+      .nullish()
+      .transform((v) => v ?? ''),
+    max_age_minutes: z.number().default(60),
+  }),
+  available: z.boolean(),
+})
+
+export type SafetySnapshot = z.infer<typeof safetySnapshotSchema>
+
 /* ---------------------------------------------------------------------- */
 /* Jobs and node actions                                                   */
 /* ---------------------------------------------------------------------- */
@@ -3775,6 +3834,27 @@ export const api = {
     /** No "latest", and no pre-releases. Both absences are the server's, and
      * the notice it returns says why. */
     releases: () => sendJSON('GET', '/api/v1/upgrade/releases', releasesSchema),
+
+    /** Is there a newer Talos, per cluster. Starts nothing. */
+    talosCheck: (): Promise<TalosCheck> =>
+      sendJSON('GET', '/api/v1/upgrade/talos/check', talosCheckSchema),
+
+    snapshotState: (cluster: string): Promise<SafetySnapshot> =>
+      sendJSON(
+        'GET',
+        `/api/v1/clusters/${encodeURIComponent(cluster)}/upgrade/snapshot`,
+        safetySnapshotSchema,
+      ),
+
+    /** Takes the etcd snapshot a Talos upgrade requires first and keeps it on
+     * the server. */
+    takeSnapshot: (cluster: string): Promise<SafetySnapshot> =>
+      sendJSON(
+        'POST',
+        `/api/v1/clusters/${encodeURIComponent(cluster)}/upgrade/snapshot`,
+        safetySnapshotSchema,
+        {},
+      ),
 
     plan: (cluster: string, to: string): Promise<UpgradePlan> =>
       sendJSON(
