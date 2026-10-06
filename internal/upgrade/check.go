@@ -99,8 +99,10 @@ func (s *Service) CheckTalos(ctx context.Context, cluster model.ClusterID, name 
 
 	chain, err := Chain(lowest, newest, available)
 	if err != nil {
+		// No path between the versions is an answer the screen shows, not a
+		// failure of the check.
 		out.Reason = err.Error()
-		return out, nil
+		return out, nil //nolint:nilerr // the reason is the result
 	}
 	if len(chain) == 0 {
 		return out, nil

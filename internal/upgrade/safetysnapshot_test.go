@@ -311,7 +311,7 @@ func TestTakingForAnUnknownClusterCreatesNothing(t *testing.T) {
 func TestTheRefusalDoesNotNameAPath(t *testing.T) {
 	t.Parallel()
 	ops := realOps()
-	ops.List = func(dir string) ([]upgrade.DirFile, error) {
+	ops.List = func(string) ([]upgrade.DirFile, error) {
 		return nil, errors.New("open /var/lib/holzkube-manager/upgrade-snapshots/c1: permission denied")
 	}
 	svc := newCheckService(nil, nil).WithSnapshots(upgrade.NewSnapshotStore(t.TempDir(), ops, nil))
