@@ -14,6 +14,10 @@
       {
         "icon": "📐",
         "text": "The interface uses its space better. On a wide screen Settings, Config and Jobs sit in two columns and Nodes is a card; on a tablet the dashboard's clusters and recent activity sit side by side; a cluster's downloads and actions are one row each instead of a column of buttons; and on a phone a table row is a card with its values two to a line, about half as tall."
+      },
+      {
+        "icon": "🔒",
+        "text": "Security and updates: the library behind running a command in a container (spdystream) and golang.org/x/crypto are raised for published denial-of-service and security fixes, along with grpc, go-jose and a few smaller ones. Taking a safety snapshot is now one at a time per cluster, cut off after 30 minutes, refuses a cluster that does not exist without leaving anything behind, and no longer names a data-directory path in its refusals."
       }
     ]
   },

@@ -238,3 +238,89 @@ func TestTakeWithoutAStoreIsRefused(t *testing.T) {
 		t.Fatalf("err = %v, want ErrNoSnapshotStore", err)
 	}
 }
+
+func TestOnlyPlainClusterIdsAreFiled(t *testing.T) {
+	t.Parallel()
+	st, _ := newStore(t)
+	for _, id := range []string{".hidden", "a b", "a:b", strings.Repeat("x", 129), "ä", "a\nb"} {
+		if _, err := put(t, st, id, "x"); err == nil {
+			t.Errorf("cluster id %q was filed", id)
+		}
+	}
+	for _, id := range []string{"c-homelab", "a_b.c-d", "0123", strings.Repeat("x", 128)} {
+		if _, err := put(t, st, id, "x"); err != nil {
+			t.Errorf("cluster id %q was refused: %v", id, err)
+		}
+	}
+}
+
+// One snapshot per cluster at a time, and the second is refused, not queued:
+// a queue of requests that each still take one is disk spent by clicking.
+func TestASecondSnapshotOfTheSameClusterIsRefusedWhileOneRuns(t *testing.T) {
+	t.Parallel()
+	st, _ := newStore(t)
+
+	started, release := make(chan struct{}), make(chan struct{})
+	done := make(chan error, 1)
+	go func() {
+		_, err := upgrade.WriteForTest(st, "c1", func(w io.Writer) (int64, error) {
+			close(started)
+			<-release
+			n, err := io.WriteString(w, "etcd")
+			return int64(n), err
+		})
+		done <- err
+	}()
+	<-started
+
+	if _, err := put(t, st, "c1", "second"); !errors.Is(err, upgrade.ErrSnapshotInProgress) {
+		t.Fatalf("second take of the same cluster: err = %v, want ErrSnapshotInProgress", err)
+	}
+	// Another cluster is not held up by it.
+	if _, err := put(t, st, "c2", "other"); err != nil {
+		t.Fatalf("a different cluster was held up: %v", err)
+	}
+
+	close(release)
+	if err := <-done; err != nil {
+		t.Fatalf("the first take: %v", err)
+	}
+	// And once it is done, the cluster can be snapshotted again.
+	if _, err := put(t, st, "c1", "third"); err != nil {
+		t.Fatalf("after it finished: %v", err)
+	}
+}
+
+// Asking for a cluster that has no machines must not leave a directory for it.
+func TestTakingForAnUnknownClusterCreatesNothing(t *testing.T) {
+	t.Parallel()
+	svc := newCheckService(nil, nil)
+	st, _ := newStore(t)
+	svc.WithSnapshots(st)
+
+	if _, err := svc.TakeSafetySnapshot(context.Background(), "ghost"); err == nil {
+		t.Fatal("a cluster with no machines was snapshotted")
+	}
+	if _, err := os.Stat(filepath.Join(snapshotDir(st), "ghost")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("a directory was made for a cluster nobody has: %v", err)
+	}
+}
+
+// The refusal reaches a browser, so it does not carry the path the disk
+// complained about.
+func TestTheRefusalDoesNotNameAPath(t *testing.T) {
+	t.Parallel()
+	ops := realOps()
+	ops.List = func(dir string) ([]upgrade.DirFile, error) {
+		return nil, errors.New("open /var/lib/holzkube-manager/upgrade-snapshots/c1: permission denied")
+	}
+	svc := newCheckService(nil, nil).WithSnapshots(upgrade.NewSnapshotStore(t.TempDir(), ops, nil))
+
+	err := svc.RequireSafetySnapshot("c1")
+	if !errors.Is(err, upgrade.ErrSnapshotRequired) {
+		t.Fatalf("err = %v, want ErrSnapshotRequired", err)
+	}
+	if strings.Contains(err.Error(), "/var/lib") || strings.Contains(err.Error(), "permission denied") {
+		t.Fatalf("the refusal names the disk's complaint: %v", err)
+	}
+}

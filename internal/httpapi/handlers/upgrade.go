@@ -838,6 +838,14 @@ func writeUpgradeError(w http.ResponseWriter, r *http.Request, d httpapi.Deps, e
 			Detail: err.Error(),
 			Code:   httpapi.CodeWouldStrand,
 		})
+	case errors.Is(err, upgrade.ErrSnapshotInProgress):
+		httpapi.WriteProblem(w, r, &httpapi.Problem{
+			Type:   httpapi.TypeConflict,
+			Title:  "A snapshot is already being taken",
+			Status: http.StatusConflict,
+			Detail: err.Error() + ". Wait for it; it counts as soon as it is done.",
+			Code:   httpapi.CodeSnapshotInProgress,
+		})
 	case errors.Is(err, upgrade.ErrNoSnapshotStore):
 		httpapi.WriteProblem(w, r, httpapi.Upstream("upstream.upgrade-unavailable", err.Error()))
 	case errors.Is(err, upgrade.ErrNoPath):
