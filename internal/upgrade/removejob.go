@@ -225,7 +225,7 @@ func (d Deps) checkRemovable(ctx context.Context, m model.Machine, machines []mo
 	return true, nil
 }
 
-func (d Deps) leaveEtcdStep(j model.Job) jobs.Step {
+func (d Deps) leaveEtcdStep(_ model.Job) jobs.Step {
 	return jobs.Step{
 		Name: "leave etcd",
 		Do: func(ctx context.Context, job *model.Job) error {
