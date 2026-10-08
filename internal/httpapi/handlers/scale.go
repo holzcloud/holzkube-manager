@@ -66,7 +66,7 @@ func clusterScale(d httpapi.Deps) http.HandlerFunc {
 		// whole request with a 502 would take away the inventory half of the
 		// answer -- which machines are in it, which workers can still go --
 		// because of a question about the other half.
-		list, err := d.Upgrade.EtcdMembers(ctx, id)
+		list, err := d.Upgrade.EtcdMembersLive(ctx, id)
 		if err != nil {
 			in.MembersProblem = "etcd's membership could not be read (" + err.Error() + ")"
 		} else {

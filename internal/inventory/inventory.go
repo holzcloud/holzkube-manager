@@ -117,7 +117,7 @@ type Service struct {
 	// ever, with no error anywhere. It has not bitten in production because
 	// holzkube-managerd calls Start before it serves; it would have bitten the
 	// first time an adoption ran on an instance that had served a list.
-	supervised map[model.MachineID]struct{}
+	supervised map[model.MachineID]*supervisor
 
 	// missed is which cluster members the membership sync has already warned
 	// about, keyed cluster/hostname, so an unreachable member is one warning
@@ -165,11 +165,18 @@ func New(d Deps) *Service {
 	return &Service{
 		deps:       d,
 		observed:   map[model.MachineID]*observation{},
-		supervised: map[model.MachineID]struct{}{},
+		supervised: map[model.MachineID]*supervisor{},
 		missed:     map[string]struct{}{},
 		reads:      map[string]chan struct{}{},
 		hardware:   map[model.MachineID]*hardwareMemo{},
 	}
+}
+
+// supervisor is the handle on one machine's observer loops: cancel ends them
+// (ForgetMachine), done closes once both have returned.
+type supervisor struct {
+	cancel context.CancelFunc
+	done   chan struct{}
 }
 
 // observation is one machine's per-level confirmation state.

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/holzcloud/holzkube-manager/internal/model"
@@ -51,6 +52,15 @@ type Member struct {
 	Voting bool `json:"voting"`
 
 	PeerURLs []string `json:"peer_urls,omitempty"`
+
+	// Hostname is what the member reported for itself, without the id.
+	Hostname string `json:"hostname,omitempty"`
+
+	// Silent marks a voting member whose own node did not answer a status
+	// probe (ProbeVoters). It is only meaningful when the list says
+	// LivenessKnown, and it also covers a voter holzkube-manager cannot ask at
+	// all because no machine in the inventory matches it.
+	Silent bool `json:"silent,omitempty"`
 }
 
 // MemberList is the answer to "what is in this cluster's etcd".
@@ -68,6 +78,14 @@ type MemberList struct {
 
 	// Sentence says both in words.
 	Sentence string `json:"sentence"`
+
+	// LivenessKnown says ProbeVoters ran, so Answering and each member's Silent
+	// are facts and not defaults.
+	LivenessKnown bool `json:"liveness_known,omitempty"`
+
+	// Answering is how many of the voting members actually answered. Tolerates
+	// is arithmetic on the membership list; this is what is left standing.
+	Answering int `json:"answering,omitempty"`
 }
 
 // Members reads a cluster's etcd membership (UPG-10).
@@ -91,6 +109,7 @@ func Members(ctx context.Context, cc *talos.ClusterClient, machines []model.Mach
 			Learner:  m.IsLearner,
 			Voting:   !m.IsLearner,
 			PeerURLs: m.PeerURLs,
+			Hostname: m.Hostname,
 		}
 		for _, machine := range machines {
 			if machine.Hostname != "" && strings.EqualFold(machine.Hostname, m.Hostname) {
@@ -127,6 +146,72 @@ func Members(ctx context.Context, cc *talos.ClusterClient, machines []model.Mach
 	return out, nil
 }
 
+// StatusProbe asks one machine's own etcd whether it answers. A nil error is
+// an answer.
+type StatusProbe func(ctx context.Context, machine model.MachineID) error
+
+// ProbeVoters finds out how many voting members actually answer.
+//
+// The membership list says who is in etcd, not who is up, and Tolerates is
+// arithmetic on the first. A three-member cluster with one member down has
+// Tolerates 1 on paper and none in fact; removing a second member from it is
+// the loss of quorum the arithmetic promised was not possible. So each voter's
+// own node is asked, and the answer is fail-closed: a voter that errors, or
+// that no inventory machine matches and so cannot be asked, counts as silent.
+func ProbeVoters(ctx context.Context, list MemberList, ask StatusProbe) MemberList {
+	out := list
+	out.Members = append([]Member(nil), list.Members...)
+
+	var wg sync.WaitGroup
+	for i := range out.Members {
+		m := &out.Members[i]
+		if !m.Voting {
+			continue
+		}
+		if m.Machine == "" || ask == nil {
+			m.Silent = true
+			continue
+		}
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			m.Silent = ask(ctx, m.Machine) != nil
+		}()
+	}
+	wg.Wait()
+
+	out.Answering = 0
+	for _, m := range out.Members {
+		if m.Voting && !m.Silent {
+			out.Answering++
+		}
+	}
+	out.LivenessKnown = true
+	return out
+}
+
+// isNamed reports whether name refers to this member: callers pass either the
+// display name ("host (id 1f)") or the bare hostname.
+func (m Member) isNamed(name string) bool {
+	return strings.EqualFold(m.Name, name) ||
+		(m.Hostname != "" && strings.EqualFold(m.Hostname, name))
+}
+
+// standingAfterRemoving is how many voters would still be answering once the
+// named one is gone. A name that matches no member is taken to be an answering
+// one, the pessimistic reading: removing a live voter costs a vote.
+func standingAfterRemoving(list MemberList, name string) int {
+	for _, m := range list.Members {
+		if m.Voting && m.isNamed(name) {
+			if m.Silent {
+				return list.Answering
+			}
+			return list.Answering - 1
+		}
+	}
+	return list.Answering - 1
+}
+
 // RefuseIfCannotSpareAVoter is the one place that decides whether a cluster
 // survives losing a voting etcd member.
 //
@@ -148,6 +233,13 @@ func Members(ctx context.Context, cc *talos.ClusterClient, machines []model.Mach
 //     API stops with it. That is recoverable by adding a member back; the
 //     first is not.
 //
+// When the list carries liveness (ProbeVoters), a third case applies: the
+// voters left standing after the removal must still be a majority of the voters
+// left in the membership. Counting members instead of answering voters is how a
+// cluster with one member already down was told it could lose another. All
+// three doors probe; a list that was never probed is judged on the count alone,
+// which is why a new door must probe too.
+//
 // The first case shipped excluded by a `VotingCount > 1` on the second one's
 // condition, which let the worse of the two through.
 //
@@ -168,6 +260,17 @@ func RefuseIfCannotSpareAVoter(list MemberList, name string) error {
 		return fmt.Errorf("%w: %s is one of %d voting members, and %d cannot lose one. Add a "+
 			"control-plane node first, or accept that the cluster stops accepting writes",
 			ErrLastVotingMember, name, list.VotingCount, list.VotingCount)
+	}
+
+	if list.LivenessKnown {
+		standing := standingAfterRemoving(list, name)
+		after := list.VotingCount - 1
+		if need := after/2 + 1; standing < need {
+			return fmt.Errorf("%w: only %d of %d voting members answer, so after removing %s "+
+				"%d would be standing and etcd needs %d of the %d that would remain. Bring the "+
+				"unreachable member back first, or remove that one instead",
+				ErrLastVotingMember, list.Answering, list.VotingCount, name, standing, need, after)
+		}
 	}
 	return nil
 }
@@ -242,6 +345,21 @@ func Snapshot(ctx context.Context, cc *talos.ClusterClient, w io.Writer) (int64,
 	return n, nil
 }
 
+// RemoveOption adjusts RemoveNode.
+type RemoveOption func(*removeOptions)
+
+type removeOptions struct {
+	machines []model.Machine
+	probe    StatusProbe
+}
+
+// WithLiveness makes RemoveNode count the voters that actually answer, not just
+// the members etcd lists: machines maps members to inventory machines and probe
+// asks each one's node. Without it the refusal rests on the membership count.
+func WithLiveness(machines []model.Machine, probe StatusProbe) RemoveOption {
+	return func(o *removeOptions) { o.machines, o.probe = machines, probe }
+}
+
 // RemoveNode takes a node out of a cluster for good (UPG-13).
 //
 // The order is the whole of it, and each step is there because skipping it
@@ -264,7 +382,13 @@ func RemoveNode(
 	ctx context.Context,
 	cc *talos.ClusterClient,
 	m model.Machine,
+	opts ...RemoveOption,
 ) error {
+	var o removeOptions
+	for _, opt := range opts {
+		opt(&o)
+	}
+
 	if m.Role == model.RoleControlPlane {
 		// Before anything, and this is the whole of the fix: read the
 		// membership and refuse if the cluster does not survive losing a
@@ -275,11 +399,14 @@ func RemoveNode(
 		// A worker never reaches this. It is not a member, and a cluster whose
 		// etcd cannot be reached must not be a cluster whose workers cannot be
 		// removed.
-		list, err := Members(ctx, cc, nil)
+		list, err := Members(ctx, cc, o.machines)
 		if err != nil {
 			return fmt.Errorf("upgrade: %s is a control-plane node and its cluster's etcd "+
 				"membership could not be read, so there is no way to tell whether the cluster "+
 				"survives losing it. Nothing has been changed: %w", nameOf(m), err)
+		}
+		if o.probe != nil {
+			list = ProbeVoters(ctx, list, o.probe)
 		}
 		if err := RefuseIfCannotSpareAVoter(list, nameOf(m)); err != nil {
 			return err

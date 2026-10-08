@@ -160,9 +160,16 @@ func (s *Service) ForgetMachine(ctx context.Context, id model.MachineID) error {
 		return err
 	}
 
+	// Its observers end with it: left running they would ask a node that is no
+	// longer in the inventory, for the life of the process.
 	s.mu.Lock()
 	delete(s.observed, id)
+	sup := s.supervised[id]
+	delete(s.supervised, id)
 	s.mu.Unlock()
+	if sup != nil {
+		sup.cancel()
+	}
 	return nil
 }
 

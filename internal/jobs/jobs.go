@@ -56,6 +56,9 @@ var (
 	// ErrNotCancellable reports a cancel request against a job that has
 	// already finished.
 	ErrNotCancellable = errors.New("jobs: job is no longer running")
+
+	// ErrClosed reports a submission to an engine that has been shut down.
+	ErrClosed = errors.New("jobs: the engine is shutting down")
 )
 
 // Step is one unit of work plus the question that makes it safe to resume.
@@ -105,7 +108,14 @@ type Deps struct {
 	Hub *streamhub.Hub
 
 	Now func() time.Time
+
+	// TopicLinger is how long a finished job's topic stays on the hub for a
+	// viewer that arrives just after the end. Zero means DefaultTopicLinger.
+	TopicLinger time.Duration
 }
+
+// DefaultTopicLinger is how long a finished job's progress stream is kept.
+const DefaultTopicLinger = 2 * time.Minute
 
 // Engine runs jobs.
 type Engine struct {
@@ -125,6 +135,13 @@ type Engine struct {
 	// the step boundary promptly rather than at the next poll.
 	running map[model.JobID]context.CancelFunc
 
+	// shutdown is cancelled by Close and by nothing else. It is what tells a
+	// step that was interrupted because the process is going away (resumable,
+	// Resume decides) from one the operator cancelled (finished, cancelled).
+	// Both cancel the step's own context; only this one says which it was.
+	shutdown       context.Context
+	shutdownCancel context.CancelFunc
+
 	wg     sync.WaitGroup
 	closed bool
 }
@@ -137,11 +154,14 @@ func New(d Deps) *Engine {
 	if d.Now == nil {
 		d.Now = time.Now
 	}
+	shutdown, shutdownCancel := context.WithCancel(context.Background())
 	return &Engine{
-		deps:     d,
-		builders: map[model.JobKind]Builder{},
-		leases:   map[model.ClusterID]model.JobID{},
-		running:  map[model.JobID]context.CancelFunc{},
+		shutdown:       shutdown,
+		shutdownCancel: shutdownCancel,
+		deps:           d,
+		builders:       map[model.JobKind]Builder{},
+		leases:         map[model.ClusterID]model.JobID{},
+		running:        map[model.JobID]context.CancelFunc{},
 	}
 }
 
@@ -184,7 +204,11 @@ func (e *Engine) Submit(ctx context.Context, j model.Job) (model.Job, error) {
 
 	e.mu.Lock()
 	build, known := e.builders[j.Kind]
+	closed := e.closed
 	e.mu.Unlock()
+	if closed {
+		return model.Job{}, ErrClosed
+	}
 	if !known {
 		return model.Job{}, fmt.Errorf("%w: %s", ErrUnknownKind, j.Kind)
 	}
@@ -232,7 +256,13 @@ func (e *Engine) Submit(ctx context.Context, j model.Job) (model.Job, error) {
 		return model.Job{}, err
 	}
 
-	e.start(stored, steps)
+	if !e.start(stored, steps) {
+		// Close won the race between the check above and the start. The record
+		// is withdrawn rather than left pending with nobody to run it.
+		_ = e.deps.Store.Jobs().Delete(context.WithoutCancel(ctx), stored.ID)
+		e.release(j.Cluster, j.ID)
+		return model.Job{}, ErrClosed
+	}
 	return stored, nil
 }
 
@@ -244,18 +274,20 @@ func (e *Engine) Submit(ctx context.Context, j model.Job) (model.Job, error) {
 // returned job into its 202 while run() below is already writing
 // Steps[i].State into the same backing array. The race detector caught it on
 // CI, on the path every reboot, shutdown, reset, provision and upgrade takes.
-func (e *Engine) start(j model.Job, steps []Step) {
+//
+// It reports false, having started nothing, when the engine is closed.
+func (e *Engine) start(j model.Job, steps []Step) bool {
 	j = j.Clone()
 
 	e.mu.Lock()
 	if e.closed {
 		e.mu.Unlock()
-		return
+		return false
 	}
 	// Deliberately not derived from the request context: a job outlives the
 	// HTTP call that asked for it, and a reboot that stopped because the
 	// operator closed the tab would be the worst kind of half-done.
-	runCtx, cancel := context.WithCancel(context.Background())
+	runCtx, cancel := context.WithCancel(e.shutdown)
 	e.running[j.ID] = cancel
 	e.mu.Unlock()
 
@@ -270,7 +302,27 @@ func (e *Engine) start(j model.Job, steps []Step) {
 		}()
 
 		e.run(runCtx, j, steps)
+		e.dropTopicLater(j.ID)
 	}()
+	return true
+}
+
+// dropTopicLater forgets a finished job's stream once the linger has passed. A
+// job left running or parked by a shutdown keeps its topic: it is not over.
+func (e *Engine) dropTopicLater(id model.JobID) {
+	if e.deps.Hub == nil {
+		return
+	}
+	final, err := e.deps.Store.Jobs().Get(context.WithoutCancel(e.shutdown), id)
+	if err != nil || !final.State.Terminal() {
+		return
+	}
+	linger := e.deps.TopicLinger
+	if linger <= 0 {
+		linger = DefaultTopicLinger
+	}
+	hub := e.deps.Hub
+	time.AfterFunc(linger, func() { hub.Drop(Topic(id)) })
 }
 
 // run executes a job's steps, persisting before and after each one.
@@ -288,11 +340,16 @@ func (e *Engine) run(ctx context.Context, j model.Job, steps []Step) {
 		// The cancel check is at the step boundary and nowhere else (JOB-04).
 		// Cancelling inside a step would leave exactly the ambiguity this
 		// engine exists to avoid.
-		if cancelled, reason := e.cancelRequested(ctx, j); cancelled {
-			j.State = model.JobCancelled
-			j.FinishedAt = e.deps.Now().UTC()
-			j = e.save(ctx, j)
-			e.publish(j, steps[i].Name, model.StepPending, reason)
+		cancelled, reason := e.cancelRequested(ctx, j)
+		if e.shutdown.Err() != nil && !cancelled {
+			// The process is going away at a boundary and nobody asked for a
+			// cancel. The job stays as it is for Resume.
+			e.deps.Logger.Info("job interrupted by shutdown at a step boundary",
+				slog.String("job", string(j.ID)))
+			return
+		}
+		if cancelled {
+			e.finishCancelled(j, steps[i].Name, model.StepPending, reason)
 			return
 		}
 
@@ -309,6 +366,14 @@ func (e *Engine) run(ctx context.Context, j model.Job, steps []Step) {
 		switch {
 		case err == nil:
 			j.Steps[i].State = model.StepDone
+		case errors.Is(err, context.Canceled) && ctx.Err() != nil && e.shutdown.Err() == nil:
+			// The operator cancelled while the step was in flight. The step was
+			// interrupted, so what it did is unknown; the record says so, and
+			// the job ends cancelled so that no restart resumes it.
+			j.Steps[i].State = model.StepFailed
+			j.Steps[i].Detail = "cancelled while this step was running; it may or may not have taken effect"
+			e.finishCancelled(j, steps[i].Name, model.StepFailed, j.Steps[i].Detail)
+			return
 		case errors.Is(err, context.Canceled) && ctx.Err() != nil:
 			// The process is shutting down mid-step. Leave the step marked
 			// running and the job marked running: what happens next is
@@ -338,13 +403,23 @@ func (e *Engine) run(ctx context.Context, j model.Job, steps []Step) {
 	e.publish(j, "", model.StepDone, "")
 }
 
+// finishCancelled records the end of an operator-cancelled job. It writes with
+// a context that survives the cancel, which is the very thing that just fired.
+func (e *Engine) finishCancelled(j model.Job, step string, stepState model.StepState, reason string) {
+	j.State = model.JobCancelled
+	j.FinishedAt = e.deps.Now().UTC()
+	j = e.save(context.WithoutCancel(e.shutdown), j)
+	e.publish(j, step, stepState, reason)
+}
+
 // cancelRequested re-reads the record, because a cancel arrives through the
-// store from an HTTP handler rather than through a channel.
+// store from an HTTP handler rather than through a channel. A cancelled context
+// alone does not count: it is also what a process shutdown looks like.
 func (e *Engine) cancelRequested(ctx context.Context, j model.Job) (bool, string) {
-	if ctx.Err() != nil {
+	if ctx.Err() != nil && e.shutdown.Err() == nil {
 		return true, "the job was cancelled"
 	}
-	current, err := e.deps.Store.Jobs().Get(ctx, j.ID)
+	current, err := e.deps.Store.Jobs().Get(context.WithoutCancel(ctx), j.ID)
 	if err != nil {
 		return false, ""
 	}
@@ -468,7 +543,9 @@ func (e *Engine) resumeJob(ctx context.Context, j model.Job, steps []Step) {
 		return
 	}
 	j = e.save(ctx, j)
-	e.start(j, steps)
+	if !e.start(j, steps) {
+		e.release(j.Cluster, j.ID)
+	}
 }
 
 // park stops a job and says what a person has to decide.
@@ -498,9 +575,19 @@ func (e *Engine) Cancel(ctx context.Context, id model.JobID) (model.Job, error) 
 	}
 
 	j.CancelRequested = true
+	if j.State == model.JobParked {
+		// Nothing runs a parked job, so there is no step boundary to wait for:
+		// the cancel is the end of it.
+		j.State = model.JobCancelled
+		j.FinishedAt = e.deps.Now().UTC()
+	}
 	stored, err := e.deps.Store.Jobs().Put(ctx, j)
 	if err != nil {
 		return model.Job{}, err
+	}
+	if stored.State == model.JobCancelled {
+		e.publish(stored, "", "", "cancelled while parked")
+		e.dropTopicLater(stored.ID)
 	}
 
 	// The stored flag is what the loop reads at the boundary; the context
@@ -664,6 +751,7 @@ func (e *Engine) Close() error {
 		return nil
 	}
 	e.closed = true
+	e.shutdownCancel()
 	cancels := make([]context.CancelFunc, 0, len(e.running))
 	for _, cancel := range e.running {
 		cancels = append(cancels, cancel)

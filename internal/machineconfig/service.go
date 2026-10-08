@@ -59,11 +59,17 @@ type Service struct {
 	// node can answer, and it would go stale the moment somebody rebooted the
 	// node outside holzkube-manager.
 	staged map[model.MachineID]stagedRecord
+	seq    uint64
 }
 
 type stagedRecord struct {
 	At     time.Time
 	Digest string
+
+	// applying marks a claim whose RPC is still in flight. It blocks a second
+	// staged apply but is not yet something the screen may report as waiting.
+	applying bool
+	seq      uint64
 }
 
 // New builds a service.
@@ -134,7 +140,7 @@ func (s *Service) Get(ctx context.Context, id model.MachineID) (View, error) {
 	}
 
 	s.mu.Lock()
-	if rec, ok := s.staged[id]; ok {
+	if rec, ok := s.staged[id]; ok && !rec.applying {
 		v.StagedPending = true
 		v.StagedAt = rec.At
 	}
@@ -219,20 +225,44 @@ func (s *Service) Apply(ctx context.Context, id model.MachineID, patches []strin
 		return talos.ApplyResult{}, ErrDryRun
 	}
 
+	// The pending check and the marker are one step under the lock. Checking
+	// first and recording after the (slow) RPC let two concurrent staged applies
+	// both see "nothing pending", and Talos would keep exactly one of them.
+	var commit func(details string)
+	var abort func()
 	if mode == ModeStaged {
-		s.mu.Lock()
-		rec, pending := s.staged[id]
-		s.mu.Unlock()
-
-		if pending {
-			return talos.ApplyResult{}, fmt.Errorf(
-				"%w: one was staged at %s. Talos would replace it without saying so, and exactly "+
-					"one of the two changes would happen. Reboot the node to apply the first, or "+
-					"apply this one immediately instead",
-				ErrStagedAlreadyPending, rec.At.Format(time.RFC3339))
+		var err error
+		commit, abort, err = s.reserveStaged(id)
+		if err != nil {
+			return talos.ApplyResult{}, err
 		}
 	}
 
+	result, err := s.apply(ctx, id, patches, mode)
+	if err != nil {
+		if abort != nil {
+			abort()
+		}
+		return talos.ApplyResult{}, err
+	}
+
+	if commit != nil {
+		commit(result.Details)
+	}
+
+	// A reboot or a try applies now and leaves nothing staged, so anything
+	// this process was remembering about the node is no longer true.
+	if mode == ModeReboot || mode == ModeTry {
+		s.mu.Lock()
+		delete(s.staged, id)
+		s.mu.Unlock()
+	}
+
+	return result, nil
+}
+
+// apply is the RPC half of Apply: read, patch, send.
+func (s *Service) apply(ctx context.Context, id model.MachineID, patches []string, mode Mode) (talos.ApplyResult, error) {
 	base, err := s.read(ctx, id)
 	if err != nil {
 		return talos.ApplyResult{}, err
@@ -248,26 +278,47 @@ func (s *Service) Apply(ctx context.Context, id model.MachineID, patches []strin
 	}
 	defer cc.Close() //nolint:errcheck // the apply's verdict is not a close error's to change
 
-	result, err := cc.ApplyConfigurationWithMode(ctx, patched, string(mode))
-	if err != nil {
-		return talos.ApplyResult{}, err
+	return cc.ApplyConfigurationWithMode(ctx, patched, string(mode))
+}
+
+// reserveStaged refuses when a staged configuration is pending and otherwise
+// records the claim in the same critical section, so a second caller is refused
+// while the first is still talking to the node. commit fills the claim in once
+// the node accepted it; abort withdraws it when the apply failed -- only if it is
+// still this call's claim, which a reboot job clearing it in between would have
+// made untrue.
+func (s *Service) reserveStaged(id model.MachineID) (commit func(details string), abort func(), err error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if rec, pending := s.staged[id]; pending {
+		return nil, nil, fmt.Errorf(
+			"%w: one was staged at %s. Talos would replace it without saying so, and exactly "+
+				"one of the two changes would happen. Reboot the node to apply the first, or "+
+				"apply this one immediately instead",
+			ErrStagedAlreadyPending, rec.At.Format(time.RFC3339))
 	}
 
-	if mode == ModeStaged {
+	s.seq++
+	mine := s.seq
+	s.staged[id] = stagedRecord{At: s.deps.Now().UTC(), seq: mine, applying: true}
+
+	commit = func(details string) {
 		s.mu.Lock()
-		s.staged[id] = stagedRecord{At: s.deps.Now().UTC(), Digest: result.Details}
-		s.mu.Unlock()
+		defer s.mu.Unlock()
+		if rec, ok := s.staged[id]; ok && rec.seq == mine {
+			rec.Digest, rec.applying = details, false
+			s.staged[id] = rec
+		}
 	}
-
-	// A reboot or a try applies now and leaves nothing staged, so anything
-	// this process was remembering about the node is no longer true.
-	if mode == ModeReboot || mode == ModeTry {
+	abort = func() {
 		s.mu.Lock()
-		delete(s.staged, id)
-		s.mu.Unlock()
+		defer s.mu.Unlock()
+		if rec, ok := s.staged[id]; ok && rec.seq == mine {
+			delete(s.staged, id)
+		}
 	}
-
-	return result, nil
+	return commit, abort, nil
 }
 
 // ClearStaged forgets that a node has a staged configuration.
