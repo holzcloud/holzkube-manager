@@ -42,14 +42,14 @@ describe('useStream', () => {
     const { result, rerender } = renderHook(({ topics }) => useStream(topics), {
       initialProps: { topics: ['kubelet'] },
     })
-    const first = FakeSource.all[0]
+    const first = FakeSource.all[0] as FakeSource
     act(() => {
       first.send('kubelet', 1, 'one')
       first.send('kubelet', 2, 'two')
     })
 
     rerender({ topics: ['kubelet', 'dmesg'] })
-    const second = FakeSource.all[1]
+    const second = FakeSource.all[1] as FakeSource
     expect(first.closed).toBe(true)
     act(() => {
       second.send('kubelet', 1, 'one')
@@ -58,13 +58,13 @@ describe('useStream', () => {
       second.send('dmesg', 1, 'boot')
     })
 
-    expect(result.current.lines.kubelet.map((l) => l.line)).toEqual(['one', 'two', 'three'])
-    expect(result.current.lines.dmesg.map((l) => l.line)).toEqual(['boot'])
+    expect(result.current.lines.kubelet?.map((l) => l.line)).toEqual(['one', 'two', 'three'])
+    expect(result.current.lines.dmesg?.map((l) => l.line)).toEqual(['boot'])
   })
 
   it('gives frames without a cursor distinct ids, and survives a frame that is not JSON', () => {
     const { result } = renderHook(() => useStream(['kubelet']))
-    const source = FakeSource.all[0]
+    const source = FakeSource.all[0] as FakeSource
     act(() => {
       source.onmessage?.({ data: '{not json', lastEventId: '' } as MessageEvent<string>)
       source.onmessage?.({
@@ -77,7 +77,7 @@ describe('useStream', () => {
       } as MessageEvent<string>)
     })
 
-    const lines = result.current.lines.kubelet
+    const lines = result.current.lines.kubelet ?? []
     expect(lines.map((l) => l.line)).toEqual(['a', 'b'])
     expect(new Set(lines.map((l) => l.id)).size).toBe(2)
   })

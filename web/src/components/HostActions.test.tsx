@@ -13,6 +13,7 @@ import {
 } from '@/components/HostActions'
 import { SudoDialog } from '@/components/SudoDialog'
 import { SESSION_QUERY_KEY } from '@/hooks/useSession'
+import { formatTime } from '@/lib/format'
 import { ProblemError } from '@/lib/problem'
 import { PROBLEM_BASE_URI } from '@/test/problem-fixtures'
 import demo from '../../fixtures/demo.json'
@@ -2173,7 +2174,7 @@ describe('HostOrderStatus', () => {
       order('restart-service'),
       later({}, { started: '2026-09-28T10:00:20Z' }),
       'back',
-      `Restart service — done. holzkube-manager is back, running 0.1.0 since ${new Date('2026-09-28T10:00:20Z').toLocaleTimeString()}.`,
+      `Restart service — done. holzkube-manager is back, running 0.1.0 since ${formatTime('2026-09-28T10:00:20Z')}.`,
       EMERALD,
       true,
     ],
@@ -2191,7 +2192,7 @@ describe('HostOrderStatus', () => {
       order('reboot'),
       later({}, { uptime: 60 }),
       'back',
-      `Restart host — done. The host restarted and holzkube-manager is back; up since ${new Date('2026-09-28T10:04:00Z').toLocaleTimeString()}.`,
+      `Restart host — done. The host restarted and holzkube-manager is back; up since ${formatTime('2026-09-28T10:04:00Z')}.`,
       EMERALD,
       true,
     ],
@@ -2200,7 +2201,7 @@ describe('HostOrderStatus', () => {
       order('poweroff'),
       later({}, { uptime: 60 }),
       'back',
-      `Shut down host — the host was switched on again and holzkube-manager is back; up since ${new Date('2026-09-28T10:04:00Z').toLocaleTimeString()}.`,
+      `Shut down host — the host was switched on again and holzkube-manager is back; up since ${formatTime('2026-09-28T10:04:00Z')}.`,
       EMERALD,
       true,
     ],
@@ -2411,7 +2412,7 @@ describe('HostOrderStatus', () => {
       expect(box.querySelector('p')?.textContent).toBe(sentence)
       expect(box).toHaveClass(colour)
       expect(box).toHaveTextContent(
-        `Order ${ID} · ${from === 'result' ? 'recorded' : 'placed'} ${new Date(o.placed_at).toLocaleTimeString()}`,
+        `Order ${ID} · ${from === 'result' ? 'recorded' : 'placed'} ${formatTime(o.placed_at)}`,
       )
       expect(within(box).queryByRole('button', { name: 'Dismiss status' }) !== null).toBe(final)
     },
@@ -2618,7 +2619,7 @@ describe('HostOrderStatus', () => {
     status(later({}), order('reboot'), 'started', { from: 'result' })
     // 14-UI-SPEC copy: "recorded {time}" instead of "placed {time}".
     expect(screen.getByRole('status')).toHaveTextContent(
-      `Order ${ID} · recorded ${new Date('2026-09-28T10:00:05Z').toLocaleTimeString()}`,
+      `Order ${ID} · recorded ${formatTime('2026-09-28T10:00:05Z')}`,
     )
     expect(screen.getByRole('status')).not.toHaveTextContent('placed')
   })

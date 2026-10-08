@@ -1,6 +1,7 @@
 import { type KeyboardEvent, type PointerEvent, useEffect, useRef, useState } from 'react'
 import type { Point } from '@/hooks/useLiveSeries'
 import { LIVE_WINDOW_MS } from '@/hooks/useLiveSeries'
+import { formatDateTime, formatTime } from '@/lib/format'
 
 /**
  * The last few minutes of a live reading, as a line (2026-09-26).
@@ -286,7 +287,7 @@ export function spanLabel(ms: number): string {
 /** A point's time, with the day once the chart spans more than a few hours. */
 function stamp(t: number, windowMs: number): string {
   const d = new Date(t)
-  return windowMs > 6 * 60 * 60_000 ? d.toLocaleString() : d.toLocaleTimeString()
+  return windowMs > 6 * 60 * 60_000 ? formatDateTime(d) : formatTime(d)
 }
 
 /**

@@ -70,3 +70,54 @@ function trim(value: number): string {
   if (value >= 10) return String(Number(value.toFixed(1)))
   return String(Number(value.toFixed(2)))
 }
+
+/**
+ * Dates and times, in one fixed locale.
+ *
+ * `toLocaleString()` with no argument prints whatever the browser's language
+ * is, so the same audit row read "10/6/2026, 2:05:09 PM" on one desk and
+ * "06.10.2026, 14:05:09" on the next, and a screenshot in a bug report did not
+ * match the screen it was taken from. The product is English everywhere else
+ * (D-09), so these are en-GB: day first, 24-hour clock, and unambiguous. The
+ * time zone stays the viewer's own -- an operator reading "14:05" means their
+ * clock, not UTC.
+ *
+ * A value that is not a date prints "—" rather than "Invalid Date", which is
+ * what `new Date(undefined).toLocaleString()` produces and what a half-filled
+ * API field would otherwise put on screen.
+ */
+const DATE_TIME = new Intl.DateTimeFormat('en-GB', { dateStyle: 'medium', timeStyle: 'medium' })
+const DATE_ONLY = new Intl.DateTimeFormat('en-GB', { dateStyle: 'medium' })
+const TIME_ONLY = new Intl.DateTimeFormat('en-GB', { timeStyle: 'medium' })
+const COUNT = new Intl.NumberFormat('en-GB')
+
+type DateInput = Date | string | number | null | undefined
+
+function asDate(value: DateInput): Date | null {
+  if (value === null || value === undefined || value === '') return null
+  const date = value instanceof Date ? value : new Date(value)
+  return Number.isNaN(date.getTime()) ? null : date
+}
+
+/** formatDateTime prints a moment as 6 Oct 2026, 14:05:09. */
+export function formatDateTime(value: DateInput): string {
+  const date = asDate(value)
+  return date === null ? '—' : DATE_TIME.format(date)
+}
+
+/** formatDate prints a day as 6 Oct 2026. */
+export function formatDate(value: DateInput): string {
+  const date = asDate(value)
+  return date === null ? '—' : DATE_ONLY.format(date)
+}
+
+/** formatTime prints a time of day as 14:05:09. */
+export function formatTime(value: DateInput): string {
+  const date = asDate(value)
+  return date === null ? '—' : TIME_ONLY.format(date)
+}
+
+/** formatCount prints a whole number with grouping: 1,234,567. */
+export function formatCount(value: number): string {
+  return Number.isFinite(value) ? COUNT.format(value) : '—'
+}

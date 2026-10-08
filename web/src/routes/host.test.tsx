@@ -13,7 +13,7 @@ import {
   type SystemStatus,
 } from '@/api'
 import { forget } from '@/hooks/useLiveSeries'
-import { formatBytes } from '@/lib/format'
+import { formatBytes, formatDateTime } from '@/lib/format'
 import { HostPage, HostView } from './host'
 
 /**
@@ -552,7 +552,7 @@ describe('the Device card', () => {
     // 26090 s is 7 h 14 min; the boot instant is observed_at minus that.
     const up = cellOf('Up since boot')
     expect(up).toHaveTextContent('7 h 14 min')
-    const since = new Date(Date.parse('2026-09-28T10:00:03Z') - 26090 * 1000).toLocaleString()
+    const since = formatDateTime(Date.parse('2026-09-28T10:00:03Z') - 26090 * 1000)
     expect(up).toHaveTextContent(`since ${since}`)
   })
 
@@ -1056,7 +1056,7 @@ describe('the Service card', () => {
     expect(within(cellOf('Version')).getByText('0.1.0')).toHaveClass('font-mono')
     const running = cellOf('Running for')
     expect(running).toHaveTextContent('2 h 0 min')
-    expect(running).toHaveTextContent(`since ${new Date('2026-09-28T08:00:00Z').toLocaleString()}`)
+    expect(running).toHaveTextContent(`since ${formatDateTime('2026-09-28T08:00:00Z')}`)
 
     const dataDir = cellOf('Data directory')
     expect(within(dataDir).getByText('/var/lib/holzkube-manager')).toHaveClass('font-mono')
@@ -1171,7 +1171,7 @@ describe('the Service card', () => {
       }
       // Checked 23 min before the reading; the absolute time beside it.
       expect(update).toHaveTextContent(
-        `Checked 23m ago · ${new Date('2026-09-28T09:37:03Z').toLocaleString()}`,
+        `Checked 23m ago · ${formatDateTime('2026-09-28T09:37:03Z')}`,
       )
       if (installed !== null) {
         expect(

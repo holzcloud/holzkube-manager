@@ -12,7 +12,7 @@ import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { merge, useChartRange } from '@/hooks/useChartRange'
 import { useLiveSeries } from '@/hooks/useLiveSeries'
-import { formatBytes, formatCores } from '@/lib/format'
+import { formatBytes, formatCores, formatDate, formatDateTime } from '@/lib/format'
 import { kubernetesRoute } from '@/routes/kubernetes'
 import { APPS_POLL_INTERVAL_MS } from '@/routes/kubernetes/apps'
 
@@ -125,11 +125,7 @@ export function AppDetailPage() {
               <StatTile
                 label="Restarts"
                 value={d.app.restarts}
-                hint={
-                  d.created_at
-                    ? `created ${new Date(d.created_at).toLocaleDateString()}`
-                    : undefined
-                }
+                hint={d.created_at ? `created ${formatDate(d.created_at)}` : undefined}
               />
             </div>
 
@@ -242,7 +238,7 @@ export function AppDetailPage() {
                             <span className="text-muted-foreground text-xs">
                               {e.object}
                               {e.count > 1 && ` · ${e.count}×`}
-                              {e.last_seen && ` · ${new Date(e.last_seen).toLocaleString()}`}
+                              {e.last_seen && ` · ${formatDateTime(e.last_seen)}`}
                             </span>
                           </p>
                           <p className="break-words text-muted-foreground text-xs">{e.message}</p>

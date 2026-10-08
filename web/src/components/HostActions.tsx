@@ -41,6 +41,7 @@ import {
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { formatTime } from '@/lib/format'
 import { cn } from '@/lib/utils'
 
 /**
@@ -928,7 +929,7 @@ const NOT_DONE: Record<HostAction, ReactNode> = {
 }
 
 function timeOf(ms: number): string {
-  return new Date(ms).toLocaleTimeString()
+  return formatTime(ms)
 }
 
 /**
@@ -1230,8 +1231,7 @@ export function HostOrderStatus({
       </p>
       <p className="mt-1 text-xs tabular-nums">
         Order <span className="font-mono">{order.id}</span> ·{' '}
-        {followed.from === 'result' ? 'recorded' : 'placed'}{' '}
-        {new Date(order.placed_at).toLocaleTimeString()}
+        {followed.from === 'result' ? 'recorded' : 'placed'} {formatTime(order.placed_at)}
       </p>
       {isFinal(phase) && (
         <Button variant="ghost" size="sm" className="mt-2" onClick={onDismiss}>

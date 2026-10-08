@@ -5,6 +5,7 @@ import { api, type Job, type JobState } from '@/api'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { formatDateTime } from '@/lib/format'
 import { cn } from '@/lib/utils'
 import { formatDuration, medianSeconds, secondsBetween, useElapsedSeconds } from '@/lib/waiting'
 import { authenticatedRoute } from '@/routes/__root'
@@ -145,7 +146,7 @@ function JobCard({ job, typical }: { job: Job; typical: number | null }) {
         <div>
           <CardTitle className="text-base">{job.kind}</CardTitle>
           <p className="font-mono text-xs text-muted-foreground">
-            {job.machine.slice(0, 8)} {new Date(job.created_at).toLocaleString()}
+            {job.machine.slice(0, 8)} {formatDateTime(job.created_at)}
             {job.actor !== '' && ` by ${job.actor}`}
           </p>
 

@@ -21,6 +21,7 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { useStream } from '@/hooks/useStream'
+import { formatDateTime } from '@/lib/format'
 import { authenticatedRoute } from '@/routes/__root'
 import { MACHINE_POLL_INTERVAL_MS } from '@/routes/nodes'
 
@@ -52,9 +53,9 @@ export function LastAnswered({ machine }: { machine: Machine }) {
 
   return (
     <p className="text-sm text-amber-700 dark:text-amber-300">
-      This node last answered {new Date(machine.seen_at).toLocaleString()}. If that is recent and
-      the readings below are not, the machine is reachable and something on it is not responding —
-      which is a different thing from a machine that is down.
+      This node last answered {formatDateTime(machine.seen_at)}. If that is recent and the readings
+      below are not, the machine is reachable and something on it is not responding — which is a
+      different thing from a machine that is down.
     </p>
   )
 }
@@ -109,7 +110,7 @@ export function NodeDetailPage() {
           </div>
           <p className="font-mono text-xs text-muted-foreground">{m.id}</p>
           <p className="text-sm text-muted-foreground">
-            In the inventory since {new Date(m.adopted_at).toLocaleString()}.{' '}
+            In the inventory since {formatDateTime(m.adopted_at)}.{' '}
             <Link to="/nodes" className="underline">
               Back to all nodes
             </Link>

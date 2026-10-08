@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { AlertTriangle } from 'lucide-react'
 import { api, type Cluster } from '@/api'
+import { formatDate } from '@/lib/format'
 import { cn } from '@/lib/utils'
 
 /**
@@ -63,7 +64,7 @@ function ClusterCertificateWarning({ cluster }: { cluster: Cluster }) {
         {!expired && (
           <p className="mt-0.5 text-xs opacity-80">
             {cluster.client_cert_days_left} day{cluster.client_cert_days_left === 1 ? '' : 's'}{' '}
-            left, expiring {new Date(cluster.client_cert_not_after).toLocaleDateString()}.
+            left, expiring {formatDate(cluster.client_cert_not_after)}.
           </p>
         )}
       </div>

@@ -33,7 +33,14 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { merge, useChartRange } from '@/hooks/useChartRange'
 import { type Series, useLiveSeries } from '@/hooks/useLiveSeries'
 import { useSession } from '@/hooks/useSession'
-import { formatBytes, formatPercent, formatRate, formatUptime } from '@/lib/format'
+import {
+  formatBytes,
+  formatDateTime,
+  formatPercent,
+  formatRate,
+  formatTime,
+  formatUptime,
+} from '@/lib/format'
 import { authenticatedRoute } from '@/routes/__root'
 
 /**
@@ -194,7 +201,7 @@ export function HostView({
       {waitingFor === null && isStale && (
         <p className="rounded-md border border-amber-600/40 bg-amber-600/10 px-3 py-2 text-sm text-amber-700 dark:text-amber-300">
           holzkube-manager did not answer the latest request. What you see is its reading from{' '}
-          {observed.toLocaleTimeString()}. {stale instanceof Error ? stale.message : ''}
+          {formatTime(observed)}. {stale instanceof Error ? stale.message : ''}
         </p>
       )}
       {health.state === 'warn' && <WarningNotice health={health} />}
@@ -309,7 +316,7 @@ export function HostView({
                     <>
                       {formatUptime(v)}{' '}
                       <span className="text-xs text-muted-foreground">
-                        since {new Date(observed.getTime() - v * 1000).toLocaleString()}
+                        since {formatDateTime(observed.getTime() - v * 1000)}
                       </span>
                     </>
                   )}
@@ -323,7 +330,7 @@ export function HostView({
         <LiveSection host={host} chart={chart} history={history} />
 
         <p className="text-xs text-muted-foreground">
-          Read {observed.toLocaleTimeString()}, every 3 s while this page is open.
+          Read {formatTime(observed)}, every 3 s while this page is open.
           {rates !== null && ` Rates are over the last ${rates.toFixed(1)} s.`}
           {' History is sampled every 15 s.'}
         </p>
@@ -392,7 +399,7 @@ function ServiceCard({ host, observed }: { host: Host; observed: Date }) {
           <dd className="min-w-0 break-words">
             {formatUptime(s.uptime_seconds)}{' '}
             <span className="text-xs text-muted-foreground">
-              since {new Date(s.started_at).toLocaleString()}
+              since {formatDateTime(s.started_at)}
             </span>
           </dd>
 
@@ -465,7 +472,7 @@ function UpdateCheck({
         {outcomeSentence(u)}
       </p>
       <p className="text-xs text-muted-foreground">
-        Checked {ago(u.checked_at, observed)} · {new Date(u.checked_at).toLocaleString()}
+        Checked {ago(u.checked_at, observed)} · {formatDateTime(u.checked_at)}
       </p>
       {(u.installed !== null || u.latest !== null) && (
         <p className="text-xs text-muted-foreground">

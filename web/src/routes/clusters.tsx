@@ -13,6 +13,7 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { formatDate } from '@/lib/format'
 import { authenticatedRoute } from '@/routes/__root'
 
 /**
@@ -147,7 +148,7 @@ export function ClusterCard({ cluster }: { cluster: Cluster }) {
             */}
             {cluster.client_cert_days_left <= 0 ? (
               <span className="text-red-700 dark:text-red-300">
-                expired {new Date(cluster.client_cert_not_after).toLocaleDateString()}
+                expired {formatDate(cluster.client_cert_not_after)}
               </span>
             ) : (
               <span
@@ -158,7 +159,7 @@ export function ClusterCard({ cluster }: { cluster: Cluster }) {
                 }
               >
                 {cluster.client_cert_days_left} days left (
-                {new Date(cluster.client_cert_not_after).toLocaleDateString()})
+                {formatDate(cluster.client_cert_not_after)})
               </span>
             )}
           </dd>
