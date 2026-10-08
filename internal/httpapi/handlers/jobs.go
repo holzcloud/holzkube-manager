@@ -265,7 +265,7 @@ func resetPreview(d httpapi.Deps) http.HandlerFunc {
 // checked in upgrade.go -- and a typo in either would produce a token that
 // never validates, which reads to an operator as a confirmation dialog that
 // simply does not work.
-const ActionRemoveFromCluster = "node.remove-from-cluster"
+const ActionRemoveFromCluster = string(model.JobRemoveFromCluster)
 
 // typedPhrase says, for every action this route will issue a token for,
 // whether the operator has to type the machine's hostname first.

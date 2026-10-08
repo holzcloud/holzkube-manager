@@ -42,8 +42,6 @@ var clientNotCalledByAScreen = map[string]string{
 	"clusters.get": "the interface reads the cluster LIST and never one cluster alone; this " +
 		"member exists for callers of the client that are not screens. It is dead weight in " +
 		"the browser bundle rather than a missing button, which is a different repair.",
-	"jobs.get": "the jobs screen polls the list and a job's detail arrives over the stream, so " +
-		"a single-job read has no caller in the interface.",
 	"patches.get": "the config screen reads a patch out of the list it already holds rather " +
 		"than fetching one by id.",
 }

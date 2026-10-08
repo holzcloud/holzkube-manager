@@ -93,6 +93,12 @@ const (
 	// JobReset wipes a node. It is the most destructive thing this product
 	// does.
 	JobReset JobKind = "node.reset"
+
+	// JobRemoveFromCluster takes a node out of its cluster for good: leave
+	// etcd, wait for the raft to settle, wipe the system disk, forget the
+	// record. The string is also the confirmable action's name, so one token
+	// vocabulary covers the dialog and the job.
+	JobRemoveFromCluster JobKind = "node.remove-from-cluster"
 )
 
 // StepState is where one step of a job stands.

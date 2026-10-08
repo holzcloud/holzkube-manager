@@ -826,26 +826,22 @@ var routeBudgets = slices.Concat([]routeBudget{
 	{
 		route: "POST /api/v1/machines/{id}/remove-from-cluster",
 		calls: []upstreamCall{
-			{name: "NewClusterClient: Version", class: nodeProbeCall},
+			{name: "NewClusterClient: Version (a peer, or the node itself, for the membership)", class: nodeProbeCall},
 			{name: "EtcdMemberList (control-plane nodes only -- does the cluster survive this)", class: nodeFastReadCall},
-			{name: "EtcdLeaveCluster (control-plane nodes only)", class: nodeMutationCall},
-			{name: "Reset", class: nodeMutationCall},
+			{name: "liveness: NewClusterClient Version (per voter, concurrently)", class: nodeProbeCall},
+			{name: "liveness: EtcdStatus (per voter, concurrently)", class: nodeFastReadCall},
 		},
 		routeDeadline: handlers.EtcdRouteBudget,
 		verdict:       withinBudget,
-		clipping:      clipped,
-		clippingRationale: "Two mutations in series, each with a thirty-second ceiling, and the " +
-			"route gives them forty-five between them. That is not a route hoping they are " +
-			"quick: both are calls that *initiate* -- the etcd leave returns when the member " +
-			"has been removed from the membership, and the reset returns when the node has " +
-			"accepted it, neither waits for the work -- so the ceilings are for a node that is " +
-			"barely answering. A removal cut at forty-five seconds is a node that could not be " +
-			"told to leave etcd, and stopping there is better than wiping it anyway.",
-		why: "The node leaves etcd and is then wiped, in that order and on one connection. " +
-			"Doing the removal from another node while this one still runs leaves a member " +
-			"that believes it is in a cluster that has forgotten it. The membership read in " +
-			"front of both is what decides whether the cluster survives losing this node, and " +
-			"it is first because a refusal after the etcd leave would be a refusal in name.",
+		clipping:      uncut,
+		why: "The route submits a job and answers 202. What it does in the request is the quorum " +
+			"rule for a control-plane node: read etcd's membership and ask each voter whether it " +
+			"answers, so that a refusal is an immediate 409 and not a job that fails a moment " +
+			"later. A worker makes no upstream call here. The etcd leave, the settle wait, the " +
+			"reset and the forget all happen in the job, on the engine's context and not on " +
+			"this request's -- which is the point of the change: they used to run here, under " +
+			"this route's forty-five seconds, and a client that went away or a budget that " +
+			"expired left a node out of etcd and not wiped.",
 	},
 	{
 		route: "POST /api/v1/clusters/{id}/client-certificate",
