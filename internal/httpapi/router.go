@@ -87,6 +87,13 @@ type Route struct {
 	// A mutating route without one would execute unlogged.
 	Action string
 
+	// AuditRead records a GET in the audit archive. Reads are not audited by
+	// default -- an archive that is never pruned cannot take every poll -- but
+	// a read that hands out cluster PKI, the etcd database or a bundle of logs
+	// is a disclosure, and the session that did it should be on the record.
+	// It requires an Action; New refuses the combination without one.
+	AuditRead bool
+
 	// Streaming declares that this route writes a response over time rather
 	// than at once -- an SSE stream today, and whatever phase 6 hangs job
 	// progress on.
@@ -345,6 +352,10 @@ func New(d Deps) http.Handler {
 		// startup, from the one place that assembles the table; a route table
 		// that contradicts itself is a programming error and the right moment
 		// to find it is before the listener opens.
+		if rt.AuditRead && rt.Action == "" {
+			panic("httpapi: route " + rt.Method + " " + rt.Pattern +
+				" asks for its read to be audited and names no Action; the record would have no name.")
+		}
 		if rt.Streaming && rt.Destructive {
 			panic("httpapi: route " + rt.Method + " " + rt.Pattern +
 				" is both Streaming and Destructive. The sudo gate buffers a response until the " +
@@ -445,7 +456,7 @@ func (d Deps) wrapRoute(rt Route) http.Handler {
 			func(w http.ResponseWriter, r *http.Request) {
 				WriteProblem(w, r, Unauthenticated())
 			}),
-		middleware.Audit(auditAdapter{deps: d}, rt.Action, middleware.IsMutating(rt.Method),
+		middleware.Audit(auditAdapter{deps: d}, rt.Action, middleware.IsMutating(rt.Method) || rt.AuditRead,
 			func(w http.ResponseWriter, r *http.Request, err error) {
 				WriteInternal(w, r, d.Logger, err)
 			}),

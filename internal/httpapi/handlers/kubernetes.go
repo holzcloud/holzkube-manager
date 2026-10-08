@@ -207,6 +207,7 @@ func KubernetesRoutes(d httpapi.Deps) []httpapi.Route {
 			// to hand out operator roles.
 			RequiresSession: true,
 			MinRole:         model.RoleReader,
+			AuditRead:       true,
 			Action:          "cluster.kubernetes-logs",
 			Handler:         handler(kubernetesLogs(d)),
 		},

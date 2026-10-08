@@ -124,6 +124,8 @@ func InventoryRoutes(d httpapi.Deps) []httpapi.Route {
 			Pattern:         "/api/v1/clusters/{id}/talosconfig",
 			RequiresSession: true,
 			MinRole:         model.RoleAdmin,
+			AuditRead:       true,
+			Action:          "cluster.talosconfig",
 			Handler:         handler(clusterTalosconfig(d)),
 		},
 		{
@@ -134,6 +136,7 @@ func InventoryRoutes(d httpapi.Deps) []httpapi.Route {
 			Pattern:         "/api/v1/clusters/{id}/kubeconfig",
 			RequiresSession: true,
 			MinRole:         model.RoleAdmin,
+			AuditRead:       true,
 			Action:          "cluster.kubeconfig",
 			Handler:         handler(clusterKubeconfig(d)),
 		},

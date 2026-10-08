@@ -351,3 +351,35 @@ func TestAdoptingAWorkerIsNamedNotGeneric(t *testing.T) {
 			p.Code, httpapi.CodeNotControlPlane)
 	}
 }
+
+// TestHandingOutClusterCredentialsIsOnRecord: audit ran for mutating methods
+// only, so the kubeconfig's documented record and the talosconfig's were never
+// written -- a stolen session could take both without a trace.
+func TestHandingOutClusterCredentialsIsOnRecord(t *testing.T) {
+	c := newInventoryHarness(t)
+	cluster := c.adopt(t)
+	id, _ := cluster["id"].(string)
+
+	resp, raw := c.do(t, http.MethodGet, "/api/v1/clusters/"+id+"/talosconfig", nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("talosconfig: %d (%s)", resp.StatusCode, raw)
+	}
+
+	resp, raw = c.do(t, http.MethodGet, "/api/v1/audit?action=cluster.talosconfig", nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("audit: %d (%s)", resp.StatusCode, raw)
+	}
+	var ab auditBody
+	if err := json.Unmarshal(raw, &ab); err != nil {
+		t.Fatalf("decode audit: %v (%s)", err, raw)
+	}
+	found := false
+	for _, r := range ab.Items {
+		if r.Action == "cluster.talosconfig" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("downloading the talosconfig left no audit record: %s", raw)
+	}
+}

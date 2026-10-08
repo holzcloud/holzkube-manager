@@ -402,3 +402,17 @@ func TestABogusBearerHeaderDoesNotWaiveSudoForASession(t *testing.T) {
 		t.Errorf("a session plus a made-up bearer got %d (%s), want 428 sudo.required", got, body)
 	}
 }
+
+func TestAnAuditedReadWithoutAnActionCannotBeRegistered(t *testing.T) {
+	t.Parallel()
+
+	defer func() {
+		if recover() == nil {
+			t.Error("a read that asks to be audited but has no action name was registered")
+		}
+	}()
+	_ = httpapi.New(httpapi.Deps{Routes: []httpapi.Route{{
+		Method: http.MethodGet, Pattern: "/api/v1/x", RequiresSession: true,
+		MinRole: model.RoleAdmin, AuditRead: true, Handler: http.NotFoundHandler(),
+	}}})
+}

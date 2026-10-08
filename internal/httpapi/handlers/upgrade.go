@@ -155,6 +155,7 @@ func UpgradeRoutes(d httpapi.Deps) []httpapi.Route {
 			Pattern:         "/api/v1/clusters/{id}/etcd/snapshot",
 			RequiresSession: true,
 			MinRole:         model.RoleAdmin,
+			AuditRead:       true,
 			Streaming:       true,
 			Action:          "etcd.snapshot",
 			Handler:         handler(etcdSnapshot(d)),

@@ -3843,12 +3843,15 @@ to different places.
 Both respond `application/yaml` with a `Content-Disposition` filename and
 `Cache-Control: no-store`.
 
-**The kubeconfig is audited and the talosconfig is not**, under
-`cluster.kubeconfig` with an empty parameter allowlist — the cluster is in the
-path and there is no body. The asymmetry is deliberate: what the kubeconfig
-hands over is `system:masters` on somebody's cluster, it is not revocable from
-here (a Kubernetes CA rotation is what withdraws it), and "who asked for this and
-when" is exactly what an archive exists to answer.
+**Both are audited** -- `cluster.kubeconfig` and `cluster.talosconfig`, each with
+an empty parameter allowlist: the cluster is in the path and there is no body.
+What they hand over is `system:masters` on somebody's cluster and an operator
+credential for the Talos API; neither is revocable from here (a CA rotation is
+what withdraws them), and "who asked for this and when" is exactly what an
+archive exists to answer. Until 2026-10-08 the code audited neither: audit ran
+for mutating methods only, so the kubeconfig's documented record was never
+written. The same now holds for the etcd snapshot, the support bundle and pod
+logs, through the route's `AuditRead` flag.
 
 ## Streaming
 
