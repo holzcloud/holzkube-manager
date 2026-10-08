@@ -6,8 +6,10 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"net"
 	"net/http"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -298,8 +300,38 @@ type Deps struct {
 
 // SSOOnly reports whether the local password is refused for this request. A nil
 // IsSSOOnly means no host is SSO-only.
+//
+// A loopback Host header from a peer that is not on loopback is refused as well.
+// SSO-only is a property of the Host header, and the header is the one thing a
+// remote caller chooses: "Host: localhost" reached the password routes of an
+// instance whose public name was SSO-only. Nobody legitimate gets to a remote
+// daemon under the name localhost.
 func (d Deps) SSOOnly(r *http.Request) bool {
+	if loopbackName(r.Host) && !peerIsLoopback(r) {
+		return true
+	}
 	return d.IsSSOOnly != nil && d.IsSSOOnly(r.Host)
+}
+
+func loopbackName(host string) bool {
+	if hh, _, err := net.SplitHostPort(host); err == nil {
+		host = hh
+	}
+	h := strings.ToLower(strings.Trim(host, "[]"))
+	if h == "localhost" || strings.HasSuffix(h, ".localhost") {
+		return true
+	}
+	ip := net.ParseIP(h)
+	return ip != nil && ip.IsLoopback()
+}
+
+func peerIsLoopback(r *http.Request) bool {
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		host = r.RemoteAddr
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }
 
 // tokenAuthenticated reports whether this request was authenticated by a

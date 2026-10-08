@@ -14,6 +14,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/cookiejar"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -415,4 +416,29 @@ func TestAnAuditedReadWithoutAnActionCannotBeRegistered(t *testing.T) {
 		Method: http.MethodGet, Pattern: "/api/v1/x", RequiresSession: true,
 		MinRole: model.RoleAdmin, AuditRead: true, Handler: http.NotFoundHandler(),
 	}}})
+}
+
+// TestALoopbackHostNameFromARemotePeerIsSSOOnly: SSO-only was a property of
+// the Host header, which is the one thing a remote caller picks.
+func TestALoopbackHostNameFromARemotePeerIsSSOOnly(t *testing.T) {
+	t.Parallel()
+
+	d := httpapi.Deps{IsSSOOnly: func(string) bool { return false }}
+	for _, tc := range []struct {
+		host, remote string
+		want         bool
+	}{
+		{"localhost:8443", "203.0.113.9:5555", true},
+		{"127.0.0.1:8443", "203.0.113.9:5555", true},
+		{"[::1]:8443", "203.0.113.9:5555", true},
+		{"localhost:8443", "127.0.0.1:5555", false},
+		{"[::1]:8443", "[::1]:5555", false},
+		{"homeserver.example.com", "203.0.113.9:5555", false},
+	} {
+		r := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", nil)
+		r.Host, r.RemoteAddr = tc.host, tc.remote
+		if got := d.SSOOnly(r); got != tc.want {
+			t.Errorf("Host %q from %q: SSOOnly = %v, want %v", tc.host, tc.remote, got, tc.want)
+		}
+	}
 }
