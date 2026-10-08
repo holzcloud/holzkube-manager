@@ -143,6 +143,58 @@ func (e *scriptEnv) setReleaseWith(daemon, script string, checksumOK bool) {
 			hexSum+"  holzkube-manager_"+fakeRelease+"_linux_amd64.tar.gz\n", 0o644)
 }
 
+// setReleases replaces the release list the curl stub serves with one
+// published release per tag, in the order given (GitHub lists by creation
+// date, which is not version order). Every one carries the same assets (ids
+// 11-13), so the archive set by setRelease is what any of them downloads; a
+// draft is given as "draft:v0.9.0".
+func (e *scriptEnv) setReleases(tags ...string) {
+	e.t.Helper()
+	var parts []string
+	for _, tag := range tags {
+		draft := "false"
+		if strings.HasPrefix(tag, "draft:") {
+			draft, tag = "true", strings.TrimPrefix(tag, "draft:")
+		}
+		v := strings.TrimPrefix(tag, "v")
+		parts = append(parts, `{"tag_name":"`+tag+`","draft":`+draft+`,"prerelease":true,"assets":[`+
+			`{"id":11,"name":"holzkube-manager_`+v+`_linux_arm64.tar.gz"},`+
+			`{"id":12,"name":"holzkube-manager_`+v+`_linux_amd64.tar.gz"},`+
+			`{"id":13,"name":"checksums.txt"}]}`)
+	}
+	e.write(filepath.Join(e.dir, "fixtures", "releases.json"), "["+strings.Join(parts, ",")+"]", 0o644)
+	// checksums.txt must name the archives of these tags.
+	archive, err := os.ReadFile(filepath.Join(e.dir, "fixtures", "archive.tar.gz"))
+	if err != nil {
+		e.t.Fatal(err)
+	}
+	sum := sha256.Sum256(archive)
+	var lines string
+	for _, tag := range tags {
+		v := strings.TrimPrefix(strings.TrimPrefix(tag, "draft:"), "v")
+		for _, a := range []string{"arm64", "amd64"} {
+			lines += hex.EncodeToString(sum[:]) + "  holzkube-manager_" + v + "_linux_" + a + ".tar.gz\n"
+		}
+	}
+	e.write(filepath.Join(e.dir, "fixtures", "checksums.txt"), lines, 0o644)
+}
+
+// countCalls is how many lines of the stub log named by name contain substr.
+func (e *scriptEnv) countCalls(name, substr string) int {
+	e.t.Helper()
+	data, err := os.ReadFile(filepath.Join(e.dir, name))
+	if err != nil {
+		return 0
+	}
+	n := 0
+	for _, l := range strings.Split(string(data), "\n") {
+		if strings.Contains(l, substr) {
+			n++
+		}
+	}
+	return n
+}
+
 func (e *scriptEnv) write(path, content string, mode os.FileMode) {
 	e.t.Helper()
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
@@ -425,6 +477,20 @@ func (e *scriptEnv) wantInstalledNothing(installed string) {
 	}
 }
 
+// badVersion is what the status directory remembers as not healthy; empty
+// when it remembers nothing.
+func (e *scriptEnv) badVersion() string {
+	e.t.Helper()
+	data, err := os.ReadFile(filepath.Join(e.statusDir, "bad-version"))
+	if errors.Is(err, os.ErrNotExist) {
+		return ""
+	}
+	if err != nil {
+		e.t.Fatal(err)
+	}
+	return strings.TrimSpace(string(data))
+}
+
 // binVersion is what the installed binary answers now.
 func (e *scriptEnv) binVersion() string {
 	e.t.Helper()
@@ -512,6 +578,12 @@ case "$url" in
   "$HKM_STUB_HEALTH_URL")
     [[ -n ${HKM_STUB_HEALTH_GATE:-} && -e $HKM_STUB_HEALTH_GATE.armed ]] && gate "$HKM_STUB_HEALTH_GATE"
     [[ ${HKM_STUB_HEALTHY:-1} == 1 ]] || exit 7
+    # HKM_STUB_HEALTH_ALTERNATE=1: answers on the 1st, 3rd, 5th ... call and
+    # fails on the others, so never two healthy answers in a row.
+    if [[ ${HKM_STUB_HEALTH_ALTERNATE:-0} == 1 ]]; then
+      echo x >> "$HKM_STUB_FIXTURES/.health-calls"
+      [[ $(( $(wc -l < "$HKM_STUB_FIXTURES/.health-calls") % 2 )) -eq 1 ]] || exit 7
+    fi
     echo '{"audit_chain":"intact"}' ;;
   *) echo "curl stub: unexpected URL $url" >&2; exit 2 ;;
 esac
@@ -560,16 +632,34 @@ case "$1" in
     [[ -e $HKM_STUB_FIXTURES/.restarted ]] || active=${HKM_STUB_ACTIVE:-$active}
     [[ $active == 1 ]] && exit 0; exit 3 ;;
   show)
-    prop="" prev=""
-    for a in "$@"; do [[ $prev == -p ]] && prop=$a; prev=$a; done
-    case $prop in
-      LoadState) printf '%s\n' "${HKM_STUB_LOAD_STATE-loaded}" ;;
-      ExecStart)
-        for p in ${HKM_STUB_EXEC_PATH-$HOLZKUBE_MANAGER_BIN}; do
-          printf '{ path=%s ; argv[]=%s ; ignore_errors=no ; start_time=[n/a] ; stop_time=[n/a] ; pid=0 ; code=(null) ; status=0/0 }\n' "$p" "$p"
-        done ;;
-      *) echo "systemctl stub: unexpected property $prop" >&2; exit 1 ;;
-    esac
+    # Every -p NAME is answered, one line each, as NAME=value unless --value.
+    props=() prev="" valueonly=0
+    for a in "$@"; do
+      [[ $a == --value ]] && valueonly=1
+      [[ $prev == -p ]] && props+=("$a")
+      prev=$a
+    done
+    for prop in "${props[@]}"; do
+      case $prop in
+        LoadState) v=${HKM_STUB_LOAD_STATE-loaded} ;;
+        ExecStart)
+          v=""
+          for p in ${HKM_STUB_EXEC_PATH-$HOLZKUBE_MANAGER_BIN}; do
+            v+=$(printf '{ path=%s ; argv[]=%s ; ignore_errors=no ; start_time=[n/a] ; stop_time=[n/a] ; pid=0 ; code=(null) ; status=0/0 }' "$p" "$p")$'\n'
+          done
+          v=${v%$'\n'} ;;
+        # HKM_STUB_PID_CHANGE=1: the service restarts between every two
+        # questions, as a crash-looping unit does (a new PID each time).
+        MainPID)
+          v=4242
+          if [[ ${HKM_STUB_PID_CHANGE:-0} == 1 ]]; then
+            echo x >> "$HKM_STUB_FIXTURES/.pids"; v=$((4242 + $(wc -l < "$HKM_STUB_FIXTURES/.pids")))
+          fi ;;
+        NRestarts) v=0 ;;
+        *) echo "systemctl stub: unexpected property $prop" >&2; exit 1 ;;
+      esac
+      if [[ $valueonly == 1 ]]; then printf '%s\n' "$v"; else printf '%s=%s\n' "$prop" "$v"; fi
+    done
     exit 0 ;;
   *) exit 0 ;;
 esac
@@ -985,14 +1075,51 @@ func TestUpdateScriptAsRoot(t *testing.T) {
 		e.wantStatus(OutcomeUpdated, ptr(fakeRelease), ptr(fakeRelease))
 	})
 
-	t.Run("rollback records nothing", func(t *testing.T) {
+	// --rollback takes the lock like any run that changes something and
+	// records "rolled-back" (it used to leave status.json at the previous
+	// run, so the Host page showed an older state than the disk).
+	t.Run("rollback records rolled-back", func(t *testing.T) {
 		t.Parallel()
 		e := newScriptEnv(t, fakeInstalled, true)
 		e.write(e.previous, fakeDaemon("0.0.9"), 0o755)
 		if rc := e.run(true, "--rollback"); rc != 0 {
 			t.Fatalf("exit = %d, want 0", rc)
 		}
-		e.wantNoStatus(e.statusDir)
+		e.wantStatus(OutcomeRolledBack, ptr("0.0.9"), ptr("0.0.9"))
+		if got := e.binVersion(); got != "holzkube-managerd 0.0.9" {
+			t.Errorf("installed binary answers %q, want the previous one", got)
+		}
+	})
+
+	t.Run("rollback takes the lock", func(t *testing.T) {
+		t.Parallel()
+		e := newScriptEnv(t, fakeInstalled, true)
+		if e.flock == "" {
+			t.Skip("no flock here")
+		}
+		e.write(e.previous, fakeDaemon("0.0.9"), 0o755)
+		flockLog := filepath.Join(e.dir, "flock-log")
+		e.extra = append(e.extra, "HKM_STUB_FLOCK_LOG="+flockLog)
+		if rc := e.run(true, "--rollback"); rc != 0 {
+			t.Fatalf("exit = %d, want 0", rc)
+		}
+		if data, _ := os.ReadFile(flockLog); !strings.Contains(string(data), "9") {
+			t.Errorf("--rollback never asked for the lock; flock calls: %q", data)
+		}
+	})
+
+	// After a rollback the version it left is remembered, or the next hourly
+	// run would install it again.
+	t.Run("rollback marks the version it left as bad", func(t *testing.T) {
+		t.Parallel()
+		e := newScriptEnv(t, fakeInstalled, true)
+		e.write(e.previous, fakeDaemon("0.0.9"), 0o755)
+		if rc := e.run(true, "--rollback"); rc != 0 {
+			t.Fatalf("exit = %d, want 0", rc)
+		}
+		if got := e.badVersion(); got != fakeInstalled {
+			t.Errorf("bad-version = %q, want %q", got, fakeInstalled)
+		}
 	})
 
 	t.Run("status directory is a symlink", func(t *testing.T) {

@@ -6,6 +6,15 @@
 #   sudo holzkube-manager-update --check   # nur nachsehen, nichts anfassen
 #   sudo holzkube-manager-update --force   # auch neu installieren, wenn die Version gleich ist
 #   sudo holzkube-manager-update --rollback
+#   sudo holzkube-manager-update --allow-downgrade  # auch auf ein aelteres Release
+#
+# Installiert wird nur, was nach Semver NEUER ist als das Installierte: aus den
+# veroeffentlichten Releases wird das hoechste gewaehlt (nicht das erste der
+# Liste), Tags mit Zusatz (-rc.1, -beta.1) werden uebergangen, und ein
+# aelteres Release ersetzt nie eine neuere Installation, ausser mit
+# --allow-downgrade. Eine Version, die nach dem Update nicht gesund wurde, wird
+# in $STATUS_DIR/bad-version gemerkt und nicht erneut installiert, bis ein
+# neueres Release erscheint oder --force sie ausdruecklich verlangt.
 #
 # Voraussetzungen auf dem Host: curl, tar, python3, systemd. Alle sind auf einem
 # Debian-Standardsystem vorhanden; jq bewusst nicht, weil es das nicht ist.
@@ -99,11 +108,13 @@ esac
 CHECK_ONLY=0
 FORCE=0
 ROLLBACK=0
+ALLOW_DOWNGRADE=0
 for arg in "$@"; do
   case "$arg" in
     --check)    CHECK_ONLY=1 ;;
     --force)    FORCE=1 ;;
     --rollback) ROLLBACK=1 ;;
+    --allow-downgrade) ALLOW_DOWNGRADE=1 ;;
     -h|--help)  awk 'NR == 1 { next } /^#/ { sub(/^# ?/, ""); print; next } { exit }' "$SELF"; exit 0 ;;
     *) echo "FEHLER: unbekannte Option $arg" >&2; exit 1 ;;
   esac
@@ -111,6 +122,71 @@ done
 
 log()  { printf '%s\n' "$*"; }
 fail() { printf 'FEHLER: %s\n' "$*" >&2; exit 1; }
+
+# atomic_install legt $1 als $2 ab, ohne dass $2 je halb geschrieben ist: erst
+# nach $2.new im selben Verzeichnis (dasselbe Dateisystem, sonst waere mv kein
+# rename), auf die Platte, dann mv -f. Ein Absturz oder Stromausfall mitten drin
+# laesst das alte $2 oder das ganze neue, nie ein abgeschnittenes Binary. Bei
+# jedem Hindernis wird $2.new wieder entfernt und 1 geliefert.
+atomic_install() {
+  local src=$1 dst=$2
+  if install -p -o root -g root -m 0755 "$src" "$dst.new" \
+    && { sync "$dst.new" 2>/dev/null || sync; } \
+    && mv -f "$dst.new" "$dst"; then
+    return 0
+  fi
+  rm -f "$dst.new"
+  return 1
+}
+
+# vercmp REMOTE LOCAL: 1, wenn REMOTE nach Semver neuer ist, 0 bei gleich, -1 bei
+# aelter. Ein Installiertes, das sich nicht als X.Y.Z lesen laesst (leer, "keine",
+# ein Dev-Stand), ist kleiner als jedes Release; ein Zusatz (-dirty) macht
+# dieselbe X.Y.Z kleiner als das Release ohne.
+vercmp() {
+  python3 -I -c '
+import re, sys
+def key(v):
+    m = re.match(r"^v?(\d+)\.(\d+)\.(\d+)(.*)$", v)
+    if not m:
+        return None
+    return (int(m[1]), int(m[2]), int(m[3]), 0 if m[4] else 1)
+r, l = key(sys.argv[1]), key(sys.argv[2])
+if r is None:
+    sys.exit("Release-Version nicht lesbar: " + sys.argv[1])
+if l is None:
+    print(0 if sys.argv[1].lstrip("v") == sys.argv[2].lstrip("v") else 1)
+else:
+    print((r > l) - (r < l))
+' "$1" "$2"
+}
+
+# --- Gemerkte schlechte Version ---------------------------------------------
+# Eine Version, die nach dem Update nicht gesund wurde, steht in
+# $STATUS_DIR/bad-version. Ohne das installierte der stuendliche Lauf sie jede
+# Stunde neu, startete den Dienst jedes Mal mit ihr neu und rollte zurueck.
+# Das Merken ist Nebensache wie das Festhalten: es scheitert still.
+bad_version() {
+  local f=$STATUS_DIR/bad-version
+  [[ -n ${STATUS_DIR:-} && -f $f && ! -L $f ]] || return 0
+  tr -d ' \t\r\n' < "$f" 2>/dev/null | head -c 64 || true
+}
+
+mark_bad() {
+  local f=$STATUS_DIR/bad-version t
+  status_dir_ok >/dev/null 2>&1 || return 0
+  t=$(mktemp "$STATUS_DIR/.bad.XXXXXX") || return 0
+  if printf '%s\n' "$1" > "$t" && chmod 0644 "$t" && mv -f "$t" "$f"; then
+    return 0
+  fi
+  rm -f "$t"
+  return 0
+}
+
+clear_bad() {
+  [[ -n ${STATUS_DIR:-} && ! -L $STATUS_DIR ]] || return 0
+  rm -f "$STATUS_DIR/bad-version" 2>/dev/null || true
+}
 
 # --- Was zuletzt geschah ----------------------------------------------------
 # Nach jedem Lauf, der zu einer Entscheidung kommt, steht in
@@ -238,18 +314,6 @@ if [[ $CHECK_ONLY -eq 0 ]]; then
   [[ $EUID -eq 0 ]] || fail "muss als root laufen (sudo $0)"
 fi
 
-# --- Rollback ---------------------------------------------------------------
-# Steht vor allem anderen, weil es der Pfad ist, den jemand unter Zeitdruck
-# sucht: kein Netz, kein Token, keine API.
-if [[ $ROLLBACK -eq 1 ]]; then
-  [[ -x $PREVIOUS ]] || fail "keine vorherige Version unter $PREVIOUS"
-  log "Zurueck auf: $("$PREVIOUS" --version)"
-  install -o root -g root -m 0755 "$PREVIOUS" "$BIN"
-  systemctl restart "$SERVICE"
-  log "Zurueckgerollt. Die Datei unter $PREVIOUS bleibt liegen."
-  exit 0
-fi
-
 # --- Ein Lauf nach dem anderen ----------------------------------------------
 # Der stuendliche Lauf (holzkube-manager-update.service) und das Nachsehen
 # (holzkube-manager-update-check.service, das der Host-Helfer startet) fuehren
@@ -281,8 +345,9 @@ fi
 #     vorher ohne. Nur eine Sperre, die ein anderer Lauf
 #     wirklich haelt, laesst es warten.
 #
-# Ohne Sperre bleiben --help, eine unbekannte Option, die Weigerung ohne root
-# und --rollback: sie enden oben und halten nichts fest. Ein --check ohne root
+# Ohne Sperre bleiben --help, eine unbekannte Option und die Weigerung ohne
+# root: sie enden oben und halten nichts fest. --rollback sperrt wie jeder
+# Lauf, der etwas aendert, und haelt "rolled-back" fest. Ein --check ohne root
 # darf nicht festhalten und sperrt darum auch nicht.
 take_lock() {
   local wait=$1 lock old
@@ -348,8 +413,8 @@ fi
 take_lock "$LOCK_WAIT"
 
 # Ab hier kommt jeder Lauf zu einer Entscheidung, und die wird festgehalten.
-# --help, eine unbekannte Option, die Weigerung ohne root und --rollback enden
-# oben und halten nichts fest; ein Lauf, der die Sperre nicht bekam, auch nicht.
+# --help, eine unbekannte Option und die Weigerung ohne root enden oben und
+# halten nichts fest; ein Lauf, der die Sperre nicht bekam, auch nicht.
 trap on_exit EXIT
 # Ein Signal beendet den Lauf ueber exit, mit 128 + Signalnummer. Ohne diese
 # Fallen laeuft die EXIT-Falle bei SIGTERM zwar auch, sieht in $? aber den
@@ -364,6 +429,32 @@ trap 'exit 129' HUP
 # festgehalten wird, liest on_exit erst am Ende neu.
 LOCAL_VERSION=$("$BIN" --version 2>/dev/null | awk '{print $NF}' || echo "keine")
 
+# --- Rollback ---------------------------------------------------------------
+# Steht vor allem anderen, was Netz braucht, weil es der Pfad ist, den jemand
+# unter Zeitdruck sucht: kein Netz, kein Token, keine API. Es nimmt die Sperre
+# wie jeder Lauf, der etwas aendert (ein stuendlicher Lauf mitten im Tausch
+# waere sonst ein Rennen um $BIN), und haelt "rolled-back" fest. Die Version,
+# die es ersetzt, wird als schlecht gemerkt: sonst installierte der naechste
+# stuendliche Lauf sie wieder. Das ist die Absicht des Operators und gilt, bis
+# ein neueres Release kommt oder --force sie verlangt.
+if [[ $ROLLBACK -eq 1 ]]; then
+  [[ -x $PREVIOUS ]] || fail "keine vorherige Version unter $PREVIOUS"
+  BACK_VERSION=$("$PREVIOUS" --version 2>&1) || fail "die vorherige Version laeuft hier nicht: $BACK_VERSION"
+  log "Zurueck auf: $BACK_VERSION"
+  # Das zuletzt bekannte neueste Release bleibt stehen; ohne Netz weiss dieser
+  # Lauf kein neueres. Gibt es keines, gilt das Zurueckgerollte.
+  LATEST=$(python3 -I -c 'import json, sys; print(json.load(open(sys.argv[1]))["latest"] or "")' "$STATUS_DIR/status.json" 2>/dev/null || true)
+  [[ -n $LATEST ]] || LATEST=$(awk '{print $NF}' <<<"$BACK_VERSION")
+  if [[ -n $LOCAL_VERSION && $LOCAL_VERSION != keine ]]; then
+    mark_bad "$LOCAL_VERSION"
+  fi
+  atomic_install "$PREVIOUS" "$BIN" || fail "$PREVIOUS liess sich nicht nach $BIN legen"
+  systemctl restart "$SERVICE"
+  OUTCOME=rolled-back
+  log "Zurueckgerollt. Die Datei unter $PREVIOUS bleibt liegen."
+  exit 0
+fi
+
 command -v curl    >/dev/null || fail "curl fehlt"
 command -v tar     >/dev/null || fail "tar fehlt"
 command -v python3 >/dev/null || fail "python3 fehlt"
@@ -372,6 +463,40 @@ command -v python3 >/dev/null || fail "python3 fehlt"
 healthy() {
   systemctl is-active --quiet "$SERVICE" \
     && curl -sk --max-time 5 "$HEALTH_URL" | grep -q '"audit_chain"'
+}
+
+# service_ident ist, woran man einen Neustart des Dienstes erkennt: die PID des
+# Hauptprozesses und der Zaehler der Neustarts durch systemd (Restart=). Kann
+# systemd das nicht sagen, ist es leer, und der Vergleich entscheidet nichts.
+service_ident() {
+  systemctl show -p MainPID -p NRestarts "$SERVICE" 2>/dev/null | tr '\n' ' ' || true
+}
+
+# wait_stable fragt hoechstens $1 Mal, mit einer Sekunde Pause, und verlangt $2
+# gesunde Antworten HINTEREINANDER, ohne dass der Dienst dazwischen neu
+# gestartet wurde. Eine einzige Antwort genuegt nicht: ein Daemon, der kurz
+# antwortet und dann abstuerzt (und von systemd neu gestartet wird), besteht eine
+# Einzelpruefung und ist trotzdem kaputt. Aendert sich die PID oder der
+# Neustart-Zaehler, faengt die Zaehlung von vorn an.
+wait_stable() {
+  local tries=$1 need=$2 streak=0 ident base="" i
+  for ((i = 0; i < tries; i++)); do
+    if healthy; then
+      ident=$(service_ident)
+      if [[ $streak -eq 0 || $ident != "$base" ]]; then
+        # Erste Antwort oder neuer Prozess: hier beginnt die Zaehlung.
+        base=$ident
+        streak=1
+      else
+        streak=$((streak + 1))
+      fi
+      [[ $streak -ge $need ]] && return 0
+    else
+      streak=0
+    fi
+    sleep 1
+  done
+  return 1
 }
 
 # wait_healthy fragt hoechstens $1 Mal, mit einer Sekunde Pause dazwischen.
@@ -516,20 +641,28 @@ download() {
 # --- Welches Release ist das neueste? ---------------------------------------
 # Jedes Release ist ein Prerelease (seit 2026-09-26: das Produkt ist Alpha, und
 # GitHub soll das auch so zeigen). /releases/latest ueberspringt Prereleases und
-# fand darum ab da nichts mehr. Gelesen wird deshalb die Liste, die GitHub
-# neueste zuerst liefert, und genommen wird das erste Release, das kein Entwurf
-# ist. Ein Entwurf ist ausdruecklich noch nicht freigegeben; ein Prerelease ist
-# hier der Normalfall.
+# fand darum ab da nichts mehr. Gelesen wird deshalb die Liste; ein Entwurf ist
+# ausdruecklich noch nicht freigegeben, ein Prerelease hier der Normalfall.
+#
+# Gewaehlt wird das nach Semver HOECHSTE Release, nicht das erste der Liste:
+# GitHub sortiert nach Erstellungsdatum, und ein spaeter angelegtes Release
+# eines aelteren Zweigs (ein Hotfix v0.3.3 nach v0.4.0) stuende sonst oben und
+# machte aus dem Update ein Downgrade. Tags mit Zusatz (v0.5.0-rc.1,
+# -beta.1) und solche, die nicht X.Y.Z sind, werden uebergangen.
 RELEASES_JSON=$(api "https://api.github.com/repos/$REPO/releases?per_page=20" 2>/dev/null) \
   || fail "die Release-Liste von $REPO ist nicht lesbar"
 LATEST_JSON=$(printf '%s' "$RELEASES_JSON" | python3 -I -c "
 import json,sys
 rs = json.load(sys.stdin)
-published = [r for r in rs if not r.get('draft')]
+import re
+def key(r):
+    m = re.fullmatch(r'v?(\d+)\.(\d+)\.(\d+)', r.get('tag_name', ''))
+    return tuple(int(x) for x in m.groups()) if m else None
+published = [r for r in rs if not r.get('draft') and key(r) is not None]
 if not published:
-    drafts = ', '.join(r['tag_name'] for r in rs if r.get('draft'))
-    sys.exit('kein veroeffentlichtes Release' + (' (als Entwurf: ' + drafts + ')' if drafts else ''))
-json.dump(published[0], sys.stdout)
+    skipped = ', '.join(r['tag_name'] for r in rs if r.get('draft') or key(r) is None)
+    sys.exit('kein stabiles veroeffentlichtes Release' + (' (uebergangen: ' + skipped + ')' if skipped else ''))
+json.dump(max(published, key=key), sys.stdout)
 ") || fail "kein Release in $REPO gefunden, das installiert werden koennte."
 
 # Ein Release traegt seit v1.16 ZWEI Archive pro Architektur: den Daemon und
@@ -567,22 +700,48 @@ LATEST=$REMOTE_VERSION
 log "installiert: $LOCAL_VERSION"
 log "neuestes Release: $TAG ($ASSET_NAME)"
 
+# Was zu tun ist, entscheidet die Semver-Ordnung, nicht Ungleichheit: ein
+# Release, das nicht NEUER ist als das Installierte, ersetzt es nie -- auch
+# nicht, wenn GitHub es als neuestes liefert (ein zurueckgezogenes oder
+# nachgereichtes Release). Zurueck geht es nur mit --allow-downgrade; --force
+# installiert dieselbe Version neu.
+CMP=$(vercmp "$REMOTE_VERSION" "$LOCAL_VERSION") || fail "Versionen nicht vergleichbar: $REMOTE_VERSION gegen $LOCAL_VERSION"
+BAD=$(bad_version)
+WANT=install
+if [[ $CMP -lt 0 && $ALLOW_DOWNGRADE -eq 0 ]]; then
+  WANT="newer-installed"
+elif [[ $CMP -eq 0 && $FORCE -eq 0 ]]; then
+  WANT=current
+elif [[ -n $BAD && $BAD == "$REMOTE_VERSION" && $FORCE -eq 0 ]]; then
+  WANT=bad
+fi
+
 if [[ $CHECK_ONLY -eq 1 ]]; then
-  if [[ $LOCAL_VERSION == "$REMOTE_VERSION" ]]; then
-    OUTCOME=current
-    log "aktuell."
-  else
-    OUTCOME=available
-    log "Update verfuegbar."
-  fi
+  case $WANT in
+    install) OUTCOME=available; log "Update verfuegbar." ;;
+    bad)     OUTCOME=current;   log "$REMOTE_VERSION ist verfuegbar, wurde aber nach einem frueheren Update nicht gesund und wird uebergangen (--force verlangt sie ausdruecklich)." ;;
+    newer-installed) OUTCOME=current; log "Installiert ($LOCAL_VERSION) ist neuer als das neueste Release ($REMOTE_VERSION); kein Downgrade ohne --allow-downgrade." ;;
+    *)       OUTCOME=current;   log "aktuell." ;;
+  esac
   exit 0
 fi
 
-if [[ $LOCAL_VERSION == "$REMOTE_VERSION" && $FORCE -eq 0 ]]; then
-  OUTCOME=current
-  log "Bereits aktuell. --force installiert trotzdem neu."
-  exit 0
-fi
+case $WANT in
+  current) OUTCOME=current; log "Bereits aktuell. --force installiert trotzdem neu."; exit 0 ;;
+  newer-installed)
+    OUTCOME=current
+    log "Installiert ($LOCAL_VERSION) ist neuer als das neueste Release ($REMOTE_VERSION). Kein Downgrade; --allow-downgrade erlaubt es ausdruecklich."
+    exit 0 ;;
+  bad)
+    OUTCOME=current
+    log "$REMOTE_VERSION wurde nach einem frueheren Update nicht gesund (oder per --rollback verlassen) und wird uebergangen, bis ein neueres Release kommt. --force installiert sie trotzdem."
+    exit 0 ;;
+esac
+
+# Ohne Pruefsumme wird nichts installiert. Ein Release ohne checksums.txt ist
+# kaputt oder manipuliert, und eine Warnung, die niemand liest, lieferte ein
+# ungeprueftes Binary als root aus.
+[[ -n $SUMS_ID ]] || fail "das Release $TAG enthaelt keine checksums.txt - Integritaet nicht pruefbar, nichts installiert."
 
 # --- Herunterladen und pruefen ----------------------------------------------
 # Aufgeraeumt wird es von on_exit. Eine zweite EXIT-Falle hier wuerde die
@@ -598,25 +757,20 @@ download -o "$TMP/$ASSET_NAME" \
   "https://api.github.com/repos/$REPO/releases/assets/$ASSET_ID" \
   || fail "Download fehlgeschlagen"
 
-if [[ -n $SUMS_ID ]]; then
-  download -o "$TMP/checksums.txt" \
-    "https://api.github.com/repos/$REPO/releases/assets/$SUMS_ID" \
-    || fail "checksums.txt nicht ladbar"
+download -o "$TMP/checksums.txt" \
+  "https://api.github.com/repos/$REPO/releases/assets/$SUMS_ID" \
+  || fail "checksums.txt nicht ladbar"
 
-  # Nur die eine Zeile pruefen. `sha256sum -c` ueber die ganze Datei wuerde an
-  # den Archiven scheitern, die hier gar nicht liegen, und ein Fehler waere
-  # dann nicht mehr von einem echten Integritaetsproblem zu unterscheiden.
-  EXPECTED=$(awk -v n="$ASSET_NAME" '$2 == n || $2 == "*" n {print $1}' "$TMP/checksums.txt")
-  [[ -n $EXPECTED ]] || fail "keine Pruefsumme fuer $ASSET_NAME in checksums.txt"
-  ACTUAL=$(sha256sum "$TMP/$ASSET_NAME" | awk '{print $1}')
-  [[ $EXPECTED == "$ACTUAL" ]] || fail "Pruefsumme stimmt nicht.
+# Nur die eine Zeile pruefen. `sha256sum -c` ueber die ganze Datei wuerde an
+# den Archiven scheitern, die hier gar nicht liegen, und ein Fehler waere
+# dann nicht mehr von einem echten Integritaetsproblem zu unterscheiden.
+EXPECTED=$(awk -v n="$ASSET_NAME" '$2 == n || $2 == "*" n {print $1}' "$TMP/checksums.txt")
+[[ -n $EXPECTED ]] || fail "keine Pruefsumme fuer $ASSET_NAME in checksums.txt"
+ACTUAL=$(sha256sum "$TMP/$ASSET_NAME" | awk '{print $1}')
+[[ $EXPECTED == "$ACTUAL" ]] || fail "Pruefsumme stimmt nicht.
   erwartet: $EXPECTED
   bekommen: $ACTUAL"
-  log "Pruefsumme ok."
-else
-  # Kein stilles Weitermachen: dass nicht geprueft wurde, gehoert ins Protokoll.
-  log "WARNUNG: das Release enthaelt keine checksums.txt - Integritaet ungeprueft."
-fi
+log "Pruefsumme ok."
 
 tar -xzf "$TMP/$ASSET_NAME" -C "$TMP" holzkube-managerd || fail "Archiv enthaelt kein holzkube-managerd"
 chmod +x "$TMP/holzkube-managerd"
@@ -629,14 +783,16 @@ log "geladen: $NEW_VERSION"
 
 # --- Installieren -----------------------------------------------------------
 install -d -o root -g root -m 0755 "$(dirname "$PREVIOUS")"
+# Beide Kopien gehen atomar an ihren Platz (atomic_install): $PREVIOUS ist der
+# Rueckweg, und ein halb geschriebener Rueckweg ist keiner.
 if [[ -x $BIN ]]; then
-  cp -p "$BIN" "$PREVIOUS"
+  atomic_install "$BIN" "$PREVIOUS" || fail "vorherige Version liess sich nicht nach $PREVIOUS sichern; nichts installiert."
   log "vorherige Version gesichert: $PREVIOUS"
 fi
 
-# install(1) ersetzt atomar. Der laufende Prozess haelt seine alte Inode, also
-# passiert bis zum Neustart nichts.
-install -o root -g root -m 0755 "$TMP/holzkube-managerd" "$BIN"
+# Der laufende Prozess haelt seine alte Inode, also passiert bis zum Neustart
+# nichts.
+atomic_install "$TMP/holzkube-managerd" "$BIN" || fail "das neue Binary liess sich nicht nach $BIN legen."
 
 # --- Nachsehen, ob es wirklich laeuft ---------------------------------------
 # Ein Update, das den Dienst kaputtmacht und "fertig" meldet, ist schlimmer als
@@ -648,9 +804,13 @@ install -o root -g root -m 0755 "$TMP/holzkube-managerd" "$BIN"
 # naechsten Stunde "current" (13-REVIEW-3 WR-01). Gefragt wird nach einem
 # gescheiterten Neustart auch nicht mehr: antwortet dann der alte Prozess, ist
 # das nicht das neue Release.
+HEALTH_STREAK=3
+HEALTH_TRIES=25
 ok=0
 if systemctl restart "$SERVICE"; then
-  wait_healthy 20 && ok=1
+  # Mindestens HEALTH_STREAK gesunde Antworten hintereinander, ohne Neustart
+  # des Dienstes dazwischen, innerhalb von HEALTH_TRIES Fragen.
+  wait_stable "$HEALTH_TRIES" "$HEALTH_STREAK" && ok=1
 else
   log "systemctl restart $SERVICE scheiterte."
 fi
@@ -661,17 +821,25 @@ if [[ $ok -eq 1 ]]; then
   # soll nicht auch noch den Rueckweg tragen muessen. So braucht eine Aenderung
   # am Update-Weg -- wie die Umstellung auf Prereleases -- nie wieder Handarbeit
   # auf dem Host.
+  #
+  # Ein Skript, das nicht einmal parst, wuerde jede Stunde scheitern und sich
+  # nie selbst reparieren: darum `bash -n` vor dem Tausch, und das bisherige
+  # bleibt als $SELF.previous liegen. Getauscht wird atomar ($SELF.new, dann mv).
   if tar -xzf "$TMP/$ASSET_NAME" -C "$TMP" deploy/holzkube-manager-update.sh 2>/dev/null; then
     if ! cmp -s "$TMP/deploy/holzkube-manager-update.sh" "$SELF"; then
+      if ! bash -n "$TMP/deploy/holzkube-manager-update.sh" 2>/dev/null; then
+        log "WARNUNG: das Update-Skript aus dem Archiv ist kein gueltiges Bash (bash -n); $SELF bleibt das bisherige Skript."
       # Ein Verzeichnis, das sich nicht schreiben laesst, macht aus einem
       # gesunden Update kein gescheitertes; das alte Skript bleibt.
-      if install -o root -g root -m 0755 "$TMP/deploy/holzkube-manager-update.sh" "$SELF"; then
-        log "Update-Skript erneuert: $SELF"
+      elif cp -p "$SELF" "$SELF.previous" 2>/dev/null \
+        && atomic_install "$TMP/deploy/holzkube-manager-update.sh" "$SELF"; then
+        log "Update-Skript erneuert: $SELF (das bisherige: $SELF.previous)"
       else
         log "WARNUNG: $SELF liess sich nicht ersetzen; es bleibt das bisherige Skript."
       fi
     fi
   fi
+  clear_bad
   OUTCOME=updated
   log ""
   log "Aktualisiert auf $("$BIN" --version)."
@@ -682,8 +850,10 @@ fi
 log ""
 log "Der Dienst ist nach dem Update nicht gesund geworden - rolle zurueck."
 journalctl -u "$SERVICE" --no-pager -n 20 -o cat || true
+# Die Version merken, damit der naechste Lauf sie nicht wieder installiert.
+mark_bad "$REMOTE_VERSION"
 if [[ -x $PREVIOUS ]]; then
-  install -o root -g root -m 0755 "$PREVIOUS" "$BIN"
+  atomic_install "$PREVIOUS" "$BIN" || log "WARNUNG: $PREVIOUS liess sich nicht nach $BIN legen."
   # Scheitert auch dieser Neustart, liegt die vorige Version trotzdem wieder
   # da, und das wird festgehalten; warum er scheiterte, sagt das Journal des
   # Dienstes.
