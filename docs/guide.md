@@ -1232,6 +1232,31 @@ reason they wrote is on the refusal.
 
 `holzkubectl scale <cluster>` prints the same thing.
 
+**Removing the node is a job.** *Remove from cluster* on a node's page asks you
+to type its hostname, then runs as a job you can watch in the dialog and on the
+Jobs page, with these steps: check the node answers; *(control plane only)*
+leave etcd and wait for it to settle; wipe the node's system disk; forget the
+node here. Only the system disk is wiped, so the machine comes back in
+maintenance mode and can be provisioned again; its other disks are left alone.
+
+- **A refusal is immediate.** If the cluster cannot spare the voter, you get the
+  reason at once and no job exists. The same rule is checked again right before
+  the node is told to leave etcd, because the job starts a moment after you
+  clicked.
+- **It holds the cluster, like any job.** Only one job runs on a cluster at a
+  time, so a removal while an upgrade is running is refused until it finishes.
+- **It survives closing the dialog, the browser and a restart of the daemon.** It
+  continues where it was: a node that already left etcd is not told to leave
+  again, and the settle wait is not waited twice. The one step it cannot check
+  afterwards is the wipe. If the daemon is restarted exactly inside it, the job
+  is **parked** and asks you to look at the node, because a second wipe is the
+  one thing it must not do by guessing. A parked removal can be started again
+  from the node's page: a node that is no longer an etcd member is not refused
+  for the quorum it no longer counts in.
+- **What a failure leaves.** Before the wipe, nothing on the node was wiped and it
+  is still listed here. After the node left etcd, it stays out; run the removal
+  again to finish it.
+
 ### Cluster templates
 
 A cluster described in one file, with its nodes chosen by machine class rather

@@ -1935,6 +1935,11 @@ export const acceptedJobSchema = z.object({
 
 export type AcceptedJob = z.infer<typeof acceptedJobSchema>
 
+/** A node removal is a job, and it also carries the cordon-and-drain notice. */
+export const acceptedRemovalSchema = acceptedJobSchema.extend({ notice: z.string() })
+
+export type AcceptedRemoval = z.infer<typeof acceptedRemovalSchema>
+
 /**
  * The seven things that can be done to a cluster, a node or an app's power
  * (2026-09-26): one vocabulary for all three, so the menu reads the same
@@ -3696,23 +3701,24 @@ export const api = {
     /**
      * Take a node out of its cluster for good (UPG-13).
      *
-     * Unlike the three above this is not a job: it is synchronous, because
-     * every step of it is a call this process makes and waits for — forfeit
-     * leadership if it holds it, leave etcd, wait out the eviction gap, then
-     * forget the record. What comes back is the notice about cordon and drain,
-     * which the screen has to show afterwards as well as before: an operator
-     * who read it on the way in has already stopped reading by the time it
-     * matters.
+     * A job since the removal stopped running inside the request: leave etcd,
+     * wait for the raft to settle, wipe the system disk, forget the record. A
+     * client that goes away, or a daemon that restarts, no longer leaves a
+     * node half removed. The quorum refusal is still immediate — a 409 here,
+     * before any job exists. What comes back is the job to follow and the
+     * notice about cordon and drain, which the screen has to show afterwards as
+     * well as before: an operator who read it on the way in has already stopped
+     * reading by the time it matters.
      */
     removeFromCluster: (
       id: string,
       cluster: string,
       confirmation: string,
-    ): Promise<{ machine: string; notice: string }> =>
+    ): Promise<AcceptedRemoval> =>
       sendJSON(
         'POST',
         `/api/v1/machines/${encodeURIComponent(id)}/remove-from-cluster`,
-        z.object({ machine: z.string(), notice: z.string() }),
+        acceptedRemovalSchema,
         { cluster, confirmation },
       ),
 
