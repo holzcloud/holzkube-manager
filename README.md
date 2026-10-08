@@ -73,7 +73,10 @@ did.
   at a time behind an etcd health gate and **never without a fresh etcd
   snapshot taken first**,
   Kubernetes upgrades in `talosctl upgrade-k8s`'s order,
-  SecureBoot, disk encryption, etcd snapshots and restore, certificate renewal
+  SecureBoot, disk encryption, etcd snapshots and restore, certificate renewal,
+  and **scheduled etcd snapshots** (every 6 hours, daily or weekly, kept on the
+  manager's own device, with a download, a checksum and an "overdue" warning --
+  copy the ones that matter off the box)
 - **A wall** — one page for a screen in the office that answers "is everything
   fine?" without anybody touching it
 - **Safe by default** — a local account and single sign-on (OIDC) that an admin

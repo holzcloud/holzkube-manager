@@ -4566,6 +4566,78 @@ never a pass. Only one snapshot per cluster is taken at a time (a second answers
 `409 conflict.snapshot-in-progress`), one is cut off after 30 minutes, and asking
 for a cluster that has no machines creates nothing.
 
+### Scheduled etcd snapshots
+
+A cluster can have a snapshot schedule (off by default). It is not a second
+mechanism: a scheduled snapshot is written by the same store as the one before an
+upgrade, into the same per-cluster directory of `upgrade-snapshots/`, atomically,
+`0600`. The two are told apart by a **kind** (the file name carries it):
+`upgrade` (the newest two are kept) and `scheduled` (the newest *keep* are kept).
+Each kind is pruned by its own count, so one can never push the other out. The
+fresh-within-60-minutes rule of a Talos upgrade counts a snapshot of **either**
+kind. Every snapshot gets a `<name>.sha256` file beside it in `sha256sum -c`
+form, written while the bytes stream.
+
+`GET /api/v1/clusters/{id}/backups` (reader) answers `available`, `schedule`
+(`interval`: `off`, `6h`, `daily` or `weekly`; `keep`; `since`), `presets`,
+`max_keep` (60), a `notice` that the files live on the manager's own device, and
+`state`:
+
+- `snapshots`: newest first, each `id` (the file name, which is what a download
+  names), `kind`, `taken_at`, `bytes`, and `sha256` (absent for a snapshot from
+  before checksums were kept);
+- `status`: the last attempt — `last_attempt_at`, `last_trigger` (`schedule` or
+  `manual`), `last_result` (`running`, `ok`, `skipped`, `failed`), `last_reason`
+  and `last_job`. `skipped` is a run that was not attempted for a stated reason:
+  another job held the cluster, the cluster could not be reached, the cluster is
+  switched off, or the disk guard refused;
+- `health`: `enabled`, `interval`, `last_success_at` (the newest *scheduled*
+  snapshot), `newest_at` and `age_seconds` (the newest of *any* kind), `overdue`
+  (the schedule is on and the last scheduled snapshot is older than **twice its
+  interval**; a schedule that never produced one is measured from when it was
+  turned on), `last_result`, `last_reason`;
+- `next_due_at` and `free_bytes` (free where the snapshots are kept).
+
+`PUT /api/v1/clusters/{id}/backups/schedule` (**admin, behind the sudo window**)
+takes `{"interval": "off"|"6h"|"daily"|"weekly", "keep": 1..60}` (keep defaults
+to 7) and answers `{schedule}`. `off` removes the schedule; the files stay. It
+changes nothing on any node, so a cluster adopted read-only can still be backed
+up. Audit action `cluster.backup-schedule` records `interval` and `keep` in
+clear.
+
+`POST /api/v1/clusters/{id}/backups/run` (operator) starts a snapshot as a job
+(`cluster.etcd-backup`) and answers `202` with the job and its topic.
+Audit action `etcd.backup-run`. It takes the cluster's one lease like any job:
+`409 conflict.cluster-busy` when another holds it.
+
+`GET /api/v1/clusters/{id}/backups/{name}` (**admin, recorded in the audit
+archive although it is a GET**, `AuditRead`, audit action `etcd.backup-download`
+with no parameters) streams one stored snapshot as `application/octet-stream` with
+its `Content-Length`. A snapshot holds every Kubernetes secret of the cluster.
+`{name}` must be a file name this product wrote; anything else — a path, a
+checksum file — is `404`.
+
+**How a run goes.** A scheduler inside the daemon looks every minute and submits
+the job when a cluster's schedule is due: `interval` after the newest scheduled
+snapshot (or after the schedule was turned on, if there is none), plus a jitter
+of up to a twelfth of the interval and at most five minutes, drawn once per
+cluster per process. The attempt is written to disk *before* the job is
+submitted, so a restart, or a daemon killed in between, waits out the retry gap
+(a sixth of the interval, between ten minutes and an hour) instead of running
+twice. The job takes the snapshot from the first control-plane node that answers
+and applies retention afterwards. The scheduler does not run under `--dry-run`.
+
+**Disk guard.** Before writing, the data directory must have **twice** the
+expected size free: the larger of the node's etcd database size, the biggest
+snapshot already stored for the cluster, and 16 MiB. Below that the run is
+`skipped` with the numbers; nothing is written.
+
+**Metrics.** `GET /metrics` adds, per cluster, `holzkube_etcd_snapshot_age_seconds`
+(age of the newest snapshot of any kind; absent when there is none),
+`holzkube_etcd_snapshot_schedule_enabled` and `holzkube_etcd_snapshot_overdue`
+(1 when overdue). The cluster list and read (`GET /api/v1/clusters`) carry the
+`health` object as `backup`.
+
 ### Confirming an upgrade types the cluster's name
 
 Not a hostname. A rolling upgrade is not about one machine — there is no single

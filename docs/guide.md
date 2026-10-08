@@ -848,7 +848,7 @@ jobs/                  long-running operations, so a restart resumes them
 patches/               reusable configuration patches, versioned
 bootstrap/             the etcd bootstrap lease and its intent records
 backups/               tarballs, from a migration or from `backup`
-upgrade-snapshots/     the etcd snapshots a Talos upgrade requires first (not in backups)
+upgrade-snapshots/     the etcd snapshots: before an upgrade and scheduled (not in backups)
 ```
 
 It is plain files on purpose: readable, and backed up with `cp` — or with the
@@ -1120,7 +1120,8 @@ gate's numbers. Then two things stand between the plan and the start:
    all, and a rolling upgrade is the operation that can cost a quorum. *Take the
    snapshot now* streams it from a control-plane node into `upgrade-snapshots/`
    in the data directory (`0600`, the newest two per cluster, not in backups). It
-   counts for **60 minutes**. The server refuses to confirm or start a Talos
+   counts for **60 minutes** -- and so does a scheduled one (see *Scheduled etcd
+   backups* below), whichever is newer. The server refuses to confirm or start a Talos
    upgrade without one -- an API client gets `409 conflict.snapshot-required` --
    and an instance that cannot keep snapshots refuses too. A failed or empty
    stream leaves nothing that counts as a snapshot.
@@ -1131,6 +1132,55 @@ each, and verifies every node afterwards (version, schematic, services). It does
 not undo an upgrade; see *It verifies upgrades and does not undo them* below for
 what a rollback is and is not. The snapshot is the way back from the one failure
 a rollback cannot help with.
+
+### Scheduled etcd backups
+
+*Upgrades -> Backups* (under the etcd panel) keeps etcd snapshots on a schedule.
+It is **off until you turn it on**. Pick *every 6 hours*, *daily* or *weekly*, say
+how many to keep (7 unless you say otherwise, at most 60), and save -- an
+administrator's setting, behind the password prompt like the others. *Run now*
+takes one immediately, as a job, whatever the schedule says.
+
+What it does and does not do:
+
+- **It is the same snapshot the upgrade takes**, in the same place
+  (`upgrade-snapshots/` in the data directory, one folder per cluster, `0600`),
+  taken from the first healthy control-plane node that answers. A scheduled one is
+  labelled *scheduled* and a pre-upgrade one *before an upgrade*; each kind is
+  pruned by its own count (the schedule's *keep*, and the newest two for the
+  upgrade), so neither can push the other out. A recent scheduled snapshot also
+  satisfies the "fresh within 60 minutes" rule of a Talos upgrade, so a daily
+  schedule does not mean a second snapshot right before an upgrade you start soon
+  after it.
+- **It runs as a job.** It takes the cluster's one lease, so it never overlaps an
+  upgrade or a reboot: when another job holds the cluster, or the cluster cannot
+  be reached, or it is switched off, the run is *skipped* and the panel shows the
+  reason. It then tries again within an hour instead of waiting a whole interval.
+  The time of the last attempt is on disk, so a restart does not run it twice,
+  and the start is jittered by a few minutes.
+- **It will not fill the disk.** A run needs **twice** the snapshot's size free
+  where the data directory is; below that it is skipped with the numbers, and
+  nothing is written. The panel shows the free space.
+- **It tells you when it has stopped.** A schedule whose last snapshot is older
+  than **twice its interval** is *backup overdue*: a badge on the panel, a line on
+  the cluster's card on the Clusters screen, and `holzkube_etcd_snapshot_overdue`
+  (with `holzkube_etcd_snapshot_age_seconds`) on `/metrics` for your Prometheus.
+- **The list shows time, kind, size and SHA-256**, and each row downloads. The
+  checksum is also a `<name>.sha256` file beside the snapshot, in the form
+  `sha256sum -c` reads, so you can check a copy you moved. A download needs an
+  administrator and is recorded in the audit log although it is only a read:
+  **a snapshot holds every Kubernetes secret of the cluster.**
+
+**The honest limit: the backups stay on the same device as the manager.** On a
+Raspberry Pi that is its SD card or disk. They protect against a bad upgrade, a
+lost etcd or a mistake in the cluster; they do **not** protect against losing the
+device, and they are deliberately not part of the data-directory backup. There is
+no remote export. If the cluster matters, download the snapshots that matter from
+time to time and keep the copies somewhere else -- and check the SHA-256 of the
+copy.
+
+Restoring is unchanged: *Restore etcd from a snapshot* below takes any snapshot
+file, including one downloaded from here.
 
 ### Upgrading Kubernetes
 
@@ -2117,8 +2167,10 @@ scrape_configs:
 
 What it exports is what this instance knows and nothing else has: nodes per
 stage, seconds left on each cluster's client certificate, job records by kind
-and state, confirmed etcd members, and whether the audit chain verified at
-startup.
+and state, confirmed etcd members, how old each cluster's newest etcd snapshot
+is and whether its backup schedule is overdue
+(`holzkube_etcd_snapshot_age_seconds`, `holzkube_etcd_snapshot_overdue`), and
+whether the audit chain verified at startup.
 
 **Export, never ingest.** This does not become a monitoring pipeline: it keeps
 no history and it does not alert.
