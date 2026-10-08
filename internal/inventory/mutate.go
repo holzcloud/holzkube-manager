@@ -61,6 +61,30 @@ func (s *Service) SetActAs(
 	return s.deps.Store.Clusters().Put(ctx, c)
 }
 
+// SetBackupSchedule stores a cluster's etcd snapshot schedule. It is not gated
+// by the cluster's read-only lock: it changes nothing on any node, and an
+// imported cluster is exactly the one whose operator wants it backed up.
+func (s *Service) SetBackupSchedule(
+	ctx context.Context, id model.ClusterID, sched model.BackupSchedule,
+) (model.Cluster, error) {
+	c, err := s.deps.Store.Clusters().Get(ctx, id)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return model.Cluster{}, ErrNotFound
+		}
+		return model.Cluster{}, err
+	}
+	sched.Since = s.deps.Now().UTC()
+	if !sched.Enabled() {
+		// "Off" is the absence of a record, so a cluster that never had a
+		// schedule and one that turned it off are the same file.
+		c.BackupSchedule = nil
+	} else {
+		c.BackupSchedule = &sched
+	}
+	return s.deps.Store.Clusters().Put(ctx, c)
+}
+
 // CheckLock is what the route middleware asks before a mutating cluster-scoped
 // operation runs.
 //

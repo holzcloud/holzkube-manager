@@ -521,9 +521,19 @@ func run(args []string) error {
 			},
 			Remove:     fsstore.RemoveFile,
 			TempPrefix: fsstore.TempPrefix,
+			ReadFile:   fsstore.ReadFile,
+			Open:       fsstore.OpenFile,
+			FreeBytes:  fsstore.FreeBytes,
 		},
 		time.Now,
 	))
+
+	// The scheduled etcd snapshots: the job kind, the standing the overview
+	// reads, and (further down, after Resume) the scheduler itself.
+	upgradeSvc.RegisterBackups(engine)
+	inv.SetBackupHealth(func(c model.Cluster, now time.Time) *model.BackupHealth {
+		return upgradeSvc.BackupHealthFor(c, now)
+	})
 
 	// The support-bundle collector. It uses the same connector, the same
 	// inventory and the same audit reader everything else does -- a bundle
@@ -556,9 +566,25 @@ func run(args []string) error {
 	// verdict, and D-15 wants exactly that: a break found at startup has to
 	// stay reported, not stop being reported because nothing re-checked.
 	metricsExporter := metrics.New(metrics.Deps{
-		Machines:         inv.Machines,
-		Clusters:         inv.Clusters,
-		Jobs:             engine.List,
+		Machines: inv.Machines,
+		Clusters: inv.Clusters,
+		Jobs:     engine.List,
+		Backups: func(ctx context.Context) ([]metrics.BackupStat, error) {
+			clusters, err := st.Clusters().List(ctx)
+			if err != nil {
+				return nil, err
+			}
+			now := time.Now()
+			out := make([]metrics.BackupStat, 0, len(clusters))
+			for _, c := range clusters {
+				h := upgradeSvc.BackupHealthFor(c, now)
+				if h == nil {
+					continue
+				}
+				out = append(out, metrics.BackupStatFrom(c.ID, *h))
+			}
+			return out, nil
+		},
 		AuditChainIntact: func() bool { return chainOK },
 	})
 
@@ -750,6 +776,22 @@ func run(args []string) error {
 	// side effect" is actually decided.
 	if err := engine.Resume(context.Background()); err != nil {
 		return err
+	}
+
+	// The snapshot schedule. Not in --dry-run, like the keeper: it submits jobs
+	// on its own, with nobody having pressed anything. It starts after Resume
+	// so that a snapshot job interrupted by the last shutdown is continued
+	// before the scheduler can ask for another.
+	backupCtx, stopBackups := context.WithCancel(context.Background())
+	defer stopBackups()
+	if !cfg.DryRun {
+		backups := upgradeSvc.NewBackupScheduler(upgrade.BackupSchedulerDeps{
+			Clusters: func(ctx context.Context) ([]model.Cluster, error) { return st.Clusters().List(ctx) },
+			Log: func(msg string, args ...any) {
+				logger.Info(msg, args...)
+			},
+		})
+		go backups.Run(backupCtx)
 	}
 
 	srv := &http.Server{

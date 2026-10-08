@@ -171,6 +171,10 @@ type ClusterView struct {
 	Degraded int `json:"degraded"`
 	Down     int `json:"down"`
 	Checking int `json:"checking"`
+
+	// Backup is the standing of the cluster's etcd snapshots, for the overview
+	// and the wall. Absent when this instance keeps none.
+	Backup *model.BackupHealth `json:"backup,omitempty"`
 }
 
 // Certificate urgency levels, in the order D-23 escalates them.
@@ -366,7 +370,9 @@ func (s *Service) Clusters(ctx context.Context) ([]ClusterView, error) {
 	now := s.deps.Now().UTC()
 	out := make([]ClusterView, 0, len(clusters))
 	for _, c := range clusters {
-		out = append(out, clusterView(c, machines, now))
+		v := clusterView(c, machines, now)
+		v.Backup = s.backupHealthOf(c, now)
+		out = append(out, v)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt.Before(out[j].CreatedAt) })
 	return out, nil
@@ -385,7 +391,29 @@ func (s *Service) Cluster(ctx context.Context, id model.ClusterID) (ClusterView,
 	if err != nil {
 		return ClusterView{}, err
 	}
-	return clusterView(c, machines, s.deps.Now().UTC()), nil
+	now := s.deps.Now().UTC()
+	v := clusterView(c, machines, now)
+	v.Backup = s.backupHealthOf(c, now)
+	return v, nil
+}
+
+// SetBackupHealth gives the inventory the means to say how a cluster's etcd
+// snapshots stand. It is a setter because the snapshot store is built after the
+// inventory (the upgrade service needs the inventory's connector).
+func (s *Service) SetBackupHealth(fn func(c model.Cluster, now time.Time) *model.BackupHealth) {
+	s.mu.Lock()
+	s.backupHealth = fn
+	s.mu.Unlock()
+}
+
+func (s *Service) backupHealthOf(c model.Cluster, now time.Time) *model.BackupHealth {
+	s.mu.Lock()
+	fn := s.backupHealth
+	s.mu.Unlock()
+	if fn == nil {
+		return nil
+	}
+	return fn(c, now)
 }
 
 func clusterView(c model.Cluster, machines []MachineView, now time.Time) ClusterView {

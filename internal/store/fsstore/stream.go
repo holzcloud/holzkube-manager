@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"syscall"
 )
 
 // WriteStreamAtomic is WriteFileAtomic for a file too large to hold in memory:
@@ -99,3 +100,43 @@ func RemoveFile(path string) error {
 // TempPrefix is the prefix of the temporaries WriteStreamAtomic and
 // WriteFileAtomic leave while writing; one found without a writer is debris.
 const TempPrefix = tempPrefix
+
+// OpenFile opens a file under the data directory for reading and reports its
+// size. It is for the stored etcd snapshots a client downloads: too large to
+// hold in memory, and nothing outside this package opens a path in the data
+// directory itself.
+func OpenFile(path string) (io.ReadCloser, int64, error) {
+	f, err := os.Open(path) //nolint:gosec // a path inside the data directory, named by its owner
+	if err != nil {
+		return nil, 0, err
+	}
+	info, err := f.Stat()
+	if err != nil {
+		_ = f.Close()
+		return nil, 0, err
+	}
+	if info.IsDir() {
+		_ = f.Close()
+		return nil, 0, fs.ErrNotExist
+	}
+	return f, info.Size(), nil
+}
+
+// FreeBytes is the space available to an unprivileged writer on the filesystem
+// holding path. A path that does not exist yet (the snapshot directory on a
+// fresh install) is measured at its nearest existing parent, which is the
+// filesystem it will be created on.
+func FreeBytes(path string) (uint64, error) {
+	for {
+		var st syscall.Statfs_t
+		err := syscall.Statfs(path, &st)
+		if err == nil {
+			return uint64(st.Bavail) * uint64(st.Bsize), nil //nolint:gosec,unconvert // widths differ per platform
+		}
+		parent := filepath.Dir(path)
+		if !errors.Is(err, fs.ErrNotExist) || parent == path {
+			return 0, err
+		}
+		path = parent
+	}
+}

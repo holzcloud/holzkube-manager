@@ -97,6 +97,10 @@ type Service struct {
 
 	mu sync.Mutex
 
+	// backupHealth says how a cluster's etcd snapshots stand; nil when this
+	// instance keeps none. See SetBackupHealth.
+	backupHealth func(c model.Cluster, now time.Time) *model.BackupHealth
+
 	// observed is the in-memory half of the read model: per machine, what each
 	// level last confirmed and when.
 	//

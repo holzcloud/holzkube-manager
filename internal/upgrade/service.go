@@ -29,6 +29,9 @@ type Service struct {
 	// snapshots keeps the safety snapshot a Talos upgrade may not start
 	// without. Nil means there is nowhere to keep one, and a start is refused.
 	snapshots *SnapshotStore
+
+	// submit starts a job; set by RegisterBackups.
+	submit SubmitFunc
 }
 
 // NewService wires one up.

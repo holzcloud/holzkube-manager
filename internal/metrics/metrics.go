@@ -60,6 +60,10 @@ type Deps struct {
 	Clusters func(ctx context.Context) ([]inventory.ClusterView, error)
 	Jobs     func(ctx context.Context) ([]model.Job, error)
 
+	// Backups says how each cluster's etcd snapshots stand. Nil means this
+	// instance keeps none, and the series are not written.
+	Backups func(ctx context.Context) ([]BackupStat, error)
+
 	// AuditChainIntact is the startup verification verdict (D-15). It is a
 	// snapshot of what was found at startup, which is the honest thing to
 	// export: a break found then must not stop being reported because a later
@@ -68,6 +72,28 @@ type Deps struct {
 
 	// Now is the clock, so that the certificate metric is testable.
 	Now func() time.Time
+}
+
+// BackupStat is one cluster's snapshot standing.
+type BackupStat struct {
+	Cluster model.ClusterID
+
+	// Enabled is whether a schedule is on; Overdue whether it has missed two
+	// intervals.
+	Enabled, Overdue bool
+
+	// AgeSeconds is the age of the newest snapshot of any kind; negative when
+	// there is none.
+	AgeSeconds float64
+}
+
+// BackupStatFrom is the exporter's view of a cluster's backup health.
+func BackupStatFrom(id model.ClusterID, h model.BackupHealth) BackupStat {
+	s := BackupStat{Cluster: id, Enabled: h.Enabled, Overdue: h.Overdue, AgeSeconds: -1}
+	if h.AgeSeconds != nil {
+		s.AgeSeconds = float64(*h.AgeSeconds)
+	}
+	return s
 }
 
 // Exporter renders one scrape.
@@ -109,9 +135,18 @@ func (e *Exporter) Write(ctx context.Context, w io.Writer) error {
 		return fmt.Errorf("metrics: read the jobs: %w", err)
 	}
 
+	var backups []BackupStat
+	if e.deps.Backups != nil {
+		backups, err = e.deps.Backups(ctx)
+		if err != nil {
+			return fmt.Errorf("metrics: read the backups: %w", err)
+		}
+	}
+
 	var b strings.Builder
 
 	e.writeClusters(&b, clusters)
+	e.writeBackups(&b, backups)
 	e.writeMachines(&b, clusters, machines)
 	e.writeJobs(&b, jobs)
 	e.writeAudit(&b)
@@ -160,6 +195,33 @@ func (e *Exporter) writeClusters(b *strings.Builder, clusters []inventory.Cluste
 		"1 when this cluster refuses mutation because it was adopted read-only (INV-12).")
 	for _, c := range clusters {
 		metric(b, "holzkube_cluster_locked", labels{{"cluster", string(c.ID)}}, boolean(c.Locked))
+	}
+}
+
+// writeBackups emits the etcd snapshot standing. The age has no series for a
+// cluster that has never had a snapshot: -1 would graph as a very young one,
+// and the overdue and schedule gauges carry that case.
+func (e *Exporter) writeBackups(b *strings.Builder, stats []BackupStat) {
+	if stats == nil {
+		return
+	}
+	help(b, "holzkube_etcd_snapshot_age_seconds", "gauge",
+		"Age of the newest stored etcd snapshot of any kind (scheduled or taken before an upgrade). "+
+			"Absent for a cluster that has none; these files live on the manager's own device.")
+	for _, s := range stats {
+		if s.AgeSeconds >= 0 {
+			metric(b, "holzkube_etcd_snapshot_age_seconds", labels{{"cluster", string(s.Cluster)}}, s.AgeSeconds)
+		}
+	}
+	help(b, "holzkube_etcd_snapshot_schedule_enabled", "gauge",
+		"1 when this cluster has a snapshot schedule.")
+	for _, s := range stats {
+		metric(b, "holzkube_etcd_snapshot_schedule_enabled", labels{{"cluster", string(s.Cluster)}}, boolean(s.Enabled))
+	}
+	help(b, "holzkube_etcd_snapshot_overdue", "gauge",
+		"1 when a schedule is on and the last scheduled snapshot is older than twice its interval.")
+	for _, s := range stats {
+		metric(b, "holzkube_etcd_snapshot_overdue", labels{{"cluster", string(s.Cluster)}}, boolean(s.Overdue))
 	}
 }
 

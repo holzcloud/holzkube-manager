@@ -40,6 +40,8 @@ func realOps() upgrade.FileOps {
 		},
 		Remove:     fsstore.RemoveFile,
 		TempPrefix: fsstore.TempPrefix,
+		ReadFile:   fsstore.ReadFile,
+		Open:       fsstore.OpenFile,
 	}
 }
 
@@ -153,8 +155,14 @@ func TestOnlyTheNewestTwoAreKept(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(entries) != 2 {
-		t.Fatalf("%d snapshots kept, want 2", len(entries))
+	var kept int
+	for _, e := range entries {
+		if strings.HasSuffix(e.Name(), ".snapshot") { // not the checksum files beside them
+			kept++
+		}
+	}
+	if kept != 2 {
+		t.Fatalf("%d snapshots kept, want 2", kept)
 	}
 	snap, _ := st.Latest("c1")
 	if snap.Bytes != 4 {

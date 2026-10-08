@@ -2,6 +2,8 @@ package upgrade
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -98,6 +100,18 @@ type FileOps struct {
 
 	// TempPrefix marks the temporaries WriteStream leaves while writing.
 	TempPrefix string
+
+	// ReadFile reads a small file (a checksum, the attempt record). Nil means
+	// this instance cannot, and those facts read as absent.
+	ReadFile func(path string) ([]byte, error)
+
+	// Open opens a stored snapshot for download. Nil means downloads are not
+	// available.
+	Open func(path string) (io.ReadCloser, int64, error)
+
+	// FreeBytes is the free space on the filesystem holding path. Nil means
+	// the disk guard cannot look, and it does not refuse.
+	FreeBytes func(path string) (uint64, error)
 }
 
 // DirFile is one entry of FileOps.List.
@@ -116,6 +130,9 @@ type SnapshotStore struct {
 	// mu guards inflight and keeps pruning from interleaving. It is never held
 	// while a snapshot streams.
 	mu sync.Mutex
+
+	// statusMu serialises the attempt record's read-modify-write.
+	statusMu sync.Mutex
 
 	// inflight is the clusters a snapshot is being taken for.
 	inflight map[model.ClusterID]bool
@@ -178,7 +195,7 @@ func (st *SnapshotStore) Latest(cluster model.ClusterID) (SafetySnapshot, error)
 		newestSize int64
 	)
 	for _, e := range entries {
-		at, ok := parseSnapshotName(e.Name)
+		at, _, ok := parseSnapshotName(e.Name)
 		if !ok || e.IsDir || e.Size == 0 {
 			continue
 		}
@@ -201,16 +218,41 @@ func (st *SnapshotStore) Latest(cluster model.ClusterID) (SafetySnapshot, error)
 	return out, nil
 }
 
-func parseSnapshotName(name string) (time.Time, bool) {
+// The two kinds of snapshot in a cluster's directory. They are told apart by
+// the file name -- `<stamp>.snapshot` is the one before an upgrade, as it has
+// been since the first release, and `<stamp>.scheduled.snapshot` is the
+// schedule's -- so that each is pruned by its own count and neither can push
+// the other out. Freshness, which asks only "is there a recent one", counts
+// both.
+const (
+	SnapshotKindUpgrade   = "upgrade"
+	SnapshotKindScheduled = "scheduled"
+)
+
+const scheduledInfix = ".scheduled"
+
+func parseSnapshotName(name string) (time.Time, string, bool) {
 	stem, ok := strings.CutSuffix(name, ".snapshot")
 	if !ok {
-		return time.Time{}, false
+		return time.Time{}, "", false
+	}
+	kind := SnapshotKindUpgrade
+	if s, scheduled := strings.CutSuffix(stem, scheduledInfix); scheduled {
+		stem, kind = s, SnapshotKindScheduled
 	}
 	at, err := time.Parse(snapshotStamp, stem)
 	if err != nil {
-		return time.Time{}, false
+		return time.Time{}, "", false
 	}
-	return at.UTC(), true
+	return at.UTC(), kind, true
+}
+
+func snapshotFileName(at time.Time, kind string) string {
+	name := at.UTC().Format(snapshotStamp)
+	if kind == SnapshotKindScheduled {
+		name += scheduledInfix
+	}
+	return name + ".snapshot"
 }
 
 // write stores whatever fn streams as the cluster's newest snapshot.
@@ -220,6 +262,15 @@ func parseSnapshotName(name string) (time.Time, bool) {
 // truncated file with a new name would be a pass for a snapshot that cannot be
 // restored.
 func (st *SnapshotStore) write(cluster model.ClusterID, fn func(io.Writer) (int64, error)) (SafetySnapshot, error) {
+	return st.writeKind(cluster, SnapshotKindUpgrade, keepSafetySnapshots, 0, fn)
+}
+
+// writeKind is write for either kind. keep is how many of this kind survive
+// it, and estimate the bytes the snapshot is expected to take (0 when nothing
+// is known): the disk guard refuses unless twice that is free.
+func (st *SnapshotStore) writeKind(
+	cluster model.ClusterID, kind string, keep int, estimate int64, fn func(io.Writer) (int64, error),
+) (SafetySnapshot, error) {
 	dir, err := st.clusterDir(cluster)
 	if err != nil {
 		return SafetySnapshot{}, err
@@ -238,9 +289,14 @@ func (st *SnapshotStore) write(cluster model.ClusterID, fn func(io.Writer) (int6
 		st.mu.Unlock()
 	}()
 
-	final := filepath.Join(dir, st.now().UTC().Format(snapshotStamp)+".snapshot")
+	if err := st.guardDisk(cluster, estimate); err != nil {
+		return SafetySnapshot{}, err
+	}
+
+	final := filepath.Join(dir, snapshotFileName(st.now(), kind))
+	sum := sha256.New()
 	n, err := st.fs.WriteStream(final, func(w io.Writer) (int64, error) {
-		n, ferr := fn(w)
+		n, ferr := fn(io.MultiWriter(w, sum))
 		if ferr != nil {
 			return 0, fmt.Errorf("the snapshot did not complete, and none was kept: %w", ferr)
 		}
@@ -254,15 +310,27 @@ func (st *SnapshotStore) write(cluster model.ClusterID, fn func(io.Writer) (int6
 	}
 	_ = n
 
+	// The checksum is a file of its own, in `sha256sum -c` form, so an
+	// operator who copied the snapshot off the box can check the copy. A
+	// failure to write it costs the checksum and not the snapshot.
+	_, _ = st.fs.WriteStream(final+checksumSuffix, func(w io.Writer) (int64, error) {
+		k, werr := fmt.Fprintf(w, "%s  %s\n", hex.EncodeToString(sum.Sum(nil)), filepath.Base(final))
+		return int64(k), werr
+	})
+
 	st.mu.Lock()
-	st.prune(dir)
+	st.prune(dir, kind, keep)
 	st.mu.Unlock()
 	return st.Latest(cluster)
 }
 
-// prune removes all but the newest keepSafetySnapshots, and any temporary a
-// crash left behind.
-func (st *SnapshotStore) prune(dir string) {
+const checksumSuffix = ".sha256"
+
+// prune removes all but the newest keep snapshots OF THIS KIND, and any
+// temporary a crash left behind. The other kind is not touched: a schedule
+// that kept seven must not push out the one an upgrade is waiting on, and two
+// pre-upgrade snapshots must not eat the schedule's history.
+func (st *SnapshotStore) prune(dir, kind string, keep int) {
 	entries, err := st.fs.List(dir)
 	if err != nil {
 		return
@@ -275,14 +343,15 @@ func (st *SnapshotStore) prune(dir string) {
 			// temporary has been renamed by now.
 			_ = st.fs.Remove(filepath.Join(dir, e.Name))
 		default:
-			if _, ok := parseSnapshotName(e.Name); ok {
+			if _, k, ok := parseSnapshotName(e.Name); ok && k == kind {
 				names = append(names, e.Name)
 			}
 		}
 	}
-	sort.Strings(names) // the stamp sorts as time does
-	for len(names) > keepSafetySnapshots {
+	sort.Strings(names) // the stamp sorts as time does within a kind
+	for len(names) > keep {
 		_ = st.fs.Remove(filepath.Join(dir, names[0]))
+		_ = st.fs.Remove(filepath.Join(dir, names[0]+checksumSuffix))
 		names = names[1:]
 	}
 }

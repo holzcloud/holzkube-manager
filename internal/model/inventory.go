@@ -88,6 +88,9 @@ type Cluster struct {
 	// written before it existed decodes as false, which is what it was.
 	Disabled bool `json:"disabled,omitempty"`
 
+	// BackupSchedule is the scheduled etcd snapshots (2026-10-08). Nil is off.
+	BackupSchedule *BackupSchedule `json:"backup_schedule,omitempty"`
+
 	Rev uint64 `json:"rev"`
 }
 
