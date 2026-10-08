@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -141,11 +142,7 @@ func streamEvents(d httpapi.Deps) http.HandlerFunc {
 		// guarantees on the way out.
 		merged := make(chan taggedItem, len(feeds)*4+8)
 		for _, f := range feeds {
-			go func(f feed) {
-				for item := range f.items {
-					merged <- taggedItem{topic: f.topic, item: item}
-				}
-			}(f)
+			go forwardFeed(r.Context(), f.topic, f.items, merged)
 		}
 
 		keepAlive := time.NewTicker(streamKeepAlive)
@@ -189,6 +186,20 @@ func streamEvents(d httpapi.Deps) http.HandlerFunc {
 					return
 				}
 			}
+		}
+	}
+}
+
+// forwardFeed copies one subscription into the merged channel until the
+// subscription closes or ctx ends. The send selects on ctx: the handler stops
+// draining merged when it returns, and a bare send into a full channel would
+// park this goroutine, and everything it references, for good.
+func forwardFeed(ctx context.Context, topic streamhub.Topic, items <-chan streamhub.Item, merged chan<- taggedItem) {
+	for item := range items {
+		select {
+		case merged <- taggedItem{topic: topic, item: item}:
+		case <-ctx.Done():
+			return
 		}
 	}
 }
