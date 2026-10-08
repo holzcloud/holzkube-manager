@@ -195,7 +195,8 @@ var allowlist = map[string][]string{
 	// talosconfig download beside it is a plain link. What it hands over is
 	// system:masters on somebody's cluster, and "who asked for this and when"
 	// is precisely what an archive is for.
-	"cluster.kubeconfig": {},
+	"cluster.kubeconfig":  {},
+	"cluster.talosconfig": {},
 
 	// The cluster this machine was added to and the address it was found at.
 	// Neither is a credential; the credentials are the cluster's, and they are
