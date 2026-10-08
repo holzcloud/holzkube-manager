@@ -1,0 +1,9 @@
+# Actions are pinned to commit SHAs (a moving tag is whatever its owner pushes
+# next, and the release job builds the binary that lands on a Pi as root). A
+# pinned SHA does not move, so this is what brings a fixed version in.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly

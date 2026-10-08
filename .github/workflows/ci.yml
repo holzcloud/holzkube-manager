@@ -47,25 +47,31 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v4
+      - name: A release is only cut from main
+        if: inputs.tag != '' && github.ref != 'refs/heads/main'
+        run: |
+          echo "::error::a release tag is created from main only; this run is on ${GITHUB_REF}"
+          exit 1
+
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       # go.mod carries `toolchain go1.26.7` and setup-go honours that line, so
       # the Go version is pinned in one place and CI cannot drift from a local
       # build.
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
           go-version-file: go.mod
           # Caches the module and build caches. Keyed on the root go.sum only:
           # sandbox/ is a separate module, deliberately outside this build.
           cache-dependency-path: go.sum
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: '22'
           cache: npm
           cache-dependency-path: web/package-lock.json
 
-      - uses: go-task/setup-task@v1
+      - uses: go-task/setup-task@70f2430ad412f838533de8c0515c749ffb2b8bd3 # v1
         with:
           version: 3.53.1
 
@@ -106,7 +112,7 @@ jobs:
       # v9, not v6: the v6 action only knows how to install golangci-lint v1,
       # and .golangci.yml is a v2 config. v7 was the first major to speak v2.
       - name: Lint Go
-        uses: golangci/golangci-lint-action@v9
+        uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9
         with:
           version: v2.13.1
 
@@ -127,6 +133,11 @@ jobs:
       # macOS runner this workflow no longer has). The limit is for a hang.
       - name: Test Go
         run: go test ./... -count=1 -race -timeout 20m
+
+      # Reachable known vulnerabilities in the Go code and its modules. Pinned
+      # like the linter; Taskfile.yml's GOVULNCHECK_VERSION is the other copy.
+      - name: Check for known vulnerabilities
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./...
 
       # Last, because it starts the product and drives a browser over every
       # route, and because it needs the binary the Build step above produced.
@@ -150,20 +161,23 @@ jobs:
     needs: [ci]
     # Either a tag was pushed, or this run was asked to create one. Both reach
     # goreleaser with a tag at HEAD, which is the only state it can release from.
-    if: startsWith(github.ref, 'refs/tags/v') || inputs.tag != ''
+    #
+    # A dispatch that asks for a tag only releases from main: any branch a writer
+    # can push would otherwise reach the Pi through the hourly update timer.
+    if: startsWith(github.ref, 'refs/tags/v') || (inputs.tag != '' && github.ref == 'refs/heads/main')
     runs-on: ubuntu-latest
     permissions:
       # Creating the draft release and uploading the archives to it. Nothing
       # else: this workflow does not publish packages or write to pull requests.
       contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           # goreleaser derives the version from the tag and the changelog from
           # git history. A shallow clone gives it neither.
           fetch-depth: 0
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
           go-version-file: go.mod
           cache-dependency-path: go.sum
@@ -171,7 +185,7 @@ jobs:
       # .goreleaser.yaml runs `npm --prefix web ci` and `npm --prefix web run
       # build` in its before hooks, for the same go:embed reason as the Taskfile.
       # The release job therefore needs Node exactly as much as the build does.
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: '22'
           cache: npm
@@ -258,7 +272,7 @@ jobs:
           python3 .github/release-notes.py "$TAG" /tmp/tag-annotation > /tmp/release-notes.md
           cat /tmp/release-notes.md
 
-      - uses: goreleaser/goreleaser-action@v6
+      - uses: goreleaser/goreleaser-action@e435ccd777264be153ace6237001ef4d979d3a7a # v6
         with:
           distribution: goreleaser
           version: v2.18.0
@@ -296,7 +310,7 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: Write the version into the project pages and read it back
         env:
           CMS_TOKEN: ${{ secrets.CMS_TOKEN }}

@@ -12,6 +12,7 @@ vars:
   # next to the one actually installed; changing it means changing
   # .github/workflows/ci.yml in the same commit.
   GOLANGCI_VERSION: v2.13.1
+  GOVULNCHECK_VERSION: v1.8.0
   # The race detector's ThreadSanitizer refuses the Raspberry Pi 5 kernel's
   # 47-bit address space, so on aarch64 the tests run without it and the race
   # detector stays CI's alone (CLAUDE.md). Everywhere else it is on.
@@ -83,6 +84,15 @@ tasks:
     desc: Run the Go tests with the release toolchain (and the race detector where it runs).
     cmds:
       - go test ./... -count=1 {{.RACE}}
+
+  vuln:
+    desc: Fail when the code calls a function with a known vulnerability.
+    # govulncheck reports only vulnerabilities the code can reach, so a finding
+    # is a reason to act and not a feed to read. It needs the network (the
+    # vulnerability database), which the gates here and in CI have; the version
+    # is pinned like the linter's, in the same place as CI's step.
+    cmds:
+      - go run golang.org/x/vuln/cmd/govulncheck@{{.GOVULNCHECK_VERSION}} ./...
 
   test:next:
     desc: Run the Go tests once more with the locally installed Go, as an early warning.
@@ -209,6 +219,7 @@ tasks:
       - task: build
       - task: lint:go
       - task: test
+      - task: vuln
       # Last because it is the slowest: it starts the product and drives a
       # browser over every route. In the chain rather than opt-in, because
       # ledger entries 5 and 64 record a drift watcher that existed, was never
