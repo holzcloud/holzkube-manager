@@ -23,6 +23,9 @@ import (
 type Store struct {
 	dir string
 
+	// stopReaper ends the periodic sweep of expired sessions.
+	stopReaper chan struct{}
+
 	// release drops the process flock. It is held for the lifetime of the
 	// Store and dropped by Close.
 	release func() error
@@ -125,8 +128,32 @@ func Open(dir string) (s *Store, err error) {
 	} else if n > 0 {
 		slog.Info("removed expired session records", slog.Int("count", n))
 	}
+
+	// And keep sweeping. Every anonymous GET of the identity-provider start
+	// route writes a session file, and a sweep only at start lets a scanner
+	// grow the directory for as long as the process lives.
+	stop := make(chan struct{})
+	s.stopReaper = stop
+	go func() {
+		t := time.NewTicker(reapInterval)
+		defer t.Stop()
+		for {
+			select {
+			case <-stop:
+				return
+			case now := <-t.C:
+				if _, err := s.sessions.reapExpired(context.Background(), now); err != nil {
+					slog.Warn("could not remove expired session records", slog.Any("error", err))
+				}
+			}
+		}
+	}()
 	return s, nil
 }
+
+// reapInterval is how often expired sessions are swept while running; a var so
+// the test need not wait ten minutes.
+var reapInterval = 10 * time.Minute
 
 // Dir reports the data directory. It is deliberately not part of store.Store:
 // callers above the seam have no business with paths.
@@ -166,6 +193,10 @@ func (s *Store) MachineClasses() store.MachineClassStore { return s.machineClass
 // Close releases the process lock. After Close another instance may open the
 // same data directory.
 func (s *Store) Close() error {
+	if s.stopReaper != nil {
+		close(s.stopReaper)
+		s.stopReaper = nil
+	}
 	if s.release == nil {
 		return nil
 	}

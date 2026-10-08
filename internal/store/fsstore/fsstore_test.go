@@ -306,3 +306,38 @@ func TestSchematicDeleteReportsAMissingRecord(t *testing.T) {
 		t.Errorf("second Delete: err = %v, want store.ErrNotFound", err)
 	}
 }
+
+// TestExpiredSessionsAreSweptWhileRunning: the sweep used to run only at start,
+// so anonymous sign-in starts could grow the directory for the process's life.
+func TestExpiredSessionsAreSweptWhileRunning(t *testing.T) {
+	old := reapInterval
+	reapInterval = 20 * time.Millisecond
+	t.Cleanup(func() { reapInterval = old })
+
+	dir := t.TempDir()
+	if err := os.Chmod(dir, 0o700); err != nil {
+		t.Fatalf("chmod: %v", err)
+	}
+	s, err := Open(dir)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+
+	ctx := context.Background()
+	if _, err := s.Sessions().Put(ctx, model.Session{ID: "stale000", Data: []byte(`{}`), ExpiresAt: time.Now().Add(-time.Hour)}); err != nil {
+		t.Fatalf("put: %v", err)
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		recs, err := s.Sessions().List(ctx)
+		if err != nil {
+			t.Fatalf("list: %v", err)
+		}
+		if len(recs) == 0 {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Error("an expired session was still on disk 5s after the sweep interval")
+}

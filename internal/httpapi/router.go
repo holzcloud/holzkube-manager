@@ -296,6 +296,10 @@ type Deps struct {
 	WallLinkValid func(ctx context.Context, token string) bool
 
 	Routes []Route
+
+	// anonBucket is the one per-peer limiter every anonymous route shares, built
+	// by New so that a scanner cannot get a fresh allowance per route.
+	anonBucket middleware.Middleware
 }
 
 // SSOOnly reports whether the local password is refused for this request. A nil
@@ -372,6 +376,11 @@ func (d Deps) LocalSignIn() string {
 
 // New builds the handler: the outer chain, the route table and the SPA fallback.
 func New(d Deps) http.Handler {
+	// Thirty in a burst, then one every two seconds, per peer.
+	d.anonBucket = middleware.AnonLimit(30, 2*time.Second, func(w http.ResponseWriter, r *http.Request, wait time.Duration) {
+		WriteProblem(w, r, RateLimited(int(wait.Seconds())+1))
+	})
+
 	mux := http.NewServeMux()
 
 	// A second, method-less mux is the cheapest way to tell "no such path" from
@@ -488,6 +497,7 @@ func (d Deps) wrapRoute(rt Route) http.Handler {
 			func(w http.ResponseWriter, r *http.Request) {
 				WriteProblem(w, r, Unauthenticated())
 			}),
+		d.anonLimit(rt),
 		middleware.Audit(auditAdapter{deps: d}, rt.Action, middleware.IsMutating(rt.Method) || rt.AuditRead,
 			func(w http.ResponseWriter, r *http.Request, err error) {
 				WriteInternal(w, r, d.Logger, err)
@@ -571,6 +581,16 @@ func (d Deps) wrapRoute(rt Route) http.Handler {
 			}),
 	)
 	return inner(rt.Handler)
+}
+
+// anonLimit bounds the routes anyone can call that leave a permanent trace:
+// an audit pair, or a session file. See middleware.AnonLimit.
+func (d Deps) anonLimit(rt Route) middleware.Middleware {
+	if rt.RequiresSession || rt.Action == "" ||
+		(!middleware.IsMutating(rt.Method) && !strings.HasPrefix(rt.Pattern, "/api/v1/auth/oidc/")) {
+		return nil
+	}
+	return d.anonBucket
 }
 
 // fallback serves the SPA for UI paths and a problem response for API paths, so

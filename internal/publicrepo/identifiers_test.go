@@ -50,6 +50,9 @@ var forbidden = map[string]bool{
 	"f4b498c3e2341152c7f1cce9994028c1d8460473b3ad8bd6623138342edeb04a": true,
 	"dfe0bb9af542f87fb2c6ff9097d65da309ec319f9e95edb1cff26ebf08b27fc5": true,
 	"d2ea9f9397b6d90809580075e62c220c2c763d34875748fe9f717899eab5979a": true,
+	// A node of the cluster itself, found 2026-10-03 as the placeholder of the
+	// import form, in the tree and in every release.
+	"b3461db8f04ddc5aee82622dab12ea01f2fdc2c1b2932417a8de806c1e66281d": true,
 	// The host names' common prefix on its own: a comment quoting how a name
 	// broke across lines carries the prefix and never the whole name.
 	"584c01d0704b9d8911e5ebf08cdb20114b4d02781f5799b947882ea0f6004d39": true,
@@ -148,5 +151,57 @@ func TestNoIdentifierOfTheRealInstallationIsInTheTree(t *testing.T) {
 	}
 	if checked < 100 {
 		t.Fatalf("checked only %d files; the walk is not seeing the repository", checked)
+	}
+}
+
+// TestNoIdentifierOfTheRealInstallationIsInTheHistory scans every commit, on
+// every branch and tag: the message and every line a commit touched.
+//
+// The tree test above is not enough, and the repository learned that twice. A
+// value that was committed and removed in the next commit is gone from the
+// tree and is still a git clone away, and "take it out" is a commit that
+// leaves it there. On 2026-10-03 the history of main still carried all of
+// them, 26 commits deep, a week after the identifiers had "come out"; the
+// history was rewritten then, and this is what keeps it clean.
+func TestNoIdentifierOfTheRealInstallationIsInTheHistory(t *testing.T) {
+	root, err := filepath.Abs(filepath.Join("..", ".."))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command("git", "-C", root, "log", "--all", "-p", "--no-color", "--format=@@COMMIT %h %s%n%b")
+	out, err := cmd.StdoutPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("git log: %v", err)
+	}
+	scanner := bufio.NewScanner(out)
+	scanner.Buffer(make([]byte, 0, 64*1024), 16*1024*1024)
+	commit, lines := "?", 0
+	reported := map[string]bool{}
+	for scanner.Scan() {
+		line := scanner.Text()
+		if strings.HasPrefix(line, "@@COMMIT ") {
+			commit = strings.Fields(line)[1]
+		}
+		lines++
+		for _, c := range candidates(line) {
+			if h := hashOf(c); forbidden[h] && !reported[commit+h] {
+				reported[commit+h] = true
+				t.Errorf("commit %s carries an identifier of the real installation (sha256 %s) in its "+
+					"message or in a line it touched; it is in the history for good once pushed -- "+
+					"amend the commit before it leaves this machine", commit, h[:12])
+			}
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		t.Errorf("reading git log: %v", err)
+	}
+	if err := cmd.Wait(); err != nil {
+		t.Fatalf("git log: %v", err)
+	}
+	if lines < 1000 {
+		t.Fatalf("scanned only %d lines of history; the log is not seeing the repository", lines)
 	}
 }

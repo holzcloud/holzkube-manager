@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/holzcloud/holzkube-manager/internal/auth"
@@ -61,6 +62,8 @@ func isReservedActor(username string) bool {
 	return false
 }
 
+var setupMu sync.Mutex
+
 func createFirstUser(d httpapi.Deps, w http.ResponseWriter, r *http.Request) {
 	// Setup creates the account that owns this instance, and it is reachable
 	// before any credential exists. On the public address that is a race
@@ -113,6 +116,12 @@ func createFirstUser(d httpapi.Deps, w http.ResponseWriter, r *http.Request) {
 		httpapi.WriteProblem(w, r, httpapi.Validation("The account details are not valid.", fieldErrs...))
 		return
 	}
+
+	// The check and the create are one step. Two concurrent first requests both
+	// saw an empty list and both created an admin; the wizard is not hot, so
+	// serialising it costs nothing.
+	setupMu.Lock()
+	defer setupMu.Unlock()
 
 	users, err := d.Store.Users().List(r.Context())
 	if err != nil {

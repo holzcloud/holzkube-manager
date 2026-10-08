@@ -46,6 +46,7 @@ func Log(logger *slog.Logger) Middleware {
 			logger.InfoContext(r.Context(), "http request",
 				slog.String("method", r.Method),
 				slog.String("path", r.URL.Path),
+				slog.String("peer", ClientIP(r)),
 				slog.Int("status", rec.Status()),
 				slog.String("request_id", RequestIDFromContext(r.Context())),
 				slog.Duration("duration", time.Since(start)),

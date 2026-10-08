@@ -442,3 +442,27 @@ func TestALoopbackHostNameFromARemotePeerIsSSOOnly(t *testing.T) {
 		}
 	}
 }
+
+// TestAnonymousLoginsCannotFloodTheAuditArchive: every login attempt writes an
+// fsync'd, hash-chained intent/outcome pair into an archive that is never
+// pruned, and the caller needs no credential. One peer gets a burst, then 429.
+func TestAnonymousLoginsCannotFloodTheAuditArchive(t *testing.T) {
+	t.Parallel()
+
+	h := newHarness(t)
+	h.setupAndLogin(t)
+
+	limited := 0
+	for range 60 {
+		// /setup after setup answers 409 with no throttle of its own, so any
+		// 429 here is this limiter and not the login throttle.
+		resp, _ := h.do(t, http.MethodPost, "/api/v1/setup",
+			map[string]string{"username": "nobody", "password": "wrong-password-xx"})
+		if resp.StatusCode == http.StatusTooManyRequests {
+			limited++
+		}
+	}
+	if limited == 0 {
+		t.Error("60 anonymous setup attempts in a row from one peer were all admitted")
+	}
+}
