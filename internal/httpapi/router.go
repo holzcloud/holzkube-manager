@@ -295,6 +295,17 @@ func (d Deps) SSOOnly(r *http.Request) bool {
 	return d.IsSSOOnly != nil && d.IsSSOOnly(r.Host)
 }
 
+// tokenAuthenticated reports whether this request was authenticated by a
+// service-account token -- resolved, not merely presented.
+//
+// CSRF and the sudo window are waived for tokens only. Asking whether an
+// Authorization header was present instead let any "Bearer x" skip both for a
+// request that was in fact authenticated by a stolen cookie.
+func tokenAuthenticated(r *http.Request) bool {
+	_, ok := auth.TokenActor(r.Context())
+	return ok
+}
+
 // wallLinkOpens reports whether this request carries a valid wall link for a
 // route that accepts one.
 //
@@ -423,7 +434,7 @@ func (d Deps) wrapRoute(rt Route) http.Handler {
 	inner := middleware.Chain(
 		// Exempt for a bearer token, and for one reason: CSRF is an attack on
 		// ambient credentials, and a token is not ambient. See CSRF's own doc.
-		middleware.CSRF(middleware.IsTokenRequest,
+		middleware.CSRF(tokenAuthenticated,
 			func(w http.ResponseWriter, r *http.Request, err error) {
 				WriteProblem(w, r, CSRFFailed(err.Error()))
 			}),
@@ -498,7 +509,7 @@ func (d Deps) wrapRoute(rt Route) http.Handler {
 		// account's name.
 		middleware.Sudo(rt.Destructive,
 			func(r *http.Request) bool {
-				if middleware.IsTokenRequest(r) {
+				if tokenAuthenticated(r) {
 					return true
 				}
 				return d.Auth.IsSudoOpen(r.Context(), d.SudoWindow)
@@ -507,7 +518,7 @@ func (d Deps) wrapRoute(rt Route) http.Handler {
 				// Nothing to touch on a token request: there is no session to
 				// stamp, and writing one would be the request creating the
 				// session it deliberately does not have.
-				if middleware.IsTokenRequest(r) {
+				if tokenAuthenticated(r) {
 					return
 				}
 				d.Auth.TouchSudoWindow(r.Context())

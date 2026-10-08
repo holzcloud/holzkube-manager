@@ -378,3 +378,27 @@ func TestAServiceAccountTokenWorksOverHTTP(t *testing.T) {
 		t.Errorf("a service account opening a sudo window answered %d, want 409 (%s)", got, body)
 	}
 }
+
+// TestABogusBearerHeaderDoesNotWaiveSudoForASession pins the hole an
+// Authorization header opened: the sudo gate and CSRF asked whether a bearer
+// was *presented*, so "Bearer x" on a request that a stolen cookie
+// authenticated skipped the password. They now ask whether a token was
+// *resolved*.
+func TestABogusBearerHeaderDoesNotWaiveSudoForASession(t *testing.T) {
+	t.Parallel()
+
+	h := newHarness(t)
+	h.setupAndLogin(t)
+	c := h.asUser(t, testUser, testPass)
+
+	bogus := func(req *http.Request) {
+		req.Header.Set("Authorization", "Bearer not-a-token")
+	}
+	// A Destructive route, and no sudo window has been opened for this session.
+	got, body := c.status(t, http.MethodPost, "/api/v1/users", map[string]string{
+		"username": "backdoor", "password": newAccountPass, "role": "admin",
+	}, bogus)
+	if got != http.StatusPreconditionRequired {
+		t.Errorf("a session plus a made-up bearer got %d (%s), want 428 sudo.required", got, body)
+	}
+}
