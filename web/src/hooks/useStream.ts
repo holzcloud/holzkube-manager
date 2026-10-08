@@ -76,9 +76,15 @@ export function useStream(topics: string[]): StreamResult {
     setConnection('connecting')
     const source = new EventSource(`/api/v1/stream?${query}`, { withCredentials: true })
 
-    const append = (topic: string, entry: StreamLine) => {
+    const append = (topic: string, entry: StreamLine, replayable = false) => {
       setLines((prev) => {
         const existing = prev[topic] ?? []
+        // Toggling a panel reopens the connection, and the server answers a new
+        // connection by replaying its ring buffer. What this tab already holds
+        // must not be shown twice: (topic, id) is the identity of a line.
+        if (replayable && existing.some((e) => e.id === entry.id)) {
+          return prev
+        }
         const next = [...existing, entry]
         return { ...prev, [topic]: next.length > MAX_LINES ? next.slice(-MAX_LINES) : next }
       })
@@ -87,22 +93,35 @@ export function useStream(topics: string[]): StreamResult {
     source.onopen = () => setConnection('open')
 
     source.onmessage = (ev: MessageEvent<string>) => {
-      const envelope = JSON.parse(ev.data) as Envelope
-      append(envelope.topic, {
-        // The frame's own id is the whole cursor set, so the per-line key is
-        // taken from the position of the line within its topic instead.
-        id: idFor(ev.lastEventId, envelope.topic),
-        line: envelope.payload.line,
-        state: envelope.payload.state,
-        reason: envelope.payload.reason,
-        at: envelope.payload.at,
-      })
+      const envelope = parse<Envelope>(ev.data)
+      if (!envelope?.payload || typeof envelope.topic !== 'string') {
+        return
+      }
+      // The frame's own id is the whole cursor set, so the per-line key is
+      // taken from the position of the line within its topic instead. A frame
+      // that carries none gets a unique negative id: it is rendered, but can
+      // never collide with another entry's key or be mistaken for a replay.
+      const known = idFor(ev.lastEventId, envelope.topic)
+      append(
+        envelope.topic,
+        {
+          id: known ?? nextGapID.current--,
+          line: envelope.payload.line,
+          state: envelope.payload.state,
+          reason: envelope.payload.reason,
+          at: envelope.payload.at,
+        },
+        known !== null,
+      )
     }
 
     source.addEventListener('gap', (ev) => {
-      const envelope = JSON.parse((ev as MessageEvent<string>).data) as {
+      const envelope = parse<{
         topic: string
         payload: { missed: number; through: number }
+      }>((ev as MessageEvent<string>).data)
+      if (!envelope?.payload || typeof envelope.topic !== 'string') {
+        return
       }
       // A visible break, never a silent omission. Somebody reading a log to
       // diagnose an outage and not being told that lines are missing draws
@@ -130,14 +149,23 @@ export function useStream(topics: string[]): StreamResult {
   return { lines, connection }
 }
 
-/** The per-topic position out of the connection-wide cursor. */
-function idFor(lastEventID: string, topic: string): number {
+/** A frame that is not JSON is dropped; it must not throw out of the handler. */
+function parse<T>(data: string): T | null {
+  try {
+    return JSON.parse(data) as T
+  } catch {
+    return null
+  }
+}
+
+/** The per-topic position out of the connection-wide cursor, or null. */
+function idFor(lastEventID: string, topic: string): number | null {
   for (const part of lastEventID.split(',')) {
     const [name, value] = part.split('=')
     if (name === topic) {
       const n = Number(value)
-      return Number.isFinite(n) ? n : 0
+      return Number.isFinite(n) && value !== '' ? n : null
     }
   }
-  return 0
+  return null
 }
