@@ -21,7 +21,7 @@ import { useSession } from '@/hooks/useSession'
  * This only keeps the operator from staring at a screen full of 401s.
  */
 export function AppShell() {
-  const { setupRequired, authenticated, loading } = useSession()
+  const { setupRequired, authenticated, unreachable, loading } = useSession()
   // The drawer's state lives here because four things open it and three close
   // it: the rail's ellipsis, the header's menu button, the backdrop, and
   // following a link. Owned by one of them, the others would each need their
@@ -34,6 +34,29 @@ export function AppShell() {
     return (
       <div className="flex h-dvh items-center justify-center text-sm text-muted-foreground">
         Loading…
+      </div>
+    )
+  }
+  if (unreachable) {
+    // Not a logout: the server did not answer. Redirecting to /login here
+    // would throw away the page the operator is on for a blip, and the login
+    // screen would then fail to load as well.
+    return (
+      <div
+        role="alert"
+        className="flex h-dvh flex-col items-center justify-center gap-3 p-4 text-center text-sm"
+      >
+        <p className="font-medium">holzkube-manager cannot be reached.</p>
+        <p className="max-w-prose text-muted-foreground">
+          The server did not answer. You are not signed out; try again once it is back.
+        </p>
+        <button
+          type="button"
+          className="rounded-md border border-border px-3 py-1.5"
+          onClick={() => window.location.reload()}
+        >
+          Try again
+        </button>
       </div>
     )
   }

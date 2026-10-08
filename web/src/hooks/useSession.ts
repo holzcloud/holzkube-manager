@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api, type Me, oidcPath, type SystemStatus } from '@/api'
+import { ProblemError } from '@/lib/problem'
 
 /**
  * The session and instance state the whole shell reads.
@@ -28,8 +29,18 @@ export interface Session {
   setupRequired: boolean
   /** True while either the status or the identity request is still in flight. */
   loading: boolean
-  /** True when the server confirmed an authenticated session. */
+  /**
+   * True while we hold a confirmed identity and the server has not said 401.
+   * A refetch that fails for any other reason (network, 5xx) keeps the last
+   * confirmed identity: only a real 401 ends the session.
+   */
   authenticated: boolean
+  /**
+   * True when the server could not be asked at all (no identity held, and the
+   * request failed for a reason other than 401). Not a logged-out state: the
+   * shell shows it in place instead of redirecting to /login.
+   */
+  unreachable: boolean
   login: (username: string, password: string) => Promise<void>
   logout: () => Promise<void>
   loggingOut: boolean
@@ -48,6 +59,16 @@ export function useSession(): Session {
     enabled: status.isSuccess && !setupRequired,
     retry: false,
   })
+
+  // Only a 401 answers "who am I" with "nobody". Every other failure leaves the
+  // question open; an identity already held stays valid until the server says
+  // otherwise.
+  const sessionEnded = me.error instanceof ProblemError && me.error.status === 401
+  const authenticated = me.data !== undefined && !sessionEnded
+  const unreachable =
+    !authenticated &&
+    !sessionEnded &&
+    ((me.isError && me.data === undefined) || (status.isError && status.data === undefined))
 
   const login = useMutation({
     mutationFn: (credentials: { username: string; password: string }) =>
@@ -84,7 +105,8 @@ export function useSession(): Session {
     me: me.data,
     setupRequired,
     loading: status.isPending || (me.isPending && me.fetchStatus !== 'idle'),
-    authenticated: me.isSuccess,
+    authenticated,
+    unreachable,
     login: async (username: string, password: string) => {
       await login.mutateAsync({ username, password })
     },
