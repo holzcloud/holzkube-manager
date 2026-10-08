@@ -12,6 +12,7 @@ import {
 } from 'lucide-react'
 import { useState } from 'react'
 import { api, type EtcdMemberList, type GateVerdict, type NodePlan, type UpgradePlan } from '@/api'
+import { BackupsPanel } from '@/components/Backups'
 import { Problem } from '@/components/Problem'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -94,6 +95,7 @@ export function UpgradesPage() {
         />
       )}
       {chosen && <EtcdPanel cluster={chosen} />}
+      {chosen && <BackupsPanel cluster={chosen} />}
       {chosen && <LockPanel cluster={chosen} />}
     </section>
   )

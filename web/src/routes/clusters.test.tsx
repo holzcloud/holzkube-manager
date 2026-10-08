@@ -53,6 +53,30 @@ describe('a cluster card', () => {
     expect(screen.getByText('1 not checked yet')).toBeInTheDocument()
   })
 
+  it('says on the card when the etcd backup is overdue, and nothing when no schedule is on', () => {
+    const { unmount } = wrap(<ClusterCard cluster={cluster} />)
+    expect(screen.queryByText('etcd backups')).not.toBeInTheDocument()
+    unmount()
+
+    wrap(
+      <ClusterCard
+        cluster={{
+          ...cluster,
+          backup: {
+            enabled: true,
+            interval: 'daily',
+            overdue: true,
+            last_success_at: '2026-10-01T06:00:00Z',
+            last_result: 'skipped',
+            last_reason: '',
+          },
+        }}
+      />,
+    )
+    expect(screen.getByText('etcd backups')).toBeInTheDocument()
+    expect(screen.getByText(/overdue — last/)).toBeInTheDocument()
+  })
+
   it('says nothing about checking once every node has answered', () => {
     wrap(<ClusterCard cluster={cluster} />)
 

@@ -140,6 +140,29 @@ export function ClusterCard({ cluster }: { cluster: Cluster }) {
             )}
           </dd>
 
+          {cluster.backup?.enabled || cluster.backup?.overdue ? (
+            <>
+              <dt className="text-muted-foreground">etcd backups</dt>
+              <dd>
+                {cluster.backup.overdue ? (
+                  <span className="text-amber-700 dark:text-amber-300">
+                    overdue
+                    {cluster.backup.last_success_at
+                      ? ` — last ${formatDate(cluster.backup.last_success_at)}`
+                      : ' — none taken yet'}
+                  </span>
+                ) : (
+                  <span>
+                    {cluster.backup.interval}
+                    {cluster.backup.last_success_at
+                      ? `, last ${formatDate(cluster.backup.last_success_at)}`
+                      : ', none taken yet'}
+                  </span>
+                )}
+              </dd>
+            </>
+          ) : null}
+
           <dt className="text-muted-foreground">Client certificate</dt>
           <dd>
             {/*

@@ -1411,6 +1411,22 @@ export const clusterSchema = z.object({
    * reason: counting them there put "1 not answering" on every card right
    * after an import or a restart. */
   checking: z.number(),
+  /** How the cluster's etcd snapshots stand. Absent when this instance keeps
+   * none. */
+  backup: z
+    .object({
+      enabled: z.boolean(),
+      interval: z.string().default('off'),
+      last_success_at: z.string().nullish(),
+      newest_at: z.string().nullish(),
+      age_seconds: z.number().nullish(),
+      /** The schedule is on and its last snapshot is older than twice its
+       * interval. */
+      overdue: z.boolean().default(false),
+      last_result: z.string().default(''),
+      last_reason: z.string().default(''),
+    })
+    .nullish(),
 })
 
 export type Cluster = z.infer<typeof clusterSchema>
@@ -1869,6 +1885,65 @@ export const safetySnapshotSchema = z.object({
 })
 
 export type SafetySnapshot = z.infer<typeof safetySnapshotSchema>
+
+/**
+ * Scheduled etcd snapshots: the schedule, what is stored and how the last run
+ * went. The files stay on the manager's own device; `notice` says so.
+ */
+export const backupHealthSchema = z.object({
+  enabled: z.boolean(),
+  interval: z.string().default('off'),
+  last_success_at: z.string().nullish(),
+  newest_at: z.string().nullish(),
+  age_seconds: z.number().nullish(),
+  overdue: z.boolean().default(false),
+  last_result: z.string().default(''),
+  last_reason: z.string().default(''),
+})
+
+export const storedSnapshotSchema = z.object({
+  id: z.string(),
+  /** `scheduled` or `upgrade` (the one taken before a Talos upgrade). */
+  kind: z.string(),
+  taken_at: z.string(),
+  bytes: z.number(),
+  /** Empty for a snapshot written before checksums were kept. */
+  sha256: z.string().default(''),
+})
+
+export type StoredSnapshot = z.infer<typeof storedSnapshotSchema>
+
+export const backupsSchema = z.object({
+  available: z.boolean(),
+  schedule: z.object({
+    interval: z.string(),
+    keep: z.number(),
+  }),
+  presets: z.array(z.string()).default([]),
+  max_keep: z.number().default(60),
+  state: z
+    .object({
+      snapshots: z
+        .array(storedSnapshotSchema)
+        .nullish()
+        .transform((v) => v ?? []),
+      status: z
+        .object({
+          last_attempt_at: z.string().nullish(),
+          last_trigger: z.string().default(''),
+          last_result: z.string().default(''),
+          last_reason: z.string().default(''),
+        })
+        .default({ last_trigger: '', last_result: '', last_reason: '' }),
+      health: backupHealthSchema.nullish(),
+      next_due_at: z.string().nullish(),
+      free_bytes: z.number().nullish(),
+    })
+    .nullish(),
+  notice: z.string().default(''),
+})
+
+export type Backups = z.infer<typeof backupsSchema>
 
 /* ---------------------------------------------------------------------- */
 /* Jobs and node actions                                                   */
@@ -3917,6 +3992,34 @@ export const api = {
         acceptedJobSchema,
         { to, confirmation },
       ),
+  },
+
+  backups: {
+    state: (cluster: string): Promise<Backups> =>
+      sendJSON('GET', `/api/v1/clusters/${encodeURIComponent(cluster)}/backups`, backupsSchema),
+
+    /** Admin, behind the sudo window. `off` removes the schedule. */
+    setSchedule: (cluster: string, interval: string, keep: number) =>
+      sendJSON(
+        'PUT',
+        `/api/v1/clusters/${encodeURIComponent(cluster)}/backups/schedule`,
+        z.unknown(),
+        { interval, keep },
+      ),
+
+    /** Takes a snapshot now, as a job. */
+    run: (cluster: string) =>
+      sendJSON(
+        'POST',
+        `/api/v1/clusters/${encodeURIComponent(cluster)}/backups/run`,
+        acceptedJobSchema,
+        {},
+      ),
+
+    /** Bytes, so a link: the browser streams a database to disk. Admin only,
+     * and recorded in the audit log. */
+    downloadURL: (cluster: string, id: string) =>
+      `/api/v1/clusters/${encodeURIComponent(cluster)}/backups/${encodeURIComponent(id)}`,
   },
 
   etcd: {
