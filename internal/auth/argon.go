@@ -182,6 +182,12 @@ func ActiveParams() *argon2id.Params {
 	return p
 }
 
+// hashSlots bounds how many argon2id computations run at once. Each holds
+// 64 MiB, and the rate limiter only learns of a failure after the hash has been
+// computed, so a burst of concurrent logins all pass it: 200 of them were
+// about 12 GiB on a Pi. Two at a time costs a queue, not memory.
+var hashSlots = make(chan struct{}, 2)
+
 // Hash derives an encoded argon2id hash with the active parameters.
 //
 // The encoded form is PHC: it carries the algorithm, the version, the memory,
@@ -192,6 +198,8 @@ func Hash(password string) (string, error) {
 	if password == "" {
 		return "", errEmptySecret
 	}
+	hashSlots <- struct{}{}
+	defer func() { <-hashSlots }()
 	return argon2id.CreateHash(password, ActiveParams())
 }
 
@@ -199,6 +207,8 @@ func Hash(password string) (string, error) {
 // hash was written with rather than the current ones. This is what lets the
 // cost be raised without invalidating a single existing password.
 func Verify(password, encodedHash string) (bool, error) {
+	hashSlots <- struct{}{}
+	defer func() { <-hashSlots }()
 	return argon2id.ComparePasswordAndHash(password, encodedHash)
 }
 

@@ -169,6 +169,7 @@ func login(d httpapi.Deps, limiter *auth.Limiter, w http.ResponseWriter, r *http
 	switch {
 	case errors.Is(err, auth.ErrInvalidCredentials):
 		limiter.Fail(ip)
+		d.Logger.Warn("sign-in failed", "route", r.URL.Path, "peer", ip)
 		httpapi.WriteProblem(w, r, httpapi.Unauthenticated())
 		return
 	case err != nil:
@@ -243,6 +244,7 @@ func openSudo(d httpapi.Deps, limiter *auth.Limiter, w http.ResponseWriter, r *h
 	}
 	if !valid {
 		limiter.Fail(ip)
+		d.Logger.Warn("sign-in failed", "route", r.URL.Path, "peer", ip)
 		httpapi.WriteProblem(w, r, httpapi.Unauthenticated())
 		return
 	}
