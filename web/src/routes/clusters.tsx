@@ -13,6 +13,8 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { formatDate } from '@/lib/format'
+import { messageFor } from '@/lib/problem'
 import { authenticatedRoute } from '@/routes/__root'
 
 /**
@@ -48,7 +50,7 @@ export function ClustersPage() {
       {isLoading && <p className="text-sm text-muted-foreground">Loading clusters…</p>}
       {error && (
         <p className="text-sm text-destructive">
-          The cluster list could not be read: {(error as Error).message}
+          The cluster list could not be read: {messageFor(error)}
         </p>
       )}
 
@@ -147,7 +149,7 @@ export function ClusterCard({ cluster }: { cluster: Cluster }) {
             */}
             {cluster.client_cert_days_left <= 0 ? (
               <span className="text-red-700 dark:text-red-300">
-                expired {new Date(cluster.client_cert_not_after).toLocaleDateString()}
+                expired {formatDate(cluster.client_cert_not_after)}
               </span>
             ) : (
               <span
@@ -158,7 +160,7 @@ export function ClusterCard({ cluster }: { cluster: Cluster }) {
                 }
               >
                 {cluster.client_cert_days_left} days left (
-                {new Date(cluster.client_cert_not_after).toLocaleDateString()})
+                {formatDate(cluster.client_cert_not_after)})
               </span>
             )}
           </dd>
@@ -283,7 +285,7 @@ export function ClusterCard({ cluster }: { cluster: Cluster }) {
             Add node
           </Button>
           {addNode.error ? (
-            <p className="w-full text-xs text-destructive">{(addNode.error as Error).message}</p>
+            <p className="w-full text-xs text-destructive">{messageFor(addNode.error)}</p>
           ) : null}
         </form>
 
@@ -311,7 +313,7 @@ export function ClusterCard({ cluster }: { cluster: Cluster }) {
             <Trash2 aria-hidden="true" className="size-4" /> Forget this cluster
           </Button>
           {forget.error ? (
-            <p className="mt-2 text-xs text-destructive">{(forget.error as Error).message}</p>
+            <p className="mt-2 text-xs text-destructive">{messageFor(forget.error)}</p>
           ) : null}
         </div>
       </CardContent>

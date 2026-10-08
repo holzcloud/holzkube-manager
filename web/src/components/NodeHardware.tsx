@@ -15,7 +15,7 @@ import { Problem } from '@/components/Problem'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { merge, useChartRange } from '@/hooks/useChartRange'
 import { useLiveSeries } from '@/hooks/useLiveSeries'
-import { formatBytes, formatCores, formatPercent, formatRate } from '@/lib/format'
+import { formatBytes, formatCores, formatPercent, formatRate, formatTime } from '@/lib/format'
 
 /**
  * A node's hardware as it is right now (2026-09-26).
@@ -111,7 +111,7 @@ export function NodeHardware({ machine }: { machine: Machine }) {
       {stale && (
         <p className="rounded-md border border-amber-600/40 bg-amber-600/10 px-3 py-2 text-sm text-amber-700 dark:text-amber-300">
           The node did not answer the latest request. What you see is its reading from{' '}
-          {new Date(h.observed_at).toLocaleTimeString()}.{' '}
+          {formatTime(h.observed_at)}.{' '}
           {hardware.error instanceof Error ? hardware.error.message : ''}
         </p>
       )}
@@ -317,9 +317,8 @@ export function NodeHardware({ machine }: { machine: Machine }) {
       <NodeApps machine={machine} />
 
       <p className="text-muted-foreground text-xs">
-        Read from the node {new Date(h.observed_at).toLocaleTimeString()}, every{' '}
-        {HARDWARE_POLL_INTERVAL_MS / 1000} s while this page is open. Rates are over the last{' '}
-        {h.rates_over_seconds.toFixed(1)} s.
+        Read from the node {formatTime(h.observed_at)}, every {HARDWARE_POLL_INTERVAL_MS / 1000} s
+        while this page is open. Rates are over the last {h.rates_over_seconds.toFixed(1)} s.
       </p>
     </section>
   )

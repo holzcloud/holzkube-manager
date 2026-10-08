@@ -13,7 +13,7 @@
  */
 export function Problem({ error }: { error: unknown }) {
   return (
-    <p className="max-w-prose text-sm text-destructive">
+    <p role="alert" className="max-w-prose text-sm text-destructive">
       {error instanceof Error ? error.message : String(error)}
     </p>
   )

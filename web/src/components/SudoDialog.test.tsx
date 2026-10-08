@@ -195,6 +195,9 @@ describe('SudoDialog', () => {
     await user.click(screen.getByRole('button', { name: 'Confirm' }))
 
     expect(await screen.findByText('Username or password is not correct.')).toBeInTheDocument()
+    // Announced, not just drawn: a screen-reader user typing a password has no
+    // other way to learn it was refused.
+    expect(screen.getByRole('alert')).toHaveTextContent('Username or password is not correct.')
     // Still open: the pending action has not been thrown away.
     expect(screen.getByRole('dialog')).toBeInTheDocument()
     expect(fetchMock).toHaveBeenCalledTimes(2)

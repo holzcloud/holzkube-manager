@@ -33,6 +33,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
+import { formatCount, formatDateTime, formatTime } from '@/lib/format'
 import { authenticatedRoute } from '@/routes/__root'
 
 /**
@@ -87,6 +88,7 @@ export function UpgradesPage() {
 
       {chosen && (
         <UpgradePanel
+          key={chosen}
           cluster={chosen}
           name={clusters.data?.find((c) => c.id === chosen)?.name ?? ''}
         />
@@ -101,7 +103,7 @@ export function UpgradesPage() {
 /* The rolling upgrade                                                     */
 /* ---------------------------------------------------------------------- */
 
-function UpgradePanel({ cluster, name }: { cluster: string; name: string }) {
+export function UpgradePanel({ cluster, name }: { cluster: string; name: string }) {
   const [kubernetes, setKubernetes] = useState(false)
   const [to, setTo] = useState('')
   const [typed, setTyped] = useState('')
@@ -128,6 +130,24 @@ function UpgradePanel({ cluster, name }: { cluster: string; name: string }) {
     },
   })
 
+  // A plan, the confirmation typed against it and a start already accepted all
+  // describe one target. Changing What or To version makes every one of them
+  // describe something the form no longer says, and the start button would
+  // then launch a rolling upgrade of a version nobody planned.
+  const forget = () => {
+    plan.reset()
+    start.reset()
+    setTyped('')
+  }
+  const changeTo = (value: string) => {
+    if (value !== to) forget()
+    setTo(value)
+  }
+  const changeKubernetes = (value: boolean) => {
+    if (value !== kubernetes) forget()
+    setKubernetes(value)
+  }
+
   return (
     <Card>
       <CardHeader>
@@ -137,6 +157,8 @@ function UpgradePanel({ cluster, name }: { cluster: string; name: string }) {
         <TalosUpdateBanner
           cluster={cluster}
           onPlan={(version) => {
+            start.reset()
+            setTyped('')
             setKubernetes(false)
             setTo(version)
             plan.mutate(version)
@@ -149,7 +171,7 @@ function UpgradePanel({ cluster, name }: { cluster: string; name: string }) {
             <Label htmlFor="upgrade-what">What</Label>
             <Select
               value={kubernetes ? 'kubernetes' : 'talos'}
-              onValueChange={(value) => setKubernetes(value === 'kubernetes')}
+              onValueChange={(value) => changeKubernetes(value === 'kubernetes')}
             >
               <SelectTrigger id="upgrade-what">
                 <SelectValue />
@@ -167,11 +189,11 @@ function UpgradePanel({ cluster, name }: { cluster: string; name: string }) {
               <Input
                 id="upgrade-to"
                 value={to}
-                onChange={(e) => setTo(e.target.value)}
+                onChange={(e) => changeTo(e.target.value)}
                 placeholder="v1.34.1"
               />
             ) : (
-              <Select value={to} onValueChange={setTo}>
+              <Select value={to} onValueChange={changeTo}>
                 <SelectTrigger id="upgrade-to">
                   <SelectValue placeholder="Choose a version" />
                 </SelectTrigger>
@@ -445,9 +467,9 @@ export function SafetySnapshotStep({ cluster }: { cluster: string }) {
         {!usable
           ? 'This instance has nowhere to keep a snapshot, so a Talos upgrade cannot be started from it.'
           : fresh && snap
-            ? `Taken ${new Date(snap.taken_at).toLocaleTimeString()}, ${(snap.bytes / 1_048_576).toFixed(1)} MiB, good until ${new Date(snap.valid_until).toLocaleTimeString()}. Kept on this server, not in backups.`
+            ? `Taken ${formatTime(snap.taken_at)}, ${(snap.bytes / 1_048_576).toFixed(1)} MiB, good until ${formatTime(snap.valid_until)}. Kept on this server, not in backups.`
             : snap?.present
-              ? `The newest is from ${new Date(snap.taken_at).toLocaleString()}, older than the ${snap.max_age_minutes} minutes an upgrade may start on.`
+              ? `The newest is from ${formatDateTime(snap.taken_at)}, older than the ${snap.max_age_minutes} minutes an upgrade may start on.`
               : 'There is none for this cluster yet. It is the one thing that brings the cluster back if a node takes its quorum with it.'}
       </p>
       <Button
@@ -770,7 +792,7 @@ function RestorePanel({ cluster }: { cluster: string }) {
       {restore.error ? <Problem error={restore.error} /> : null}
       {restore.data && (
         <p role="status" className="max-w-prose text-xs">
-          Restored from {restore.data.uploaded_bytes.toLocaleString()} bytes. {restore.data.notice}
+          Restored from {formatCount(restore.data.uploaded_bytes)} bytes. {restore.data.notice}
         </p>
       )}
     </section>

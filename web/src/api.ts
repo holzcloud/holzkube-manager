@@ -623,7 +623,18 @@ export function onSudoRequired(handler: SudoHandler | null): void {
 /** Install the handler that takes the operator to /login on an expired session. */
 export function onSessionExpired(handler: SessionExpiredHandler | null): void {
   sessionExpiredHandler = handler
+  if (handler !== null) {
+    sessionExpiryFired = false
+  }
 }
+
+/**
+ * An expired session answers every request in flight with 401 at once. The
+ * handler (a toast, a cache clear, a navigation) must run for the first of
+ * them only; the rest are the same event. Re-armed by installing a handler or
+ * by a successful sign-in.
+ */
+let sessionExpiryFired = false
 
 /**
  * Names the pending action for the sudo prompt, in English (D-09), and says
@@ -920,7 +931,10 @@ async function sendPrebuilt(
   }
 
   if (interceptUnauthenticated && presentationFor(error.problem) === 'login-transition') {
-    sessionExpiredHandler?.(error.problem)
+    if (!sessionExpiryFired && sessionExpiredHandler !== null) {
+      sessionExpiryFired = true
+      sessionExpiredHandler(error.problem)
+    }
   }
 
   throw error
@@ -3445,6 +3459,8 @@ export const api = {
         interceptUnauthenticated: false,
       },
     )
+    // A new session: the next expiry is a new event, not the tail of the old one.
+    sessionExpiryFired = false
   },
 
   logout: async (): Promise<void> => {

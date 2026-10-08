@@ -1635,6 +1635,27 @@ describe('ImagesView — the saved schematics', () => {
   })
 
   /**
+   * The button carries an aria-label, which replaces everything inside it for a
+   * screen reader, so a live region inside it was never read. The outcome is
+   * announced by a status region next to the button instead.
+   */
+  it('announces the copy outcome from a live region outside the button', async () => {
+    stubFactory({ saved: [USABLE] })
+    const user = userEvent.setup()
+
+    renderImages()
+    const detail = await openDetail(user, USABLE)
+    await detail.findByLabelText('ISO reference')
+    const button = detail.getByRole('button', { name: 'Copy ISO' })
+
+    await user.click(button)
+
+    const status = await detail.findByText('ISO copied to the clipboard')
+    expect(status).toHaveAttribute('aria-live', 'polite')
+    expect(button).not.toContainElement(status)
+  })
+
+  /**
    * A clipboard the browser refuses is the ordinary case outside a secure
    * origin, which is where this product lives whenever it is reached by IP
    * address. Rendering that as the resting label told the operator nothing had

@@ -8,6 +8,7 @@ import { HealthField, StageBadge } from '@/components/HealthField'
 import { MachineClasses } from '@/components/MachineClasses'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { messageFor } from '@/lib/problem'
 import { authenticatedRoute } from '@/routes/__root'
 
 /**
@@ -41,7 +42,7 @@ export function NodesPage() {
   if (error) {
     return (
       <p className="text-sm text-destructive">
-        The node list could not be read: {(error as Error).message}
+        The node list could not be read: {messageFor(error)}
       </p>
     )
   }

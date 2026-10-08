@@ -15,6 +15,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import { messageFor } from '@/lib/problem'
 import { authenticatedRoute } from '@/routes/__root'
 
 /**
@@ -147,7 +148,7 @@ function NodeConfig({ machine, machineID }: { machine?: Machine; machineID: stri
           {view.isLoading && <p className="text-sm text-muted-foreground">Reading the node</p>}
           {view.error && (
             <p className="text-sm text-destructive">
-              The configuration could not be read: {(view.error as Error).message}
+              The configuration could not be read: {messageFor(view.error)}
             </p>
           )}
           {view.data && (

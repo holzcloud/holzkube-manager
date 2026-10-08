@@ -63,41 +63,45 @@ export function SudoDialog() {
   // A challenge must be settled exactly once: twice would resolve a promise
   // the pipeline already moved past, never would hang the caller forever.
   const settled = useRef(false)
+  // The challenge on show, readable from the handler without a state updater.
+  const challengeRef = useRef<SudoChallenge | null>(null)
 
   useEffect(() => {
     onSudoRequired((next) => {
-      setChallenge((current) => {
-        // A challenge that is being displaced is a challenge that was refused.
-        // Resetting `settled` without settling the outgoing one first left its
-        // `askForSudo` promise unresolved forever: `send` never returned, the
-        // caller's `await` hung for the life of the page, and there was no
-        // error and no toast to show for it -- only a spinner that never
-        // stopped. One destructive route exists today, so a single page cannot
-        // reach this yet; phase 6's node actions gate through this same dialog.
-        if (current !== null && !settled.current) {
-          current.settle(false)
-        }
-        settled.current = false
-        return next
-      })
+      // A challenge that is being displaced is a challenge that was refused.
+      // Resetting `settled` without settling the outgoing one first left its
+      // `askForSudo` promise unresolved forever: `send` never returned, the
+      // caller's `await` hung for the life of the page, and there was no
+      // error and no toast to show for it -- only a spinner that never
+      // stopped. One destructive route exists today, so a single page cannot
+      // reach this yet; phase 6's node actions gate through this same dialog.
+      //
+      // Done here and not inside a setState updater: an updater must be pure,
+      // and React runs it twice under StrictMode.
+      const current = challengeRef.current
+      if (current !== null && !settled.current) {
+        current.settle(false)
+      }
+      settled.current = false
+      challengeRef.current = next
+      setChallenge(next)
       setPassword('')
       setMessage('')
     })
     return () => onSudoRequired(null)
   }, [])
 
-  const settle = useCallback(
-    (granted: boolean) => {
-      if (challenge !== null && !settled.current) {
-        settled.current = true
-        challenge.settle(granted)
-      }
-      setChallenge(null)
-      setPassword('')
-      setBusy(false)
-    },
-    [challenge],
-  )
+  const settle = useCallback((granted: boolean) => {
+    const showing = challengeRef.current
+    if (showing !== null && !settled.current) {
+      settled.current = true
+      showing.settle(granted)
+    }
+    challengeRef.current = null
+    setChallenge(null)
+    setPassword('')
+    setBusy(false)
+  }, [])
 
   const submit = async (event: FormEvent) => {
     event.preventDefault()
@@ -212,7 +216,11 @@ export function SudoDialog() {
               />
             </div>
 
-            {message !== '' && <p className="text-sm text-destructive">{message}</p>}
+            {message !== '' && (
+              <p role="alert" className="text-sm text-destructive">
+                {message}
+              </p>
+            )}
 
             <DialogFooter>
               <Button type="button" variant="ghost" onClick={() => settle(false)} disabled={busy}>

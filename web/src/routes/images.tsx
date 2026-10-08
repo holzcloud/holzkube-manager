@@ -1919,33 +1919,42 @@ function CopyButton({ label, value }: { label: string; value: string }) {
   )
 
   return (
-    <Button
-      type="button"
-      variant="ghost"
-      aria-label={`Copy ${label}`}
-      title={
-        outcome === 'failed'
-          ? 'The browser refused the clipboard. That usually means this page was not loaded over a trusted origin.'
-          : undefined
-      }
-      onClick={() => {
-        const written = navigator.clipboard?.writeText(value)
-        if (written === undefined) {
-          // No clipboard at all. Reporting it is the whole point: the old code
-          // discarded this case and rendered it as "nothing happened".
-          settle('failed')
-          return
+    <>
+      <Button
+        type="button"
+        variant="ghost"
+        aria-label={`Copy ${label}`}
+        title={
+          outcome === 'failed'
+            ? 'The browser refused the clipboard. That usually means this page was not loaded over a trusted origin.'
+            : undefined
         }
-        void written.then(
-          () => settle('copied'),
-          () => settle('failed'),
-        )
-      }}
-    >
-      <span aria-live="polite">
+        onClick={() => {
+          const written = navigator.clipboard?.writeText(value)
+          if (written === undefined) {
+            // No clipboard at all. Reporting it is the whole point: the old code
+            // discarded this case and rendered it as "nothing happened".
+            settle('failed')
+            return
+          }
+          void written.then(
+            () => settle('copied'),
+            () => settle('failed'),
+          )
+        }}
+      >
         {outcome === 'copied' ? 'Copied' : outcome === 'failed' ? 'Copy failed' : 'Copy'}
+      </Button>
+      {/* The live region lives OUTSIDE the button: the button's aria-label
+          replaces whatever is inside it, so a region in there is never read. */}
+      <span role="status" aria-live="polite" className="sr-only">
+        {outcome === 'copied'
+          ? `${label} copied to the clipboard`
+          : outcome === 'failed'
+            ? `Copying ${label} failed`
+            : ''}
       </span>
-    </Button>
+    </>
   )
 }
 

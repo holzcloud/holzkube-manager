@@ -53,6 +53,7 @@ export function LogPanel({ title, lines, connection, className }: LogPanelProps)
     }
   }, [count])
 
+  const keys = uniqueKeys()
   const latestState = [...lines].reverse().find((l) => l.state)?.state
   const stateReason = [...lines].reverse().find((l) => l.state)?.reason
 
@@ -72,6 +73,8 @@ export function LogPanel({ title, lines, connection, className }: LogPanelProps)
 
       <div
         ref={box}
+        role="log"
+        aria-label={`${title} log`}
         onScroll={(e) => {
           const el = e.currentTarget
           pinned.current = el.scrollHeight - el.scrollTop - el.clientHeight < 32
@@ -85,10 +88,11 @@ export function LogPanel({ title, lines, connection, className }: LogPanelProps)
         )}
 
         {lines.map((entry) => {
+          const key = keys.next(entry.id)
           if (entry.gap) {
             return (
               <div
-                key={entry.id}
+                key={key}
                 className="my-1 flex items-center gap-2 text-amber-700 dark:text-amber-300"
                 title="Your browser could not keep up and these lines were dropped rather than queued. They are not missing from the node."
               >
@@ -100,14 +104,14 @@ export function LogPanel({ title, lines, connection, className }: LogPanelProps)
           }
           if (entry.state) {
             return (
-              <div key={entry.id} className={cn('my-0.5', STATE_TEXT[entry.state].className)}>
+              <div key={key} className={cn('my-0.5', STATE_TEXT[entry.state].className)}>
                 — {STATE_TEXT[entry.state].label}
                 {entry.reason ? `: ${entry.reason}` : ''} —
               </div>
             )
           }
           return (
-            <div key={entry.id} className="whitespace-pre-wrap break-all">
+            <div key={key} className="whitespace-pre-wrap break-all">
               {entry.line}
             </div>
           )
@@ -115,4 +119,20 @@ export function LogPanel({ title, lines, connection, className }: LogPanelProps)
       </div>
     </div>
   )
+}
+
+/**
+ * Row keys that cannot collide. Ids are unique per topic by contract, but a
+ * duplicate must degrade to a repeated row, not to React reusing one node for
+ * two entries and mis-rendering the tail.
+ */
+function uniqueKeys() {
+  const seen = new Map<number, number>()
+  return {
+    next(id: number): string {
+      const n = seen.get(id) ?? 0
+      seen.set(id, n + 1)
+      return n === 0 ? String(id) : `${id}#${n}`
+    },
+  }
 }

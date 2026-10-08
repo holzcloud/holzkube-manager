@@ -21,6 +21,8 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { useStream } from '@/hooks/useStream'
+import { formatDateTime } from '@/lib/format'
+import { messageFor } from '@/lib/problem'
 import { authenticatedRoute } from '@/routes/__root'
 import { MACHINE_POLL_INTERVAL_MS } from '@/routes/nodes'
 
@@ -52,9 +54,9 @@ export function LastAnswered({ machine }: { machine: Machine }) {
 
   return (
     <p className="text-sm text-amber-700 dark:text-amber-300">
-      This node last answered {new Date(machine.seen_at).toLocaleString()}. If that is recent and
-      the readings below are not, the machine is reachable and something on it is not responding —
-      which is a different thing from a machine that is down.
+      This node last answered {formatDateTime(machine.seen_at)}. If that is recent and the readings
+      below are not, the machine is reachable and something on it is not responding — which is a
+      different thing from a machine that is down.
     </p>
   )
 }
@@ -89,7 +91,7 @@ export function NodeDetailPage() {
   if (error || !data) {
     return (
       <p className="text-sm text-destructive">
-        This node could not be read: {(error as Error | undefined)?.message ?? 'not found'}
+        This node could not be read: {error ? messageFor(error) : 'not found'}
       </p>
     )
   }
@@ -109,7 +111,7 @@ export function NodeDetailPage() {
           </div>
           <p className="font-mono text-xs text-muted-foreground">{m.id}</p>
           <p className="text-sm text-muted-foreground">
-            In the inventory since {new Date(m.adopted_at).toLocaleString()}.{' '}
+            In the inventory since {formatDateTime(m.adopted_at)}.{' '}
             <Link to="/nodes" className="underline">
               Back to all nodes
             </Link>
@@ -369,7 +371,7 @@ export function NodeDetailPage() {
  * node whose service list is stale still gets the services it last reported —
  * the log may be empty, but the list is the honest one.
  */
-function NodeStreams({ machine }: { machine: Machine }) {
+export function NodeStreams({ machine }: { machine: Machine }) {
   const services = (machine.services.value ?? [])
     .map((s) => s.id)
     .filter((id) => STREAMABLE_SERVICES.has(id))
@@ -394,6 +396,7 @@ function NodeStreams({ machine }: { machine: Machine }) {
             key={name}
             size="sm"
             variant={open.includes(name) ? 'secondary' : 'outline'}
+            aria-pressed={open.includes(name)}
             onClick={() =>
               setOpen((prev) =>
                 prev.includes(name) ? prev.filter((n) => n !== name) : [...prev, name],

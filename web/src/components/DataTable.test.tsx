@@ -1,4 +1,5 @@
-import { render, screen, within } from '@testing-library/react'
+import { fireEvent, render, screen, within } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { type Column, DataTable } from '@/components/DataTable'
 
@@ -190,5 +191,37 @@ describe('with nothing to show', () => {
 
     expect(screen.getByText(/the API server answered/i)).toBeInTheDocument()
     expect(screen.queryByRole('table')).toBeNull()
+  })
+})
+
+describe('a clickable row on a desk', () => {
+  it('does not open the row when Enter or Space is pressed on a control inside it', async () => {
+    atPhoneWidth(false)
+    const onRowClick = vi.fn()
+    const user = userEvent.setup()
+    render(
+      <DataTable
+        label="Deployments"
+        rows={rows}
+        keyOf={(r) => r.id}
+        columns={columns}
+        empty="none"
+        onRowClick={onRowClick}
+        rowLabel={(r) => `Open ${r.name}`}
+      />,
+    )
+
+    // A key that bubbles up from a control inside the row must not act as the
+    // row's own. (fireEvent: the keydown alone, without the click a real key
+    // press on a button also produces, which callers stop themselves.)
+    const inner = screen.getByRole('button', { name: 'Roll pods coredns' })
+    fireEvent.keyDown(inner, { key: 'Enter' })
+    fireEvent.keyDown(inner, { key: ' ' })
+    expect(onRowClick).not.toHaveBeenCalled()
+
+    // The row itself still opens from the keyboard.
+    screen.getByRole('button', { name: 'Open coredns' }).focus()
+    await user.keyboard('{Enter}')
+    expect(onRowClick).toHaveBeenCalledTimes(1)
   })
 })

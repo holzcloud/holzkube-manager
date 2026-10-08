@@ -31,6 +31,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { SESSION_QUERY_KEY } from '@/hooks/useSession'
+import { formatDate, formatDateTime } from '@/lib/format'
 
 /**
  * Accounts and roles (V2-AUTH-02).
@@ -243,14 +244,10 @@ function SignInCell({ user }: { user: User }) {
         </span>
       )}
       <span className="block text-xs">
-        {user.last_used_at === ''
-          ? 'never used'
-          : `last used ${new Date(user.last_used_at).toLocaleString()}`}
+        {user.last_used_at === '' ? 'never used' : `last used ${formatDateTime(user.last_used_at)}`}
       </span>
       {user.token_issued_at !== '' && (
-        <span className="block text-xs">
-          issued {new Date(user.token_issued_at).toLocaleDateString()}
-        </span>
+        <span className="block text-xs">issued {formatDate(user.token_issued_at)}</span>
       )}
     </span>
   )

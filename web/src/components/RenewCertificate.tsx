@@ -3,6 +3,7 @@ import { RefreshCw } from 'lucide-react'
 import { api } from '@/api'
 import { Problem } from '@/components/Problem'
 import { Button } from '@/components/ui/button'
+import { formatDate } from '@/lib/format'
 
 /**
  * The button the certificate ladder has been counting down to.
@@ -45,8 +46,8 @@ export function RenewCertificate({ clusterID }: { clusterID: string }) {
 
       {renew.isSuccess && (
         <p role="status" className="text-xs text-muted-foreground">
-          Renewed. It expires {new Date(renew.data.client_cert_not_after).toLocaleDateString()}, and
-          no node was touched.
+          Renewed. It expires {formatDate(renew.data.client_cert_not_after)}, and no node was
+          touched.
         </p>
       )}
     </div>
