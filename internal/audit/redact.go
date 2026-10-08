@@ -552,6 +552,15 @@ var allowlist = map[string][]string{
 	// record is only that it happened.
 	"etcd.snapshot": {},
 
+	// Scheduled etcd snapshots. The schedule's two values are permitted in
+	// clear: "backups were switched to daily, keeping 7" is what an archive
+	// is asked six months later. A run-now and a download have a cluster in
+	// the path and nothing else; the download is AuditRead, because the file
+	// holds every Kubernetes secret of the cluster.
+	"cluster.backup-schedule": {"interval", "keep"},
+	"etcd.backup-run":         {},
+	"etcd.backup-download":    {},
+
 	// A restore, and the most consequential entry in this table. The node is
 	// in the path; what is worth keeping in clear is whether the operator
 	// turned off the snapshot's integrity check, because a restore from a

@@ -91,9 +91,12 @@ func newUpgradeHarnessWith(t *testing.T, secureBoot bool) *upgradeHarness {
 			}
 			deps.Gate = upgrade.NewGate(deps.Connect, h.inv.ControlPlanesOf)
 
-			return upgrade.NewService(deps, func(context.Context) ([]string, error) {
+			svc := upgrade.NewService(deps, func(context.Context) ([]string, error) {
 				return []string{"v1.13.9", "v1.14.0", "v1.14.1", "v1.15.0-rc.1"}, nil
 			}).WithSnapshots(upgrade.NewSnapshotStore(t.TempDir(), snapshotOps(), time.Now))
+			svc.RegisterBackups(h.jobs)
+			h.inv.SetBackupHealth(svc.BackupHealthFor)
+			return svc
 		}),
 	)
 
@@ -570,5 +573,7 @@ func snapshotOps() upgrade.FileOps {
 		},
 		Remove:     fsstore.RemoveFile,
 		TempPrefix: fsstore.TempPrefix,
+		ReadFile:   fsstore.ReadFile,
+		Open:       fsstore.OpenFile,
 	}
 }

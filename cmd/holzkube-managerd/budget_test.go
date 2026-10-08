@@ -1848,6 +1848,14 @@ func TestEveryRouteThatReachesUpstreamHasABudgetRow(t *testing.T) {
 		// data directory. It reaches no node: the snapshot was taken earlier,
 		// by the POST that has its own row.
 		"GET /api/v1/clusters/{id}/upgrade/snapshot",
+		// The scheduled snapshots' four routes read or write the data
+		// directory and the cluster record, and start a job; none dials a node
+		// while the request is held. The job does that, under the engine, with
+		// its own 30-minute ceiling (upgrade.SafetySnapshotTimeout).
+		"GET /api/v1/clusters/{id}/backups",
+		"PUT /api/v1/clusters/{id}/backups/schedule",
+		"POST /api/v1/clusters/{id}/backups/run",
+		"GET /api/v1/clusters/{id}/backups/{name}",
 	} {
 		noUpstream[r] = true
 	}

@@ -44,8 +44,13 @@ func upgradeConfigured(d httpapi.Deps) *httpapi.Problem {
 	return nil
 }
 
-// UpgradeRoutes serves the rolling upgrades and etcd management.
+// UpgradeRoutes serves the rolling upgrades and etcd management, and the
+// scheduled etcd snapshots.
 func UpgradeRoutes(d httpapi.Deps) []httpapi.Route {
+	return append(upgradeRoutes(d), backupRoutes(d)...)
+}
+
+func upgradeRoutes(d httpapi.Deps) []httpapi.Route {
 	return []httpapi.Route{
 		{
 			Method:          http.MethodGet,

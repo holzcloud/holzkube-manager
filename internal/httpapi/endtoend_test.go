@@ -438,6 +438,22 @@ func newHarness(t *testing.T, opts ...harnessOpt) *harness {
 				}
 				return engine.List(ctx)
 			},
+			Backups: func(ctx context.Context) ([]metrics.BackupStat, error) {
+				if deps.Upgrade == nil {
+					return nil, nil
+				}
+				clusters, err := st.Clusters().List(ctx)
+				if err != nil {
+					return nil, err
+				}
+				var out []metrics.BackupStat
+				for _, c := range clusters {
+					if bh := deps.Upgrade.BackupHealthFor(c, time.Now()); bh != nil {
+						out = append(out, metrics.BackupStatFrom(c.ID, *bh))
+					}
+				}
+				return out, nil
+			},
 			AuditChainIntact: func() bool { return chainOK },
 		})
 	}
