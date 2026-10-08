@@ -432,6 +432,36 @@ func (s *Service) EtcdMembers(ctx context.Context, cluster model.ClusterID) (Mem
 	return Members(ctx, cc, machines)
 }
 
+// EtcdMembersLive is EtcdMembers plus a status probe of every voter's own node,
+// so the list says how many voters actually answer. Every decision about losing
+// a voter is made on this one: the plain list only knows who is a member.
+func (s *Service) EtcdMembersLive(ctx context.Context, cluster model.ClusterID) (MemberList, error) {
+	list, err := s.EtcdMembers(ctx, cluster)
+	if err != nil {
+		return MemberList{}, err
+	}
+	return ProbeVoters(ctx, list, s.probeStatus), nil
+}
+
+// probeStatus asks one machine's etcd for its own status; an answer, however
+// unhappy its contents, means the node is there to vote.
+func (s *Service) probeStatus(ctx context.Context, id model.MachineID) error {
+	cc, err := s.deps.Connect(ctx, id)
+	if err != nil {
+		return err
+	}
+	defer cc.Close() //nolint:errcheck // the probe's verdict is its own
+
+	statusCtx, cancel, err := talos.WithClassDeadline(ctx, talos.MethodEtcdStatus)
+	if err != nil {
+		return err
+	}
+	defer cancel()
+
+	_, err = cc.EtcdStatus(statusCtx)
+	return err
+}
+
 // RemoveEtcdMember removes one member (UPG-11).
 //
 // The call is made through a *different* node than the member being removed,
@@ -445,7 +475,7 @@ func (s *Service) RemoveEtcdMember(ctx context.Context, cluster model.ClusterID,
 		return err
 	}
 
-	list, err := s.EtcdMembers(ctx, cluster)
+	list, err := s.EtcdMembersLive(ctx, cluster)
 	if err != nil {
 		return err
 	}
@@ -529,7 +559,17 @@ func (s *Service) RemoveNodeFromCluster(ctx context.Context, m model.Machine) er
 	// The machine rather than an id and a bool. The caller used to derive
 	// `controlPlane` itself, which put the decision about which rules apply on
 	// the far side of the seam from the rules.
-	return RemoveNode(ctx, cc, m)
+	var opts []RemoveOption
+	if m.Role == model.RoleControlPlane {
+		machines, err := s.deps.Machines(ctx, m.Cluster)
+		if err != nil {
+			return fmt.Errorf("upgrade: %s is a control-plane node and its cluster's machines could "+
+				"not be listed, so there is no way to tell which etcd members answer. Nothing has "+
+				"been changed: %w", nameOf(m), err)
+		}
+		opts = append(opts, WithLiveness(machines, s.probeStatus))
+	}
+	return RemoveNode(ctx, cc, m, opts...)
 }
 
 // anyControlPlane opens a client to the first control-plane node that answers.
