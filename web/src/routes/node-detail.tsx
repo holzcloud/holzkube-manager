@@ -369,7 +369,7 @@ export function NodeDetailPage() {
  * node whose service list is stale still gets the services it last reported —
  * the log may be empty, but the list is the honest one.
  */
-function NodeStreams({ machine }: { machine: Machine }) {
+export function NodeStreams({ machine }: { machine: Machine }) {
   const services = (machine.services.value ?? [])
     .map((s) => s.id)
     .filter((id) => STREAMABLE_SERVICES.has(id))
@@ -394,6 +394,7 @@ function NodeStreams({ machine }: { machine: Machine }) {
             key={name}
             size="sm"
             variant={open.includes(name) ? 'secondary' : 'outline'}
+            aria-pressed={open.includes(name)}
             onClick={() =>
               setOpen((prev) =>
                 prev.includes(name) ? prev.filter((n) => n !== name) : [...prev, name],

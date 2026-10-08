@@ -212,7 +212,11 @@ export function SudoDialog() {
               />
             </div>
 
-            {message !== '' && <p className="text-sm text-destructive">{message}</p>}
+            {message !== '' && (
+              <p role="alert" className="text-sm text-destructive">
+                {message}
+              </p>
+            )}
 
             <DialogFooter>
               <Button type="button" variant="ghost" onClick={() => settle(false)} disabled={busy}>

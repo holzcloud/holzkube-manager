@@ -73,6 +73,8 @@ export function LogPanel({ title, lines, connection, className }: LogPanelProps)
 
       <div
         ref={box}
+        role="log"
+        aria-label={`${title} log`}
         onScroll={(e) => {
           const el = e.currentTarget
           pinned.current = el.scrollHeight - el.scrollTop - el.clientHeight < 32

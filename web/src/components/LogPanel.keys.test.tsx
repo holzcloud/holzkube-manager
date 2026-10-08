@@ -3,6 +3,13 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { LogPanel } from '@/components/LogPanel'
 
 /** Two entries with one id must both render and must not make React warn. */
+describe('LogPanel', () => {
+  it('is a log region, named after its topic, so appended lines are announced politely', () => {
+    render(<LogPanel title="kubelet" connection="open" lines={[]} />)
+    expect(screen.getByRole('log', { name: 'kubelet log' })).toBeInTheDocument()
+  })
+})
+
 describe('LogPanel keys', () => {
   afterEach(() => vi.restoreAllMocks())
 
