@@ -158,6 +158,9 @@ export function DataTable<T>({
                       'aria-label': rowLabel?.(row),
                       onClick: () => onRowClick(row),
                       onKeyDown: (event: React.KeyboardEvent) => {
+                        // A key pressed on a control inside the row belongs to that
+                        // control; only the row itself opens the row.
+                        if (event.target !== event.currentTarget) return
                         if (event.key === 'Enter' || event.key === ' ') {
                           event.preventDefault()
                           onRowClick(row)

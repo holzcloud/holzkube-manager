@@ -220,8 +220,11 @@ export function KubernetesAppsPage() {
                     role: 'actions',
                     render: (a) => (
                       // biome-ignore lint/a11y/noStaticElementInteractions: stops the row's own click, it handles nothing itself
-                      // biome-ignore lint/a11y/useKeyWithClickEvents: same
-                      <span onClick={(e) => e.stopPropagation()}>
+                      // The menu's own keys must not reach the row's key handler either.
+                      <span
+                        onClick={(e) => e.stopPropagation()}
+                        onKeyDown={(e) => e.stopPropagation()}
+                      >
                         <PowerMenu
                           target={{
                             kind: 'app',
