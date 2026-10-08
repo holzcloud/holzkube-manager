@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"math/rand/v2"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/holzcloud/holzkube-manager/internal/health"
@@ -221,7 +222,11 @@ func (s *Service) supervise(id model.MachineID) {
 			slog.String("machine", string(id)))
 		return
 	}
-	s.supervised[id] = struct{}{}
+	// Each machine's loops get their own cancel under the service's lifetime,
+	// so forgetting the machine can end them without ending the others.
+	ctx, cancel := context.WithCancel(ctx)
+	sup := &supervisor{cancel: cancel, done: make(chan struct{})}
+	s.supervised[id] = sup
 	if _, ok := s.observed[id]; !ok {
 		s.observed[id] = newObservation()
 	}
@@ -233,13 +238,22 @@ func (s *Service) supervise(id model.MachineID) {
 	// the failure the poll exists against; the watch supplies the latency the
 	// poll cannot.
 	s.wg.Add(2)
+	var loops sync.WaitGroup
+	loops.Add(2)
 	go func() {
 		defer s.wg.Done()
+		defer loops.Done()
 		s.observeLoop(ctx, id)
 	}()
 	go func() {
 		defer s.wg.Done()
+		defer loops.Done()
 		s.watchLoop(ctx, id)
+	}()
+	go func() {
+		loops.Wait()
+		cancel()
+		close(sup.done)
 	}()
 }
 
