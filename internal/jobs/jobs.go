@@ -108,7 +108,14 @@ type Deps struct {
 	Hub *streamhub.Hub
 
 	Now func() time.Time
+
+	// TopicLinger is how long a finished job's topic stays on the hub for a
+	// viewer that arrives just after the end. Zero means DefaultTopicLinger.
+	TopicLinger time.Duration
 }
+
+// DefaultTopicLinger is how long a finished job's progress stream is kept.
+const DefaultTopicLinger = 2 * time.Minute
 
 // Engine runs jobs.
 type Engine struct {
@@ -295,8 +302,27 @@ func (e *Engine) start(j model.Job, steps []Step) bool {
 		}()
 
 		e.run(runCtx, j, steps)
+		e.dropTopicLater(j.ID)
 	}()
 	return true
+}
+
+// dropTopicLater forgets a finished job's stream once the linger has passed. A
+// job left running or parked by a shutdown keeps its topic: it is not over.
+func (e *Engine) dropTopicLater(id model.JobID) {
+	if e.deps.Hub == nil {
+		return
+	}
+	final, err := e.deps.Store.Jobs().Get(context.WithoutCancel(e.shutdown), id)
+	if err != nil || !final.State.Terminal() {
+		return
+	}
+	linger := e.deps.TopicLinger
+	if linger <= 0 {
+		linger = DefaultTopicLinger
+	}
+	hub := e.deps.Hub
+	time.AfterFunc(linger, func() { hub.Drop(Topic(id)) })
 }
 
 // run executes a job's steps, persisting before and after each one.
@@ -561,6 +587,7 @@ func (e *Engine) Cancel(ctx context.Context, id model.JobID) (model.Job, error) 
 	}
 	if stored.State == model.JobCancelled {
 		e.publish(stored, "", "", "cancelled while parked")
+		e.dropTopicLater(stored.ID)
 	}
 
 	// The stored flag is what the loop reads at the boundary; the context
