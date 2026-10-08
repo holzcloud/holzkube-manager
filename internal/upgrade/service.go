@@ -446,20 +446,7 @@ func (s *Service) EtcdMembersLive(ctx context.Context, cluster model.ClusterID) 
 // probeStatus asks one machine's etcd for its own status; an answer, however
 // unhappy its contents, means the node is there to vote.
 func (s *Service) probeStatus(ctx context.Context, id model.MachineID) error {
-	cc, err := s.deps.Connect(ctx, id)
-	if err != nil {
-		return err
-	}
-	defer cc.Close() //nolint:errcheck // the probe's verdict is its own
-
-	statusCtx, cancel, err := talos.WithClassDeadline(ctx, talos.MethodEtcdStatus)
-	if err != nil {
-		return err
-	}
-	defer cancel()
-
-	_, err = cc.EtcdStatus(statusCtx)
-	return err
+	return s.deps.probeStatus(ctx, id)
 }
 
 // RemoveEtcdMember removes one member (UPG-11).
@@ -548,28 +535,26 @@ func (s *Service) Restore(ctx context.Context, id model.MachineID, snapshot io.R
 	})
 }
 
-// RemoveNodeFromCluster is UPG-13.
-func (s *Service) RemoveNodeFromCluster(ctx context.Context, m model.Machine) error {
-	cc, err := s.deps.Connect(ctx, m.ID)
+// PreflightRemoval is the part of UPG-13 that must refuse before anything is
+// submitted: for a control-plane node, read etcd's membership and decline when
+// the cluster does not survive losing a voter. It runs in the request, so a
+// refusal is an immediate 409 and not a failed job. The same check runs again
+// inside the job's leave step, immediately before the node is told to leave.
+//
+// A worker is not a member and reads no membership: a cluster whose etcd
+// cannot be reached must not be a cluster whose workers cannot be removed.
+func (s *Service) PreflightRemoval(ctx context.Context, m model.Machine) error {
+	if m.Role != model.RoleControlPlane {
+		return nil
+	}
+	machines, err := s.deps.Machines(ctx, m.Cluster)
 	if err != nil {
-		return err
+		return fmt.Errorf("upgrade: %s is a control-plane node and its cluster's machines could "+
+			"not be listed, so there is no way to tell which etcd members answer. Nothing has "+
+			"been changed: %w", nameOf(m), err)
 	}
-	defer cc.Close() //nolint:errcheck // the removal's verdict is its own
-
-	// The machine rather than an id and a bool. The caller used to derive
-	// `controlPlane` itself, which put the decision about which rules apply on
-	// the far side of the seam from the rules.
-	var opts []RemoveOption
-	if m.Role == model.RoleControlPlane {
-		machines, err := s.deps.Machines(ctx, m.Cluster)
-		if err != nil {
-			return fmt.Errorf("upgrade: %s is a control-plane node and its cluster's machines could "+
-				"not be listed, so there is no way to tell which etcd members answer. Nothing has "+
-				"been changed: %w", nameOf(m), err)
-		}
-		opts = append(opts, WithLiveness(machines, s.probeStatus))
-	}
-	return RemoveNode(ctx, cc, m, opts...)
+	_, err = s.deps.checkRemovable(ctx, m, machines)
+	return err
 }
 
 // anyControlPlane opens a client to the first control-plane node that answers.

@@ -345,103 +345,6 @@ func Snapshot(ctx context.Context, cc *talos.ClusterClient, w io.Writer) (int64,
 	return n, nil
 }
 
-// RemoveOption adjusts RemoveNode.
-type RemoveOption func(*removeOptions)
-
-type removeOptions struct {
-	machines []model.Machine
-	probe    StatusProbe
-}
-
-// WithLiveness makes RemoveNode count the voters that actually answer, not just
-// the members etcd lists: machines maps members to inventory machines and probe
-// asks each one's node. Without it the refusal rests on the membership count.
-func WithLiveness(machines []model.Machine, probe StatusProbe) RemoveOption {
-	return func(o *removeOptions) { o.machines, o.probe = machines, probe }
-}
-
-// RemoveNode takes a node out of a cluster for good (UPG-13).
-//
-// The order is the whole of it, and each step is there because skipping it
-// leaves something behind:
-//
-//  1. **etcd leave**, on the node itself, so it forfeits leadership if it has
-//     it and removes itself from the membership. Doing this from another node
-//     while this one still runs leaves a member that believes it is still in a
-//     cluster that has forgotten it.
-//  2. **reset**, which wipes it. Without this the machine still holds the
-//     cluster's PKI and will try to rejoin on its next boot.
-//  3. **forget**, which takes it out of holzkube-manager's inventory. Without
-//     this the dashboard shows a node that is never coming back, which is
-//     indistinguishable from one that is down.
-//
-// Cordon and drain are not here, and that is a limitation stated rather than
-// hidden: they are Kubernetes API operations and this product speaks the Talos
-// machine API. RemoveNodeNotice says so on the screen.
-func RemoveNode(
-	ctx context.Context,
-	cc *talos.ClusterClient,
-	m model.Machine,
-	opts ...RemoveOption,
-) error {
-	var o removeOptions
-	for _, opt := range opts {
-		opt(&o)
-	}
-
-	if m.Role == model.RoleControlPlane {
-		// Before anything, and this is the whole of the fix: read the
-		// membership and refuse if the cluster does not survive losing a
-		// voter. It is read through the node being removed, which is fine --
-		// it is still a member and still answering, or Connect would not have
-		// returned a client.
-		//
-		// A worker never reaches this. It is not a member, and a cluster whose
-		// etcd cannot be reached must not be a cluster whose workers cannot be
-		// removed.
-		list, err := Members(ctx, cc, o.machines)
-		if err != nil {
-			return fmt.Errorf("upgrade: %s is a control-plane node and its cluster's etcd "+
-				"membership could not be read, so there is no way to tell whether the cluster "+
-				"survives losing it. Nothing has been changed: %w", nameOf(m), err)
-		}
-		if o.probe != nil {
-			list = ProbeVoters(ctx, list, o.probe)
-		}
-		if err := RefuseIfCannotSpareAVoter(list, nameOf(m)); err != nil {
-			return err
-		}
-
-		leaveCtx, cancel, err := talos.WithClassDeadline(ctx, talos.MethodEtcdLeaveCluster)
-		if err != nil {
-			return err
-		}
-		err = cc.EtcdLeaveCluster(leaveCtx)
-		cancel()
-		if err != nil {
-			return fmt.Errorf("upgrade: %s could not leave etcd: %w. Nothing has been wiped",
-				nameOf(m), err)
-		}
-	}
-
-	resetCtx, cancel, err := talos.WithClassDeadline(ctx, talos.MethodReset)
-	if err != nil {
-		return err
-	}
-	defer cancel()
-
-	return cc.Reset(resetCtx, talos.ResetOptions{
-		// The system disk, so the machine comes back in maintenance mode and
-		// can be provisioned again. Not every disk: the operator removing a
-		// node from a cluster has not necessarily asked for the data on it to
-		// go, and a removal that wiped more than it was asked to is not
-		// undoable.
-		Mode:     "system-disk",
-		Graceful: true,
-		Reboot:   true,
-	})
-}
-
 // RemoveNodeNotice is what the screen says about cordon and drain (UPG-13).
 //
 // It is stated rather than quietly omitted. An operator who reads "remove this
@@ -453,7 +356,8 @@ const RemoveNodeNotice = "holzkube-manager speaks the Talos machine API and not 
 	"Run `kubectl drain <node>` first if the workloads on it need to move rather than restart."
 
 // EvictionWait is how long a removal waits after the etcd leave before
-// wiping.
+// wiping. The removal job's "let etcd settle" step waits exactly this long
+// (Deps.EvictionWait overrides it in tests and nowhere else).
 //
 // It is not a guess about etcd: it is the gap in which a raft that has just
 // lost a member settles, and wiping into that gap is how a removal of one

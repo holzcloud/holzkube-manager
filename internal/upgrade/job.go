@@ -83,10 +83,33 @@ type Deps struct {
 	// reach. Nil means no Kubernetes access: the configuration is still
 	// updated, and the step says the DaemonSet was not.
 	KubeProxy func(ctx context.Context, cluster model.ClusterID, image string) (string, error)
+
+	// Forget takes a machine out of the inventory. The node-removal job's last
+	// step calls it, and it must treat "already gone" as success: a job that
+	// is resumed after the record was deleted must not fail on having done
+	// its work.
+	Forget func(ctx context.Context, id model.MachineID) error
+
+	// Wait blocks for d or until ctx ends. Nil waits on a real timer; it is a
+	// seam so a test can see that the removal's settle step waits, and for how
+	// long, without sleeping.
+	Wait func(ctx context.Context, d time.Duration) error
+
+	// EvictionWait overrides the settle step's length. Zero means the
+	// EvictionWait constant, which is what production runs with.
+	EvictionWait time.Duration
+
+	// Now is the clock the settle step's Happened check reads. Nil is
+	// time.Now.
+	Now func() time.Time
 }
 
 // Register teaches a job engine both rolling upgrades.
 func Register(e *jobs.Engine, d Deps) {
+	e.Register(model.JobRemoveFromCluster, func(j model.Job) ([]jobs.Step, error) {
+		return removeNodeSteps(d, j)
+	})
+
 	e.Register(JobKindTalosUpgrade, func(j model.Job) ([]jobs.Step, error) {
 		req, err := RequestFromParams(j.Params)
 		if err != nil {

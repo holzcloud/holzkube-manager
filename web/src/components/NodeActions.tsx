@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { AlertTriangle, Eraser, Unplug } from 'lucide-react'
-import { useState } from 'react'
-import { api, type Machine } from '@/api'
+import { useEffect, useState } from 'react'
+import { api, type Job, type Machine } from '@/api'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -12,6 +12,8 @@ import {
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { messageFor } from '@/lib/problem'
+import { cn } from '@/lib/utils'
 
 /**
  * Reboot, shut down, reset, and remove from the cluster.
@@ -35,12 +37,13 @@ export function NodeActions({
 }: {
   machine: Machine
   /**
-   * Called once the operator closes the removal dialog after a successful
-   * removal. The record is gone by then, so the screen this component is on is
-   * about a machine that no longer exists — but the dialog is also the only
-   * place the cordon-and-drain notice appears, so navigating away the instant
-   * the call returns would take it off the screen before it was read. The
-   * caller decides where to go, after the reading.
+   * Called once the operator closes the removal dialog after the removal job
+   * has succeeded. The record is gone by then, so the screen this component is
+   * on is about a machine that no longer exists — but the dialog is also the
+   * only place the cordon-and-drain notice appears, so navigating away the
+   * instant the job finishes would take it off the screen before it was read.
+   * The caller decides where to go, after the reading. It is not called for a
+   * job that failed or is parked: the record is still there.
    */
   onRemoved?: () => void
 }) {
@@ -98,23 +101,30 @@ export function NodeActions({
 /**
  * Taking a node out of its cluster for good (UPG-13).
  *
- * The route has existed since phase 9 with nothing to click, which made the
- * whole of that phase's etcd work reachable only with curl. This is the same
- * shape as Reset: the server issues a token bound to this action, this machine
- * and this cluster, and the dialog's job is to make sure the operator is
- * looking at the action the token will authorise.
+ * The same shape as Reset: the server issues a token bound to this action,
+ * this machine and this cluster, and the dialog's job is to make sure the
+ * operator is looking at the action the token will authorise.
  *
- * Two things are said here and nowhere else. The first is that holzkube-manager
- * cannot cordon or drain -- it speaks the Talos machine API and not the
- * Kubernetes one -- so anything still scheduled on the node stops when it does.
- * The server sends that sentence back with the result as well, and it is shown
- * again afterwards on purpose: an operator who read it on the way in has
- * stopped reading by the time it is true.
+ * It is a job. Submitting answers 202 straight away — or 409 when the cluster
+ * cannot spare the voter, which is checked before any job exists — and the
+ * dialog then follows the job through its steps (leave etcd, wait, wipe,
+ * forget) until it is done, failed or parked. Closing the dialog does not stop
+ * it: the job lives on the daemon and on the Jobs page.
  *
- * The second is that this is not a reset. The machine keeps its disks and its
- * configuration; what it loses is its membership and its record here. Somebody
- * expecting a wipe would otherwise leave a machine on the network still holding
- * the cluster's secrets.
+ * Three things are said here and nowhere else. The first is that
+ * holzkube-manager cannot cordon or drain -- it speaks the Talos machine API
+ * and not the Kubernetes one -- so anything still scheduled on the node stops
+ * when it does. The server sends that sentence back with the job as well, and
+ * it is shown again afterwards on purpose: an operator who read it on the way
+ * in has stopped reading by the time it is true.
+ *
+ * The second is that the node's system disk is wiped. It is not wiped further:
+ * data disks stay, and the machine comes back in maintenance mode, ready to be
+ * provisioned again.
+ *
+ * The third is where a job that did not finish leaves things. A failure before
+ * the wipe leaves the node as it was; a parked job means the wipe may or may
+ * not have run, and a person has to look.
  */
 function RemoveFromClusterDialog({
   machine,
@@ -130,7 +140,7 @@ function RemoveFromClusterDialog({
   const queryClient = useQueryClient()
   const [typed, setTyped] = useState('')
   const [failure, setFailure] = useState('')
-  const [notice, setNotice] = useState('')
+  const [accepted, setAccepted] = useState<{ job: string; notice: string } | null>(null)
 
   // The hostname, for the reason the reset dialog gives: it is the thing the
   // operator can check against the machine in front of them. A node that has
@@ -152,9 +162,8 @@ function RemoveFromClusterDialog({
     },
     onSuccess: (result) => {
       setFailure('')
-      setNotice(result.notice)
-      void queryClient.invalidateQueries({ queryKey: ['machines'] })
-      void queryClient.invalidateQueries({ queryKey: ['clusters'] })
+      setAccepted({ job: result.job.id, notice: result.notice })
+      void queryClient.invalidateQueries({ queryKey: ['jobs'] })
     },
     onError: (e: Error) => setFailure(e.message),
   })
@@ -168,31 +177,25 @@ function RemoveFromClusterDialog({
             Remove {phrase} from its cluster
           </DialogTitle>
           <DialogDescription>
-            The node leaves etcd, forfeiting leadership first if it holds it, and its record here is
-            forgotten. Its disks and its configuration are untouched — this is not a reset, and the
-            machine keeps the cluster's secrets until somebody wipes it.
+            The node leaves etcd, forfeiting leadership first if it holds it, waits for etcd to
+            settle, has its system disk wiped, and its record here is forgotten. This is not a full
+            reset: its other disks are left alone, and the machine comes back in maintenance mode,
+            ready to be provisioned again.
           </DialogDescription>
         </DialogHeader>
 
-        {notice !== '' ? (
-          <div className="space-y-4 text-sm">
-            <p className="rounded-md border border-emerald-600/40 bg-emerald-600/10 px-3 py-2 text-emerald-700 dark:text-emerald-300">
-              {phrase} has been removed.
-            </p>
-            <p className="rounded-md border border-amber-600/40 bg-amber-600/10 px-3 py-2 text-amber-700 dark:text-amber-300">
-              {notice}
-            </p>
-            <div className="flex justify-end">
-              <Button
-                onClick={() => {
-                  onOpenChange(false)
-                  onRemoved?.()
-                }}
-              >
-                Close
-              </Button>
-            </div>
-          </div>
+        {accepted !== null ? (
+          <RemovalProgress
+            jobID={accepted.job}
+            notice={accepted.notice}
+            phrase={phrase}
+            onClose={(removed) => {
+              onOpenChange(false)
+              if (removed) {
+                onRemoved?.()
+              }
+            }}
+          />
         ) : (
           <div className="space-y-4 text-sm">
             <p className="rounded-md border border-amber-600/40 bg-amber-600/10 px-3 py-2 text-amber-700 dark:text-amber-300">
@@ -240,6 +243,145 @@ function RemoveFromClusterDialog({
         )}
       </DialogContent>
     </Dialog>
+  )
+}
+
+const REMOVAL_POLL_MS = 2000
+
+function jobIsOver(job: Job | undefined): boolean {
+  return (
+    job !== undefined &&
+    (job.state === 'succeeded' ||
+      job.state === 'failed' ||
+      job.state === 'cancelled' ||
+      job.state === 'parked')
+  )
+}
+
+/**
+ * Follows the removal job: its steps while it runs, then what it ended as.
+ *
+ * Polled rather than streamed, as the Jobs page is: this is one job for a
+ * minute, and a poll that survives a dropped connection is worth more here than
+ * a stream that needs reconnecting. A poll that fails is said, not hidden —
+ * a progress panel that quietly stops moving is the thing that makes an
+ * operator click the button again.
+ */
+function RemovalProgress({
+  jobID,
+  notice,
+  phrase,
+  onClose,
+}: {
+  jobID: string
+  notice: string
+  phrase: string
+  onClose: (removed: boolean) => void
+}) {
+  const queryClient = useQueryClient()
+
+  const poll = useQuery({
+    queryKey: ['job', jobID],
+    queryFn: () => api.jobs.get(jobID),
+    refetchInterval: (query) => (jobIsOver(query.state.data) ? false : REMOVAL_POLL_MS),
+  })
+
+  const job = poll.data
+  const done = job?.state === 'succeeded'
+  const over = jobIsOver(job)
+
+  // The record is gone once the job has succeeded; the lists have to say so.
+  useEffect(() => {
+    if (job !== undefined && over) {
+      void queryClient.invalidateQueries({ queryKey: ['jobs'] })
+      void queryClient.invalidateQueries({ queryKey: ['machines'] })
+      void queryClient.invalidateQueries({ queryKey: ['clusters'] })
+    }
+  }, [job, over, queryClient])
+
+  const failedStep = job?.steps.find((s) => s.state === 'failed')
+
+  return (
+    <div className="space-y-4 text-sm">
+      {job === undefined ? (
+        <p className="text-muted-foreground">
+          {poll.error ? `The job could not be read: ${messageFor(poll.error)}` : 'Starting…'}
+        </p>
+      ) : (
+        <>
+          <ol className="space-y-1" aria-label="Removal steps">
+            {job.steps.map((step) => (
+              <li key={step.name} className="flex items-baseline gap-2">
+                <span
+                  className={cn(
+                    'w-16 shrink-0 text-xs',
+                    step.state === 'done' && 'text-emerald-700 dark:text-emerald-300',
+                    step.state === 'failed' && 'text-red-700 dark:text-red-300',
+                    step.state === 'running' && 'text-sky-700 dark:text-sky-300',
+                    (step.state === 'skipped' || step.state === 'pending') &&
+                      'text-muted-foreground',
+                  )}
+                >
+                  {step.state}
+                </span>
+                <span>
+                  {step.name}
+                  {step.detail !== '' && (
+                    <span className="block text-xs text-muted-foreground">{step.detail}</span>
+                  )}
+                </span>
+              </li>
+            ))}
+          </ol>
+
+          {job.state === 'failed' && (
+            <p className="rounded-md border border-red-600/40 bg-red-600/10 px-3 py-2 text-red-700 dark:text-red-300">
+              The removal stopped at “{failedStep?.name ?? 'a step'}”.{' '}
+              {failedStep?.name === 'wipe the node' || failedStep?.name === 'forget the node'
+                ? 'The node has already left etcd and may be wiped. Look at it before trying again.'
+                : 'Nothing was wiped and the node is still in the inventory.'}
+            </p>
+          )}
+
+          {job.state === 'parked' && (
+            <p className="rounded-md border border-amber-600/40 bg-amber-600/10 px-3 py-2 text-amber-700 dark:text-amber-300">
+              <span className="font-medium">This removal needs you to decide.</span>{' '}
+              {job.parked_reason} It is on the Jobs page.
+            </p>
+          )}
+
+          {job.state === 'cancelled' && (
+            <p className="rounded-md border px-3 py-2 text-muted-foreground">
+              The removal was cancelled at a step boundary. What already ran is not undone.
+            </p>
+          )}
+
+          {done && (
+            <p className="rounded-md border border-emerald-600/40 bg-emerald-600/10 px-3 py-2 text-emerald-700 dark:text-emerald-300">
+              {phrase} has been removed.
+            </p>
+          )}
+
+          {!over && poll.error && (
+            <p className="text-destructive">
+              The job's progress could not be read: {messageFor(poll.error)}. It is still running on
+              the daemon.
+            </p>
+          )}
+        </>
+      )}
+
+      {/* Shown from the start, not only at the end: it is true from the first
+          step, and an operator who watches the progress should not have to wait
+          for the last one to be told. */}
+      <p className="rounded-md border border-amber-600/40 bg-amber-600/10 px-3 py-2 text-amber-700 dark:text-amber-300">
+        {notice}
+      </p>
+
+      <div className="flex justify-end">
+        <Button onClick={() => onClose(done)}>{over ? 'Done' : 'Close and keep going'}</Button>
+      </div>
+    </div>
   )
 }
 

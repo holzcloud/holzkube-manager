@@ -4670,11 +4670,37 @@ reset and rejoined. Nothing in this API does that.
 
 ### Removing a node from a cluster
 
-`POST /api/v1/machines/{id}/remove-from-cluster` does three things in an order
-where each one is there because skipping it leaves something behind: the node
-leaves etcd (from the node itself, so it forfeits leadership and removes itself
-rather than being removed by a peer while still running), it is reset to its
-system disk, and it is forgotten from the inventory.
+`POST /api/v1/machines/{id}/remove-from-cluster` takes `{"cluster", "confirmation"}`
+(a token for `node.remove-from-cluster`, bound to that cluster) and **submits a
+job**. It answers `202` with `Location: /api/v1/jobs/{job}` and
+`{"job", "topic", "notice"}`, like every other job route; `notice` is the
+cordon-and-drain sentence below. It used to do the work inside the request and
+answer `200` with `{"machine", "notice"}`; a client that went away, a budget that
+expired or a restart of the daemon left a node out of etcd and not wiped, and the
+route took no cluster lease.
+
+The job's kind is `node.remove-from-cluster` and its parameters are `cluster` and
+`role`. Its steps, each recorded on the job:
+
+| step | roles | resumable after a restart? |
+|---|---|---|
+| `check the node answers` | all | yes (a read) |
+| `leave etcd` | control plane | yes: etcd's membership is read through a peer; a node it no longer lists has left, and is **not** told to leave again |
+| `let etcd settle` | control plane | yes: waits `EvictionWait` (15 s) so a raft that has just lost a member settles before the wipe; done once that long has passed since it started |
+| `wipe the node` | all | **no**: reset of the system disk only, `graceful`, rebooting. Nothing can be asked of a node that tells "wiped a moment ago" from "booting for another reason", so a restart inside this step **parks** the job |
+| `forget the node` | all | yes: the machine is in the inventory or it is not |
+
+The job holds the cluster's lease (JOB-03): a removal while another job runs on the
+cluster is `409 store.cluster-busy`. The cluster named in the body must be the
+machine's own cluster (`400` otherwise), and a machine in no cluster is `400`.
+The route stays `destructive` (sudo window), `operator`, and audited as
+`node.remove-from-cluster`.
+
+The refusals below are answered **in the request**, before any job exists. The
+quorum rule is checked again inside the `leave etcd` step, immediately before the
+leave. A control-plane node etcd no longer lists is not refused for quorum: there
+is nothing left to lose, and refusing would make a half-finished removal
+impossible to finish.
 
 **Cordon and drain are not performed**, and the response says so. holzkube-manager
 speaks the Talos machine API and not the Kubernetes API. Anything still scheduled

@@ -69,7 +69,12 @@ type nodeState struct {
 	// idea of the membership.
 	removedMembers map[uint64]bool
 
+	// ring is the etcd membership shared with other simulated nodes; nil
+	// means this node is a cluster of one.
+	ring *EtcdRing
+
 	resets     int
+	leaves     int
 	poweredOff bool
 
 	// shutdowns and forcedShutdowns count Shutdown RPCs, the second only those
@@ -128,7 +133,11 @@ type NodeState struct {
 	// Resets counts completed Reset RPCs. PoweredOff is true once the node has
 	// been shut down, or reset without a reboot; a powered-off node answers
 	// Unavailable rather than answering normally.
-	Resets     int
+	Resets int
+
+	// EtcdLeaves counts completed EtcdLeaveCluster RPCs, so a test can see a
+	// leave that was not repeated.
+	EtcdLeaves int
 	PoweredOff bool
 
 	// AppliedConfigs counts configurations actually applied. A dry-run apply
@@ -163,14 +172,19 @@ func newNodeState(opts Options) *nodeState {
 	if now == nil {
 		now = time.Now
 	}
-	return &nodeState{
+	n := &nodeState{
 		now:          now,
 		hostname:     opts.Hostname,
 		version:      opts.TalosVersion,
 		lastBoot:     now(),
 		bootstrapped: opts.Bootstrapped,
 		bootTakes:    opts.BootTakes,
+		ring:         opts.EtcdRing,
 	}
+	if n.ring != nil && opts.Bootstrapped {
+		n.ring.join(opts.Hostname)
+	}
+	return n
 }
 
 // snapshot returns the current state as a value.
@@ -231,7 +245,9 @@ func (n *nodeState) removeMember(id uint64) {
 func (n *nodeState) leaveEtcd() {
 	n.mu.Lock()
 	defer n.mu.Unlock()
+	n.leaves++
 	n.bootstrapped = false
+	n.ring.leave(n.hostname)
 }
 
 func (n *nodeState) snapshot() NodeState {
@@ -246,6 +262,7 @@ func (n *nodeState) snapshot() NodeState {
 		Reboots:         n.reboots,
 		LastBoot:        n.lastBoot,
 		Resets:          n.resets,
+		EtcdLeaves:      n.leaves,
 		PoweredOff:      n.poweredOff,
 		AppliedConfigs:  n.appliedConfigs,
 		RecoverCalls:    n.recoverCalls,
@@ -308,6 +325,7 @@ func (n *nodeState) bootstrap() error {
 	}
 
 	n.bootstrapped = true
+	n.ring.join(n.hostname)
 	return nil
 }
 
@@ -431,6 +449,7 @@ func (n *nodeState) reset(reboot bool) {
 
 	n.resets++
 	n.bootstrapped = false
+	n.ring.leave(n.hostname)
 	n.appliedConfigs = 0
 
 	if reboot {
@@ -461,6 +480,22 @@ func (n *nodeState) setBootstrapped(v bool) {
 	defer n.mu.Unlock()
 
 	n.bootstrapped = v
+	if v {
+		n.ring.join(n.hostname)
+	} else {
+		n.ring.leave(n.hostname)
+	}
+}
+
+// etcdMembers is the membership this node reports: the whole ring when the
+// node shares one, itself alone otherwise.
+func (n *nodeState) etcdMembers() []string {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	if n.ring == nil {
+		return []string{n.hostname}
+	}
+	return n.ring.members()
 }
 
 func (n *nodeState) setHostname(hostname string) {
@@ -746,16 +781,22 @@ func (m *machineService) EtcdMemberList(_ context.Context, _ *machine.EtcdMember
 			"talossim: etcd is not running on %s: the node has not been bootstrapped", n.Hostname)
 	}
 
+	hosts := m.server.node.etcdMembers()
+	members := make([]*machine.EtcdMember, 0, len(hosts))
+	for _, h := range hosts {
+		members = append(members, &machine.EtcdMember{
+			Id:         memberID(h),
+			Hostname:   h,
+			PeerUrls:   []string{"https://" + m.server.opts.NodeIP + ":2380"},
+			ClientUrls: []string{"https://" + m.server.opts.NodeIP + ":2379"},
+		})
+	}
+
 	return &machine.EtcdMemberListResponse{
 		Messages: []*machine.EtcdMembers{{
 			Metadata:      m.server.node.metadata(),
-			LegacyMembers: []string{n.Hostname},
-			Members: []*machine.EtcdMember{{
-				Id:         memberID(n.Hostname),
-				Hostname:   n.Hostname,
-				PeerUrls:   []string{"https://" + m.server.opts.NodeIP + ":2380"},
-				ClientUrls: []string{"https://" + m.server.opts.NodeIP + ":2379"},
-			}},
+			LegacyMembers: hosts,
+			Members:       members,
 		}},
 	}, nil
 }

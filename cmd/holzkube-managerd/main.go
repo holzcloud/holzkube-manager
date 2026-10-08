@@ -385,6 +385,16 @@ func run(args []string) error {
 			return nil
 		},
 
+		// The last step of a node removal. A machine that is already gone is
+		// success, not failure: a resumed job must not fail on having done
+		// its work.
+		Forget: func(ctx context.Context, id model.MachineID) error {
+			if err := inv.ForgetMachine(ctx, id); err != nil && !errors.Is(err, inventory.ErrNotFound) {
+				return err
+			}
+			return nil
+		},
+
 		// Resolving an installer needs the Image Factory and the stored
 		// schematic, and neither belongs to the upgrade package. It is wired
 		// here, in the one place that holds both.

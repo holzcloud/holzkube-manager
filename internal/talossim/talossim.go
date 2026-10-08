@@ -141,6 +141,13 @@ type Options struct {
 	// exercised in the direction that matters.
 	SecureBoot bool
 
+	// EtcdRing, when set, is the etcd membership this node shares with the
+	// other nodes given the same ring: each bootstrapped node is a member,
+	// every member lists all of them, and leaving etcd or being reset takes a
+	// node out of every list. Nil is a cluster of one, which is what every
+	// test written before this existed relies on.
+	EtcdRing *EtcdRing
+
 	// Members is the cluster membership this node's discovery reports. Leaving
 	// it empty is the truthful simulation of a cluster whose discovery service
 	// is switched off -- which is a supported configuration and must not look

@@ -755,6 +755,10 @@ func removeNodeFromCluster(d httpapi.Deps) http.HandlerFunc {
 			httpapi.WriteProblem(w, r, p)
 			return
 		}
+		if p := jobsConfigured(d); p != nil {
+			httpapi.WriteProblem(w, r, p)
+			return
+		}
 		if p := inventoryConfigured(d); p != nil {
 			httpapi.WriteProblem(w, r, p)
 			return
@@ -789,25 +793,63 @@ func removeNodeFromCluster(d httpapi.Deps) http.HandlerFunc {
 			return
 		}
 
+		// The cluster the lock middleware checked is the one in the body, and
+		// the cluster the job takes its lease on is the machine's. They must
+		// be the same cluster, or a read-only lock on one could be walked
+		// around by naming it in the body of a request about another.
+		if m.Cluster == "" {
+			httpapi.WriteProblem(w, r, httpapi.Validation(
+				"This machine belongs to no cluster, so there is nothing to remove it from."))
+			return
+		}
+		if body.Cluster != string(m.Cluster) {
+			httpapi.WriteProblem(w, r, httpapi.Validation(
+				"The cluster in the request is not the cluster this machine belongs to.",
+				httpapi.FieldError{Field: "cluster", Reason: "does not match the machine's cluster"}))
+			return
+		}
+
+		// The quorum rule runs here, in the request, so that a refusal is an
+		// immediate 409 and not a job that fails a moment later. It runs again
+		// inside the job's leave step: the job starts after this check, and the
+		// cluster can change in between.
 		ctx, cancel := budgetedContext(r, EtcdRouteBudget)
 		defer cancel()
-
-		if err := d.Upgrade.RemoveNodeFromCluster(ctx, m); err != nil {
+		if err := d.Upgrade.PreflightRemoval(ctx, m); err != nil {
 			writeUpgradeError(w, r, d, err)
 			return
 		}
 
-		// Out of the inventory too. A node that was wiped and left in the list
-		// shows as a node that is down, which is indistinguishable from one
-		// that will come back.
-		if err := d.Inventory.ForgetMachine(r.Context(), id); err != nil {
-			writeInventoryError(w, r, d, err)
+		actor := ""
+		if u, ok := d.Auth.CurrentUser(r.Context()); ok {
+			actor = u.Username
+		}
+
+		// A job and not a call: leaving etcd, waiting for the raft to settle,
+		// wiping and forgetting must survive the client going away and the
+		// daemon restarting, and they hold the cluster's lease so they cannot
+		// run beside an upgrade (JOB-03). Submit refuses with 409 when the
+		// lease is taken.
+		j, err := d.Jobs.Submit(r.Context(), model.Job{
+			Kind:    model.JobRemoveFromCluster,
+			Cluster: m.Cluster,
+			Machine: id,
+			Params:  upgrade.RemovalParams(m),
+			Actor:   actor,
+		})
+		if err != nil {
+			writeJobError(w, r, d, err)
 			return
 		}
 
-		writeJSON(w, http.StatusOK, map[string]any{
-			"machine": string(id),
-			"notice":  upgrade.RemoveNodeNotice,
+		// 202: accepted, not done. The forget -- out of the inventory, so a
+		// wiped node is not left in the list looking like one that is down --
+		// is the job's last step.
+		w.Header().Set("Location", "/api/v1/jobs/"+string(j.ID))
+		writeJSON(w, http.StatusAccepted, map[string]any{
+			"job":    j,
+			"topic":  string(jobs.Topic(j.ID)),
+			"notice": upgrade.RemoveNodeNotice,
 		})
 	}
 }
