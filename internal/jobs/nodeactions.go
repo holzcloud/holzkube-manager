@@ -45,12 +45,58 @@ type Connector func(ctx context.Context, id model.MachineID) (*talos.ClusterClie
 // five seconds has answered.
 const probeTimeout = 8 * time.Second
 
+// NodeOption adjusts RegisterNodeActions.
+type NodeOption func(*nodeOptions)
+
+type nodeOptions struct {
+	afterReboot func(model.MachineID)
+}
+
+// AfterReboot registers a hook that runs once a reboot job's node has taken the
+// reboot -- or, on resume, was found to have rebooted already. It is how things
+// that are only true until the next boot (a staged configuration) get cleared.
+func AfterReboot(fn func(model.MachineID)) NodeOption {
+	return func(o *nodeOptions) { o.afterReboot = fn }
+}
+
+// afterRebooted wraps a reboot step so that hook runs when the node is known to
+// have rebooted. It adds no step: a job record written by an older build has two
+// steps, and a rebuilt list of three would park it.
+func afterRebooted(s Step, id model.MachineID, hook func(model.MachineID)) Step {
+	if hook == nil {
+		return s
+	}
+	do, happened := s.Do, s.Happened
+	s.Do = func(ctx context.Context, j *model.Job) error {
+		if err := do(ctx, j); err != nil {
+			return err
+		}
+		hook(id)
+		return nil
+	}
+	if happened != nil {
+		s.Happened = func(ctx context.Context, j *model.Job) (bool, error) {
+			ok, err := happened(ctx, j)
+			if ok && err == nil {
+				hook(id)
+			}
+			return ok, err
+		}
+	}
+	return s
+}
+
 // RegisterNodeActions teaches an engine the three node actions.
-func RegisterNodeActions(e *Engine, connect Connector) {
+func RegisterNodeActions(e *Engine, connect Connector, opts ...NodeOption) {
+	var o nodeOptions
+	for _, opt := range opts {
+		opt(&o)
+	}
+
 	e.Register(model.JobReboot, func(j model.Job) ([]Step, error) {
 		return []Step{
 			ReachableStep(connect, j.Machine),
-			RebootStep(connect, j.Machine, false),
+			afterRebooted(RebootStep(connect, j.Machine, false), j.Machine, o.afterReboot),
 		}, nil
 	})
 

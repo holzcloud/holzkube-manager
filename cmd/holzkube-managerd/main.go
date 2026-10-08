@@ -265,9 +265,21 @@ func run(args []string) error {
 	})
 	defer engine.Close()
 
+	// The config domain, built here because the reboot job below clears its
+	// "a staged configuration is waiting" memory: a reboot is what applies it.
+	// It takes the same connector the jobs take, and the transport mode,
+	// because whether this process may apply anything is a property of the
+	// process rather than of the request.
+	configSvc := machineconfig.New(machineconfig.Deps{
+		Connect: func(ctx context.Context, id model.MachineID) (*talos.ClusterClient, error) {
+			return inv.Connect(ctx, id)
+		},
+		Mode: talosMode,
+	})
+
 	jobs.RegisterNodeActions(engine, func(ctx context.Context, id model.MachineID) (*talos.ClusterClient, error) {
 		return inv.Connect(ctx, id)
-	})
+	}, jobs.AfterReboot(configSvc.ClearStaged))
 
 	// The confirmation signing key is generated here and lives only in memory.
 	// A confirmation that survived a restart would be a decision about a fleet
@@ -276,16 +288,6 @@ func run(args []string) error {
 	if err != nil {
 		return err
 	}
-
-	// The config domain. It takes the same connector the jobs take, and the
-	// transport mode, because whether this process may apply anything is a
-	// property of the process rather than of the request.
-	configSvc := machineconfig.New(machineconfig.Deps{
-		Connect: func(ctx context.Context, id model.MachineID) (*talos.ClusterClient, error) {
-			return inv.Connect(ctx, id)
-		},
-		Mode: talosMode,
-	})
 
 	// Provisioning: the wizard's reads, and the etcd bootstrap lease.
 	//
