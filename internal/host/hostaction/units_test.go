@@ -1180,11 +1180,18 @@ func TestTheUpdateTimingContract(t *testing.T) {
 	if !strings.Contains(waitBody, "local tries=$1") || !regexp.MustCompile(`(?m)^\s*for _ in \$\(seq 1 "\$tries"\); do$`).MatchString(waitBody) {
 		t.Errorf("wait_healthy() does not loop over its argument as the timing model assumes:\n%s", waitBody)
 	}
+	// Before the install one wait_healthy N; after the restart wait_stable
+	// asks HEALTH_TRIES times (it needs HEALTH_STREAK answers in a row, but
+	// the worst case is every try running out its curl).
 	waitCalls := regexp.MustCompile(`(?m)^[^#\n]*\bwait_healthy ([0-9]+)\b`).FindAllStringSubmatch(script, -1)
-	if len(waitCalls) != 2 {
-		t.Errorf("the update script calls wait_healthy %d times, the timing model counts 2 (before the install and after the restart); redo the model", len(waitCalls))
+	if len(waitCalls) != 1 {
+		t.Errorf("the update script calls wait_healthy %d times, the timing model counts 1 (before the install); redo the model", len(waitCalls))
 	}
-	tries := 0
+	stableCalls := regexp.MustCompile(`(?m)^[^#\n]*\bwait_stable "\$HEALTH_TRIES" "\$HEALTH_STREAK"`).FindAllString(script, -1)
+	if len(stableCalls) != 1 {
+		t.Errorf("the update script calls wait_stable %d times, the timing model counts 1 (after the restart); redo the model", len(stableCalls))
+	}
+	tries := scriptNumber(t, script, "the health tries after the restart", regexp.MustCompile(`(?m)^\s*HEALTH_TRIES=([0-9]+)$`))
 	for _, c := range waitCalls {
 		n, err := strconv.Atoi(c[1])
 		if err != nil {
@@ -1192,8 +1199,16 @@ func TestTheUpdateTimingContract(t *testing.T) {
 		}
 		tries += n
 	}
+	stableBody := scriptFunctionBody(t, script, "wait_stable")
+	if !regexp.MustCompile(`(?m)^\s*for \(\(i = 0; i < tries; i\+\+\)\); do$`).MatchString(stableBody) || !strings.Contains(stableBody, "healthy") {
+		t.Errorf("wait_stable() does not loop over its argument asking healthy, as the timing model assumes:\n%s", stableBody)
+	}
 	healthMax := scriptSeconds(t, script, "the health check's --max-time", regexp.MustCompile(`curl -sk --max-time ([0-9]+) "\$HEALTH_URL"`))
-	pause := scriptSeconds(t, script, "the health loop's sleep", regexp.MustCompile(`(?m)^\s*sleep ([0-9]+)$`))
+	sleepRe := regexp.MustCompile(`(?m)^\s*sleep ([0-9]+)$`)
+	pause := scriptSeconds(t, waitBody, "the health loop's sleep", sleepRe)
+	if got := scriptSeconds(t, stableBody, "wait_stable()'s sleep", sleepRe); got != pause {
+		t.Errorf("wait_stable() pauses %v between tries, wait_healthy() %v; the timing model assumes one pause", got, pause)
+	}
 
 	worst := updateLock + apiMax + 2*downloadMax + 2*daemonRestartWorstCase +
 		time.Duration(tries)*(healthMax+pause) + updateLocalWork

@@ -148,14 +148,27 @@ listens only on an address of the network (`--listen 192.168.1.10:8443` gives
 `HOLZKUBE_MANAGER_HEALTH_URL=https://192.168.1.10:8443/api/v1/system/status`).
 A binary somewhere other than `/usr/local/bin` it does not update.
 
-A run of the update looks for the newest release that is not a draft,
-downloads it, checks its checksum and runs the new binary's `--version` before
-the service is touched. Then it installs the binary, restarts the service and
-checks that it answers on `127.0.0.1:8443` -- usually within about 20
-seconds; it asks 20 times, each with up to 5 seconds for an answer and a
-second's pause, so at most about two minutes. If the restart fails or the
-service does not answer, it goes back to the previous binary and records
-**rolled-back**. What happened is recorded in
+A run of the update looks for the highest release version that is a plain
+`vX.Y.Z` (drafts and tags with a suffix such as `-rc.1` or `-beta.1` are
+skipped) and installs it only if it is newer than what is installed; an older
+release never replaces a newer installation unless you run
+`holzkube-manager-update --allow-downgrade`. It downloads the release, checks
+its checksum -- a release without `checksums.txt` is refused -- and runs the new
+binary's `--version` before the service is touched. Then it installs the binary
+(written next to its place and moved into it, so a power cut leaves the old or
+the new binary, never half of one), restarts the service and checks that it
+answers on `127.0.0.1:8443`: three answers in a row, with no restart of the
+service in between, within 25 tries of up to 5 seconds each and a second's
+pause, so at most about two and a half minutes. If the restart fails or the
+service does not stay healthy, it goes back to the previous binary and records
+**rolled-back**, and it remembers that version in
+`/var/lib/holzkube-manager-update/bad-version`: the hourly run does not try it
+again until a newer release is published (`--force` installs it anyway).
+`holzkube-manager-update --rollback` does the same by hand, takes the same lock
+as the other runs and records **rolled-back**; the version it leaves is
+remembered as well. When the update replaces its own script it first checks the
+new one with `bash -n` and keeps the old one as
+`/usr/local/sbin/holzkube-manager-update.previous`. What happened is recorded in
 `/var/lib/holzkube-manager-update/status.json`, and the Host page's **Update
 check** row shows it.
 
