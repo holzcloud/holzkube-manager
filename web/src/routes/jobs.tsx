@@ -6,6 +6,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { formatDateTime } from '@/lib/format'
+import { messageFor } from '@/lib/problem'
 import { cn } from '@/lib/utils'
 import { formatDuration, medianSeconds, secondsBetween, useElapsedSeconds } from '@/lib/waiting'
 import { authenticatedRoute } from '@/routes/__root'
@@ -70,7 +71,7 @@ export function JobsPage() {
       {isLoading && <p className="text-sm text-muted-foreground">Loading jobs</p>}
       {error && (
         <p className="text-sm text-destructive">
-          The job list could not be read: {(error as Error).message}
+          The job list could not be read: {messageFor(error)}
         </p>
       )}
 

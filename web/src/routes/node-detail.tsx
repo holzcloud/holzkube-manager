@@ -22,6 +22,7 @@ import {
 } from '@/components/ui/table'
 import { useStream } from '@/hooks/useStream'
 import { formatDateTime } from '@/lib/format'
+import { messageFor } from '@/lib/problem'
 import { authenticatedRoute } from '@/routes/__root'
 import { MACHINE_POLL_INTERVAL_MS } from '@/routes/nodes'
 
@@ -90,7 +91,7 @@ export function NodeDetailPage() {
   if (error || !data) {
     return (
       <p className="text-sm text-destructive">
-        This node could not be read: {(error as Error | undefined)?.message ?? 'not found'}
+        This node could not be read: {error ? messageFor(error) : 'not found'}
       </p>
     )
   }
