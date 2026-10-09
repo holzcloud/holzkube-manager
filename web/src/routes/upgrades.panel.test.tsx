@@ -61,7 +61,9 @@ describe('the upgrade panel', () => {
 
     expect(screen.queryByText('Kubernetes stays supported.')).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /Start the rolling upgrade/ })).toBeNull()
-  })
+    // Typing character by character is slow on a loaded Pi; the default 5 s was
+    // exceeded once while the Go suite ran beside it.
+  }, 30_000)
 
   it('drops the plan when What changes', async () => {
     const user = userEvent.setup()

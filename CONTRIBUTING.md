@@ -17,7 +17,7 @@ the Raspberry Pi 5 (linux/arm64) it is released for. Others may work; these
 are the ones known to.
 
 - **Go 1.26.7.** `go.mod` declares `go 1.26` with `toolchain go1.26.7`, so a machine
-  whose Go predates 1.26.7 fetches the pinned toolchain by itself.
+  whose Go predates 1.26.9 fetches the pinned toolchain by itself.
 - **Node 22** with **npm 10**.
 - **go-task 3.53.1**, **golangci-lint 2.13.1**, **goreleaser 2.18.0**.
 
