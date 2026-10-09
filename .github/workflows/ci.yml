@@ -65,7 +65,7 @@ jobs:
           # sandbox/ is a separate module, deliberately outside this build.
           cache-dependency-path: go.sum
 
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: '22'
           cache: npm
@@ -185,7 +185,7 @@ jobs:
       # .goreleaser.yaml runs `npm --prefix web ci` and `npm --prefix web run
       # build` in its before hooks, for the same go:embed reason as the Taskfile.
       # The release job therefore needs Node exactly as much as the build does.
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: '22'
           cache: npm
