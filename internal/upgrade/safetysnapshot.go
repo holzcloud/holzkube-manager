@@ -295,6 +295,7 @@ func (st *SnapshotStore) writeKind(
 
 	final := filepath.Join(dir, snapshotFileName(st.now(), kind))
 	sum := sha256.New()
+	sidecar := final + checksumSuffix
 	n, err := st.fs.WriteStream(final, func(w io.Writer) (int64, error) {
 		n, ferr := fn(io.MultiWriter(w, sum))
 		if ferr != nil {
@@ -303,20 +304,23 @@ func (st *SnapshotStore) writeKind(
 		if n <= 0 {
 			return 0, errors.New("the node sent an empty snapshot, and none was kept")
 		}
+		// The checksum is a file of its own, in `sha256sum -c` form, so an
+		// operator who copied the snapshot off the box can check the copy. It is
+		// written before the snapshot is renamed into place, so a snapshot that
+		// can be listed always has its checksum -- written afterwards, a reader
+		// (and CI's slower runner) saw the snapshot first and "not recorded". A
+		// failure to write it costs the checksum and not the snapshot.
+		_, _ = st.fs.WriteStream(sidecar, func(cw io.Writer) (int64, error) {
+			k, werr := fmt.Fprintf(cw, "%s  %s\n", hex.EncodeToString(sum.Sum(nil)), filepath.Base(final))
+			return int64(k), werr
+		})
 		return n, nil
 	})
 	if err != nil {
+		_ = st.fs.Remove(sidecar)
 		return SafetySnapshot{}, err
 	}
 	_ = n
-
-	// The checksum is a file of its own, in `sha256sum -c` form, so an
-	// operator who copied the snapshot off the box can check the copy. A
-	// failure to write it costs the checksum and not the snapshot.
-	_, _ = st.fs.WriteStream(final+checksumSuffix, func(w io.Writer) (int64, error) {
-		k, werr := fmt.Fprintf(w, "%s  %s\n", hex.EncodeToString(sum.Sum(nil)), filepath.Base(final))
-		return int64(k), werr
-	})
 
 	st.mu.Lock()
 	st.prune(dir, kind, keep)
