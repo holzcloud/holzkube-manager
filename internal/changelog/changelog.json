@@ -1,5 +1,31 @@
 [
   {
+    "version": "v0.5.0",
+    "date": "2026-10-09",
+    "changes": [
+      {
+        "icon": "🛟",
+        "text": "Scheduled etcd backups. Per cluster you can switch on a schedule (every 6 hours, daily or weekly) and say how many to keep; each run is a job that takes the snapshot from a healthy control-plane node, skips with a stated reason when the cluster is busy, unreachable or the disk is short, and never runs twice after a restart. The Upgrades screen lists them with size and checksum, downloads one, and has a Run now button. A cluster whose last scheduled backup is more than two intervals old is marked overdue on its card and in /metrics. The backups stay on this device: they do not survive losing its SD card, so copy a download somewhere else."
+      },
+      {
+        "icon": "🔐",
+        "text": "Security fixes from an audit. A stolen session cookie could skip the password prompt for destructive actions just by sending any Authorization header; that is closed. Handing out a kubeconfig, talosconfig, etcd snapshot, support bundle or pod log is now written to the audit log (the kubeconfig was documented as audited and was not). \"Host: localhost\" from another machine no longer reaches the password routes of an address that is single-sign-on only. Password hashing runs two at a time, so a burst of logins cannot exhaust the Pi's memory; anonymous requests that write to the audit log or create sessions are limited per address; expired sessions are swept while running; failed sign-ins and the peer address now appear in the journal."
+      },
+      {
+        "icon": "♻️",
+        "text": "The updater is stricter. It installs only a newer version (a downgrade needs --allow-downgrade), picks the highest release rather than the first listed, refuses a release without checksums.txt, remembers a version that failed its health check instead of retrying it every hour, replaces the program and itself atomically, and wants three healthy answers in a row before it calls an update good. --rollback now takes the lock and records itself. Releases are cut only from main, and CI actions are pinned and scanned for known vulnerabilities."
+      },
+      {
+        "icon": "🧹",
+        "text": "Removing a node is now a job. It leaves etcd, waits for it to settle, wipes the system disk and forgets the node, resumes after a restart, holds the cluster's lease and is shown step by step; the refusals (quorum, wrong cluster) stay immediate. The quorum check counts the voters that actually answer, not the ones on record. The route answers 202 with the job instead of 200, which matters only to scripts that call it."
+      },
+      {
+        "icon": "🛠️",
+        "text": "Fixes. Cancelling a running job ends it as cancelled instead of leaving it running and resuming after a restart; staged configuration can be applied again after the node rebooted; streams, forgotten machines and finished jobs no longer leak goroutines and memory. In the interface, one failed session check no longer throws you to the login page, log panels no longer repeat lines, the upgrade plan resets when you change the target, error messages are announced to screen readers, and dates use one format."
+      }
+    ]
+  },
+  {
     "version": "v0.4.0",
     "date": "2026-10-06",
     "changes": [
