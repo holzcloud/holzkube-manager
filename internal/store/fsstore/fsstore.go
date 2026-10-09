@@ -134,8 +134,11 @@ func Open(dir string) (s *Store, err error) {
 	// grow the directory for as long as the process lives.
 	stop := make(chan struct{})
 	s.stopReaper = stop
+	// Read here, in the caller, not inside the goroutine: a test that swaps the
+	// interval back after Close would otherwise race with the goroutine's read.
+	interval := reapInterval
 	go func() {
-		t := time.NewTicker(reapInterval)
+		t := time.NewTicker(interval)
 		defer t.Stop()
 		for {
 			select {
