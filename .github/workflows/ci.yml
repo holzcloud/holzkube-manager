@@ -58,7 +58,7 @@ jobs:
       # go.mod carries `toolchain go1.26.7` and setup-go honours that line, so
       # the Go version is pinned in one place and CI cannot drift from a local
       # build.
-      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
           # Caches the module and build caches. Keyed on the root go.sum only:
@@ -177,7 +177,7 @@ jobs:
           # git history. A shallow clone gives it neither.
           fetch-depth: 0
 
-      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
           cache-dependency-path: go.sum
