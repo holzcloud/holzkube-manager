@@ -164,6 +164,11 @@ Siehe `PROJECT.md`, die `MILESTONE-*.md`-Dateien und für v1.18 den Abschnitt
 - [Phase 13]: 13-16: CapabilityBoundingSet=, SystemCallFilter=, ProtectProc= and ProcSubset= stay out of the shipped update unit until a real install and restart through it is measured as root
 - [Phase 13]: 13-17: single-button reasons share one line in button order (at most two sentences); actionReason asks group, update script, update unit, older helper, as the routes do
 
+### Roadmap Evolution
+
+- Phase 15 added (2026-10-12): Drift-Erkennung der Maschinenkonfiguration
+- Phase 16 added (2026-10-12): Kubernetes-Upgradekette auf neuesten Patch je Minor
+
 ### Blockers/Concerns
 
 - OPS-05 braucht eine Maschine, keinen Code.

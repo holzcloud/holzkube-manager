@@ -269,3 +269,29 @@ Waves: 1 → {01, 02} · 2 → {03} · 3 → {04} · 4 → {05} · 5 → {06} ·
 | 12. Host wie ein Knoten — Verlauf, Warnung, Wand | v1.18 | 8/8 | Complete    | 2026-09-29 |
 | 13. Host-Aktionen über einen root-eigenen Helfer | v1.18 | 17/17 | In Progress|  |
 | 14. Telefon — Tippziele, die ein Daumen trifft | v1.18 | 7/7 | In Progress|  |
+
+## Nach v1.18 (ohne Milestone, angelegt 2026-10-12)
+
+Aus den Kandidaten von `AUDIT-2026-10-08.md`, vom Betreiber am 2026-10-12 gewählt.
+Beide Phasen hängen nicht an v1.18 und nicht aneinander; die Nummern setzen die
+Zählung fort, die Tabelle oben führt sie noch nicht.
+
+### Phase 15: Drift-Erkennung der Maschinenkonfiguration
+
+**Goal:** Der Betreiber sieht, wenn die aktive Konfiguration eines Knotens von dem abweicht, was holzkube-manager zuletzt gesetzt oder gelesen hat — eine Änderung am Knoten selbst fällt heute nicht auf, weil das Diff nur beim Patchen berechnet wird. Periodische Lesung nach dem Muster von `internal/certwatch`, Anzeige auf der Knoten- und Cluster-Seite und eine Warnung; nie ein stilles „keine Drift", wo die Lesung fehlschlug.
+**Requirements**: TBD
+**Depends on:** Nothing
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (run /gsd-plan-phase 15 to break down)
+
+### Phase 16: Kubernetes-Upgradekette auf neuesten Patch je Minor
+
+**Goal:** Die Zwischenschritte der Kubernetes-Upgradekette laufen auf dem neuesten Patch je Minor statt über `.0`. Eng begrenzt in `internal/upgrade`; ohne echten Cluster nur gegen die Simulatoren belegbar, und der Bericht sagt das.
+**Requirements**: TBD
+**Depends on:** Nothing
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (run /gsd-plan-phase 16 to break down)
