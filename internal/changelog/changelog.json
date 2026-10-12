@@ -1,5 +1,23 @@
 [
   {
+    "version": "v0.7.0",
+    "date": "2026-10-12",
+    "changes": [
+      {
+        "icon": "🔗",
+        "text": "The Kubernetes upgrade chain names the newest stable patch. When a Kubernetes upgrade has to go through intermediate minors, the plan used to name each one as .0 (for example v1.33.0), which is not what anyone installs. It now asks dl.k8s.io for the newest stable patch of each minor on the way and shows that (v1.33.7, say). If that lookup fails, the plan is blocked with a sentence that says so, and never quietly falls back to .0; a target one minor away needs no lookup and is unaffected. The source has no setting. Still advice only: the job installs the version you typed in one run, so the chain tells you what to do and does not enforce it (open ledger entry 174), and a multi-minor target is blocked only while the lookup is down. Tested against the simulators and a fake server only: the format of dl.k8s.io was measured once and is not documented, and no real cluster has taken an intermediate patch from it yet (ledger 175)."
+      },
+      {
+        "icon": "📐",
+        "text": "The compatibility table for Talos 1.12, 1.13 and 1.14 is corrected. It allowed Kubernetes only up to 1.33, 1.34 and 1.35; Talos 1.14 supports up to 1.37, so a cluster on Talos 1.14 could not plan a chain past 1.35. The windows are now 1.30 to 1.35, 1.31 to 1.36 and 1.32 to 1.37, and the Talos 1.14 row is held against the library this build is compiled with, so it cannot fall behind again unnoticed. Older Talos rows were not re-checked."
+      },
+      {
+        "icon": "🧰",
+        "text": "The build pipeline uses newer GitHub Actions (checkout, setup-go, setup-node, setup-task and goreleaser, each pinned to a commit). Nothing changes in the running program; the new versions are exercised by this release's own build."
+      }
+    ]
+  },
+  {
     "version": "v0.6.0",
     "date": "2026-10-12",
     "changes": [
