@@ -1,8 +1,12 @@
 package compat_test
 
 import (
+	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/siderolabs/talos/pkg/machinery/constants"
+	"github.com/siderolabs/talos/pkg/machinery/gendata"
 
 	"github.com/holzcloud/holzkube-manager/internal/compat"
 	"github.com/holzcloud/holzkube-manager/internal/talos"
@@ -35,10 +39,10 @@ func TestCheckClassifiesTheWindow(t *testing.T) {
 		supported bool
 		headroom  int
 	}{
-		{name: "inside with headroom", talos: "v1.13.9", k8s: "v1.32.4", supported: true, headroom: 2},
-		{name: "at the top", talos: "v1.13.9", k8s: "v1.34.1", supported: true, headroom: 0},
-		{name: "above the top", talos: "v1.13.9", k8s: "v1.35.0", supported: false, headroom: -1},
-		{name: "below the floor", talos: "v1.13.9", k8s: "v1.31.0", supported: false, headroom: 3},
+		{name: "inside with headroom", talos: "v1.13.9", k8s: "v1.34.4", supported: true, headroom: 2},
+		{name: "at the top", talos: "v1.13.9", k8s: "v1.36.1", supported: true, headroom: 0},
+		{name: "above the top", talos: "v1.13.9", k8s: "v1.37.0", supported: false, headroom: -1},
+		{name: "below the floor", talos: "v1.13.9", k8s: "v1.30.0", supported: false, headroom: 6},
 	}
 
 	for _, row := range rows {
@@ -110,4 +114,36 @@ func itoa(n int) string {
 		n /= 10
 	}
 	return string(b)
+}
+
+// TestTheNewestRowMatchesTheCompiledMachinery holds the matrix row of the
+// machinery this binary is built with to that library's own constants. The
+// matrix is edited by hand; on 2026-10-12 it still said Kubernetes 1.35 for a
+// Talos whose machinery defaults to 1.37, and nothing noticed.
+//
+// The top and the default must equal the machinery's default, and the bottom is
+// its count of supported minors back from it. (The Talos documentation lists one
+// fewer at the bottom; the operator chose the machinery's, because it is what
+// the code allows and a working cluster is not reported as outside.)
+func TestTheNewestRowMatchesTheCompiledMachinery(t *testing.T) {
+	t.Parallel()
+
+	def := strings.SplitN(strings.TrimPrefix(constants.DefaultKubernetesVersion, "1."), ".", 2)[0]
+	defMinor, err := strconv.Atoi(def)
+	if err != nil {
+		t.Fatalf("machinery default %q: %v", constants.DefaultKubernetesVersion, err)
+	}
+
+	v := compat.Check(gendata.VersionTag, constants.DefaultKubernetesVersion)
+	if !v.Known {
+		t.Fatalf("the compiled machinery's Talos %s has no row in the matrix", gendata.VersionTag)
+	}
+	if v.Window.MaxMinor != defMinor || v.Window.DefaultMinor != defMinor {
+		t.Errorf("Talos %s row top/default = %d/%d, the compiled machinery defaults to Kubernetes 1.%d",
+			gendata.VersionTag, v.Window.MaxMinor, v.Window.DefaultMinor, defMinor)
+	}
+	if want := defMinor - constants.SupportedKubernetesVersions + 1; v.Window.MinMinor != want {
+		t.Errorf("Talos %s row bottom = %d, want %d (default %d, %d minors supported)",
+			gendata.VersionTag, v.Window.MinMinor, want, defMinor, constants.SupportedKubernetesVersions)
+	}
 }

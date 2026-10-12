@@ -38,7 +38,11 @@ type Window struct {
 // than extrapolating -- an extrapolated window is an upgrade that is allowed
 // to strand a cluster.
 var matrix = map[int]Window{
-	// Talos 1.7 .. 1.14. The range each release supports moves by one minor
+	// Talos 1.7 .. 1.14. Rows 12 to 14 follow the support matrix of each release
+	// (docs.siderolabs.com, getting-started/support-matrix); row 14 is also held
+	// against the machinery compiled in (TestTheNewestRowMatchesTheCompiledMachinery),
+	// which supports six minors back from its default. Rows 7 to 11 were not
+	// re-checked. The range each release supports moves by one minor
 	// per release, with the default tracking the newest Kubernetes at the time
 	// the Talos release was cut.
 	7:  {MinMinor: 26, MaxMinor: 30, DefaultMinor: 30},
@@ -46,9 +50,9 @@ var matrix = map[int]Window{
 	9:  {MinMinor: 28, MaxMinor: 32, DefaultMinor: 32},
 	10: {MinMinor: 29, MaxMinor: 32, DefaultMinor: 32},
 	11: {MinMinor: 30, MaxMinor: 33, DefaultMinor: 33},
-	12: {MinMinor: 31, MaxMinor: 33, DefaultMinor: 33},
-	13: {MinMinor: 32, MaxMinor: 34, DefaultMinor: 34},
-	14: {MinMinor: 32, MaxMinor: 35, DefaultMinor: 35},
+	12: {MinMinor: 30, MaxMinor: 35, DefaultMinor: 35},
+	13: {MinMinor: 31, MaxMinor: 36, DefaultMinor: 36},
+	14: {MinMinor: 32, MaxMinor: 37, DefaultMinor: 37},
 }
 
 // Verdict is what the matrix says about one node's pair of versions.

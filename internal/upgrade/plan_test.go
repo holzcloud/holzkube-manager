@@ -197,8 +197,9 @@ func TestTheKubernetesChainPassesThroughEveryMinor(t *testing.T) {
 func TestAKubernetesChainBeyondWhatTalosSupportsIsRefused(t *testing.T) {
 	t.Parallel()
 
-	// Talos 1.12 supports Kubernetes up to 1.33.
-	_, err := upgrade.KubernetesChain(v(t, "v1.32.4"), v(t, "v1.35.0"), "v1.12.3")
+	// A target far above every window, so the property does not depend on how
+	// high the compatibility matrix currently reaches for Talos 1.12.
+	_, err := upgrade.KubernetesChain(v(t, "v1.32.4"), v(t, "v1.99.0"), "v1.12.3")
 	if !errors.Is(err, upgrade.ErrWouldStrand) {
 		t.Fatalf("a Kubernetes upgrade past what the running Talos supports returned %v", err)
 	}
