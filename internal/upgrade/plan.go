@@ -281,36 +281,113 @@ func CheckStrand(to Version, kubernetesVersion string) StrandCheck {
 	}
 }
 
-// KubernetesChain computes the Kubernetes versions to pass through.
+// MaxKubernetesIntermediates is the most intermediate minors a Kubernetes
+// chain may have.
 //
-// Kubernetes supports upgrading one minor at a time as well, and for the same
-// structural reason: the version skew policy allows a kubelet one minor behind
-// the API server and nothing more. It is a separate function from Chain
-// because the two are bounded by different things -- a Talos chain is bounded
-// by what is released, a Kubernetes chain by what the running Talos supports.
-func KubernetesChain(from, to Version, talosVersion string) ([]Step, error) {
+// The longest chain the compatibility matrix can honestly ask for runs from the
+// bottom of the lowest window (Kubernetes 1.26 under Talos 1.7) to the top of the
+// highest (1.37): ten intermediate minors. Sixteen leaves room. The cap exists
+// only so that a typed target such as v1.2000000000.0 neither builds an enormous
+// list nor sends a flood of lookups to a source somebody else runs.
+const MaxKubernetesIntermediates = 16
+
+// kubernetesChainPrecheck is the question KubernetesChain and PlanKubernetes
+// both ask first, kept in one place so that a plan and a chain can never answer
+// it differently: is this a downgrade, and does the Talos that is running carry
+// the target?
+//
+// The window is checked for the target only, not for the start and not for the
+// intermediate minors; that is a known limit of the chain and not something this
+// function decides.
+func kubernetesChainPrecheck(from, to Version, talosVersion string) error {
 	switch {
 	case to.Less(from):
-		return nil, fmt.Errorf("%w: Kubernetes does not support downgrading", ErrNoPath)
+		return fmt.Errorf("%w: Kubernetes does not support downgrading", ErrNoPath)
 	case to == from:
-		return nil, nil
+		return nil
 	}
 
 	v := compat.Check(talosVersion, to.String())
 	if v.Known && !v.Supported {
-		return nil, fmt.Errorf("%w: %s", ErrWouldStrand, v.Sentence)
+		return fmt.Errorf("%w: %s", ErrWouldStrand, v.Sentence)
+	}
+	return nil
+}
+
+// kubernetesIntermediateMinors lists the minors strictly between the start and
+// the target, in ascending order. They are the ones whose newest patch a chain
+// has to know.
+//
+// It counts before it builds, so that neither the list nor the work of making
+// it depends on how far away a typed target is.
+func kubernetesIntermediateMinors(from, to Version) ([]int, error) {
+	n := to.Minor - from.Minor - 1
+	if n <= 0 {
+		return nil, nil
+	}
+	if n > MaxKubernetesIntermediates {
+		return nil, fmt.Errorf("%w: getting from %s to %s would pass through %d minor versions, and "+
+			"nothing here plans more than %d. Kubernetes upgrades one minor at a time; choose a "+
+			"nearer target", ErrNoPath, from, to, n, MaxKubernetesIntermediates)
+	}
+	minors := make([]int, 0, n)
+	for m := from.Minor + 1; m < to.Minor; m++ {
+		minors = append(minors, m)
+	}
+	return minors, nil
+}
+
+// KubernetesChain computes the Kubernetes versions to pass through.
+//
+// Kubernetes upgrades one minor at a time as well, but for a different reason
+// than Talos: the project's API deprecation policy requires kube-apiserver to
+// not skip a minor when it is upgraded, so every minor between the start and
+// the target has to be passed through. (The version skew policy would allow a
+// kubelet to be several minors behind; it is the API server that decides.) It
+// is a separate function from Chain because the two are bounded by different
+// things -- a Talos chain is bounded by what is released, a Kubernetes chain by
+// what the running Talos supports.
+//
+// newest maps a minor to the newest stable patch of it, as the caller looked it
+// up. Each intermediate step is taken from it, and a minor missing from it is a
+// refusal that names the minor: this function never puts a version in by
+// itself, because the first release of a minor is the oldest one and is exactly
+// the step nobody should be sent through. Targets one minor away or in the same
+// minor have nothing on the way and need no newest at all.
+func KubernetesChain(from, to Version, talosVersion string, newest map[int]Version) ([]Step, error) {
+	if err := kubernetesChainPrecheck(from, to, talosVersion); err != nil {
+		return nil, err
+	}
+	if to == from {
+		return nil, nil
+	}
+
+	minors, err := kubernetesIntermediateMinors(from, to)
+	if err != nil {
+		return nil, err
 	}
 
 	var steps []Step
-	for m := from.Minor + 1; m <= to.Minor; m++ {
-		step := Version{Major: to.Major, Minor: m, Patch: 0}
-		why := fmt.Sprintf("Kubernetes upgrades one minor at a time: a kubelet may be one minor "+
-			"behind the API server and no more, so 1.%d has to be passed through.", m)
-		if m == to.Minor {
-			step = to
-			why = "The version you chose."
+	for _, m := range minors {
+		v, ok := newest[m]
+		if !ok {
+			return nil, fmt.Errorf("%w: getting from %s to %s has to pass through 1.%d, and its "+
+				"newest patch is not known. Kubernetes upgrades one minor at a time; there is no "+
+				"way to skip it, and no version is guessed in its place", ErrNoPath, from, to, m)
 		}
-		steps = append(steps, Step{To: step, Why: why})
+		steps = append(steps, Step{
+			To: v,
+			Why: fmt.Sprintf("kube-apiserver may not skip a minor version when it is upgraded, so "+
+				"%s to %s has to pass through 1.%d. This is the newest stable patch of 1.%d, not "+
+				"the version you asked for; it is the one on the way.",
+				from.Contract(), to.Contract(), m, m),
+		})
+	}
+
+	// A target in the same minor is a patch jump: nothing on the way, and no
+	// step either, as before.
+	if to.Minor > from.Minor {
+		steps = append(steps, Step{To: to, Why: "The version you chose."})
 	}
 	return steps, nil
 }

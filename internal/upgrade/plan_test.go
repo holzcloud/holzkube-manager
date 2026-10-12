@@ -2,9 +2,11 @@ package upgrade_test
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
+	"github.com/holzcloud/holzkube-manager/internal/compat"
 	"github.com/holzcloud/holzkube-manager/internal/upgrade"
 )
 
@@ -175,20 +177,28 @@ func TestAnUnknownKubernetesVersionIsBlocked(t *testing.T) {
 
 // TestTheKubernetesChainPassesThroughEveryMinor.
 //
-// The kubelet may be one minor behind the API server and no more, which is the
-// same structural reason Talos upgrades one minor at a time.
+// kube-apiserver may not skip a minor when it is upgraded, so every minor
+// between the start and the target is passed through, and each one on the
+// newest stable patch it has, not on the first release of the minor.
 func TestTheKubernetesChainPassesThroughEveryMinor(t *testing.T) {
 	t.Parallel()
 
-	steps, err := upgrade.KubernetesChain(v(t, "v1.32.4"), v(t, "v1.34.1"), "v1.14.0")
+	steps, err := upgrade.KubernetesChain(v(t, "v1.32.4"), v(t, "v1.34.1"), "v1.14.0",
+		map[int]upgrade.Version{33: v(t, "v1.33.7")})
 	if err != nil {
 		t.Fatalf("KubernetesChain: %v", err)
 	}
 	if len(steps) != 2 {
 		t.Fatalf("the chain from 1.32 to 1.34 has %d step(s), want 2: %+v", len(steps), steps)
 	}
-	if steps[0].To.Minor != 33 || steps[1].To.String() != "v1.34.1" {
-		t.Errorf("the chain is %s then %s", steps[0].To, steps[1].To)
+	if steps[0].To.String() != "v1.33.7" || steps[1].To.String() != "v1.34.1" {
+		t.Errorf("the chain is %s then %s, want v1.33.7 then v1.34.1", steps[0].To, steps[1].To)
+	}
+	if !strings.Contains(steps[0].Why, "on the way") {
+		t.Errorf("the intermediate step does not say it is on the way: %q", steps[0].Why)
+	}
+	if strings.Contains(steps[0].Why, "no more") {
+		t.Errorf("the intermediate step still gives the skew rule that is wrong: %q", steps[0].Why)
 	}
 }
 
@@ -199,9 +209,93 @@ func TestAKubernetesChainBeyondWhatTalosSupportsIsRefused(t *testing.T) {
 
 	// A target far above every window, so the property does not depend on how
 	// high the compatibility matrix currently reaches for Talos 1.12.
-	_, err := upgrade.KubernetesChain(v(t, "v1.32.4"), v(t, "v1.99.0"), "v1.12.3")
+	_, err := upgrade.KubernetesChain(v(t, "v1.32.4"), v(t, "v1.99.0"), "v1.12.3", nil)
 	if !errors.Is(err, upgrade.ErrWouldStrand) {
 		t.Fatalf("a Kubernetes upgrade past what the running Talos supports returned %v", err)
+	}
+}
+
+// TestAKubernetesChainWithAMissingMinorIsRefusedRatherThanFilled.
+//
+// The function never puts a version in by itself: a minor whose newest patch
+// is not known is a refusal that names the minor, not a guess at its first
+// release.
+func TestAKubernetesChainWithAMissingMinorIsRefusedRatherThanFilled(t *testing.T) {
+	t.Parallel()
+
+	steps, err := upgrade.KubernetesChain(v(t, "v1.32.4"), v(t, "v1.35.1"), "v1.14.0",
+		map[int]upgrade.Version{33: v(t, "v1.33.7")})
+	if !errors.Is(err, upgrade.ErrNoPath) {
+		t.Fatalf("a chain with a missing minor returned %v, want ErrNoPath", err)
+	}
+	if !strings.Contains(err.Error(), "1.34") {
+		t.Errorf("the refusal does not name the minor that is missing: %v", err)
+	}
+	if len(steps) != 0 {
+		t.Errorf("a refused chain still carries steps: %+v", steps)
+	}
+}
+
+// TestAKubernetesChainWithoutIntermediatesNeedsNoReleases.
+//
+// A patch jump and a jump to the next minor have nothing on the way, and
+// neither may need the set of newest patches.
+func TestAKubernetesChainWithoutIntermediatesNeedsNoReleases(t *testing.T) {
+	t.Parallel()
+
+	steps, err := upgrade.KubernetesChain(v(t, "v1.34.1"), v(t, "v1.34.9"), "v1.14.0", nil)
+	if err != nil || len(steps) != 0 {
+		t.Errorf("a patch jump gave %+v, %v; want an empty chain", steps, err)
+	}
+
+	steps, err = upgrade.KubernetesChain(v(t, "v1.33.4"), v(t, "v1.34.1"), "v1.14.0", nil)
+	if err != nil {
+		t.Fatalf("the next minor: %v", err)
+	}
+	if len(steps) != 1 || steps[0].To.String() != "v1.34.1" {
+		t.Errorf("the next minor gave %+v, want the target alone", steps)
+	}
+
+	steps, err = upgrade.KubernetesChain(v(t, "v1.34.1"), v(t, "v1.34.1"), "v1.14.0", nil)
+	if err != nil || steps != nil {
+		t.Errorf("the same version gave %+v, %v; want nil", steps, err)
+	}
+}
+
+// TestAKubernetesChainReachesTheNewestKubernetesTalos114Supports.
+//
+// The top of the window is computed from compat, not written down here: the
+// property is that the chain reaches whatever the newest supported minor is,
+// at any height of the matrix.
+func TestAKubernetesChainReachesTheNewestKubernetesTalos114Supports(t *testing.T) {
+	t.Parallel()
+
+	verdict := compat.Check("v1.14.2", "v1.34.0")
+	if !verdict.Known {
+		t.Fatal("Talos 1.14 has no row in the compatibility matrix; the matrix quick task " +
+			"(D-03) has to have run before this phase's tests mean anything")
+	}
+	top := verdict.Window.MaxMinor
+
+	from := v(t, fmt.Sprintf("v1.%d.3", top-3))
+	to := v(t, fmt.Sprintf("v1.%d.1", top))
+	steps, err := upgrade.KubernetesChain(from, to, "v1.14.2", map[int]upgrade.Version{
+		top - 2: v(t, fmt.Sprintf("v1.%d.9", top-2)),
+		top - 1: v(t, fmt.Sprintf("v1.%d.5", top-1)),
+	})
+	if err != nil {
+		t.Fatalf("a chain up to the top of Talos 1.14's window (1.%d) was refused: %v", top, err)
+	}
+	want := []string{
+		fmt.Sprintf("v1.%d.9", top-2), fmt.Sprintf("v1.%d.5", top-1), fmt.Sprintf("v1.%d.1", top),
+	}
+	if len(steps) != len(want) {
+		t.Fatalf("the chain has %d step(s), want %d: %+v", len(steps), len(want), steps)
+	}
+	for i, w := range want {
+		if steps[i].To.String() != w {
+			t.Errorf("step %d is %s, want %s", i, steps[i].To, w)
+		}
 	}
 }
 

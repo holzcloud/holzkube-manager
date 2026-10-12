@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"io"
 	"sort"
+	"strconv"
+	"strings"
 
 	"github.com/holzcloud/holzkube-manager/internal/model"
 	"github.com/holzcloud/holzkube-manager/internal/talos"
@@ -32,6 +34,28 @@ type Service struct {
 
 	// submit starts a job; set by RegisterBackups.
 	submit SubmitFunc
+
+	// kubernetesReleases says which patch is the newest of a Kubernetes minor.
+	// Nil means there is no such source, and a Kubernetes chain with
+	// intermediate steps is then blocked rather than guessed.
+	kubernetesReleases KubernetesReleaseSource
+}
+
+// KubernetesReleaseSource names the newest stable patch of each of the given
+// Kubernetes minors: minor 33 maps to "v1.33.7". It is called once per plan
+// with every intermediate minor of the chain, and only when the chain has any.
+//
+// It is a function because the answer comes from a host somebody else runs and
+// this package has no business knowing which, as with the Talos releases. An
+// error, or an answer that is not a stable release of the minor asked about, is
+// not worked around: the plan is blocked.
+type KubernetesReleaseSource func(ctx context.Context, minors []int) (map[int]string, error)
+
+// WithKubernetesReleases gives the service a source of the newest Kubernetes
+// patch per minor, so a chain's intermediate steps can name one.
+func (s *Service) WithKubernetesReleases(src KubernetesReleaseSource) *Service {
+	s.kubernetesReleases = src
+	return s
 }
 
 // NewService wires one up.
@@ -343,12 +367,36 @@ func (s *Service) PlanKubernetes(ctx context.Context, cluster model.ClusterID, t
 	}
 
 	talosVersion := lowestTalos(machines)
-	chain, cerr := KubernetesChain(from, target, talosVersion)
+
+	// The same first questions the chain asks, asked here as well and before
+	// anything is looked up: a target the running Talos does not carry, or a
+	// downgrade, is answered by that and never by a source.
+	//
+	// Deliberately not returned as an error. A version pair with no legal path
+	// is not a failure of this call: it is the answer, and the operator has to
+	// read the sentence rather than a 500. Returning it as an error would lose
+	// the rest of the plan along with it.
+	if perr := kubernetesChainPrecheck(from, target, talosVersion); perr != nil {
+		plan.Blocked = true
+		plan.BlockReason = perr.Error()
+		return plan, nil //nolint:nilerr // a blocked plan is the answer, not a failure
+	}
+	minors, merr := kubernetesIntermediateMinors(from, target)
+	if merr != nil {
+		plan.Blocked = true
+		plan.BlockReason = merr.Error()
+		return plan, nil //nolint:nilerr // a blocked plan is the answer, not a failure
+	}
+
+	newest, reason := s.newestKubernetesPatches(ctx, from, target, minors)
+	if reason != "" {
+		plan.Blocked = true
+		plan.BlockReason = reason
+		return plan, nil
+	}
+
+	chain, cerr := KubernetesChain(from, target, talosVersion, newest)
 	if cerr != nil {
-		// Deliberately not returned as an error. A version pair with no legal
-		// path is not a failure of this call: it is the answer, and the
-		// operator has to read the sentence rather than a 500. Returning it as
-		// an error would lose the rest of the plan along with it.
 		plan.Blocked = true
 		plan.BlockReason = cerr.Error()
 		return plan, nil //nolint:nilerr // a blocked plan is the answer, not a failure
@@ -385,6 +433,66 @@ func (s *Service) PlanKubernetes(ctx context.Context, cluster model.ClusterID, t
 	}
 
 	return plan, nil
+}
+
+// newestKubernetesPatches asks the source for the newest patch of every
+// intermediate minor and checks what it said. It returns the checked set, or a
+// sentence for a blocked plan.
+//
+// It asks only when there is something to ask: a target in the same minor or
+// the next one has nothing on the way, and a plan for it must not depend on a
+// host that may be unreachable. The one question carries every minor, so the
+// source can answer them together under one deadline.
+//
+// Nothing here falls back. A patch that could not be determined is not replaced
+// by the first release of its minor, not even with a note saying so: that is
+// the oldest version the minor has, presented to an operator as a step that has
+// been checked.
+func (s *Service) newestKubernetesPatches(
+	ctx context.Context, from, target Version, minors []int,
+) (map[int]Version, string) {
+	if len(minors) == 0 {
+		return nil, ""
+	}
+
+	nextMinor := fmt.Sprintf("v%d.%d", from.Major, from.Minor+1)
+	could := "The newest patch of " + minorList(from.Major, minors) + " could not be determined"
+	consequence := "No step is guessed in its place. A target in " + nextMinor +
+		" needs no lookup and can still be planned."
+
+	if s.kubernetesReleases == nil {
+		return nil, could + ": this instance has no source of Kubernetes releases. " + consequence
+	}
+
+	answer, err := s.kubernetesReleases(ctx, minors)
+	if err != nil {
+		return nil, could + ": " + err.Error() + ". " + consequence
+	}
+
+	newest := make(map[int]Version, len(minors))
+	for _, m := range minors {
+		raw, ok := answer[m]
+		if !ok {
+			return nil, could + ": the source named no version for 1." + strconv.Itoa(m) + ". " + consequence
+		}
+		v, perr := ParseVersion(raw)
+		if perr != nil || strings.Count(strings.TrimPrefix(strings.TrimSpace(raw), "v"), ".") != 2 ||
+			v.Major != target.Major || v.Minor != m || v.IsPreRelease() {
+			return nil, could + ": what the source named for 1." + strconv.Itoa(m) +
+				" is not a stable release of that minor. " + consequence
+		}
+		newest[m] = v
+	}
+	return newest, ""
+}
+
+// minorList renders minors as "1.33" or "1.33, 1.34".
+func minorList(major int, minors []int) string {
+	parts := make([]string, 0, len(minors))
+	for _, m := range minors {
+		parts = append(parts, fmt.Sprintf("%d.%d", major, m))
+	}
+	return strings.Join(parts, ", ")
 }
 
 // RequestFor turns a plan into the job request that runs it.

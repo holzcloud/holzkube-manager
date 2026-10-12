@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -40,6 +41,28 @@ func newUpgradeHarness(t *testing.T) *upgradeHarness {
 // chosen, because the installer an upgrade writes depends on it.
 func newUpgradeHarnessWith(t *testing.T, secureBoot bool) *upgradeHarness {
 	t.Helper()
+	return newUpgradeHarnessOptions(t, upgradeHarnessOptions{SecureBoot: secureBoot})
+}
+
+// upgradeHarnessOptions is what a test may choose about the simulated node and
+// the services around it. Every field's zero value is what the harness always
+// did, so a test that sets none of them is unchanged.
+type upgradeHarnessOptions struct {
+	SecureBoot bool
+
+	// KubeletImage sets the Kubernetes version the node reports (its tag). When
+	// it is set the harness also refreshes the node, because without a refresh
+	// the inventory's snapshot does not know the Kubernetes version at all.
+	KubeletImage string
+
+	// KubernetesReleases is the source of the newest patch of a minor; nil means
+	// the service is built without one.
+	KubernetesReleases upgrade.KubernetesReleaseSource
+}
+
+func newUpgradeHarnessOptions(t *testing.T, opts upgradeHarnessOptions) *upgradeHarness {
+	t.Helper()
+	secureBoot := opts.SecureBoot
 
 	cl, err := talossim.NewCluster("homelab", "https://192.168.1.41:6443")
 	if err != nil {
@@ -47,6 +70,7 @@ func newUpgradeHarnessWith(t *testing.T, secureBoot bool) *upgradeHarness {
 	}
 	sim, err := talossim.New(talossim.Options{
 		Hostname: "cp-1", Cluster: cl, ControlPlane: true, SecureBoot: secureBoot,
+		KubeletImage: opts.KubeletImage,
 	})
 	if err != nil {
 		t.Fatalf("talossim.New: %v", err)
@@ -94,6 +118,9 @@ func newUpgradeHarnessWith(t *testing.T, secureBoot bool) *upgradeHarness {
 			svc := upgrade.NewService(deps, func(context.Context) ([]string, error) {
 				return []string{"v1.13.9", "v1.14.0", "v1.14.1", "v1.15.0-rc.1"}, nil
 			}).WithSnapshots(upgrade.NewSnapshotStore(t.TempDir(), snapshotOps(), time.Now))
+			if opts.KubernetesReleases != nil {
+				svc.WithKubernetesReleases(opts.KubernetesReleases)
+			}
 			svc.RegisterBackups(h.jobs)
 			h.inv.SetBackupHealth(svc.BackupHealthFor)
 			return svc
@@ -135,6 +162,13 @@ func newUpgradeHarnessWith(t *testing.T, secureBoot bool) *upgradeHarness {
 	defer cancelBootstrap()
 	if err := cc.Bootstrap(bootstrapCtx); err != nil {
 		t.Fatalf("Bootstrap: %v", err)
+	}
+
+	// Without a refresh the snapshot has no Kubernetes version, and a
+	// Kubernetes plan says so instead of planning. Only a test that chose the
+	// kubelet image asks for it, so no other test's starting state changes.
+	if opts.KubeletImage != "" {
+		uh.inv.Refresh(ctx, uh.machine)
 	}
 
 	return uh
@@ -575,5 +609,79 @@ func snapshotOps() upgrade.FileOps {
 		TempPrefix: fsstore.TempPrefix,
 		ReadFile:   fsstore.ReadFile,
 		Open:       fsstore.OpenFile,
+	}
+}
+
+// fakeKubernetesReleases is a source of newest patches that writes down every
+// question it is asked, so a test can say what was asked and how often.
+type fakeKubernetesReleases struct {
+	mu    sync.Mutex
+	asked [][]int
+	reply map[int]string
+	err   error
+}
+
+func (f *fakeKubernetesReleases) source() upgrade.KubernetesReleaseSource {
+	return func(_ context.Context, minors []int) (map[int]string, error) {
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		f.asked = append(f.asked, append([]int(nil), minors...))
+		if f.err != nil {
+			return nil, f.err
+		}
+		return f.reply, nil
+	}
+}
+
+func (f *fakeKubernetesReleases) questions() [][]int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([][]int(nil), f.asked...)
+}
+
+// TestTheKubernetesPlanRouteNamesTheNewestPatchOfTheMinorOnTheWay is K8S-01
+// through the real router and the simulated node: a cluster on Kubernetes 1.32,
+// asked for 1.34.1, is told to pass through the newest 1.33 the source names,
+// and not through 1.33.0.
+func TestTheKubernetesPlanRouteNamesTheNewestPatchOfTheMinorOnTheWay(t *testing.T) {
+	t.Parallel()
+
+	src := &fakeKubernetesReleases{reply: map[int]string{33: "v1.33.7"}}
+	h := newUpgradeHarnessOptions(t, upgradeHarnessOptions{
+		KubeletImage:       "ghcr.io/siderolabs/kubelet:v1.32.4",
+		KubernetesReleases: src.source(),
+	})
+
+	resp, raw := h.do(t, http.MethodPost,
+		"/api/v1/clusters/"+string(h.clusterID(t))+"/upgrade/kubernetes/plan",
+		map[string]any{"to": "v1.34.1"})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("plan: %d (%s)", resp.StatusCode, raw)
+	}
+
+	var plan upgrade.Plan
+	if err := json.Unmarshal(raw, &plan); err != nil {
+		t.Fatalf("decode plan: %v (%s)", err, raw)
+	}
+	if plan.Blocked {
+		t.Fatalf("the plan is blocked: %s", plan.BlockReason)
+	}
+	if len(plan.Chain) != 2 {
+		t.Fatalf("the chain has %d step(s), want 2: %+v (%s)", len(plan.Chain), plan.Chain, raw)
+	}
+	first, last := plan.Chain[0], plan.Chain[1]
+	if first.To.Major != 1 || first.To.Minor != 33 || first.To.Patch != 7 {
+		t.Errorf("the step on the way is %s, want v1.33.7", first.To)
+	}
+	if !strings.Contains(first.Why, "on the way") {
+		t.Errorf("the step on the way does not say so: %q", first.Why)
+	}
+	if last.To.String() != "v1.34.1" {
+		t.Errorf("the last step is %s, want the target v1.34.1", last.To)
+	}
+
+	got := src.questions()
+	if len(got) != 1 || len(got[0]) != 1 || got[0][0] != 33 {
+		t.Errorf("the source was asked %v, want exactly one question about [33]", got)
 	}
 }
