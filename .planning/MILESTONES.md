@@ -64,3 +64,37 @@ Live-Hardware und Sensoren pro Knoten, Verlaufsdiagramme (1 h / 6 h / 24 h,
 
 - Live-Sensoren, Wake-on-LAN und erzwungene Talos-Power-Aktionen sind auf
   echter Hardware noch nicht geübt (Release-Notiz v0.0.1).
+
+## v1.18 Host & Telefon (angelegt 2026-09-28, gebaut bis 2026-10-02) → Releases v0.2.0 bis v0.2.2
+
+Phasen 11–14, 39 Pläne, alle ausgeführt. Die Host-Seite (Gerät, Dienst,
+Live-Werte, Verlauf, Wand), fünf Host-Aktionen über einen root-eigenen Helfer
+und die Tippziel-Prüfung bei 390 px. Die stündliche Update-Unit liegt jetzt in
+`deploy/`. Phase 13 und 14 stehen auf `human_needed`
+(`13-VERIFICATION.md`, `14-VERIFICATION.md`); der Milestone ist **nicht
+archiviert**, weil die Handproben fehlen.
+
+### Known Gaps
+
+- Auf dem Pi nie gelaufen: Helfer installieren, Neustart mit zwei Sitzungen,
+  Dienst-Neustart und Herunterfahren je einmal, die ausgelieferten Update-Units
+  unter ihrer Sandbox.
+- Telefon-Handprobe (D-11) nicht durchgeführt; D-08 für `/host` nach 13-12
+  nicht wiederholt. MOB-03 bleibt „partial".
+
+## Ohne Milestone-Datei (2026-10-03 bis 2026-10-09) → Releases v0.3.0 bis v0.5.0
+
+Direkt auf Anweisung gebaut: das Redesign 2026 (v0.3.0/v0.3.1, Mockup
+`docs/mockups/webui-2026.html`), Talos-machinery v1.14.2, Talos-Update-Suche und
+frischer etcd-Snapshot vor jedem Talos-Upgrade (v0.4.0), bessere
+Raumnutzung (Desktop, Tablet, Telefon), die Tiefenanalyse
+(`AUDIT-2026-10-08.md`) mit ihren Sicherheits- und Update-Skript-Fixes, das
+Entfernen eines Knotens als dauerhafter Job und geplante etcd-Backups mit
+Aufbewahrung, Download und Überfällig-Markierung (v0.5.0, 2026-10-09).
+
+### Known Gaps
+
+- Backups liegen nur auf dem Pi; ein Export-Ziel (SFTP/S3) ist eine Entscheidung
+  des Betreibers.
+- Release-Signatur (Empfehlung minisign) und Alerting-Kanal: offen, siehe Audit.
+- Nicht gelaufen am 2026-10-08: `./bin/task ci`, Browser- und Layout-Tests.

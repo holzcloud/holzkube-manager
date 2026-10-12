@@ -15,7 +15,8 @@ gibt also nichts, womit 11 zusammenstoßen könnte.
 - ✅ **v1.16 Omni-Parität** — Abschnitt B (2026-09-17)
 - ✅ **v1.17 Kubernetes und Pods** — 6 Scheiben (2026-09-19)
 - ✅ **ohne Milestone** — Wand, Hardware, Verlauf, Apps, Power → Release v0.1.0 (2026-09-27)
-- 🚧 **v1.18 Host & Telefon** — Phasen 11–14 (angelegt 2026-09-28, in Arbeit)
+- 🚧 **v1.18 Host & Telefon** — Phasen 11–14 (gebaut 2026-10-02, Handproben offen)
+- ✅ **ohne Milestone** — Redesign, Audit, Backups → Releases v0.3.0 bis v0.5.0 (2026-10-09)
 
 ## Phases
 
@@ -44,7 +45,7 @@ gibt also nichts, womit 11 zusammenstoßen könnte.
 
 </details>
 
-### 🚧 v1.18 Host & Telefon (in Arbeit)
+### 🚧 v1.18 Host & Telefon (gebaut, `human_needed`)
 
 **Milestone-Ziel:** Das Gerät, auf dem holzkube-manager selbst läuft, ist in der
 Oberfläche sichtbar und bedienbar wie ein Knoten; und die Oberfläche ist auf
@@ -58,8 +59,8 @@ der Betreiber prüfen kann, statt einer API, die niemand ansieht.
 
 - [x] **Phase 11: Host-Seite — Gerät, Dienst, Live-Werte** - Der Betreiber öffnet `/host` und sieht das Gerät, den Dienst und dessen Live-Werte; was die Härtung verbirgt, heißt „nicht lesbar", nie 0 (completed 2026-09-28)
 - [x] **Phase 12: Host wie ein Knoten — Verlauf, Warnung, Wand** - Der Host hat Verlauf über 1 h / 6 h / 24 h, eine Warnung mit Grund und steht in Navigation und Wand mit einem Zustand (completed 2026-09-29)
-- [ ] **Phase 13: Host-Aktionen über einen root-eigenen Helfer** - Neustart, Herunterfahren, Dienst-Neustart, Update-Suche — ohne dass der Daemon Root bekommt
-- [ ] **Phase 14: Telefon — Tippziele, die ein Daumen trifft** - Jedes Bedienelement ≥ 44 px bei 390 px, auch hinter einem Tipp und auf `/host`, gehalten von der Layout-Prüfung
+- [~] **Phase 13: Host-Aktionen über einen root-eigenen Helfer** - Neustart, Herunterfahren, Dienst-Neustart, Update-Suche — ohne dass der Daemon Root bekommt
+- [~] **Phase 14: Telefon — Tippziele, die ein Daumen trifft** - Jedes Bedienelement ≥ 44 px bei 390 px, auch hinter einem Tipp und auf `/host`, gehalten von der Layout-Prüfung
 
 **Wo geprüft wird.** Sitzungen laufen auf dem Pi des Betreibers (aarch64); arm64 wird dort nativ ausgeführt, und ein Bericht nennt das.
 Der Produktions-Daemon daneben wird für keine dieser Phasen ersetzt oder neu

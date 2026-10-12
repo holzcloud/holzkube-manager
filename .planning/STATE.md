@@ -4,11 +4,11 @@ milestone: v1.18
 milestone_name: Host & Telefon
 current_phase: 14
 current_phase_name: telefon-tippziele
-status: verifying
-stopped_at: Completed 13-17-PLAN.md
+status: human_needed
+stopped_at: Planung nachgezogen
 last_updated: "2026-10-02T04:57:09.209Z"
-last_activity: 2026-09-30
-last_activity_desc: Phase 14 execution started
+last_activity: 2026-10-12
+last_activity_desc: Planung auf Stand v0.5.0 nachgezogen
 state_head: 735a7680cf981bb719251d03aa937621c4bac26b
 progress:
   total_phases: 4
@@ -20,7 +20,9 @@ progress:
 
 # Project State
 
-Stand 2026-09-28. Der vorige Bericht (Abschluss v1.15, Übergabe 2026-09-17)
+Stand 2026-10-12 (letztes Release **v0.5.0**, 2026-10-09). Die Phasen 11–14
+von v1.18 sind gebaut und warten auf Handproben; seit 2026-10-03 lief die Arbeit
+ohne GSD-Phasen (Redesign, Audit, Backups), siehe `MILESTONES.md`. Der vorige Bericht (Abschluss v1.15, Übergabe 2026-09-17)
 liegt unverändert in `milestones/STATE-2026-09-17.md`.
 
 ## Project Reference
@@ -28,18 +30,23 @@ liegt unverändert in `milestones/STATE-2026-09-17.md`.
 See: .planning/PROJECT.md (updated 2026-09-28)
 
 **Core value:** Eine neue Maschine wird komplett in der UI zum Cluster-Node — ohne `talosctl`, ohne Omni.
-**Current focus:** Phase 14 — telefon-tippziele
+**Current focus:** v1.18 abschließen — Handproben auf dem Pi (Phase 13, 14); danach Audit-Kandidaten (`AUDIT-2026-10-08.md`)
 
 ## Current Position
 
-Phase: 14 (telefon-tippziele) — EXECUTING
-Plan: 7 of 7
-Status: Phase complete — ready for verification
-Last activity: 2026-09-30 — Phase 14 execution started
+Phase: 14 (telefon-tippziele) — alle Pläne ausgeführt, `human_needed`
+Phase 13: 17/17 Pläne, `human_needed`
+Last activity: 2026-10-12 — Planung nachgezogen (Release v0.5.0)
 
 Progress: [█████░░░░░] 50%
 
 ## Offen
+
+- **Entscheidungen des Betreibers (Stand 2026-10-12):** Release-Signatur
+  (minisign empfohlen), Export-Ziel für Backups, Alerting-Kanal, Cloud-Provider,
+  SAML. Router: Port 8443 im Internet erreichbar? (`AUDIT-2026-10-08.md`)
+- **Branch `claude/sponsor-button`** (ein Commit, FUNDING.yml und Badge) ist nicht
+  gemergt; fünf Dependabot-Branches für GitHub Actions sind offen.
 
 - **Release-Blocker OPS-05** (Ledger 87) plus 82, 84, 85: ein Durchlauf auf
   echter amd64-Hardware.
@@ -173,10 +180,10 @@ Siehe `PROJECT.md`, die `MILESTONE-*.md`-Dateien und für v1.18 den Abschnitt
 
 ## Session Continuity
 
-Last session: 2026-10-02T04:57:09.026Z
-Stopped at: Completed 13-17-PLAN.md
+Last session: 2026-10-12
+Stopped at: Planung nachgezogen
 Resume file: None
-Next: `/gsd-plan-phase 11`
+Next: Handproben Phase 13/14 auf dem Pi, dann `/gsd-complete-milestone` für v1.18
 
 ## Performance Metrics
 
