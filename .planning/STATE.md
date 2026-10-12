@@ -5,11 +5,11 @@ milestone_name: Host & Telefon
 current_phase: 14
 current_phase_name: telefon-tippziele
 status: human_needed
-stopped_at: Completed 16-01-PLAN.md
-last_updated: "2026-10-12T14:45:56.771Z"
+stopped_at: Completed 16-02-PLAN.md
+last_updated: "2026-10-12T14:59:40.913Z"
 last_activity: 2026-10-12
 last_activity_desc: Planung auf Stand v0.5.0 nachgezogen
-state_head: c38d60bc00c40212370bcdd5592992a9f3af83c7
+state_head: 6ca21c60f2aae9eb6ccaf1286a44a573c04c0ecf
 progress:
   total_phases: 4
   completed_phases: 2
@@ -163,6 +163,7 @@ Siehe `PROJECT.md`, die `MILESTONE-*.md`-Dateien und für v1.18 den Abschnitt
 - [Phase 13]: 13-16: update is refused with 409 conflict.host-update-unit-missing while holzkube-manager-update.service is not a regular file in /etc/systemd/system; order container, missing, update script, update unit, outdated, busy
 - [Phase 13]: 13-16: CapabilityBoundingSet=, SystemCallFilter=, ProtectProc= and ProcSubset= stay out of the shipped update unit until a real install and restart through it is measured as root
 - [Phase 13]: 13-17: single-button reasons share one line in button order (at most two sentences); actionReason asks group, update script, update unit, older helper, as the routes do
+- [Phase 16]: 16-02: the answer of dl.k8s.io is one regular expression v1.N.[0-9]+ of the asked minor; no error repeats an address or a byte of the answer; the redirect rule is rewritten in k8srelease, not exported from imagefactory
 
 ### Roadmap Evolution
 
@@ -191,8 +192,8 @@ Siehe `PROJECT.md`, die `MILESTONE-*.md`-Dateien und für v1.18 den Abschnitt
 
 ## Session Continuity
 
-Last session: 2026-10-12T14:45:56.738Z
-Stopped at: Completed 16-01-PLAN.md
+Last session: 2026-10-12T14:59:40.881Z
+Stopped at: Completed 16-02-PLAN.md
 Resume file: None
 Next: Handproben Phase 13/14 auf dem Pi, dann `/gsd-complete-milestone` für v1.18
 
@@ -239,3 +240,4 @@ Next: Handproben Phase 13/14 auf dem Pi, dann `/gsd-complete-milestone` für v1.
 | Phase 13 P15 | 75min | 3 tasks | 11 files |
 | Phase 13 P16 | elapsed 2026-10-01 18:10 to 2026-10-02 06:15 CEST with a pause | 3 tasks | 14 files |
 | Phase 13 P17 | 41min | 3 tasks | 14 files |
+| Phase 16 P02 | 75min | 3 tasks | 9 files |

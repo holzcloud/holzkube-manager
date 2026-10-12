@@ -75,7 +75,7 @@ damit er es am Ende auf einen Blick prüfen und umwerfen kann.
 Phase 16, angeschlossen an UPG-05 (Kette statt „latest“) in
 `milestones/v1.14-REQUIREMENTS.md`. Entscheidungen des Betreibers: `16-CONTEXT.md`.
 
-- [ ] **K8S-01**: Die Zwischenschritte der Kubernetes-Upgradekette tragen den neuesten stabilen Patch ihrer Minor statt `.0`; lässt er sich bei einer Kette mit Zwischenschritten nicht ermitteln, ist der Plan mit einem Satz blockiert und fällt nie stillschweigend auf `.0` zurück
+- [x] **K8S-01**: Die Zwischenschritte der Kubernetes-Upgradekette tragen den neuesten stabilen Patch ihrer Minor statt `.0`; lässt er sich bei einer Kette mit Zwischenschritten nicht ermitteln, ist der Plan mit einem Satz blockiert und fällt nie stillschweigend auf `.0` zurück
 
 ## Future Requirements
 
@@ -114,7 +114,7 @@ Phase 16, angeschlossen an UPG-05 (Kette statt „latest“) in
 | MOB-01 | Phase 14 | Complete |
 | MOB-02 | Phase 14 | Complete |
 | MOB-03 | Phase 14 | Pending |
-| K8S-01 | Phase 16 | Pending |
+| K8S-01 | Phase 16 | Complete |
 
 **Coverage:** 23 von 23 v1.18-Anforderungen einer Phase zugeordnet, keine doppelt.
 
