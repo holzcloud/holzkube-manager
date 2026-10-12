@@ -180,6 +180,7 @@ Siehe `PROJECT.md`, die `MILESTONE-*.md`-Dateien und für v1.18 den Abschnitt
 | # | Description | Date | Commit | Directory |
 |---|-------------|------|--------|-----------|
 | 261001-sa9 | Unlink single sign-on (admin, sudo, audit); person accounts only for SSO linking; SSO-only pre-check removed; review fixes CR-01, WR-01..07 | 2026-10-01 | 05f1279 | [261001-sa9-unlink-single-sign-on](./quick/261001-sa9-unlink-single-sign-on/) |
+| 261012-hs1 | Zertifikatsablauf im Cluster (Talos/etcd/Kubernetes), Karte, Banner, Wand, /metrics — retroaktiv nachgetragen, Release v0.6.0 | 2026-10-12 | 22af6c9 | [261012-hs1-nachtrag-zertifikatsablauf-im-cluster-v0](./quick/261012-hs1-nachtrag-zertifikatsablauf-im-cluster-v0/) |
 
 ## Session Continuity
 
