@@ -53,7 +53,7 @@ jobs:
           echo "::error::a release tag is created from main only; this run is on ${GITHUB_REF}"
           exit 1
 
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       # go.mod carries `toolchain go1.26.7` and setup-go honours that line, so
       # the Go version is pinned in one place and CI cannot drift from a local
@@ -171,7 +171,7 @@ jobs:
       # else: this workflow does not publish packages or write to pull requests.
       contents: write
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # goreleaser derives the version from the tag and the changelog from
           # git history. A shallow clone gives it neither.
@@ -310,7 +310,7 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Write the version into the project pages and read it back
         env:
           CMS_TOKEN: ${{ secrets.CMS_TOKEN }}
