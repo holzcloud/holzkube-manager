@@ -70,6 +70,13 @@ damit er es am Ende auf einen Blick prüfen und umwerfen kann.
 - [x] **MOB-02**: Ein Wächter in der Layout-Prüfung misst die Tippzielgrößen auf allen Routen und wird rot, sobald ein Element darunter fällt
 - [ ] **MOB-03**: Die neue Host-Seite erfüllt MOB-01 und ist auf dem Telefon bedienbar
 
+### Kubernetes-Upgradekette (K8S)
+
+Phase 16, angeschlossen an UPG-05 (Kette statt „latest“) in
+`milestones/v1.14-REQUIREMENTS.md`. Entscheidungen des Betreibers: `16-CONTEXT.md`.
+
+- [ ] **K8S-01**: Die Zwischenschritte der Kubernetes-Upgradekette tragen den neuesten stabilen Patch ihrer Minor statt `.0`; lässt er sich bei einer Kette mit Zwischenschritten nicht ermitteln, ist der Plan mit einem Satz blockiert und fällt nie stillschweigend auf `.0` zurück
+
 ## Future Requirements
 
 - Host-Aktion „Rollback auf die vorige Version" (`holzkube-manager-update --rollback`)
@@ -107,8 +114,9 @@ damit er es am Ende auf einen Blick prüfen und umwerfen kann.
 | MOB-01 | Phase 14 | Complete |
 | MOB-02 | Phase 14 | Complete |
 | MOB-03 | Phase 14 | Pending |
+| K8S-01 | Phase 16 | Pending |
 
-**Coverage:** 22 von 22 v1.18-Anforderungen einer Phase zugeordnet, keine doppelt.
+**Coverage:** 23 von 23 v1.18-Anforderungen einer Phase zugeordnet, keine doppelt.
 
 ---
 *Traceability gefüllt am 2026-09-28 mit der Roadmap für v1.18 (Phasen 11–14).*

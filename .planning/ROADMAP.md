@@ -289,9 +289,10 @@ Plans:
 ### Phase 16: Kubernetes-Upgradekette auf neuesten Patch je Minor
 
 **Goal:** Die Zwischenschritte der Kubernetes-Upgradekette laufen auf dem neuesten Patch je Minor statt über `.0`. Eng begrenzt in `internal/upgrade`; ohne echten Cluster nur gegen die Simulatoren belegbar, und der Bericht sagt das.
-**Requirements**: TBD
-**Depends on:** Nothing
-**Plans:** 0 plans
+**Requirements**: K8S-01
+**Depends on:** Nothing (vor der Ausführung: der Quick-Task „compat-Matrix korrigieren“, Entscheidung D-03 in `16-CONTEXT.md`; Phase 16 ändert `internal/compat` nicht)
+**Plans:** 2 plans
 
 Plans:
-- [ ] TBD (run /gsd-plan-phase 16 to break down)
+- [ ] 16-01-PLAN.md — Die Kette trägt den neuesten Patch: `KubernetesChain` über eine übergebene Menge, die Quellen-Naht und die Blockade bei Ausfall in `internal/upgrade`, Ende zu Ende über die Plan-Route gegen talossim; API-Vertrag und offener Ledger-Eintrag zur beratenden Kette (D-01, D-02, D-05)
+- [ ] 16-02-PLAN.md — Die Quelle dl.k8s.io: `internal/k8srelease` (streng validiert, gleichzeitig unter einem Deadline, ohne Flag), im Daemon verdrahtet, Budget- und Verdrahtungswächter, README und Guide (D-01, D-04)
