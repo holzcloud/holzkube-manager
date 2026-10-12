@@ -53,25 +53,25 @@ jobs:
           echo "::error::a release tag is created from main only; this run is on ${GITHUB_REF}"
           exit 1
 
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       # go.mod carries `toolchain go1.26.7` and setup-go honours that line, so
       # the Go version is pinned in one place and CI cannot drift from a local
       # build.
-      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
           # Caches the module and build caches. Keyed on the root go.sum only:
           # sandbox/ is a separate module, deliberately outside this build.
           cache-dependency-path: go.sum
 
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: '22'
           cache: npm
           cache-dependency-path: web/package-lock.json
 
-      - uses: go-task/setup-task@70f2430ad412f838533de8c0515c749ffb2b8bd3 # v1
+      - uses: go-task/setup-task@a00fbb05ce67b35648be3c78cbc9fd85354c757e # v2.2.0
         with:
           version: 3.53.1
 
@@ -171,13 +171,13 @@ jobs:
       # else: this workflow does not publish packages or write to pull requests.
       contents: write
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # goreleaser derives the version from the tag and the changelog from
           # git history. A shallow clone gives it neither.
           fetch-depth: 0
 
-      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
           cache-dependency-path: go.sum
@@ -185,7 +185,7 @@ jobs:
       # .goreleaser.yaml runs `npm --prefix web ci` and `npm --prefix web run
       # build` in its before hooks, for the same go:embed reason as the Taskfile.
       # The release job therefore needs Node exactly as much as the build does.
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: '22'
           cache: npm
@@ -272,7 +272,7 @@ jobs:
           python3 .github/release-notes.py "$TAG" /tmp/tag-annotation > /tmp/release-notes.md
           cat /tmp/release-notes.md
 
-      - uses: goreleaser/goreleaser-action@e435ccd777264be153ace6237001ef4d979d3a7a # v6
+      - uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7.2.3
         with:
           distribution: goreleaser
           version: v2.18.0
@@ -310,7 +310,7 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Write the version into the project pages and read it back
         env:
           CMS_TOKEN: ${{ secrets.CMS_TOKEN }}
