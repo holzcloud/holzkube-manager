@@ -20,7 +20,7 @@ progress:
 
 # Project State
 
-Stand 2026-10-12 (letztes Release **v0.5.0**, 2026-10-09). Die Phasen 11–14
+Stand 2026-10-12 (letztes Release **v0.6.0**, 2026-10-12). Die Phasen 11–14
 von v1.18 sind gebaut und warten auf Handproben; seit 2026-10-03 lief die Arbeit
 ohne GSD-Phasen (Redesign, Audit, Backups), siehe `MILESTONES.md`. Der vorige Bericht (Abschluss v1.15, Übergabe 2026-09-17)
 liegt unverändert in `milestones/STATE-2026-09-17.md`.
@@ -42,9 +42,12 @@ Progress: [█████░░░░░] 50%
 
 ## Offen
 
-- **Entscheidungen des Betreibers (Stand 2026-10-12):** Release-Signatur
-  (minisign empfohlen), Export-Ziel für Backups, Alerting-Kanal, Cloud-Provider,
-  SAML. Router: Port 8443 im Internet erreichbar? (`AUDIT-2026-10-08.md`)
+- **Entschieden 2026-10-12:** Release-Signatur — **vorerst keine**; es bleibt bei
+  SHA-256 aus demselben Release (Risiko und Optionen: `AUDIT-2026-10-08.md`,
+  minisign wäre die Empfehlung gewesen). Letztes Release: **v0.6.0**
+  (Zertifikatsablauf im Cluster), gebaut und verifiziert von CI.
+- **Entscheidungen des Betreibers (Stand 2026-10-12):** Export-Ziel für Backups,
+  Alerting-Kanal, Cloud-Provider, SAML. Router: Port 8443 im Internet erreichbar? (`AUDIT-2026-10-08.md`)
 - **Branch `claude/sponsor-button`** (ein Commit, FUNDING.yml und Badge) ist nicht
   gemergt; fünf Dependabot-Branches für GitHub Actions sind offen.
 
