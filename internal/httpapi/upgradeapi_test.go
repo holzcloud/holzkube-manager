@@ -3,6 +3,7 @@ package httpapi_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strings"
 	"sync"
@@ -683,5 +684,84 @@ func TestTheKubernetesPlanRouteNamesTheNewestPatchOfTheMinorOnTheWay(t *testing.
 	got := src.questions()
 	if len(got) != 1 || len(got[0]) != 1 || got[0][0] != 33 {
 		t.Errorf("the source was asked %v, want exactly one question about [33]", got)
+	}
+}
+
+// TestAKubernetesPlanWhoseLookupFailedIsBlockedOnTheScreen: when the newest
+// patch of the minor on the way cannot be found, the plan says so and carries
+// no chain, and nothing in it is the first release of that minor.
+func TestAKubernetesPlanWhoseLookupFailedIsBlockedOnTheScreen(t *testing.T) {
+	t.Parallel()
+
+	src := &fakeKubernetesReleases{err: errors.New("dl.example.com: connection refused")}
+	h := newUpgradeHarnessOptions(t, upgradeHarnessOptions{
+		KubeletImage:       "ghcr.io/siderolabs/kubelet:v1.32.4",
+		KubernetesReleases: src.source(),
+	})
+
+	resp, raw := h.do(t, http.MethodPost,
+		"/api/v1/clusters/"+string(h.clusterID(t))+"/upgrade/kubernetes/plan",
+		map[string]any{"to": "v1.34.1"})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("plan: %d (%s)", resp.StatusCode, raw)
+	}
+	var plan upgrade.Plan
+	if err := json.Unmarshal(raw, &plan); err != nil {
+		t.Fatalf("decode plan: %v (%s)", err, raw)
+	}
+	if !plan.Blocked {
+		t.Fatalf("a plan whose lookup failed was not blocked: %s", raw)
+	}
+	if len(plan.Chain) != 0 {
+		t.Errorf("a blocked plan carries a chain: %+v", plan.Chain)
+	}
+	if !strings.Contains(plan.BlockReason, "newest patch") || !strings.Contains(plan.BlockReason, "connection refused") {
+		t.Errorf("the block does not say what could not be found and why: %q", plan.BlockReason)
+	}
+}
+
+// TestSubmittingAKubernetesUpgradeWhoseLookupFailedIsRefused: the block is the
+// server's and not only the screen's. Submitting, and asking for the token to
+// submit, both rebuild the plan and refuse with the same sentence.
+func TestSubmittingAKubernetesUpgradeWhoseLookupFailedIsRefused(t *testing.T) {
+	t.Parallel()
+
+	src := &fakeKubernetesReleases{err: errors.New("dl.example.com: connection refused")}
+	h := newUpgradeHarnessOptions(t, upgradeHarnessOptions{
+		KubeletImage:       "ghcr.io/siderolabs/kubelet:v1.32.4",
+		KubernetesReleases: src.source(),
+	})
+
+	resp, raw := h.do(t, http.MethodPost, "/api/v1/auth/sudo", map[string]string{"password": testPass})
+	if resp.StatusCode != http.StatusNoContent && resp.StatusCode != http.StatusOK {
+		t.Fatalf("sudo: %d (%s)", resp.StatusCode, raw)
+	}
+	cluster := h.clusterID(t)
+	resp, raw = h.do(t, http.MethodPost, "/api/v1/clusters/"+string(cluster)+"/lock",
+		map[string]any{"locked": false})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("unlock: %d (%s)", resp.StatusCode, raw)
+	}
+	base := "/api/v1/clusters/" + string(cluster)
+
+	// A Kubernetes upgrade needs no snapshot, so nothing is taken here.
+	for _, c := range []struct {
+		name, path string
+		body       map[string]any
+	}{
+		{"submit", base + "/upgrade/kubernetes", map[string]any{"to": "v1.34.1", "confirmation": "anything"}},
+		{"confirm", base + "/upgrade/confirm",
+			map[string]any{"kind": upgrade.JobKindKubernetesUpgrade, "to": "v1.34.1", "typed": "homelab"}},
+	} {
+		resp, raw = h.do(t, http.MethodPost, c.path, c.body)
+		if resp.StatusCode != http.StatusConflict {
+			t.Fatalf("%s with a failed lookup answered %d (%s), want 409", c.name, resp.StatusCode, raw)
+		}
+		if !strings.Contains(string(raw), "upgrade-blocked") {
+			t.Errorf("%s: the refusal does not carry the upgrade-blocked code: %s", c.name, raw)
+		}
+		if !strings.Contains(string(raw), "newest patch") {
+			t.Errorf("%s: the refusal does not carry the sentence about the newest patch: %s", c.name, raw)
+		}
 	}
 }
