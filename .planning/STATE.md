@@ -187,7 +187,7 @@ Siehe `PROJECT.md`, die `MILESTONE-*.md`-Dateien und für v1.18 den Abschnitt
 | 261001-sa9 | Unlink single sign-on (admin, sudo, audit); person accounts only for SSO linking; SSO-only pre-check removed; review fixes CR-01, WR-01..07 | 2026-10-01 | 05f1279 | [261001-sa9-unlink-single-sign-on](./quick/261001-sa9-unlink-single-sign-on/) |
 | 261012-hs1 | Zertifikatsablauf im Cluster (Talos/etcd/Kubernetes), Karte, Banner, Wand, /metrics — retroaktiv nachgetragen, Release v0.6.0 | 2026-10-12 | 22af6c9 | [261012-hs1-nachtrag-zertifikatsablauf-im-cluster-v0](./quick/261012-hs1-nachtrag-zertifikatsablauf-im-cluster-v0/) |
 | 261012-hxm | Dependabot: fünf Actions-Bumps gebündelt, CI-Gate grün, nach main | 2026-10-12 | 064f48d | [261012-hxm-dependabot-fuenf-actions-bumps-gebuendel](./quick/261012-hxm-dependabot-fuenf-actions-bumps-gebuendel/) |
-| 261012-l9s | compat-Matrix Talos 1.12 bis 1.14 korrigiert, Zeile 14 gegen die Maschinerie gehalten (Voraussetzung Phase 16) | 2026-10-12 | pending | [261012-l9s-compat-matrix-talos-12-bis-14-korrigiere](./quick/261012-l9s-compat-matrix-talos-12-bis-14-korrigiere/) |
+| 261012-l9s | compat-Matrix Talos 1.12 bis 1.14 korrigiert, Zeile 14 gegen die Maschinerie gehalten (Voraussetzung Phase 16) | 2026-10-12 | 55dc775 | [261012-l9s-compat-matrix-talos-12-bis-14-korrigiere](./quick/261012-l9s-compat-matrix-talos-12-bis-14-korrigiere/) |
 
 ## Session Continuity
 
