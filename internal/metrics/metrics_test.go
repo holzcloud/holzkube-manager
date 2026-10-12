@@ -416,3 +416,30 @@ func assertFamiliesAreWellFormed(t *testing.T, out string) {
 		}
 	}
 }
+
+// TestNodeCertificatesAreSignedSecondsPerNodeAndRole: an expired certificate
+// inside a cluster is a negative number, a cluster nobody has read yet writes no
+// series at all, and the kind label says whether a small value is an authority
+// running out or a rotation that is stuck.
+func TestNodeCertificatesAreSignedSecondsPerNodeAndRole(t *testing.T) {
+	t.Parallel()
+
+	f := build(2)
+	f.clusters[0].NodeCertificates = &model.CertificateHealth{Items: []model.NodeCertificate{
+		{Node: "cp-1", Name: "etcd peer", Kind: "issued", NotAfter: now.Add(-time.Hour)},
+		{Node: "cp-1", Name: "etcd authority", Kind: "authority", NotAfter: now.Add(48 * time.Hour)},
+	}}
+	out := f.render(t)
+
+	v, ok := sampleValue(out, `holzkube_node_certificate_seconds{cluster="c0",node="cp-1",name="etcd peer",kind="issued"}`)
+	if !ok || v != -3600 {
+		t.Errorf("expired issued certificate = %v (present %v), want -3600", v, ok)
+	}
+	v, ok = sampleValue(out, `holzkube_node_certificate_seconds{cluster="c0",node="cp-1",name="etcd authority",kind="authority"}`)
+	if !ok || v != 172800 {
+		t.Errorf("authority = %v (present %v), want 172800", v, ok)
+	}
+	if strings.Contains(out, `holzkube_node_certificate_seconds{cluster="c1"`) {
+		t.Error("a series was written for a cluster that has not been read")
+	}
+}

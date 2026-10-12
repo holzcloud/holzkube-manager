@@ -1427,6 +1427,30 @@ export const clusterSchema = z.object({
       last_reason: z.string().default(''),
     })
     .nullish(),
+  /** How long the certificates inside the cluster have left, as its
+   * control-plane nodes last reported them. Absent until the first read, which
+   * the card says rather than showing fine. */
+  node_certificates: z
+    .object({
+      checked_at: z.string(),
+      read_nodes: z.number(),
+      control_planes: z.number(),
+      urgency: z.enum(['none', 'badge', 'banner', 'critical']),
+      warning: z.string().default(''),
+      items: z.array(
+        z.object({
+          node: z.string(),
+          name: z.string(),
+          /** authority: nothing renews it. issued: Talos renews it. */
+          kind: z.enum(['authority', 'issued']),
+          not_after: z.string(),
+          /** Negative once expired. */
+          days_left: z.number(),
+          urgency: z.enum(['none', 'badge', 'banner', 'critical']),
+        }),
+      ),
+    })
+    .nullish(),
 })
 
 export type Cluster = z.infer<typeof clusterSchema>
@@ -2770,6 +2794,17 @@ export const wallSchema = z.object({
    * reader; then the wall draws no host tile, never a placeholder. */
   host: z
     .object({ name: z.string(), state: z.string(), reason: z.string() })
+    .nullish()
+    .transform((v) => v ?? null),
+  /** The worst certificate inside the cluster, once it is within the banner
+   * rung of its ladder: its role and the days it has left, nothing that names
+   * a machine. Null while nothing needs action. */
+  certificates: z
+    .object({
+      state: z.enum(['banner', 'critical']),
+      name: z.string(),
+      days_left: z.number(),
+    })
     .nullish()
     .transform((v) => v ?? null),
 })

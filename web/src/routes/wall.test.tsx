@@ -72,6 +72,7 @@ function wallAt(when: Date, overrides: Partial<Wall> = {}): Wall {
     summary: { ok: 2 },
     trends: { cluster: {}, nodes: {} },
     host: null as Wall['host'],
+    certificates: null as Wall['certificates'],
     ...overrides,
   }
   // Unless a test says otherwise, the roll-up follows from the workloads.
@@ -667,5 +668,38 @@ describe('the host tile (D-14)', () => {
       expect(tile.className).not.toContain('md:text-[2.9vmin]')
     }
     expect(grid.className).toContain('minmax(16rem,1fr)')
+  })
+})
+
+describe('the certificate line', () => {
+  it('names the role and the days, and nothing that names a machine', async () => {
+    vi.spyOn(api.kubernetes, 'wall').mockResolvedValue(
+      wallAt(new Date(), {
+        certificates: { state: 'critical', name: 'etcd authority', days_left: 5 },
+      }),
+    )
+    wrap(<WallView />)
+    expect(
+      await screen.findByText('The etcd authority certificate expires in 5 days'),
+    ).toBeInTheDocument()
+  })
+
+  it('says expired once there are no days left', async () => {
+    vi.spyOn(api.kubernetes, 'wall').mockResolvedValue(
+      wallAt(new Date(), {
+        certificates: { state: 'critical', name: 'Kubernetes authority', days_left: 0 },
+      }),
+    )
+    wrap(<WallView />)
+    expect(
+      await screen.findByText('The Kubernetes authority certificate has expired'),
+    ).toBeInTheDocument()
+  })
+
+  it('is absent while nothing needs action', async () => {
+    vi.spyOn(api.kubernetes, 'wall').mockResolvedValue(wallAt(new Date()))
+    wrap(<WallView />)
+    await screen.findByText('cp-1')
+    expect(screen.queryByText(/certificate/)).toBeNull()
   })
 })

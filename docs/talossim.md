@@ -145,6 +145,18 @@ kubelet spec joined the list in phase 3 because that is where a node's
 Kubernetes version is read from — leaving it behind would mean a node with
 Kubernetes down still confidently reporting a Kubernetes version.
 
+## Simulated certificates
+
+Every node serves the secrets resources Talos keeps its certificates in, so
+`talos.ClusterClient.Certificates` is a read like any other. The Talos API
+authority is the node's own (a cluster's OS CA in a cluster). A control-plane node
+(`Options.ControlPlane`) also gets etcd and Kubernetes authorities and the issued
+certificates under them; a worker does not, as on a real node. Their lifetimes are
+`Options.IssuedCertificateValidity` (default a year) and
+`Options.AuthorityValidity` (default ten), which is how a test puts a stuck
+rotation or an expiring authority on screen. The simulator's resources carry no
+private keys.
+
 ## Simulated hardware
 
 The hardware view reads counters and sensors live, so the node has them

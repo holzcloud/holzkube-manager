@@ -101,6 +101,10 @@ type Service struct {
 	// instance keeps none. See SetBackupHealth.
 	backupHealth func(c model.Cluster, now time.Time) *model.BackupHealth
 
+	// certificateHealth says how the certificates inside a cluster stand; nil
+	// until the reader is wired.
+	certificateHealth func(c model.Cluster, now time.Time) *model.CertificateHealth
+
 	// observed is the in-memory half of the read model: per machine, what each
 	// level last confirmed and when.
 	//

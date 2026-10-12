@@ -524,9 +524,12 @@ func clusterWall(d httpapi.Deps) http.HandlerFunc {
 			writeKubernetesError(w, r, err)
 			return
 		}
-		writeJSON(w, http.StatusOK, newWallAnswer(wall,
-			trendsForTheWall(r.Context(), d, model.ClusterID(r.PathValue("id")), now),
-			hostForTheWall(d, now)))
+		id := model.ClusterID(r.PathValue("id"))
+		answer := newWallAnswer(wall,
+			trendsForTheWall(r.Context(), d, id, now),
+			hostForTheWall(d, now))
+		answer.Certificates = certificatesForTheWall(r.Context(), d, id)
+		writeJSON(w, http.StatusOK, answer)
 	}
 }
 
@@ -541,6 +544,9 @@ type wallAnswer struct {
 	Trends wallTrends `json:"trends"`
 	// Host is null without a host reader or before its first sample.
 	Host *wallHost `json:"host"`
+	// Certificates is null unless a certificate inside the cluster is within
+	// the banner rung of its ladder.
+	Certificates *wallCertificates `json:"certificates"`
 }
 
 // newWallAnswer puts the answer together. The cluster's nodes and summary are

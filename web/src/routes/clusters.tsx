@@ -5,6 +5,7 @@ import { useState } from 'react'
 import { api, type Cluster } from '@/api'
 import { ClusterScalePanel } from '@/components/ClusterScale'
 import { ClusterTemplatePanel } from '@/components/ClusterTemplate'
+import { NodeCertificatesRow } from '@/components/NodeCertificates'
 import { PowerMenu } from '@/components/PowerMenu'
 import { RenewCertificate } from '@/components/RenewCertificate'
 import { RotateAuthority } from '@/components/RotateAuthority'
@@ -186,6 +187,11 @@ export function ClusterCard({ cluster }: { cluster: Cluster }) {
                 {formatDate(cluster.client_cert_not_after)})
               </span>
             )}
+          </dd>
+
+          <dt className="text-muted-foreground">Cluster certificates</dt>
+          <dd>
+            <NodeCertificatesRow health={cluster.node_certificates} />
           </dd>
         </dl>
 

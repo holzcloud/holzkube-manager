@@ -74,6 +74,9 @@ did.
   snapshot taken first**,
   Kubernetes upgrades in `talosctl upgrade-k8s`'s order,
   SecureBoot, disk encryption, etcd snapshots and restore, certificate renewal,
+  **certificate expiry inside the cluster** (Talos, etcd and Kubernetes
+  authorities and the certificates they issue, read from the control planes and
+  warned about on the cluster card, in the banner, on the wall and in `/metrics`),
   and **scheduled etcd snapshots** (every 6 hours, daily or weekly, kept on the
   manager's own device, with a download, a checksum and an "overdue" warning --
   copy the ones that matter off the box)

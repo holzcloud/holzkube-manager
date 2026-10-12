@@ -3330,6 +3330,42 @@ delete images would do nothing at all.
 | `conflict.cannot-stop` | 409 | the thing has no stop: a DaemonSet, whose size is how many nodes match, or a pod nothing owns, where removing it would be a deletion rather than a stop. The detail says what to do instead. |
 
 
+## Certificates inside a cluster
+
+Read-only, no route of its own: `GET /api/v1/clusters` and
+`GET /api/v1/clusters/{id}` carry `node_certificates`, absent until the first
+read of that cluster's control planes (a minute after start, then every six
+hours).
+
+```json
+"node_certificates": {
+  "checked_at": "2026-10-12T08:00:00Z",
+  "read_nodes": 3, "control_planes": 3,
+  "urgency": "none | badge | banner | critical",
+  "warning": "the worst certificate, as a sentence",
+  "items": [{ "node": "cp-1", "name": "etcd peer", "kind": "authority | issued",
+              "subject": "…", "machine": "…", "not_after": "…",
+              "days_left": 232, "urgency": "none" }]
+}
+```
+
+`items` is soonest first, `days_left` is whole days and negative once expired,
+and both are computed when the answer is built, so an old reading still counts
+down. **An authority** uses the ladder 90 / 30 / 7 days (badge / banner /
+critical); **an issued certificate** 14 days (banner) and 3 days (critical),
+because Talos renews it by itself and a short time left means a stuck rotation.
+A control plane that did not answer on the last pass keeps its previous items
+and is counted out of `read_nodes`. No key, and nothing that could be used to
+impersonate a node, is in the answer.
+
+`GET /api/v1/clusters/{id}/wall` carries `certificates`: null, or
+`{"state": "banner | critical", "name": "<role>", "days_left": n}` for the
+soonest certificate at banner or worse. A wall link opens that route, so the
+object names the role and the days and no node or subject.
+
+`holzkube_node_certificate_seconds{cluster,node,name,kind}` in `/metrics` is
+the same number in seconds, negative once expired.
+
 ## Rotating a cluster's certificate authority
 
 Three routes, and the split is the operation's safety rather than REST taste:

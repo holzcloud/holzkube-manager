@@ -381,8 +381,25 @@ function Headline({ wall, stale, ageMs }: { wall: Wall; stale: boolean; ageMs: n
         {plural(wall.workloads.length, 'workload')}, {plural(wall.nodes.length, 'node')}
         {' · holzkube-manager alpha'}
       </p>
+      {/* A certificate with a date to act on. Only from the banner rung down:
+          a line that said "all certificates fine" would be one nobody reads. */}
+      {wall.certificates !== null && (
+        <p
+          className={`mt-1 text-xs md:mt-[0.8vmin] md:text-[2.1vmin] ${
+            wall.certificates.state === 'critical' ? 'text-red-300' : 'text-amber-300'
+          }`}
+        >
+          {certificateSentence(wall.certificates)}
+        </p>
+      )}
     </div>
   )
+}
+
+/** What the certificate line says. Days are whole and may be zero or negative. */
+function certificateSentence(c: { name: string; days_left: number }): string {
+  if (c.days_left <= 0) return `The ${c.name} certificate has expired`
+  return `The ${c.name} certificate expires in ${plural(c.days_left, 'day')}`
 }
 
 /** Section is a labelled block. Every section on this screen says what it is. */

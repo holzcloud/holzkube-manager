@@ -215,7 +215,14 @@ func issue(parent *x509.Certificate, parentKey crypto.Signer, tmpl *x509.Certifi
 	now := time.Now()
 	tmpl.SerialNumber = serial
 	tmpl.NotBefore = now.Add(-time.Minute)
-	tmpl.NotAfter = now.Add(certValidity)
+	if tmpl.NotAfter.IsZero() {
+		tmpl.NotAfter = now.Add(certValidity)
+	}
+	if !tmpl.NotAfter.After(tmpl.NotBefore) {
+		// A certificate that is already expired is what a test of the expiry
+		// ladder asks for; it still needs a validity window that starts first.
+		tmpl.NotBefore = tmpl.NotAfter.Add(-time.Hour)
+	}
 
 	signer := crypto.Signer(parentKey)
 	issuer := parent

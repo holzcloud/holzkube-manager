@@ -175,6 +175,11 @@ type ClusterView struct {
 	// Backup is the standing of the cluster's etcd snapshots, for the overview
 	// and the wall. Absent when this instance keeps none.
 	Backup *model.BackupHealth `json:"backup,omitempty"`
+
+	// NodeCertificates is the standing of the certificates inside the cluster,
+	// as its control-plane nodes last reported them. Absent until the first
+	// read has happened, which the screen says rather than showing fine.
+	NodeCertificates *model.CertificateHealth `json:"node_certificates,omitempty"`
 }
 
 // Certificate urgency levels, in the order D-23 escalates them.
@@ -372,6 +377,7 @@ func (s *Service) Clusters(ctx context.Context) ([]ClusterView, error) {
 	for _, c := range clusters {
 		v := clusterView(c, machines, now)
 		v.Backup = s.backupHealthOf(c, now)
+		v.NodeCertificates = s.certificateHealthOf(c, now)
 		out = append(out, v)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt.Before(out[j].CreatedAt) })
@@ -394,6 +400,7 @@ func (s *Service) Cluster(ctx context.Context, id model.ClusterID) (ClusterView,
 	now := s.deps.Now().UTC()
 	v := clusterView(c, machines, now)
 	v.Backup = s.backupHealthOf(c, now)
+	v.NodeCertificates = s.certificateHealthOf(c, now)
 	return v, nil
 }
 
@@ -409,6 +416,26 @@ func (s *Service) SetBackupHealth(fn func(c model.Cluster, now time.Time) *model
 func (s *Service) backupHealthOf(c model.Cluster, now time.Time) *model.BackupHealth {
 	s.mu.Lock()
 	fn := s.backupHealth
+	s.mu.Unlock()
+	if fn == nil {
+		return nil
+	}
+	return fn(c, now)
+}
+
+// SetCertificateHealth gives the inventory the means to say how the
+// certificates inside a cluster stand. It is a setter for the same reason
+// SetBackupHealth is: the reader is built after the inventory, from its
+// connector.
+func (s *Service) SetCertificateHealth(fn func(c model.Cluster, now time.Time) *model.CertificateHealth) {
+	s.mu.Lock()
+	s.certificateHealth = fn
+	s.mu.Unlock()
+}
+
+func (s *Service) certificateHealthOf(c model.Cluster, now time.Time) *model.CertificateHealth {
+	s.mu.Lock()
+	fn := s.certificateHealth
 	s.mu.Unlock()
 	if fn == nil {
 		return nil

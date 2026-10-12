@@ -21,6 +21,7 @@ import (
 	"github.com/holzcloud/holzkube-manager/internal/audit"
 	"github.com/holzcloud/holzkube-manager/internal/auth"
 	"github.com/holzcloud/holzkube-manager/internal/auth/oidc"
+	"github.com/holzcloud/holzkube-manager/internal/certwatch"
 	"github.com/holzcloud/holzkube-manager/internal/config"
 	"github.com/holzcloud/holzkube-manager/internal/history"
 	"github.com/holzcloud/holzkube-manager/internal/host"
@@ -535,6 +536,25 @@ func run(args []string) error {
 		return upgradeSvc.BackupHealthFor(c, now)
 	})
 
+	// The certificates inside each cluster, read from its control-plane nodes.
+	// A read-only look, so it runs in --dry-run too. The reader drops the
+	// private keys Talos keeps beside the certificates before anything leaves
+	// internal/talos.
+	certWatch := certwatch.New(certwatch.Deps{
+		Clusters:      func(ctx context.Context) ([]model.Cluster, error) { return st.Clusters().List(ctx) },
+		ControlPlanes: inv.ControlPlanesOf,
+		Read: func(ctx context.Context, id model.MachineID) ([]talos.Certificate, error) {
+			cc, err := inv.Connect(ctx, id)
+			if err != nil {
+				return nil, err
+			}
+			defer func() { _ = cc.Close() }()
+			return cc.Certificates(ctx)
+		},
+		Log: func(msg string, args ...any) { logger.Info(msg, args...) },
+	})
+	inv.SetCertificateHealth(certWatch.HealthFor)
+
 	// The support-bundle collector. It uses the same connector, the same
 	// inventory and the same audit reader everything else does -- a bundle
 	// assembled from its own reads would be a bundle describing a cluster
@@ -758,6 +778,10 @@ func run(args []string) error {
 		stopSampling()
 		<-sampled
 	}()
+
+	certCtx, stopCerts := context.WithCancel(context.Background())
+	defer stopCerts()
+	go certWatch.Run(certCtx, time.Minute)
 
 	// The keeper of disabled nodes: one that comes up anyway is cordoned and
 	// said so in the log. Not in --dry-run, which promises to change nothing

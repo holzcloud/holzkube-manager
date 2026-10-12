@@ -191,6 +191,26 @@ func (e *Exporter) writeClusters(b *strings.Builder, clusters []inventory.Cluste
 			c.ClientCertNotAfter.Sub(now).Seconds())
 	}
 
+	// The certificates inside the cluster, one series per node and role. Same
+	// unit and sign as above for the same reason, and a node that stopped
+	// answering keeps its last reading rather than dropping the series.
+	help(b, "holzkube_node_certificate_seconds", "gauge",
+		"Seconds until a certificate on a control-plane node expires, as last read. Negative means it already has. "+
+			"kind is authority (nothing renews it) or issued (Talos renews it, so a small value means a stuck rotation).")
+	for _, c := range clusters {
+		if c.NodeCertificates == nil {
+			continue
+		}
+		for _, it := range c.NodeCertificates.Items {
+			metric(b, "holzkube_node_certificate_seconds", labels{
+				{"cluster", string(c.ID)},
+				{"node", it.Node},
+				{"name", it.Name},
+				{"kind", it.Kind},
+			}, it.NotAfter.Sub(now).Seconds())
+		}
+	}
+
 	help(b, "holzkube_cluster_locked", "gauge",
 		"1 when this cluster refuses mutation because it was adopted read-only (INV-12).")
 	for _, c := range clusters {

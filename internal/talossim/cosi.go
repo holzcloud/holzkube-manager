@@ -2,11 +2,16 @@ package talossim
 
 import (
 	"context"
+	"crypto"
+	"crypto/x509"
+	"crypto/x509/pkix"
+	"encoding/pem"
 	"fmt"
 	"net"
 	"net/netip"
 	"strconv"
 	"strings"
+	"time"
 
 	cosiapi "github.com/cosi-project/runtime/api/v1alpha1"
 	"github.com/cosi-project/runtime/pkg/safe"
@@ -15,6 +20,8 @@ import (
 	"github.com/cosi-project/runtime/pkg/state/impl/namespaced"
 	cosiserver "github.com/cosi-project/runtime/pkg/state/protobuf/server"
 	"google.golang.org/grpc"
+
+	x509res "github.com/siderolabs/crypto/x509"
 
 	talosconfig "github.com/siderolabs/talos/pkg/machinery/config"
 	"github.com/siderolabs/talos/pkg/machinery/config/configloader"
@@ -27,6 +34,7 @@ import (
 	"github.com/siderolabs/talos/pkg/machinery/resources/k8s"
 	"github.com/siderolabs/talos/pkg/machinery/resources/network"
 	runtimeres "github.com/siderolabs/talos/pkg/machinery/resources/runtime"
+	secretsres "github.com/siderolabs/talos/pkg/machinery/resources/secrets"
 
 	"github.com/holzcloud/holzkube-manager/internal/talos"
 )
@@ -254,6 +262,9 @@ func (s *Server) seedTheRest(ctx context.Context) error {
 		return err
 	}
 	if err := s.seedKernelCmdline(ctx); err != nil {
+		return err
+	}
+	if err := s.seedCertificates(ctx); err != nil {
 		return err
 	}
 	if err := s.seedExtensions(ctx); err != nil {
@@ -612,3 +623,109 @@ type simValidationMode struct{}
 func (simValidationMode) String() string        { return "talossim" }
 func (simValidationMode) RequiresInstall() bool { return false }
 func (simValidationMode) InContainer() bool     { return false }
+
+// seedCertificates puts the certificates a node holds into the state, as the
+// secrets resources Talos keeps them in.
+//
+// The Talos API authority is the node's own, which in a cluster is the
+// cluster's OS CA. The etcd and Kubernetes ones, and every issued certificate,
+// are minted here with the lifetimes the options give, because their expiry is
+// the fact under test. Workers have no etcd and no Kubernetes API server, so
+// they are not given those, as on a real node.
+func (s *Server) seedCertificates(ctx context.Context) error {
+	issuedFor := s.opts.IssuedCertificateValidity
+	if issuedFor == 0 {
+		issuedFor = 365 * 24 * time.Hour
+	}
+	authorityFor := s.opts.AuthorityValidity
+	if authorityFor == 0 {
+		authorityFor = 10 * 365 * 24 * time.Hour
+	}
+	now := time.Now()
+
+	osCA := &x509res.PEMEncodedCertificateAndKey{Crt: s.pki.caPEM()}
+	osRoot := secretsres.NewOSRoot(secretsres.OSRootID)
+	osRoot.TypedSpec().IssuingCA = osCA
+	if err := s.COSI().Create(ctx, osRoot); err != nil {
+		return fmt.Errorf("talossim: seed %s: %w", secretsres.OSRootType, err)
+	}
+
+	mint := func(name string, parent *x509.Certificate, parentKey crypto.Signer, ca bool, validity time.Duration) (*x509res.PEMEncodedCertificateAndKey, *x509.Certificate, crypto.Signer, error) {
+		tmpl := &x509.Certificate{
+			Subject:  pkix.Name{CommonName: name},
+			NotAfter: now.Add(validity),
+		}
+		if ca {
+			tmpl.KeyUsage = x509.KeyUsageCertSign | x509.KeyUsageDigitalSignature
+			tmpl.BasicConstraintsValid = true
+			tmpl.IsCA = true
+		}
+		key, der, err := issue(parent, parentKey, tmpl)
+		if err != nil {
+			return nil, nil, nil, fmt.Errorf("talossim: certificate %q: %w", name, err)
+		}
+		return &x509res.PEMEncodedCertificateAndKey{
+			Crt: pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}),
+		}, mustLeaf(der), key, nil
+	}
+
+	api, _, _, err := mint("talossim "+s.opts.Hostname+" apid", s.pki.caCert, s.pki.caKey, false, issuedFor)
+	if err != nil {
+		return err
+	}
+	apiRes := secretsres.NewAPI()
+	apiRes.TypedSpec().Server = api
+	if err := s.COSI().Create(ctx, apiRes); err != nil {
+		return fmt.Errorf("talossim: seed %s: %w", secretsres.APIType, err)
+	}
+
+	if !s.opts.ControlPlane {
+		return nil
+	}
+
+	etcdCA, etcdCert, etcdKey, err := mint("talossim etcd CA", nil, nil, true, authorityFor)
+	if err != nil {
+		return err
+	}
+	etcdRoot := secretsres.NewEtcdRoot(secretsres.EtcdRootID)
+	etcdRoot.TypedSpec().EtcdCA = etcdCA
+	if err := s.COSI().Create(ctx, etcdRoot); err != nil {
+		return fmt.Errorf("talossim: seed %s: %w", secretsres.EtcdRootType, err)
+	}
+
+	etcdServer, _, _, err := mint("talossim etcd server", etcdCert, etcdKey, false, issuedFor)
+	if err != nil {
+		return err
+	}
+	etcdPeer, _, _, err := mint("talossim etcd peer", etcdCert, etcdKey, false, issuedFor)
+	if err != nil {
+		return err
+	}
+	etcdRes := secretsres.NewEtcd()
+	etcdRes.TypedSpec().Etcd = etcdServer
+	etcdRes.TypedSpec().EtcdPeer = etcdPeer
+	if err := s.COSI().Create(ctx, etcdRes); err != nil {
+		return fmt.Errorf("talossim: seed %s: %w", secretsres.EtcdType, err)
+	}
+
+	k8sCA, k8sCert, k8sKey, err := mint("talossim kubernetes CA", nil, nil, true, authorityFor)
+	if err != nil {
+		return err
+	}
+	k8sRoot := secretsres.NewKubernetesRoot(secretsres.KubernetesRootID)
+	k8sRoot.TypedSpec().IssuingCA = k8sCA
+	if err := s.COSI().Create(ctx, k8sRoot); err != nil {
+		return fmt.Errorf("talossim: seed %s: %w", secretsres.KubernetesRootType, err)
+	}
+
+	apiServer, _, _, err := mint("talossim kube-apiserver", k8sCert, k8sKey, false, issuedFor)
+	if err != nil {
+		return err
+	}
+	dyn := secretsres.NewKubernetesDynamicCerts()
+	dyn.TypedSpec().APIServer = apiServer
+	if err := s.COSI().Create(ctx, dyn); err != nil {
+		return fmt.Errorf("talossim: seed %s: %w", secretsres.KubernetesDynamicCertsType, err)
+	}
+	return nil
+}

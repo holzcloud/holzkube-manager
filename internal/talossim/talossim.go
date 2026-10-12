@@ -94,6 +94,17 @@ type Options struct {
 	// it is.
 	StreamChunk int
 
+	// IssuedCertificateValidity is how long the certificates Talos renews on
+	// its own (the API server's, etcd's, the Kubernetes API server's) have
+	// left, as this node reports them. Zero means a year, which is what Talos
+	// issues. It is how a test puts a rotation that got stuck on screen.
+	IssuedCertificateValidity time.Duration
+
+	// AuthorityValidity is how long the etcd and Kubernetes authorities have
+	// left. Zero means ten years. Nothing renews an authority, so a short one
+	// is the case the expiry warnings exist for.
+	AuthorityValidity time.Duration
+
 	// Cluster, when set, makes this node a member of a simulated cluster: it
 	// serves that cluster's machine configuration, and its certificate
 	// authority is the cluster's own OS CA rather than a fresh one. A node

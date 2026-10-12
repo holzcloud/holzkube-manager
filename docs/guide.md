@@ -1247,6 +1247,38 @@ makes this a cron entry rather than a banner somebody has to be logged in to
 see. A failed run leaves the old certificate in place, which is what makes that
 defensible.
 
+### Certificates inside the cluster
+
+The admin certificate above is the one holzkube-manager holds. The certificates
+*inside* the cluster are Talos's: the Talos API server certificate and its
+authority on every node, and on a control plane the etcd server and peer
+certificates and authority and the Kubernetes API server certificate and
+authority. The cluster card lists them under **Cluster certificates**, soonest
+first, read from every control-plane node a minute after start and then every six
+hours. Until the first read it says *not read yet*, never *fine*.
+
+Two kinds, because they fail differently:
+
+- **An authority** is never renewed by Talos. Its date is one to plan a CA
+  rotation for, and it climbs the same ladder as the admin certificate: a badge at
+  90 days, a banner on every page at 30, red at 7.
+- **An issued certificate** is renewed by Talos long before it runs out, so being
+  close at all is the fault: a banner at 14 days and red at 3 mean a rotation is
+  stuck on that node.
+
+A control plane that does not answer keeps its last reading on the card (a node
+that is down for a reboot would otherwise take its certificates off the screen
+when you are looking at it) and the card says how many answered. The wall shows
+one line, only from the banner rung down, naming the certificate's *role* and its
+days and no machine. `/metrics` carries `holzkube_node_certificate_seconds` per
+cluster, node, role and kind, negative once expired.
+
+Talos keeps each of these certificates in a resource that also holds its private
+key. holzkube-manager reads the resource and keeps the name and the dates; the
+key is never copied out of the package that reads it. Workers are not read (they
+have no etcd or Kubernetes API server and Talos renews their API certificate the
+same way). Nothing here changes a node.
+
 ### Growing and shrinking a cluster
 
 Each cluster card answers **what can this cluster spare?** — which of its nodes

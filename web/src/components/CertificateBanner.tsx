@@ -31,7 +31,12 @@ export function CertificateBanner({ className }: { className?: string }) {
   const warning = (data ?? []).filter(
     (c) => c.certificate_urgency === 'banner' || c.certificate_urgency === 'critical',
   )
-  if (warning.length === 0) {
+  // The certificates inside a cluster, from its nodes. Same rungs, same place:
+  // a stuck rotation or an authority with weeks left is about every page too.
+  const inside = (data ?? []).filter(
+    (c) => c.node_certificates?.urgency === 'banner' || c.node_certificates?.urgency === 'critical',
+  )
+  if (warning.length === 0 && inside.length === 0) {
     return null
   }
 
@@ -39,6 +44,21 @@ export function CertificateBanner({ className }: { className?: string }) {
     <div className={cn('flex flex-col gap-2', className)}>
       {warning.map((c) => (
         <ClusterCertificateWarning key={c.id} cluster={c} />
+      ))}
+      {inside.map((c) => (
+        <div
+          key={`inside-${c.id}`}
+          role="status"
+          className={cn(
+            'flex items-start gap-2 rounded-md border px-3 py-2 text-sm',
+            c.node_certificates?.urgency === 'critical'
+              ? 'border-red-600/40 bg-red-600/10 text-red-700 dark:text-red-300'
+              : 'border-amber-600/40 bg-amber-600/10 text-amber-700 dark:text-amber-300',
+          )}
+        >
+          <AlertTriangle aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
+          <p>{c.node_certificates?.warning}</p>
+        </div>
       ))}
     </div>
   )
