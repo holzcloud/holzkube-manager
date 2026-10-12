@@ -28,13 +28,13 @@ func recordingSource(t *testing.T) (*httptest.Server, func() []string) {
 		paths []string
 	)
 	mux := http.NewServeMux()
-	mux.HandleFunc("/release/stable-1.33.txt", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/release/stable-1.33.txt", func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = fmt.Fprint(w, "v1.33.7")
 	})
-	mux.HandleFunc("/release/stable-1.34.txt", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/release/stable-1.34.txt", func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = fmt.Fprint(w, "v1.34.2\n")
 	})
-	mux.HandleFunc("/release/latest-1.33.txt", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/release/latest-1.33.txt", func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = fmt.Fprint(w, "v1.33.0-rc.1")
 	})
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -81,7 +81,7 @@ func TestNewestAsksTheStableListAndReturnsThePatchOfTheMinor(t *testing.T) {
 func answer(t *testing.T, status int, body string) (*httptest.Server, *atomic.Int64) {
 	t.Helper()
 	var n atomic.Int64
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		n.Add(1)
 		w.WriteHeader(status)
 		_, _ = fmt.Fprint(w, body)
@@ -156,8 +156,12 @@ func TestNewestRefusesWhatIsNotAStableReleaseOfTheMinor(t *testing.T) {
 func TestNewestRefusesAServerThatDropsTheConnection(t *testing.T) {
 	t.Parallel()
 
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		conn, _, err := w.(http.Hijacker).Hijack()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		hijacker, ok := w.(http.Hijacker)
+		if !ok {
+			return
+		}
+		conn, _, err := hijacker.Hijack()
 		if err != nil {
 			return
 		}

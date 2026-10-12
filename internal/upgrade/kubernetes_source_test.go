@@ -46,7 +46,7 @@ func TestTheRealSourceFeedsTheChain(t *testing.T) {
 func TestTheRealSourceAnsweringNotFoundBlocksThePlan(t *testing.T) {
 	t.Parallel()
 
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/xml")
 		w.WriteHeader(http.StatusNotFound)
 		_, _ = fmt.Fprint(w, `<?xml version='1.0'?><Error><Code>NoSuchKey</Code></Error>`)
