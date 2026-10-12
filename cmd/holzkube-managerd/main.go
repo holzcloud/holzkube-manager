@@ -31,6 +31,7 @@ import (
 	"github.com/holzcloud/holzkube-manager/internal/imagefactory"
 	"github.com/holzcloud/holzkube-manager/internal/inventory"
 	"github.com/holzcloud/holzkube-manager/internal/jobs"
+	"github.com/holzcloud/holzkube-manager/internal/k8srelease"
 	"github.com/holzcloud/holzkube-manager/internal/kube"
 	"github.com/holzcloud/holzkube-manager/internal/machineconfig"
 	"github.com/holzcloud/holzkube-manager/internal/metrics"
@@ -500,6 +501,17 @@ func run(args []string) error {
 		Now: time.Now,
 	})
 
+	// Where the newest patch of each Kubernetes minor on the way is read: the
+	// stable lists on dl.k8s.io, a read, so it runs in --dry-run too. The
+	// address is the package's constant and nothing from the configuration:
+	// there is no flag, no environment variable and no setting for it. Without
+	// an answer a plan with steps on the way is blocked with a sentence; the
+	// first release of a minor is never put in its place.
+	k8sReleases, err := k8srelease.New(k8srelease.DefaultBaseURL)
+	if err != nil {
+		return fmt.Errorf("the lookup of Kubernetes releases: %w", err)
+	}
+
 	// The release list comes from the Image Factory, which is also where the
 	// installer images come from -- so the versions offered and the versions
 	// installable are the same set by construction rather than by agreement.
@@ -508,7 +520,7 @@ func run(args []string) error {
 			return nil, errors.New("this instance was started without an Image Factory client")
 		}
 		return factory.Versions(ctx)
-	}).WithSnapshots(upgrade.NewSnapshotStore(
+	}).WithKubernetesReleases(k8sReleases.Newest).WithSnapshots(upgrade.NewSnapshotStore(
 		filepath.Join(cfg.DataDir, backup.UpgradeSnapshotsDirName),
 		upgrade.FileOps{
 			WriteStream: fsstore.WriteStreamAtomic,
