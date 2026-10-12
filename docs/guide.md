@@ -1205,6 +1205,26 @@ each component in a document of its own (`KubeAPIServerConfig`, `KubeletConfig`,
 …), an older one in the v1alpha1 fields, and the change goes where the node
 keeps it.
 
+A target more than one minor away is a chain. Kubernetes does not let the API
+server skip a minor on the way up, so the plan names every minor in between and,
+as its last step, the version you chose. Each step on the way is the **newest
+stable patch** of its minor, never `.0`: the first release of a minor is its
+oldest and least fixed one. The patch comes from
+`https://dl.k8s.io/release/stable-1.N.txt`, one small request for each minor in
+between, all of them at the same time under one short shared deadline. A target
+in the running minor or the next one needs no request at all.
+
+If that source cannot be reached, or answers anything but a stable version of
+the minor that was asked for, the plan is blocked with a sentence saying so, and
+so are confirming and starting it. Nothing is filled in with `.0` instead, and a
+target in the next minor can still be planned. The source has no setting: unlike
+`--image-factory`, there is no option, variable or field to point it somewhere
+else, so a site that cannot reach dl.k8s.io plans single steps only.
+
+The chain is a hint and not a lock. The run installs the version you typed, in
+one run; to follow the chain, type its first step as the target and plan the next
+one afterwards.
+
 This has run against the simulator and a fake Kubernetes API, not yet against a
 real cluster.
 

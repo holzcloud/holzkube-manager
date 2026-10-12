@@ -72,7 +72,10 @@ did.
   the dashboard), Talos upgrades built from Image Factory schematics, one node
   at a time behind an etcd health gate and **never without a fresh etcd
   snapshot taken first**,
-  Kubernetes upgrades in `talosctl upgrade-k8s`'s order,
+  Kubernetes upgrades in `talosctl upgrade-k8s`'s order (a target more than
+  one minor away is shown as a chain through the **newest patch** of every
+  minor in between, looked up on dl.k8s.io, blocked with a sentence when that
+  fails and never guessed as `.0`),
   SecureBoot, disk encryption, etcd snapshots and restore, certificate renewal,
   **certificate expiry inside the cluster** (Talos, etcd and Kubernetes
   authorities and the certificates they issue, read from the control planes and

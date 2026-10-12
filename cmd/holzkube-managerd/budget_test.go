@@ -10,6 +10,7 @@ import (
 	"github.com/holzcloud/holzkube-manager/internal/httpapi"
 	"github.com/holzcloud/holzkube-manager/internal/httpapi/handlers"
 	"github.com/holzcloud/holzkube-manager/internal/imagefactory"
+	"github.com/holzcloud/holzkube-manager/internal/k8srelease"
 	"github.com/holzcloud/holzkube-manager/internal/kube"
 	"github.com/holzcloud/holzkube-manager/internal/talos"
 )
@@ -168,7 +169,23 @@ const (
 	// it is its own constant because behind it is a kubelet, and a powered-off
 	// node is the ordinary state of a homelab rather than an exception.
 	kubeSummaryCall callClass = "kube-summary"
+
+	// The fifth family, added with the newest-patch chain: the Kubernetes release
+	// list on dl.k8s.io, one small file per minor between the cluster and the
+	// target. It is one call in a row however many minors lie between, for the
+	// reason kubeSummaryCall is: they are asked at the same time under ONE shared
+	// deadline, so together they cannot take longer than k8srelease.Budget.
+	kubernetesReleasesCall callClass = "kubernetes-releases"
 )
+
+// kubernetesReleasesLookup is the call the three routes that build a Kubernetes
+// plan make, declared once so they cannot drift apart. It is made only when the
+// target is more than one minor away; a row declares the worst case.
+var kubernetesReleasesLookup = upstreamCall{
+	name: "k8srelease: the newest stable patch of every minor on the way, concurrently under one " +
+		"deadline (only when the target is more than one minor away)",
+	class: kubernetesReleasesCall,
+}
 
 // upstreamCall is one call a route makes in series: what it is, and which
 // budget class governs it.
@@ -204,6 +221,8 @@ func (u upstreamCall) budget() (time.Duration, bool) {
 		return kube.ExecBudget, true
 	case kubeSummaryCall:
 		return kube.SummaryBudget, true
+	case kubernetesReleasesCall:
+		return k8srelease.Budget, true
 	default:
 		return 0, false
 	}
@@ -683,6 +702,7 @@ var routeBudgets = slices.Concat([]routeBudget{
 	{
 		route: "POST /api/v1/clusters/{id}/upgrade/kubernetes/plan",
 		calls: []upstreamCall{
+			kubernetesReleasesLookup,
 			{name: "gate: NewClusterClient Version (per control-plane node)", class: nodeProbeCall},
 			{name: "gate: EtcdStatus", class: nodeFastReadCall},
 			{name: "gate: EtcdMemberList", class: nodeFastReadCall},
@@ -693,8 +713,10 @@ var routeBudgets = slices.Concat([]routeBudget{
 		clipping:      uncut,
 		why: "Shorter than the Talos plan by exactly the reads that do not apply: a Kubernetes " +
 			"upgrade writes no installer image, so there is no schematic to read off each node. " +
-			"What is left is the health gate and the versions already in the store. It shares " +
-			"the Talos plan's ceiling because it is the same screen.",
+			"What is left is the health gate and the versions already in the store, and, when the " +
+			"target is more than one minor away, the lookup of the newest patch of every minor " +
+			"on the way -- concurrently, under one deadline, so it is one call in the row. It " +
+			"shares the Talos plan's ceiling because it is the same screen.",
 	},
 	{
 		route: "POST /api/v1/clusters/{id}/upgrade",
@@ -720,6 +742,7 @@ var routeBudgets = slices.Concat([]routeBudget{
 	{
 		route: "POST /api/v1/clusters/{id}/upgrade/kubernetes",
 		calls: []upstreamCall{
+			kubernetesReleasesLookup,
 			{name: "gate: NewClusterClient Version (per control-plane node)", class: nodeProbeCall},
 			{name: "gate: EtcdStatus", class: nodeFastReadCall},
 			{name: "gate: EtcdMemberList", class: nodeFastReadCall},
@@ -729,11 +752,13 @@ var routeBudgets = slices.Concat([]routeBudget{
 		verdict:       withinBudget,
 		clipping:      uncut,
 		why: "As the Talos submission, against the shorter plan: rebuild, check the " +
-			"confirmation, submit. The rolling apply happens in the job.",
+			"confirmation, submit. The rebuild asks for the newest patch of the minors on the " +
+			"way again, once, under one deadline. The rolling apply happens in the job.",
 	},
 	{
 		route: "POST /api/v1/clusters/{id}/upgrade/confirm",
 		calls: append([]upstreamCall{
+			kubernetesReleasesLookup,
 			{name: "NewClusterClient: Version (per node)", class: nodeProbeCall},
 		}, append(nodeFactsCalls(),
 			upstreamCall{name: "SecurityState (per node -- which installer it needs)", class: nodeFastReadCall},
@@ -748,7 +773,10 @@ var routeBudgets = slices.Concat([]routeBudget{
 		clippingRationale: nodeReadClippingRationale,
 		why: "It builds the same plan the submission will, and that is the point rather than an " +
 			"inefficiency: a token issued against one plan and a run built from another would " +
-			"be a confirmation of something that did not happen.",
+			"be a confirmation of something that did not happen. For a Kubernetes target that " +
+			"is more than one minor away the plan also asks for the newest patch of the minors " +
+			"on the way, once, under one deadline; the sum is declared for the one kind that " +
+			"has both.",
 	},
 	{
 		route: "GET /api/v1/clusters/{id}/etcd/members",
@@ -1922,6 +1950,40 @@ func kubeconfigAttempts(n int) []upstreamCall {
 	return calls
 }
 
+// TestTheKubernetesPlanRoutesDeclareTheReleaseLookup is here because the table
+// is declared by hand and an omitted call changes no sum: a row that left the
+// lookup out still composes, still passes TestEveryRouteThatReachesUpstreamHasABudgetRow
+// (which asks only that the route has a row, not what is in it) and still
+// passes the ratchets. Nothing else would notice. The three routes that build a
+// Kubernetes plan are named here, and each has to carry the call.
+func TestTheKubernetesPlanRoutesDeclareTheReleaseLookup(t *testing.T) {
+	t.Parallel()
+
+	for _, route := range []string{
+		"POST /api/v1/clusters/{id}/upgrade/kubernetes/plan",
+		"POST /api/v1/clusters/{id}/upgrade/kubernetes",
+		"POST /api/v1/clusters/{id}/upgrade/confirm",
+	} {
+		var found bool
+		for _, row := range routeBudgets {
+			if row.route != route {
+				continue
+			}
+			found = true
+			if !slices.ContainsFunc(row.calls, func(c upstreamCall) bool { return c.class == kubernetesReleasesCall }) {
+				t.Errorf("%s builds a Kubernetes plan, which asks dl.k8s.io for the newest patch of "+
+					"every minor on the way, and its row declares no call of the class %q. The table "+
+					"is declared by hand and an omitted call changes no sum, so nothing else "+
+					"notices: add kubernetesReleasesLookup to the row's calls",
+					route, kubernetesReleasesCall)
+			}
+		}
+		if !found {
+			t.Errorf("%s has no row in the budget table", route)
+		}
+	}
+}
+
 // TestRouteBudgetsComposeAgainstWriteTimeout is the assertion itself: for each
 // route, recompute the composition from the constants that actually govern it
 // and check the computed verdicts against the declared ones.
@@ -2048,5 +2110,9 @@ func TestRouteBudgetTableReadsTheRealConstants(t *testing.T) {
 		t.Errorf("imagefactory.ManifestTimeout = %s, and the declarations in this table were "+
 			"computed against 30s. Recheck every row rather than editing this line",
 			imagefactory.ManifestTimeout)
+	}
+	if k8srelease.Budget != 10*time.Second {
+		t.Errorf("k8srelease.Budget = %s, and the three Kubernetes plan rows were computed "+
+			"against 10s. Recheck every row rather than editing this line", k8srelease.Budget)
 	}
 }
