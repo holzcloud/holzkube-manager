@@ -4493,6 +4493,35 @@ A gate that could not be evaluated is a **refusal**, never a blank. A verdict
 with neither `ok` nor a `reason` would be the most important check on the screen
 silently saying nothing.
 
+### The Kubernetes plan: the chain is advice
+
+`POST /api/v1/clusters/{id}/upgrade/kubernetes/plan` takes `to` and answers with
+the plan above. `chain` lists every intermediate minor and, as its last step,
+the version that was asked for. **Each intermediate step is the newest stable
+patch of its minor**, as `https://dl.k8s.io/release/stable-1.N.txt` names it,
+and never the first release of the minor: a cluster sent through `v1.33.0` when
+`v1.33.7` exists is sent through the oldest software that minor has.
+
+A target in the running minor (a patch jump) has an empty chain, and one in the
+next minor has a single step. Neither asks the source, so neither depends on it.
+A target whose chain would have more than sixteen intermediate minors is
+refused before anything is asked.
+
+When the newest patch cannot be determined (the source is unreachable, is not
+configured, or answers something that is not a stable release of the minor
+asked about) the plan is `blocked`. `block_reason` says in one sentence that
+the newest patch could not be determined and why, `chain` is empty, and both
+`POST /api/v1/clusters/{id}/upgrade/confirm` and
+`POST /api/v1/clusters/{id}/upgrade/kubernetes` answer 409
+`conflict.upgrade-blocked` with that same sentence. Nothing is filled in with
+the oldest version of a minor, neither silently nor with a note: a step shown
+to an operator is a step somebody checked.
+
+And the honest limit: **the chain is advice, not a lock.** The job installs the
+`to` that was sent, in one run, and no route refuses a target that is several
+minors away as long as the source answers. Whoever wants to follow the chain
+sends its first step as `to` and plans the next one afterwards.
+
 ### The gate shows its inputs, whether it passes or refuses
 
 `gate_preview.input` carries the membership, the voting count, each member's
