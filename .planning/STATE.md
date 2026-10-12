@@ -48,8 +48,8 @@ Progress: [█████░░░░░] 50%
   (Zertifikatsablauf im Cluster), gebaut und verifiziert von CI.
 - **Entscheidungen des Betreibers (Stand 2026-10-12):** Export-Ziel für Backups,
   Alerting-Kanal, Cloud-Provider, SAML. Router: Port 8443 im Internet erreichbar? (`AUDIT-2026-10-08.md`)
-- **Branch `claude/sponsor-button`** (ein Commit, FUNDING.yml und Badge) ist nicht
-  gemergt; fünf Dependabot-Branches für GitHub Actions sind offen.
+- **Branch `claude/sponsor-button`** ist überholt (FUNDING.yml und Badge stehen
+  schon auf main) und kann gelöscht werden. Die Dependabot-Bumps sind in main.
 
 - **Release-Blocker OPS-05** (Ledger 87) plus 82, 84, 85: ein Durchlauf auf
   echter amd64-Hardware.
@@ -181,6 +181,7 @@ Siehe `PROJECT.md`, die `MILESTONE-*.md`-Dateien und für v1.18 den Abschnitt
 |---|-------------|------|--------|-----------|
 | 261001-sa9 | Unlink single sign-on (admin, sudo, audit); person accounts only for SSO linking; SSO-only pre-check removed; review fixes CR-01, WR-01..07 | 2026-10-01 | 05f1279 | [261001-sa9-unlink-single-sign-on](./quick/261001-sa9-unlink-single-sign-on/) |
 | 261012-hs1 | Zertifikatsablauf im Cluster (Talos/etcd/Kubernetes), Karte, Banner, Wand, /metrics — retroaktiv nachgetragen, Release v0.6.0 | 2026-10-12 | 22af6c9 | [261012-hs1-nachtrag-zertifikatsablauf-im-cluster-v0](./quick/261012-hs1-nachtrag-zertifikatsablauf-im-cluster-v0/) |
+| 261012-hxm | Dependabot: fünf Actions-Bumps gebündelt, CI-Gate grün, nach main | 2026-10-12 | 064f48d | [261012-hxm-dependabot-fuenf-actions-bumps-gebuendel](./quick/261012-hxm-dependabot-fuenf-actions-bumps-gebuendel/) |
 
 ## Session Continuity
 
