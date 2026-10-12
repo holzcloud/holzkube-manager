@@ -1,5 +1,19 @@
 [
   {
+    "version": "v0.6.0",
+    "date": "2026-10-12",
+    "changes": [
+      {
+        "icon": "📅",
+        "text": "Certificate expiry inside the cluster. Until now only the certificate this manager holds itself was counted down; the ones inside the cluster ran out unseen. The cluster card now lists, under Cluster certificates, the Talos API, etcd and Kubernetes certificates and their authorities, read from every control-plane node a minute after start and then every six hours, soonest first. An authority is never renewed by Talos, so it climbs the same ladder as the admin certificate (badge at 90 days, banner on every page at 30, red at 7). A certificate Talos issues is renewed by Talos long before it runs out, so being close at all means a stuck rotation: banner at 14 days, red at 3. Until the first read the card says \"not read yet\", never \"fine\"; a control plane that does not answer keeps its last reading and the card says how many answered. The wall shows one line, only from the banner rung down, naming the certificate's role and its days and no machine, and /metrics carries holzkube_node_certificate_seconds (negative once expired). Talos keeps these certificates beside their private keys; only the name and the dates are kept here, never a key. Run against the simulator only, not yet against a real cluster."
+      },
+      {
+        "icon": "🗂️",
+        "text": "Planning notes brought up to date and the 2026 interface mockup added to the repository (docs/mockups). Nothing changes in the running program."
+      }
+    ]
+  },
+  {
     "version": "v0.5.0",
     "date": "2026-10-09",
     "changes": [
