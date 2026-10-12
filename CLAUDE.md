@@ -31,11 +31,23 @@ messages. Use documentation values (192.168.1.10, homeserver, example.com)
 instead. That also holds when the value is what the journal or a screenshot
 showed.
 
-This happened once already: the identifiers were removed before the repository
-went public on 2026-09-03, came back through sessions working against the real
-cluster, and on 2026-09-26 had to be cut out of the whole history, with every
-tag moved. `internal/publicrepo` now fails the gate on the known values; it
-lists them as hashes, so a new one gets added there as a hash too.
+This happened twice already: the identifiers were removed before the repository
+went public on 2026-09-03 and came back through sessions working against the
+real cluster. On 2026-09-26 they were taken out of the tree -- a normal commit,
+which left them in the history of main, 26 commits deep, until 2026-10-03,
+when the history was rewritten for real (every commit id and every tag
+changed). `internal/publicrepo` fails the gate on the known values, in the
+tree *and* in every commit message and touched line of the history; it lists
+them as hashes, so a new one gets added there as a hash too.
+
+Removing a value in a later commit does nothing for a public repository. If a
+real value is about to be committed, amend the commit before it is pushed.
+The values the guard does not know yet are the danger: a real node address sat
+as a form placeholder in every release until 2026-10-03 because nobody had
+hashed it. When a session sees a value of the real installation anywhere --
+journal, screenshot, cluster -- it hashes it into the guard at once. GitHub
+keeps the old commits reachable through the merged pull request #1
+(`refs/pull/1/head`) until its support removes them.
 
 ## A feature is not done until the README says so; a release is not done without its changelog
 
