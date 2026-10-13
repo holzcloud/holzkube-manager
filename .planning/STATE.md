@@ -20,7 +20,7 @@ progress:
 
 # Project State
 
-Stand 2026-10-12 (letztes Release **v0.6.0**, 2026-10-12). Die Phasen 11–14
+Stand 2026-10-13 (letztes Release **v0.7.0**, 2026-10-12). Die Phasen 11–14
 von v1.18 sind gebaut und warten auf Handproben; seit 2026-10-03 lief die Arbeit
 ohne GSD-Phasen (Redesign, Audit, Backups), siehe `MILESTONES.md`. Der vorige Bericht (Abschluss v1.15, Übergabe 2026-09-17)
 liegt unverändert in `milestones/STATE-2026-09-17.md`.
@@ -44,8 +44,13 @@ Progress: [█████░░░░░] 50%
 
 - **Entschieden 2026-10-12:** Release-Signatur — **vorerst keine**; es bleibt bei
   SHA-256 aus demselben Release (Risiko und Optionen: `AUDIT-2026-10-08.md`,
-  minisign wäre die Empfehlung gewesen). Letztes Release: **v0.6.0**
-  (Zertifikatsablauf im Cluster), gebaut und verifiziert von CI.
+  minisign wäre die Empfehlung gewesen). Letztes Release: **v0.7.0**
+  (Kubernetes-Kette mit neuestem Patch, korrigierte compat-Matrix), Gate und
+  Release-Verifikation von CI grün.
+- **Phase 16 `human_needed` (Stand 2026-10-13):** von Hand
+  `curl https://dl.k8s.io/release/stable-1.35.txt` (eine Zeile `v1.35.PATCH`) und
+  eine echte Kettenplanung gegen den Cluster (Ledger 175). Phase 15
+  (Drift-Erkennung) ist angelegt, noch nicht geplant.
 - **Entscheidungen des Betreibers (Stand 2026-10-12):** Export-Ziel für Backups,
   Alerting-Kanal, Cloud-Provider, SAML. Router: Port 8443 im Internet erreichbar? (`AUDIT-2026-10-08.md`)
 - **Branch `claude/sponsor-button`** ist überholt (FUNDING.yml und Badge stehen

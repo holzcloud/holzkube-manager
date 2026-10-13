@@ -98,3 +98,20 @@ Aufbewahrung, Download und Überfällig-Markierung (v0.5.0, 2026-10-09).
   des Betreibers.
 - Release-Signatur (Empfehlung minisign) und Alerting-Kanal: offen, siehe Audit.
 - Nicht gelaufen am 2026-10-08: `./bin/task ci`, Browser- und Layout-Tests.
+
+## Ohne Milestone-Datei (2026-10-12) → Releases v0.6.0 und v0.7.0
+
+Direkt auf Anweisung gebaut: Zertifikatsablauf im Cluster (v0.6.0, Quick-Task
+261012-hs1, nachträglich erfasst) und die Kubernetes-Upgradekette mit dem neuesten
+Patch je Minor (Phase 16, Anforderung K8S-01, v0.7.0), dazu die korrigierte
+compat-Matrix für Talos 1.12 bis 1.14 (Quick-Task 261012-l9s) und die fünf
+gebündelten Dependabot-Bumps (261012-hxm).
+
+### Known Gaps
+
+- **Phase 16 `human_needed`:** das Format von `dl.k8s.io/release/stable-1.N.txt`
+  ist einmal gemessen und hat keine Live-Prüfung (Ledger 175); ein echter Cluster
+  hat noch keinen Zwischenpatch daraus angenommen. Die Kette bleibt ein Hinweis,
+  nicht erzwungen (Ledger 174).
+- Zertifikatsablauf nie gegen einen echten Talos-Cluster gelaufen.
+- Matrixzeilen für Talos 1.7 bis 1.11 nicht nachgeprüft.
