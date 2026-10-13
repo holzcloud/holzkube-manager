@@ -18,116 +18,60 @@
   <a href="https://github.com/holzcloud/holzkube-manager/releases">Releases</a>
 </p>
 
-**holzkube-manager** is a self-hosted web interface for clusters running
-[Talos Linux](https://www.talos.dev) and the Kubernetes on top of them. It is
-**one Go binary with the interface compiled in**, and it runs *beside* the
-cluster rather than in it — a Raspberry Pi on the same network is enough. It
-speaks the Talos machine API and the Kubernetes API directly and reads what it
-shows live from the cluster, so a screen never says more than the cluster just
-did.
+**holzkube-manager** is a self-hosted web interface for
+[Talos Linux](https://www.talos.dev) and the Kubernetes clusters on top of it,
+and a lightweight alternative to Sidero Omni for a homelab or a small site. It
+is a single Go binary with the interface compiled in. It runs beside the
+cluster, not in it, so a Raspberry Pi on the same network is enough. It talks to
+the Talos machine API and the Kubernetes API directly and shows what the cluster
+just said, nothing cached or guessed.
 
 > [!WARNING]
-> **holzkube-manager is alpha software under heavy development.** Any release
-> can change or remove features, the API and the data directory's format, and
-> an update can break things. Keep a backup of the data directory (see the
+> **Alpha software under heavy development.** Any release can change or remove
+> features, the API and the data directory format, and an update can break
+> things. Back up the data directory (see the
 > [guide](docs/guide.md#backups)) and read the release notes before updating.
 
-![Live hardware of a node over the last 24 hours](docs/screenshots/node-hardware.png)
+![The holzkube-manager dashboard: clusters, nodes, and the state of the instance](docs/screenshots/dashboard.png)
 
 ## What it does
 
-- **Clusters and nodes** — adopt an existing Talos cluster from its
-  talosconfig or provision a new one; nodes that join or leave are followed
-  from the cluster's own membership
-- **Live hardware per node** — load per core, temperatures, fans, memory,
-  disks and network, with the last 24 hours kept across restarts
-- **The machine it runs on** — the Host page: what the device is, which
-  version runs and what the last update check found, and live CPU, memory,
-  filesystems, temperatures and network throughput, with 24 hours of history
-  kept across restarts and shown over 1 h, 6 h or 24 h like a node's; a warning
-  when a temperature or a filesystem crosses its threshold, naming the value and
-  the threshold; its state (healthy, warning, not readable) in the navigation
-  and as a tile on the wall; a value the service's hardening hides says so
-  instead of showing 0; and from the same page restart the service, restart or
-  shut down the machine, check for an update without installing anything, or
-  check and install it — carried out by a small root-owned helper the operator
-  installs from `deploy/`, while the service itself never gets root
-- **Updates itself** — every hour a timer looks for a newer release, installs
-  it, checks that the service answers and goes back to the previous version if
-  it does not; the update script and its two systemd units ship, sandboxed, in
-  `deploy/` of every release archive (`holzkube-manager-update.service` and
-  `holzkube-manager-update.timer`), and the Host page shows what the last run
-  found, and says so when no timer is there to run it. It updates the daemon
-  run as the guide's `holzkube-manager.service` (also in `deploy/`), and on a
-  machine laid out otherwise refuses and says why rather than install a
-  binary nobody runs
-- **Apps** — everything that runs, grouped by what was installed, with its CPU
-  and memory now and over the day
-- **Kubernetes** — workloads, pods and why one is broken, events, storage,
-  networking, quotas, who may do what, cordon and drain, apply a manifest, run a
-  command in a container
-- **Power** — stop, start, restart or force it, for a whole cluster, one node or
-  one app; Wake-on-LAN brings a node back
-- **Lifecycle** — a button that asks whether a newer Talos exists (and a hint on
-  the dashboard), Talos upgrades built from Image Factory schematics, one node
-  at a time behind an etcd health gate and **never without a fresh etcd
-  snapshot taken first**,
-  Kubernetes upgrades in `talosctl upgrade-k8s`'s order (a target more than
-  one minor away is shown as a chain through the **newest patch** of every
-  minor in between, looked up on dl.k8s.io, blocked with a sentence when that
-  fails and never guessed as `.0`),
-  SecureBoot, disk encryption, etcd snapshots and restore, certificate renewal,
-  **certificate expiry inside the cluster** (Talos, etcd and Kubernetes
-  authorities and the certificates they issue, read from the control planes and
-  warned about on the cluster card, in the banner, on the wall and in `/metrics`),
-  and **scheduled etcd snapshots** (every 6 hours, daily or weekly, kept on the
-  manager's own device, with a download, a checksum and an "overdue" warning --
-  copy the ones that matter off the box)
-- **A wall** — one page for a screen in the office that answers "is everything
-  fine?" without anybody touching it
-- **Safe by default** — a local account and single sign-on (OIDC) that an admin
-  can unlink to move to another provider, roles, re-authentication before
-  anything destructive, a hash-chained audit log, and a `--dry-run` mode that
-  refuses every change at the wire
-- **Around it** — `holzkubectl` on the command line, Prometheus `/metrics`, a
-  support bundle, and an interface that works on a phone and sits on its home
-  screen like an app
+- **Cluster management:** adopt an existing Talos cluster from its talosconfig
+  or provision a new one, and follow nodes as they join or leave.
+- **Live node hardware:** load per core, temperatures, fans, memory, disks and
+  network, with 24 hours of history kept across restarts.
+- **Kubernetes:** workloads, pods and why one is broken, events, storage,
+  networking, cordon and drain, apply a manifest, run a command in a container.
+- **Upgrades:** Talos upgrades built from Image Factory schematics, one node at
+  a time behind an etcd health gate, and never without a fresh etcd snapshot.
+  Kubernetes upgrades follow the order of `talosctl upgrade-k8s`.
+- **etcd backup and restore:** snapshots on a schedule (every 6 hours, daily or
+  weekly), with download, checksum and an "overdue" warning.
+- **Certificates and security:** certificate expiry read from the cluster and
+  warned about, SecureBoot and disk encryption, local account plus OIDC single
+  sign-on, roles, re-authentication before destructive actions, a hash-chained
+  audit log, and a `--dry-run` mode that refuses every change.
+- **Power:** stop, start or restart a cluster, a node or an app; Wake-on-LAN
+  brings a node back.
+- **The host itself:** a Host page for the machine it runs on, with live CPU,
+  memory, disks and temperatures, and a self-update that rolls back if the
+  service does not answer afterwards.
+- **Around it:** a wall view for an office screen, a phone-friendly interface,
+  Prometheus `/metrics`, a support bundle and the `holzkubectl` command line.
 
 ## A look around
 
+![The wall: every node and workload as a tile, never scrolls, always shows how old its data is](docs/screenshots/wall.png)
+
+![The clusters page with nodes, their condition and certificates](docs/screenshots/clusters.png)
+
 ![The dashboard on a desk and on a phone](docs/screenshots/showcase.png)
 
-**Dashboard.** The fleet at a glance: the clusters, the machines and how many
-are down, and the instance's own state including the audit chain, with the
-machines, the clusters and the latest audit records laid out below. On a desk
-the full navigation stands beside it; on a tablet it folds to an icon rail.
-
-**Clusters.** Each cluster with its nodes, their condition and its
-certificate, and everything you do to a cluster in one place.
-
-![Clusters](docs/screenshots/clusters.png)
-
-**One node.** Its processor, memory, disks and temperatures, live and over the
-last day, with the node's actions in the header.
-
-![One node, with its hardware over the last 24 hours](docs/screenshots/node-hardware.png)
-
-**The wall.** Every node and workload as a tile -- the machine holzkube-manager
-runs on first among them -- how full the cluster is and the latest warnings. It
-never scrolls, and it always says how old its answer is.
-
-![The wall](docs/screenshots/wall.png)
-
-**On a phone.** The five main areas are a tab bar under your thumb, the rest is
-behind the menu, and every control is at least 44px: the build fails otherwise.
-
-![The dashboard, a node and Kubernetes on a phone](docs/screenshots/phone.png)
-
-## Quick start
+## Install
 
 Download the `linux_arm64` archive from the
-[newest release](https://github.com/holzcloud/holzkube-manager/releases) --
-releases are built for the Raspberry Pi 5 only for now -- then:
+[newest release](https://github.com/holzcloud/holzkube-manager/releases)
+(builds are for the Raspberry Pi 5 only for now), then:
 
 ```sh
 tar xzf holzkube-manager_*_linux_arm64.tar.gz
@@ -135,37 +79,20 @@ tar xzf holzkube-manager_*_linux_arm64.tar.gz
 ```
 
 Open `https://<host>:8443` and create the first account in the browser. The
-certificate is self-signed; compare the fingerprint your browser shows with the
-`sha256_fingerprint` line in the log before accepting it.
-
-To keep it running, install it as a service from the same archive, as the
-guide's [Running it as a service](docs/guide.md#running-it-as-a-service)
-shows; to keep it up to date as well, add the update script and its hourly
-timer from [Updating itself every hour](docs/guide.md#updating-itself-every-hour).
-The hourly update needs the service: it replaces
-`/usr/local/bin/holzkube-managerd` and restarts `holzkube-manager.service`.
-
-Prefer a container? `docker compose up -d --build` in a checkout builds the
-image from the [`compose.yaml`](compose.yaml) in this repository. To build from source you
-need Go 1.26 and Node:
-
-```sh
-task build    # web first, then Go: bin/holzkube-managerd and bin/holzkubectl
-```
-
-Configuration, single sign-on, backups, upgrades, the systemd unit and
-everything else is in the **[guide](docs/guide.md)**.
+certificate is self-signed; compare the fingerprint in your browser with the
+`sha256_fingerprint` line in the log before accepting it. To run it as a service
+with hourly updates, a container, or from source (Go 1.26 and Node, `task
+build`), follow the [guide](docs/guide.md).
 
 ## Documentation
 
-- [Guide](docs/guide.md) — building, running, configuring and operating
-- [API contract](docs/api-contract.md) — routes, errors, CSRF and the audit query
-- [talossim](docs/talossim.md) — the in-process Talos node the tests run against
+- [Guide](docs/guide.md): building, running, configuring and operating
+- [API contract](docs/api-contract.md): routes, errors, CSRF and the audit query
+- [talossim](docs/talossim.md): the in-process Talos node the tests run against
 - [Contributing](CONTRIBUTING.md) and [security](SECURITY.md)
 
 ## Licence
 
-holzkube-manager is free software under the
-[GNU Affero General Public License v3](LICENSE). Running it on your own cluster
-obliges you to nothing; if you offer a modified version to other people over a
-network, they are entitled to your changes.
+Free software under the [GNU Affero General Public License v3](LICENSE) (AGPL-3.0).
+Running it on your own cluster obliges you to nothing; if you offer a modified
+version to other people over a network, they are entitled to your changes.
