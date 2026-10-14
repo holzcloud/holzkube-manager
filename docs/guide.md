@@ -166,7 +166,10 @@ service does not stay healthy, it goes back to the previous binary and records
 again until a newer release is published (`--force` installs it anyway).
 `holzkube-manager-update --rollback` does the same by hand, takes the same lock
 as the other runs and records **rolled-back**; the version it leaves is
-remembered as well. When the update replaces its own script it first checks the
+remembered as well. A rollback replaces the binary and
+not the data directory: after a release that raised the directory's schema, a
+rolled-back binary will not start, and [Schema 7 and going
+back](#schema-7-and-going-back) says what to do then. When the update replaces its own script it first checks the
 new one with `bash -n` and keeps the old one as
 `/usr/local/sbin/holzkube-manager-update.previous`. What happened is recorded in
 `/var/lib/holzkube-manager-update/status.json`, and the Host page's **Update
@@ -846,6 +849,7 @@ cluster-secrets/       each cluster's PKI, separate from the cluster record
 machines/              the node inventory, flat and keyed by UUID
 jobs/                  long-running operations, so a restart resumes them
 patches/               reusable configuration patches, versioned
+config-baselines/      per node, the last configuration seen, redacted (drift detection)
 bootstrap/             the etcd bootstrap lease and its intent records
 backups/               tarballs, from a migration or from `backup`
 upgrade-snapshots/     the etcd snapshots: before an upgrade and scheduled (not in backups)
@@ -894,6 +898,33 @@ valid tar entry.
 
 A backup contains every secret in the data directory verbatim. It is `0600`
 inside the `0700` directory; copying it somewhere else copies those secrets.
+
+### Schema 7 and going back
+
+The version that brings drift detection raises the schema of the data directory
+from 6 to 7 and creates `config-baselines/`: one file per node, the last
+configuration the daemon read from it, redacted the way the Config view is. The
+migration runs on the first start of that version. Before it changes anything
+it takes a backup, `backups/pre-migration-6-to-7-<time>.tar.gz`, and it puts
+nothing into the new directory: a baseline exists only because a node was read.
+
+A binary from before that version refuses the directory afterwards and does not
+start (`migrate: data directory is newer than this binary`), because an older
+binary that carried on would rewrite records whose shape it does not know. That
+matters for the hourly update, which -- as described under
+[Updating itself every hour](#updating-itself-every-hour) -- goes back to the
+previous *binary* when the service does not come back healthy, and not to a
+previous directory. A rollback after the new version has started once therefore
+leaves a service that does not start, because the old binary meets a version 7
+directory. There are two ways out:
+
+- install the new binary again, which is the way forward; or
+- go back to the old one for real: with the old binary, run
+  `holzkube-managerd restore <data-dir>/backups/pre-migration-6-to-7-<time>.tar.gz`.
+  That puts the directory back to the version 6 state of the moment before the
+  migration, so whatever was changed since is gone, and it takes a backup of what
+  is there first, as every restore does. The `config-baselines/` directory stays
+  where it is; a binary that does not know it leaves it alone.
 
 ### In a container
 
