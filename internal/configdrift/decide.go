@@ -204,6 +204,18 @@ func (s *Service) unreadable(ctx context.Context, cluster model.ClusterID, m mod
 // machine and the state and never an error text or configuration content.
 func (s *Service) set(cluster model.ClusterID, m model.Machine, r *reading) {
 	s.mu.Lock()
+	changed := s.put(m, r)
+	s.mu.Unlock()
+
+	if changed {
+		s.deps.Log("configuration drift: state of a node changed",
+			"cluster", string(cluster), "node", m.Hostname, "machine", string(m.ID), "state", string(r.state))
+	}
+}
+
+// put stores a reading and reports whether the state is another one than the
+// last that was logged. The caller holds mu.
+func (s *Service) put(m model.Machine, r *reading) bool {
 	s.readings[m.ID] = r
 	prev, seen := s.logged[m.ID]
 	if !seen {
@@ -215,10 +227,5 @@ func (s *Service) set(cluster model.ClusterID, m model.Machine, r *reading) {
 	} else {
 		s.logged[m.ID] = r.state
 	}
-	s.mu.Unlock()
-
-	if changed {
-		s.deps.Log("configuration drift: state of a node changed",
-			"cluster", string(cluster), "node", m.Hostname, "machine", string(m.ID), "state", string(r.state))
-	}
+	return changed
 }
