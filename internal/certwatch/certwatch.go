@@ -93,6 +93,11 @@ func Sentence(cluster string, c model.NodeCertificate) string {
 	}
 }
 
+// DefaultReadBudget bounds one node's connection and read. A control plane that
+// is down must not hold up the pass for the others, and a few small resources
+// are a fast read.
+const DefaultReadBudget = 20 * time.Second
+
 // Deps is what the service needs from the rest of the program.
 type Deps struct {
 	Clusters      func(ctx context.Context) ([]model.Cluster, error)
@@ -103,6 +108,14 @@ type Deps struct {
 
 	// Every is the period between passes. Zero means six hours.
 	Every time.Duration
+
+	// ReadBudget is how long one node may take to answer, connection and read
+	// together. Zero means DefaultReadBudget. It is a deadline put on the
+	// context handed to Read, because the Talos client refuses a call that
+	// carries none (internal/talos/deadline.go) and the context Run is started
+	// with has none: in v0.6.0 and v0.7.0 that refusal was the reason nothing was
+	// ever read.
+	ReadBudget time.Duration
 
 	// Now defaults to time.Now.
 	Now func() time.Time
@@ -129,6 +142,9 @@ type Service struct {
 func New(d Deps) *Service {
 	if d.Every == 0 {
 		d.Every = 6 * time.Hour
+	}
+	if d.ReadBudget == 0 {
+		d.ReadBudget = DefaultReadBudget
 	}
 	if d.Now == nil {
 		d.Now = time.Now
@@ -189,7 +205,9 @@ func (s *Service) Refresh(ctx context.Context, id model.ClusterID) {
 
 	next := reading{at: s.deps.Now(), controlPlane: len(machines)}
 	for _, m := range machines {
-		certs, err := s.deps.Read(ctx, m.ID)
+		readCtx, cancel := context.WithTimeout(ctx, s.deps.ReadBudget)
+		certs, err := s.deps.Read(readCtx, m.ID)
+		cancel()
 		if err != nil {
 			s.deps.Log("certificate watch: read a node", "cluster", string(id), "node", m.Hostname, "err", err)
 			for _, old := range previous.items {
