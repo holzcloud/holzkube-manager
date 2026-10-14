@@ -31,7 +31,7 @@ const (
 	StateOK State = "ok"
 
 	// StateSettling means an apply from this daemon is on its way and has not landed
-	// yet, so a difference is expected for a while. Plan 04 sets it.
+	// yet, so a difference is expected for a while. Plan 05 sets it.
 	StateSettling State = "settling"
 
 	// StateDrift means the node's configuration differs from the baseline and

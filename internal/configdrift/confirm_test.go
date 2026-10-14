@@ -339,7 +339,7 @@ func TestConfirmRefusesWhenThereIsNothingToConfirm(t *testing.T) {
 		state configdrift.State
 		setup func(t *testing.T, d *drifting)
 	}{
-		{"ok", configdrift.StateOK, func(t *testing.T, d *drifting) {
+		{"ok", configdrift.StateOK, func(_ *testing.T, d *drifting) {
 			d.fake.set(d.before, nil)
 			d.svc.Tick(context.Background())
 		}},

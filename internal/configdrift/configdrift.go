@@ -46,9 +46,13 @@ const (
 	DefaultReadBudget = 20 * time.Second
 
 	// DefaultSettleWindow is how long a difference after an apply from this
-	// daemon is expected before it counts as drift. Plan 04 uses it.
+	// daemon is expected before it counts as drift. Plan 05 uses it.
 	DefaultSettleWindow = 15 * time.Minute
 )
+
+// pokeBuffer is how many pokes wait for a read. A poke beyond it is dropped: the
+// next pass reads the node anyway.
+const pokeBuffer = 64
 
 // Deps is what the service needs from the rest of the program.
 type Deps struct {
@@ -128,6 +132,9 @@ type Service struct {
 	passes   map[model.ClusterID]pass
 	logged   map[model.MachineID]State
 
+	// pokes carries the nodes that were asked for out of turn.
+	pokes chan model.MachineID
+
 	// storeMu serialises read-modify-write of one baseline. The store refuses a
 	// stale write by itself; this keeps two passes of the service from reaching
 	// it at the same time at all.
@@ -156,10 +163,15 @@ func New(d Deps) *Service {
 		readings: map[model.MachineID]*reading{},
 		passes:   map[model.ClusterID]pass{},
 		logged:   map[model.MachineID]State{},
+		pokes:    make(chan model.MachineID, pokeBuffer),
 	}
 }
 
-// Run reads once shortly after start and then every period until ctx ends.
+// Run reads once shortly after start and then every period until ctx ends. A
+// node that was poked is read without waiting for the next period.
+//
+// ctx is the daemon's, with no deadline of its own; every read gets its budget
+// from readNode.
 func (s *Service) Run(ctx context.Context, firstAfter time.Duration) {
 	timer := time.NewTimer(firstAfter)
 	defer timer.Stop()
@@ -169,18 +181,26 @@ func (s *Service) Run(ctx context.Context, firstAfter time.Duration) {
 			return
 		case <-timer.C:
 			s.Tick(ctx)
+			s.Flush(ctx)
 			timer.Reset(s.deps.Every)
+		case id := <-s.pokes:
+			s.flush(ctx, []model.MachineID{id})
 		}
 	}
 }
 
-// Tick makes one pass over every cluster that is not switched off.
+// Tick clears up after machines that are gone, then makes one pass over every
+// cluster that is not switched off.
 //
 // A cluster with Disabled set is skipped: its nodes are off on purpose, and a
 // read would cost each of them up to the probe's deadline and say nothing. Its
 // last reading stays with its age, and a cluster never read says "not read
 // yet".
 func (s *Service) Tick(ctx context.Context) {
+	// First, so that a node that changed its cluster is not compared with the
+	// baseline it had in the cluster it left.
+	s.reconcile(ctx)
+
 	clusters, err := s.deps.Clusters(ctx)
 	if err != nil {
 		s.deps.Log("configuration drift: list the clusters", "err", err)

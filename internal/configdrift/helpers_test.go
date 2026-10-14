@@ -147,6 +147,7 @@ type serviceOpts struct {
 	// The lists the service is given, for the tests that change them under it.
 	allMachines func(context.Context) ([]model.Machine, error)
 	machines    func(context.Context, model.ClusterID) ([]model.Machine, error)
+	clusters    func(context.Context) ([]model.Cluster, error)
 }
 
 type serviceOpt func(*serviceOpts)
@@ -166,11 +167,6 @@ func withMachine(m model.Machine) serviceOpt { return func(o *serviceOpts) { o.m
 // withAllMachines replaces the list of every machine (inventory.AllMachines).
 func withAllMachines(f func(context.Context) ([]model.Machine, error)) serviceOpt {
 	return func(o *serviceOpts) { o.allMachines = f }
-}
-
-// withMachines replaces the list of one cluster's machines.
-func withMachines(f func(context.Context, model.ClusterID) ([]model.Machine, error)) serviceOpt {
-	return func(o *serviceOpts) { o.machines = f }
 }
 
 // service builds the configdrift service over the node: the real reader unless
@@ -202,6 +198,9 @@ func (n *node) service(t *testing.T, opts ...serviceOpt) *configdrift.Service {
 	}
 	if o.machines != nil {
 		d.Machines = o.machines
+	}
+	if o.clusters != nil {
+		d.Clusters = o.clusters
 	}
 	if o.clock != nil {
 		d.Now = o.clock.Now
@@ -284,6 +283,7 @@ type fakeReader struct {
 	calls     int
 	hadLimit  bool
 	remaining time.Duration
+	ids       []model.MachineID
 }
 
 func (f *fakeReader) set(snap machineconfig.Snap, err error) {
@@ -292,10 +292,32 @@ func (f *fakeReader) set(snap machineconfig.Snap, err error) {
 	f.snap, f.err = snap, err
 }
 
-func (f *fakeReader) Read(ctx context.Context, _ model.MachineID) (machineconfig.Snap, error) {
+// count is how often Read was called; safe while a Run is going.
+func (f *fakeReader) count() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.calls
+}
+
+// limit is what the last call's context said about a deadline.
+func (f *fakeReader) limit() (bool, time.Duration) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.hadLimit, f.remaining
+}
+
+// read lists the machines Read was called for, in order.
+func (f *fakeReader) read() []model.MachineID {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]model.MachineID(nil), f.ids...)
+}
+
+func (f *fakeReader) Read(ctx context.Context, id model.MachineID) (machineconfig.Snap, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.calls++
+	f.ids = append(f.ids, id)
 	d, ok := ctx.Deadline()
 	f.hadLimit = ok
 	f.remaining = time.Until(d)

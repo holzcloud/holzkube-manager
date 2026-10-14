@@ -180,3 +180,144 @@ func (s *Service) markConfirmed(m model.Machine, cluster model.ClusterID, senten
 			"cluster", string(cluster), "node", m.Hostname, "machine", string(m.ID), "state", string(next.state))
 	}
 }
+
+// Forget drops what is held about one machine: the baseline file and the
+// reading in memory. Whatever of the two is not there is not an error. The next
+// reading lays a new baseline out of what the node says then.
+//
+// It is also the way out of a baseline that is damaged, which nothing else
+// repairs.
+func (s *Service) Forget(ctx context.Context, id model.MachineID) {
+	s.storeMu.Lock()
+	err := s.deps.Baselines.Delete(ctx, id)
+	s.storeMu.Unlock()
+	if err != nil && !errors.Is(err, store.ErrNotFound) {
+		s.deps.Log("configuration drift: forget a baseline", "machine", string(id), "err", err)
+	}
+
+	s.mu.Lock()
+	delete(s.readings, id)
+	delete(s.logged, id)
+	s.mu.Unlock()
+}
+
+// reconcile clears up after machines that are gone and machines that moved, at
+// the start of every pass: a baseline whose machine is not in the inventory any
+// more, or whose cluster is not the machine's cluster now, is removed.
+//
+// It runs in the pass and not as a hook in ForgetMachine and ForgetCluster
+// because those two do not always delete a machine (a forgotten cluster only
+// releases its machines), and a pass also covers a machine that was moved by
+// hand and a data directory restored from a backup, with one rule.
+//
+// It deletes only when it knows both lists. "The machines could not be listed"
+// is not "there are none", and "the baselines could not be listed" -- which is
+// what one damaged file does to the store's List, with the part read until then
+// still in hand -- is not a list to delete by. In either case nothing goes and
+// a line says why; the damaged file stops the clearing up until it is removed.
+func (s *Service) reconcile(ctx context.Context) {
+	machines, err := s.deps.AllMachines(ctx)
+	if err != nil {
+		s.deps.Log("configuration drift: the machines could not be listed, nothing is cleared up", "err", err)
+		return
+	}
+
+	s.storeMu.Lock()
+	defer s.storeMu.Unlock()
+
+	bases, err := s.deps.Baselines.List(ctx)
+	if err != nil {
+		s.deps.Log("configuration drift: the baselines could not be listed, nothing is cleared up", "err", err)
+		return
+	}
+
+	cluster := make(map[model.MachineID]model.ClusterID, len(machines))
+	for _, m := range machines {
+		cluster[m.ID] = m.Cluster
+	}
+	for _, b := range bases {
+		if c, known := cluster[b.Machine]; known && c == b.Cluster {
+			continue
+		}
+		if err := s.deps.Baselines.Delete(ctx, b.Machine); err != nil && !errors.Is(err, store.ErrNotFound) {
+			s.deps.Log("configuration drift: remove the baseline of a machine that is gone or moved",
+				"machine", string(b.Machine), "err", err)
+			continue
+		}
+		s.deps.Log("configuration drift: removed the baseline of a machine that is gone or moved",
+			"machine", string(b.Machine))
+		s.mu.Lock()
+		delete(s.readings, b.Machine)
+		delete(s.logged, b.Machine)
+		s.mu.Unlock()
+	}
+}
+
+// Poke asks for one node to be read before the next pass, for example because a
+// configuration was just applied to it. It never blocks: when the buffer is
+// full the poke is dropped, because the next pass reads the node anyway.
+func (s *Service) Poke(id model.MachineID) {
+	select {
+	case s.pokes <- id:
+	default:
+	}
+}
+
+// Flush reads the nodes that were poked, now, each once however often it was
+// poked, under the budget every node gets. Run calls it; a test may.
+func (s *Service) Flush(ctx context.Context) {
+	s.flush(ctx, nil)
+}
+
+// flush reads first and everything else that is waiting in the buffer.
+func (s *Service) flush(ctx context.Context, first []model.MachineID) {
+	ids := first
+	for {
+		select {
+		case id := <-s.pokes:
+			ids = append(ids, id)
+			continue
+		default:
+		}
+		break
+	}
+	if len(ids) == 0 {
+		return
+	}
+
+	machines, err := s.deps.AllMachines(ctx)
+	if err != nil {
+		s.deps.Log("configuration drift: the machines could not be listed, a poke is dropped", "err", err)
+		return
+	}
+	clusters, err := s.deps.Clusters(ctx)
+	if err != nil {
+		s.deps.Log("configuration drift: the clusters could not be listed, a poke is dropped", "err", err)
+		return
+	}
+	byID := make(map[model.MachineID]model.Machine, len(machines))
+	for _, m := range machines {
+		byID[m.ID] = m
+	}
+	off := make(map[model.ClusterID]bool, len(clusters))
+	for _, c := range clusters {
+		off[c.ID] = c.Disabled
+	}
+
+	done := make(map[model.MachineID]bool, len(ids))
+	for _, id := range ids {
+		if done[id] {
+			continue
+		}
+		done[id] = true
+		m, known := byID[id]
+		disabled, inCluster := off[m.Cluster]
+		if !known || m.Cluster == "" || m.Disabled || !inCluster || disabled {
+			continue
+		}
+		if ctx.Err() != nil {
+			return
+		}
+		s.readNode(ctx, m.Cluster, m)
+	}
+}
