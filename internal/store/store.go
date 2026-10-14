@@ -76,6 +76,13 @@ type Store interface {
 	// cluster definition rather than the other way round.
 	MachineClasses() MachineClassStore
 
+	// ConfigBaselines holds, per node, the last configuration the daemon knew
+	// the node to have, for drift detection. Get does not report a damaged
+	// record as a missing one: a baseline that cannot be read is an error and
+	// not ErrNotFound, so that a caller never mistakes it for a first sight and
+	// overwrites it.
+	ConfigBaselines() ConfigBaselineStore
+
 	Close() error
 }
 
@@ -123,6 +130,14 @@ type MachineClassStore interface {
 	List(ctx context.Context) ([]model.MachineClass, error)
 	Put(ctx context.Context, rec model.MachineClass) (model.MachineClass, error)
 	Delete(ctx context.Context, id model.MachineClassID) error
+}
+
+// ConfigBaselineStore holds one baseline per node, keyed by the machine id.
+type ConfigBaselineStore interface {
+	Get(ctx context.Context, id model.MachineID) (model.ConfigBaseline, error)
+	List(ctx context.Context) ([]model.ConfigBaseline, error)
+	Put(ctx context.Context, rec model.ConfigBaseline) (model.ConfigBaseline, error)
+	Delete(ctx context.Context, id model.MachineID) error
 }
 
 // MachineStore holds the node inventory, flat and keyed by UUID (D-10).

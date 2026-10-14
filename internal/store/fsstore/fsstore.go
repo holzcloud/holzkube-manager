@@ -40,12 +40,13 @@ type Store struct {
 	sessions   *sessionStore
 	schematics *schematicStore
 
-	clusters       *clusterStore
-	clusterSecrets *clusterSecretStore
-	machines       *machineStore
-	jobs           *jobStore
-	patches        *patchStore
-	machineClasses *machineClassStore
+	clusters        *clusterStore
+	clusterSecrets  *clusterSecretStore
+	machines        *machineStore
+	jobs            *jobStore
+	patches         *patchStore
+	machineClasses  *machineClassStore
+	configBaselines *configBaselineStore
 }
 
 // Open prepares dir as a holzkube-manager data directory and returns a Store over it.
@@ -106,11 +107,12 @@ func Open(dir string) (s *Store, err error) {
 	s.jobs = newJobStore(filepath.Join(abs, kindJobs), s.entityMu)
 	s.patches = newPatchStore(filepath.Join(abs, kindPatches), s.entityMu)
 	s.machineClasses = newMachineClassStore(filepath.Join(abs, kindMachineClasses), s.entityMu)
+	s.configBaselines = newConfigBaselineStore(filepath.Join(abs, kindConfigBaselines), s.entityMu)
 
 	for _, sub := range []string{
 		s.users.dir, s.sessions.dir, s.schematics.dir,
 		s.clusters.dir, s.clusterSecrets.inner.dir, s.machines.dir, s.jobs.dir, s.patches.dir,
-		s.machineClasses.dir,
+		s.machineClasses.dir, s.configBaselines.dir,
 	} {
 		if err := os.MkdirAll(sub, dirPerm); err != nil {
 			return nil, fmt.Errorf("fsstore: create %s: %w", sub, err)
@@ -193,6 +195,9 @@ func (s *Store) Patches() store.PatchStore { return s.patches }
 // MachineClasses returns the named-selector entity.
 func (s *Store) MachineClasses() store.MachineClassStore { return s.machineClasses }
 
+// ConfigBaselines returns the per-node configuration baseline entity.
+func (s *Store) ConfigBaselines() store.ConfigBaselineStore { return s.configBaselines }
+
 // Close releases the process lock. After Close another instance may open the
 // same data directory.
 func (s *Store) Close() error {
@@ -216,12 +221,13 @@ const (
 	kindSessions   = "sessions"
 	kindSchematics = "schematics"
 
-	kindClusters       = "clusters"
-	kindClusterSecrets = "cluster-secrets"
-	kindMachines       = "machines"
-	kindJobs           = "jobs"
-	kindPatches        = "patches"
-	kindMachineClasses = "machine-classes"
+	kindClusters        = "clusters"
+	kindClusterSecrets  = "cluster-secrets"
+	kindMachines        = "machines"
+	kindJobs            = "jobs"
+	kindPatches         = "patches"
+	kindMachineClasses  = "machine-classes"
+	kindConfigBaselines = "config-baselines"
 
 	// settingsKey is the id half of the lock key for the settings singleton.
 	settingsKey = "singleton"

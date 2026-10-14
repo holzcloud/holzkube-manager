@@ -154,6 +154,10 @@ type machineClassStore struct {
 	recordStore[model.MachineClassID, model.MachineClass]
 }
 
+type configBaselineStore struct {
+	recordStore[model.MachineID, model.ConfigBaseline]
+}
+
 type clusterSecretStore struct {
 	inner recordStore[model.ClusterID, model.ClusterSecrets]
 }
@@ -227,6 +231,18 @@ func newMachineClassStore(dir string, locks *store.EntityLocks) *machineClassSto
 		key:    func(c model.MachineClass) model.MachineClassID { return c.ID },
 		rev:    func(c model.MachineClass) uint64 { return c.Rev },
 		setRev: func(c *model.MachineClass, v uint64) { c.Rev = v },
+	}}
+}
+
+func newConfigBaselineStore(dir string, locks *store.EntityLocks) *configBaselineStore {
+	return &configBaselineStore{recordStore[model.MachineID, model.ConfigBaseline]{
+		locks:  locks,
+		dir:    dir,
+		kind:   kindConfigBaselines,
+		noun:   "config baseline",
+		key:    func(b model.ConfigBaseline) model.MachineID { return b.Machine },
+		rev:    func(b model.ConfigBaseline) uint64 { return b.Rev },
+		setRev: func(b *model.ConfigBaseline, v uint64) { b.Rev = v },
 	}}
 }
 
