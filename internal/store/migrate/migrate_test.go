@@ -522,3 +522,61 @@ func TestMigrateVersionFiveGainsMachineClasses(t *testing.T) {
 		t.Fatalf("the existing record did not survive the migration: %v", err)
 	}
 }
+
+// TestMigrateVersionSixGainsConfigBaselines drives the 6 -> 7 step (D-08).
+//
+// The directory comes out empty, and that is the point: a baseline is a
+// statement about a configuration somebody read from a node, so a migration
+// that wrote one would be a claim about a node nobody has read. A baseline
+// comes into being only through a reading.
+//
+// The version is asserted as the number 7 and not only as CurrentVersion, so
+// that a bump that is forgotten, or made twice, does not stay green by
+// agreeing with itself.
+func TestMigrateVersionSixGainsConfigBaselines(t *testing.T) {
+	dir := copyFixture(t, "version-6")
+
+	if err := Run(dir); err != nil {
+		t.Fatalf("Run on a version-6 directory: %v", err)
+	}
+
+	if got := readVersionFile(t, dir); got != "7" {
+		t.Fatalf("VERSION = %q, want 7", got)
+	}
+	if CurrentVersion != 7 {
+		t.Fatalf("CurrentVersion = %d, want 7", CurrentVersion)
+	}
+
+	info, err := os.Stat(filepath.Join(dir, "config-baselines"))
+	if err != nil {
+		t.Fatalf("the config-baselines directory was not created: %v", err)
+	}
+	if perm := info.Mode().Perm(); perm != 0o700 {
+		t.Errorf("config-baselines is %04o, want 0700", perm)
+	}
+
+	entries, err := os.ReadDir(filepath.Join(dir, "config-baselines"))
+	if err != nil {
+		t.Fatalf("read config-baselines: %v", err)
+	}
+	if len(entries) != 0 {
+		t.Errorf("the migration created %d baselines. A baseline exists only because a node was "+
+			"read, so anything written here is invented", len(entries))
+	}
+
+	if _, err := os.Stat(filepath.Join(dir, "users", "alice.json")); err != nil {
+		t.Fatalf("the existing record did not survive the migration: %v", err)
+	}
+
+	files := backupFiles(t, dir)
+	if len(files) != 1 || !strings.HasPrefix(files[0], "pre-migration-6-to-7-") {
+		t.Fatalf("backups = %v, want exactly one pre-migration-6-to-7-* tarball", files)
+	}
+	names := tarballEntries(t, filepath.Join(dir, BackupsDirName, files[0]))
+	if !slices.ContainsFunc(names, func(n string) bool { return strings.Contains(n, "users/alice.json") }) {
+		t.Errorf("the backup does not contain the record it was taken to protect: %v", names)
+	}
+	if slices.ContainsFunc(names, func(n string) bool { return strings.Contains(n, "config-baselines") }) {
+		t.Errorf("the backup contains config-baselines, so it was taken after the migration ran: %v", names)
+	}
+}

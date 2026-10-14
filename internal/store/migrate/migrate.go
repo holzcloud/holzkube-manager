@@ -23,7 +23,7 @@ import (
 )
 
 // CurrentVersion is the schema version this binary understands.
-const CurrentVersion = 6
+const CurrentVersion = 7
 
 const (
 	// VersionFileName holds the schema version of a data directory.
@@ -147,6 +147,30 @@ var migrations = []Migration{
 		To:   6,
 		Apply: func(dir string) error {
 			path := filepath.Join(dir, "machine-classes")
+			if err := os.MkdirAll(path, dirPerm); err != nil {
+				return fmt.Errorf("create %s: %w", path, err)
+			}
+			return nil
+		},
+	},
+	{
+		// Configuration baselines: one record per node, the last configuration
+		// the daemon read from it, for drift detection. Nothing is migrated
+		// into it, because a baseline is a statement about a configuration
+		// somebody actually read from a node; one written here would be a claim
+		// about a node nobody has read.
+		//
+		// This is a schema bump and not a quiet directory creation because the
+		// operator chose it so (D-08, 2026-10-14). The cost is deliberate and
+		// known: a binary from before this version refuses the directory from
+		// now on (ErrVersionTooNew), and the update script rolls the binary
+		// back and not the directory, so the way back after a rollback is the
+		// backup taken before this migration
+		// (backups/pre-migration-6-to-7-<time>.tar.gz).
+		From: 6,
+		To:   7,
+		Apply: func(dir string) error {
+			path := filepath.Join(dir, "config-baselines")
 			if err := os.MkdirAll(path, dirPerm); err != nil {
 				return fmt.Errorf("create %s: %w", path, err)
 			}
