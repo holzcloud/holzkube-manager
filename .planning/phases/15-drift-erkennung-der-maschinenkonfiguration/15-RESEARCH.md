@@ -483,7 +483,7 @@ svc.Tick(ctx)
 | A8 | `gendata.VersionTag` ist die richtige Quelle für das Feld `machinery` (so benennt es CLAUDE.md, Datei nicht geöffnet) | Befund 3 | Anderes Feld nutzen |
 | A9 | `provision/job.go`-`Record` ist der passende Haken für das Löschen der Basis; Signatur nicht geprüft | Befund 3 | Anderer Haken |
 
-## Open Questions
+## Open Questions (RESOLVED)
 
 Alle sind **Auswahlen für den Betreiber** (Empfehlung zuerst). Der Orchestrator stellt sie über das Auswahlwerkzeug.
 
@@ -491,23 +491,29 @@ Alle sind **Auswahlen für den Betreiber** (Empfehlung zuerst). Der Orchestrator
    - A) **Migration `6 → 7` (Empfehlung, Konvention)**: neuer Ordner `config-baselines/` per Migration, Fixture `version-6/`, Test. Kosten: ein vom Update-Timer zurückgerolltes Binary lehnt das Verzeichnis ab (`ErrVersionTooNew`), Wiederherstellung nur aus dem Pre-Migration-Tarball. Nutzen: einheitlich, Layout versioniert.
    - B) **Keine Versionserhöhung**, `Open` legt den Ordner an (`MkdirAll` tut das für alle Entity-Ordner). Kosten: weicht von der Konvention ab (kein Test erzwingt sie). Nutzen: das automatische Rückrollen funktioniert weiter, ein altes Binary ignoriert den Ordner.
    - Fragen: wie oft rollt der Update-Timer in der Praxis zurück? Das ist Betreiberwissen.
+   - **RESOLVED:** Option A, Migration 6 auf 7 (CONTEXT D-08); die Folge für ein zurückgerolltes Binary steht im Leitfaden (Plan 15-02).
 2. **Mehrdokument-Vergleich**
    - A) **Neue Funktion `CompareDocuments` (Empfehlung)**, `Compare` bleibt. Kosten: zwei Vergleichsfunktionen, `Plan` bleibt blind für Nicht-Erst-Dokumente. Nutzen: kein Eingriff in `Plan`/`ModeFor`.
    - B) **`Compare` selbst mehrdokumentfähig machen.** Nutzen: behebt den Vorbefund in `Plan` (ein Patch auf `KubeletConfig` zeigt heute einen leeren Diff). Kosten: `ModeFor` bekommt unbekannte Pfade (konservativ: unbekannt = Reboot), bestehende Tests ändern sich; größerer Radius für eine Drift-Phase.
    - Unabhängig davon sollte der Vorbefund als eigene Aufgabe vermerkt werden.
+   - **RESOLVED:** Option A, neue Funktion `CompareDocuments`, `Compare` bleibt (CONTEXT D-09); der Vorbefund ist ein offener Ledger-Eintrag (Plan 15-10).
 3. **Wie eigene Applies die Basis führen**
    - A) **Erwarteter Digest (Empfehlung)**: einheitlich für alle Modi, Race entfällt, überlebt Neustart. Kosten: ein Feld im Datensatz (`expected`), Annahme A2 (Knoten liefert Gesendetes) ungeprüft; Fehlschlag zeigt Drift statt zu verbergen.
    - B) **Nur "nach Apply neu lesen"**: einfacher, kein Zusatzfeld. Kosten: falsch für `staged`, `try`, `reboot`, `auto`; braucht Sonderfälle und In-Flight-Markierung.
+   - **RESOLVED:** Option A, erwarteter Digest am Engpass (CONTEXT D-10); Annahme A2 bleibt ungeprüft und steht im Ledger (Plan 15-10). Eine offene Drift überlebt die Landung eines eigenen Applys (CONTEXT D-13).
 4. **Sudo für "so ist es gewollt"**
    - A) **`Destructive: true` (Empfehlung)**: überschreibt den Beleg und schaltet das Banner ab; Präzedenz `backup-schedule`, `wall-link.*`. Kosten: ein Klick mehr.
    - B) **Nicht `Destructive`**, nur Admin und Audit. Nutzen: weniger Reibung; Kosten: eine offene Admin-Sitzung kann ein sicherheitsrelevantes Banner stillschweigend wegbestätigen.
+   - **RESOLVED:** Option A, `Destructive` (CONTEXT D-11).
 5. **`certwatch` ohne Deadline (außerhalb von Phase 15, aber gleicher Fehler)**
    - A) **Eigene Quick-Aufgabe vor Phase 15 (Empfehlung)**: Budget im `Read`, Wächter auf `context.Background()`; vorher im Journal des Pi nach `certificate watch: read a node` suchen (das kann nur der Betreiber).
    - B) **Als Aufgabe 0 in den Plan von Phase 15 aufnehmen.** Nutzen: ein Durchgang; Kosten: vermischt zwei Themen.
    - C) Nicht anfassen. Kosten: ein ausgeliefertes Feature (v0.6.0) bleibt möglicherweise wirkungslos.
+   - **RESOLVED:** eigene Quick-Aufgabe vor Phase 15 (Quick-Task 261014-gl2, `Deps.ReadBudget` in `internal/certwatch`); der neue Leser hat sein eigenes Budget (Plan 15-03).
 6. **D-03 Ausnahmeliste**
    - A) **Keinen Mechanismus bauen (Empfehlung)**: Messung und Dokumentation sagen "kein Rauschpfad"; ein Pfad wird im Fehlalarmfall in einer Zeile ergänzt.
    - B) **Leere, typisierte Liste mit Test "jeder Eintrag hat Beleg"**: Gerüst steht bereit; Kosten: toter Code.
+   - **RESOLVED:** Option A, kein Mechanismus (CONTEXT D-12, vom Betreiber bestätigt). Die rohen, nicht redigierten Felder (Annahme A7) stehen so im Schnappschuss, wie die Konfigurationsansicht sie zeigt (CONTEXT D-14).
 
 ## Environment Availability
 

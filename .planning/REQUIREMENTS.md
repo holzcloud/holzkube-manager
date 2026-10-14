@@ -77,6 +77,21 @@ Phase 16, angeschlossen an UPG-05 (Kette statt „latest“) in
 
 - [x] **K8S-01**: Die Zwischenschritte der Kubernetes-Upgradekette tragen den neuesten stabilen Patch ihrer Minor statt `.0`; lässt er sich bei einer Kette mit Zwischenschritten nicht ermitteln, ist der Plan mit einem Satz blockiert und fällt nie stillschweigend auf `.0` zurück
 
+### Drift-Erkennung der Maschinenkonfiguration (DRIFT)
+
+Phase 15. Entscheidungen des Betreibers: `15-CONTEXT.md` (D-01 bis D-11; D-12 ist
+eine Ermessensentscheidung von Claude, im Bericht gekennzeichnet).
+
+- [ ] **DRIFT-01**: Die erste Lesung eines Knotens legt seine Basis an und sagt das; ein Knoten ohne Basis hat keine Abweichung, und ein nie gelesener Knoten sagt „not read yet", nie „keine Drift"
+- [ ] **DRIFT-02**: Die Basis ist ein redigierter, normalisierter Schnappschuss je Knoten im Datenverzeichnis (`config-baselines/`, Schema 6 auf 7); nie ein unredigierter Schlüssel, eine nicht lesbare Konfiguration speichert nichts, eine beschädigte Datei wird gemeldet statt als „keine Drift" gelesen
+- [ ] **DRIFT-03**: Jeder erreichbare Knoten wird periodisch und nach jedem eigenen Apply gelesen, mit eigener Frist je Knoten auch auf einem Kontext ohne Frist; ein Knoten, der nicht antwortet, behält seine letzte Lesung und zählt als nicht gelesen
+- [ ] **DRIFT-04**: Eigene Applies (Konfiguration anwenden, Kubernetes-Upgrade, CA-Rotation) verschieben die Basis über den erwarteten Digest am Engpass, richtig für `no-reboot`, `reboot`, `auto`, `staged` und `try`; eine neu provisionierte Maschine erbt keine alte Basis
+- [ ] **DRIFT-05**: Die Knotenseite zeigt Zustand und Diff über alle Dokumente der Konfiguration, nicht nur das erste
+- [ ] **DRIFT-06**: Die Clusterkarte hat eine Zeile „Configuration"; `/metrics` trägt 0/1 je Cluster und Knoten und nie 0 für einen nicht gelesenen Knoten
+- [ ] **DRIFT-07**: Ein Banner auf jeder Seite erscheint erst, wenn Drift 24 Stunden unbestätigt bleibt; der Beginn der Drift überlebt einen Neustart
+- [ ] **DRIFT-08**: Der Betreiber bestätigt „so ist es gewollt": Admin-Rolle, Sudo-Fenster, Audit-Eintrag mit Knoten und Digest, der gelesene Stand wird die Basis, nichts am Knoten ändert sich; kein Zurücksetzen
+- [ ] **DRIFT-09**: README, Leitfaden und API-Vertrag beschreiben die Funktion; was sich nicht belegen lässt (Annahmen A1 und A2, der Blindfleck von `Compare`, Geheimniswerte, nicht redigierte Felder) steht offen im Ledger
+
 ## Future Requirements
 
 - Host-Aktion „Rollback auf die vorige Version" (`holzkube-manager-update --rollback`)
@@ -115,8 +130,17 @@ Phase 16, angeschlossen an UPG-05 (Kette statt „latest“) in
 | MOB-02 | Phase 14 | Complete |
 | MOB-03 | Phase 14 | Pending |
 | K8S-01 | Phase 16 | Complete |
+| DRIFT-01 | Phase 15 | Pending |
+| DRIFT-02 | Phase 15 | Pending |
+| DRIFT-03 | Phase 15 | Pending |
+| DRIFT-04 | Phase 15 | Pending |
+| DRIFT-05 | Phase 15 | Pending |
+| DRIFT-06 | Phase 15 | Pending |
+| DRIFT-07 | Phase 15 | Pending |
+| DRIFT-08 | Phase 15 | Pending |
+| DRIFT-09 | Phase 15 | Pending |
 
-**Coverage:** 23 von 23 v1.18-Anforderungen einer Phase zugeordnet, keine doppelt.
+**Coverage:** 32 von 32 v1.18-Anforderungen einer Phase zugeordnet, keine doppelt.
 
 ---
 *Traceability gefüllt am 2026-09-28 mit der Roadmap für v1.18 (Phasen 11–14).*
