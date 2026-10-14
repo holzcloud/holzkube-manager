@@ -58,8 +58,9 @@ func (s *Service) Confirm(ctx context.Context, id model.MachineID, digest string
 		return err
 	}
 
-	rd, err := s.confirmable(id, digest)
-	if err != nil {
+	// The first look is outside the lock: most refusals need no write and no
+	// wait for one.
+	if _, err := s.confirmable(id, digest); err != nil {
 		return err
 	}
 
@@ -67,6 +68,12 @@ func (s *Service) Confirm(ctx context.Context, id model.MachineID, digest string
 	defer s.storeMu.Unlock()
 
 	for range decideAttempts {
+		// The second look is inside it. Two confirmations of the same state both
+		// pass the first; the one that got the lock second finds the node ok.
+		rd, err := s.confirmable(id, digest)
+		if err != nil {
+			return err
+		}
 		rec := model.ConfigBaseline{
 			Machine:   id,
 			Format:    model.BaselineFormat,
@@ -80,6 +87,13 @@ func (s *Service) Confirm(ctx context.Context, id model.MachineID, digest string
 		base, err := s.deps.Baselines.Get(ctx, id)
 		switch {
 		case err == nil:
+			// Confirming settles a real drift; it does not repair a baseline
+			// that cannot be trusted. That is a file to remove, after which the
+			// next reading lays a new one.
+			if why := damageOf(base, id); why != "" {
+				return fmt.Errorf("configdrift: the stored baseline (config-baselines/%s.json) is damaged: %s; "+
+					"it is left as it is; remove the file and the next reading lays a new baseline", id, why)
+			}
 			rec.Rev = base.Rev
 		case errors.Is(err, store.ErrNotFound):
 			// The record went away since the reading. What the operator
@@ -118,10 +132,27 @@ func (s *Service) confirmable(id model.MachineID, digest string) (reading, error
 		return reading{}, ErrNotRead
 	case rd.state != StateDrift:
 		return reading{}, ErrNoDrift
-	case digest != rd.snap.Digest:
+	case !isDigest(digest) || digest != rd.snap.Digest:
+		// The format is checked as well as the equality: the HTTP layer
+		// validates the format on its own and with another error, and this does
+		// not lean on that. An empty digest never confirms anything, not even a
+		// reading that has none.
 		return reading{}, ErrDigestChanged
 	}
 	return rd, nil
+}
+
+// isDigest says whether text is a sha256 as lower-case hex.
+func isDigest(text string) bool {
+	if len(text) != 64 {
+		return false
+	}
+	for _, c := range text {
+		if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
+			return false
+		}
+	}
+	return true
 }
 
 // markConfirmed puts the reading in memory on ok, so that the display does not

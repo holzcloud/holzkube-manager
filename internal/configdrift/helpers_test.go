@@ -143,6 +143,10 @@ type serviceOpts struct {
 	log     *logSink
 	cluster model.Cluster
 	machine *model.Machine
+
+	// The lists the service is given, for the tests that change them under it.
+	allMachines func(context.Context) ([]model.Machine, error)
+	machines    func(context.Context, model.ClusterID) ([]model.Machine, error)
 }
 
 type serviceOpt func(*serviceOpts)
@@ -158,6 +162,16 @@ func withLog(l *logSink) serviceOpt { return func(o *serviceOpts) { o.log = l } 
 func withCluster(c model.Cluster) serviceOpt { return func(o *serviceOpts) { o.cluster = c } }
 
 func withMachine(m model.Machine) serviceOpt { return func(o *serviceOpts) { o.machine = &m } }
+
+// withAllMachines replaces the list of every machine (inventory.AllMachines).
+func withAllMachines(f func(context.Context) ([]model.Machine, error)) serviceOpt {
+	return func(o *serviceOpts) { o.allMachines = f }
+}
+
+// withMachines replaces the list of one cluster's machines.
+func withMachines(f func(context.Context, model.ClusterID) ([]model.Machine, error)) serviceOpt {
+	return func(o *serviceOpts) { o.machines = f }
+}
 
 // service builds the configdrift service over the node: the real reader unless
 // withRead says otherwise, the real store, the one machine in one cluster.
@@ -182,6 +196,12 @@ func (n *node) service(t *testing.T, opts ...serviceOpt) *configdrift.Service {
 		AllMachines: func(context.Context) ([]model.Machine, error) { return []model.Machine{machine}, nil },
 		Read:        read,
 		Baselines:   n.st.ConfigBaselines(),
+	}
+	if o.allMachines != nil {
+		d.AllMachines = o.allMachines
+	}
+	if o.machines != nil {
+		d.Machines = o.machines
 	}
 	if o.clock != nil {
 		d.Now = o.clock.Now
