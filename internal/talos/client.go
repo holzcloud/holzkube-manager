@@ -30,6 +30,9 @@ import (
 // for not having a List method.
 type ClusterClient struct {
 	conn *conn
+
+	// observer hears every configuration this client sends; see ApplyObserver.
+	observer ApplyObserver
 }
 
 // MaintenanceClient is a connection to a node that has not been configured yet.
@@ -672,7 +675,13 @@ type ApplyResult struct {
 }
 
 // ApplyConfiguration hands the node a machine configuration.
-func (c *ClusterClient) ApplyConfiguration(ctx context.Context, cfg []byte) (ApplyResult, error) {
+//
+// It sends no mode, so the node reads the zero value of the wire, which is an
+// unconditional reboot; the observer is told "reboot" for that reason.
+func (c *ClusterClient) ApplyConfiguration(ctx context.Context, cfg []byte) (res ApplyResult, err error) {
+	done := c.observeApply(ctx, cfg, "reboot")
+	defer func() { done(err) }()
+
 	return applyConfiguration(ctx, c.conn, cfg)
 }
 
@@ -1033,11 +1042,18 @@ func (m *MaintenanceClient) Disks(ctx context.Context) ([]Disk, error) {
 // An unknown mode is refused here rather than sent, because Talos's own
 // default for an unrecognised value is `auto`, which usually means a reboot:
 // a typo would reboot a node.
-func (c *ClusterClient) ApplyConfigurationWithMode(ctx context.Context, cfg []byte, mode string) (ApplyResult, error) {
+//
+// The observer, if there is one, is told after the mode is checked, so a mode
+// that is refused is never reported as a configuration that was sent, and before
+// the RPC, and hears the result whichever way the method returns.
+func (c *ClusterClient) ApplyConfigurationWithMode(ctx context.Context, cfg []byte, mode string) (res ApplyResult, err error) {
 	m, ok := applyMode(mode)
 	if !ok {
 		return ApplyResult{}, fmt.Errorf("talos: %q is not an apply mode", mode)
 	}
+
+	done := c.observeApply(ctx, cfg, mode)
+	defer func() { done(err) }()
 
 	resp, err := c.conn.c.ApplyConfiguration(ctx, &machine.ApplyConfigurationRequest{
 		Data: cfg,

@@ -83,6 +83,27 @@ func (s *Service) decide(ctx context.Context, cluster model.ClusterID, m model.M
 		}
 
 		if base.Digest != snap.Digest {
+			// An apply from this installation left this digest behind, and this
+			// is it: what the operator meant is now what the node runs, so it is
+			// the baseline, and there is no difference to report.
+			if base.Expected != nil && base.Expected.Digest == snap.Digest {
+				landed := base
+				landed.Format, landed.Cluster = model.BaselineFormat, m.Cluster
+				landed.Snapshot, landed.Digest = snap.Text, snap.Digest
+				landed.TakenAt, landed.Source, landed.Machinery = now, model.BaselineApply, gendata.VersionTag
+				landed.Expected, landed.DriftSince, landed.AppliedOnDriftAt = nil, time.Time{}, time.Time{}
+				saved, err := s.deps.Baselines.Put(ctx, landed)
+				if errors.Is(err, store.ErrConflict) {
+					continue
+				}
+				if err != nil {
+					s.unreadable(ctx, cluster, m, reasonStoreFailed(err))
+					return false
+				}
+				s.record(cluster, m, StateOK, now, snap, time.Time{}, sentenceOK(saved))
+				return true
+			}
+
 			// The stored text may be the same configuration in another
 			// encoding, written by an older build or older machinery. Judging
 			// "drift" on bytes alone would report a difference nobody made.
