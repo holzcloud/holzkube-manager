@@ -5,11 +5,11 @@ milestone_name: Host & Telefon
 current_phase: 14
 current_phase_name: telefon-tippziele
 status: human_needed
-stopped_at: Completed 15-02-PLAN.md
-last_updated: "2026-10-14T11:49:49.280Z"
+stopped_at: Completed 15-03-PLAN.md
+last_updated: "2026-10-14T12:02:04.304Z"
 last_activity: 2026-10-12
 last_activity_desc: Planung auf Stand v0.5.0 nachgezogen
-state_head: aac2678eb4e2b0f16d11b1da8c4b2d4901fbf812
+state_head: 7ae661d22665538b0d0931e5452d05910d3304cf
 progress:
   total_phases: 4
   completed_phases: 2
@@ -171,6 +171,7 @@ Siehe `PROJECT.md`, die `MILESTONE-*.md`-Dateien und für v1.18 den Abschnitt
 - [Phase 16]: 16-02: the answer of dl.k8s.io is one regular expression v1.N.[0-9]+ of the asked minor; no error repeats an address or a byte of the answer; the redirect rule is rewritten in k8srelease, not exported from imagefactory
 - [Phase 15]: 15-01: Snapshot-Text = Redact-Ausgabe, Dokumente nach kind[/name] sortiert, Kommentare weg, sha256-Digest; ReadSnapshot setzt die COSI-Klassenfrist selbst
 - [Phase 15]: 15-02: Schema 7 (D-08) umgesetzt; AppliedOnDriftAt schon im Basisformat; Open legt config-baselines/ selbst an, bewacht durch TestOpenCreatesTheConfigBaselinesDirectory (writeAtomic legt es sonst nebenbei an)
+- [Phase 15]: 15-03: eine Lesung speichert nie etwas Unsicheres (PEM-Gürtel und Deckel vor jedem Schreiben); unreadable übernimmt DriftSince aus dem Datensatz; Log nur beim Zustandswechsel, ohne Fehlertext
 
 ### Roadmap Evolution
 
@@ -201,8 +202,8 @@ Siehe `PROJECT.md`, die `MILESTONE-*.md`-Dateien und für v1.18 den Abschnitt
 
 ## Session Continuity
 
-Last session: 2026-10-14T11:49:49.246Z
-Stopped at: Completed 15-02-PLAN.md
+Last session: 2026-10-14T12:02:04.266Z
+Stopped at: Completed 15-03-PLAN.md
 Resume file: None
 Next: Handproben Phase 13/14 auf dem Pi, dann `/gsd-complete-milestone` für v1.18
 
@@ -252,3 +253,4 @@ Next: Handproben Phase 13/14 auf dem Pi, dann `/gsd-complete-milestone` für v1.
 | Phase 16 P02 | 75min | 3 tasks | 9 files |
 | Phase 15 P01 | ~1h | 2 tasks | 3 files |
 | Phase 15 P02 | 40min | 3 tasks | 13 files |
+| Phase 15 P03 | ~1h | 2 tasks | 7 files |
