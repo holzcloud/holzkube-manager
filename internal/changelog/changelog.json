@@ -1,5 +1,15 @@
 [
   {
+    "version": "v0.7.1",
+    "date": "2026-10-14",
+    "changes": [
+      {
+        "icon": "🩹",
+        "text": "Fixed: the \"Cluster certificates\" row added in v0.6.0 never filled in on a running manager. The read that looks at each control plane was started without a time limit, and the Talos client refuses a call that has none, so every pass failed quietly and the row stayed at \"not read yet\" (which is why it never said \"fine\" either, but also never warned). Every read now runs under its own 20 second limit. The tests missed it because each of them happened to carry a limit of its own; two new ones start the way the manager does, one of them against the simulator through the real client. Still only checked against the simulator: no real cluster has been read through it yet, so look at the row on a control plane once this is installed."
+      }
+    ]
+  },
+  {
     "version": "v0.7.0",
     "date": "2026-10-12",
     "changes": [
