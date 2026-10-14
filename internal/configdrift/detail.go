@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/holzcloud/holzkube-manager/internal/machineconfig"
@@ -18,31 +19,31 @@ import (
 type State string
 
 const (
-	// StateNotRead: nothing has been read from the node since this daemon
+	// StateNotRead means nothing has been read from the node since this daemon
 	// started. It is never "ok" and never "no drift": the daemon does not know.
 	StateNotRead State = "not-read"
 
-	// StateBaselineCreated: the reading just now was the first one of this
+	// StateBaselineCreated means the reading just now was the first one of this
 	// node, and it is the baseline from here on.
 	StateBaselineCreated State = "baseline-created"
 
-	// StateOK: the node's configuration is the baseline.
+	// StateOK means the node's configuration is the baseline.
 	StateOK State = "ok"
 
-	// StateSettling: an apply from this daemon is on its way and has not landed
+	// StateSettling means an apply from this daemon is on its way and has not landed
 	// yet, so a difference is expected for a while. Plan 04 sets it.
 	StateSettling State = "settling"
 
-	// StateDrift: the node's configuration differs from the baseline and
+	// StateDrift means the node's configuration differs from the baseline and
 	// nothing this installation did explains it.
 	StateDrift State = "drift"
 
-	// StateUnreadable: the node could not be read, or its configuration could
+	// StateUnreadable means the node could not be read, or its configuration could
 	// not be turned into a snapshot. It says nothing about drift in either
 	// direction.
 	StateUnreadable State = "unreadable"
 
-	// StateBaselineDamaged: the stored baseline cannot be trusted, so nothing
+	// StateBaselineDamaged means the stored baseline cannot be trusted, so nothing
 	// is compared with it and nothing overwrites it.
 	StateBaselineDamaged State = "baseline-damaged"
 )
@@ -186,10 +187,6 @@ func sentenceDamaged(id model.MachineID, why string) string {
 		". It was left as it is and this node is not compared until it is dealt with."
 }
 
-func sentenceStoreFailed(err error) string {
-	return "The baseline could not be stored: " + shorten(err.Error()) + ". Nothing is claimed about this node."
-}
-
 // maxErrorText bounds how much of an error reaches a sentence.
 const maxErrorText = 200
 
@@ -202,27 +199,38 @@ func shorten(text string) string {
 	return string(runes[:maxErrorText]) + "..."
 }
 
-// sentenceUnreadable explains a failed read. Errors from machineconfig carry
-// fixed sentences and no configuration content; any other error is a transport
-// or protocol failure whose text may name the node's address, which the
-// reader's role is shown anyway.
-func sentenceUnreadable(err error, lastGood time.Time) string {
-	var why string
+// reasonUnreadable says why a reading failed. Errors from machineconfig carry
+// fixed sentences and no configuration content; any other error is a transport,
+// protocol or store failure whose text may name the node's address, which the
+// reader's role is shown anyway, and which is cut to maxErrorText characters.
+func reasonUnreadable(err error) string {
 	switch {
 	case errors.Is(err, machineconfig.ErrSnapshotUnreadable):
-		why = "This version of holzkube-manager cannot load the node's configuration; a node running a newer " +
+		return "This version of holzkube-manager cannot load the node's configuration; a node running a newer " +
 			"Talos than this build knows is the usual reason."
 	case errors.Is(err, machineconfig.ErrSnapshotTooLarge):
-		why = "The node's configuration is larger than a snapshot may be."
+		return "The node's configuration is larger than a snapshot may be."
 	case errors.Is(err, machineconfig.ErrSnapshotUnsafe):
-		why = "The configuration still held a private key after redaction, so nothing was stored."
+		return "The configuration still held a private key after redaction, so nothing was stored."
 	case errors.Is(err, store.ErrConflict):
-		why = "The baseline was being changed at the same time; the next pass will try again."
-	default:
-		why = "The node could not be read: " + shorten(err.Error())
+		return "The baseline was being changed at the same time; the next pass will try again."
+	}
+	return "The node could not be read: " + shorten(err.Error())
+}
+
+// reasonStoreFailed is the reason when the reading worked and the baseline could
+// not be stored or loaded.
+func reasonStoreFailed(err error) string {
+	return "The baseline could not be stored or loaded: " + shorten(err.Error()) + "."
+}
+
+// sentenceUnreadable is a reason plus how stale the last good reading is.
+func sentenceUnreadable(reason string, lastGood time.Time) string {
+	if !strings.HasSuffix(reason, ".") {
+		reason += "."
 	}
 	if lastGood.IsZero() {
-		return why + " It has not been read successfully since this daemon started."
+		return reason + " It has not been read successfully since this daemon started."
 	}
-	return why + " Last good reading: " + when(lastGood) + "."
+	return reason + " Last good reading: " + when(lastGood) + "."
 }

@@ -123,7 +123,11 @@ type logSink struct {
 func (l *logSink) Log(msg string, args ...any) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	l.lines = append(l.lines, strings.TrimSpace(msg+" "+fmt.Sprint(args...)))
+	line := msg
+	for i := 0; i+1 < len(args); i += 2 {
+		line += fmt.Sprintf(" %v=%v", args[i], args[i+1])
+	}
+	l.lines = append(l.lines, line)
 }
 
 func (l *logSink) Lines() []string {
@@ -139,7 +143,6 @@ type serviceOpts struct {
 	log     *logSink
 	cluster model.Cluster
 	machine *model.Machine
-	budget  time.Duration
 }
 
 type serviceOpt func(*serviceOpts)
@@ -155,8 +158,6 @@ func withLog(l *logSink) serviceOpt { return func(o *serviceOpts) { o.log = l } 
 func withCluster(c model.Cluster) serviceOpt { return func(o *serviceOpts) { o.cluster = c } }
 
 func withMachine(m model.Machine) serviceOpt { return func(o *serviceOpts) { o.machine = &m } }
-
-func withBudget(d time.Duration) serviceOpt { return func(o *serviceOpts) { o.budget = d } }
 
 // service builds the configdrift service over the node: the real reader unless
 // withRead says otherwise, the real store, the one machine in one cluster.
@@ -181,7 +182,6 @@ func (n *node) service(t *testing.T, opts ...serviceOpt) *configdrift.Service {
 		AllMachines: func(context.Context) ([]model.Machine, error) { return []model.Machine{machine}, nil },
 		Read:        read,
 		Baselines:   n.st.ConfigBaselines(),
-		ReadBudget:  o.budget,
 	}
 	if o.clock != nil {
 		d.Now = o.clock.Now

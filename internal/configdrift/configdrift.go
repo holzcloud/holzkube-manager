@@ -242,7 +242,7 @@ func (s *Service) readNode(ctx context.Context, cluster model.ClusterID, m model
 	snap, err := s.deps.Read(readCtx, m.ID)
 	cancel()
 	if err != nil {
-		s.unreadable(ctx, cluster, m, err)
+		s.unreadable(ctx, cluster, m, reasonUnreadable(err))
 		return false
 	}
 	return s.decide(ctx, cluster, m, snap)
