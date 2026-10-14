@@ -41,6 +41,13 @@ Alle als Auswahl vom Betreiber am 2026-10-14 getroffen.
 ### Auflösung
 - **D-07:** Der Betreiber kann das Diff ansehen und **„so ist es gewollt" bestätigen**: der aktuelle Stand wird die neue Basis. Aktion mit Admin-Rolle, Sudo-Fenster falls die Projektregeln es für Aktionen dieser Art verlangen, und Audit-Eintrag; kein Eingriff am Knoten. **Kein Zurücksetzen** in dieser Phase.
 
+### Entscheidungen nach der Recherche (2026-10-14, als Auswahl)
+- **D-08:** Die gespeicherten Basen bekommen eine **Schema-Migration 6 auf 7** (Konvention des Projekts). Bekannte Folge: ein vom Update-Timer zurückgerolltes Binary lehnt das Verzeichnis ab (`ErrVersionTooNew`); das Update-Skript hat dafür sein Rollback. — **Reversibility:** one-way — eine veröffentlichte Verzeichnisversion lässt sich nicht ohne Migration zurücknehmen.
+- **D-09:** Der Mehrdokument-Vergleich ist eine **neue Funktion `CompareDocuments`** (Dokumente nach `kind[/name]` normalisiert). `machineconfig.Compare` bleibt unverändert; sein Blindfleck (liest nur das erste von bis zu 28 Dokumenten, gilt auch für `Plan`/`ModeFor`) wird als **offener Ledger-Eintrag** festgehalten, nicht repariert.
+- **D-10:** Eigene Applies frischen die Basis über einen **erwarteten Digest am Engpass** `ClusterClient.ApplyConfigurationWithMode` auf (Aufrufer `Service.Apply`, `upgrade.applyImage`, `rotateca.rewrite`). Richtig auch für `staged`, `try`, `reboot`, `auto`; die Race „Apply im Flug" entfällt. Annahme A2 der Recherche (ein echter Knoten liefert nach Apply semantisch das Gesendete) ist ungeprüft und im Bericht zu nennen.
+- **D-11:** „So ist es gewollt" ist eine **`Destructive`-Route** (Sudo-Fenster, Admin, Audit `config.drift-confirm`, Digest als Compare-and-Swap), nach dem Muster `backup-schedule`.
+- **D-12:** Rauschen (D-03): die Recherche konnte **keinen** selbstverändernden Pfad belegen, die Ausnahmeliste ist daher **leer**. Es wird **kein Ausnahme-Mechanismus gebaut**; die Annahme „Talos schreibt die aktive Konfiguration nicht selbst um" (A1, nur Absenz in der Doku) steht im Bericht, und ein später gefundenes Rauschen wird dann gezielt ergänzt. Das ist eine Ermessensentscheidung von Claude, vom Betreiber nicht ausdrücklich gewählt.
+
 ### Claude's Discretion
 - Name und Ort des Pakets (nach dem Vorbild `certwatch`), Lesetakt in Stunden, Form der Persistenz (Datei je Knoten über `fsstore`), Wortlaut der Sätze. Alle Gestaltungsfragen, die ein Betreiber nicht entscheiden muss; wo doch eine echte Alternative besteht, geht sie als Auswahl zurück an den Betreiber.
 
@@ -67,6 +74,8 @@ Alle als Auswahl vom Betreiber am 2026-10-14 getroffen.
 
 <code_context>
 ## Existing Code Insights
+
+(Ergänzt 2026-10-14 nach der Recherche, siehe `15-RESEARCH.md`: `certwatch`-Fehler gefunden und separat behoben, Quick-Task 261014-gl2. Der neue Leser braucht ein eigenes Budget je Knoten (~20 s), und sein Wächter muss auf einem Kontext **ohne** Frist starten. Der Audit-Eintrag für HTTP-Routen trägt nie eine `machine_id`: `config.drift-confirm` braucht einen serverseitig aus dem Pfad gesetzten Parameter.)
 
 ### Reusable Assets
 - `machineconfig.Redact`, `Compare`, `Service.read` — Lesen, Redigieren und Vergleichen sind vorhanden; neu ist nur die gespeicherte Basis.
