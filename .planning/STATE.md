@@ -5,11 +5,11 @@ milestone_name: Host & Telefon
 current_phase: 14
 current_phase_name: telefon-tippziele
 status: human_needed
-stopped_at: Completed 15-03-PLAN.md
-last_updated: "2026-10-14T12:02:04.304Z"
+stopped_at: Completed 15-04-PLAN.md
+last_updated: "2026-10-14T12:20:27.798Z"
 last_activity: 2026-10-12
 last_activity_desc: Planung auf Stand v0.5.0 nachgezogen
-state_head: 7ae661d22665538b0d0931e5452d05910d3304cf
+state_head: 1b0f0d46c08038bca1b0d1dbf0d729c08d381ffe
 progress:
   total_phases: 4
   completed_phases: 2
@@ -172,6 +172,8 @@ Siehe `PROJECT.md`, die `MILESTONE-*.md`-Dateien und für v1.18 den Abschnitt
 - [Phase 15]: 15-01: Snapshot-Text = Redact-Ausgabe, Dokumente nach kind[/name] sortiert, Kommentare weg, sha256-Digest; ReadSnapshot setzt die COSI-Klassenfrist selbst
 - [Phase 15]: 15-02: Schema 7 (D-08) umgesetzt; AppliedOnDriftAt schon im Basisformat; Open legt config-baselines/ selbst an, bewacht durch TestOpenCreatesTheConfigBaselinesDirectory (writeAtomic legt es sonst nebenbei an)
 - [Phase 15]: 15-03: eine Lesung speichert nie etwas Unsicheres (PEM-Gürtel und Deckel vor jedem Schreiben); unreadable übernimmt DriftSince aus dem Datensatz; Log nur beim Zustandswechsel, ohne Fehlertext
+- [Phase 15]: 15-04: Aufräumen im Lauf (reconcile am Anfang von Tick) statt Haken in ForgetMachine/ForgetCluster; löscht nur bei zwei gelesenen Listen
+- [Phase 15]: 15-04: Confirm bestätigt nur eine echte, aktuell gelesene Drift gegen den Digest der gesehenen Lesung (zweimal geprüft, vor und in storeMu) und repariert keine beschädigte Basis
 
 ### Roadmap Evolution
 
@@ -202,8 +204,8 @@ Siehe `PROJECT.md`, die `MILESTONE-*.md`-Dateien und für v1.18 den Abschnitt
 
 ## Session Continuity
 
-Last session: 2026-10-14T12:02:04.266Z
-Stopped at: Completed 15-03-PLAN.md
+Last session: 2026-10-14T12:20:27.747Z
+Stopped at: Completed 15-04-PLAN.md
 Resume file: None
 Next: Handproben Phase 13/14 auf dem Pi, dann `/gsd-complete-milestone` für v1.18
 
@@ -254,3 +256,4 @@ Next: Handproben Phase 13/14 auf dem Pi, dann `/gsd-complete-milestone` für v1.
 | Phase 15 P01 | ~1h | 2 tasks | 3 files |
 | Phase 15 P02 | 40min | 3 tasks | 13 files |
 | Phase 15 P03 | ~1h | 2 tasks | 7 files |
+| Phase 15 P04 | 16min | 3 tasks | 7 files |
