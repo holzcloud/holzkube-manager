@@ -1,9 +1,11 @@
 ---
 phase: 15-drift-erkennung-der-maschinenkonfiguration
 verified: 2026-10-15T11:45:00Z
-status: gaps_found
-score: 8/9 must-haves verified
+re_verified: 2026-10-15T13:00:00Z
+status: human_needed
+score: 9/9 must-haves verified
 covered_files:
+  - .planning/WINDOWS.md
   - .planning/phases/15-drift-erkennung-der-maschinenkonfiguration/15-01-PLAN.md
   - .planning/phases/15-drift-erkennung-der-maschinenkonfiguration/15-01-SUMMARY.md
   - .planning/phases/15-drift-erkennung-der-maschinenkonfiguration/15-02-PLAN.md
@@ -24,57 +26,108 @@ covered_files:
   - .planning/phases/15-drift-erkennung-der-maschinenkonfiguration/15-09-SUMMARY.md
   - .planning/phases/15-drift-erkennung-der-maschinenkonfiguration/15-10-PLAN.md
   - .planning/phases/15-drift-erkennung-der-maschinenkonfiguration/15-10-SUMMARY.md
+  - .planning/phases/15-drift-erkennung-der-maschinenkonfiguration/15-11-PLAN.md
+  - .planning/phases/15-drift-erkennung-der-maschinenkonfiguration/15-11-SUMMARY.md
   - cmd/holzkube-managerd/main.go
+  - docs/guide.md
   - internal/configdrift/apply.go
   - internal/configdrift/configdrift.go
   - internal/configdrift/decide.go
   - internal/configdrift/detail.go
+  - internal/configdrift/expected_test.go
   - internal/configdrift/health.go
   - internal/configdrift/lifecycle.go
   - internal/machineconfig/snapshot.go
   - web/src/components/AppShell.tsx
+  - web/src/routes/drift-wiring.test.tsx
   - web/src/routes/node-detail.tsx
-covered_digest: "v3:sha256:e62e675555e79d4a99d6333a502f7f172f22ac7d74c19580361a4e5f34b5dc87"
+covered_digest: "v3:sha256:f2f2ead5238af25364b2c7d9175b0ca8bdfc8bb9c66dd4584a70d0af923a4665"
 behavior_unverified: 0
 overrides_applied: 0
-gaps:
-  - truth: "Eigene Applies (Konfiguration anwenden, K8s-Upgrade, CA-Rotation) verschieben die Basis ueber den erwarteten Digest, richtig fuer no-reboot, reboot, auto, staged und try (DRIFT-04, D-10)"
-    status: partial
-    reason: >
-      Fuer reboot und auto (mit Neustart) wird die Landung nur erkannt, wenn die erste erfolgreiche Lesung NACH dem Neustart
-      innerhalb von SettleWindow (15 min) nach dem Apply liegt. Der Anstoss nach dem Apply ist einmalig und liest den Knoten
-      sofort (vor oder waehrend des Neustarts: alte Fassung oder nicht lesbar); die naechste Lesung ist der Takt von 3 h
-      (DefaultEvery), nichts stoesst nach dem Neustart erneut an (main.go:285 haengt AfterReboot nur an ClearStaged). decide.go
-      (Landungsregel: `!s.stale(exp, now)`) uebernimmt eine Erwartung, die aelter als das Fenster ist, nicht: ein Knoten, der
-      genau die gesendete Fassung traegt, steht dann als drift (und nach 24 h als Banner). Gemessen mit einer Wegwerf-Probe
-      (nicht im Repo): reboot-Erwartung, Lesung der alten Fassung, 3 h weiter, Lesung der angewendeten Fassung -> Zustand "drift",
-      Satz "differs from the baseline ... first reading of this node". Der Fall ist gegen talossim nicht sichtbar, weil der
-      Simulator jeden Modus sofort anwendet; A2 im Ledger 177 benennt nur die Bytegleichheit, nicht dieses Timing. Der Leitfaden
-      sagt "becomes the baseline when that version shows up on the node", das gilt hier nicht.
-    artifacts:
-      - path: "internal/configdrift/decide.go"
-        issue: "Landungsregel verlangt !s.stale(exp, now); stale = Modus != staged && Alter >= SettleWindow; reboot/auto landen real nach Minuten, gelesen wird nach Stunden"
-      - path: "internal/configdrift/apply.go"
-        issue: "Poke nur einmal unmittelbar nach erfolgreichem RPC; kein Folgeanstoss nach dem Neustart"
-      - path: "internal/configdrift/expected_test.go"
-        issue: "TestAnExpectationThatRanOutIsNotAdopted und TestAnApplyThatNeverLandedStopsBeingExpected halten die Regel fest, kein Test deckt 'reboot, Lesung erst nach dem Takt'"
-    missing:
-      - "Adoption (Digest gleich Erwartung) und Settling trennen: settling bleibt 15 min, die Adoption einer Erwartung der Modi reboot/auto gilt bis zu einem langen Horizont (Vorschlag: BannerAfter, 24 h; staged hat ohnehin keinen) oder bis eine neuere Erwartung sie ersetzt"
-      - "Test rot zuerst: reboot-Erwartung, Lesung alt (settling), Clock +DefaultEvery, Lesung der angewendeten Fassung -> ok, Quelle apply (die Probe dieser Verifikation als Test); TestAnExpectationThatRanOutIsNotAdopted fuer die Modi anpassen und den Preis (dritter wendet dieselben Bytes spaeter an, nicht unterscheidbar) im Kommentar nennen"
-      - "Leitfaden (Abschnitt 'The baseline', 'What counts') und Ledger 177 um dieses Timing ergaenzen, falls der Horizont bleibt"
+re_verification:
+  previous_status: gaps_found
+  previous_score: 8/9
+  gaps_closed:
+    - "Eigene Applies mit reboot/auto landen nach dem Takt von 3 h als Basis (AdoptWindow 24 h), D-13 gehalten (DRIFT-04, D-10)"
+    - "W1: Verwendung von ConfigDriftBanner (AppShell) und NodeConfigDrift (node-detail) durch Rendertest gehalten"
+  gaps_remaining: []
+  regressions: []
+gaps: []
 deferred: []
 advisory: []
-human_verification: []
+human_verification:
+  - test: "Echter Knoten, Modi reboot und auto: Konfiguration anwenden, Neustart abwarten, die naechste Lesung des Daemons ansehen (Takt 3 h oder Daemon-Neustart + 1 min)"
+    expected: "Knoten steht ok mit Quelle apply, nicht drift; zweimal lesen vorher ohne Drift; identische Bytes ohne Drift (A1, A2, Timing; Ledger 177)"
+    why_human: "talossim wendet jeden Modus sofort an und zeigt weder Neustart noch Wartezeit; die Regel ist nur mit gesetzten Datensaetzen und vorgestellter Uhr belegt"
+  - test: "Browser auf dem Pi: Knotenseite (Zustand, Diff), Clusterkarte, Banner, Klickpfad Bestaetigen mit Sudo-Dialog"
+    expected: "Aussehen, Layout, Tippziele (44 px) in Ordnung; Bestaetigen macht den Zustand zur Basis und schreibt nichts auf den Knoten"
+    why_human: "Der Rendertest haelt nur Verwendung und Text im jsdom, nicht Layout, Raster oder Tippziele; Browserprojekt und Layout-Waechter liefen nicht"
+  - test: "Daemon-Lauf auf dem Pi (linux/arm64), Banner nach echten 24 h, go test -race dort"
+    expected: "Die Lesung laeuft im echten Daemon, das Banner erscheint nach 24 h unbestaetigter Drift auf jeder Seite"
+    why_human: "Verdrahtung nur ueber AST-Waechter und Testharnesse belegt; Banner nur mit vorgestellter Uhr; kein Pi, kein Daemon-Lauf in dieser Umgebung"
 ---
 
 # Phase 15: Drift-Erkennung der Maschinenkonfiguration - Verifikationsbericht
 
 **Phase Goal:** Der Betreiber sieht, wenn die aktive Konfiguration eines Knotens von dem abweicht, was holzkube-manager zuletzt gesetzt oder gelesen hat; periodische Lesung nach `internal/certwatch`, Anzeige auf Knotenseite (mit Diff), Clusterkarte, `/metrics`, Banner nach 24 h unbestaetigt, Bestaetigen "so ist es gewollt" (neue Basis, Admin, Sudo, Audit, kein Schreiben auf den Knoten); nie ein stilles "keine Drift", wo die Lesung fehlschlug.
 **Verified:** 2026-10-15
-**Status:** gaps_found (eine Luecke, klein und mit konkretem Fix; sonst Ziel erreicht)
-**Re-verification:** Nein, Erstverifikation. Wo die Verifikation lief: Mac, Darwin arm64, Go 1.27.2 (Linter mit go1.26.9). Kein Pi, kein echter Knoten, kein Browser, kein Daemon-Lauf.
+**Status:** human_needed (nach Re-Verifikation 2026-10-15; Erstverifikation war gaps_found, 8/9)
+**Re-verification:** Ja, nach Gap-Closure-Plan 15-11 (siehe Abschnitt unten). Die Tabellen darunter sind der Stand der Erstverifikation, Wahrheit 5, 6, 7 und 9 sind durch die Re-Verifikation ueberholt. Erstverifikation: Wo die Verifikation lief: Mac, Darwin arm64, Go 1.27.2 (Linter mit go1.26.9). Kein Pi, kein echter Knoten, kein Browser, kein Daemon-Lauf.
 
-## Ergebnis in einem Absatz
+## Re-Verifikation 2026-10-15 (nach Plan 15-11: 442e0b6, 5801be9, f60a468, 33846e6; nichts gepusht)
+
+Wo: Mac, Darwin arm64, Go 1.27.2 (Linter mit go1.26.9), Node 26 mit `NODE_OPTIONS=--no-experimental-webstorage`. Kein Pi, kein echter Knoten, kein Browser, kein Daemon-Lauf. Das SUMMARY wurde nicht als Beleg genommen; alles Folgende ist neu gelesen oder gemessen.
+
+### Gap 1 (DRIFT-04, D-10): geschlossen
+
+Code gelesen (`decide.go`): `adopts(e, now)` = staged immer; reboot/auto `age < AdoptWindow` (`AdoptWindow = BannerAfter = 24 h`, `configdrift.go:67`); alles andere (no-reboot) `age < SettleWindow`; try wird in `apply.go` gar nicht erst als Erwartung notiert (`modeTry`) und deshalb nie uebernommen. `settles` ist unveraendert 15 min und schliesst staged aus; `stale = !adopts`. Die Landungsregel fragt `adopts`; der D-13-Zweig (offene Drift, `AppliedOnDriftAt`, `Expected = nil`, Basis und `DriftSince` bleiben, Zustand drift) steht unveraendert darin. Eine Lesung der alten Fassung (Digest gleich Basis) behaelt eine noch zaehlende Erwartung (`spent` nur bei `stale`).
+
+Eigene Injektionen (Build und `go vet` vorher je Exit 0, Test-Exit vom Befehl `go test ./internal/configdrift/ -count=1`, Wiederherstellung mit `cmp`, `git status` sauber; Ausgangslage gruen, Exit 0):
+
+| # | Eingriff in `decide.go` (1 Zeile, Diffstat 1/1) | Exit | rot |
+|---|---|---|---|
+| a | reboot/auto zaehlen nur bis `SettleWindow` (alte 15-Minuten-Regel) | 1 | `TestAnApplyWithARestartIsAdoptedWhenTheNextReadingOnlyComesWithThePass` (reboot, auto), `TestAnExpectationStillCountsUntilItRunsOut`, `TestAnOwnApplyLandingHoursLaterOnAnOpenDriftKeepsItOpen` (3 Zeilen) |
+| b | D-13-Zweig tot (Landung auf offener Drift loescht `DriftSince`) | 1 | `TestAnOwnApplyLandingOnAnOpenDriftKeepsItOpen`, `TestConfirmingAfterALandingMakesTheLandedStateTheBaseline` (2 Zeilen), `TestAnOwnApplyLandingHoursLaterOnAnOpenDriftKeepsItOpen` (3 Zeilen) |
+
+Ein erster Versuch von (b) hat wegen einer Einrueckung nicht injiziert (Assertion im Skript, `git diff` leer, Exit 0): das habe ich als Nicht-Messung verworfen und wiederholt; kein `build failed`/`undefined` in einer der Ausgaben.
+
+Leitfaden und Ledger 177 gelesen: der Leitfaden nennt die Fristen je Modus (24 h reboot/auto, 15 min no-reboot, staged bis zum Boot, try nie), den Preis (derselbe Byte-Apply eines Dritten im Fenster ist nicht unterscheidbar), dass eine offene Drift nicht durch eine Landung geschlossen wird, und dass das Timing nur mit gesetzten Datensaetzen und vorgestellter Uhr belegt ist. Ledger 177 traegt das Timing in Beschreibung, SCHLIESSBEDINGUNG (Neustart abwarten, dann die naechste Lesung) und Grund; Status offen; Tabelle und JSON zeichengleich (`TestTheLedgersTwoHalvesSayTheSameThing` gruen). Kein Ueberanspruch. Zwei Kleinigkeiten, kein Gap: der Leitfaden sagt "`settling` stays at 15 minutes for every mode", obwohl staged nie settelt (`settles` schliesst es aus); und die 24 Stunden im Leitfaden hat kein Test an `AdoptWindow` gebunden (SUMMARY nennt das selbst).
+
+### W1: Verdrahtung gehalten
+
+`web/src/routes/drift-wiring.test.tsx` rendert den echten `routeTree` bei `/nodes/m-cp-1` mit gespiegelten API-Antworten (Fixture, Zod-geparst) und einem `fetch`, das jede nicht gespiegelte Adresse laut nennt. Ausgangslage 2/2 gruen (Exit 0). Eigene Injektionen, `cd web && NODE_OPTIONS=--no-experimental-webstorage npx vitest run --project jsdom src/routes/drift-wiring.test.tsx > Datei`, `cmp` danach identisch:
+
+| # | Eingriff | Exit | rot |
+|---|---|---|---|
+| c | Zeile `<ConfigDriftBanner className="px-4 pt-2" />` aus `AppShell.tsx` | 1 | "the shell shows the configuration banner on a node page": `Unable to find an element with the text: cp-1 has differed ...` (Assertion, 1 failed / 1 passed) |
+| d | Zeile `<NodeConfigDrift machine={m.id} ...>` aus `node-detail.tsx` | 1 | "the node page asks for the configuration of its own machine and shows it": `Unable to find an element with the text: This node differs ...` (1 failed / 1 passed) |
+
+Der Test haelt Verwendung und Text im jsdom, nicht Aussehen, Raster, Tippziele.
+
+### Regression (Mac)
+
+| Befehl | Exit | Ergebnis |
+|---|---|---|
+| `go build ./...`, `go vet ./...`, `gofmt -l .` | 0, 0, 0 | leer |
+| `go test` configdrift machineconfig talos inventory planning publicrepo cmd/holzkube-managerd `-count=1` | 0 | alle ok |
+| `go test -race ./internal/configdrift/ -count=1` | 0 | ok (nur Mac, nur dieses Paket; auf dem Pi nicht moeglich/nicht gelaufen) |
+| golangci-lint v2.13.1 mit go1.26.9 `run ./...` | 0 | `0 issues.` |
+| vitest `--project jsdom` komplett | 0 | 71 Dateien, 929 Tests (vorher 70/927) |
+| `tsc --noEmit` / `biome check src` | 0 / 0 | biome: die alten 2 Warnungen + 1 Info, keine in der neuen Datei |
+| `git diff --name-only eba8d70 -- internal/changelog internal/certwatch internal/machineconfig/diff.go` | leer | D-09, Changelog und certwatch unberuehrt |
+
+Nicht gelaufen: `go test ./internal/httpapi` (die vier bekannten `web/dist`-Tests), `task ci`, vitest-Browserprojekt, Layout-Waechter.
+
+### Neue Luecken: keine
+
+Keine Debt-Marker, keine Regression, kein neuer Blocker gefunden. Der Status ist `human_needed`, weil die verbleibenden Punkte nur ein Mensch am echten System belegen kann (Frontmatter `human_verification`).
+
+### Empfehlung zu DRIFT-01..09
+
+- **Durch die Evidenz als erledigt markierbar (Code, Tests und rot gesehene Waechter):** DRIFT-01, DRIFT-02, DRIFT-03, DRIFT-06 (Zahlen und Karte; Layout offen), DRIFT-08, DRIFT-09 (Dokumentation vorhanden, Ledger ehrlich; keine Betreiberwerte).
+- **Im Code geschlossen, aber bis zur Pruefung auf dem Pi Pending lassen:** DRIFT-04 (reboot/auto-Timing und A1/A2 nur mit gesetzten Datensaetzen, Ledger 177), DRIFT-05 (Knotenseite: Verwendung gehalten, Aussehen/Klickpfad im Browser ungeprueft), DRIFT-07 (Banner: Regel durch Injektion H gehalten, echte 24 h und Anzeige im Browser ungeprueft). Wenn der Betreiber "Code und Tests" als Massstab nimmt, ist auch das markierbar; ehrlicher ist, diese drei bis zum Lauf auf dem Pi offen zu halten.
+
+## Ergebnis in einem Absatz (Erstverifikation)
 
 Die Kette Lesung -> Basis -> `GET .../config/drift` -> `config_drift` auf der Clusterkarte -> `/metrics` -> Banner -> `POST .../confirm` ist in jedem Hop im Code aufgerufen, nicht nur deklariert, und die meisten Waechter wurden von mir mit eingesetztem Fehler rot gesehen. Die Randregeln "nie stilles keine Drift", Geheimnisse, Audit, Sudo und die Entscheidungen D-01..D-14 halten. Gefunden habe ich eine echte Luecke in D-10/DRIFT-04: ein Apply mit Neustart (reboot, auto) wird als Drift gemeldet, sobald die erste Lesung nach dem Neustart erst mit dem 3-Stunden-Takt kommt. Dazu eine Warnung: die Verdrahtung des Banners in `AppShell.tsx` und des Abschnitts in `node-detail.tsx` wird von keinem Test gehalten (gemessen).
 
