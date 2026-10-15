@@ -281,7 +281,7 @@ Zählung fort, die Tabelle oben führt sie noch nicht.
 **Goal:** Der Betreiber sieht, wenn die aktive Konfiguration eines Knotens von dem abweicht, was holzkube-manager zuletzt gesetzt oder gelesen hat — eine Änderung am Knoten selbst fällt heute nicht auf, weil das Diff nur beim Patchen berechnet wird. Periodische Lesung nach dem Muster von `internal/certwatch`, Anzeige auf der Knoten- und Cluster-Seite und eine Warnung; nie ein stilles „keine Drift", wo die Lesung fehlschlug.
 **Requirements**: DRIFT-01, DRIFT-02, DRIFT-03, DRIFT-04, DRIFT-05, DRIFT-06, DRIFT-07, DRIFT-08, DRIFT-09
 **Depends on:** Nothing
-**Plans:** 6/10 plans executed
+**Plans:** 7/10 plans executed
 
 Plans:
 - [x] 15-01-PLAN.md — Schnappschuss und Mehrdokument-Vergleich: `machineconfig.Snapshot` (redigiert, normalisiert, nie Rohbytes), `CompareDocuments` neben dem unveränderten `Compare`, `ReadSnapshot` von einem Kontext ohne Frist (D-01, D-02, D-09)
@@ -290,7 +290,7 @@ Plans:
 - [x] 15-04-PLAN.md — Bestätigen, Aufräumen, Anstoß: `Confirm` mit Digest als Compare-and-Swap und ohne Zugriff auf den Knoten, `Forget`, Aufräumen verwaister Basen, `Poke` und `Run` (D-04, D-07, D-11)
 - [x] 15-05-PLAN.md — Eigene Applies am Engpass: `talos.ApplyObserver` am `ClusterClient`, erwarteter Digest, staged ohne Fenster, settling mit Fenster, try nie übernommen, die Methodenmenge gepinnt (D-10)
 - [x] 15-06-PLAN.md — Die Sicht: `ClusterView.ConfigDrift`, `HealthFor` mit der 24-Stunden-Regel des Banners, drei Metrik-Serien, nie 0 für nicht gelesen (D-04, D-05, D-06)
-- [ ] 15-07-PLAN.md — Die Aufrufer: `inventory.Connect` hängt den Beobachter an, Konfigurationsdienst, Kubernetes-Upgrade und CA-Rotation Ende zu Ende gemessen, Quelltext-Wächter über die Aufrufer, die Provisionierung vergisst die alte Basis (D-10)
+- [x] 15-07-PLAN.md — Die Aufrufer: `inventory.Connect` hängt den Beobachter an, Konfigurationsdienst, Kubernetes-Upgrade und CA-Rotation Ende zu Ende gemessen, Quelltext-Wächter über die Aufrufer, die Provisionierung vergisst die alte Basis (D-10)
 - [ ] 15-08-PLAN.md — HTTP, Audit, Verdrahtung: GET mit Diff (Operator), POST bestätigen (Admin, Sudo, Digest), Knoten im Audit-Eintrag aus dem Pfad, `main.go` samt AST-Wächter, API-Vertrag (D-05, D-07, D-11)
 - [ ] 15-09-PLAN.md — Oberfläche: Abschnitt auf der Knotenseite mit Diff und Bestätigen, Zeile Configuration auf der Clusterkarte, Banner auf jeder Seite (D-05, D-06, D-07)
 - [ ] 15-10-PLAN.md — Dokumentation, Ledger, Gate: vier offene Ledger-Einträge von Hand (Compare-Blindfleck, A1/A2, Geheimniswerte, nicht redigierte Felder), README und Leitfaden, das Gate der ganzen Phase gegen BASE (D-02, D-09, D-12)
