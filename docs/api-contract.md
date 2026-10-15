@@ -1195,6 +1195,11 @@ Prometheus cannot tell a series that stopped being reported from a target that
 went away, and a "nodes down" graph that ends at zero shows its last non-zero
 value for as long as anybody looks at it.
 
+The four configuration drift series are the one exception, and it is stated:
+`holzkube_node_config_drift` and `holzkube_node_config_read_age_seconds` carry the
+host name as `node`, as `holzkube_node_certificate_seconds` does, and so grow with
+the fleet. See "Configuration drift".
+
 `holzkube_cluster_client_certificate_seconds` may be **negative**. An expired
 certificate is a named state, not a missing metric: the failure it describes
 takes every node in the cluster down in the same second, so a series that
@@ -4293,6 +4298,158 @@ configuration, configuration is where the secrets are, and the archive has no
 deletion path. A stored patch is readable at its own id for as long as it exists
 — which is forever — so the record is complete without the archive holding the
 bytes.
+
+## Configuration drift
+
+holzkube-manager reads the active configuration of every node of every cluster
+that is not switched off, a minute after it starts and then every three hours,
+and keeps one **baseline** per node: the configuration the node had when it was
+last known to be right. A later reading that differs from it, and that nothing
+this installation did explains, is **drift**. The reading is redacted before it
+is compared and before anything is written (see "Nothing leaves this package
+unredacted" above); a baseline file holds no secret.
+
+It is a read-only look and runs in `--dry-run` too. Neither route below sends
+anything to a node.
+
+### Routes
+
+| Method | Path | Role | Destructive | Action | Notes |
+|---|---|---|---|---|---|
+| `GET` | `/api/v1/machines/{id}/config/drift` | operator | no | — | the state, the sentence, and the difference over every document when there is drift |
+| `POST` | `/api/v1/machines/{id}/config/drift/confirm` | **admin** | **yes** | `config.drift-confirm` | `{ "digest": "<64 hex>" }`; `200` with the same view as the `GET`, now `ok` |
+
+The difference is configuration content, so the `GET` asks for an operator, as
+`GET /api/v1/machines/{id}/config` does. `GET /api/v1/clusters`, which a reader
+may call, carries states only (below). Neither route is cluster-scoped, so a
+cluster adopted read-only can still be confirmed: confirming writes local state
+and changes nothing on any node, and neither `--dry-run` nor a cluster lock
+refuses it. Neither route has an upstream budget: the answer is worked out from
+the last reading held in memory and from the store, and no node is asked while
+the request is open.
+
+An instance started without the watch answers both with `502`
+`upstream.drift-unavailable`; an unknown machine is `404` `notfound.record`.
+
+The `GET` answers
+
+```json
+{
+  "machine": "…",
+  "state": "ok | baseline-created | settling | drift | unreadable | baseline-damaged | not-read",
+  "sentence": "what the state means, in words",
+  "checked_at": "…", "read_at": "…",
+  "baseline_taken_at": "…", "baseline_source": "first-sight | apply | confirmed",
+  "drift_since": "…",
+  "digest": "<64 hex>",
+  "diff": { "changes": [{ "path": "KubeletConfig.image", "…": "…" }], "paths": ["…"], "duplicates": false },
+  "notice": "what a snapshot cannot show"
+}
+```
+
+`diff` is there only while `state` is `drift`; it is the baseline against the
+last good reading, over every document of the configuration, not only the first.
+`digest` is the digest of that last good reading and is what the confirmation
+sends back. `notice` is part of every answer and says that a change of nothing
+but a secret value, such as a rotated token, is not visible: snapshots hold the
+redacted configuration. The answer carries no secret value of the cluster.
+Lists are never `null`: `changes` and `paths` are empty lists when there is
+nothing in them, and so is `items` below.
+
+### The states
+
+| `state` | what it says |
+|---|---|
+| `not-read` | nothing was read from the node since this daemon started; it is never "ok" and never "no drift" |
+| `baseline-created` | the reading just now was the first of this node and is its baseline from here on |
+| `ok` | the node has the baseline's configuration |
+| `settling` | an apply from this daemon is on its way and has not taken effect yet; a difference is expected for up to 15 minutes |
+| `drift` | the node differs from its baseline and nothing this installation did explains it; the only state that has something to confirm |
+| `unreadable` | the node could not be read, or its configuration could not be turned into a snapshot; this says nothing about drift in either direction |
+| `baseline-damaged` | the stored baseline cannot be trusted; nothing is compared with it and nothing overwrites it |
+
+No path is excepted: every change in any document counts. A node that stops
+answering while it drifts keeps `drift_since`; the start of a drift is written
+once into the node's record and survives a restart.
+
+### Confirming
+
+`POST .../config/drift/confirm` makes the state the operator looked at the new
+baseline ("this is intended"; `baseline_source` becomes `confirmed`). It is
+Admin and Destructive, so it needs an open sudo window (`428` without one,
+`403` as an operator or reader). The digest is a compare-and-swap: only the state
+whose digest was shown is confirmed, and a change after the screen is not
+confirmed with it.
+
+| answer | when |
+|---|---|
+| `400` | the digest is not 64 lower-case hexadecimal characters, or the body is missing; a field error names `digest` |
+| `409` `conflict.drift-changed` | the digest is not the one of the reading last taken |
+| `409` `conflict.drift-not-read` | no current good reading to confirm: not read since the daemon started, or the last attempt failed |
+| `409` `conflict.no-drift` | the node does not differ from its baseline |
+
+The three codes are in the table of codes above. Nothing is written when one of
+them is answered.
+
+**An apply from here on top of an open drift does not end it.** When this
+daemon sends a configuration to a node that already has a drift, `drift_since`
+stays and the sentence names the earlier, never confirmed difference; only
+confirming, or the node returning to the baseline, ends it.
+
+### On the cluster list
+
+`GET /api/v1/clusters` and `GET /api/v1/clusters/{id}` carry `config_drift`,
+absent until the cluster has been read once and never carrying a difference:
+
+```json
+"config_drift": {
+  "checked_at": "…",
+  "nodes": 3, "read_nodes": 3, "drifted": 1,
+  "banner": false, "warning": "",
+  "items": [{ "machine": "…", "node": "cp-1", "state": "drift",
+              "since": "…", "read_at": "…", "sentence": "…" }]
+}
+```
+
+`items` is one entry per node by host name; `sentence` is said by the server and
+names no path and no value, and for `unreadable` and `baseline-damaged` it is a
+fixed sentence without the error text, because a reader may see this list.
+`banner` is `true`, with `warning` naming the oldest node and counting the
+others, once a drift has run unconfirmed for 24 hours counted from its start;
+the server computes it, the interface only shows it.
+
+### Audit
+
+`config.drift-confirm` records the **node** and the **digest in clear**. The node
+is `params.machine`, written by the server from the path after the redaction, so
+a body key `machine` does not decide it, and any other body key stands as
+`<redacted>`; the digest is a hash, harmless, and says which state was declared
+right. (Before this action a record of an HTTP route carried no node at all:
+`machine_id` is empty on it, because the node is only in the URL, which is not
+kept.)
+
+### Metrics
+
+Four series in `/metrics`, derived from the same memory and never from a node at
+scrape time, so a value is up to one pass (three hours) old:
+
+- `holzkube_node_config_drift{cluster,node}`: `1` for a known drift, `0` for a
+  node that was read and matches. A node nobody has read, cannot read, or whose
+  baseline is damaged has no series, never `0`.
+- `holzkube_cluster_config_drift{cluster}`: `1` when any node of the cluster
+  has a known drift, `0` only when every node has a verdict and none differs;
+  absent while part of the cluster is unjudged and none of the rest differs.
+- `holzkube_cluster_config_nodes_judged{cluster}`: how many nodes have a verdict
+  (compared with a baseline, or known to drift), written for every cluster that
+  was read, also with `0`. Compare it with the number of nodes to see partial
+  coverage.
+- `holzkube_node_config_read_age_seconds{cluster,node}`: the age of the last
+  good reading, never present for a node that was not read.
+
+`node` is the host name, the same exception to "no machine is a label value" that
+`holzkube_node_certificate_seconds` makes. What the daemon does not see (a field
+that `Redact` does not cover, a rotated secret value) and what a read-only
+reading costs a node are in `docs/guide.md`.
 
 ## Provisioning
 

@@ -1884,6 +1884,15 @@ func TestEveryRouteThatReachesUpstreamHasABudgetRow(t *testing.T) {
 		"PUT /api/v1/clusters/{id}/backups/schedule",
 		"POST /api/v1/clusters/{id}/backups/run",
 		"GET /api/v1/clusters/{id}/backups/{name}",
+		// The configuration drift reads. The difference is worked out from the
+		// last reading the watch holds in memory and the baseline in the store;
+		// no node is asked while the request is open. The watch reads the nodes
+		// on its own timer, each under its own budget (configdrift.ReadBudget).
+		"GET /api/v1/machines/{id}/config/drift",
+		// Confirming a drift makes the last reading the baseline: it writes one
+		// record in the data directory and sends nothing to a node, which is
+		// also why a cluster adopted read-only may do it.
+		"POST /api/v1/machines/{id}/config/drift/confirm",
 	} {
 		noUpstream[r] = true
 	}

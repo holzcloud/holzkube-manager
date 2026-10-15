@@ -23,6 +23,7 @@ import (
 	"github.com/holzcloud/holzkube-manager/internal/auth/oidc"
 	"github.com/holzcloud/holzkube-manager/internal/certwatch"
 	"github.com/holzcloud/holzkube-manager/internal/config"
+	"github.com/holzcloud/holzkube-manager/internal/configdrift"
 	"github.com/holzcloud/holzkube-manager/internal/history"
 	"github.com/holzcloud/holzkube-manager/internal/host"
 	"github.com/holzcloud/holzkube-manager/internal/host/hostaction"
@@ -283,6 +284,32 @@ func run(args []string) error {
 		return inv.Connect(ctx, id)
 	}, jobs.AfterReboot(configSvc.ClearStaged))
 
+	// The configuration drift watch: whether a node still has the configuration
+	// it had when it was last known to be right. A read-only look, so it runs in
+	// --dry-run too, like the certificate watch; what it keeps is a baseline per
+	// node in the data directory, redacted before it is written.
+	//
+	// Built here, before provisioning, because the provisioning job is handed
+	// its Forget: a machine that is reset and set up again under the same
+	// identity must not be compared with the baseline of its old life. The
+	// reader is the configuration service's, which hands out only the redacted
+	// snapshot; the observer and the view are hung on the inventory just below,
+	// where every client that applies a configuration comes from.
+	drift := configdrift.New(configdrift.Deps{
+		Clusters:    func(ctx context.Context) ([]model.Cluster, error) { return st.Clusters().List(ctx) },
+		Machines:    inv.MachinesOf,
+		AllMachines: func(ctx context.Context) ([]model.Machine, error) { return st.Machines().List(ctx) },
+		Read:        configSvc.ReadSnapshot,
+		Baselines:   st.ConfigBaselines(),
+		Log:         func(msg string, args ...any) { logger.Info(msg, args...) },
+	})
+	// Every client the inventory gives out tells the watch when it sends this
+	// daemon's own configuration to a node (config apply, a Kubernetes
+	// upgrade, a CA rotation), so the watch does not report it as drift. The
+	// view is what the cluster card and the metrics read.
+	inv.SetApplyObserver(drift.ApplyObserver())
+	inv.SetConfigDrift(drift.HealthFor)
+
 	// The confirmation signing key is generated here and lives only in memory.
 	// A confirmation that survived a restart would be a decision about a fleet
 	// that may since have changed.
@@ -323,6 +350,9 @@ func run(args []string) error {
 		inv.ControlPlaneCount)
 
 	provision.Register(engine, provision.Deps{
+		// The old baseline of a machine goes right before the new configuration
+		// is written to it. Inside the literal, like Drift below.
+		ForgetConfig:     drift.Forget,
 		Dialer:           dialer,
 		MaintenanceCreds: maintenanceCreds,
 		ClusterCreds:     inv.ClusterCreds,
@@ -707,6 +737,7 @@ func run(args []string) error {
 		Jobs:        engine,
 		Confirmer:   confirmer,
 		Config:      configSvc,
+		Drift:       drift,
 		Provision:   provisionSvc,
 		Upgrade:     upgradeSvc,
 		Power:       powerSvc,
@@ -794,6 +825,17 @@ func run(args []string) error {
 	certCtx, stopCerts := context.WithCancel(context.Background())
 	defer stopCerts()
 	go certWatch.Run(certCtx, time.Minute)
+
+	// The drift watch reads each node once shortly after start and then every
+	// three hours. On a context derived from the background one and nothing
+	// else: no deadline, so the loop is not ended by one, and no request, so it
+	// is not ended by the end of one (the certificate watch ran on a context
+	// with a deadline once and stopped without a word, quick task 261014-gl2).
+	// Every read gets its own budget inside the watch. TestTheDaemonWiresTheDriftWatch
+	// holds this.
+	driftCtx, stopDrift := context.WithCancel(context.Background())
+	defer stopDrift()
+	go drift.Run(driftCtx, time.Minute)
 
 	// The keeper of disabled nodes: one that comes up anyway is cordoned and
 	// said so in the log. Not in --dry-run, which promises to change nothing
@@ -1004,6 +1046,7 @@ func routeTable(deps httpapi.Deps) []httpapi.Route {
 		handlers.StreamRoutes(deps),
 		handlers.JobRoutes(deps),
 		handlers.ConfigRoutes(deps),
+		handlers.ConfigDriftRoutes(deps),
 		handlers.ProvisionRoutes(deps),
 		handlers.UpgradeRoutes(deps),
 		handlers.PowerRoutes(deps),
