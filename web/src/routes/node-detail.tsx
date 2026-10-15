@@ -7,6 +7,7 @@ import { HealthField, StageBadge } from '@/components/HealthField'
 import { LabelEditor } from '@/components/LabelEditor'
 import { LogPanel } from '@/components/LogPanel'
 import { NodeActions } from '@/components/NodeActions'
+import { NodeConfigDrift } from '@/components/NodeConfigDrift'
 import { NodeHardware } from '@/components/NodeHardware'
 import { PowerMenu } from '@/components/PowerMenu'
 import { Badge } from '@/components/ui/badge'
@@ -304,6 +305,13 @@ export function NodeDetailPage() {
             </dl>
           </CardContent>
         </Card>
+
+        {/*
+          Between Hardware and the live output, not straight after "Version
+          compatibility": that card and Hardware are a pair in the two-column
+          grid, and a card spanning both columns between them would leave a gap.
+        */}
+        <NodeConfigDrift machine={m.id} className="lg:col-span-2" />
 
         <Card className="lg:col-span-2">
           <CardHeader>

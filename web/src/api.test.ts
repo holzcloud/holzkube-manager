@@ -348,6 +348,18 @@ describe('the sudo prompt names the action it is asking about', () => {
     const challenge = await challengeRaisedBy(() => api.users.unlinkIdentity('u1'))
     expect(challenge.action).toBe('Unlink single sign-on for this account')
   })
+
+  /**
+   * Confirming a drift writes only local state and changes nothing on the node,
+   * so the reason says that -- and says what it does do, which is overwrite the
+   * last known configuration and switch the warning banner off.
+   */
+  it('names confirming a configuration as the new baseline, and says what it does', async () => {
+    const challenge = await challengeRaisedBy(() => api.configDrift.confirm('m-1', 'ab'.repeat(32)))
+    expect(challenge.action).toBe('Confirm this configuration as the new baseline')
+    expect(challenge.because).toContain('last known configuration')
+    expect(challenge.because).toContain('nothing on the node')
+  })
 })
 
 /**

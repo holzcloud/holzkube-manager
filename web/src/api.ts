@@ -684,6 +684,17 @@ const ACTION_LABELS: ReadonlyArray<{
       'password again before it runs. Nothing is lost if it fails: the certificate is proved ' +
       'against a node before it replaces the one in use',
   },
+  // Confirming a drift (Phase 15). It writes local state only: no node is
+  // sent anything, which is why the reason says so instead of the dialog's
+  // general sentence.
+  {
+    match: /^\/api\/v1\/machines\/[^/]+\/config\/drift\/confirm$/,
+    action: 'Confirm this configuration as the new baseline',
+    because:
+      'overwrites the last known configuration of this node with the one shown and switches the ' +
+      'warning banner off, so it asks for your password again. It changes nothing on the node ' +
+      'itself: nothing on the node is sent or reverted',
+  },
   // The five host actions (Phase 13). Four take away the machine this page
   // runs on or the service itself, and the fifth has root look for a release on
   // the page's behalf, so the prompt names which of the five it is.
@@ -1386,6 +1397,23 @@ export const historySchema = z.object({
 })
 
 export type History = z.infer<typeof historySchema>
+
+/**
+ * Where a node's configuration stands against its baseline. Seven states, and
+ * three of them (`not-read`, `unreadable`, `baseline-damaged`) are not a
+ * judgement at all: no screen may draw them like `ok`.
+ */
+export const configDriftStateSchema = z.enum([
+  'not-read',
+  'baseline-created',
+  'ok',
+  'settling',
+  'drift',
+  'unreadable',
+  'baseline-damaged',
+])
+
+export type ConfigDriftState = z.infer<typeof configDriftStateSchema>
 
 export const clusterSchema = z.object({
   id: z.string(),
@@ -3115,6 +3143,41 @@ export const previewSchema = z.object({
 
 export type ConfigPreview = z.infer<typeof previewSchema>
 
+/* ---------------------------------------------------------------------- */
+/* Configuration drift (Phase 15)                                          */
+/* ---------------------------------------------------------------------- */
+
+/**
+ * One node, with the difference over every document when there is drift.
+ *
+ * The time fields are absent when empty (the server writes them `omitzero`), and
+ * `diff` is there only while the state is `drift`. Its lists are read like every
+ * other list in this file: absent and null are both empty.
+ */
+export const configDriftDetailSchema = z.object({
+  machine: z.string(),
+  state: configDriftStateSchema,
+  sentence: z.string(),
+  checked_at: z.string().nullish(),
+  read_at: z.string().nullish(),
+  baseline_taken_at: z.string().nullish(),
+  baseline_source: z.string().nullish(),
+  drift_since: z.string().nullish(),
+  /** The digest of the last good reading: what a confirmation sends back. */
+  digest: z.string().default(''),
+  diff: z
+    .object({
+      changes: z.array(changeSchema).nullish().transform(orEmpty),
+      paths: z.array(z.string()).nullish().transform(orEmpty),
+      duplicates: z.boolean().default(false),
+    })
+    .nullish(),
+  /** The fixed sentence about what a snapshot cannot show. */
+  notice: z.string().default(''),
+})
+
+export type ConfigDriftDetail = z.infer<typeof configDriftDetailSchema>
+
 export const patchSchema = z.object({
   id: z.string(),
   name: z.string(),
@@ -3876,6 +3939,28 @@ export const api = {
         `/api/v1/machines/${encodeURIComponent(machine)}/config/apply`,
         applyResultSchema,
         { patches, patch_ids: patchIDs, mode, cluster },
+      ),
+  },
+
+  configDrift: {
+    /** The state of one node's configuration and, when it drifts, the
+     * difference. Reads what the daemon already holds: no node is asked. */
+    get: (machine: string): Promise<ConfigDriftDetail> =>
+      sendJSON(
+        'GET',
+        `/api/v1/machines/${encodeURIComponent(machine)}/config/drift`,
+        configDriftDetailSchema,
+      ),
+
+    /** "This is intended": makes the state the operator looked at the new
+     * baseline. The digest is the one the page showed; the server confirms only
+     * that state. Destructive, so it goes through the sudo window. */
+    confirm: (machine: string, digest: string): Promise<ConfigDriftDetail> =>
+      sendJSON(
+        'POST',
+        `/api/v1/machines/${encodeURIComponent(machine)}/config/drift/confirm`,
+        configDriftDetailSchema,
+        { digest },
       ),
   },
 

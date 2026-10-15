@@ -3,6 +3,7 @@ import {
   accessControlSchema,
   clusterNetworkSchema,
   clusterStorageSchema,
+  configDriftDetailSchema,
   hostSchema,
   inventorySchema,
 } from '@/api'
@@ -68,5 +69,24 @@ describe('a null list', () => {
       expect(parsed.success ? null : JSON.stringify(parsed.error.issues)).toBeNull()
       expect(parsed.success && parsed.data.actions.outdated).toEqual([])
     }
+  })
+
+  it('reads a drift detail with null or missing diff lists as empty lists (15-09)', () => {
+    const detail = {
+      machine: 'm-1',
+      state: 'drift',
+      sentence: 'This node differs from its baseline.',
+      digest: 'ab'.repeat(32),
+      notice: 'A rotated secret is not visible here.',
+    }
+    for (const diff of [{ changes: null, paths: null }, {}]) {
+      const parsed = configDriftDetailSchema.safeParse({ ...detail, diff })
+      expect(parsed.success ? null : JSON.stringify(parsed.error.issues)).toBeNull()
+      expect(parsed.success && parsed.data.diff?.changes).toEqual([])
+      expect(parsed.success && parsed.data.diff?.paths).toEqual([])
+    }
+    const none = configDriftDetailSchema.safeParse({ ...detail, diff: null })
+    expect(none.success ? null : JSON.stringify(none.error.issues)).toBeNull()
+    expect(none.success && none.data.diff).toBeFalsy()
   })
 })
