@@ -77,6 +77,41 @@ describe('a cluster card', () => {
     expect(screen.getByText(/overdue — last/)).toBeInTheDocument()
   })
 
+  it('has a configuration row that says "not read yet" until the server sends config_drift (15-09)', () => {
+    const { unmount } = wrap(<ClusterCard cluster={cluster} />)
+    expect(screen.getByText('Configuration').nextElementSibling).toHaveTextContent('not read yet')
+    unmount()
+
+    wrap(
+      <ClusterCard
+        cluster={{
+          ...cluster,
+          config_drift: {
+            checked_at: '2026-10-12T09:05:00Z',
+            nodes: 1,
+            read_nodes: 1,
+            drifted: 1,
+            banner: false,
+            warning: '',
+            items: [
+              {
+                machine: 'm-1',
+                node: 'cp-1',
+                state: 'drift',
+                since: '2026-10-11T07:30:00Z',
+                read_at: '2026-10-12T09:00:00Z',
+                sentence: 'differs',
+              },
+            ],
+          },
+        }}
+      />,
+    )
+    expect(screen.getByText('Configuration').nextElementSibling).toHaveTextContent(
+      '1 of 1 nodes differs from its baseline: cp-1',
+    )
+  })
+
   it('says nothing about checking once every node has answered', () => {
     wrap(<ClusterCard cluster={cluster} />)
 

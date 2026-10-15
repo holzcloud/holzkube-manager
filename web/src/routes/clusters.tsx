@@ -5,6 +5,7 @@ import { useState } from 'react'
 import { api, type Cluster } from '@/api'
 import { ClusterScalePanel } from '@/components/ClusterScale'
 import { ClusterTemplatePanel } from '@/components/ClusterTemplate'
+import { ConfigDriftRow } from '@/components/ConfigDriftRow'
 import { NodeCertificatesRow } from '@/components/NodeCertificates'
 import { PowerMenu } from '@/components/PowerMenu'
 import { RenewCertificate } from '@/components/RenewCertificate'
@@ -192,6 +193,11 @@ export function ClusterCard({ cluster }: { cluster: Cluster }) {
           <dt className="text-muted-foreground">Cluster certificates</dt>
           <dd>
             <NodeCertificatesRow health={cluster.node_certificates} />
+          </dd>
+
+          <dt className="text-muted-foreground">Configuration</dt>
+          <dd>
+            <ConfigDriftRow health={cluster.config_drift} />
           </dd>
         </dl>
 

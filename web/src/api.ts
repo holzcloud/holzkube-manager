@@ -1479,6 +1479,36 @@ export const clusterSchema = z.object({
       ),
     })
     .nullish(),
+  /** Where the configuration of the cluster's nodes stands against their
+   * baselines. Absent until the cluster has been read once, which the card says
+   * ("not read yet") rather than showing nothing. It never carries a
+   * difference: that is only on the node's own page. `banner` and `warning` are
+   * the server's, which counts the 24 hours; this screen computes no threshold. */
+  config_drift: z
+    .object({
+      checked_at: z.string(),
+      nodes: z.number(),
+      read_nodes: z.number(),
+      drifted: z.number(),
+      banner: z.boolean().default(false),
+      warning: z.string().default(''),
+      items: z
+        .array(
+          z.object({
+            machine: z.string(),
+            node: z.string(),
+            state: configDriftStateSchema,
+            /** The start of a known drift. Set on an unreadable node too, when
+             * the record knows one. */
+            since: z.string().nullish(),
+            read_at: z.string().nullish(),
+            sentence: z.string(),
+          }),
+        )
+        .nullish()
+        .transform(orEmpty),
+    })
+    .nullish(),
 })
 
 export type Cluster = z.infer<typeof clusterSchema>

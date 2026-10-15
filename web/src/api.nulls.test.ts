@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   accessControlSchema,
   clusterNetworkSchema,
+  clusterSchema,
   clusterStorageSchema,
   configDriftDetailSchema,
   hostSchema,
@@ -88,5 +89,17 @@ describe('a null list', () => {
     const none = configDriftDetailSchema.safeParse({ ...detail, diff: null })
     expect(none.success ? null : JSON.stringify(none.error.issues)).toBeNull()
     expect(none.success && none.data.diff).toBeFalsy()
+  })
+
+  it('reads a cluster config_drift with null or missing items as an empty list (15-09)', () => {
+    const cluster = (demo as unknown as { '/api/v1/clusters': { clusters: unknown[] } })[
+      '/api/v1/clusters'
+    ].clusters[0] as Record<string, unknown>
+    const drift = { checked_at: '2026-10-12T09:05:00Z', nodes: 0, read_nodes: 0, drifted: 0 }
+    for (const items of [null, undefined, []]) {
+      const parsed = clusterSchema.safeParse({ ...cluster, config_drift: { ...drift, items } })
+      expect(parsed.success ? null : JSON.stringify(parsed.error.issues)).toBeNull()
+      expect(parsed.success && parsed.data.config_drift?.items).toEqual([])
+    }
   })
 })

@@ -166,7 +166,7 @@ function StateBadge({ state }: { state: ConfigDriftState }) {
   )
 }
 
-const STATE_LABEL: Record<ConfigDriftState, string> = {
+export const STATE_LABEL: Record<ConfigDriftState, string> = {
   'not-read': 'not read yet',
   'baseline-created': 'baseline created',
   ok: 'As last known',
