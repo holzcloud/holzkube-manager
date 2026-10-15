@@ -926,6 +926,10 @@ directory. There are two ways out:
   is there first, as every restore does. The `config-baselines/` directory stays
   where it is; a binary that does not know it leaves it alone.
 
+What is in `config-baselines/` and what is not (secret values are replaced, a
+few kinds of field are stored as the Config view shows them) is described under
+[Configuration drift](#configuration-drift).
+
 ### In a container
 
 `compose.yaml` in this repository is the whole setup. The image runs as uid
@@ -1329,6 +1333,134 @@ key. holzkube-manager reads the resource and keeps the name and the dates; the
 key is never copied out of the package that reads it. Workers are not read (they
 have no etcd or Kubernetes API server and Talos renews their API certificate the
 same way). Nothing here changes a node.
+
+### Configuration drift
+
+Nothing used to notice a change made to a node behind this installation's back:
+the diff exists only while you patch. Now the active configuration of every node
+is read and compared with a **baseline**, the configuration the node had when it
+was last known to be right. A difference that nothing this installation did
+explains is **drift**.
+
+**What is read, and when.** Every node that exists and is not switched off, in
+every cluster that is not switched off, a minute after start and then every
+three hours, and once more, out of turn, after each apply this installation makes
+(applying a configuration, a Kubernetes upgrade, a CA rotation). One node gets at
+most 20 seconds, connection and read together. It is a read: a cluster adopted
+read-only and `--dry-run` change nothing about it. Until a node has been read the
+card says *not read yet*, never *fine*. A cluster that is only stopped, not
+switched off, costs up to five seconds per node and pass, one after the other,
+because each node has to fail to answer first.
+
+**The baseline.** The first reading of a node creates it and says so; there is
+nothing to differ from yet. After that it moves in two ways only: an apply made
+by this installation (the expected configuration is noted as a digest before it
+is sent, and becomes the baseline when that version shows up on the node; a
+`staged` apply counts once the version lands, a `try` apply never), or you
+confirming a drift. It is the redacted, normalised configuration text, one file
+per node in `config-baselines/` of the [data directory](#data-directory).
+
+**What counts.** Every change in every document of the configuration, including
+`machine.install.image`. There is no list of exceptions and no way to add one,
+because the research found no path that Talos rewrites by itself (assumption A1,
+checked against the documentation only, ledger 177). A false alarm on a node
+nobody changed would be the first sign that the assumption is wrong, and is worth
+reporting.
+
+**The seven states.**
+
+| State | What it says |
+|---|---|
+| `not-read` | not read since this daemon started; never counted as fine |
+| `baseline-created` | the reading just now was the first, and is the baseline from here on |
+| `ok` | the node has the baseline's configuration |
+| `settling` | an apply from here is on its way; for up to 15 minutes a difference is expected |
+| `drift` | the node differs and nothing here explains it; the only state with something to confirm |
+| `unreadable` | the node could not be read; this says nothing about drift either way |
+| `baseline-damaged` | the stored baseline cannot be trusted; nothing is compared with it and nothing overwrites it |
+
+A node without a verdict (`not-read`, `unreadable`, `baseline-damaged`) is never
+counted as matching anywhere: not on the card, not in the metrics.
+
+**Where it shows.** The node page, the cluster card (a *Configuration* row) and
+`/metrics` show a drift at once. The **banner** on every page waits until the
+drift has gone 24 hours unconfirmed, counted from the start of the drift, which
+is kept in the node's record and survives a restart, and not from the last
+reading; it cannot be dismissed. An apply made by this installation that lands on
+a node with an open drift does not end it: the start stays, the banner keeps
+counting, the baseline is not moved, and the sentence says the state includes an
+earlier change that was never confirmed. A drift ends by confirming it or by the
+node going back to the baseline. After a restart the card says *not read yet*
+until the first reading, a minute after start, and the banner is absent in that
+time; the start of a running drift stays in the record and the banner comes back
+with the first reading.
+
+**Confirming.** *Confirm this configuration as the new baseline* on the node page
+needs an admin and a fresh sign-in (the sudo window), and writes
+`config.drift-confirm` to the audit archive with the node and the digest. It
+confirms exactly the state you looked at: if the node changed again meanwhile
+the answer is 409 and the page shows the new state. Nothing is changed on the
+node. There is no reset to the baseline (a task of its own, later), no
+comparison with sister nodes and none with a configuration generated from
+secrets and patches.
+
+**What it cannot see, each with an open ledger entry.**
+
+- A change of nothing but a **secret value**, such as a rotated token or a new
+  key, is invisible, because every secret is replaced by the same constant before
+  anything is compared or written; what shows is set against empty (decision
+  D-02, ledger 178).
+- Fields that the redaction does not know (`machine.files`, `machine.env`,
+  `machine.install.extraKernelArgs`, `cluster.inlineManifests`,
+  `EnvironmentConfig`, `EtcFileConfig`, `ExtensionServiceConfig`) are stored as
+  the Config view shows them, so they sit **permanently** in `config-baselines/`
+  (`0600` in a `0700` directory, verbatim in every backup of the data directory).
+  That is the operator's decision (D-14), not an extra redaction. If you keep
+  secrets in those fields, look at the files (ledger 179).
+- A real node is only assumed to return what was sent after an apply (A2). If it
+  does not, an apply made here shows up as drift that you confirm, and nothing is
+  hidden. The simulator the tests run against cannot stage or try, so those rules
+  are checked on stored records and not against a node (ledger 177).
+- The reading is up to one pass old. A reading that lands in the roughly one
+  minute a `try` apply is active sees the trial configuration and says drift
+  until the next reading.
+- Only the last state is kept, not a history of changes.
+- The wall does not show drift; it is not part of this feature.
+- A switched-off cluster or node is not read; its last reading stays, with its
+  age.
+- One damaged baseline file stops the removal of baselines of vanished machines
+  until it is deleted (the state `baseline-damaged` names the file).
+- The explanation of an unreadable machine on the node page can name its
+  address or a path in the data directory; it is shown to operators and up, and
+  the cluster list, which a reader may call, carries a fixed sentence instead.
+- The comparison reads every document, but the Config view's **Plan** still only
+  reads the first one, so a patch to another document shows an empty diff there
+  (ledger 176).
+
+**Repairs.** A damaged baseline is reported as `baseline-damaged`, with the name
+of the file, and never overwritten. Deleting `config-baselines/<machine id>.json`
+makes the next reading create a new baseline. A machine that is provisioned anew
+starts with a new baseline: the job forgets the old one. Restoring an older
+backup of the data directory brings older baselines back; changes since then show
+as drift, and you confirm them. The directory and its schema are described under
+[Data directory](#data-directory), including [going back from
+schema 7](#schema-7-and-going-back).
+
+**Metrics.** Four series, all derived from the last readings and never from a
+node at scrape time:
+
+- `holzkube_cluster_config_drift{cluster}`: 1 when any node has a known drift; 0
+  only when **every** node of the cluster has a verdict and none differs; absent
+  when part of the cluster is without a verdict and none of the rest differs.
+- `holzkube_cluster_config_nodes_judged{cluster}`: how many nodes have a verdict,
+  so an alert rule can see partial coverage.
+- `holzkube_node_config_drift{cluster,node}`: 1 or 0, never 0 for a node that was
+  not read.
+- `holzkube_node_config_read_age_seconds{cluster,node}`: the age of the last good
+  reading; absent for a node never read.
+
+A node has a verdict when it is `ok`, `baseline-created` or `settling`, or has a
+known drift.
 
 ### Growing and shrinking a cluster
 
@@ -2252,16 +2384,26 @@ What it exports is what this instance knows and nothing else has: nodes per
 stage, seconds left on each cluster's client certificate, job records by kind
 and state, confirmed etcd members, how old each cluster's newest etcd snapshot
 is and whether its backup schedule is overdue
-(`holzkube_etcd_snapshot_age_seconds`, `holzkube_etcd_snapshot_overdue`), and
-whether the audit chain verified at startup.
+(`holzkube_etcd_snapshot_age_seconds`, `holzkube_etcd_snapshot_overdue`),
+whether the audit chain verified at startup, the certificate expiry of every
+control-plane node (`holzkube_node_certificate_seconds`) and whether a node's
+configuration differs from its baseline
+(`holzkube_node_config_drift`, `holzkube_cluster_config_drift`,
+`holzkube_cluster_config_nodes_judged`,
+`holzkube_node_config_read_age_seconds`; see [Configuration
+drift](#configuration-drift)).
 
 **Export, never ingest.** This does not become a monitoring pipeline: it keeps
 no history and it does not alert.
 
 Two properties are deliberate and worth knowing before writing a rule against
-it. **No node is ever a label value**, so the number of series follows the
-number of clusters rather than the size of the fleet — what an operator graphs
-is "how many nodes are down", and the dashboard answers "which one". And
+it. **The counts per stage never carry a node as a label value**, so those
+series follow the number of clusters rather than the size of the fleet — what an
+operator graphs is "how many nodes are down", and the dashboard answers "which
+one". The per-node series (`holzkube_node_certificate_seconds`,
+`holzkube_node_config_drift` and `holzkube_node_config_read_age_seconds`) are the
+exception: they carry the host name, never the machine id, so they grow with the
+size of the fleet. And
 `holzkube_cluster_client_certificate_seconds` **goes negative**: an expired
 certificate is a named state rather than a missing metric, because the failure
 it describes takes every node in the cluster down in the same second and a

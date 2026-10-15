@@ -51,6 +51,12 @@ just said, nothing cached or guessed.
   warned about, SecureBoot and disk encryption, local account plus OIDC single
   sign-on, roles, re-authentication before destructive actions, a hash-chained
   audit log, and a `--dry-run` mode that refuses every change.
+- **Configuration drift:** the active configuration of every node is read every
+  few hours and compared with what holzkube-manager last knew or set itself. A
+  change made at the node (talosctl, another operator) shows up with its diff on
+  the node page, as a row on the cluster card and in `/metrics`, and as a banner
+  once it has stayed unconfirmed for a day; "this is intended" makes the new
+  state the baseline and changes nothing on the node.
 - **Power:** stop, start or restart a cluster, a node or an app; Wake-on-LAN
   brings a node back.
 - **The host itself:** a Host page for the machine it runs on, with live CPU,
