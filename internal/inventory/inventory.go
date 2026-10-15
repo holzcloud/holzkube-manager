@@ -105,6 +105,10 @@ type Service struct {
 	// until the reader is wired.
 	certificateHealth func(c model.Cluster, now time.Time) *model.CertificateHealth
 
+	// configDrift says how the configuration of a cluster's nodes stands
+	// against what was last known; nil until the reader is wired.
+	configDrift func(c model.Cluster, now time.Time) *model.ConfigDriftHealth
+
 	// observed is the in-memory half of the read model: per machine, what each
 	// level last confirmed and when.
 	//

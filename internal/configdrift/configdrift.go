@@ -116,10 +116,11 @@ type reading struct {
 type pass struct {
 	at time.Time
 
-	// nodes counts the nodes read or attempted, switched-off ones left out;
-	// read counts those that were compared with a baseline or founded one.
-	nodes int
-	read  int
+	// members are the nodes the pass covered, by machine and with the host name
+	// they had then: the ones read or attempted, switched-off ones left out. Who
+	// answered is not kept here but in the readings, which a poke changes
+	// between two passes; the counts of the view are drawn from both.
+	members map[model.MachineID]string
 }
 
 // Service holds the last reading of each node.
@@ -226,7 +227,7 @@ func (s *Service) Refresh(ctx context.Context, cluster model.ClusterID) {
 	}
 
 	present := make(map[model.MachineID]bool, len(machines))
-	p := pass{}
+	p := pass{members: make(map[model.MachineID]string, len(machines))}
 	for _, m := range machines {
 		present[m.ID] = true
 		if m.Disabled {
@@ -235,10 +236,8 @@ func (s *Service) Refresh(ctx context.Context, cluster model.ClusterID) {
 		if ctx.Err() != nil {
 			return
 		}
-		p.nodes++
-		if s.readNode(ctx, cluster, m) {
-			p.read++
-		}
+		p.members[m.ID] = m.Hostname
+		s.readNode(ctx, cluster, m)
 	}
 
 	s.mu.Lock()

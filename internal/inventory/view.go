@@ -180,6 +180,12 @@ type ClusterView struct {
 	// as its control-plane nodes last reported them. Absent until the first
 	// read has happened, which the screen says rather than showing fine.
 	NodeCertificates *model.CertificateHealth `json:"node_certificates,omitempty"`
+
+	// ConfigDrift is the standing of the configuration of the cluster's nodes:
+	// counts, a state per node and the banner. Absent until the first pass has
+	// been through the cluster, which the card says as "not read yet" and never
+	// as "no drift". It carries no difference: this list is readable by a Reader.
+	ConfigDrift *model.ConfigDriftHealth `json:"config_drift,omitempty"`
 }
 
 // Certificate urgency levels, in the order D-23 escalates them.
@@ -378,6 +384,7 @@ func (s *Service) Clusters(ctx context.Context) ([]ClusterView, error) {
 		v := clusterView(c, machines, now)
 		v.Backup = s.backupHealthOf(c, now)
 		v.NodeCertificates = s.certificateHealthOf(c, now)
+		v.ConfigDrift = s.configDriftOf(c, now)
 		out = append(out, v)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt.Before(out[j].CreatedAt) })
@@ -401,6 +408,7 @@ func (s *Service) Cluster(ctx context.Context, id model.ClusterID) (ClusterView,
 	v := clusterView(c, machines, now)
 	v.Backup = s.backupHealthOf(c, now)
 	v.NodeCertificates = s.certificateHealthOf(c, now)
+	v.ConfigDrift = s.configDriftOf(c, now)
 	return v, nil
 }
 
@@ -436,6 +444,26 @@ func (s *Service) SetCertificateHealth(fn func(c model.Cluster, now time.Time) *
 func (s *Service) certificateHealthOf(c model.Cluster, now time.Time) *model.CertificateHealth {
 	s.mu.Lock()
 	fn := s.certificateHealth
+	s.mu.Unlock()
+	if fn == nil {
+		return nil
+	}
+	return fn(c, now)
+}
+
+// SetConfigDrift gives the inventory the means to say how the configuration of a
+// cluster's nodes stands. It is a setter for the same reason
+// SetCertificateHealth is: the reader is built after the inventory, from its
+// connector. Nil takes it away again.
+func (s *Service) SetConfigDrift(fn func(c model.Cluster, now time.Time) *model.ConfigDriftHealth) {
+	s.mu.Lock()
+	s.configDrift = fn
+	s.mu.Unlock()
+}
+
+func (s *Service) configDriftOf(c model.Cluster, now time.Time) *model.ConfigDriftHealth {
+	s.mu.Lock()
+	fn := s.configDrift
 	s.mu.Unlock()
 	if fn == nil {
 		return nil
