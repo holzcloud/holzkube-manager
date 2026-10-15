@@ -10,9 +10,16 @@ import (
 	"github.com/holzcloud/holzkube-manager/internal/talos"
 )
 
-// modeTry is the apply mode whose configuration returns by itself. It is a
-// literal of this package because talos carries the mode as the caller's string.
-const modeTry = "try"
+// The apply modes this package has to tell apart. They are literals of this
+// package because talos carries the mode as the caller's string.
+const (
+	// modeTry is the mode whose configuration returns by itself.
+	modeTry = "try"
+
+	// modeStaged is the mode that changes nothing now and everything at the
+	// next boot.
+	modeStaged = "staged"
+)
 
 // ApplyObserver is what hears every configuration this installation sends to a
 // node, hung on the Talos client (talos.ClusterClient.SetApplyObserver) at the

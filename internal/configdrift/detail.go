@@ -31,7 +31,7 @@ const (
 	StateOK State = "ok"
 
 	// StateSettling means an apply from this daemon is on its way and has not landed
-	// yet, so a difference is expected for a while. Plan 05 sets it.
+	// yet, so a difference is expected for a while, at most the settle window.
 	StateSettling State = "settling"
 
 	// StateDrift means the node's configuration differs from the baseline and
@@ -172,10 +172,18 @@ func sentenceDrift(b model.ConfigBaseline, since time.Time) string {
 	out := "The configuration differs from the baseline taken " + when(b.TakenAt) + " from " +
 		describeSource(b.Source) + "; the difference was first seen " + when(since) + "."
 	if !b.AppliedOnDriftAt.IsZero() {
-		out += " The state includes an earlier difference that was never confirmed, and a change made through " +
+		out += " The state includes an earlier change that was never confirmed, and a change made through " +
 			"holzkube-manager landed on top of it on " + when(b.AppliedOnDriftAt) + "."
 	}
 	return out
+}
+
+// sentenceSettling says that an apply from this installation has not taken
+// effect yet, and when a difference stops being explained by it.
+func sentenceSettling(e *model.ExpectedConfig, window time.Duration) string {
+	return "A configuration sent through holzkube-manager on " + when(e.At) + " (mode " + e.Mode + ") has not taken " +
+		"effect on the node yet, so it differs from its baseline for now. That is expected until " +
+		when(e.At.Add(window)) + "; if it still differs then, it is reported as a difference."
 }
 
 func sentenceOK(b model.ConfigBaseline) string {

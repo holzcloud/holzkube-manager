@@ -46,7 +46,7 @@ const (
 	DefaultReadBudget = 20 * time.Second
 
 	// DefaultSettleWindow is how long a difference after an apply from this
-	// daemon is expected before it counts as drift. Plan 05 uses it.
+	// daemon is expected before it counts as drift (StateSettling).
 	DefaultSettleWindow = 15 * time.Minute
 )
 

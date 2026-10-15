@@ -25,10 +25,23 @@ const decideAttempts = 3
 //  1. no baseline yet (and only "not found" means that): this reading becomes
 //     it, first sight;
 //  2. a baseline that cannot be trusted: baseline-damaged, nothing is written;
-//  3. same digest: ok -- and if the digests differ but the stored text means
-//     the same once the running machinery has normalised it, that is also ok,
-//     and the text is brought to that form once;
-//  4. otherwise drift, with the start of it written once.
+//  3. same digest: ok. A deviation that was running is over, and an expectation
+//     of an apply that is the baseline itself or has run out is dropped;
+//  4. the digest an own apply left behind (Expected), while that expectation
+//     still counts: that configuration is the baseline (source apply) and the
+//     node is ok -- unless a deviation is open and was never confirmed, in
+//     which case the baseline stays where it is, the expectation is spent and
+//     the node stays drift (D-13);
+//  5. different digest, but the stored text means the same once the running
+//     machinery has normalised it: ok, and the text is brought to that form once;
+//  6. an own apply is on its way (Expected, not staged, younger than the settle
+//     window) and no deviation is open: settling, nothing is written;
+//  7. otherwise drift, with the start of it written once.
+//
+// An expectation counts while it is a staged one (a staged configuration
+// changes nothing until the next boot and has no end of its own) or younger
+// than the settle window. It is a digest, so only that exact configuration is
+// ever taken for an own change.
 //
 // It runs under storeMu and reports whether the node ended up compared.
 func (s *Service) decide(ctx context.Context, cluster model.ClusterID, m model.Machine, snap machineconfig.Snap) bool {
@@ -83,10 +96,44 @@ func (s *Service) decide(ctx context.Context, cluster model.ClusterID, m model.M
 		}
 
 		if base.Digest != snap.Digest {
+			// The stored text may be the same configuration in another
+			// encoding, written by an older build or older machinery. Judging
+			// "drift" on bytes alone would report a difference nobody made.
+			renormalised, err := machineconfig.Snapshot([]byte(base.Snapshot))
+			if err != nil {
+				s.damaged(cluster, m, now, snap, "its snapshot does not load with this version of holzkube-manager")
+				return false
+			}
+			sameAsBaseline := renormalised.Digest == snap.Digest
+
 			// An apply from this installation left this digest behind, and this
-			// is it: what the operator meant is now what the node runs, so it is
-			// the baseline, and there is no difference to report.
-			if base.Expected != nil && base.Expected.Digest == snap.Digest {
+			// is it.
+			if exp := base.Expected; exp != nil && exp.Digest == snap.Digest && !sameAsBaseline && !s.stale(exp, now) {
+				if !base.DriftSince.IsZero() {
+					// D-13: a deviation is open and nobody confirmed it, and
+					// this landed on top of it. Moving the baseline would make
+					// the earlier difference disappear unseen, so it stays: the
+					// start, the baseline and the state are what they were, the
+					// expectation is spent, and the record says an apply landed
+					// on it.
+					if base.AppliedOnDriftAt.IsZero() {
+						base.AppliedOnDriftAt = now
+					}
+					base.Expected = nil
+					saved, err := s.deps.Baselines.Put(ctx, base)
+					if errors.Is(err, store.ErrConflict) {
+						continue
+					}
+					if err != nil {
+						s.unreadable(ctx, cluster, m, reasonStoreFailed(err))
+						return false
+					}
+					s.record(cluster, m, StateDrift, now, snap, saved.DriftSince, sentenceDrift(saved, saved.DriftSince))
+					return true
+				}
+
+				// What the operator meant is now what the node runs: it is the
+				// baseline, and there is no difference to report.
 				landed := base
 				landed.Format, landed.Cluster = model.BaselineFormat, m.Cluster
 				landed.Snapshot, landed.Digest = snap.Text, snap.Digest
@@ -104,17 +151,12 @@ func (s *Service) decide(ctx context.Context, cluster model.ClusterID, m model.M
 				return true
 			}
 
-			// The stored text may be the same configuration in another
-			// encoding, written by an older build or older machinery. Judging
-			// "drift" on bytes alone would report a difference nobody made.
-			renormalised, err := machineconfig.Snapshot([]byte(base.Snapshot))
-			if err != nil {
-				s.damaged(cluster, m, now, snap, "its snapshot does not load with this version of holzkube-manager")
-				return false
-			}
-			if renormalised.Digest == snap.Digest {
+			if sameAsBaseline {
 				base.Snapshot, base.Digest, base.Machinery = renormalised.Text, renormalised.Digest, gendata.VersionTag
 				base.DriftSince, base.AppliedOnDriftAt = time.Time{}, time.Time{}
+				if exp := base.Expected; exp != nil && (exp.Digest == snap.Digest || s.stale(exp, now)) {
+					base.Expected = nil
+				}
 				if _, err := s.deps.Baselines.Put(ctx, base); errors.Is(err, store.ErrConflict) {
 					continue
 				} else if err != nil {
@@ -125,8 +167,23 @@ func (s *Service) decide(ctx context.Context, cluster model.ClusterID, m model.M
 				return true
 			}
 
-			if base.DriftSince.IsZero() {
-				base.DriftSince = now
+			// An apply is on its way and the node is not what it was: for a
+			// while that is the apply, not somebody else. It is never said of a
+			// deviation that is already open, which is somebody else's by now.
+			if exp := base.Expected; exp != nil && base.DriftSince.IsZero() && s.settles(exp, now) {
+				s.record(cluster, m, StateSettling, now, snap, time.Time{}, sentenceSettling(exp, s.deps.SettleWindow))
+				return true
+			}
+
+			// Drift. An expectation that has run out goes in the same write.
+			spent := base.Expected != nil && s.stale(base.Expected, now)
+			if base.DriftSince.IsZero() || spent {
+				if base.DriftSince.IsZero() {
+					base.DriftSince = now
+				}
+				if spent {
+					base.Expected = nil
+				}
 				if _, err := s.deps.Baselines.Put(ctx, base); errors.Is(err, store.ErrConflict) {
 					continue
 				} else if err != nil {
@@ -138,10 +195,16 @@ func (s *Service) decide(ctx context.Context, cluster model.ClusterID, m model.M
 			return true
 		}
 
-		if !base.DriftSince.IsZero() || !base.AppliedOnDriftAt.IsZero() {
-			// The node is back at the baseline: there is no difference left to
-			// date or to qualify.
+		// The node is the baseline. A deviation that was running is over, and
+		// an expectation that is this very configuration (an apply that changed
+		// nothing) or has run out is of no use any more. One that is still
+		// waiting -- a reboot not done yet, a staged configuration -- stays.
+		spent := base.Expected != nil && (base.Expected.Digest == base.Digest || s.stale(base.Expected, now))
+		if !base.DriftSince.IsZero() || !base.AppliedOnDriftAt.IsZero() || spent {
 			base.DriftSince, base.AppliedOnDriftAt = time.Time{}, time.Time{}
+			if spent {
+				base.Expected = nil
+			}
 			if _, err := s.deps.Baselines.Put(ctx, base); errors.Is(err, store.ErrConflict) {
 				continue
 			} else if err != nil {
@@ -154,6 +217,21 @@ func (s *Service) decide(ctx context.Context, cluster model.ClusterID, m model.M
 	}
 	s.unreadable(ctx, cluster, m, reasonUnreadable(store.ErrConflict))
 	return false
+}
+
+// settles reports whether an expectation still explains a difference by the
+// apply being on its way: a mode that changes the running configuration, not
+// yet past the settle window. A staged configuration does not: it changes
+// nothing until the next boot, so a difference while it waits is not it.
+func (s *Service) settles(e *model.ExpectedConfig, now time.Time) bool {
+	return e.Mode != modeStaged && now.Sub(e.At) < s.deps.SettleWindow
+}
+
+// stale reports whether an expectation has run out: not a staged one, and past
+// the settle window. Nothing is explained by it any more, and what it names is
+// not taken for an own change when it shows up.
+func (s *Service) stale(e *model.ExpectedConfig, now time.Time) bool {
+	return e.Mode != modeStaged && now.Sub(e.At) >= s.deps.SettleWindow
 }
 
 // damageOf says what is wrong with a stored baseline, or "" when nothing is.
