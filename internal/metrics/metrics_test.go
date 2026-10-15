@@ -164,7 +164,10 @@ func TestNoMachineEverBecomesALabelValue(t *testing.T) {
 //
 // The claim is stronger than the requirement asks for and it is the one the
 // design actually makes: adding nodes adds *no* series at all, and adding a
-// cluster adds the same fixed number every time. A multiplicative export would
+// cluster adds the same fixed number every time. That holds for a fleet with no
+// series per node; the certificates and the configuration drift add them, on
+// purpose, to a cluster that has been read (see the package comment), and this
+// test builds no such view. A multiplicative export would
 // fail the first half; one that merely avoided a nodes x clusters label pair
 // would pass the first and fail the second.
 func TestCardinalityDoesNotGrowWithTheFleet(t *testing.T) {

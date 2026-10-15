@@ -17,6 +17,13 @@
 // for. The cardinality of everything here is a function of the number of
 // clusters, which for this product is one or a few.
 //
+// One exception to that has grown since: the certificates inside a cluster
+// (holzkube_node_certificate_seconds) and the configuration drift
+// (holzkube_node_config_drift and holzkube_node_config_read_age_seconds) carry
+// the node, by host name and never by machine id, because "which node" is the
+// whole point of those two. They cost a series per node of a cluster that has
+// been read; a cluster nobody has read costs none.
+//
 // **A series that drops to zero is still written.** Prometheus has no way to
 // tell a series that stopped being reported from one whose target went away,
 // and a graph of "nodes down" that simply stops when the number reaches zero
@@ -211,10 +218,102 @@ func (e *Exporter) writeClusters(b *strings.Builder, clusters []inventory.Cluste
 		}
 	}
 
+	e.writeConfigDrift(b, clusters, now)
+
 	help(b, "holzkube_cluster_locked", "gauge",
 		"1 when this cluster refuses mutation because it was adopted read-only (INV-12).")
 	for _, c := range clusters {
 		metric(b, "holzkube_cluster_locked", labels{{"cluster", string(c.ID)}}, boolean(c.Locked))
+	}
+}
+
+// writeConfigDrift emits the standing of the nodes' configuration against what
+// was last known (D-05). It reads ClusterView.ConfigDrift, which is what the
+// reader holds in memory: no node is asked at scrape time, so a reading is up
+// to one pass old, and holzkube_node_config_read_age_seconds says how old.
+//
+// The one rule is that a 0 is only ever written for a node that was compared.
+// A node nobody has read, cannot read, or whose baseline cannot be trusted has
+// no series for the drift, because "no drift" is a claim and this is not one.
+// The cluster is 0 only when every node of it has such a verdict; with part of
+// the cluster unjudged and no drift among the rest there is no series, and
+// holzkube_cluster_config_nodes_judged is what lets an alert rule see the gap.
+func (e *Exporter) writeConfigDrift(b *strings.Builder, clusters []inventory.ClusterView, now time.Time) {
+	help(b, "holzkube_node_config_drift", "gauge",
+		"1 when a node's configuration is known to differ from what holzkube-manager last knew, 0 when it was read and matches "+
+			"(or an apply from here is still settling). A node that was never read, cannot be read, or whose baseline is damaged has "+
+			"no series, except an unreadable one that was drifting before it stopped answering, which stays 1. "+
+			"The reading can be up to one pass (three hours) old; see holzkube_node_config_read_age_seconds.")
+	for _, c := range clusters {
+		if c.ConfigDrift == nil {
+			continue
+		}
+		for _, it := range c.ConfigDrift.Items {
+			if !it.Judged() {
+				continue
+			}
+			metric(b, "holzkube_node_config_drift",
+				labels{{"cluster", string(c.ID)}, {"node", it.Node}}, boolean(it.Drifting()))
+		}
+	}
+
+	help(b, "holzkube_cluster_config_drift", "gauge",
+		"1 when any node of the cluster is known to differ from what holzkube-manager last knew. 0 only when every node of the "+
+			"cluster was compared and none differs. No series for a cluster nobody has read, or while some nodes could not be "+
+			"judged and none of the others differs: see holzkube_cluster_config_nodes_judged.")
+	for _, c := range clusters {
+		h := c.ConfigDrift
+		if h == nil {
+			continue
+		}
+		drifting, judged := false, 0
+		for _, it := range h.Items {
+			if it.Drifting() {
+				drifting = true
+			}
+			if it.Judged() {
+				judged++
+			}
+		}
+		switch {
+		case drifting:
+			metric(b, "holzkube_cluster_config_drift", labels{{"cluster", string(c.ID)}}, 1)
+		case h.Nodes > 0 && judged == h.Nodes:
+			metric(b, "holzkube_cluster_config_drift", labels{{"cluster", string(c.ID)}}, 0)
+		}
+	}
+
+	help(b, "holzkube_cluster_config_nodes_judged", "gauge",
+		"How many nodes of the cluster have a verdict on their configuration: compared with a baseline, or known to drift. "+
+			"Written for every cluster that has been read, also with 0. Compare it with the number of nodes to see partial coverage.")
+	for _, c := range clusters {
+		h := c.ConfigDrift
+		if h == nil {
+			continue
+		}
+		judged := 0
+		for _, it := range h.Items {
+			if it.Judged() {
+				judged++
+			}
+		}
+		metric(b, "holzkube_cluster_config_nodes_judged", labels{{"cluster", string(c.ID)}}, float64(judged))
+	}
+
+	help(b, "holzkube_node_config_read_age_seconds", "gauge",
+		"Seconds since the last reading of a node's configuration that worked. No series for a node never read. "+
+			"It keeps growing while a node does not answer.")
+	for _, c := range clusters {
+		if c.ConfigDrift == nil {
+			continue
+		}
+		for _, it := range c.ConfigDrift.Items {
+			if it.ReadAt.IsZero() {
+				continue
+			}
+			metric(b, "holzkube_node_config_read_age_seconds",
+				labels{{"cluster", string(c.ID)}, {"node", it.Node}}, max(0, now.Sub(it.ReadAt).Seconds()))
+		}
 	}
 }
 

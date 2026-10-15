@@ -13,6 +13,7 @@ import (
 	"github.com/holzcloud/holzkube-manager/internal/configdrift"
 	invsvc "github.com/holzcloud/holzkube-manager/internal/inventory"
 	"github.com/holzcloud/holzkube-manager/internal/machineconfig"
+	"github.com/holzcloud/holzkube-manager/internal/metrics"
 	"github.com/holzcloud/holzkube-manager/internal/model"
 	"github.com/holzcloud/holzkube-manager/internal/store/fsstore"
 	"github.com/holzcloud/holzkube-manager/internal/talos"
@@ -381,4 +382,70 @@ func TestTheStatesOfTheViewAreTheStatesOfThePackage(t *testing.T) {
 			t.Errorf("state %q: configdrift says %q, model says %q", p.name, p.pkg, p.mod)
 		}
 	}
+}
+
+// TestTracerAReadingReachesTheMetrics extends the tracer to /metrics: the same
+// real inventory, the exporter over its two lists, and no node asked at scrape
+// time. A reading that matched is 0, a third party's change is 1.
+func TestTracerAReadingReachesTheMetrics(t *testing.T) {
+	t.Parallel()
+
+	a := newAdoptedNode(t)
+	svc := a.service()
+	bg := context.Background()
+
+	exp := metrics.New(metrics.Deps{
+		Machines: a.inv.Machines,
+		Clusters: a.inv.Clusters,
+		Jobs:     func(context.Context) ([]model.Job, error) { return nil, nil },
+	})
+	scrape := func() string {
+		t.Helper()
+		var b strings.Builder
+		if err := exp.Write(bg, &b); err != nil {
+			t.Fatalf("Write: %v", err)
+		}
+		return b.String()
+	}
+	nodeSeries := `holzkube_node_config_drift{cluster="` + string(a.cluster.ID) + `",node="cp-1"}`
+	clusterSeries := `holzkube_cluster_config_drift{cluster="` + string(a.cluster.ID) + `"}`
+
+	if out := scrape(); strings.Contains(out, nodeSeries) || strings.Contains(out, clusterSeries) {
+		t.Fatalf("before the first pass the export carries a drift series:\n%s", out)
+	}
+
+	svc.Tick(bg)
+	out := scrape()
+	if got, ok := sample(out, nodeSeries); !ok || got != "0" {
+		t.Fatalf("after a reading that founded the baseline the node is %q (present %v), want 0", got, ok)
+	}
+	if got, ok := sample(out, clusterSeries); !ok || got != "0" {
+		t.Errorf("the cluster is %q (present %v), want 0: its one node has a verdict", got, ok)
+	}
+	if got, ok := sample(out, `holzkube_cluster_config_nodes_judged{cluster="`+string(a.cluster.ID)+`"}`); !ok || got != "1" {
+		t.Errorf("nodes judged is %q (present %v), want 1", got, ok)
+	}
+	if strings.Contains(out, string(a.machine.ID)) {
+		t.Errorf("the machine id %s is in the export", a.machine.ID)
+	}
+
+	a.thirdPartyChange(t, tracerPatch)
+	svc.Tick(bg)
+	out = scrape()
+	if got, ok := sample(out, nodeSeries); !ok || got != "1" {
+		t.Errorf("after a third party's change the node is %q (present %v), want 1", got, ok)
+	}
+	if got, ok := sample(out, clusterSeries); !ok || got != "1" {
+		t.Errorf("after a third party's change the cluster is %q (present %v), want 1", got, ok)
+	}
+}
+
+// sample is the value text of one series, found by its name and labels.
+func sample(out, series string) (string, bool) {
+	for _, line := range strings.Split(out, "\n") {
+		if rest, found := strings.CutPrefix(line, series+" "); found {
+			return rest, true
+		}
+	}
+	return "", false
 }
