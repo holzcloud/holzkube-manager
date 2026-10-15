@@ -281,7 +281,7 @@ Zählung fort, die Tabelle oben führt sie noch nicht.
 **Goal:** Der Betreiber sieht, wenn die aktive Konfiguration eines Knotens von dem abweicht, was holzkube-manager zuletzt gesetzt oder gelesen hat — eine Änderung am Knoten selbst fällt heute nicht auf, weil das Diff nur beim Patchen berechnet wird. Periodische Lesung nach dem Muster von `internal/certwatch`, Anzeige auf der Knoten- und Cluster-Seite und eine Warnung; nie ein stilles „keine Drift", wo die Lesung fehlschlug.
 **Requirements**: DRIFT-01, DRIFT-02, DRIFT-03, DRIFT-04, DRIFT-05, DRIFT-06, DRIFT-07, DRIFT-08, DRIFT-09
 **Depends on:** Nothing
-**Plans:** 10/10 plans executed
+**Plans:** 10/11 plans executed (1 gap-closure plan, nach der Verifikation 2026-10-15)
 
 Plans:
 - [x] 15-01-PLAN.md — Schnappschuss und Mehrdokument-Vergleich: `machineconfig.Snapshot` (redigiert, normalisiert, nie Rohbytes), `CompareDocuments` neben dem unveränderten `Compare`, `ReadSnapshot` von einem Kontext ohne Frist (D-01, D-02, D-09)
@@ -294,6 +294,7 @@ Plans:
 - [x] 15-08-PLAN.md — HTTP, Audit, Verdrahtung: GET mit Diff (Operator), POST bestätigen (Admin, Sudo, Digest), Knoten im Audit-Eintrag aus dem Pfad, `main.go` samt AST-Wächter, API-Vertrag (D-05, D-07, D-11)
 - [x] 15-09-PLAN.md — Oberfläche: Abschnitt auf der Knotenseite mit Diff und Bestätigen, Zeile Configuration auf der Clusterkarte, Banner auf jeder Seite (D-05, D-06, D-07)
 - [x] 15-10-PLAN.md — Dokumentation, Ledger, Gate: vier offene Ledger-Einträge von Hand (Compare-Blindfleck, A1/A2, Geheimniswerte, nicht redigierte Felder), README und Leitfaden, das Gate der ganzen Phase gegen BASE (D-02, D-09, D-12)
+- [ ] 15-11-PLAN.md — Lückenschluss (gap closure) nach 15-VERIFICATION.md: Adoption und Settling trennen, damit ein Apply mit reboot oder auto nicht als falsche Drift endet, wenn die erste Lesung danach erst mit dem Takt kommt (reboot und auto 24 Stunden Übernahme, settling bleibt 15 Minuten, D-13 bleibt; Leitfaden und Ledger 177); ein Rendertest über den echten Routenbaum hält Banner in `AppShell.tsx` und Abschnitt in `node-detail.tsx` (DRIFT-04, DRIFT-05, DRIFT-07, DRIFT-09; D-05, D-06, D-10, D-13)
 
 ### Phase 16: Kubernetes-Upgradekette auf neuesten Patch je Minor
 
