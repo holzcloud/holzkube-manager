@@ -6,11 +6,11 @@ current_phase: 15
 current_phase_name: drift-erkennung-der-maschinenkonfiguration
 current_plan: 10
 status: verifying
-stopped_at: Completed 15-10-PLAN.md
-last_updated: "2026-10-15T09:15:35.098Z"
+stopped_at: Completed 15-11-PLAN.md
+last_updated: "2026-10-15T10:11:14.901Z"
 last_activity: 2026-10-15
-last_activity_desc: Plan 15-10 ausgeführt, Phase 15 wartet auf die Verifikation
-state_head: 6ca513c82ab008c12765fb5b5b70b6e8ae91333c
+last_activity_desc: Plan 15-11 (Lückenschluss G-15-1, W-15-1) ausgeführt, Phase 15 wartet auf die erneute Verifikation
+state_head: f60a4680a303309c62beade0d02fa4dfc95ad41f
 progress:
   total_phases: 4
   completed_phases: 2
@@ -184,6 +184,7 @@ Siehe `PROJECT.md`, die `MILESTONE-*.md`-Dateien und für v1.18 den Abschnitt
 - [Phase 15]: 15-05: der Beobachter hängt am ClusterClient (ein Engpass, Methodenmenge Apply* gepinnt); keine bedingungslose Übernahme nach no-reboot; D-13: Landung auf offener Drift behält Basis und DriftSince
 - [Phase 15]: 15-05: eine verfallene Erwartung wird gelöscht und nie übernommen; staged ohne Fenster, settling nur ohne offene Drift
 - [Phase 15]: 15-10: README ohne Bild (Betreiber 2026-10-14); REQUIREMENTS DRIFT-01..09 bleiben Pending bis zur Verifikation, weil Browser und echter Knoten ungeprueft sind; vier offene Ledger-Eintraege 176-179
+- [Phase 15]: 15-11: Adoption und Settling getrennt: AdoptWindow 24 h fuer reboot und auto, settling 15 min, no-reboot 15 min, staged ohne Ende
 
 ### Roadmap Evolution
 
@@ -214,10 +215,10 @@ Siehe `PROJECT.md`, die `MILESTONE-*.md`-Dateien und für v1.18 den Abschnitt
 
 ## Session Continuity
 
-Last session: 2026-10-15T09:15:27.445Z
-Stopped at: Completed 15-10-PLAN.md
+Last session: 2026-10-15T10:11:14.868Z
+Stopped at: Completed 15-11-PLAN.md
 Resume file: None
-Next: Verifikation der Phase 15, Handproben Phase 13/14 auf dem Pi, dann `/gsd-complete-milestone` für v1.18
+Next: erneute Verifikation der Phase 15 (nach 15-11), Handproben Phase 13/14 auf dem Pi, dann `/gsd-complete-milestone` für v1.18
 
 ## Performance Metrics
 
@@ -273,3 +274,4 @@ Next: Verifikation der Phase 15, Handproben Phase 13/14 auf dem Pi, dann `/gsd-c
 | Phase 15 P08 | 1h30m | 3 tasks | 12 files |
 | Phase 15 P09 | 20min | 3 tasks | 14 files |
 | Phase 15 P10 | ~50min | 3 tasks | 4 files |
+| Phase 15 P11 | ca. 1h | 3 tasks | 7 files |
