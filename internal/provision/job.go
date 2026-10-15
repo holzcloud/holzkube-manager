@@ -79,6 +79,13 @@ type Deps struct {
 	// from; the composition root decides what to do about a cluster that has
 	// none yet.
 	KubernetesVersion func(ctx context.Context, id model.ClusterID) (string, error)
+
+	// ForgetConfig makes the configuration drift watch forget what it knew of a
+	// machine. The baseline of a machine that is being set up again is void: it
+	// describes the machine's old self, and a baseline that survived a reset
+	// would show the whole new configuration as drift after every reinstall of
+	// the same UUID. Optional: nil means there is nothing to forget.
+	ForgetConfig func(ctx context.Context, id model.MachineID)
 }
 
 // Register teaches a job engine how to provision.
@@ -126,6 +133,18 @@ func steps(d Deps, req Request) []jobs.Step {
 				if err := VerifyMachine(ctx, d.Dialer, req.Addr, req.UUID,
 					d.MaintenanceCreds(req.Fingerprint)); err != nil {
 					return err
+				}
+
+				// The baseline the configuration drift watch holds for this
+				// machine is void from here on: the check above has just
+				// established that it IS this machine, and it is about to be
+				// written with a configuration that has nothing to do with
+				// what it had. Not earlier -- a check that failed has found
+				// nothing and forgets nothing -- and not at the end of the
+				// job, where the machine would answer as a cluster node for a
+				// while with its new configuration against the old baseline.
+				if d.ForgetConfig != nil {
+					d.ForgetConfig(ctx, req.UUID)
 				}
 
 				target := talos.Target{Machine: req.UUID, Addr: req.Addr}
