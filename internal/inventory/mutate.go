@@ -347,6 +347,11 @@ func (s *Service) AddManual(ctx context.Context, cluster model.ClusterID, addr s
 // the first. The stream readers are the first such caller; phase 6's jobs are
 // the next.
 //
+// Because it is the one way, it is also the one place the observer of the
+// configuration drift watch is hung on a client (SetApplyObserver, D-10): the
+// configuration service, the Kubernetes upgrade and the CA rotation all get
+// their client here, and none of them has to remember anything.
+//
 // The caller owns the returned client and must Close it.
 func (s *Service) Connect(ctx context.Context, id model.MachineID) (*talos.ClusterClient, error) {
 	rec, err := s.deps.Store.Machines().Get(ctx, id)
@@ -378,9 +383,31 @@ func (s *Service) Connect(ctx context.Context, id model.MachineID) (*talos.Clust
 		return nil, err
 	}
 
-	return talos.NewClusterClient(ctx, s.deps.Dialer, talos.Target{
+	cc, err := talos.NewClusterClient(ctx, s.deps.Dialer, talos.Target{
 		Cluster: rec.Cluster,
 		Machine: rec.ID,
 		Addr:    rec.Addr,
 	}, creds, s.deps.Mode)
+	if err != nil {
+		return nil, err
+	}
+
+	s.mu.Lock()
+	observer := s.applyObserver
+	s.mu.Unlock()
+	if observer != nil {
+		cc.SetApplyObserver(observer)
+	}
+	return cc, nil
+}
+
+// SetApplyObserver gives the inventory the observer every client from Connect
+// carries: the configuration drift watch hears each configuration this
+// installation sends to a node, before the RPC and with its result. A setter
+// because the watch is built after the inventory, from its connector. Nil takes
+// it away again; a client that was already given out keeps the one it was given.
+func (s *Service) SetApplyObserver(o talos.ApplyObserver) {
+	s.mu.Lock()
+	s.applyObserver = o
+	s.mu.Unlock()
 }

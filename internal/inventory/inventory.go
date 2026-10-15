@@ -109,6 +109,10 @@ type Service struct {
 	// against what was last known; nil until the reader is wired.
 	configDrift func(c model.Cluster, now time.Time) *model.ConfigDriftHealth
 
+	// applyObserver hears every configuration a client from Connect sends; nil
+	// until the drift watch is wired. See SetApplyObserver.
+	applyObserver talos.ApplyObserver
+
 	// observed is the in-memory half of the read model: per machine, what each
 	// level last confirmed and when.
 	//
