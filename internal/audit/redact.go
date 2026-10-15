@@ -561,6 +561,13 @@ var allowlist = map[string][]string{
 	"etcd.backup-run":         {},
 	"etcd.backup-download":    {},
 
+	// Confirming a configuration drift as intended. The digest is a hash of
+	// the configuration the operator looked at: harmless, and the only thing
+	// that says WHICH state was declared right, six months later, when the node
+	// has been changed ten times since. The node is not in the body; the server
+	// writes it from the path (MachineFromPath), after this redaction.
+	"config.drift-confirm": {"digest"},
+
 	// A restore, and the most consequential entry in this table. The node is
 	// in the path; what is worth keeping in clear is whether the operator
 	// turned off the snapshot's integrity check, because a restore from a
@@ -648,6 +655,32 @@ var accountPath = map[string]string{
 // "" for any other action. pathValue is the request's PathValue.
 func AccountFromPath(action string, pathValue func(string) string) string {
 	wildcard, ok := accountPath[action]
+	if !ok {
+		return ""
+	}
+	return pathValue(wildcard)
+}
+
+// MachineParam names the node a node route acts on, in a record's params. Like
+// AccountParam it is written by the server after the body has been redacted,
+// so a body that sends the key does not decide which node the record names.
+const MachineParam = "machine"
+
+// machinePath names, for each route that acts on one node and whose body does
+// not carry it, the path wildcard that holds the node.
+//
+// Before this a record of an HTTP route never carried a node: the id is in the
+// URL, and the URL is not kept. "An admin confirmed a drift" without the node
+// would be a record nobody can use. A machine id is server-generated and is the
+// one the inventory shows.
+var machinePath = map[string]string{
+	"config.drift-confirm": "id",
+}
+
+// MachineFromPath answers the node id a node route's path names, and "" for any
+// other action. pathValue is the request's PathValue.
+func MachineFromPath(action string, pathValue func(string) string) string {
+	wildcard, ok := machinePath[action]
 	if !ok {
 		return ""
 	}

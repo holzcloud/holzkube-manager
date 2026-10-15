@@ -328,6 +328,23 @@ const (
 	// showing the plan does not need the code to tell it what to render.
 	CodeUpgradeBlocked = "conflict.upgrade-blocked"
 
+	// CodeDriftNotRead: there is no current good reading of the node to confirm
+	// -- it was not read since this daemon started, or its last reading
+	// failed. The caller waits for a reading that works (the screen shows when
+	// the node was last read) and looks at the difference again.
+	CodeDriftNotRead = "conflict.drift-not-read"
+
+	// CodeNoDrift: the node does not differ from its baseline, so there is
+	// nothing to confirm. It is a conflict and not a success because a client
+	// that pressed "this is intended" on a screen that was already stale should
+	// be told the screen was stale, not that it worked.
+	CodeNoDrift = "conflict.no-drift"
+
+	// CodeDriftChanged: the digest sent is not the digest of the reading last
+	// taken, so what the operator looked at is not what is there now. The
+	// caller shows the difference again and asks again; nothing was confirmed.
+	CodeDriftChanged = "conflict.drift-changed"
+
 	// CodeSnapshotRequired: a Talos upgrade was confirmed or submitted without
 	// a fresh etcd snapshot of the cluster taken by this instance. It is its
 	// own code because the way out is a button the screen already shows -- take

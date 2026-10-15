@@ -11,7 +11,11 @@ import (
 	"testing"
 	"time"
 
+	corev1 "k8s.io/api/core/v1"
+
+	"github.com/holzcloud/holzkube-manager/internal/audit"
 	"github.com/holzcloud/holzkube-manager/internal/inventory"
+	"github.com/holzcloud/holzkube-manager/internal/kubesim"
 	"github.com/holzcloud/holzkube-manager/internal/machineconfig"
 	"github.com/holzcloud/holzkube-manager/internal/model"
 	"github.com/holzcloud/holzkube-manager/internal/store/fsstore"
@@ -286,5 +290,413 @@ func TestADriftRouteWithoutTheWatchSaysSo(t *testing.T) {
 	}
 	if !strings.Contains(string(raw), "upstream.drift-unavailable") {
 		t.Errorf("the 502 does not carry its code: %s", raw)
+	}
+}
+
+// ---- confirming ------------------------------------------------------------
+
+// confirmPath is the route that makes the state an operator looked at the new
+// baseline.
+func confirmPath(id model.MachineID) string {
+	return "/api/v1/machines/" + string(id) + "/config/drift/confirm"
+}
+
+// baselineRecord is the stored baseline of the node, as the bytes the store
+// would write, so that "left as it was" is a byte comparison.
+func (h *inventoryHarness) baselineRecord(t *testing.T, id model.MachineID) string {
+	t.Helper()
+
+	rec, err := h.store.ConfigBaselines().Get(context.Background(), id)
+	if err != nil {
+		t.Fatalf("the baseline of %s: %v", id, err)
+	}
+	raw, err := json.Marshal(rec)
+	if err != nil {
+		t.Fatalf("marshal the baseline: %v", err)
+	}
+	return string(raw)
+}
+
+// accountWithSudo creates an account of the role and signs it in with an open
+// sudo window of its own, so that what refuses it is its role and not the
+// window.
+func (h *inventoryHarness) accountWithSudo(t *testing.T, role model.UserRole) *asClient {
+	t.Helper()
+
+	h.openSudo(t)
+	name := string(role) + "-account"
+	resp, raw := h.do(t, http.MethodPost, "/api/v1/users", map[string]string{
+		"username": name, "password": newAccountPass, "role": string(role),
+	})
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("creating the %s account: %d (%s)", role, resp.StatusCode, raw)
+	}
+	c := h.asUser(t, name, newAccountPass)
+	if got, raw := c.status(t, http.MethodPost, "/api/v1/auth/sudo",
+		map[string]string{"password": newAccountPass}); got != http.StatusNoContent {
+		t.Fatalf("sudo as the %s: %d (%s)", role, got, raw)
+	}
+	return c
+}
+
+func TestConfirmingNeedsTheSudoWindow(t *testing.T) {
+	h := newDriftHarness(t)
+	id := h.drifting(t)
+	v, _ := h.getDrift(t, id)
+	before := h.baselineRecord(t, id)
+
+	resp, raw := h.do(t, http.MethodPost, confirmPath(id), map[string]string{"digest": v.Digest})
+	if resp.StatusCode != http.StatusPreconditionRequired {
+		t.Fatalf("confirming without an open sudo window: %d, want 428 (%s)", resp.StatusCode, raw)
+	}
+	if after := h.baselineRecord(t, id); after != before {
+		t.Errorf("a refused confirmation changed the baseline:\n before %s\n after  %s", before, after)
+	}
+	if again, _ := h.getDrift(t, id); again.State != "drift" {
+		t.Errorf("the node is %q after a confirmation the gate refused, want drift", again.State)
+	}
+}
+
+func TestConfirmingIsForAdminsOnly(t *testing.T) {
+	h := newDriftHarness(t)
+	id := h.drifting(t)
+	v, _ := h.getDrift(t, id)
+	before := h.baselineRecord(t, id)
+
+	for _, role := range []model.UserRole{model.RoleOperator, model.RoleReader} {
+		c := h.accountWithSudo(t, role)
+		if got, raw := c.status(t, http.MethodPost, confirmPath(id), map[string]string{"digest": v.Digest}); got != http.StatusForbidden {
+			t.Errorf("a %s confirmed the drift: %d, want 403 (%s)", role, got, raw)
+		}
+	}
+	if after := h.baselineRecord(t, id); after != before {
+		t.Errorf("a refused confirmation changed the baseline:\n before %s\n after  %s", before, after)
+	}
+}
+
+func TestConfirmingTurnsTheDriftIntoTheBaseline(t *testing.T) {
+	h := newDriftHarness(t)
+	id := h.drifting(t)
+	seen, _ := h.getDrift(t, id)
+	h.openSudo(t)
+
+	resp, raw := h.do(t, http.MethodPost, confirmPath(id), map[string]string{"digest": seen.Digest})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("confirming: %d (%s)", resp.StatusCode, raw)
+	}
+	var v driftView
+	if err := json.Unmarshal(raw, &v); err != nil {
+		t.Fatalf("decode the answer: %v (%s)", err, raw)
+	}
+	if v.State != "ok" || v.Diff != nil || v.DriftSince != "" {
+		t.Errorf("the answer of a confirmation is %s, want the new view: ok, no diff, no start", raw)
+	}
+	if v.BaselineSource != "confirmed" {
+		t.Errorf("the baseline source is %q, want confirmed", v.BaselineSource)
+	}
+
+	if again, raw := h.getDrift(t, id); again.State != "ok" || again.Diff != nil {
+		t.Errorf("GET after confirming: %s, want ok and no diff", raw)
+	}
+	resp, list := h.do(t, http.MethodGet, "/api/v1/clusters", nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("clusters: %d (%s)", resp.StatusCode, list)
+	}
+	var clusters struct {
+		Clusters []struct {
+			ConfigDrift *struct {
+				Drifted int `json:"drifted"`
+			} `json:"config_drift"`
+		} `json:"clusters"`
+	}
+	if err := json.Unmarshal(list, &clusters); err != nil {
+		t.Fatalf("decode the cluster list: %v", err)
+	}
+	if len(clusters.Clusters) != 1 || clusters.Clusters[0].ConfigDrift == nil || clusters.Clusters[0].ConfigDrift.Drifted != 0 {
+		t.Errorf("the cluster card still counts the drift after it was confirmed: %s", list)
+	}
+
+	// A reading that follows is compared with what was confirmed.
+	h.drift.Tick(context.Background())
+	if after, raw := h.getDrift(t, id); after.State != "ok" {
+		t.Errorf("the next reading of an unchanged node is %q, want ok: %s", after.State, raw)
+	}
+}
+
+func TestConfirmingRefusesABadDigest(t *testing.T) {
+	h := newDriftHarness(t)
+	id := h.drifting(t)
+	h.openSudo(t)
+	before := h.baselineRecord(t, id)
+
+	for name, body := range map[string]any{
+		"not hex":          map[string]string{"digest": strings.Repeat("z", 64)},
+		"too short":        map[string]string{"digest": strings.Repeat("a", 63)},
+		"too long":         map[string]string{"digest": strings.Repeat("a", 65)},
+		"upper case":       map[string]string{"digest": strings.Repeat("A", 64)},
+		"empty":            map[string]string{"digest": ""},
+		"no digest at all": map[string]string{},
+		"no body":          nil,
+	} {
+		// An empty body still says what it is: the CSRF rule wants a content
+		// type on every mutating request.
+		resp, raw := h.do(t, http.MethodPost, confirmPath(id), body, func(r *http.Request) {
+			r.Header.Set("Content-Type", "application/json")
+		})
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Errorf("%s: %d, want 400 (%s)", name, resp.StatusCode, raw)
+			continue
+		}
+		if name != "no body" && !strings.Contains(string(raw), `"digest"`) {
+			t.Errorf("%s: the 400 does not name the field digest: %s", name, raw)
+		}
+	}
+	if after := h.baselineRecord(t, id); after != before {
+		t.Errorf("a refused confirmation changed the baseline:\n before %s\n after  %s", before, after)
+	}
+}
+
+func TestConfirmingRefusesAChangedReading(t *testing.T) {
+	h := newDriftHarness(t)
+	id := h.drifting(t)
+	seen, _ := h.getDrift(t, id)
+
+	// Between the screen and the click somebody changes it again.
+	h.thirdParty(t, id, "apiVersion: v1alpha1\nkind: KubeletConfig\nimage: ghcr.io/siderolabs/kubelet:v1.34.3\n")
+	h.drift.Tick(context.Background())
+	if now, _ := h.getDrift(t, id); now.Digest == seen.Digest {
+		t.Fatal("precondition: the second change did not change the digest")
+	}
+	before := h.baselineRecord(t, id)
+
+	h.openSudo(t)
+	resp, raw := h.do(t, http.MethodPost, confirmPath(id), map[string]string{"digest": seen.Digest})
+	if resp.StatusCode != http.StatusConflict || problemCode(raw) != "conflict.drift-changed" {
+		t.Fatalf("confirming what is not the last reading: %d (%s), want 409 conflict.drift-changed", resp.StatusCode, raw)
+	}
+	if after := h.baselineRecord(t, id); after != before {
+		t.Errorf("a refused confirmation changed the baseline:\n before %s\n after  %s", before, after)
+	}
+	if now, _ := h.getDrift(t, id); now.State != "drift" {
+		t.Errorf("the node is %q after a refused confirmation, want drift", now.State)
+	}
+}
+
+func TestConfirmingRefusesWhatHasNoDrift(t *testing.T) {
+	h := newDriftHarness(t)
+	id := h.adoptedMachine(t)
+	h.drift.Tick(context.Background())
+	h.drift.Tick(context.Background())
+	v, raw := h.getDrift(t, id)
+	if v.State != "ok" {
+		t.Fatalf("precondition: the node is %q (%s), want ok", v.State, raw)
+	}
+	before := h.baselineRecord(t, id)
+
+	h.openSudo(t)
+	resp, raw := h.do(t, http.MethodPost, confirmPath(id), map[string]string{"digest": v.Digest})
+	if resp.StatusCode != http.StatusConflict || problemCode(raw) != "conflict.no-drift" {
+		t.Fatalf("confirming a node without drift: %d (%s), want 409 conflict.no-drift", resp.StatusCode, raw)
+	}
+	if after := h.baselineRecord(t, id); after != before {
+		t.Errorf("a refused confirmation changed the baseline:\n before %s\n after  %s", before, after)
+	}
+}
+
+func TestConfirmingRefusesWhatWasNeverRead(t *testing.T) {
+	h := newDriftHarness(t)
+	id := h.adoptedMachine(t)
+	h.openSudo(t)
+
+	resp, raw := h.do(t, http.MethodPost, confirmPath(id), map[string]string{"digest": strings.Repeat("a", 64)})
+	if resp.StatusCode != http.StatusConflict || problemCode(raw) != "conflict.drift-not-read" {
+		t.Fatalf("confirming a node nobody has read: %d (%s), want 409 conflict.drift-not-read", resp.StatusCode, raw)
+	}
+	if _, err := h.store.ConfigBaselines().Get(context.Background(), id); err == nil {
+		t.Error("a refused confirmation laid a baseline")
+	}
+}
+
+// driftConfirmRecords are the audit records of the confirm action.
+func (h *inventoryHarness) driftConfirmRecords(t *testing.T) (attempts []audit.Record, successes int) {
+	t.Helper()
+
+	page, err := h.logger.Query(context.Background(), audit.Filter{Action: "config.drift-confirm"})
+	if err != nil {
+		t.Fatalf("query audit: %v", err)
+	}
+	for _, rec := range page.Items {
+		switch rec.Outcome {
+		case audit.OutcomeAttempt:
+			attempts = append(attempts, rec)
+		case audit.OutcomeSuccess:
+			successes++
+		}
+	}
+	return attempts, successes
+}
+
+func TestTheConfirmationNamesTheNodeAndTheDigestInTheAuditRecord(t *testing.T) {
+	h := newDriftHarness(t)
+	id := h.drifting(t)
+	seen, _ := h.getDrift(t, id)
+	h.openSudo(t)
+
+	if resp, raw := h.do(t, http.MethodPost, confirmPath(id), map[string]string{"digest": seen.Digest}); resp.StatusCode != http.StatusOK {
+		t.Fatalf("confirming: %d (%s)", resp.StatusCode, raw)
+	}
+
+	attempts, successes := h.driftConfirmRecords(t)
+	if len(attempts) != 1 || successes != 1 {
+		t.Fatalf("the archive holds %d attempts and %d successes of config.drift-confirm, want one of each", len(attempts), successes)
+	}
+	rec := attempts[0]
+	if rec.Actor != testUser {
+		t.Errorf("the record actor is %q, want %q", rec.Actor, testUser)
+	}
+	if got := rec.Params["machine"]; got != string(id) {
+		t.Errorf("the record names the node %v, want %q: an admin who confirmed a drift without a node is no record", got, id)
+	}
+	if got := rec.Params["digest"]; got != seen.Digest {
+		t.Errorf("the record names the digest %v, want %q: it proves which state was confirmed", got, seen.Digest)
+	}
+}
+
+func TestTheBodyCannotNameTheNodeInTheAuditRecord(t *testing.T) {
+	h := newDriftHarness(t)
+	id := h.drifting(t)
+	seen, _ := h.getDrift(t, id)
+	h.openSudo(t)
+
+	// The route reads no key but the digest and refuses this body, and the
+	// attempt is on the record before the handler looks at it: the record is
+	// what a client that lies about the node would have to fool.
+	resp, raw := h.do(t, http.MethodPost, confirmPath(id), map[string]string{
+		"digest": seen.Digest, "machine": "somebody-elses-node", "note": "free text a person might type",
+	})
+	if resp.StatusCode == http.StatusOK {
+		t.Fatalf("a body with keys the route does not know was accepted: %s", raw)
+	}
+
+	attempts, _ := h.driftConfirmRecords(t)
+	if len(attempts) != 1 {
+		t.Fatalf("the archive holds %d attempts, want 1", len(attempts))
+	}
+	rec := attempts[0]
+	if got := rec.Params["machine"]; got != string(id) {
+		t.Errorf("the record names the node %v, want the one in the path %q", got, id)
+	}
+	if got := rec.Params["note"]; got != audit.RedactedMarker {
+		t.Errorf("a free-text key of the body is %v in the record, want %s", got, audit.RedactedMarker)
+	}
+	encoded, err := json.Marshal(rec)
+	if err != nil {
+		t.Fatalf("marshal the record: %v", err)
+	}
+	for _, planted := range []string{"somebody-elses-node", "free text a person might type"} {
+		if strings.Contains(string(encoded), planted) {
+			t.Errorf("the record carries %q, which nothing ever removes from the archive: %s", planted, encoded)
+		}
+	}
+}
+
+func TestConfirmingTouchesNothingAtTheNode(t *testing.T) {
+	h := newDriftHarness(t)
+	id := h.drifting(t)
+	seen, _ := h.getDrift(t, id)
+	h.openSudo(t)
+
+	// What a read costs the node, and what a write does: the calls the reader
+	// and the apply path make.
+	calls := func() map[string]int {
+		out := map[string]int{}
+		for _, m := range []string{"ApplyConfiguration", "Get", "Version", "List", "Reboot", "Upgrade"} {
+			out[m] = h.sim.Calls(m)
+		}
+		return out
+	}
+	before := calls()
+
+	if resp, raw := h.do(t, http.MethodPost, confirmPath(id), map[string]string{"digest": seen.Digest}); resp.StatusCode != http.StatusOK {
+		t.Fatalf("confirming: %d (%s)", resp.StatusCode, raw)
+	}
+	after := calls()
+	for m, n := range before {
+		if after[m] != n {
+			t.Errorf("confirming made the node hear %s %d times, want %d: it changes local state only", m, after[m]-n, 0)
+		}
+	}
+}
+
+func TestConfirmingWorksOnAReadOnlyAdoptedCluster(t *testing.T) {
+	h := newDriftHarness(t)
+	id := h.drifting(t)
+	seen, _ := h.getDrift(t, id)
+
+	// The cluster was imported, which adopts it read-only; say it again with
+	// the route so the test does not lean on a default, and prove the lock
+	// refuses what it is for.
+	resp, list := h.do(t, http.MethodGet, "/api/v1/clusters", nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("clusters: %d (%s)", resp.StatusCode, list)
+	}
+	var clusters struct {
+		Clusters []struct {
+			ID string `json:"id"`
+		} `json:"clusters"`
+	}
+	if err := json.Unmarshal(list, &clusters); err != nil || len(clusters.Clusters) != 1 {
+		t.Fatalf("decode the cluster list: %v (%s)", err, list)
+	}
+	cluster := clusters.Clusters[0].ID
+	h.openSudo(t)
+	if resp, raw := h.do(t, http.MethodPost, "/api/v1/clusters/"+cluster+"/lock",
+		map[string]any{"locked": true}); resp.StatusCode != http.StatusOK {
+		t.Fatalf("lock: %d (%s)", resp.StatusCode, raw)
+	}
+	resp, raw := h.do(t, http.MethodPost, "/api/v1/machines/"+string(id)+"/config/apply",
+		map[string]any{"cluster": cluster, "patches": []string{"machine:\n  certSANs:\n    - 10.0.0.9\n"}})
+	if resp.StatusCode != http.StatusForbidden || problemCode(raw) != "forbidden.cluster-locked" {
+		t.Fatalf("precondition: the lock does not refuse an apply: %d (%s)", resp.StatusCode, raw)
+	}
+
+	resp, raw = h.do(t, http.MethodPost, confirmPath(id), map[string]string{"digest": seen.Digest})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("confirming on a cluster that is locked: %d (%s), want 200: it writes local state only", resp.StatusCode, raw)
+	}
+	if v, raw := h.getDrift(t, id); v.State != "ok" {
+		t.Errorf("the node is %q after the confirmation, want ok: %s", v.State, raw)
+	}
+}
+
+// TestTheWallCarriesNoConfigDrift is an observation, not a guard: the wall is
+// not part of this phase, and a fault put back into this code would not turn it
+// red. It says what the wall answers today, for a cluster whose card does carry
+// config_drift.
+func TestTheWallCarriesNoConfigDrift(t *testing.T) {
+	nodes := []kubesim.Node{{Name: "cp-1", Ready: corev1.ConditionTrue, Roles: []string{"control-plane"}}}
+	h, id, _ := adoptedClusterWithAPI(t, kubesim.Options{Nodes: nodes}, withDrift())
+	if h.drift == nil {
+		t.Fatal("the harness built no drift watch")
+	}
+	h.drift.Tick(context.Background())
+
+	resp, list := h.do(t, http.MethodGet, "/api/v1/clusters", nil)
+	if resp.StatusCode != http.StatusOK || !strings.Contains(string(list), `"config_drift"`) {
+		t.Fatalf("precondition: the cluster card does not carry config_drift: %d (%s)", resp.StatusCode, list)
+	}
+
+	path := "/api/v1/clusters/" + id + "/wall"
+	token := mintWallLink(t, h)
+	status, raw := asTheScreen(t, h, http.MethodGet, path, token, nil)
+	if status != http.StatusOK {
+		t.Fatalf("the wall answered %d (%s); the observation needs the real answer", status, raw)
+	}
+	if strings.Contains(strings.ToLower(raw), "drift") {
+		t.Errorf("the wall answer mentions drift: %s", raw)
+	}
+	resp, session := h.do(t, http.MethodGet, path, nil)
+	if resp.StatusCode != http.StatusOK || strings.Contains(strings.ToLower(string(session)), "drift") {
+		t.Errorf("the wall answer to a session: %d, mentions drift: %s", resp.StatusCode, session)
 	}
 }

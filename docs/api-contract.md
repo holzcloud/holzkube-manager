@@ -4897,6 +4897,9 @@ wants to set one.
 | `conflict.unknown-schematic` | 409 | the node's Image Factory schematic could not be read |
 | `conflict.not-upgraded` | 409 | the node came back running something other than what was installed |
 | `conflict.node-refused` | 409 | the node answered and the answer was no |
+| `conflict.drift-changed` | 409 | the digest sent is not the one of the reading last taken: the configuration changed again since the difference was shown; nothing was confirmed |
+| `conflict.drift-not-read` | 409 | there is no current good reading of the node to confirm: it was not read since the daemon started, or the last attempt failed |
+| `conflict.no-drift` | 409 | the node does not differ from its baseline, so there is nothing to confirm |
 
 `conflict.node-refused` exists because `talos.KindRejected` deliberately has no
 upstream code — "the node refused" is not an availability problem — and without

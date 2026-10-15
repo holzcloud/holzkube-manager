@@ -120,6 +120,11 @@ func captureParams(r *http.Request, action string) map[string]any {
 	if account := audit.AccountFromPath(action, r.PathValue); account != "" {
 		params[audit.AccountParam] = account
 	}
+	// The same for the node a node route acts on: from the path, after the
+	// redaction, never from the body.
+	if machine := audit.MachineFromPath(action, r.PathValue); machine != "" {
+		params[audit.MachineParam] = machine
+	}
 	return params
 }
 
