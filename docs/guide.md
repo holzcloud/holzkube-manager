@@ -1355,10 +1355,17 @@ because each node has to fail to answer first.
 **The baseline.** The first reading of a node creates it and says so; there is
 nothing to differ from yet. After that it moves in two ways only: an apply made
 by this installation (the expected configuration is noted as a digest before it
-is sent, and becomes the baseline when that version shows up on the node; a
-`staged` apply counts once the version lands, a `try` apply never), or you
-confirming a drift. It is the redacted, normalised configuration text, one file
-per node in `config-baselines/` of the [data directory](#data-directory).
+is sent, and becomes the baseline when a reading finds exactly that version on
+the node), or you confirming a drift. How long a reading can still take a version
+for your own apply depends on the mode. For `reboot` and `auto` it is
+up to 24 hours after the apply, because the first reading after the restart may
+only come with the next pass, which is three hours away. For `no-reboot` it is
+15 minutes: it takes effect without a restart and the node is read right after.
+A `staged` apply counts until it lands at the next boot, and a `try` apply never. After
+that, the same version is a drift like any other. `settling` stays at 15
+minutes for every mode: past that, any other version is a drift at once. The
+baseline is the redacted, normalised configuration text, one file per node in
+`config-baselines/` of the [data directory](#data-directory).
 
 **What counts.** Every change in every document of the configuration, including
 `machine.install.image`. There is no list of exceptions and no way to add one,
@@ -1417,6 +1424,13 @@ secrets and patches.
   (`0600` in a `0700` directory, verbatim in every backup of the data directory).
   That is the operator's decision (D-14), not an extra redaction. If you keep
   secrets in those fields, look at the files (ledger 179).
+- An apply with a restart (`reboot`, `auto`) is recognised for up to 24 hours
+  instead of 15 minutes, because the first reading after the restart may only
+  come with the next pass. In that time the very same bytes, applied by somebody
+  else, look like your own apply and show no drift. A drift that is already open
+  and was never confirmed is not closed by such a landing either. The timing is
+  only shown with stored records and a clock that is moved, not against a node
+  that really restarts: the simulator applies every mode at once (ledger 177).
 - A real node is only assumed to return what was sent after an apply (A2). If it
   does not, an apply made here shows up as drift that you confirm, and nothing is
   hidden. The simulator the tests run against cannot stage or try, so those rules
