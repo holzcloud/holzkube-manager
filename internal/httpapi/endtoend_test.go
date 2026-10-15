@@ -22,6 +22,7 @@ import (
 
 	"github.com/holzcloud/holzkube-manager/internal/audit"
 	"github.com/holzcloud/holzkube-manager/internal/auth"
+	"github.com/holzcloud/holzkube-manager/internal/configdrift"
 	"github.com/holzcloud/holzkube-manager/internal/history"
 	"github.com/holzcloud/holzkube-manager/internal/host"
 	"github.com/holzcloud/holzkube-manager/internal/host/hostaction"
@@ -62,6 +63,10 @@ type harness struct {
 	jobs    *jobs.Engine
 	history *history.Store
 
+	// drift is the configuration drift watch, set by withDrift. A test asks it
+	// for a pass (Tick) instead of waiting three hours for one.
+	drift *configdrift.Service
+
 	// confirmer is the one the routes check tokens with: set by withJobs, and
 	// by withHostActions when withJobs was not given. A test that needs a
 	// token no route would issue -- a node's, to try on a host route -- issues
@@ -87,6 +92,7 @@ type harnessConfig struct {
 	streaming            bool
 	jobs                 bool
 	config               bool
+	drift                bool
 	provision            func(*harness) *provision.Service
 	registerProvisionJob func(*jobs.Engine, *harness)
 	upgrade              func(*harness) *upgrade.Service
@@ -143,6 +149,17 @@ func withStreaming() harnessOpt {
 // withConfig adds the machine-configuration service and its routes.
 func withConfig() harnessOpt {
 	return func(c *harnessConfig) { c.config = true }
+}
+
+// withDrift adds the configuration drift watch and its routes. It implies the
+// configuration service, which is what reads a node for it; the inventory is
+// the caller's, as it is for withConfig. Without it the routes are registered
+// and answer 502, which is what a test of that answer needs.
+func withDrift() harnessOpt {
+	return func(c *harnessConfig) {
+		c.config = true
+		c.drift = true
+	}
 }
 
 // withProvision adds the provisioning service and its routes. It implies jobs,
@@ -395,6 +412,26 @@ func newHarness(t *testing.T, opts ...harnessOpt) *harness {
 		})
 	}
 
+	// The drift watch, wired the way the composition root wires it: the same
+	// reader as the config routes, the observer on every client the inventory
+	// gives out, the view on the inventory. Inside deps, before the route
+	// list: Deps is copied by value into each ...Routes call below.
+	if cfg.drift && inv != nil && deps.Config != nil {
+		drift := configdrift.New(configdrift.Deps{
+			Clusters: st.Clusters().List,
+			Machines: inv.MachinesOf,
+			AllMachines: func(ctx context.Context) ([]model.Machine, error) {
+				return st.Machines().List(ctx)
+			},
+			Read:      deps.Config.ReadSnapshot,
+			Baselines: st.ConfigBaselines(),
+		})
+		inv.SetConfigDrift(drift.HealthFor)
+		inv.SetApplyObserver(drift.ApplyObserver())
+		deps.Drift = drift
+		h2.drift = drift
+	}
+
 	h2.dataDir = dir
 	h2.store = st
 	h2.inv = inv
@@ -494,6 +531,7 @@ func newHarness(t *testing.T, opts ...harnessOpt) *harness {
 		handlers.StreamRoutes(deps),
 		handlers.JobRoutes(deps),
 		handlers.ConfigRoutes(deps),
+		handlers.ConfigDriftRoutes(deps),
 		handlers.ProvisionRoutes(deps),
 		handlers.UpgradeRoutes(deps),
 		handlers.AuthorityRoutes(deps),

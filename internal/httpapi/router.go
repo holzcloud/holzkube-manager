@@ -16,6 +16,7 @@ import (
 	"github.com/holzcloud/holzkube-manager/internal/audit"
 	"github.com/holzcloud/holzkube-manager/internal/auth"
 	"github.com/holzcloud/holzkube-manager/internal/auth/oidc"
+	"github.com/holzcloud/holzkube-manager/internal/configdrift"
 	"github.com/holzcloud/holzkube-manager/internal/history"
 	"github.com/holzcloud/holzkube-manager/internal/host"
 	"github.com/holzcloud/holzkube-manager/internal/host/hostaction"
@@ -223,6 +224,13 @@ type Deps struct {
 	// applying. It is nil in a deployment that serves none of those, and those
 	// handlers answer 502 rather than panicking if it is.
 	Config *machineconfig.Service
+
+	// Drift is the configuration drift watch: it says whether a node still has
+	// the configuration it had when it was last known to be right, and holds
+	// the confirmation that makes a new state the right one. It is nil in an
+	// instance started without the watch, and the drift routes answer 502
+	// rather than panicking if it is.
+	Drift *configdrift.Service
 
 	// Provision is the provisioning wizard's service: scanning, inspecting,
 	// planning and the etcd bootstrap lease. It is nil in a deployment that
