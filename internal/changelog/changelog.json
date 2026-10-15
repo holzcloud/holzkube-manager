@@ -1,5 +1,19 @@
 [
   {
+    "version": "v0.8.0",
+    "date": "2026-10-15",
+    "changes": [
+      {
+        "icon": "🧭",
+        "text": "Configuration drift. holzkube-manager now notices when a node's machine configuration changes behind its back (talosctl, another operator). The first time it reads a node it keeps a copy of the configuration with the secrets blacked out as that node's baseline and says so; from then on it reads every reachable node every three hours, and again after each apply it makes itself. The node page shows whether the node matches, since when it differs and the difference across all of the configuration's documents. The cluster card has a Configuration row, /metrics carries the state per node and per cluster (never 0 for a node that could not be compared), and a banner appears on every page once a drift has stood for 24 hours without being confirmed. \"Confirm as intended\" makes what the node has now the new baseline; it needs the admin role and the password prompt, is written to the audit log, and touches nothing on the node. There is no reset button. A node that cannot be read is never shown as matching, a damaged baseline is never overwritten, and an apply that holzkube-manager makes itself (patch, Kubernetes upgrade, CA rotation, also with a restart) is recognised as its own and does not show as drift."
+      },
+      {
+        "icon": "⚠️",
+        "text": "What to know about it. The baseline is a plain copy on disk with the secrets blacked out, but a changed secret value alone does not show (only set versus empty), and the fields the redaction does not know (files, environment, inline manifests) are stored as the configuration view already shows them, so treat the data directory and its backups accordingly. The data directory moves to schema 7; an hourly update that rolls back to an older version will refuse it, and the guide says how to get back. Nothing here has run against a real cluster yet: that Talos returns what was sent after an apply, that it never rewrites the configuration itself, the timing after a restart (an own apply with a restart counts as its own for up to 24 hours, so a third party applying the very same bytes in that time looks like it) and the banner after real hours are all unchecked (ledger 177 to 179), and the layout and tap targets of the new parts were not seen in a browser."
+      }
+    ]
+  },
+  {
     "version": "v0.7.1",
     "date": "2026-10-14",
     "changes": [
