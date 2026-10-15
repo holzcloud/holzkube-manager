@@ -72,12 +72,6 @@ func interfaceInFlight() []map[string]bool {
 		// The metrics history (2026-09-26): the charts that open on the last
 		// day are being written against the contract in parallel.
 		group(handlers.HistoryRoutes(httpapi.Deps{})),
-		// The configuration drift (2026-10-15): the screen that shows the
-		// difference and confirms it is built against the contract in the next
-		// plan of the phase, and names both routes in api.ts. That plan deletes
-		// this group; until it lands, the group holds only while web/src
-		// mentions neither route.
-		group(handlers.ConfigDriftRoutes(httpapi.Deps{})),
 	}
 }
 

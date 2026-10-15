@@ -2,6 +2,7 @@ import { Navigate, Outlet } from '@tanstack/react-router'
 import { useState } from 'react'
 import { CertificateBanner } from '@/components/CertificateBanner'
 import { ChainBannerContainer } from '@/components/ChainBanner'
+import { ConfigDriftBanner } from '@/components/ConfigDriftBanner'
 import { DryRunBannerContainer } from '@/components/DryRunBanner'
 import { Header } from '@/components/Header'
 import { ResumeAfterProvider, SudoFailureNotice } from '@/components/ResumeAfterProvider'
@@ -77,6 +78,12 @@ export function AppShell() {
           every node in that cluster goes unreachable in the same second, and
           the operator who was not warned reads that as a dead cluster (D-23). */}
       <CertificateBanner className="px-4 pt-2" />
+      {/* And a fifth, of the same kind: a node whose configuration has
+          differed from its baseline for more than a day and was never confirmed
+          (Phase 15). That is a statement about the cluster, not about the page
+          it is read on, so it stands here. The 24 hours are the server's to
+          count; this only shows what it reports, and cannot be dismissed. */}
+      <ConfigDriftBanner className="px-4 pt-2" />
       {/* And a fourth: what the operator was doing before the identity
           provider took the page away. It belongs here rather than on the
           screen the action started on, because the provider hands the browser
