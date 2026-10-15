@@ -35,13 +35,18 @@ const decideAttempts = 3
 //  5. different digest, but the stored text means the same once the running
 //     machinery has normalised it: ok, and the text is brought to that form once;
 //  6. an own apply is on its way (Expected, not staged, younger than the settle
-//     window) and no deviation is open: settling, nothing is written;
+//     window, whatever its mode) and no deviation is open: settling, nothing is
+//     written;
 //  7. otherwise drift, with the start of it written once.
 //
-// An expectation counts while it is a staged one (a staged configuration
-// changes nothing until the next boot and has no end of its own) or younger
-// than the settle window. It is a digest, so only that exact configuration is
-// ever taken for an own change.
+// An expectation counts for the adoption (rule 4) while it is a staged one (a
+// staged configuration changes nothing until the next boot and has no end of its
+// own), an apply with a restart (reboot, auto) younger than AdoptWindow, or any
+// other apply younger than the settle window. Settling (rule 6) is shorter and
+// the same for every mode but staged: the settle window. It is a digest, so only
+// that exact configuration is ever taken for an own change. The price of the
+// long window for a restart is that somebody else applying exactly the same
+// bytes inside it cannot be told from the landing (named since 15-05).
 //
 // It runs under storeMu and reports whether the node ended up compared.
 func (s *Service) decide(ctx context.Context, cluster model.ClusterID, m model.Machine, snap machineconfig.Snap) bool {
@@ -108,7 +113,7 @@ func (s *Service) decide(ctx context.Context, cluster model.ClusterID, m model.M
 
 			// An apply from this installation left this digest behind, and this
 			// is it.
-			if exp := base.Expected; exp != nil && exp.Digest == snap.Digest && !sameAsBaseline && !s.stale(exp, now) {
+			if exp := base.Expected; exp != nil && exp.Digest == snap.Digest && !sameAsBaseline && s.adopts(exp, now) {
 				if !base.DriftSince.IsZero() {
 					// D-13: a deviation is open and nobody confirmed it, and
 					// this landed on top of it. Moving the baseline would make
@@ -223,15 +228,38 @@ func (s *Service) decide(ctx context.Context, cluster model.ClusterID, m model.M
 // apply being on its way: a mode that changes the running configuration, not
 // yet past the settle window. A staged configuration does not: it changes
 // nothing until the next boot, so a difference while it waits is not it.
+//
+// Settling is the one thing that stays at the settle window for every mode;
+// whether the configuration that was sent is taken for the landing is adopts.
 func (s *Service) settles(e *model.ExpectedConfig, now time.Time) bool {
 	return e.Mode != modeStaged && now.Sub(e.At) < s.deps.SettleWindow
 }
 
-// stale reports whether an expectation has run out: not a staged one, and past
-// the settle window. Nothing is explained by it any more, and what it names is
-// not taken for an own change when it shows up.
+// adopts reports whether an expectation still counts for the adoption: whether a
+// reading of exactly the configuration it names is taken for the landing of the
+// apply. A staged one counts without end (it lands at the next boot, whenever
+// that is). An apply with a restart (reboot, auto) counts for AdoptWindow,
+// because the first reading after the restart can be a whole pass away. Any
+// other mode (no-reboot) counts for the settle window: it takes effect without
+// a restart and the node is read right after. The edge is strict: at the end of
+// the window it no longer counts.
+func (s *Service) adopts(e *model.ExpectedConfig, now time.Time) bool {
+	age := now.Sub(e.At)
+	switch e.Mode {
+	case modeStaged:
+		return true
+	case modeReboot, modeAuto:
+		return age < AdoptWindow
+	default:
+		return age < s.deps.SettleWindow
+	}
+}
+
+// stale reports whether an expectation has run out: it no longer counts for the
+// adoption. Nothing is explained by it any more, and what it names is not taken
+// for an own change when it shows up.
 func (s *Service) stale(e *model.ExpectedConfig, now time.Time) bool {
-	return e.Mode != modeStaged && now.Sub(e.At) >= s.deps.SettleWindow
+	return !s.adopts(e, now)
 }
 
 // damageOf says what is wrong with a stored baseline, or "" when nothing is.

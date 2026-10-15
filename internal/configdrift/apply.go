@@ -16,6 +16,11 @@ const (
 	// modeTry is the mode whose configuration returns by itself.
 	modeTry = "try"
 
+	// modeReboot and modeAuto are the modes that may restart the node, so that
+	// the first reading that sees the new configuration can be a pass away.
+	modeReboot = "reboot"
+	modeAuto   = "auto"
+
 	// modeStaged is the mode that changes nothing now and everything at the
 	// next boot.
 	modeStaged = "staged"

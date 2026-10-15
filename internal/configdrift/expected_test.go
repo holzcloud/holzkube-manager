@@ -254,29 +254,49 @@ func TestANoOpApplyClearsItsExpectation(t *testing.T) {
 	}
 }
 
+// edge is one mode and the age at which its expectation has just run out for
+// the adoption: no-reboot at the settle window, an apply with a restart at
+// AdoptWindow.
+type edge struct {
+	mode string
+	age  time.Duration
+}
+
+var runOutAt = []edge{
+	{"no-reboot", configdrift.DefaultSettleWindow},
+	{"reboot", configdrift.AdoptWindow},
+	{"auto", configdrift.AdoptWindow},
+}
+
 // TestAnApplyThatNeverLandedStopsBeingExpected: an apply that never landed stops
-// counting after the window, and somebody else applying the very same bytes
-// later is a change to report.
+// counting once its window is over, and somebody else applying the very same
+// bytes later is a change to report.
 func TestAnApplyThatNeverLandedStopsBeingExpected(t *testing.T) {
 	t.Parallel()
 
-	e := newExpecting(t)
-	e.expect(t, e.own, "reboot", e.clk.Now())
-	e.clk.Advance(configdrift.DefaultSettleWindow)
+	for _, row := range runOutAt {
+		t.Run(row.mode, func(t *testing.T) {
+			t.Parallel()
 
-	if d := e.read(t, e.base); d.State != configdrift.StateOK {
-		t.Fatalf("state is %q (%s), want ok", d.State, d.Sentence)
-	}
-	if b := e.rec(t); b.Expected != nil {
-		t.Fatalf("an expectation that ran out is still in the record: %+v", b.Expected)
-	}
+			e := newExpecting(t)
+			e.expect(t, e.own, row.mode, e.clk.Now())
+			e.clk.Advance(row.age)
 
-	d := e.read(t, e.own)
-	if d.State != configdrift.StateDrift {
-		t.Fatalf("a third party applying the bytes of an apply that never landed reads as %q (%s), want drift", d.State, d.Sentence)
-	}
-	if b := e.rec(t); b.Source == model.BaselineApply {
-		t.Error("the stale expectation became the baseline")
+			if d := e.read(t, e.base); d.State != configdrift.StateOK {
+				t.Fatalf("state is %q (%s), want ok", d.State, d.Sentence)
+			}
+			if b := e.rec(t); b.Expected != nil {
+				t.Fatalf("an expectation that ran out is still in the record: %+v", b.Expected)
+			}
+
+			d := e.read(t, e.own)
+			if d.State != configdrift.StateDrift {
+				t.Fatalf("a third party applying the bytes of an apply that never landed reads as %q (%s), want drift", d.State, d.Sentence)
+			}
+			if b := e.rec(t); b.Source == model.BaselineApply {
+				t.Error("the stale expectation became the baseline")
+			}
+		})
 	}
 }
 
@@ -286,38 +306,99 @@ func TestAnApplyThatNeverLandedStopsBeingExpected(t *testing.T) {
 func TestAnExpectationThatRanOutIsRemovedWhenTheNodeDrifts(t *testing.T) {
 	t.Parallel()
 
-	e := newExpecting(t)
-	e.expect(t, e.own, "reboot", e.clk.Now())
-	e.clk.Advance(configdrift.DefaultSettleWindow + time.Minute)
+	for _, row := range runOutAt {
+		t.Run(row.mode, func(t *testing.T) {
+			t.Parallel()
 
-	if d := e.read(t, e.third); d.State != configdrift.StateDrift {
-		t.Fatalf("state is %q (%s), want drift", d.State, d.Sentence)
-	}
-	b := e.rec(t)
-	if b.Expected != nil {
-		t.Errorf("an expectation that ran out survived the write of a drift: %+v", b.Expected)
-	}
-	if b.DriftSince.IsZero() || b.Rev != 3 {
-		t.Errorf("the record is rev %d with DriftSince %v, want rev 3 (expectation, then one write) and a start", b.Rev, b.DriftSince)
+			e := newExpecting(t)
+			e.expect(t, e.own, row.mode, e.clk.Now())
+			e.clk.Advance(row.age + time.Minute)
+
+			if d := e.read(t, e.third); d.State != configdrift.StateDrift {
+				t.Fatalf("state is %q (%s), want drift", d.State, d.Sentence)
+			}
+			b := e.rec(t)
+			if b.Expected != nil {
+				t.Errorf("an expectation that ran out survived the write of a drift: %+v", b.Expected)
+			}
+			if b.DriftSince.IsZero() || b.Rev != 3 {
+				t.Errorf("the record is rev %d with DriftSince %v, want rev 3 (expectation, then one write) and a start", b.Rev, b.DriftSince)
+			}
+		})
 	}
 }
 
 // TestAnExpectationThatRanOutIsNotAdopted is the other half: a record that still
 // holds an expectation past its window (nothing has read the node since) does
 // not make the node's matching configuration the baseline.
+//
+// The price is named here, as it has been since 15-05 (T-15-17): while the
+// expectation counts, a third party who applies exactly the same bytes as we did
+// cannot be told from our own landing, and no drift is shown. The window is what
+// bounds that. For no-reboot it is the settle window, 15 minutes; for reboot and
+// auto it is AdoptWindow, up to 24 hours, because the first reading after a
+// restart can only come with the next pass. This test holds the other side: once
+// the window is over, the same bytes are drift.
 func TestAnExpectationThatRanOutIsNotAdopted(t *testing.T) {
 	t.Parallel()
 
-	e := newExpecting(t)
-	e.expect(t, e.own, "no-reboot", e.clk.Now())
-	e.clk.Advance(2 * configdrift.DefaultSettleWindow)
+	rows := append([]edge{{"no-reboot", 2 * configdrift.DefaultSettleWindow}},
+		append(runOutAt, edge{"reboot", 2 * configdrift.AdoptWindow})...)
+	for _, row := range rows {
+		t.Run(row.mode+" "+row.age.String(), func(t *testing.T) {
+			t.Parallel()
 
-	d := e.read(t, e.own)
-	if d.State != configdrift.StateDrift {
-		t.Fatalf("a configuration that matches an expectation two windows old reads as %q (%s), want drift", d.State, d.Sentence)
+			e := newExpecting(t)
+			e.expect(t, e.own, row.mode, e.clk.Now())
+			e.clk.Advance(row.age)
+
+			d := e.read(t, e.own)
+			if d.State != configdrift.StateDrift {
+				t.Fatalf("a configuration that matches a %s expectation %v old reads as %q (%s), want drift", row.mode, row.age, d.State, d.Sentence)
+			}
+			b := e.rec(t)
+			if b.Source == model.BaselineApply || b.Digest != e.base.Digest {
+				t.Errorf("the baseline moved to %q/%s on an expectation that had run out", b.Source, b.Digest)
+			}
+			if b.Expected != nil {
+				t.Errorf("the expectation that ran out is still in the record: %+v", b.Expected)
+			}
+		})
 	}
-	if b := e.rec(t); b.Source == model.BaselineApply || b.Digest != e.base.Digest {
-		t.Errorf("the baseline moved to %q/%s on an expectation that had run out", b.Source, b.Digest)
+}
+
+// TestAnExpectationStillCountsUntilItRunsOut measures the edge from the inside:
+// one second before the window is over, exactly the configuration that was sent
+// is still the landing.
+func TestAnExpectationStillCountsUntilItRunsOut(t *testing.T) {
+	t.Parallel()
+
+	rows := []edge{
+		{"no-reboot", configdrift.DefaultSettleWindow - time.Second},
+		{"reboot", configdrift.AdoptWindow - time.Second},
+		{"auto", configdrift.AdoptWindow - time.Second},
+		{"staged", 100 * 24 * time.Hour},
+	}
+	for _, row := range rows {
+		t.Run(row.mode, func(t *testing.T) {
+			t.Parallel()
+
+			e := newExpecting(t)
+			e.expect(t, e.own, row.mode, e.clk.Now())
+			e.clk.Advance(row.age)
+
+			d := e.read(t, e.own)
+			if d.State != configdrift.StateOK {
+				t.Fatalf("a %s apply %v old that landed reads as %q (%s), want ok", row.mode, row.age, d.State, d.Sentence)
+			}
+			b := e.rec(t)
+			if b.Source != model.BaselineApply || b.Digest != e.own.Digest {
+				t.Errorf("the baseline is %q/%s, want the landed configuration from source apply", b.Source, b.Digest)
+			}
+			if b.Expected != nil {
+				t.Errorf("the expectation is still there: %+v", b.Expected)
+			}
+		})
 	}
 }
 
@@ -722,6 +803,76 @@ func TestAnOwnApplyLandingOnAnOpenDriftKeepsItOpen(t *testing.T) {
 	}
 }
 
+// TestAnOwnApplyLandingHoursLaterOnAnOpenDriftKeepsItOpen (D-13, late): an apply
+// with a restart lands, as far as any reading can tell, hours after it was sent,
+// long after the settle window. An open drift that nobody confirmed is not
+// closed by that either: the start and the baseline stay, the expectation is
+// spent, and the record says an apply landed on it.
+func TestAnOwnApplyLandingHoursLaterOnAnOpenDriftKeepsItOpen(t *testing.T) {
+	t.Parallel()
+
+	type row struct {
+		name string
+		mode string
+		// laterDrift: the drift is only dated after the settle window, while the
+		// expectation of "own" still counts, and then "own" is read.
+		laterDrift bool
+	}
+	for _, r := range []row{
+		{"reboot", "reboot", false},
+		{"auto", "auto", false},
+		{"reboot, drift dated after the settle window", "reboot", true},
+	} {
+		t.Run(r.name, func(t *testing.T) {
+			t.Parallel()
+
+			e := newExpecting(t)
+			var since time.Time
+			var landing machineconfig.Snap
+			if r.laterDrift {
+				e.expect(t, e.own, r.mode, e.clk.Now())
+				e.clk.Advance(configdrift.DefaultSettleWindow)
+				since = e.openDrift(t) // not settling: the settle window is over
+				if b := e.rec(t); b.Expected == nil || b.Expected.Digest != e.own.Digest {
+					t.Fatalf("precondition: the expectation of the apply is %+v, want it to still count", b.Expected)
+				}
+				e.clk.Advance(configdrift.DefaultEvery)
+				landing = e.own
+			} else {
+				since = e.openDrift(t)
+				e.clk.Advance(time.Hour)
+				e.expect(t, e.both, r.mode, e.clk.Now())
+				e.clk.Advance(configdrift.DefaultEvery)
+				landing = e.both
+			}
+
+			d := e.read(t, landing)
+			if d.State != configdrift.StateDrift {
+				t.Fatalf("an apply that landed hours later on an open drift reads as %q (%s), want drift", d.State, d.Sentence)
+			}
+			if !d.DriftSince.Equal(since) {
+				t.Errorf("DriftSince is %v, want the earlier start %v", d.DriftSince, since)
+			}
+			if !strings.Contains(d.Sentence, "earlier change that was never confirmed") {
+				t.Errorf("the sentence %q does not name the earlier change that was never confirmed", d.Sentence)
+			}
+			b := e.rec(t)
+			if b.Digest != e.base.Digest || b.Snapshot != e.base.Text || b.Source != model.BaselineFirstSight {
+				t.Errorf("the baseline moved to %q/%s; it must stay what was never confirmed against", b.Source, b.Digest)
+			}
+			if !b.DriftSince.Equal(since) {
+				t.Errorf("the record's DriftSince is %v, want %v", b.DriftSince, since)
+			}
+			if b.Expected != nil {
+				t.Errorf("the expectation is still there: %+v", b.Expected)
+			}
+			if !b.AppliedOnDriftAt.Equal(e.clk.Now()) {
+				t.Errorf("AppliedOnDriftAt is %v, want the time of the reading %v", b.AppliedOnDriftAt, e.clk.Now())
+			}
+		})
+	}
+}
+
 // TestAnApplyInFlightOnAnOpenDriftIsStillDrift (D-13): an open drift is never
 // settling, however young the apply that is expected.
 func TestAnApplyInFlightOnAnOpenDriftIsStillDrift(t *testing.T) {
@@ -790,4 +941,63 @@ func TestConfirmingAfterALandingMakesTheLandedStateTheBaseline(t *testing.T) {
 			t.Errorf("the record is %+v, want the base with both fields empty", b)
 		}
 	})
+}
+
+// TestAnApplyWithARestartIsAdoptedWhenTheNextReadingOnlyComesWithThePass is the
+// probe of the verification of 2026-10-15 (gap G-15-1) as a permanent test. The
+// poke after an apply reads the node once, at once, before or during the
+// restart, and nothing pokes again afterwards, so the first reading that sees
+// the new configuration is the one of the next pass, DefaultEvery later: far
+// past the settle window. The apply is still its own. The simulator cannot show
+// this, because it applies every mode immediately; only a record with the
+// expectation in it and a clock that moves can.
+func TestAnApplyWithARestartIsAdoptedWhenTheNextReadingOnlyComesWithThePass(t *testing.T) {
+	t.Parallel()
+
+	for _, mode := range []string{"reboot", "auto"} {
+		t.Run(mode, func(t *testing.T) {
+			t.Parallel()
+
+			e := newExpecting(t)
+			done := observe(e, mode, e.rawOwn)
+			if done == nil {
+				t.Fatal("precondition: the observer does not want to hear the result of an apply")
+			}
+			if b := e.rec(t); b.Expected == nil || b.Expected.Mode != mode || b.Expected.Digest != e.own.Digest {
+				t.Fatalf("precondition: the record's expectation is %+v, want %s/%s", b.Expected, mode, e.own.Digest)
+			}
+
+			// The RPC succeeded: the poke reads the node before it has restarted.
+			done(nil)
+			e.fake.set(e.base, nil)
+			e.svc.Flush(context.Background())
+			if d := detail(t, e.svc); d.State != configdrift.StateOK {
+				t.Fatalf("the reading before the restart is %q (%s), want ok", d.State, d.Sentence)
+			}
+			b := e.rec(t)
+			if b.Expected == nil || b.Expected.Digest != e.own.Digest {
+				t.Fatalf("the expectation did not survive the reading of the old version: %+v", b.Expected)
+			}
+			if b.Digest != e.base.Digest || b.Source != model.BaselineFirstSight {
+				t.Fatalf("the baseline is %q/%s after the old version was read, want the first-sight base", b.Source, b.Digest)
+			}
+
+			// The node restarts and nobody reads it until the next pass.
+			e.clk.Advance(configdrift.DefaultEvery)
+			d := e.read(t, e.own)
+			if d.State != configdrift.StateOK {
+				t.Fatalf("the applied version, read one pass later, is %q (%s), want ok", d.State, d.Sentence)
+			}
+			b = e.rec(t)
+			if b.Source != model.BaselineApply || b.Digest != e.own.Digest || b.Snapshot != e.own.Text {
+				t.Errorf("the baseline is %q/%s, want the applied version from source apply", b.Source, b.Digest)
+			}
+			if b.Expected != nil || !b.DriftSince.IsZero() {
+				t.Errorf("the record still carries an expectation or a drift start: %+v", b)
+			}
+			if !b.TakenAt.Equal(e.clk.Now()) {
+				t.Errorf("TakenAt is %v, want the time of the reading %v", b.TakenAt, e.clk.Now())
+			}
+		})
+	}
 }

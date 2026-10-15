@@ -46,9 +46,25 @@ const (
 	DefaultReadBudget = 20 * time.Second
 
 	// DefaultSettleWindow is how long a difference after an apply from this
-	// daemon is expected before it counts as drift (StateSettling).
+	// daemon is expected before it counts as drift (StateSettling). It is the
+	// settling only: how long an expectation still counts for the adoption of
+	// what the node shows is AdoptWindow, and for most modes that is not this.
 	DefaultSettleWindow = 15 * time.Minute
 )
+
+// AdoptWindow is how long the expectation of an apply with a restart (reboot,
+// auto) still counts for the adoption: a reading that finds exactly the
+// configuration that was sent is the baseline, not drift. The poke after an
+// apply reads the node at once, before or during the restart, and nothing pokes
+// again afterwards, so the first reading that sees the new configuration is
+// often the one of the next pass, DefaultEvery (three hours) later. A window of
+// the settle window's size would call that landing somebody else's change.
+//
+// It is a day, the same as BannerAfter: shorter misses a pass of three hours
+// with a restart and a failed poke on top, longer leaves somebody who applies
+// exactly the same bytes unseen for longer (the price, named since 15-05: that
+// is indistinguishable from the landing). Settling does not grow with it.
+const AdoptWindow = BannerAfter
 
 // pokeBuffer is how many pokes wait for a read. A poke beyond it is dropped: the
 // next pass reads the node anyway.
