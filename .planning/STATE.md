@@ -2,14 +2,15 @@
 gsd_state_version: "1.0"
 milestone: v1.18
 milestone_name: Host & Telefon
-current_phase: 14
-current_phase_name: telefon-tippziele
-status: human_needed
-stopped_at: Completed 15-09-PLAN.md
-last_updated: "2026-10-15T08:49:17.208Z"
-last_activity: 2026-10-12
-last_activity_desc: Planung auf Stand v0.5.0 nachgezogen
-state_head: cba79f3443aff9d6c45d3f79841c08cf99e5f805
+current_phase: 15
+current_phase_name: drift-erkennung-der-maschinenkonfiguration
+current_plan: 10
+status: verifying
+stopped_at: Completed 15-10-PLAN.md
+last_updated: "2026-10-15T09:15:35.098Z"
+last_activity: 2026-10-15
+last_activity_desc: Plan 15-10 ausgeführt, Phase 15 wartet auf die Verifikation
+state_head: 6ca513c82ab008c12765fb5b5b70b6e8ae91333c
 progress:
   total_phases: 4
   completed_phases: 2
@@ -20,9 +21,11 @@ progress:
 
 # Project State
 
-Stand 2026-10-13 (letztes Release **v0.7.0**, 2026-10-12). Die Phasen 11–14
-von v1.18 sind gebaut und warten auf Handproben; seit 2026-10-03 lief die Arbeit
-ohne GSD-Phasen (Redesign, Audit, Backups), siehe `MILESTONES.md`. Der vorige Bericht (Abschluss v1.15, Übergabe 2026-09-17)
+Stand 2026-10-15 (letztes Release **v0.7.1**). Die Phasen 11–14 von v1.18 sind
+gebaut, 13 und 14 warten auf Handproben (`human_needed`); Phase 16 ist gebaut
+und `human_needed`; Phase 15 (Drift-Erkennung) ist geplant und gebaut (10 von 10
+Plänen) und wartet auf die Verifikation der Phase. Seit 2026-10-03 lief die
+Arbeit teils ohne GSD-Phasen (Redesign, Audit, Backups), siehe `MILESTONES.md`. Der vorige Bericht (Abschluss v1.15, Übergabe 2026-09-17)
 liegt unverändert in `milestones/STATE-2026-09-17.md`.
 
 ## Project Reference
@@ -34,9 +37,12 @@ See: .planning/PROJECT.md (updated 2026-09-28)
 
 ## Current Position
 
-Phase: 14 (telefon-tippziele) — alle Pläne ausgeführt, `human_needed`
-Phase 13: 17/17 Pläne, `human_needed`
-Last activity: 2026-10-12 — Planung nachgezogen (Release v0.5.0)
+Current Plan: 10
+Total Plans in Phase: 10
+Phase: 15 (drift-erkennung-der-maschinenkonfiguration) — 10/10 Pläne gebaut, wartet auf die Verifikation
+Phase 13: 17/17 Pläne, `human_needed`; Phase 14: alle Pläne ausgeführt, `human_needed`
+Phase 16: gebaut, `human_needed`
+Last activity: 2026-10-15 — Plan 15-10 (Dokumentation, Ledger, Gate)
 
 Progress: [█████░░░░░] 50%
 
@@ -50,7 +56,8 @@ Progress: [█████░░░░░] 50%
 - **Phase 16 `human_needed` (Stand 2026-10-13):** von Hand
   `curl https://dl.k8s.io/release/stable-1.35.txt` (eine Zeile `v1.35.PATCH`) und
   eine echte Kettenplanung gegen den Cluster (Ledger 175). Phase 15
-  (Drift-Erkennung) ist angelegt, noch nicht geplant.
+  (Drift-Erkennung) ist geplant und gebaut (10 Pläne) und wartet auf die
+  Verifikation.
 - **Entscheidungen des Betreibers (Stand 2026-10-12):** Export-Ziel für Backups,
   Alerting-Kanal, Cloud-Provider, SAML. Router: Port 8443 im Internet erreichbar? (`AUDIT-2026-10-08.md`)
 - **Branch `claude/sponsor-button`** ist überholt (FUNDING.yml und Badge stehen
@@ -77,7 +84,7 @@ Progress: [█████░░░░░] 50%
 - **Auf echter Hardware nicht geübt:** Live-Sensoren, Wake-on-LAN, erzwungene
   Power-Aktionen.
 
-Maßgeblich für den Ledger ist `WINDOWS.md` (20 offen, 19 verzichtet).
+Maßgeblich für den Ledger ist `WINDOWS.md` (26 offen, 19 verzichtet).
 
 ## Accumulated Context
 
@@ -176,6 +183,7 @@ Siehe `PROJECT.md`, die `MILESTONE-*.md`-Dateien und für v1.18 den Abschnitt
 - [Phase 15]: 15-04: Confirm bestätigt nur eine echte, aktuell gelesene Drift gegen den Digest der gesehenen Lesung (zweimal geprüft, vor und in storeMu) und repariert keine beschädigte Basis
 - [Phase 15]: 15-05: der Beobachter hängt am ClusterClient (ein Engpass, Methodenmenge Apply* gepinnt); keine bedingungslose Übernahme nach no-reboot; D-13: Landung auf offener Drift behält Basis und DriftSince
 - [Phase 15]: 15-05: eine verfallene Erwartung wird gelöscht und nie übernommen; staged ohne Fenster, settling nur ohne offene Drift
+- [Phase 15]: 15-10: README ohne Bild (Betreiber 2026-10-14); REQUIREMENTS DRIFT-01..09 bleiben Pending bis zur Verifikation, weil Browser und echter Knoten ungeprueft sind; vier offene Ledger-Eintraege 176-179
 
 ### Roadmap Evolution
 
@@ -206,10 +214,10 @@ Siehe `PROJECT.md`, die `MILESTONE-*.md`-Dateien und für v1.18 den Abschnitt
 
 ## Session Continuity
 
-Last session: 2026-10-15T08:49:17.175Z
-Stopped at: Completed 15-09-PLAN.md
+Last session: 2026-10-15T09:15:27.445Z
+Stopped at: Completed 15-10-PLAN.md
 Resume file: None
-Next: Handproben Phase 13/14 auf dem Pi, dann `/gsd-complete-milestone` für v1.18
+Next: Verifikation der Phase 15, Handproben Phase 13/14 auf dem Pi, dann `/gsd-complete-milestone` für v1.18
 
 ## Performance Metrics
 
@@ -264,3 +272,4 @@ Next: Handproben Phase 13/14 auf dem Pi, dann `/gsd-complete-milestone` für v1.
 | Phase 15 P07 | 20min | 3 tasks | 9 files |
 | Phase 15 P08 | 1h30m | 3 tasks | 12 files |
 | Phase 15 P09 | 20min | 3 tasks | 14 files |
+| Phase 15 P10 | ~50min | 3 tasks | 4 files |
