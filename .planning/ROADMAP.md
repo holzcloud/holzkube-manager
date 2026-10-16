@@ -270,6 +270,46 @@ Waves: 1 → {01, 02} · 2 → {03} · 3 → {04} · 4 → {05} · 5 → {06} ·
 | 13. Host-Aktionen über einen root-eigenen Helfer | v1.18 | 17/17 | In Progress|  |
 | 14. Telefon — Tippziele, die ein Daumen trifft | v1.18 | 7/7 | In Progress|  |
 
+### Phase 17: Versionspruefung zwischen Plan und Apply
+
+**Goal:** Eine Konfiguration, die zwischen Plan und Apply von jemand anderem geändert wurde, wird nicht still überschrieben: das Apply wird verweigert und sagt, was sich seitdem geändert hat. Zwei Operatoren überschreiben einander heute still (Audit 2026-10-08, "Versionsprüfung zwischen Plan und Apply", klein).
+**Requirements**: TBD
+**Depends on:** Nothing (nutzt Digest und Lesung der Konfiguration; Phase 15 liegt bereit, ist aber keine Voraussetzung)
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (run /gsd-plan-phase 17 to break down)
+
+### Phase 18: Cordon, Drain und Worker-Gate
+
+**Goal:** Das Entfernen eines Knotens räumt auf (cordon, drain, Node-Objekt), und im Upgrade prüft ein Worker-Gate (Readiness, PodDisruptionBudget) vor dem Reboot, so wie die Control Plane heute schon eines hat (Audit 2026-10-08, "Cordon/Drain und Node-Objekt beim Entfernen", "Worker-Gate vor Reboot im Upgrade"). Beides braucht den Kubernetes-Client, bisher nur gegen `kubesim` bewiesen.
+**Requirements**: TBD
+**Depends on:** Nothing
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (run /gsd-plan-phase 18 to break down)
+
+### Phase 19: Alerting
+
+**Goal:** Der Betreiber wird benachrichtigt, wenn etwas seine Aufmerksamkeit braucht: Node down, Platte, Temperatur, Snapshot überfällig, Zertifikat, Konfigurationsdrift. Heute gibt es nur `/metrics` und die Wand (Audit 2026-10-08, "Alerting", mittel). Der Kanal (Webhook, ntfy, Mail) ist eine Entscheidung des Betreibers und kommt in der Diskussionsrunde als Auswahl.
+**Requirements**: TBD
+**Depends on:** Nothing (Quellen sind die vorhandenen Zustände aus v0.5.0 bis v0.8.0)
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (run /gsd-plan-phase 19 to break down)
+
+### Phase 20: Backup-Export
+
+**Goal:** Die etcd-Backups überleben den Verlust des Pi: sie werden an ein Ziel außerhalb des Geräts exportiert (Audit 2026-10-08, "Geplante etcd-Snapshots mit Aufbewahrung und Export", der Export-Teil). Das Ziel (SFTP oder S3) ist eine Entscheidung des Betreibers und kommt in der Diskussionsrunde als Auswahl.
+**Requirements**: TBD
+**Depends on:** Nothing (baut auf den geplanten Snapshots aus v0.5.0)
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (run /gsd-plan-phase 20 to break down)
+
 ## Nach v1.18 (ohne Milestone, angelegt 2026-10-12)
 
 Aus den Kandidaten von `AUDIT-2026-10-08.md`, vom Betreiber am 2026-10-12 gewählt.
