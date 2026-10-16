@@ -115,3 +115,22 @@ gebündelten Dependabot-Bumps (261012-hxm).
   nicht erzwungen (Ledger 174).
 - Zertifikatsablauf nie gegen einen echten Talos-Cluster gelaufen.
 - Matrixzeilen für Talos 1.7 bis 1.11 nicht nachgeprüft.
+
+## Ohne Milestone-Datei (2026-10-14 bis 2026-10-15) → Releases v0.7.1 und v0.8.0
+
+Direkt auf Anweisung gebaut: die Frist-Korrektur am Zertifikatsablauf (v0.7.1,
+Quick-Task 261014-gl2; v0.6.0 und v0.7.0 lasen in Produktion nichts, weil der Leser
+ohne Frist startete) und die Drift-Erkennung der Maschinenkonfiguration (Phase 15,
+v0.8.0): Basis je Knoten im Datenverzeichnis (Schema 7), periodischer Leser,
+Knotenseite mit Diff, Clusterzeile, Metriken, Banner nach 24 h, Bestätigen. Elf Pläne
+(15-11 Lückenschluss), unabhängig verifiziert, `human_needed`.
+
+### Known Gaps
+
+- **Phase 15 `human_needed`:** ein echter Knoten mit Apply und Neustart (A1, A2 und
+  das Timing, Ledger 177), Aussehen und Klickpfad im Browser auf dem Pi, das Banner
+  nach echten 24 Stunden. DRIFT-04, 05 und 07 stehen bis dahin auf Pending.
+- Eine geänderte Geheimnisfarbe allein ist unsichtbar (Ledger 178); die nicht
+  redigierten Rohfelder liegen in `config-baselines/` (Ledger 179).
+- Der Zertifikatsablauf ist erst mit v0.7.1 überhaupt lauffähig und nie an einem
+  echten Cluster gesehen.

@@ -21,7 +21,7 @@ progress:
 
 # Project State
 
-Stand 2026-10-15 (letztes Release **v0.7.1**). Die Phasen 11–14 von v1.18 sind
+Stand 2026-10-16 (letztes Release **v0.8.0**, 2026-10-15). Die Phasen 11–14 von v1.18 sind
 gebaut, 13 und 14 warten auf Handproben (`human_needed`); Phase 16 ist gebaut
 und `human_needed`; Phase 15 (Drift-Erkennung) ist geplant und gebaut (10 von 10
 Plänen) und wartet auf die Verifikation der Phase. Seit 2026-10-03 lief die
@@ -50,9 +50,14 @@ Progress: [█████░░░░░] 50%
 
 - **Entschieden 2026-10-12:** Release-Signatur — **vorerst keine**; es bleibt bei
   SHA-256 aus demselben Release (Risiko und Optionen: `AUDIT-2026-10-08.md`,
-  minisign wäre die Empfehlung gewesen). Letztes Release: **v0.7.0**
+  minisign wäre die Empfehlung gewesen). Letztes Release: **v0.8.0**
   (Kubernetes-Kette mit neuestem Patch, korrigierte compat-Matrix), Gate und
   Release-Verifikation von CI grün.
+- **Phase 15 `human_needed` (Stand 2026-10-16, v0.8.0 veröffentlicht):** auf dem Pi
+  prüfen: Knotenseite zeigt erst „baseline created", dann „matches"; ein eigener
+  Apply mit Neustart steht nach der nächsten Lesung als ok (Ledger 177); Klickpfad
+  Knotenseite, Bestätigen, Sudo-Dialog im Browser; die Cluster-Karte füllt unter
+  „Cluster certificates" (v0.7.1) Datumsangaben. DRIFT-04, 05, 07 Pending.
 - **Phase 16 `human_needed` (Stand 2026-10-13):** von Hand
   `curl https://dl.k8s.io/release/stable-1.35.txt` (eine Zeile `v1.35.PATCH`) und
   eine echte Kettenplanung gegen den Cluster (Ledger 175). Phase 15
