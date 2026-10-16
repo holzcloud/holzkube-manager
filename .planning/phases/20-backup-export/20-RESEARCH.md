@@ -595,7 +595,7 @@ func TestAnExporterOnAContextWithNoDeadlineStillExports(t *testing.T) {
 | A12 | Takt 1 min, 3 Versuche je Durchlauf mit 10 s und 30 s, Abstand `retryGap`, 5-GB-Grenze, Budgetformel | Befund 4, Muster 4 | Gestaltungsfragen im Ermessen; leicht änderbar |
 | A13 | Der Betreiber nutzt Klartext-HTTP nicht (Auswahl C2) | Open Questions | Mittel: sonst muss die Bestätigungsvariante gebaut werden |
 
-## Open Questions
+## Open Questions (RESOLVED in 20-CONTEXT.md D-03)
 
 Alle als **Auswahl** an den Betreiber, jede mit Kosten und Nutzen und einer Empfehlung (CLAUDE.md: Fragen sind Auswahlen, über `AskUserQuestion`). Wo der Betreiber nicht antwortet, gilt die Empfehlung; die nicht markierten Punkte sind Ermessen und brauchen keine Rückfrage.
 

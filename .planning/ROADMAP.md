@@ -273,42 +273,59 @@ Waves: 1 → {01, 02} · 2 → {03} · 3 → {04} · 4 → {05} · 5 → {06} ·
 ### Phase 17: Versionspruefung zwischen Plan und Apply
 
 **Goal:** Eine Konfiguration, die zwischen Plan und Apply von jemand anderem geändert wurde, wird nicht still überschrieben: das Apply wird verweigert und sagt, was sich seitdem geändert hat. Zwei Operatoren überschreiben einander heute still (Audit 2026-10-08, "Versionsprüfung zwischen Plan und Apply", klein).
-**Requirements**: TBD
+**Requirements**: VERS-01, VERS-02, VERS-03, VERS-04, VERS-05, VERS-06
 **Depends on:** Nothing (nutzt Digest und Lesung der Konfiguration; Phase 15 liegt bereit, ist aber keine Voraussetzung)
-**Plans:** 0 plans
+**Plans:** 2 plans
 
 Plans:
-- [ ] TBD (run /gsd-plan-phase 17 to break down)
+- [ ] 17-01-PLAN.md — Server: base_digest im Plan, Pflichtfeld und Prüfung im Apply, Sperre je Knoten
+- [ ] 17-02-PLAN.md — UI, deklarative Tabellen, Ledger, Doku, Gate
 
 ### Phase 18: Cordon, Drain und Worker-Gate
 
 **Goal:** Das Entfernen eines Knotens räumt auf (cordon, drain, Node-Objekt), und im Upgrade prüft ein Worker-Gate (Readiness, PodDisruptionBudget) vor dem Reboot, so wie die Control Plane heute schon eines hat (Audit 2026-10-08, "Cordon/Drain und Node-Objekt beim Entfernen", "Worker-Gate vor Reboot im Upgrade"). Beides braucht den Kubernetes-Client, bisher nur gegen `kubesim` bewiesen.
-**Requirements**: TBD
+**Requirements**: DRAIN-01, DRAIN-02, DRAIN-03, DRAIN-04, DRAIN-05, DRAIN-06, WGATE-01, WGATE-02, WGATE-03
 **Depends on:** Nothing
-**Plans:** 0 plans
+**Plans:** 4 plans
 
 Plans:
-- [ ] TBD (run /gsd-plan-phase 18 to break down)
+- [ ] 18-01-PLAN.md — Cordon und Drain vor dem Entfernen, Frist, Budgetname
+- [ ] 18-02-PLAN.md — Kubernetes-Seite: Node-Objekt löschen, Cordon zurücknehmen, Rechte, nackte Pods, Quorum
+- [ ] 18-03-PLAN.md — Hinweistext, Dialog, README
+- [ ] 18-04-PLAN.md — Worker-Gate, Guide, API-Vertrag, Ledger
 
 ### Phase 19: Alerting
 
 **Goal:** Der Betreiber wird benachrichtigt, wenn etwas seine Aufmerksamkeit braucht: Node down, Platte, Temperatur, Snapshot überfällig, Zertifikat, Konfigurationsdrift. Heute gibt es nur `/metrics` und die Wand (Audit 2026-10-08, "Alerting", mittel). Der Kanal (Webhook, ntfy, Mail) ist eine Entscheidung des Betreibers und kommt in der Diskussionsrunde als Auswahl.
-**Requirements**: TBD
+**Requirements**: SECRET-01, ALRT-01, ALRT-02, ALRT-03, ALRT-04, ALRT-05, ALRT-06, ALRT-07, ALRT-08
 **Depends on:** Nothing (Quellen sind die vorhandenen Zustände aus v0.5.0 bis v0.8.0)
-**Plans:** 0 plans
+**Plans:** 7 plans
 
 Plans:
-- [ ] TBD (run /gsd-plan-phase 19 to break down)
+- [ ] 19-01-PLAN.md — internal/secretval (gemeinsamer Secret-Typ)
+- [ ] 19-02-PLAN.md — Vokabular, Assess für acht Arten, Sampler
+- [ ] 19-03-PLAN.md — Tracker, Zustandsdatei, Neustartsicherheit
+- [ ] 19-04-PLAN.md — Webhook-Dokument, Sender, URL-Prüfung
+- [ ] 19-05-PLAN.md — Service, Wiederholung, Dry-Run, Einstellungen
+- [ ] 19-06-PLAN.md — Routen, Audit, Budget, Verdrahtung, Metriken
+- [ ] 19-07-PLAN.md — Einstellungskarte, Doku, Ledger, Gate
 
 ### Phase 20: Backup-Export
 
 **Goal:** Die etcd-Backups überleben den Verlust des Pi: sie werden an ein Ziel außerhalb des Geräts exportiert (Audit 2026-10-08, "Geplante etcd-Snapshots mit Aufbewahrung und Export", der Export-Teil). Das Ziel (SFTP oder S3) ist eine Entscheidung des Betreibers und kommt in der Diskussionsrunde als Auswahl.
-**Requirements**: TBD
-**Depends on:** Nothing (baut auf den geplanten Snapshots aus v0.5.0)
-**Plans:** 0 plans
+**Requirements**: EXPORT-01, EXPORT-02, EXPORT-03, EXPORT-04, EXPORT-05, EXPORT-06, EXPORT-07, EXPORT-08, EXPORT-09
+**Depends on:** Phase 19 (ganz, mindestens 19-01: der gemeinsame Typ `internal/secretval`; beide Phasen ändern dieselben Dateien, darum läuft 19 vor 20); baut auf den geplanten Snapshots aus v0.5.0
+**Plans:** 8 plans
 
 Plans:
-- [ ] TBD (run /gsd-plan-phase 20 to break down)
+- [ ] 20-01-PLAN.md — Target-Naht, SigV4-Client, fakes3
+- [ ] 20-02-PLAN.md — Entitäten und Snapshot-Hooks
+- [ ] 20-03-PLAN.md — Client härten
+- [ ] 20-04-PLAN.md — Reconciler
+- [ ] 20-05-PLAN.md — Handler und API
+- [ ] 20-06-PLAN.md — Metriken, Übersicht, Verdrahtung
+- [ ] 20-07-PLAN.md — UI
+- [ ] 20-08-PLAN.md — Doku, Ledger, Gate
 
 ## Nach v1.18 (ohne Milestone, angelegt 2026-10-12)
 

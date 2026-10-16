@@ -383,10 +383,10 @@ if !driftDigestShape.MatchString(body.BaseDigest) {
 | A6 | Die Verweigerung eines zweiten Klicks auf dieselbe Vorschau nach erfolgreichem Apply ist erwünscht | Frage 3 | Betreiber empfindet es als Störung; es ist die Folge von D-01 und schützt vor doppelten Listeneinträgen |
 | A7 | Vorschlag `base_digest` im Audit zu erlauben (Hash, kein Geheimnis) | T13 | Wenn nicht: Feld wird still verworfen, nichts bricht |
 
-## Open Questions
+## Open Questions (RESOLVED)
 
-1. **Echter Knoten:** Liefert das Re-Encoding eines echten Talos-Knotens bei jedem Lesen denselben redigierten Snapshot? (A3.) Nicht auf dem Mac prüfbar; eine Pi-Prüfung gehört in `human_needed` der Verifikation: Plan, kurz warten, Apply ohne Änderung muss durchgehen.
-2. **Fehlermapping der Snapshot-Fehler im Plan** (`ErrSnapshotUnreadable`, `TooLarge`, `Unsafe`) heute `500`. Planer entscheidet: belassen oder auf `409`/Upstream mappen. Keine Auswirkung auf VERS-01..06.
+1. **(RESOLVED, deferred to human_needed, Ledger)** **Echter Knoten:** Liefert das Re-Encoding eines echten Talos-Knotens bei jedem Lesen denselben redigierten Snapshot? (A3.) Nicht auf dem Mac prüfbar; eine Pi-Prüfung gehört in `human_needed` der Verifikation: Plan, kurz warten, Apply ohne Änderung muss durchgehen.
+2. **(RESOLVED: bleibt 500, Plan 17-01 Task 2)** **Fehlermapping der Snapshot-Fehler im Plan** (`ErrSnapshotUnreadable`, `TooLarge`, `Unsafe`) heute `500`. Planer entscheidet: belassen oder auf `409`/Upstream mappen. Keine Auswirkung auf VERS-01..06.
 
 ## Environment Availability
 

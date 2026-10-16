@@ -92,6 +92,59 @@ eine Ermessensentscheidung von Claude, im Bericht gekennzeichnet).
 - [x] **DRIFT-08**: Der Betreiber bestätigt „so ist es gewollt": Admin-Rolle, Sudo-Fenster, Audit-Eintrag mit Knoten und Digest, der gelesene Stand wird die Basis, nichts am Knoten ändert sich; kein Zurücksetzen
 - [x] **DRIFT-09**: README, Leitfaden und API-Vertrag beschreiben die Funktion; was sich nicht belegen lässt (Annahmen A1 und A2, der Blindfleck von `Compare`, Geheimniswerte, nicht redigierte Felder) steht offen im Ledger
 
+### Versionsprüfung zwischen Plan und Apply (VERS)
+
+Phase 17. Entscheidungen: `17-CONTEXT.md` (D-01 bis D-03). Die IDs sind der Vorschlag aus `17-RESEARCH.md`.
+
+- [ ] **VERS-01**: Die Vorschau (Plan) trägt `base_digest`, den Digest des Snapshots der gelesenen aktiven Konfiguration
+- [ ] **VERS-02**: Das Apply verlangt `base_digest`, liest erneut und verweigert bei Abweichung, ohne Überschreib-Schalter, und sendet dann nichts
+- [ ] **VERS-03**: Der Satz der Verweigerung nennt die Änderungen über alle Dokumente, ohne Geheimnisse, Werte und Adressen
+- [ ] **VERS-04**: Ein eigenes Apply landet wie bisher und frischt die Drift-Basis über den erwarteten Digest auf; ein verweigertes Apply hinterlässt keine Erwartung
+- [ ] **VERS-05**: Zwei gleichzeitige Applies auf einen Knoten aus diesem Prozess überschreiben einander nicht still (Sperre je Knoten)
+- [ ] **VERS-06**: Die Oberfläche zeigt die Verweigerung als Satz und bietet „neu planen" an; README, Anleitung und API-Vertrag sind im selben Schritt nachgezogen
+
+### Cordon, Drain und Worker-Gate (DRAIN, WGATE)
+
+Phase 18. Entscheidungen: `18-CONTEXT.md` (D-01 bis D-03). Die IDs sind der Vorschlag des Planers.
+
+- [ ] **DRAIN-01**: Das Entfernen eines Knotens sperrt (cordon) und räumt (drain) ihn über die Eviction-API, nie über Löschen, bevor der erste unumkehrbare Schritt läuft
+- [ ] **DRAIN-02**: Ein PDB-Veto wird bis zu einer Frist (10 min) abgewartet, dann scheitert der Auftrag vor allem Unumkehrbaren und nennt Budget und Pod; der eigene Cordon wird zurückgenommen, nichts wird erzwungen
+- [ ] **DRAIN-03**: Das Kubernetes-Node-Objekt wird nach dem Wipe gelöscht; ein Fehler ist `failed` mit einem Satz
+- [ ] **DRAIN-04**: Alles, was verweigern kann, verweigert vor jeder Änderung (Kubernetes nicht erreichbar, Berechtigung fehlt, nackter Pod, Control-Plane-Quorum); sichtbar übersprungen wird nur bei `ErrNoKubernetesAuthority`; ein toter Kubelet wird evakuiert, aber nicht abgewartet
+- [ ] **DRAIN-05**: Jeder neue Schritt ist prüfbar, der Wipe bleibt nicht prüfbar, ein Auftrag alter Form wird geparkt
+- [ ] **DRAIN-06**: Hinweis, Dialog, README, Leitfaden und API-Vertrag sagen, was jetzt geschieht
+- [ ] **WGATE-01**: Vor dem Neustart jedes Workers prüft ein eigener Schritt Bereitschaft der anderen Knoten und per Dry-Run die Budgets, alle 10 s bis 5 min; danach ein Satz und `failed`; `ImagePull` und `Upgrade` laufen nie bei offenem Gate
+- [ ] **WGATE-02**: Das Gate ändert nie Workloads; Control Plane, gesperrte Knoten und das Kubernetes-Upgrade bekommen kein echtes Gate; nur fehlende Autorität ist ein sichtbarer Sprung
+- [ ] **WGATE-03**: Dokumentation und Ledger nennen die Beweisgrenze (nur gegen `kubesim` und `talossim` bewiesen)
+
+### Alerting (ALRT, SECRET)
+
+Phase 19. Entscheidungen: `19-CONTEXT.md` (D-01 bis D-04). ALRT-01 bis 08 sind der Vorschlag aus `19-RESEARCH.md`; SECRET-01 hat der Planer ergänzt.
+
+- [ ] **SECRET-01**: Ein gemeinsamer Typ `internal/secretval.Secret` für Geheimnisse, die nie in Log, Fehler, Metrik oder Antwort laufen; Phase 20 baut darauf (Phase 19 läuft vor Phase 20), und `Reveal` hat eine geführte Aufruferliste
+- [ ] **ALRT-01**: Ein Auswerter liest dasselbe Lesemodell wie `/metrics` und die Anzeige und erkennt Übergänge, nicht jeden Takt
+- [ ] **ALRT-02**: Gedeckte Zustände: Knoten nicht erreichbar, Knoten-Platte, Knoten-Temperatur, Host (Pi), Snapshot überfällig, Admin-Zertifikat, Zertifikate im Cluster, Konfigurationsdrift; „nicht gelesen" ist nie „wieder in Ordnung"
+- [ ] **ALRT-03**: Ein Neustart meldet nichts neu; der Erststart legt eine Ausgangslage an, ohne jeden Einzelnen zu melden
+- [ ] **ALRT-04**: Webhook-Dokument mit Version, stabilen Schlüsseln und `delivery_id`; ein Dokument je Auswertungsdurchgang
+- [ ] **ALRT-05**: Auslieferung mit eigener Frist je Versuch, TLS-Prüfung, keine Weiterleitung, Antwortgrenze, begrenzte Wiederholung, sichtbarer Zustand der letzten Auslieferung, kein Geheimnis in Fehlern und Logs
+- [ ] **ALRT-06**: Die URL ist eine Einstellung im Datenverzeichnis, schreibend ja, lesend nie; Admin und Sudo; Audit ohne URL; Testnachricht; mit `--dry-run` wird nichts gesendet (D-04)
+- [ ] **ALRT-07**: Einstellungskarte: gesetzt/nicht gesetzt, letzte Auslieferung, Liste der letzten Ereignisse
+- [ ] **ALRT-08**: README, Leitfaden, API-Vertrag, Metriken; die Sätze „does not alert" werden berichtigt
+
+### Backup-Export (EXPORT)
+
+Phase 20, hängt an SECRET-01 aus Phase 19. Entscheidungen: `20-CONTEXT.md` (D-01 bis D-03). Die IDs sind der Vorschlag aus `20-RESEARCH.md`.
+
+- [ ] **EXPORT-01**: Jeder erfolgreiche Snapshot (geplant und vor Upgrade) wird nach dem Schreiben zu einem konfigurierten Ziel exportiert, mit Prüfsumme; kein Cluster-Lease
+- [ ] **EXPORT-02**: Austauschnaht `Target` (Put, Check, Fingerprint); S3 ist die erste Umsetzung, SFTP kommt später
+- [ ] **EXPORT-03**: Eigener schmaler S3-Client (SigV4, Stdlib), Pfadstil und Virtual-Host, Region, Prüfsummen-Header, Größengrenze 5 GB
+- [ ] **EXPORT-04**: TLS-Prüfung bleibt an; eigene CA per PEM für ein LAN-Ziel; nie `InsecureSkipVerify`; kein Redirect
+- [ ] **EXPORT-05**: Ziel-Einstellungen und Geheimnis im Datenverzeichnis, das Geheimnis in der UI schreibgeschützt, Audit-Allowlist, nie in Log, Fehler, Metrik oder Antwort
+- [ ] **EXPORT-06**: Wiederholung mit Grenze, Zustand je Snapshot und je Cluster, nie still; Rückstau nach Ausfall; Zielwechsel exportiert neu
+- [ ] **EXPORT-07**: Überfällig-Zustand des Exports; „nicht konfiguriert" ist ein eigener Zustand und nie „ok"
+- [ ] **EXPORT-08**: Einstellungsseite, Export-Zustand auf der Backups-Tafel, „Ziel testen", „jetzt exportieren"; API-Vertrag, Leitfaden, README
+- [ ] **EXPORT-09**: Beweis gegen einen eigenen `httptest`-Fake-S3 mit unabhängigem Signaturvektor, je Anspruch ein rot gesehener Fehler
+
 ## Future Requirements
 
 - Host-Aktion „Rollback auf die vorige Version" (`holzkube-manager-update --rollback`)
@@ -139,8 +192,41 @@ eine Ermessensentscheidung von Claude, im Bericht gekennzeichnet).
 | DRIFT-07 | Phase 15 | Pending |
 | DRIFT-08 | Phase 15 | Complete |
 | DRIFT-09 | Phase 15 | Complete |
+| VERS-01 | Phase 17 | Pending |
+| VERS-02 | Phase 17 | Pending |
+| VERS-03 | Phase 17 | Pending |
+| VERS-04 | Phase 17 | Pending |
+| VERS-05 | Phase 17 | Pending |
+| VERS-06 | Phase 17 | Pending |
+| DRAIN-01 | Phase 18 | Pending |
+| DRAIN-02 | Phase 18 | Pending |
+| DRAIN-03 | Phase 18 | Pending |
+| DRAIN-04 | Phase 18 | Pending |
+| DRAIN-05 | Phase 18 | Pending |
+| DRAIN-06 | Phase 18 | Pending |
+| WGATE-01 | Phase 18 | Pending |
+| WGATE-02 | Phase 18 | Pending |
+| WGATE-03 | Phase 18 | Pending |
+| SECRET-01 | Phase 19 | Pending |
+| ALRT-01 | Phase 19 | Pending |
+| ALRT-02 | Phase 19 | Pending |
+| ALRT-03 | Phase 19 | Pending |
+| ALRT-04 | Phase 19 | Pending |
+| ALRT-05 | Phase 19 | Pending |
+| ALRT-06 | Phase 19 | Pending |
+| ALRT-07 | Phase 19 | Pending |
+| ALRT-08 | Phase 19 | Pending |
+| EXPORT-01 | Phase 20 | Pending |
+| EXPORT-02 | Phase 20 | Pending |
+| EXPORT-03 | Phase 20 | Pending |
+| EXPORT-04 | Phase 20 | Pending |
+| EXPORT-05 | Phase 20 | Pending |
+| EXPORT-06 | Phase 20 | Pending |
+| EXPORT-07 | Phase 20 | Pending |
+| EXPORT-08 | Phase 20 | Pending |
+| EXPORT-09 | Phase 20 | Pending |
 
-**Coverage:** 32 von 32 v1.18-Anforderungen einer Phase zugeordnet, keine doppelt.
+**Coverage:** 32 von 32 v1.18-Anforderungen einer Phase zugeordnet, keine doppelt; dazu 33 Anforderungen der Phasen 17 bis 20 (Vorschlag der Planer, nicht vom Betreiber bestätigt).
 
 ---
 *Traceability gefüllt am 2026-09-28 mit der Roadmap für v1.18 (Phasen 11–14).*
