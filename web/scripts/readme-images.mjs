@@ -183,6 +183,21 @@ function live(path, body) {
     for (const c of body.clusters) {
       Object.assign(c, { certificate_warning: '', certificate_urgency: 'none' })
       if (c.client_cert_days_left < 60) Object.assign(c, { client_cert_days_left: 64, client_cert_not_after: '2026-11-22T08:00:00Z' })
+      // The readings the cards show for the cluster's own certificates and the
+      // nodes' configuration are moved to now, so "read" is always recent and a
+      // difference is always a few hours old (short of the 24 h behind a banner).
+      const ago = (h) => new Date(Date.now() - h * 3_600_000).toISOString()
+      if (c.node_certificates) {
+        c.node_certificates.checked_at = ago(0.2)
+        for (const it of c.node_certificates.items) it.not_after = new Date(Date.now() + it.days_left * 86_400_000).toISOString()
+      }
+      if (c.config_drift) {
+        c.config_drift.checked_at = ago(0.5)
+        for (const it of c.config_drift.items) {
+          it.read_at = ago(0.5)
+          if (it.since) it.since = ago(4)
+        }
+      }
     }
   }
   if (path.endsWith('/hardware')) body.observed_at = now
@@ -213,7 +228,8 @@ function live(path, body) {
 }
 
 async function context(width, height, scale) {
-  const c = await browser.newContext({ viewport: { width, height }, deviceScaleFactor: scale })
+  // en-US: the dates in the pictures read the same whatever the machine's locale.
+  const c = await browser.newContext({ viewport: { width, height }, deviceScaleFactor: scale, locale: 'en-US' })
   await c.addInitScript(() => localStorage.setItem('holzkube-manager.theme', 'dark'))
   await c.route('**/api/v1/**', async (route) => {
     if (route.request().method() !== 'GET') return route.continue()

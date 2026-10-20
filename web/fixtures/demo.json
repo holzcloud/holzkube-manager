@@ -283,7 +283,82 @@
         "healthy": 2,
         "degraded": 1,
         "down": 0,
-        "checking": 0
+        "checking": 0,
+        "node_certificates": {
+          "checked_at": "2026-10-20T08:00:00Z",
+          "read_nodes": 1,
+          "control_planes": 1,
+          "urgency": "none",
+          "warning": "",
+          "items": [
+            {
+              "node": "srv-node-01.homelab.example",
+              "name": "etcd peer",
+              "kind": "issued",
+              "not_after": "2027-06-08T08:00:00Z",
+              "days_left": 231,
+              "urgency": "none"
+            },
+            {
+              "node": "srv-node-01.homelab.example",
+              "name": "Kubernetes API server",
+              "kind": "issued",
+              "not_after": "2027-06-08T08:00:00Z",
+              "days_left": 231,
+              "urgency": "none"
+            },
+            {
+              "node": "srv-node-01.homelab.example",
+              "name": "Talos API",
+              "kind": "issued",
+              "not_after": "2027-06-08T08:00:00Z",
+              "days_left": 231,
+              "urgency": "none"
+            },
+            {
+              "node": "srv-node-01.homelab.example",
+              "name": "Kubernetes authority",
+              "kind": "authority",
+              "not_after": "2036-09-01T08:00:00Z",
+              "days_left": 3604,
+              "urgency": "none"
+            }
+          ]
+        },
+        "config_drift": {
+          "checked_at": "2026-10-20T08:00:00Z",
+          "nodes": 3,
+          "read_nodes": 3,
+          "drifted": 1,
+          "banner": false,
+          "warning": "",
+          "items": [
+            {
+              "machine": "m-cp-1",
+              "node": "srv-node-01.homelab.example",
+              "state": "ok",
+              "since": null,
+              "read_at": "2026-10-20T08:00:00Z",
+              "sentence": "matches its baseline"
+            },
+            {
+              "machine": "m-worker-1",
+              "node": "worker-02.homelab.example",
+              "state": "drift",
+              "since": "2026-10-20T03:40:00Z",
+              "read_at": "2026-10-20T08:00:00Z",
+              "sentence": "differs from its baseline"
+            },
+            {
+              "machine": "m-worker-2",
+              "node": "worker-03.homelab.example",
+              "state": "ok",
+              "since": null,
+              "read_at": "2026-10-20T08:00:00Z",
+              "sentence": "matches its baseline"
+            }
+          ]
+        }
       },
       {
         "id": "c-lab-zwei",
@@ -302,7 +377,58 @@
         "healthy": 0,
         "degraded": 0,
         "down": 1,
-        "checking": 0
+        "checking": 0,
+        "node_certificates": {
+          "checked_at": "2026-10-20T08:00:00Z",
+          "read_nodes": 1,
+          "control_planes": 1,
+          "urgency": "none",
+          "warning": "",
+          "items": [
+            {
+              "node": "cp-1.lab-zwei.example",
+              "name": "etcd peer",
+              "kind": "issued",
+              "not_after": "2027-06-02T08:00:00Z",
+              "days_left": 225,
+              "urgency": "none"
+            },
+            {
+              "node": "cp-1.lab-zwei.example",
+              "name": "Talos API",
+              "kind": "issued",
+              "not_after": "2027-06-02T08:00:00Z",
+              "days_left": 225,
+              "urgency": "none"
+            },
+            {
+              "node": "cp-1.lab-zwei.example",
+              "name": "Talos authority",
+              "kind": "authority",
+              "not_after": "2036-08-14T08:00:00Z",
+              "days_left": 3586,
+              "urgency": "none"
+            }
+          ]
+        },
+        "config_drift": {
+          "checked_at": "2026-10-20T08:00:00Z",
+          "nodes": 1,
+          "read_nodes": 1,
+          "drifted": 0,
+          "banner": false,
+          "warning": "",
+          "items": [
+            {
+              "machine": "m-lab-1",
+              "node": "cp-1.lab-zwei.example",
+              "state": "ok",
+              "since": null,
+              "read_at": "2026-10-20T08:00:00Z",
+              "sentence": "matches its baseline"
+            }
+          ]
+        }
       }
     ]
   },
