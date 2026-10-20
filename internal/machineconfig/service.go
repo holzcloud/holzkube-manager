@@ -60,6 +60,10 @@ type Service struct {
 	// node outside holzkube-manager.
 	staged map[model.MachineID]stagedRecord
 	seq    uint64
+
+	// memo holds the redacted text of recent plans, for the sentence of a
+	// refusal (Phase 17). Its own lock: it is not s.mu's business.
+	memo *planMemo
 }
 
 type stagedRecord struct {
@@ -77,7 +81,11 @@ func New(d Deps) *Service {
 	if d.Now == nil {
 		d.Now = time.Now
 	}
-	return &Service{deps: d, staged: map[model.MachineID]stagedRecord{}}
+	return &Service{
+		deps:   d,
+		staged: map[model.MachineID]stagedRecord{},
+		memo:   newPlanMemo(planMemoPerNode, planMemoMaxBytes, planMemoLifetime, d.Now),
+	}
 }
 
 // View is a node's configuration as the screen shows it.
@@ -210,6 +218,7 @@ func (s *Service) Plan(ctx context.Context, id model.MachineID, patches []string
 	if err != nil {
 		return Preview{}, err
 	}
+	s.memo.remember(id, snap)
 
 	p := Preview{
 		Machine:    id,
@@ -335,7 +344,21 @@ func (s *Service) checkBase(id model.MachineID, raw []byte, baseDigest string) e
 	if snap.Digest == baseDigest {
 		return nil
 	}
-	return &ChangedSincePlanError{}
+
+	// The sentence says what changed, and for that it needs the plan's state. It
+	// comes from process memory and may be gone (a restart, the limits of the
+	// memo); the refusal does not depend on it. CompareDocuments and not Compare:
+	// Compare reads only the first document, and a change in KubeletConfig would
+	// give a sentence with nothing in it (ledger 176).
+	before, ok := s.memo.recall(id, baseDigest)
+	if !ok {
+		return &ChangedSincePlanError{}
+	}
+	diff, err := CompareDocuments(before, snap.Text)
+	if err != nil {
+		return &ChangedSincePlanError{}
+	}
+	return &ChangedSincePlanError{Known: true, Changes: diff.Changes}
 }
 
 // reserveStaged refuses when a staged configuration is pending and otherwise
