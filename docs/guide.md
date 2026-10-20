@@ -1334,6 +1334,49 @@ key is never copied out of the package that reads it. Workers are not read (they
 have no etcd or Kubernetes API server and Talos renews their API certificate the
 same way). Nothing here changes a node.
 
+### Applying a configuration patch
+
+The Config page plans first ("See what would change") and applies afterwards.
+The plan remembers **which state of the node it read**: a fingerprint of the
+configuration, called `base_digest`. When you press Apply, the daemon reads the
+node once more, and if somebody changed it in between (another operator,
+talosctl, an earlier apply of your own) **nothing is sent**. The page shows, in a
+yellow box, one sentence saying what changed, with paths and without values, and
+Apply is locked. You plan again ("See what would change again" repeats the plan
+with the same patch text) and see what your patch does to the current
+configuration.
+
+There is no switch that applies anyway: whoever wants to overwrite plans again.
+An apply of your own still refreshes the baseline of the drift detection; a
+refused one leaves it alone. Two applies to one node run one after the other.
+After a successful apply the same preview stays locked until you plan again,
+since the apply has itself changed the node.
+
+If you call the route from a script: this is a change in the alpha stage.
+`base_digest` is required; plan first and send back what the plan gave.
+
+**What it cannot do.**
+
+- A change of nothing but a secret value is not refused and not turned back: it
+  leaves the fingerprint as it was, and the apply carries the new value along
+  (ledger 178).
+- The window between reading and sending remains, because Talos has no
+  precondition in its apply call. A change made by talosctl in those
+  milliseconds is overwritten and is seen only by the drift detection afterwards
+  (an open ledger entry of phase 17).
+- It is assumed, and not shown against a real node, that two readings without a
+  change give the same fingerprint. A false alarm would be a refusal whose
+  sentence says the form changed, without naming a setting (an open ledger entry
+  of phase 17).
+- The fingerprint binds the node, not the patch text; the apply sends what is in
+  the text field.
+- After a restart of the daemon (the hourly update) the sentence no longer names
+  the paths, because the earlier state is gone; the refusal stands.
+- The plan reads only the first document, the fingerprint all of them (ledger
+  176).
+- A second click on the same preview after a success is refused, and the page
+  locks it already.
+
 ### Configuration drift
 
 Nothing used to notice a change made to a node behind this installation's back:

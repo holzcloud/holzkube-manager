@@ -57,6 +57,10 @@ just said, nothing cached or guessed.
   the node page, as a row on the cluster card and in `/metrics`, and as a banner
   once it has stayed unconfirmed for a day; "this is intended" makes the new
   state the baseline and changes nothing on the node.
+- **Configuration changes:** a patch is planned against what the node has right
+  now, and the apply is refused, with a sentence saying what changed, if somebody
+  changed the node in between (talosctl, another operator). Two applies to one
+  node run one after the other.
 - **Power:** stop, start or restart a cluster, a node or an app; Wake-on-LAN
   brings a node back.
 - **The host itself:** a Host page for the machine it runs on, with live CPU,

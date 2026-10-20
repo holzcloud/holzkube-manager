@@ -4229,8 +4229,8 @@ would hide the problem and showing it unredacted would hand over the key.
 | Method | Path | Destructive | Notes |
 |---|---|---|---|
 | `GET` | `/api/v1/machines/{id}/config` | no | `raw` and `rendered`, both redacted |
-| `POST` | `/api/v1/machines/{id}/config/plan` | no | reads, merges locally, changes nothing |
-| `POST` | `/api/v1/machines/{id}/config/apply` | **yes** | cluster-scoped; `mode` required |
+| `POST` | `/api/v1/machines/{id}/config/plan` | no | reads, merges locally, changes nothing; the answer carries `base_digest` |
+| `POST` | `/api/v1/machines/{id}/config/apply` | **yes** | cluster-scoped; `mode` and `base_digest` required |
 | `GET` / `POST` | `/api/v1/patches` | no | list, create-or-edit |
 | `GET` | `/api/v1/patches/{id}` | no | including superseded versions |
 
@@ -4273,6 +4273,46 @@ Three cases are called out by name:
   in memory — a stored flag would be a claim about the node that only the node can
   answer, and it would go stale the moment somebody rebooted outside holzkube-manager.
 
+### The apply checks what the plan saw
+
+`plan` answers with `base_digest`: the SHA-256 of the snapshot of the active
+configuration the plan read — every document, normalised, with the same
+redactions as the configuration view, and the same notion of digest as the one
+on the drift view. `apply` requires it back, 64 lower-case hex characters. A
+missing or malformed value is `400 validation.failed` with the field
+`base_digest`; there is no way to leave the check out.
+
+The server reads the node again, forms the digest of that same reading it then
+patches from, and compares. If they differ the answer is
+`409 conflict.config-changed-since-plan`, nothing is sent, and `detail` says what
+changed since the plan: paths with their document prefix and kind (`added`,
+`removed`, `modified`, `list changed` with both lengths), at most eight, then
+`and N more` — **never values**. When the server no longer holds the earlier
+state (it keeps a bounded memory of recent plans in the process, empty after a
+restart of the daemon) it refuses all the same, and the sentence says that the
+earlier state is no longer available.
+
+Two applies on one node run one after the other. An apply that has to wait for
+the first until its own request runs out answers `409 store.conflict` and sends
+nothing. A refused apply also leaves the drift baseline alone, which only an
+apply that was sent may move.
+
+What this does not do, in so many words:
+
+- A change of nothing but a secret value between plan and apply does not change
+  the digest (the snapshot is redacted), so it is not refused, and the apply
+  carries the new value on unchanged rather than turning it back (ledger 178).
+- The window between reading and sending remains, because Talos's apply call has
+  no precondition field. The server keeps it short (one client for reading and
+  sending, one lock per node against applies from this process) and cannot close
+  it.
+- The digest binds the state of the node, not the patch text; the apply sends
+  what the request carries.
+- A second apply of the same preview after a success is refused, because the
+  first apply changed the digest.
+- The plan chapter still reads only the first document (ledger 176): the digest
+  covers all documents, the diff view of the plan does not.
+
 ### Patches are strategic merge only, and append-only
 
 RFC 6902 addresses list entries by index. An index is a claim about a list as it
@@ -4292,7 +4332,9 @@ only has an answer if the thing applied still exists.
 
 ### Audit
 
-`config.apply` permits the cluster, the mode and the **patch ids**. Patch
+`config.apply` permits the cluster, the mode, the **patch ids** and
+`base_digest` (a hash of the redacted text, not a secret; it says later which
+state the operator had looked at). Patch
 *bodies* are deliberately absent from the allowlist: a body is arbitrary
 configuration, configuration is where the secrets are, and the archive has no
 deletion path. A stored patch is readable at its own id for as long as it exists
