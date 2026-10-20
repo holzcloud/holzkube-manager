@@ -15,7 +15,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { messageFor } from '@/lib/problem'
+import { CODE_CONFIG_CHANGED_SINCE_PLAN, messageFor, ProblemError } from '@/lib/problem'
 import { authenticatedRoute } from '@/routes/__root'
 
 /**
@@ -95,6 +95,14 @@ function NodeConfig({ machine, machineID }: { machine?: Machine; machineID: stri
   const [patch, setPatch] = useState('')
   const [preview, setPreview] = useState<ConfigPreview | null>(null)
   const [failure, setFailure] = useState('')
+  // The server's sentence when it refused an apply because the node changed
+  // since the plan. It lives here and not in the preview so that it stays on
+  // the page until the new plan has arrived (D-02).
+  const [refusal, setRefusal] = useState('')
+  // Counts the plans that came back. A new plan is a new preview, so the card
+  // starts over (mode, the "Applied" line, its own failure) rather than
+  // carrying the last one's state into it.
+  const [planSeq, setPlanSeq] = useState(0)
 
   const view = useQuery({
     queryKey: ['config', machineID],
@@ -106,10 +114,13 @@ function NodeConfig({ machine, machineID }: { machine?: Machine; machineID: stri
     onSuccess: (p) => {
       setPreview(p)
       setFailure('')
+      setRefusal('')
+      setPlanSeq((n) => n + 1)
     },
     onError: (e: Error) => {
       setPreview(null)
       setFailure(e.message)
+      setRefusal('')
     },
   })
 
@@ -189,10 +200,15 @@ function NodeConfig({ machine, machineID }: { machine?: Machine; machineID: stri
 
       {preview && (
         <PreviewCard
+          key={planSeq}
           preview={preview}
           machineID={machineID}
           cluster={machine?.cluster ?? ''}
           patch={patch}
+          refusal={refusal}
+          onRefused={setRefusal}
+          onPlanAgain={() => plan.mutate()}
+          planning={plan.isPending}
         />
       )}
     </div>
@@ -216,11 +232,19 @@ function PreviewCard({
   machineID,
   cluster,
   patch,
+  refusal,
+  onRefused,
+  onPlanAgain,
+  planning,
 }: {
   preview: ConfigPreview
   machineID: string
   cluster: string
   patch: string
+  refusal: string
+  onRefused: (sentence: string) => void
+  onPlanAgain: () => void
+  planning: boolean
 }) {
   const queryClient = useQueryClient()
   const [mode, setMode] = useState(preview.verdict.mode)
@@ -228,13 +252,23 @@ function PreviewCard({
   const [failure, setFailure] = useState('')
 
   const apply = useMutation({
-    mutationFn: () => api.config.apply(machineID, [patch], mode, cluster),
+    mutationFn: () => api.config.apply(machineID, [patch], mode, cluster, preview.base_digest),
     onSuccess: (r) => {
       setApplied(`Applied in ${r.mode} mode. ${r.details}`)
       setFailure('')
       void queryClient.invalidateQueries({ queryKey: ['config', machineID] })
     },
-    onError: (e: Error) => setFailure(e.message),
+    onError: (e: Error) => {
+      // The refusal is told apart by its code, never by the status alone: the
+      // sentence is the server's and goes on the page unchanged. Everything else
+      // stays a red line, with Apply still usable.
+      if (e instanceof ProblemError && e.code === CODE_CONFIG_CHANGED_SINCE_PLAN) {
+        setFailure('')
+        onRefused(e.message)
+        return
+      }
+      setFailure(e.message)
+    },
   })
 
   return (
@@ -304,6 +338,21 @@ function PreviewCard({
           ))}
         </ul>
 
+        {refusal !== '' && (
+          <div
+            role="alert"
+            className="space-y-2 rounded-md border border-amber-600/40 bg-amber-600/10 px-3 py-2 text-amber-700 dark:text-amber-300"
+          >
+            <p className="flex items-start gap-2">
+              <AlertTriangle aria-hidden="true" className="mt-0.5 size-4 shrink-0" />
+              <span>{refusal}</span>
+            </p>
+            <Button variant="outline" size="sm" disabled={planning} onClick={onPlanAgain}>
+              See what would change again
+            </Button>
+          </div>
+        )}
+
         <div className="flex flex-wrap items-end gap-3">
           <div className="w-48 space-y-1">
             <Label htmlFor="apply-mode">Apply mode</Label>
@@ -324,12 +373,23 @@ function PreviewCard({
             <TryCountdown seconds={preview.verdict.try_seconds} running={apply.isPending} />
           )}
 
-          <Button disabled={apply.isPending} onClick={() => apply.mutate()}>
+          <Button
+            disabled={apply.isPending || refusal !== '' || applied !== ''}
+            onClick={() => apply.mutate()}
+          >
             Apply
           </Button>
         </div>
 
-        {applied !== '' && <p className="text-emerald-700 dark:text-emerald-300">{applied}</p>}
+        {applied !== '' && (
+          <>
+            <p className="text-emerald-700 dark:text-emerald-300">{applied}</p>
+            <p className="text-muted-foreground">
+              This node has changed now, and this preview was made from the node before. Plan again
+              before the next change.
+            </p>
+          </>
+        )}
         {failure !== '' && <p className="text-destructive">{failure}</p>}
       </CardContent>
     </Card>

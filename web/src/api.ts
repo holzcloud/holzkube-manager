@@ -3164,6 +3164,14 @@ export const previewSchema = z.object({
     duplicates: z.boolean().default(false),
   }),
   verdict: verdictSchema,
+  /**
+   * The precondition of the apply: the digest of the configuration this plan
+   * was made from, which the apply sends back so the server can refuse when the
+   * node has changed since (Phase 17). Not optional on purpose. A server that
+   * does not deliver it must not produce a preview that can be applied, or the
+   * check would be skipped silently by exactly the answer that lacks it.
+   */
+  base_digest: z.string(),
   result: z.string(),
   /** False is nearly always a patch that appends to a list. */
   idempotent: z.boolean(),
@@ -3957,18 +3965,23 @@ export const api = {
         { patches, patch_ids: patchIDs, cluster: '', mode: '' },
       ),
 
+    /** Sends the patch to the node. `baseDigest` is the `base_digest` of the
+     * plan the operator looked at: it has no default, so a call that leaves it
+     * out does not type-check, and the server refuses the apply when the node
+     * is no longer what that plan read. */
     apply: (
       machine: string,
       patches: string[],
       mode: string,
       cluster: string,
+      baseDigest: string,
       patchIDs: string[] = [],
     ): Promise<{ mode: string; details: string }> =>
       sendJSON(
         'POST',
         `/api/v1/machines/${encodeURIComponent(machine)}/config/apply`,
         applyResultSchema,
-        { patches, patch_ids: patchIDs, mode, cluster },
+        { patches, patch_ids: patchIDs, mode, cluster, base_digest: baseDigest },
       ),
   },
 

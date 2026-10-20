@@ -43,6 +43,14 @@ export type Problem = z.infer<typeof problemSchema>
 export const CODE_UPSTREAM_FACTORY_UNAVAILABLE = 'upstream.factory-unavailable'
 export const CODE_UPSTREAM_FACTORY_REJECTED = 'upstream.factory-rejected'
 
+/**
+ * The refusal of a configuration apply because the node is no longer what its
+ * plan read (Phase 17). Recognised by this code and never by the status: a 409
+ * is also what `store.conflict` carries, and that one means something else (an
+ * apply on the same node was still running), with a different way forward.
+ */
+export const CODE_CONFIG_CHANGED_SINCE_PLAN = 'conflict.config-changed-since-plan'
+
 /** A typed error carrying the decoded problem+json body. */
 export class ProblemError extends Error {
   readonly problem: Problem

@@ -413,3 +413,35 @@ describe('what the sudo challenge may carry', () => {
     expect(challenge.replay).toBeUndefined()
   })
 })
+
+/**
+ * The apply carries the digest of the plan it was made from (Phase 17, VERS-02).
+ *
+ * The client cannot leave it out -- `baseDigest` is a required parameter, so a
+ * call without it does not type-check -- and this holds the other half: what it
+ * is called in the body, which is the field the server's check reads.
+ */
+describe('the configuration apply', () => {
+  it('sends the digest of the plan as base_digest, beside the patch and the mode', async () => {
+    const bodies: unknown[] = []
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((_path: string, init: RequestInit) => {
+        bodies.push(JSON.parse(String(init.body)))
+        return Promise.resolve(ok({ mode: 'NO_REBOOT', details: '' }))
+      }),
+    )
+
+    await api.config.apply('m-1', ['p'], 'no-reboot', 'c-1', 'ab'.repeat(32))
+
+    expect(bodies).toEqual([
+      {
+        patches: ['p'],
+        patch_ids: [],
+        mode: 'no-reboot',
+        cluster: 'c-1',
+        base_digest: 'ab'.repeat(32),
+      },
+    ])
+  })
+})
