@@ -284,6 +284,16 @@
         "degraded": 1,
         "down": 0,
         "checking": 0,
+        "backup": {
+          "enabled": true,
+          "interval": "daily",
+          "last_success_at": "2026-10-19T03:00:00Z",
+          "newest_at": "2026-10-19T03:00:00Z",
+          "age_seconds": 30000,
+          "overdue": false,
+          "last_result": "ok",
+          "last_reason": ""
+        },
         "node_certificates": {
           "checked_at": "2026-10-20T08:00:00Z",
           "read_nodes": 1,

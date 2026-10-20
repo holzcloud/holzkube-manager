@@ -187,6 +187,10 @@ function live(path, body) {
       // nodes' configuration are moved to now, so "read" is always recent and a
       // difference is always a few hours old (short of the 24 h behind a banner).
       const ago = (h) => new Date(Date.now() - h * 3_600_000).toISOString()
+      if (c.backup) {
+        c.backup.last_success_at = c.backup.newest_at = ago(9)
+        c.backup.age_seconds = 9 * 3600
+      }
       if (c.node_certificates) {
         c.node_certificates.checked_at = ago(0.2)
         for (const it of c.node_certificates.items) it.not_after = new Date(Date.now() + it.days_left * 86_400_000).toISOString()
