@@ -6,16 +6,16 @@ current_phase: 15
 current_phase_name: drift-erkennung-der-maschinenkonfiguration
 current_plan: 10
 status: verifying
-stopped_at: Completed 17-01-PLAN.md
-last_updated: "2026-10-20T09:11:10.463Z"
+stopped_at: "Phase 17 plan 02: tasks done except the two ledger entries (blocked)"
+last_updated: "2026-10-20T09:25:01.384Z"
 last_activity: 2026-10-15
 last_activity_desc: Plan 15-11 (Lückenschluss G-15-1, W-15-1) ausgeführt, Phase 15 wartet auf die erneute Verifikation
-state_head: 7efc8acedad45da02f5845e7fbcfe304926f822f
+state_head: 80c5c12ebf6562e837d96a6b46dcf3ae35b12f32
 progress:
   total_phases: 8
   completed_phases: 2
   total_plans: 60
-  completed_plans: 40
+  completed_plans: 41
   percent: 25
 ---
 
@@ -206,6 +206,7 @@ Siehe `PROJECT.md`, die `MILESTONE-*.md`-Dateien und für v1.18 den Abschnitt
   `deploy/`, installiert wird nichts. Bis der Betreiber installiert, zeigt der
   Pi „nicht hinterlegt" und gesperrte Aktionen; das ist der Soll-Zustand, keine
   Lücke.
+- 17-02: the two phase 17 ledger entries (unrun-verify A3/A4, gap read-to-send window) are not in WINDOWS.md: 'gsd-tools windows' refuses the ledger (entry 147 has kind gap) and hand-editing is prohibited; needs an operator decision
 
 ### Quick Tasks Completed
 
@@ -220,9 +221,9 @@ Siehe `PROJECT.md`, die `MILESTONE-*.md`-Dateien und für v1.18 den Abschnitt
 
 ## Session Continuity
 
-Last session: 2026-10-20T09:11:10.364Z
-Stopped at: Completed 17-01-PLAN.md
-Resume file: None
+Last session: 2026-10-20T09:25:01.235Z
+Stopped at: Phase 17 plan 02: tasks done except the two ledger entries (blocked)
+Resume file: .planning/phases/17-versionspruefung-zwischen-plan-und-apply/17-02-SUMMARY.md
 Next: erneute Verifikation der Phase 15 (nach 15-11), Handproben Phase 13/14 auf dem Pi, dann `/gsd-complete-milestone` für v1.18
 
 ## Performance Metrics
