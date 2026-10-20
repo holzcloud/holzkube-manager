@@ -415,3 +415,119 @@ func TestAnApplyOpensOneClientForReadingAndSending(t *testing.T) {
 		t.Errorf("an apply opened %d clients, want 1: the check and the send must share one", got)
 	}
 }
+
+// holdFirstApply makes the first configuration sent through any client of the
+// node stop just before the RPC, where the observer of the drift baseline sits.
+// reached says it stands there; the returned function lets it go (once, safe to
+// call again).
+func (n *planNode) holdFirstApply() (reached <-chan struct{}, release func()) {
+	hit := make(chan struct{}, 1)
+	gate := make(chan struct{})
+	var first atomic.Bool
+	n.setHook(func(context.Context, talos.ApplyAttempt) func(error) {
+		if first.CompareAndSwap(false, true) {
+			hit <- struct{}{}
+			<-gate
+		}
+		return nil
+	})
+	var once sync.Once
+	n.t.Cleanup(func() { once.Do(func() { close(gate) }) })
+	return hit, func() { once.Do(func() { close(gate) }) }
+}
+
+// TestTwoAppliesOnOneNodeDoNotOverwriteEachOther is VERS-05. Both applies were
+// planned against the same state; the first is held just before it sends; the
+// second must not even read the node while the first runs. Released, the first
+// lands and the second reads the new state and is refused. Without the lock the
+// second reads the old state, passes the check and overwrites the first. The
+// 200 milliseconds support the red view only: with the lock the outcome does not
+// depend on timing.
+func TestTwoAppliesOnOneNodeDoNotOverwriteEachOther(t *testing.T) {
+	t.Parallel()
+
+	n := newPlanNode(t)
+	svc := n.service()
+	p1 := n.plan(svc, ownPatch)
+	p2 := n.plan(svc, otherPatch)
+	if p1.BaseDigest != p2.BaseDigest {
+		t.Fatal("precondition: the two plans were not made from the same state")
+	}
+
+	reached, release := n.holdFirstApply()
+
+	firstDone := make(chan error, 1)
+	go func() { firstDone <- n.apply(svc, ownPatch, machineconfig.ModeNoReboot, p1.BaseDigest) }()
+	select {
+	case <-reached:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the first apply never reached the send")
+	}
+
+	opened := n.connects.Load()
+	secondDone := make(chan error, 1)
+	go func() { secondDone <- n.apply(svc, otherPatch, machineconfig.ModeNoReboot, p2.BaseDigest) }()
+	time.Sleep(200 * time.Millisecond)
+	if got := n.connects.Load(); got != opened {
+		t.Errorf("the second apply opened %d client(s) while the first was running, want it to wait for the lock", got-opened)
+	}
+
+	release()
+	if err := <-firstDone; err != nil {
+		t.Fatalf("the first apply: %v", err)
+	}
+	if err := <-secondDone; !errors.Is(err, machineconfig.ErrChangedSincePlan) {
+		t.Errorf("the second apply returned %v, want ErrChangedSincePlan", err)
+	}
+
+	raw := n.raw()
+	if !strings.Contains(raw, "10.0.0.9") {
+		t.Error("the first apply is not on the node")
+	}
+	if strings.Contains(raw, "10.0.0.10") {
+		t.Error("the second apply overwrote the first")
+	}
+}
+
+func TestAnApplyWaitingForTheNodeGivesUpWithItsContext(t *testing.T) {
+	t.Parallel()
+
+	n := newPlanNode(t)
+	svc := n.service()
+	p1 := n.plan(svc, ownPatch)
+	p2 := n.plan(svc, otherPatch)
+
+	reached, release := n.holdFirstApply()
+	firstDone := make(chan error, 1)
+	go func() { firstDone <- n.apply(svc, ownPatch, machineconfig.ModeNoReboot, p1.BaseDigest) }()
+	select {
+	case <-reached:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the first apply never reached the send")
+	}
+	sent := n.calls()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+	defer cancel()
+	secondDone := make(chan error, 1)
+	go func() {
+		_, err := svc.Apply(ctx, "m1", []string{otherPatch}, machineconfig.ModeNoReboot, p2.BaseDigest)
+		secondDone <- err
+	}()
+	select {
+	case err := <-secondDone:
+		if !errors.Is(err, machineconfig.ErrApplyBusy) {
+			t.Errorf("the waiting apply returned %v, want ErrApplyBusy", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the waiting apply did not give up when its context ended")
+	}
+	if got := n.calls(); got != sent {
+		t.Errorf("the node heard %d ApplyConfiguration call(s) from the waiting apply, want none", got-sent)
+	}
+
+	release()
+	if err := <-firstDone; err != nil {
+		t.Fatalf("the first apply: %v", err)
+	}
+}

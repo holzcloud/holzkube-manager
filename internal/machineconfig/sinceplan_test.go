@@ -1,9 +1,11 @@
 package machineconfig
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -187,4 +189,125 @@ func TestCheckBaseNeverReturnsNilForASnapshotFailure(t *testing.T) {
 	if !errors.Is(err, ErrSnapshotTooLarge) {
 		t.Errorf("checkBase returned %v, want ErrSnapshotTooLarge", err)
 	}
+}
+
+// acquire takes the lock of a node on a goroutine and reports when it got it.
+func acquire(ctx context.Context, s *Service, id model.MachineID) <-chan func() {
+	got := make(chan func(), 1)
+	go func() {
+		release, err := s.lockMachine(ctx, id)
+		if err != nil {
+			got <- nil
+			return
+		}
+		got <- release
+	}()
+	return got
+}
+
+func TestLockMachineWaitsOnTheSameNodeAndNotOnAnother(t *testing.T) {
+	t.Parallel()
+
+	s := New(Deps{})
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	release, err := s.lockMachine(ctx, "m1")
+	if err != nil {
+		t.Fatalf("first lock: %v", err)
+	}
+
+	// Another node does not wait.
+	other, err := s.lockMachine(ctx, "m2")
+	if err != nil {
+		t.Fatalf("lock of another node: %v", err)
+	}
+	other()
+
+	// The same node does, until the first is released.
+	second := acquire(ctx, s, "m1")
+	select {
+	case <-second:
+		t.Fatal("a second lock of the same node was granted while the first was held")
+	case <-time.After(150 * time.Millisecond):
+	}
+	release()
+	select {
+	case got := <-second:
+		if got == nil {
+			t.Fatal("the second lock failed after the first was released")
+		}
+		got()
+	case <-time.After(5 * time.Second):
+		t.Fatal("the second lock was not granted after the first was released")
+	}
+}
+
+func TestLockMachineGivesUpWithTheContext(t *testing.T) {
+	t.Parallel()
+
+	s := New(Deps{})
+	long, cancelLong := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancelLong()
+	release, err := s.lockMachine(long, "m1")
+	if err != nil {
+		t.Fatalf("first lock: %v", err)
+	}
+	defer release()
+
+	short, cancelShort := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancelShort()
+	done := make(chan error, 1)
+	go func() {
+		_, err := s.lockMachine(short, "m1")
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		if !errors.Is(err, ErrApplyBusy) {
+			t.Errorf("the lock returned %v, want ErrApplyBusy", err)
+		}
+		if !errors.Is(err, context.DeadlineExceeded) {
+			t.Errorf("the lock returned %v, want it to wrap the context's error", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the lock did not give up when its context ended")
+	}
+}
+
+func TestLockMachineReleasesOnEveryPath(t *testing.T) {
+	t.Parallel()
+
+	s := New(Deps{})
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	for i := 0; i < 3; i++ {
+		release, err := s.lockMachine(ctx, "m1")
+		if err != nil {
+			t.Fatalf("lock %d: %v", i, err)
+		}
+		release()
+		// A second release must not free somebody else's hold.
+		release()
+	}
+
+	// The slot is free after a release, and a double release did not make room
+	// for two holders.
+	first, err := s.lockMachine(ctx, "m1")
+	if err != nil {
+		t.Fatalf("lock after releases: %v", err)
+	}
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		short, c := context.WithTimeout(context.Background(), 100*time.Millisecond)
+		defer c()
+		if _, err := s.lockMachine(short, "m1"); !errors.Is(err, ErrApplyBusy) {
+			t.Errorf("a second holder got the lock: %v", err)
+		}
+	}()
+	wg.Wait()
+	first()
 }

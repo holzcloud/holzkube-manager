@@ -28,6 +28,18 @@ var (
 	ErrApplyBusy = errors.New("machineconfig: another apply on this node is still running")
 )
 
+// applyBusyError is ErrApplyBusy with the sentence the operator reads and the
+// error of the context that ended the wait.
+type applyBusyError struct{ cause error }
+
+func (e *applyBusyError) Error() string {
+	return "Nothing was applied: another apply on this node was still running when the time of this " +
+		"request ran out. Look at the node, then plan again."
+}
+
+func (e *applyBusyError) Is(target error) bool { return target == ErrApplyBusy }
+func (e *applyBusyError) Unwrap() error        { return e.cause }
+
 // maxNamedChanges is how many changed paths the sentence names before it says
 // how many more there are.
 const maxNamedChanges = 8

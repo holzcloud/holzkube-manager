@@ -409,6 +409,9 @@ func writeConfigError(w http.ResponseWriter, r *http.Request, d httpapi.Deps, er
 		httpapi.WriteProblem(w, r, httpapi.Conflict(httpapi.CodeStagedPending, err.Error()))
 	case errors.Is(err, machineconfig.ErrChangedSincePlan):
 		httpapi.WriteProblem(w, r, httpapi.Conflict(httpapi.CodeConfigChangedSincePlan, err.Error()))
+	case errors.Is(err, machineconfig.ErrApplyBusy):
+		// "Somebody else was first", which is what store.conflict already says.
+		httpapi.WriteProblem(w, r, httpapi.Conflict("store.conflict", err.Error()))
 	case errors.Is(err, machineconfig.ErrBaseDigestRequired):
 		// The handler stops this first; the branch keeps the service and the
 		// route in step.

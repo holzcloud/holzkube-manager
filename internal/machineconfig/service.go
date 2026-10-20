@@ -64,6 +64,12 @@ type Service struct {
 	// memo holds the redacted text of recent plans, for the sentence of a
 	// refusal (Phase 17). Its own lock: it is not s.mu's business.
 	memo *planMemo
+
+	// locks has one slot per node that has been applied to: an apply holds it
+	// from before it reads the node until its RPC is over (Phase 17). A channel
+	// and not a mutex, so that the wait can end with the request's context.
+	lockMu sync.Mutex
+	locks  map[model.MachineID]chan struct{}
 }
 
 type stagedRecord struct {
@@ -85,6 +91,7 @@ func New(d Deps) *Service {
 		deps:   d,
 		staged: map[model.MachineID]stagedRecord{},
 		memo:   newPlanMemo(planMemoPerNode, planMemoMaxBytes, planMemoLifetime, d.Now),
+		locks:  map[model.MachineID]chan struct{}{},
 	}
 }
 
@@ -259,6 +266,16 @@ func (s *Service) Apply(ctx context.Context, id model.MachineID, patches []strin
 		return talos.ApplyResult{}, ErrBaseDigestRequired
 	}
 
+	// One apply per node at a time, from the check to the end of the RPC. Two
+	// applies planned against the same state would otherwise both read it, both
+	// pass the check and the second would overwrite the first without a word.
+	// Taken before the staged claim and released on every path out.
+	release, err := s.lockMachine(ctx, id)
+	if err != nil {
+		return talos.ApplyResult{}, err
+	}
+	defer release()
+
 	// The pending check and the marker are one step under the lock. Checking
 	// first and recording after the (slow) RPC let two concurrent staged applies
 	// both see "nothing pending", and Talos would keep exactly one of them.
@@ -293,6 +310,28 @@ func (s *Service) Apply(ctx context.Context, id model.MachineID, patches []strin
 	}
 
 	return result, nil
+}
+
+// lockMachine takes the node's slot, waiting for it as long as ctx allows. It
+// serialises Apply of this service only: Plan and Get never wait, and the jobs of
+// an upgrade or a CA rotation read and write within milliseconds and have no plan
+// a digest could belong to. The returned release may be called more than once.
+func (s *Service) lockMachine(ctx context.Context, id model.MachineID) (func(), error) {
+	s.lockMu.Lock()
+	slot, ok := s.locks[id]
+	if !ok {
+		slot = make(chan struct{}, 1)
+		s.locks[id] = slot
+	}
+	s.lockMu.Unlock()
+
+	select {
+	case slot <- struct{}{}:
+	case <-ctx.Done():
+		return nil, &applyBusyError{cause: ctx.Err()}
+	}
+	var once sync.Once
+	return func() { once.Do(func() { <-slot }) }, nil
 }
 
 // apply is the RPC half of Apply: read, check, patch, send.
