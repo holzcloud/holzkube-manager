@@ -6,17 +6,17 @@ current_phase: 15
 current_phase_name: drift-erkennung-der-maschinenkonfiguration
 current_plan: 10
 status: verifying
-stopped_at: Completed 15-11-PLAN.md
-last_updated: "2026-10-15T10:11:14.901Z"
+stopped_at: Completed 17-01-PLAN.md
+last_updated: "2026-10-20T09:11:10.463Z"
 last_activity: 2026-10-15
 last_activity_desc: Plan 15-11 (Lückenschluss G-15-1, W-15-1) ausgeführt, Phase 15 wartet auf die erneute Verifikation
-state_head: f60a4680a303309c62beade0d02fa4dfc95ad41f
+state_head: 7efc8acedad45da02f5845e7fbcfe304926f822f
 progress:
-  total_phases: 4
+  total_phases: 8
   completed_phases: 2
-  total_plans: 39
-  completed_plans: 39
-  percent: 50
+  total_plans: 60
+  completed_plans: 40
+  percent: 25
 ---
 
 # Project State
@@ -44,7 +44,7 @@ Phase 13: 17/17 Pläne, `human_needed`; Phase 14: alle Pläne ausgeführt, `huma
 Phase 16: gebaut, `human_needed`
 Last activity: 2026-10-15 — Plan 15-10 (Dokumentation, Ledger, Gate)
 
-Progress: [█████░░░░░] 50%
+Progress: [███░░░░░░░] 25%
 
 ## Offen
 
@@ -189,6 +189,7 @@ Siehe `PROJECT.md`, die `MILESTONE-*.md`-Dateien und für v1.18 den Abschnitt
 - [Phase 15]: 15-05: eine verfallene Erwartung wird gelöscht und nie übernommen; staged ohne Fenster, settling nur ohne offene Drift
 - [Phase 15]: 15-10: README ohne Bild (Betreiber 2026-10-14); REQUIREMENTS DRIFT-01..09 bleiben Pending bis zur Verifikation, weil Browser und echter Knoten ungeprueft sind; vier offene Ledger-Eintraege 176-179
 - [Phase 15]: 15-11: Adoption und Settling getrennt: AdoptWindow 24 h fuer reboot und auto, settling 15 min, no-reboot 15 min, staged ohne Ende
+- [Phase 17]: 17-01: snapshot-failure errors stay 500 via writeInventoryError; ErrApplyBusy maps to 409 store.conflict; the sentence uses Path, Kind and list lengths only; memo limits 4 per node, 8 MiB, one hour
 
 ### Roadmap Evolution
 
@@ -219,8 +220,8 @@ Siehe `PROJECT.md`, die `MILESTONE-*.md`-Dateien und für v1.18 den Abschnitt
 
 ## Session Continuity
 
-Last session: 2026-10-15T10:11:14.868Z
-Stopped at: Completed 15-11-PLAN.md
+Last session: 2026-10-20T09:11:10.364Z
+Stopped at: Completed 17-01-PLAN.md
 Resume file: None
 Next: erneute Verifikation der Phase 15 (nach 15-11), Handproben Phase 13/14 auf dem Pi, dann `/gsd-complete-milestone` für v1.18
 
@@ -279,3 +280,4 @@ Next: erneute Verifikation der Phase 15 (nach 15-11), Handproben Phase 13/14 auf
 | Phase 15 P09 | 20min | 3 tasks | 14 files |
 | Phase 15 P10 | ~50min | 3 tasks | 4 files |
 | Phase 15 P11 | ca. 1h | 3 tasks | 7 files |
+| Phase 17 P01 | one session | 3 tasks | 13 files |

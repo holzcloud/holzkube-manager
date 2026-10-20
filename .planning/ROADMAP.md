@@ -275,10 +275,10 @@ Waves: 1 → {01, 02} · 2 → {03} · 3 → {04} · 4 → {05} · 5 → {06} ·
 **Goal:** Eine Konfiguration, die zwischen Plan und Apply von jemand anderem geändert wurde, wird nicht still überschrieben: das Apply wird verweigert und sagt, was sich seitdem geändert hat. Zwei Operatoren überschreiben einander heute still (Audit 2026-10-08, "Versionsprüfung zwischen Plan und Apply", klein).
 **Requirements**: VERS-01, VERS-02, VERS-03, VERS-04, VERS-05, VERS-06
 **Depends on:** Nothing (nutzt Digest und Lesung der Konfiguration; Phase 15 liegt bereit, ist aber keine Voraussetzung)
-**Plans:** 2 plans
+**Plans:** 1/2 plans executed
 
 Plans:
-- [ ] 17-01-PLAN.md — Server: base_digest im Plan, Pflichtfeld und Prüfung im Apply, Sperre je Knoten
+- [x] 17-01-PLAN.md — Server: base_digest im Plan, Pflichtfeld und Prüfung im Apply, Sperre je Knoten
 - [ ] 17-02-PLAN.md — UI, deklarative Tabellen, Ledger, Doku, Gate
 
 ### Phase 18: Cordon, Drain und Worker-Gate
