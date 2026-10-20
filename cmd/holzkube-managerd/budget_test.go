@@ -523,25 +523,26 @@ var routeBudgets = slices.Concat([]routeBudget{
 	{
 		route: "POST /api/v1/machines/{id}/config/apply",
 		calls: []upstreamCall{
-			{name: "read: NewClusterClient Version", class: nodeProbeCall},
-			{name: "read: MachineConfigYAML COSI Get", class: nodeFastReadCall},
-			{name: "apply: NewClusterClient Version", class: nodeProbeCall},
+			{name: "NewClusterClient Version", class: nodeProbeCall},
+			{name: "MachineConfigYAML COSI Get", class: nodeFastReadCall},
 			{name: "ApplyConfiguration", class: nodeMutationCall},
 		},
 		routeDeadline: handlers.ConfigRouteBudget,
 		verdict:       withinBudget,
 		clipping:      clipped,
 		clippingRationale: "The mutation class is thirty seconds to *initiate*, and this ceiling is " +
-			"thirty seconds for the whole route -- so the apply is clipped by whatever the read " +
-			"before it consumed. That is the right direction for this route and not a compromise: " +
-			"an apply whose read took twenty-nine seconds is an apply against a node that is " +
-			"barely answering, and initiating a configuration change on such a node is the thing " +
-			"to avoid rather than the thing to make more time for. The read happens first and " +
-			"fails first.",
-		why: "Service.Apply reads the current configuration, merges the patches locally, connects " +
-			"again and applies. The second connection is a second Version probe because " +
-			"NewClusterClient proves itself; it is not shared with the read's, because the read " +
-			"closes its client before the merge.",
+			"thirty seconds for the whole route -- so the apply is clipped by whatever the probe " +
+			"and the read before it consumed. That is the right direction for this route and not " +
+			"a compromise: an apply whose read took twenty-nine seconds is an apply against a " +
+			"node that is barely answering, and initiating a configuration change on such a node " +
+			"is the thing to avoid rather than the thing to make more time for. The read happens " +
+			"first and fails first.",
+		why: "Service.Apply connects once, reads the active configuration, compares the digest of " +
+			"that reading with the one the plan gave (local, CPU, no node call), patches exactly " +
+			"the bytes it read and sends them with the same client. One client serves the reading " +
+			"and the sending, so there is one Version probe and not two. The lock per node that " +
+			"makes a second apply on the same node wait is not an upstream call: it ends with the " +
+			"request's context, inside this route's ceiling.",
 	},
 	{
 		route: "POST /api/v1/clusters/fingerprint",

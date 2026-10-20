@@ -268,8 +268,14 @@ var allowlist = map[string][]string{
 	// this archive is kept forever. A stored patch stays readable at its own
 	// id for as long as it exists -- which is also forever -- so the record is
 	// complete without the archive holding the bytes.
+	//
+	// `base_digest` of an apply (Phase 17) is the hash of the redacted text of
+	// the configuration the plan was made from: the same value
+	// config.drift-confirm records, so no secret, and the only thing that says
+	// later which state the operator had looked at when they pressed Apply. The
+	// patch text itself stays out.
 	"config.plan":  {"cluster", "patch_ids[]"},
-	"config.apply": {"cluster", "mode", "patch_ids[]"},
+	"config.apply": {"cluster", "mode", "patch_ids[]", "base_digest"},
 
 	// The patch's name, and deliberately not its body, for the reason above.
 	"patch.create": {"name"},

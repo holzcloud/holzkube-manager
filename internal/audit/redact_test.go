@@ -294,3 +294,36 @@ func TestRedactSchematicDeleteIsListedWithNothingPermitted(t *testing.T) {
 		t.Errorf("schematic.delete permits %v, want nothing permitted", fields)
 	}
 }
+
+// TestConfigApplyKeepsItsBaseDigestAndNothingOfThePatches holds what the audit
+// of an apply may say after Phase 17. The digest of the configuration the plan
+// was made from is a hash of the redacted text -- the same value
+// config.drift-confirm already records -- and it is what tells somebody, later,
+// which state the operator had looked at. The patch text is arbitrary
+// configuration, and the archive is kept forever, so it never gets in.
+func TestConfigApplyKeepsItsBaseDigestAndNothingOfThePatches(t *testing.T) {
+	const secretArg = "token: hunter2-in-a-patch"
+	digest := strings.Repeat("ab", 32)
+
+	got := Params("config.apply", map[string]any{
+		"cluster":     "homelab",
+		"mode":        "no-reboot",
+		"patch_ids":   []any{"p-1"},
+		"base_digest": digest,
+		"patches":     []any{secretArg},
+		"invented":    "a field nobody listed",
+	})
+
+	if got["base_digest"] != digest {
+		t.Errorf("base_digest = %v, want the digest in clear", got["base_digest"])
+	}
+	if got["cluster"] != "homelab" || got["mode"] != "no-reboot" {
+		t.Errorf("cluster and mode = %v, %v, want them in clear", got["cluster"], got["mode"])
+	}
+	for _, field := range []string{"patches", "invented"} {
+		if got[field] != RedactedMarker {
+			t.Errorf("%s = %v, want %q", field, got[field], RedactedMarker)
+		}
+	}
+	assertNoSecret(t, got, secretArg)
+}
