@@ -5057,6 +5057,7 @@ wants to set one.
 | `conflict.drift-changed` | 409 | the digest sent is not the one of the reading last taken: the configuration changed again since the difference was shown; nothing was confirmed |
 | `conflict.drift-not-read` | 409 | there is no current good reading of the node to confirm: it was not read since the daemon started, or the last attempt failed |
 | `conflict.no-drift` | 409 | the node does not differ from its baseline, so there is nothing to confirm |
+| `conflict.config-changed-since-plan` | 409 | an apply was refused because the active configuration of the node changed since its plan (the `base_digest` does not match); nothing was sent, plan again |
 
 `conflict.node-refused` exists because `talos.KindRejected` deliberately has no
 upstream code — "the node refused" is not an availability problem — and without

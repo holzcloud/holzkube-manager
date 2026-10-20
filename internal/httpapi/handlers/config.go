@@ -132,6 +132,11 @@ type planBody struct {
 	// is no default, because the default that would suggest itself -- `auto` --
 	// usually means a reboot.
 	Mode string `json:"mode"`
+
+	// BaseDigest is the base_digest the plan answered with. The plan route
+	// ignores it; the apply route requires it, because an optional one would be
+	// a switch that skips the check (Phase 17).
+	BaseDigest string `json:"base_digest"`
 }
 
 func planConfig(d httpapi.Deps) http.HandlerFunc {
@@ -185,6 +190,11 @@ func applyConfig(d httpapi.Deps) http.HandlerFunc {
 			return
 		}
 
+		if p := baseDigestProblem(body.BaseDigest); p != nil {
+			httpapi.WriteProblem(w, r, p)
+			return
+		}
+
 		patches, problem := resolvePatches(r, d, body)
 		if problem != nil {
 			httpapi.WriteProblem(w, r, problem)
@@ -195,7 +205,7 @@ func applyConfig(d httpapi.Deps) http.HandlerFunc {
 		defer cancel()
 
 		result, err := d.Config.Apply(ctx, model.MachineID(r.PathValue("id")),
-			patches, machineconfig.Mode(body.Mode))
+			patches, machineconfig.Mode(body.Mode), body.BaseDigest)
 		if err != nil {
 			writeConfigError(w, r, d, err)
 			return
@@ -205,6 +215,22 @@ func applyConfig(d httpapi.Deps) http.HandlerFunc {
 			"details": result.Details,
 		})
 	}
+}
+
+// baseDigestProblem is the 400 for an apply whose base_digest is missing or not
+// the shape the plan hands out.
+func baseDigestProblem(digest string) *httpapi.Problem {
+	const how = "Plan first, then apply with the base_digest the plan answered with: " +
+		"64 hexadecimal characters. The apply refuses a node that changed since the plan, " +
+		"and it cannot tell without it."
+	if digest == "" {
+		return httpapi.Validation(how, httpapi.FieldError{Field: "base_digest", Reason: "required"})
+	}
+	if !driftDigestShape.MatchString(digest) {
+		return httpapi.Validation(how, httpapi.FieldError{
+			Field: "base_digest", Reason: "must be 64 lower-case hexadecimal characters"})
+	}
+	return nil
 }
 
 // resolvePatches turns stored patch ids and inline bodies into one ordered
@@ -381,6 +407,12 @@ func writeConfigError(w http.ResponseWriter, r *http.Request, d httpapi.Deps, er
 	switch {
 	case errors.Is(err, machineconfig.ErrStagedAlreadyPending):
 		httpapi.WriteProblem(w, r, httpapi.Conflict(httpapi.CodeStagedPending, err.Error()))
+	case errors.Is(err, machineconfig.ErrChangedSincePlan):
+		httpapi.WriteProblem(w, r, httpapi.Conflict(httpapi.CodeConfigChangedSincePlan, err.Error()))
+	case errors.Is(err, machineconfig.ErrBaseDigestRequired):
+		// The handler stops this first; the branch keeps the service and the
+		// route in step.
+		httpapi.WriteProblem(w, r, baseDigestProblem(""))
 	case errors.Is(err, machineconfig.ErrDryRun):
 		httpapi.WriteProblem(w, r, &httpapi.Problem{
 			Type:   httpapi.TypeForbidden,

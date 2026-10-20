@@ -542,7 +542,7 @@ func TestTryIsNeverAdopted(t *testing.T) {
 
 		ctx, cancel := context.WithTimeout(bg, 30*time.Second)
 		defer cancel()
-		if _, err := own.Apply(ctx, "m1", []string{ownPatch}, machineconfig.ModeTry); err != nil {
+		if _, err := planThenApply(ctx, own, "m1", ownPatch, machineconfig.ModeTry); err != nil {
 			t.Fatalf("Apply: %v", err)
 		}
 		after, err := os.ReadFile(n.baselinePath())
@@ -691,7 +691,7 @@ func TestAnOwnApplyLeavesNoSecretInTheBaselineFile(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(bg, 30*time.Second)
 	defer cancel()
-	if _, err := own.Apply(ctx, "m1", []string{ownPatch}, machineconfig.ModeNoReboot); err != nil {
+	if _, err := planThenApply(ctx, own, "m1", ownPatch, machineconfig.ModeNoReboot); err != nil {
 		t.Fatalf("Apply: %v", err)
 	}
 

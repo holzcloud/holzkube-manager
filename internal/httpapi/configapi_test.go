@@ -374,3 +374,216 @@ func TestTwoOperatorsEditingOnePatchGetAConflictAndNotAnInternalError(t *testing
 		t.Errorf("the refusal does not say what to do about it: %q", p.Detail)
 	}
 }
+
+// The tests below hold Phase 17: an apply is refused when the node changed
+// between the plan and the apply, and the refusal reaches the operator over the
+// real router, the real Talos client and a simulated node.
+
+const certSANPatch = "machine:\n  certSANs:\n    - 10.0.0.9\n"
+
+// onlyClusterID reads the one cluster's id the way the apply body names it.
+func (h *inventoryHarness) onlyClusterID(t *testing.T) string {
+	t.Helper()
+
+	resp, raw := h.do(t, http.MethodGet, "/api/v1/clusters", nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("clusters: %d (%s)", resp.StatusCode, raw)
+	}
+	var list struct {
+		Clusters []struct {
+			ID string `json:"id"`
+		} `json:"clusters"`
+	}
+	if err := json.Unmarshal(raw, &list); err != nil || len(list.Clusters) != 1 {
+		t.Fatalf("decode the cluster list: %v (%s)", err, raw)
+	}
+	return list.Clusters[0].ID
+}
+
+// planDigest plans a patch over the route and returns the base_digest it
+// carries ("" when the answer has none).
+func (h *inventoryHarness) planDigest(t *testing.T, id model.MachineID, patch string) string {
+	t.Helper()
+
+	resp, raw := h.do(t, http.MethodPost, "/api/v1/machines/"+string(id)+"/config/plan",
+		map[string]any{"patches": []string{patch}})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("plan: %d (%s)", resp.StatusCode, raw)
+	}
+	var preview struct {
+		BaseDigest string `json:"base_digest"`
+	}
+	if err := json.Unmarshal(raw, &preview); err != nil {
+		t.Fatalf("decode preview: %v (%s)", err, raw)
+	}
+	return preview.BaseDigest
+}
+
+// applyBody opens the sudo window and sends an apply.
+func (h *inventoryHarness) applyBody(t *testing.T, id model.MachineID, body map[string]any) (*http.Response, []byte) {
+	t.Helper()
+
+	h.openSudo(t)
+	return h.do(t, http.MethodPost, "/api/v1/machines/"+string(id)+"/config/apply", body)
+}
+
+// configView reads the redacted configuration of the node.
+func (h *inventoryHarness) configView(t *testing.T, id model.MachineID) string {
+	t.Helper()
+
+	resp, raw := h.do(t, http.MethodGet, "/api/v1/machines/"+string(id)+"/config", nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("config: %d (%s)", resp.StatusCode, raw)
+	}
+	var view struct {
+		Raw string `json:"raw"`
+	}
+	if err := json.Unmarshal(raw, &view); err != nil {
+		t.Fatalf("decode view: %v", err)
+	}
+	return view.Raw
+}
+
+// TestThePlanRouteCarriesTheDigestOfWhatItRead is VERS-01 over the route: the
+// digest is stable for an unchanged node and moves with a change in a document
+// that is not the first one.
+func TestThePlanRouteCarriesTheDigestOfWhatItRead(t *testing.T) {
+	h := newConfigHarness(t)
+	id := h.adoptedMachine(t)
+
+	first := h.planDigest(t, id, certSANPatch)
+	second := h.planDigest(t, id, certSANPatch)
+	if !driftDigest.MatchString(first) {
+		t.Fatalf("base_digest is %q, want 64 lower-case hexadecimal characters", first)
+	}
+	if first != second {
+		t.Errorf("two plans of an unchanged node carry %q and %q, want the same", first, second)
+	}
+
+	h.thirdParty(t, id, kubeletImagePatch)
+	if third := h.planDigest(t, id, certSANPatch); third == first {
+		t.Error("a plan after a change in the KubeletConfig document carries the old digest")
+	}
+}
+
+// TestAnApplyOnAnUnchangedNodeStillLandsOverTheRoute: the refusal is for a
+// changed node, not for every apply.
+func TestAnApplyOnAnUnchangedNodeStillLandsOverTheRoute(t *testing.T) {
+	h := newConfigHarness(t)
+	id := h.adoptedMachine(t)
+	h.openSudo(t)
+	h.unlockEverything(t)
+	cluster := h.onlyClusterID(t)
+
+	digest := h.planDigest(t, id, certSANPatch)
+	resp, raw := h.applyBody(t, id, map[string]any{
+		"cluster": cluster, "patches": []string{certSANPatch}, "mode": "no-reboot", "base_digest": digest,
+	})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("apply: %d (%s)", resp.StatusCode, raw)
+	}
+	if !strings.Contains(h.configView(t, id), "10.0.0.9") {
+		t.Error("the node does not carry the applied certSAN")
+	}
+}
+
+// TestAnApplyAfterAForeignChangeIsRefusedOverTheRoute is D-01 at the boundary:
+// 409, its own code, a sentence, and the node heard nothing.
+func TestAnApplyAfterAForeignChangeIsRefusedOverTheRoute(t *testing.T) {
+	h := newConfigHarness(t)
+	id := h.adoptedMachine(t)
+	h.openSudo(t)
+	h.unlockEverything(t)
+	cluster := h.onlyClusterID(t)
+
+	digest := h.planDigest(t, id, certSANPatch)
+	h.thirdParty(t, id, kubeletImagePatch)
+	sent := h.sim.Calls("ApplyConfiguration")
+
+	resp, raw := h.applyBody(t, id, map[string]any{
+		"cluster": cluster, "patches": []string{certSANPatch}, "mode": "no-reboot", "base_digest": digest,
+	})
+	if resp.StatusCode != http.StatusConflict {
+		t.Fatalf("apply after a foreign change: %d (%s), want 409", resp.StatusCode, raw)
+	}
+	if got := problemCode(raw); got != httpapi.CodeConfigChangedSincePlan {
+		t.Errorf("the code is %q, want %q", got, httpapi.CodeConfigChangedSincePlan)
+	}
+	var problem struct {
+		Detail string `json:"detail"`
+	}
+	if err := json.Unmarshal(raw, &problem); err != nil {
+		t.Fatalf("decode the problem: %v", err)
+	}
+	if !strings.HasPrefix(problem.Detail, "Nothing was applied") {
+		t.Errorf("the detail is %q, want a sentence that begins with 'Nothing was applied'", problem.Detail)
+	}
+	if got := h.sim.Calls("ApplyConfiguration"); got != sent {
+		t.Errorf("the node heard %d ApplyConfiguration call(s) after the refusal, want none", got-sent)
+	}
+
+	view := h.configView(t, id)
+	if !strings.Contains(view, "kubelet:v1.34.2") {
+		t.Error("the third party's change is gone from the node")
+	}
+	if strings.Contains(view, "10.0.0.9") {
+		t.Error("the refused patch reached the node")
+	}
+
+	records := h.auditPage(t, "?limit=100")
+	body, err := json.Marshal(records.Items)
+	if err != nil {
+		t.Fatalf("marshal audit records: %v", err)
+	}
+	if !hasAction(records.Items, "config.apply") {
+		t.Error("the refused apply is not in the audit archive")
+	}
+	if strings.Contains(string(body), "KubeletConfig.image") {
+		t.Error("the sentence reached the audit archive: it holds the code, never the text")
+	}
+}
+
+// TestAnApplyWithoutAUsableDigestIsRefusedOverTheRoute: the field is required,
+// because an optional one would be exactly the switch D-01 rules out.
+func TestAnApplyWithoutAUsableDigestIsRefusedOverTheRoute(t *testing.T) {
+	h := newConfigHarness(t)
+	id := h.adoptedMachine(t)
+	h.openSudo(t)
+	h.unlockEverything(t)
+	cluster := h.onlyClusterID(t)
+	digest := h.planDigest(t, id, certSANPatch)
+
+	for name, field := range map[string]any{
+		"missing":           nil,
+		"empty":             "",
+		"63 characters":     digest[:63],
+		"upper case":        strings.ToUpper(digest),
+		"65 characters":     digest + "0",
+		"not hexadecimal":   strings.Repeat("g", 64),
+		"whitespace around": " " + digest + " ",
+	} {
+		t.Run(name, func(t *testing.T) {
+			if name == "upper case" && field == digest {
+				t.Fatal("precondition: the digest has no letter, so upper-casing it changes nothing")
+			}
+			sent := h.sim.Calls("ApplyConfiguration")
+			body := map[string]any{"cluster": cluster, "patches": []string{certSANPatch}, "mode": "no-reboot"}
+			if field != nil {
+				body["base_digest"] = field
+			}
+			resp, raw := h.applyBody(t, id, body)
+			if resp.StatusCode != http.StatusBadRequest {
+				t.Fatalf("apply: %d (%s), want 400", resp.StatusCode, raw)
+			}
+			if got := problemCode(raw); got != "validation.failed" {
+				t.Errorf("the code is %q, want validation.failed", got)
+			}
+			if !strings.Contains(string(raw), "base_digest") {
+				t.Errorf("the answer does not name the field base_digest: %s", raw)
+			}
+			if got := h.sim.Calls("ApplyConfiguration"); got != sent {
+				t.Errorf("the node heard an ApplyConfiguration call for a bad digest")
+			}
+		})
+	}
+}

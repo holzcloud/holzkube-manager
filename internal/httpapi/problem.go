@@ -345,6 +345,12 @@ const (
 	// caller shows the difference again and asks again; nothing was confirmed.
 	CodeDriftChanged = "conflict.drift-changed"
 
+	// CodeConfigChangedSincePlan: an apply was refused because the active
+	// configuration of the node is no longer the one its plan was made from;
+	// somebody else changed it in between. Nothing was sent. The way out is to
+	// plan again, which is a different way out from every other conflict here.
+	CodeConfigChangedSincePlan = "conflict.config-changed-since-plan"
+
 	// CodeSnapshotRequired: a Talos upgrade was confirmed or submitted without
 	// a fresh etcd snapshot of the cluster taken by this instance. It is its
 	// own code because the way out is a button the screen already shows -- take

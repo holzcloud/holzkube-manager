@@ -60,7 +60,7 @@ func TestTracerAnOwnApplyMovesTheBaselineAndAThirdPartyChangeDoesNot(t *testing.
 	const patch = "machine:\n  certSANs:\n    - 10.0.0.9\n"
 	ctx, cancel := context.WithTimeout(bg, 30*time.Second)
 	defer cancel()
-	if _, err := own.Apply(ctx, "m1", []string{patch}, machineconfig.ModeNoReboot); err != nil {
+	if _, err := planThenApply(ctx, own, "m1", patch, machineconfig.ModeNoReboot); err != nil {
 		t.Fatalf("Apply: %v", err)
 	}
 

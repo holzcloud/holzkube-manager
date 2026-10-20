@@ -39,7 +39,7 @@ func TestTracerAnApplyThroughTheInventoryIsAnOwnApply(t *testing.T) {
 	defer cancel()
 	own := machineconfig.New(machineconfig.Deps{Connect: a.inv.Connect})
 	const patch = "machine:\n  certSANs:\n    - 10.0.0.9\n"
-	if _, err := own.Apply(ctx, a.machine.ID, []string{patch}, machineconfig.ModeNoReboot); err != nil {
+	if _, err := planThenApply(ctx, own, a.machine.ID, patch, machineconfig.ModeNoReboot); err != nil {
 		t.Fatalf("Apply: %v", err)
 	}
 

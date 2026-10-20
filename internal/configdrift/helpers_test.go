@@ -239,6 +239,19 @@ func (n *node) thirdPartyChange(t *testing.T, patch string) {
 	}
 }
 
+// planThenApply is how the product applies since the version check (Phase 17):
+// plan the patch, then apply it with the digest of what the plan read, in one
+// context (which carries the deadline the Talos client requires). The refusal
+// of an apply whose node changed in between is the service's, and the callers
+// that want to see it call Plan and Apply themselves.
+func planThenApply(ctx context.Context, svc *machineconfig.Service, id model.MachineID, patch string, mode machineconfig.Mode) (talos.ApplyResult, error) {
+	preview, err := svc.Plan(ctx, id, []string{patch})
+	if err != nil {
+		return talos.ApplyResult{}, fmt.Errorf("plan: %w", err)
+	}
+	return svc.Apply(ctx, id, []string{patch}, mode, preview.BaseDigest)
+}
+
 // secrets is every value of the generated configuration that must never reach
 // the baseline file. The raw configuration is checked to hold at least the
 // token and secret values in the clear, so their absence from a file says

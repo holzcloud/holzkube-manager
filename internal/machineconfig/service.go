@@ -170,6 +170,13 @@ type Preview struct {
 	// what it said.
 	Valid      bool     `json:"valid"`
 	Validation []string `json:"validation,omitempty"`
+
+	// BaseDigest is the digest of the snapshot of the active configuration this
+	// plan was made from, all documents, redacted and normalised (Snapshot). The
+	// apply must send it back: it is how the apply knows whether somebody else
+	// changed the node in between. It is a precondition and not a permission, and
+	// it is no secret.
+	BaseDigest string `json:"base_digest"`
 }
 
 // Plan computes the diff, the mode and the validation for a set of patches
@@ -195,11 +202,21 @@ func (s *Service) Plan(ctx context.Context, id model.MachineID, patches []string
 		return Preview{}, err
 	}
 
+	// The digest is of what was read, not of what the patches would make of it:
+	// it protects the match with the node's state, not the text of a patch. A
+	// snapshot that cannot be made fails the plan; a plan without a digest could
+	// never be applied.
+	snap, err := Snapshot(base)
+	if err != nil {
+		return Preview{}, err
+	}
+
 	p := Preview{
-		Machine: id,
-		Diff:    diff,
-		Verdict: ModeFor(diff.Paths),
-		Result:  string(redacted),
+		Machine:    id,
+		Diff:       diff,
+		Verdict:    ModeFor(diff.Paths),
+		Result:     string(redacted),
+		BaseDigest: snap.Digest,
 	}
 
 	// Idempotence is checked per plan rather than per patch, because what the
@@ -220,9 +237,17 @@ func (s *Service) Plan(ctx context.Context, id model.MachineID, patches []string
 // It refuses a second staged apply (CFG-08) rather than letting Talos replace
 // the first silently, and it refuses everything while the process is in
 // dry-run.
-func (s *Service) Apply(ctx context.Context, id model.MachineID, patches []string, mode Mode) (talos.ApplyResult, error) {
+//
+// baseDigest is the BaseDigest of the plan the operator looked at. It is
+// required: an empty one is refused, so that leaving it out is no way to skip
+// the check. The apply reads the node again and refuses with
+// ErrChangedSincePlan when what it reads is not what the plan was made from.
+func (s *Service) Apply(ctx context.Context, id model.MachineID, patches []string, mode Mode, baseDigest string) (talos.ApplyResult, error) {
 	if s.deps.Mode.DryRun {
 		return talos.ApplyResult{}, ErrDryRun
+	}
+	if baseDigest == "" {
+		return talos.ApplyResult{}, ErrBaseDigestRequired
 	}
 
 	// The pending check and the marker are one step under the lock. Checking
@@ -238,7 +263,7 @@ func (s *Service) Apply(ctx context.Context, id model.MachineID, patches []strin
 		}
 	}
 
-	result, err := s.apply(ctx, id, patches, mode)
+	result, err := s.apply(ctx, id, patches, mode, baseDigest)
 	if err != nil {
 		if abort != nil {
 			abort()
@@ -261,24 +286,56 @@ func (s *Service) Apply(ctx context.Context, id model.MachineID, patches []strin
 	return result, nil
 }
 
-// apply is the RPC half of Apply: read, patch, send.
-func (s *Service) apply(ctx context.Context, id model.MachineID, patches []string, mode Mode) (talos.ApplyResult, error) {
-	base, err := s.read(ctx, id)
-	if err != nil {
-		return talos.ApplyResult{}, err
-	}
-	patched, err := ApplyPatches(base, patches)
-	if err != nil {
-		return talos.ApplyResult{}, err
-	}
-
+// apply is the RPC half of Apply: read, check, patch, send.
+//
+// One client does all of it, and one reading serves both the check and the
+// patch. A second reading between them would put the check and the patch on
+// different bytes, and a client opened a second time widens the window in which
+// somebody else can write -- Talos knows no precondition on the request, so the
+// window can be made short and not closed.
+//
+// The patch goes onto the bytes just read and not onto anything the plan held:
+// a secret rotated by somebody else since the plan is carried forward, not
+// reverted (the digest does not see secrets, by design).
+func (s *Service) apply(ctx context.Context, id model.MachineID, patches []string, mode Mode, baseDigest string) (talos.ApplyResult, error) {
 	cc, err := s.deps.Connect(ctx, id)
 	if err != nil {
 		return talos.ApplyResult{}, err
 	}
 	defer cc.Close() //nolint:errcheck // the apply's verdict is not a close error's to change
 
+	base, err := cc.MachineConfigYAML(ctx)
+	if err != nil {
+		return talos.ApplyResult{}, err
+	}
+
+	// Strictly before ApplyConfigurationWithMode: the observer of the drift
+	// baseline hangs in that method, and a refusal in front of it never reaches
+	// it, so a refused apply leaves no expectation behind.
+	if err := s.checkBase(id, base, baseDigest); err != nil {
+		return talos.ApplyResult{}, err
+	}
+
+	patched, err := ApplyPatches(base, patches)
+	if err != nil {
+		return talos.ApplyResult{}, err
+	}
+
 	return cc.ApplyConfigurationWithMode(ctx, patched, string(mode))
+}
+
+// checkBase refuses when the configuration just read is not the one the plan
+// was made from. A snapshot that cannot be made is returned as it is: a check
+// that cannot be done is not a check that passed.
+func (s *Service) checkBase(id model.MachineID, raw []byte, baseDigest string) error {
+	snap, err := Snapshot(raw)
+	if err != nil {
+		return err
+	}
+	if snap.Digest == baseDigest {
+		return nil
+	}
+	return &ChangedSincePlanError{}
 }
 
 // reserveStaged refuses when a staged configuration is pending and otherwise
