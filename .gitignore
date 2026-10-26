@@ -36,3 +36,6 @@ __pycache__/
 # The sandbox binary `go build ./sandbox/cmd/talos-sandbox` leaves here; it
 # was committed by accident once (84 MB) and had to be cut out of the history.
 /sandbox/talos-sandbox
+
+# Interne Planung und Audits gehören nicht in das öffentliche Repo
+.planning/
