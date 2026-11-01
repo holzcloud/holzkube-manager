@@ -1,5 +1,31 @@
 [
   {
+    "version": "v0.9.0",
+    "date": "2026-11-01",
+    "changes": [
+      {
+        "icon": "🛡️",
+        "text": "A configuration change checks that the node is still as planned. The plan now carries a digest of what the node had when it was planned, and the apply sends it back. If somebody changed the node in between (talosctl, another operator), the apply is refused with a sentence naming which parts of the configuration changed, never their values, and you plan again from the new state. Two applies on one node never run at the same time, and a refused apply never reaches the drift baseline. One gap remains and is named in the guide: Talos has no precondition on the write itself, so the moment between the last read and the send cannot be closed."
+      },
+      {
+        "icon": "✨",
+        "text": "What's new, as its own screen. Every release has a tab, the one this instance runs is marked and selected, and each change is a card with a headline. After an update the screen opens by itself once per browser; Settings → About opens it again. The first start of a browser that has never shown a version stays quiet."
+      },
+      {
+        "icon": "🔓",
+        "text": "A finished job gives the cluster back before it says so. A job used to be stored as finished and release its hold on the cluster a moment later, so a request sent right after could be refused with \"another job is already running on this cluster\" while nothing ran. It no longer can."
+      },
+      {
+        "icon": "📦",
+        "text": "Talos machinery v1.14.5. The library that reads node configurations is raised from v1.14.2, and the weekly check against newer Talos releases is green again. The supported range is still v1.14."
+      },
+      {
+        "icon": "⚠️",
+        "text": "What to know. The version check is proven against the simulator only; the hand run on a real node (plan, wait, apply; a foreign change through talosctl must give a refusal) is still open as ledger entry 180. The product is alpha and breaking changes are possible in any release."
+      }
+    ]
+  },
+  {
     "version": "v0.8.0",
     "date": "2026-10-15",
     "changes": [
