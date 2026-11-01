@@ -327,6 +327,17 @@ func TestHardwareFindsSensorsItCannotList(t *testing.T) {
 // TestHardwareRatesAreTheNodesOwnCounters is the counter half: what the view
 // computes from the node's counters matches the rates the simulator's counters
 // advance at, and the devices a person does not want to see are left out.
+// rateTolerance is how far a measured rate may be from the simulator's.
+//
+// The simulator's counters grow with the wall clock and the service divides by
+// the interval it measured around its two calls, so a scheduler that delays one
+// of them by 70 ms moves a one-second rate by 7%. A loaded CI runner did
+// (1.334 MB/s against 1.25, and 266863 against 250000), and the 5% this had
+// been failed the release. 15% still separates every mistake these assertions
+// exist for: a disk counted together with its partitions is 2x, a link
+// counted together with loopback and the pod's veth is checked by name above.
+const rateTolerance = 0.15
+
 func TestHardwareRatesAreTheNodesOwnCounters(t *testing.T) {
 	t.Parallel()
 
@@ -371,9 +382,9 @@ func TestHardwareRatesAreTheNodesOwnCounters(t *testing.T) {
 		t.Fatalf("disks = %+v, want nvme0n1 alone", v.Disks)
 	}
 	near(t, "nvme0n1 read", v.Disks[0].ReadBytesPerSec, talossim.SimulatedDiskReadBytesPerSec,
-		0.05*talossim.SimulatedDiskReadBytesPerSec)
+		rateTolerance*talossim.SimulatedDiskReadBytesPerSec)
 	near(t, "nvme0n1 write", v.Disks[0].WriteBytesPerSec, talossim.SimulatedDiskWriteBytesPerSec,
-		0.05*talossim.SimulatedDiskWriteBytesPerSec)
+		rateTolerance*talossim.SimulatedDiskWriteBytesPerSec)
 
 	// Network: eth0 alone. Loopback and the pod's veth are in the node's
 	// counters and are not a cable anybody plugged in.
@@ -383,8 +394,8 @@ func TestHardwareRatesAreTheNodesOwnCounters(t *testing.T) {
 	if !v.Network[0].Up || v.Network[0].SpeedMbit != 1000 {
 		t.Errorf("eth0 up=%v speed=%d, want up at 1000", v.Network[0].Up, v.Network[0].SpeedMbit)
 	}
-	near(t, "eth0 rx", v.Network[0].RxBytesPerSec, talossim.SimulatedRxBytesPerSec, 0.05*talossim.SimulatedRxBytesPerSec)
-	near(t, "eth0 tx", v.Network[0].TxBytesPerSec, talossim.SimulatedTxBytesPerSec, 0.05*talossim.SimulatedTxBytesPerSec)
+	near(t, "eth0 rx", v.Network[0].RxBytesPerSec, talossim.SimulatedRxBytesPerSec, rateTolerance*talossim.SimulatedRxBytesPerSec)
+	near(t, "eth0 tx", v.Network[0].TxBytesPerSec, talossim.SimulatedTxBytesPerSec, rateTolerance*talossim.SimulatedTxBytesPerSec)
 
 	// Filesystems: STATE and EPHEMERAL, once each. The squashfs root, the
 	// pseudo-filesystems and EPHEMERAL's bind mounts are not disks.
@@ -441,7 +452,7 @@ func TestHardwareMeasuresBetweenTwoRequests(t *testing.T) {
 			"would be over the two seconds between them", v.RatesOverSeconds)
 	}
 	near(t, "eth0 rx over the longer window", v.Network[0].RxBytesPerSec, talossim.SimulatedRxBytesPerSec,
-		0.05*talossim.SimulatedRxBytesPerSec)
+		rateTolerance*talossim.SimulatedRxBytesPerSec)
 }
 
 // TestHardwarePollsReadOnlyTheSensorInputs pins what the cached sensor layout

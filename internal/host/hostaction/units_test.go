@@ -390,7 +390,8 @@ func TestUnitsVerify(t *testing.T) {
 		defer cancel()
 		cmd := exec.CommandContext(ctx, bin, append([]string{"verify", "--man=no"}, files...)...)
 		cmd.Env = append(os.Environ(), "SYSTEMD_COLORS=0", "SYSTEMD_PAGER=", "LC_ALL=C")
-		out, err := cmd.CombinedOutput()
+		raw, err := cmd.CombinedOutput()
+		out := ourLines(raw)
 		var exitErr *exec.ExitError
 		switch {
 		case err == nil:
@@ -1901,4 +1902,25 @@ func TestThePageNeedsTheUpdateUnitWhereTheRoutesDo(t *testing.T) {
 	if !slices.Equal(page, server) {
 		t.Errorf("the page's UPDATE_UNIT_ACTIONS is %q, hostaction.NeedsUpdateUnit names %q; the page and the routes disagree", page, server)
 	}
+}
+
+// ourLines keeps what systemd-analyze verify said about our own unit files.
+//
+// verify also loads every unit of the host it runs on, and a runner image ships
+// units that warn about themselves (CPUAccounting= "has been removed" in
+// xfs_scrub_all.service and walinuxagent.service on the GitHub runner). Those
+// lines are about somebody else's files, and with "any output fails" they made
+// this gate red on a machine whose only difference was its image. Every unit we
+// ship is named holzkube-manager*, and so is every line that concerns one.
+func ourLines(raw []byte) string {
+	var kept []string
+	for _, line := range strings.Split(string(raw), "\n") {
+		if strings.Contains(line, "holzkube-manager") {
+			kept = append(kept, line)
+		}
+	}
+	if len(kept) == 0 {
+		return ""
+	}
+	return strings.Join(kept, "\n") + "\n"
 }
