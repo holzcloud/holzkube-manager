@@ -137,9 +137,14 @@ describe('the configuration row of a cluster card', () => {
   })
 
   it('is read by the cluster schema in the wire format, and its absence is tolerated', () => {
-    const base = (demo as unknown as { '/api/v1/clusters': { clusters: unknown[] } })[
-      '/api/v1/clusters'
-    ].clusters[0] as Record<string, unknown>
+    // The demo cluster carries a reading for the screenshots; this test is about
+    // a cluster that has none.
+    const base = {
+      ...(demo as unknown as { '/api/v1/clusters': { clusters: Record<string, unknown>[] } })[
+        '/api/v1/clusters'
+      ].clusters[0],
+      config_drift: undefined,
+    } as Record<string, unknown>
 
     const without = clusterSchema.safeParse(base)
     expect(without.success ? null : JSON.stringify(without.error.issues)).toBeNull()
