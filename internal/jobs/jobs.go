@@ -387,6 +387,7 @@ func (e *Engine) run(ctx context.Context, j model.Job, steps []Step) {
 			j.Steps[i].Detail = err.Error()
 			j.State = model.JobFailed
 			j.FinishedAt = now
+			e.release(j.Cluster, j.ID)
 			j = e.save(ctx, j)
 			e.publish(j, steps[i].Name, model.StepFailed, err.Error())
 			return
@@ -399,6 +400,7 @@ func (e *Engine) run(ctx context.Context, j model.Job, steps []Step) {
 	j.State = model.JobSucceeded
 	j.Current = len(steps) - 1
 	j.FinishedAt = e.deps.Now().UTC()
+	e.release(j.Cluster, j.ID)
 	j = e.save(ctx, j)
 	e.publish(j, "", model.StepDone, "")
 }
@@ -408,6 +410,7 @@ func (e *Engine) run(ctx context.Context, j model.Job, steps []Step) {
 func (e *Engine) finishCancelled(j model.Job, step string, stepState model.StepState, reason string) {
 	j.State = model.JobCancelled
 	j.FinishedAt = e.deps.Now().UTC()
+	e.release(j.Cluster, j.ID)
 	j = e.save(context.WithoutCancel(e.shutdown), j)
 	e.publish(j, step, stepState, reason)
 }
@@ -649,6 +652,11 @@ func (e *Engine) acquire(cluster model.ClusterID, id model.JobID) error {
 	return nil
 }
 
+// release gives a cluster's lease back. It is called before the end of a job is
+// written, not only when the job's goroutine returns: a client that waits for
+// "finished" and sends the next job straight away must not be refused with
+// ErrClusterBusy by a job that has nothing left to do. It is safe to call twice;
+// the goroutine's own release afterwards finds nothing of this job's to remove.
 func (e *Engine) release(cluster model.ClusterID, id model.JobID) {
 	if cluster == "" {
 		return
