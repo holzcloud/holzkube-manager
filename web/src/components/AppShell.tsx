@@ -7,6 +7,7 @@ import { DryRunBannerContainer } from '@/components/DryRunBanner'
 import { Header } from '@/components/Header'
 import { ResumeAfterProvider, SudoFailureNotice } from '@/components/ResumeAfterProvider'
 import { BottomNav, NavDrawer, RailNav } from '@/components/Sidebar'
+import { WhatsNewOnUpdate } from '@/components/WhatsNew'
 import { useSession } from '@/hooks/useSession'
 
 /**
@@ -123,6 +124,9 @@ export function AppShell() {
       </div>
       {/* The phone's tab bar: below md only, fixed to the bottom edge. */}
       <BottomNav />
+      {/* Opens by itself, once, the first time this browser meets a new
+          version. Here because the navigation is rendered twice. */}
+      <WhatsNewOnUpdate />
     </div>
   )
 }

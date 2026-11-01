@@ -59,25 +59,23 @@ describe('the release notes panel', () => {
     expect(dialog).toHaveTextContent('running here')
   })
 
-  it('opens on the series the instance is running, not on the newest one', async () => {
+  it('has one tab per release, and opens on the one the instance is running', async () => {
     // The case that matters: a host that has not been updated. Opening on the
-    // newest series would show it a list of things it does not have, under a
-    // heading that does not say so.
+    // newest release would show it a list of things it does not have.
     show('v0.1.0')
 
     const dialog = await screen.findByRole('dialog')
+    expect(screen.getAllByRole('tab')).toHaveLength(3)
+    expect(screen.getByRole('tab', { name: /v0\.1\.0/ })).toHaveAttribute('aria-selected', 'true')
     expect(dialog).toHaveTextContent('The first public release.')
     expect(dialog).not.toHaveTextContent('Removing a node asks etcd first.')
-
-    const tab = screen.getByRole('button', { name: 'v0.1' })
-    expect(tab).toHaveAttribute('aria-pressed', 'true')
   })
 
-  it('lets the operator read a series they are not on', async () => {
+  it('lets the operator read a release they are not on', async () => {
     const user = userEvent.setup()
     show('v0.1.0')
 
-    await user.click(screen.getByRole('button', { name: 'v1.16' }))
+    await user.click(screen.getByRole('tab', { name: /v1\.16\.0-beta\.1/ }))
 
     const dialog = screen.getByRole('dialog')
     expect(dialog).toHaveTextContent('Removing a node asks etcd first.')
@@ -86,14 +84,32 @@ describe('the release notes panel', () => {
     expect(dialog).not.toHaveTextContent('running here')
   })
 
+  it('moves between tabs with the arrow keys, Home and End', async () => {
+    const user = userEvent.setup()
+    show('v1.16.0')
+
+    const first = screen.getByRole('tab', { name: /^v1\.16\.0$/ })
+    first.focus()
+    await user.keyboard('{ArrowRight}')
+    expect(screen.getByRole('tab', { name: /v1\.16\.0-beta\.1/ })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    )
+    await user.keyboard('{End}')
+    expect(screen.getByRole('tab', { name: /v0\.1\.0/ })).toHaveAttribute('aria-selected', 'true')
+    await user.keyboard('{Home}')
+    expect(first).toHaveAttribute('aria-selected', 'true')
+  })
+
   it('counts the changes of each release', async () => {
     const user = userEvent.setup()
     show('v1.16.0')
-    await user.click(screen.getByRole('button', { name: 'v1.16' }))
+    await user.click(screen.getByRole('tab', { name: /v1\.16\.0-beta\.1/ }))
 
     const dialog = screen.getByRole('dialog')
-    expect(within(dialog).getByText('1 change')).toBeInTheDocument()
     expect(within(dialog).getByText('2 changes')).toBeInTheDocument()
+    await user.click(screen.getByRole('tab', { name: /^v1\.16\.0$/ }))
+    expect(within(dialog).getByText('1 change')).toBeInTheDocument()
   })
 
   /**
@@ -107,7 +123,7 @@ describe('the release notes panel', () => {
     const dialog = await screen.findByRole('dialog')
     expect(dialog).toHaveTextContent('This instance is running v9.9.9-dev')
     expect(dialog).not.toHaveTextContent('running here')
-    // Falls back to the newest series rather than to a blank panel.
+    // Falls back to the newest release rather than to a blank panel.
     expect(dialog).toHaveTextContent('The version is on screen now.')
   })
 
@@ -142,11 +158,11 @@ describe('the running version as a release build spells it', () => {
     expect(dialog).toHaveTextContent('running here')
   })
 
-  it('opens on the running series when the binary reports it without a v', async () => {
+  it('opens on the running release when the binary reports it without a v', async () => {
     show('0.1.0')
 
     const dialog = await screen.findByRole('dialog')
-    expect(screen.getByRole('button', { name: 'v0.1' })).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByRole('tab', { name: /v0\.1\.0/ })).toHaveAttribute('aria-selected', 'true')
     expect(dialog).toHaveTextContent('The first public release.')
     expect(dialog).not.toHaveTextContent('Removing a node asks etcd first.')
   })

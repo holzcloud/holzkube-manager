@@ -1,6 +1,6 @@
 import { useMutation, useQuery } from '@tanstack/react-query'
 import { createRoute } from '@tanstack/react-router'
-import { Activity, AlertTriangle, Download, Info, ShieldCheck } from 'lucide-react'
+import { Activity, AlertTriangle, Download, Info, ShieldCheck, Sparkles } from 'lucide-react'
 import { type FormEvent, type ReactNode, useState } from 'react'
 import { api, roleAtLeast } from '@/api'
 import { Button } from '@/components/ui/button'
@@ -8,6 +8,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { WallLinks } from '@/components/WallLinks'
+import { ReleaseNotes, useVersion } from '@/components/WhatsNew'
 import { authenticatedRoute } from '@/routes/__root'
 import { AccountsCard } from '@/routes/accounts'
 
@@ -75,6 +76,7 @@ export function SettingsPage() {
         </div>
         <MetricsCard />
         <BackupCard />
+        <AboutCard />
       </div>
     </section>
   )
@@ -376,3 +378,46 @@ export const settingsRoute = createRoute({
   path: '/settings',
   component: SettingsPage,
 })
+
+/* ---------------------------------------------------------------------- */
+
+/**
+ * Which build this is, and the way back to what changed in it.
+ *
+ * The screen also opens by itself after an update; this is how it is read
+ * again, or for an older release, without having to find the small version
+ * number in the sidebar.
+ */
+export function AboutCard() {
+  const [open, setOpen] = useState(false)
+  const info = useVersion()
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-base">About</CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-3 text-sm">
+        {info.isSuccess && info.data.version !== '' ? (
+          <>
+            <p>
+              holzkube-manager <span className="font-medium">{info.data.version}</span>
+            </p>
+            <Button type="button" variant="outline" onClick={() => setOpen(true)}>
+              <Sparkles aria-hidden="true" className="size-4" />
+              What's new
+            </Button>
+            <ReleaseNotes
+              open={open}
+              onOpenChange={setOpen}
+              version={info.data.version}
+              releases={info.data.releases}
+            />
+          </>
+        ) : (
+          <p className="text-muted-foreground">The version of this build could not be read.</p>
+        )}
+      </CardContent>
+    </Card>
+  )
+}

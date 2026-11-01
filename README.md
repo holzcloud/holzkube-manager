@@ -66,6 +66,8 @@ just said, nothing cached or guessed.
 - **The host itself:** a Host page for the machine it runs on, with live CPU,
   memory, disks and temperatures, and a self-update that rolls back if the
   service does not answer afterwards.
+- **What's new:** after every update the first start opens a screen with the
+  notes of the new version, one tab per release; Settings, About opens it again.
 - **Around it:** a wall view for an office screen, a phone-friendly interface,
   Prometheus `/metrics`, a support bundle and the `holzkubectl` command line.
 

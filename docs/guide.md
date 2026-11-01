@@ -2417,6 +2417,24 @@ being read guards nothing.
 **The toast's dismiss button is held by a component test** instead, because
 nothing in the running product raises a toast without first doing something.
 
+## What's new
+
+Every release has its notes in `internal/changelog/changelog.json`, and the app
+shows them as one tab per release, newest on the left, the version this
+instance runs marked with a green dot and selected when the screen opens.
+
+**It opens by itself once per update.** The first time a browser meets a newer
+version than the one it last showed, the screen opens on its own. Which version
+a browser has shown is kept in that browser (local storage), not on the server:
+a second browser or a phone shows it once more, and a browser that has never
+shown any version learns the current one silently, because a fresh install has
+nothing that is new to it. A development build, which no release describes,
+never opens it.
+
+**To read it again** use Settings, About, "What's new", or the version number at
+the foot of the navigation. Older releases are the other tabs; the arrow keys,
+Home and End move between them.
+
 ## Metrics
 
 ```
