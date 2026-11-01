@@ -96,12 +96,12 @@ eine Ermessensentscheidung von Claude, im Bericht gekennzeichnet).
 
 Phase 17. Entscheidungen: `17-CONTEXT.md` (D-01 bis D-03). Die IDs sind der Vorschlag aus `17-RESEARCH.md`.
 
-- [ ] **VERS-01**: Die Vorschau (Plan) trägt `base_digest`, den Digest des Snapshots der gelesenen aktiven Konfiguration
-- [ ] **VERS-02**: Das Apply verlangt `base_digest`, liest erneut und verweigert bei Abweichung, ohne Überschreib-Schalter, und sendet dann nichts
-- [ ] **VERS-03**: Der Satz der Verweigerung nennt die Änderungen über alle Dokumente, ohne Geheimnisse, Werte und Adressen
-- [ ] **VERS-04**: Ein eigenes Apply landet wie bisher und frischt die Drift-Basis über den erwarteten Digest auf; ein verweigertes Apply hinterlässt keine Erwartung
-- [ ] **VERS-05**: Zwei gleichzeitige Applies auf einen Knoten aus diesem Prozess überschreiben einander nicht still (Sperre je Knoten)
-- [ ] **VERS-06**: Die Oberfläche zeigt die Verweigerung als Satz und bietet „neu planen" an; README, Anleitung und API-Vertrag sind im selben Schritt nachgezogen
+- [x] **VERS-01**: Die Vorschau (Plan) trägt `base_digest`, den Digest des Snapshots der gelesenen aktiven Konfiguration
+- [x] **VERS-02**: Das Apply verlangt `base_digest`, liest erneut und verweigert bei Abweichung, ohne Überschreib-Schalter, und sendet dann nichts
+- [x] **VERS-03**: Der Satz der Verweigerung nennt die Änderungen über alle Dokumente, ohne Geheimnisse, Werte und Adressen
+- [x] **VERS-04**: Ein eigenes Apply landet wie bisher und frischt die Drift-Basis über den erwarteten Digest auf; ein verweigertes Apply hinterlässt keine Erwartung
+- [x] **VERS-05**: Zwei gleichzeitige Applies auf einen Knoten aus diesem Prozess überschreiben einander nicht still (Sperre je Knoten)
+- [x] **VERS-06**: Die Oberfläche zeigt die Verweigerung als Satz und bietet „neu planen" an; README, Anleitung und API-Vertrag sind im selben Schritt nachgezogen
 
 ### Cordon, Drain und Worker-Gate (DRAIN, WGATE)
 
@@ -192,12 +192,12 @@ Phase 20, hängt an SECRET-01 aus Phase 19. Entscheidungen: `20-CONTEXT.md` (D-0
 | DRIFT-07 | Phase 15 | Pending |
 | DRIFT-08 | Phase 15 | Complete |
 | DRIFT-09 | Phase 15 | Complete |
-| VERS-01 | Phase 17 | Pending |
-| VERS-02 | Phase 17 | Pending |
-| VERS-03 | Phase 17 | Pending |
-| VERS-04 | Phase 17 | Pending |
-| VERS-05 | Phase 17 | Pending |
-| VERS-06 | Phase 17 | Pending |
+| VERS-01 | Phase 17 | Complete |
+| VERS-02 | Phase 17 | Complete |
+| VERS-03 | Phase 17 | Complete |
+| VERS-04 | Phase 17 | Complete |
+| VERS-05 | Phase 17 | Complete |
+| VERS-06 | Phase 17 | Complete |
 | DRAIN-01 | Phase 18 | Pending |
 | DRAIN-02 | Phase 18 | Pending |
 | DRAIN-03 | Phase 18 | Pending |

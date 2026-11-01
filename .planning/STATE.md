@@ -6,7 +6,7 @@ current_phase: 15
 current_phase_name: drift-erkennung-der-maschinenkonfiguration
 current_plan: 10
 status: verifying
-stopped_at: "Phase 17 plan 02: tasks done except the two ledger entries (blocked)"
+stopped_at: "Phase 17 gebaut und verifiziert (human_needed): Handprobe auf dem Pi, Ledger 180"
 last_updated: "2026-10-20T09:25:01.384Z"
 last_activity: 2026-10-15
 last_activity_desc: Plan 15-11 (Lückenschluss G-15-1, W-15-1) ausgeführt, Phase 15 wartet auf die erneute Verifikation
@@ -47,6 +47,13 @@ Last activity: 2026-10-15 — Plan 15-10 (Dokumentation, Ledger, Gate)
 Progress: [███░░░░░░░] 25%
 
 ## Offen
+
+- **Phase 17 `human_needed` (Stand 2026-11-01):** Versionspruefung zwischen Plan und Apply
+  gebaut, UAT und Verifikation gegen den Simulator gruen (`17-UAT.md`,
+  `17-VERIFICATION.md`). Auf dem Pi pruefen: Plan, warten, Apply ohne Aenderung geht
+  durch; Fremdaenderung mit talosctl gibt 409; dieselbe Vorschau zweimal wird
+  verweigert; gelbe Meldung im Browser und auf dem Telefon (Ledger 180). Ledger 181
+  (Fenster zwischen Lesen und Senden) bleibt offen, solange Talos keine Vorbedingung kennt.
 
 - **Entschieden 2026-10-12:** Release-Signatur — **vorerst keine**; es bleibt bei
   SHA-256 aus demselben Release (Risiko und Optionen: `AUDIT-2026-10-08.md`,
