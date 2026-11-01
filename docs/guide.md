@@ -1363,11 +1363,11 @@ If you call the route from a script: this is a change in the alpha stage.
 - The window between reading and sending remains, because Talos has no
   precondition in its apply call. A change made by talosctl in those
   milliseconds is overwritten and is seen only by the drift detection afterwards
-  (an open ledger entry of phase 17).
+  (open ledger entry 181).
 - It is assumed, and not shown against a real node, that two readings without a
   change give the same fingerprint. A false alarm would be a refusal whose
-  sentence says the form changed, without naming a setting (an open ledger entry
-  of phase 17).
+  sentence says the form changed, without naming a setting (open ledger entry
+  180).
 - The fingerprint binds the node, not the patch text; the apply sends what is in
   the text field.
 - After a restart of the daemon (the hourly update) the sentence no longer names

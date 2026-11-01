@@ -3,7 +3,7 @@ phase: 17-versionspruefung-zwischen-plan-und-apply
 plan: 02
 subsystem: ui
 tags: [react, vitest, audit, docs, optimistic-concurrency]
-status: partial
+status: complete
 
 requires:
   - phase: 17-01
@@ -46,7 +46,7 @@ completed: 2026-10-20
 
 # Phase 17 Plan 02: Version check between plan and apply, interface, tables, texts
 
-**STATUS: PARTIAL. One part of Task 2 is NOT done: the two open ledger entries (A3/A4 and the read-to-send window) are not in `.planning/WINDOWS.md`. See "Blocked" below. Everything else ran.**
+**STATUS: COMPLETE (2026-11-01, entries 180 and 181 written by hand on the operator's choice; the verb cannot read the ledger). Earlier: PARTIAL. One part of Task 2 is NOT done: the two open ledger entries (A3/A4 and the read-to-send window) are not in `.planning/WINDOWS.md`. See "Blocked" below. Everything else ran.**
 
 The Config page now sends the digest of the plan it applied from, shows a refusal as the server's sentence in a yellow alert with Apply locked and a "See what would change again" button that repeats the plan with the same patch text, and locks a preview after it landed.
 
