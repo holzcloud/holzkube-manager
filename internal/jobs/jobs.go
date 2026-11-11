@@ -307,6 +307,23 @@ func (e *Engine) start(j model.Job, steps []Step) bool {
 	return true
 }
 
+// Busy reports whether a job is executing in this process right now.
+//
+// It is what a restart of the daemon has to ask first. A job in a step is
+// interrupted by one: at best Resume picks it up afterwards, at worst the step
+// cannot be verified and the job is parked for a person. The update that runs
+// every hour restarts the daemon, and it used to do so without asking.
+//
+// It answers from memory and reads nothing, because the route that carries it
+// answers before authentication. A parked job is not busy: nothing is
+// executing, and it would otherwise hold off every update until somebody
+// decided about it.
+func (e *Engine) Busy() bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return len(e.running) > 0
+}
+
 // dropTopicLater forgets a finished job's stream once the linger has passed. A
 // job left running or parked by a shutdown keeps its topic: it is not over.
 func (e *Engine) dropTopicLater(id model.JobID) {

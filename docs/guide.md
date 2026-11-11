@@ -166,7 +166,21 @@ service does not stay healthy, it goes back to the previous binary and records
 again until a newer release is published (`--force` installs it anyway).
 `holzkube-manager-update --rollback` does the same by hand, takes the same lock
 as the other runs and records **rolled-back**; the version it leaves is
-remembered as well. A rollback replaces the binary and
+remembered as well.
+
+**An update waits for a running job.** The restart an update ends with
+interrupts whatever the daemon is doing, so before it downloads anything the
+run asks the daemon whether a job is executing — a rolling upgrade, a removal,
+a backup. If one is, the run installs nothing, records **available** and asks
+again next hour; the time it first waited is kept in
+`/var/lib/holzkube-manager-update/deferred-since`. After 24 hours of that it
+installs anyway, because a job that hangs must not hold off the update that
+repairs it, and `--force` installs at once. A parked job — one waiting for you
+to decide — is not a running one and holds nothing back. A daemon that does
+start again in the middle of a job continues it afterwards where the step can
+be checked, and parks it where it cannot.
+
+A rollback replaces the binary and
 not the data directory: after a release that raised the directory's schema, a
 rolled-back binary will not start, and [Schema 7 and going
 back](#schema-7-and-going-back) says what to do then. When the update replaces its own script it first checks the

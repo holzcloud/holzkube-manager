@@ -584,7 +584,13 @@ case "$url" in
       echo x >> "$HKM_STUB_FIXTURES/.health-calls"
       [[ $(( $(wc -l < "$HKM_STUB_FIXTURES/.health-calls") % 2 )) -eq 1 ]] || exit 7
     fi
-    echo '{"audit_chain":"intact"}' ;;
+    # HKM_STUB_BUSY=1: the daemon says a job is executing, in the spelling
+    # its status route uses (internal/httpapi, TestTheStatusRouteSaysWhenAJobIsExecuting).
+    if [[ ${HKM_STUB_BUSY:-0} == 1 ]]; then
+      echo '{"setup_required":false,"audit_chain":{"ok":true},"busy":true,"oidc_enabled":false}'
+    else
+      echo '{"setup_required":false,"audit_chain":{"ok":true},"busy":false,"oidc_enabled":false}'
+    fi ;;
   *) echo "curl stub: unexpected URL $url" >&2; exit 2 ;;
 esac
 `
@@ -1587,4 +1593,95 @@ func (e *scriptEnv) wantInstalledNothingAtAll(installed string) {
 // pyQuote is s as a Python string literal.
 func pyQuote(s string) string {
 	return "'" + strings.NewReplacer(`\`, `\\`, `'`, `\'`, "\n", `\n`).Replace(s) + "'"
+}
+
+// TestUpdateScriptWaitsForARunningJob is the hourly update meeting a daemon
+// that is in the middle of something.
+//
+// The restart an update ends with interrupts whatever job is executing: an
+// upgrade stops on the node it happened to be on. The daemon says so under the
+// health URL ("busy":true), and the run then installs nothing and asks again
+// next hour -- for a day at most, because a job that hangs must not hold off
+// the update that repairs it.
+//
+// Fault injected and seen red, for each of the four: the `if ... && busy` block
+// removed (the first installs), `$FORCE -eq 0` removed from it (the second
+// installs nothing), the age comparison turned into `true` (the third installs
+// nothing), and clear_deferred removed (the fourth keeps the file).
+func TestUpdateScriptWaitsForARunningJob(t *testing.T) {
+	t.Parallel()
+	requireUserNamespace(t)
+
+	deferredSince := func(e *scriptEnv) string {
+		data, err := os.ReadFile(filepath.Join(e.statusDir, "deferred-since"))
+		if err != nil {
+			return ""
+		}
+		return strings.TrimSpace(string(data))
+	}
+
+	t.Run("a busy daemon is not restarted", func(t *testing.T) {
+		t.Parallel()
+		e := newScriptEnv(t, fakeInstalled, true)
+		e.recordCalls()
+		e.extra = append(e.extra, "HKM_STUB_BUSY=1")
+		out, rc := e.runOutput(true)
+		if rc != 0 {
+			t.Fatalf("exit = %d, want 0: waiting is not a failure\n%s", rc, out)
+		}
+		e.wantStatus(OutcomeAvailable, ptr(fakeInstalled), ptr(fakeRelease))
+		if got := e.binVersion(); got != "holzkube-managerd "+fakeInstalled {
+			t.Errorf("installed binary answers %q: the run replaced it under a running job", got)
+		}
+		if n := e.countCalls("systemctl-calls", "restart"); n != 0 {
+			t.Errorf("systemctl restart was called %d time(s) while the daemon was executing a job", n)
+		}
+		if n := e.countCalls("curl-urls", "/releases/assets/"); n != 0 {
+			t.Errorf("the run downloaded %d asset(s) it was not going to install", n)
+		}
+		if deferredSince(e) == "" {
+			t.Error("the run did not write down since when it has been waiting; it would wait for ever")
+		}
+		if !strings.Contains(out, "--force") {
+			t.Errorf("the run does not say how to install anyway:\n%s", out)
+		}
+	})
+
+	t.Run("--force installs past a busy daemon", func(t *testing.T) {
+		t.Parallel()
+		e := newScriptEnv(t, fakeInstalled, true)
+		e.extra = append(e.extra, "HKM_STUB_BUSY=1")
+		if rc := e.run(true, "--force"); rc != 0 {
+			t.Fatalf("exit = %d, want 0", rc)
+		}
+		e.wantStatus(OutcomeUpdated, ptr(fakeRelease), ptr(fakeRelease))
+	})
+
+	t.Run("a daemon busy for more than a day is updated anyway", func(t *testing.T) {
+		t.Parallel()
+		e := newScriptEnv(t, fakeInstalled, true)
+		e.extra = append(e.extra, "HKM_STUB_BUSY=1")
+		twoDaysAgo := time.Now().Add(-48 * time.Hour).Unix()
+		e.write(filepath.Join(e.statusDir, "deferred-since"), strconv.FormatInt(twoDaysAgo, 10)+"\n", 0o644)
+		if rc := e.run(true); rc != 0 {
+			t.Fatalf("exit = %d, want 0", rc)
+		}
+		e.wantStatus(OutcomeUpdated, ptr(fakeRelease), ptr(fakeRelease))
+		if got := deferredSince(e); got != "" {
+			t.Errorf("deferred-since still says %q after the install", got)
+		}
+	})
+
+	t.Run("an idle daemon is updated and the wait is forgotten", func(t *testing.T) {
+		t.Parallel()
+		e := newScriptEnv(t, fakeInstalled, true)
+		e.write(filepath.Join(e.statusDir, "deferred-since"), strconv.FormatInt(time.Now().Add(-time.Hour).Unix(), 10)+"\n", 0o644)
+		if rc := e.run(true); rc != 0 {
+			t.Fatalf("exit = %d, want 0", rc)
+		}
+		e.wantStatus(OutcomeUpdated, ptr(fakeRelease), ptr(fakeRelease))
+		if got := deferredSince(e); got != "" {
+			t.Errorf("deferred-since still says %q: the next busy hour would count from a wait that is over", got)
+		}
+	})
 }

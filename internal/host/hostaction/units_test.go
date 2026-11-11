@@ -1205,6 +1205,19 @@ func TestTheUpdateTimingContract(t *testing.T) {
 		t.Errorf("wait_stable() does not loop over its argument asking healthy, as the timing model assumes:\n%s", stableBody)
 	}
 	healthMax := scriptSeconds(t, script, "the health check's --max-time", regexp.MustCompile(`curl -sk --max-time ([0-9]+) "\$HEALTH_URL"`))
+	// Every question to the daemon goes through status_body, so the one
+	// --max-time above is the limit of each. Besides the health loops there is
+	// one more: whether the daemon is executing a job, asked once before the
+	// download and without a pause.
+	for _, fn := range []string{"healthy", "busy"} {
+		if body := scriptFunctionBody(t, script, fn); !strings.Contains(body, "status_body | grep -q") {
+			t.Errorf("%s() does not ask through status_body, as the timing model assumes:\n%s", fn, body)
+		}
+	}
+	busyAsks := len(regexp.MustCompile(`(?m)^[^#\n]*&& busy; then$`).FindAllString(script, -1))
+	if busyAsks != 1 {
+		t.Errorf("the update script asks busy %d times, the timing model counts 1 (before the download); redo the model", busyAsks)
+	}
 	sleepRe := regexp.MustCompile(`(?m)^\s*sleep ([0-9]+)$`)
 	pause := scriptSeconds(t, waitBody, "the health loop's sleep", sleepRe)
 	if got := scriptSeconds(t, stableBody, "wait_stable()'s sleep", sleepRe); got != pause {
@@ -1212,13 +1225,13 @@ func TestTheUpdateTimingContract(t *testing.T) {
 	}
 
 	worst := updateLock + apiMax + 2*downloadMax + 2*daemonRestartWorstCase +
-		time.Duration(tries)*(healthMax+pause) + updateLocalWork
+		time.Duration(tries)*(healthMax+pause) + time.Duration(busyAsks)*healthMax + updateLocalWork
 
 	unit := readUnitFile(t, shippedUpdateUnit)
 	start, stop := unitSpan(t, unit, "Service", "TimeoutStartSec"), unitSpan(t, unit, "Service", "TimeoutStopSec")
-	t.Logf("update worst case %v (lock %v + list %v + 2 x download %v + 2 x restart %v + %d health tries x (%v + %v) + local %v); "+
-		"TimeoutStartSec %v leaves %v above it, margin wanted %v",
-		worst, updateLock, apiMax, downloadMax, daemonRestartWorstCase, tries, healthMax, pause, updateLocalWork,
+	t.Logf("update worst case %v (lock %v + list %v + 2 x download %v + 2 x restart %v + %d health tries x (%v + %v) + "+
+		"%d busy question x %v + local %v); TimeoutStartSec %v leaves %v above it, margin wanted %v",
+		worst, updateLock, apiMax, downloadMax, daemonRestartWorstCase, tries, healthMax, pause, busyAsks, healthMax, updateLocalWork,
 		start, start-worst, updateUnitMargin)
 	if worst+updateUnitMargin > start {
 		t.Errorf("%s: TimeoutStartSec %v, want at least %v: the script's worst case %v plus %v; "+
