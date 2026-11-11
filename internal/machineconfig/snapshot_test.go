@@ -65,14 +65,13 @@ func TestAnUnparsableConfigurationYieldsNoSnapshot(t *testing.T) {
 	const planted = "planted-value-that-must-not-surface-5d2c"
 	broken := string(raw) + "\n---\napiVersion: v1alpha1\nkind: SomethingNewUpstream\nplanted: " + planted + "\n"
 
-	// Precondition: Redact itself refuses this one, and hands back bytes
-	// alongside the error -- the case that must not become a snapshot.
-	partial, rerr := machineconfig.Redact([]byte(broken))
-	if rerr == nil {
+	// Precondition: Redact itself refuses this one. It used to hand back
+	// bytes alongside the error, which was the case this test guarded the
+	// snapshot against; since 2026-11-11 it hands back none
+	// (TestAConfigThatDoesNotParseLeavesNothing), and the snapshot must
+	// refuse all the same.
+	if _, rerr := machineconfig.Redact([]byte(broken)); rerr == nil {
 		t.Fatal("precondition: Redact accepted a document of an unknown kind, so this is not the failing case")
-	}
-	if len(partial) == 0 {
-		t.Fatal("precondition: Redact returned no bytes with its error, so there is nothing to wrongly keep")
 	}
 
 	snap, err := machineconfig.Snapshot([]byte(broken))
