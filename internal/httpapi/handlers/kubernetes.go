@@ -1830,6 +1830,12 @@ func writeKubernetesError(w http.ResponseWriter, r *http.Request, err error) {
 			Code:   httpapi.CodeManifestInvalid,
 		})
 
+	case errors.Is(err, kube.ErrBadNamespace):
+		httpapi.WriteProblem(w, r, httpapi.Validation(
+			"That is not a name a namespace can have: lower-case letters, digits and hyphens, "+
+				"at most 63 characters.",
+			httpapi.FieldError{Field: "namespace", Reason: "not a namespace name"}))
+
 	case errors.Is(err, kube.ErrNoSuchWorkload):
 		httpapi.WriteProblem(w, r, httpapi.NotFound("notfound.kubernetes-workload", err.Error()))
 

@@ -8,6 +8,7 @@ import (
 
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/validation"
 )
 
 // What is actually being used (2026-09-19).
@@ -58,10 +59,24 @@ func (c *Client) NodeUsage(ctx context.Context) ([]Usage, error) {
 	return c.usage(ctx, "/apis/metrics.k8s.io/v1beta1/nodes")
 }
 
+// ErrBadNamespace is a namespace that is not a name a namespace can have.
+var ErrBadNamespace = errors.New("kube: that is not a namespace name")
+
 // PodUsage reads what each pod is using, in one namespace or across all.
+//
+// The namespace goes into a path this function builds by hand -- the metrics
+// API has no typed client here -- and client-go cleans a path before it sends
+// it. So a namespace of "../../../../api/v1/namespaces/kube-system/secrets/.."
+// was a request for something else entirely, made with this installation's
+// system:masters certificate, from a route a reader may call; whatever list
+// came back was shown as rows of names. Every other read takes its namespace
+// through a typed client, which refuses such a name. This one checks it.
 func (c *Client) PodUsage(ctx context.Context, namespace string) ([]Usage, error) {
 	path := "/apis/metrics.k8s.io/v1beta1/pods"
 	if namespace != "" {
+		if problems := validation.IsDNS1123Label(namespace); len(problems) > 0 {
+			return nil, fmt.Errorf("%w: %q", ErrBadNamespace, namespace)
+		}
 		path = "/apis/metrics.k8s.io/v1beta1/namespaces/" + namespace + "/pods"
 	}
 	return c.usage(ctx, path)
