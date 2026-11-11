@@ -363,10 +363,18 @@ func (e *Engine) run(ctx context.Context, j model.Job, steps []Step) {
 
 		now := e.deps.Now().UTC()
 		j.Steps[i].FinishedAt = now
+		// A step that returned an error while its context is cancelled was
+		// interrupted, whatever the error says. It used to be recognised by
+		// errors.Is(err, context.Canceled), and a step that was inside a gRPC
+		// call does not return that: it returns a status error with
+		// codes.Canceled, which is not context.Canceled and does not wrap it.
+		// So a restart of the daemon in the middle of a Talos call wrote the
+		// job down as failed, and Resume never looked at it again -- an
+		// upgrade stopped after the node it happened to be on.
 		switch {
 		case err == nil:
 			j.Steps[i].State = model.StepDone
-		case errors.Is(err, context.Canceled) && ctx.Err() != nil && e.shutdown.Err() == nil:
+		case ctx.Err() != nil && e.shutdown.Err() == nil:
 			// The operator cancelled while the step was in flight. The step was
 			// interrupted, so what it did is unknown; the record says so, and
 			// the job ends cancelled so that no restart resumes it.
@@ -374,7 +382,7 @@ func (e *Engine) run(ctx context.Context, j model.Job, steps []Step) {
 			j.Steps[i].Detail = "cancelled while this step was running; it may or may not have taken effect"
 			e.finishCancelled(j, steps[i].Name, model.StepFailed, j.Steps[i].Detail)
 			return
-		case errors.Is(err, context.Canceled) && ctx.Err() != nil:
+		case ctx.Err() != nil:
 			// The process is shutting down mid-step. Leave the step marked
 			// running and the job marked running: what happens next is
 			// Resume's decision at the next start, and it is the decision this
