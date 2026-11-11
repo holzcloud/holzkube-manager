@@ -4004,6 +4004,12 @@ That is not a style choice. A reboot takes a minute and a reset several, and an
 endpoint that waits is an endpoint whose progress nobody can watch and whose
 failure arrives as a timeout with no record of how far it got.
 
+The read-only lock these three routes answer to — and the one
+`POST /api/v1/machines/{id}/config/apply` answers to — is the lock of **the
+cluster the machine belongs to**, read from the inventory. A `cluster` in the
+request body does not choose it: until 2026-11-11 it did, and a body that named
+no cluster, or an unlocked one, got a node of a locked cluster rebooted.
+
 ### Confirmation is server-side, and it is bound to the parameters
 
 Two calls, always:

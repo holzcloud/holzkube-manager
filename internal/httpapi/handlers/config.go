@@ -67,7 +67,7 @@ func ConfigRoutes(d httpapi.Deps) []httpapi.Route {
 			MinRole:         model.RoleOperator,
 			Destructive:     true,
 			Action:          "config.apply",
-			ClusterScope:    clusterFromBody,
+			ClusterScope:    machineClusterFromPath(d),
 			Handler:         handler(applyConfig(d)),
 		},
 		{
