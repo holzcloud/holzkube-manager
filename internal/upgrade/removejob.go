@@ -389,10 +389,17 @@ const cordonLeftNote = "The node stays cordoned, so nothing new is scheduled ont
 // to be wiped, and its emptyDir goes with it whatever this does. No Force: a
 // pod no controller owns is not coming back anywhere, and it is named in the
 // failure instead of being lost. Budgets are honoured, always.
+//
+// RetryBlocked and WaitGone are set here and nowhere else: this is the drain
+// whose next step cannot be taken back, so it waits -- up to the deadline --
+// for a budget to open and for the evicted pods to be gone, where a power
+// action reports a refusal at once. Neither turns a veto into a delete.
 func (d Deps) drainOptions() kube.DrainOptions {
 	return kube.DrainOptions{
 		DeleteLocalData: true,
 		Timeout:         d.drainBudget(),
+		RetryBlocked:    d.drainRetry(),
+		WaitGone:        d.drainGonePoll(),
 	}
 }
 

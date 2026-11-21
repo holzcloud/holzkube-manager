@@ -283,8 +283,9 @@ func (r *removalRig) kubeClient(t *testing.T) *kube.Client {
 // snapshotOf reads what the rig can see about one host right now.
 func (r *removalRig) snapshotOf(host string) rigSnapshot {
 	return rigSnapshot{
-		Node:    r.simByHost[host].Node(),
-		Evicted: r.ksim.Evicted(),
+		Node:       r.simByHost[host].Node(),
+		Evicted:    r.ksim.Evicted(),
+		PodsOnNode: r.ksim.PodsOn(host),
 	}
 }
 
@@ -1124,5 +1125,134 @@ func TestARestartInsideTheDrainWhenNothingIsLeftSkipsIt(t *testing.T) {
 
 	if st := stepNamed(after, "drain the node").State; st != model.StepSkipped {
 		t.Errorf("the drain step is %s, want skipped: nothing was left to move", st)
+	}
+}
+
+// budgetedPod is a StatefulSet's pod a PodDisruptionBudget named db-pdb holds.
+func budgetedPod(node string) kubesim.Pod {
+	return kubesim.Pod{
+		Namespace: "default", Name: "db-0", Node: node, OwnerKind: "StatefulSet",
+		BudgetRefuses: true, BudgetName: "db-pdb",
+	}
+}
+
+// TestABudgetThatNeverOpensStopsTheRemovalBeforeAnythingIsIrreversible is the
+// reason the drain is a step of its own and comes first: a pod a budget
+// protects is a veto, and a removal that honours it ends with the node still
+// in etcd and still wiped of nothing. Talos' own drain inside the reset gives
+// up after five minutes and goes on; this one does not.
+func TestABudgetThatNeverOpensStopsTheRemovalBeforeAnythingIsIrreversible(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		host string
+		cps  int
+		wks  int
+	}{
+		{"w-1", 1, 1},
+		{"cp-1", 3, 0},
+	} {
+		t.Run(tc.host, func(t *testing.T) {
+			t.Parallel()
+			r := newRemovalRigWith(t, tc.cps, tc.wks, removalRigOptions{
+				Pods:        []kubesim.Pod{budgetedPod(tc.host)},
+				DrainBudget: 400 * time.Millisecond,
+			})
+
+			j := r.await(r.engine, r.submit(r.engine, tc.host).ID, model.JobFailed)
+
+			if cur := j.Steps[j.Current].Name; cur != "drain the node" {
+				t.Fatalf("the job failed in %q, want the drain", cur)
+			}
+			d := stepNamed(j, "drain the node").Detail
+			for _, want := range []string{"db-pdb", "default/db-0", "Nothing has been wiped", "has not left etcd"} {
+				if !strings.Contains(d, want) {
+					t.Errorf("the failure %q does not say %q", d, want)
+				}
+			}
+			if n := r.sim(tc.host).Node(); n.Resets != 0 || n.EtcdLeaves != 0 {
+				t.Errorf("%s was touched although a budget held a pod: %+v", tc.host, n)
+			}
+			if !r.known(tc.host) {
+				t.Errorf("%s was forgotten", tc.host)
+			}
+			if got := r.ksim.Evicted(); len(got) != 0 {
+				t.Errorf("evicted %v despite the budget", got)
+			}
+			if got := r.ksim.Deleted(); len(got) != 0 {
+				t.Errorf("deleted %v: a refused eviction is never turned into a delete", got)
+			}
+			if got := r.ksim.Calls("POST /api/v1/namespaces/default/pods/db-0/eviction"); got < 2 {
+				t.Errorf("the eviction was attempted %d times, want it asked again until the deadline", got)
+			}
+		})
+	}
+}
+
+// TestABudgetThatOpensLetsTheRemovalFinish: the same cluster, the budget opens
+// while the drain waits, and the removal runs to the end.
+func TestABudgetThatOpensLetsTheRemovalFinish(t *testing.T) {
+	t.Parallel()
+	r := newRemovalRigWith(t, 1, 1, removalRigOptions{
+		Pods:        []kubesim.Pod{budgetedPod("w-1")},
+		DrainBudget: 10 * time.Second,
+	})
+
+	go func() {
+		for r.ksim.Calls("POST /api/v1/namespaces/default/pods/db-0/eviction") < 2 && r.t.Context().Err() == nil {
+			time.Sleep(2 * time.Millisecond)
+		}
+		_ = r.ksim.SetBudgetRefuses("default", "db-0", false)
+	}()
+
+	r.await(r.engine, r.submit(r.engine, "w-1").ID, model.JobSucceeded)
+
+	if !slices.Equal(r.ksim.Evicted(), []string{"default/db-0"}) {
+		t.Errorf("evicted %v, want the pod once the budget opened", r.ksim.Evicted())
+	}
+	if r.sim("w-1").Node().Resets != 1 {
+		t.Error("the removal did not go on to wipe the node")
+	}
+}
+
+// TestARemovalWaitsForTerminatingPodsBeforeTheWipe: an eviction the server
+// accepted is not a pod that is gone. The wipe must connect after the pods have
+// left the node.
+func TestARemovalWaitsForTerminatingPodsBeforeTheWipe(t *testing.T) {
+	t.Parallel()
+	r := newRemovalRigWith(t, 1, 1, removalRigOptions{Pods: []kubesim.Pod{
+		{Namespace: "default", Name: "web-1", Node: "w-1", OwnerKind: "ReplicaSet", LingersAfterEviction: true},
+		{Namespace: "default", Name: "web-2", Node: "w-1", OwnerKind: "ReplicaSet", LingersAfterEviction: true},
+	}})
+
+	// The pods finish shutting down 300 ms after their evictions were accepted,
+	// not after the test started: the steps before the drain take about as long
+	// as a fixed delay would, and a wipe that connected after a delay that was
+	// already over would prove nothing.
+	go func() {
+		for len(r.ksim.Evicted()) < 2 && r.t.Context().Err() == nil {
+			time.Sleep(2 * time.Millisecond)
+		}
+		time.Sleep(300 * time.Millisecond)
+		for _, name := range []string{"web-1", "web-2"} {
+			for r.t.Context().Err() == nil {
+				if r.ksim.FinishTermination("default", name) == nil {
+					break
+				}
+				time.Sleep(5 * time.Millisecond)
+			}
+		}
+	}()
+
+	r.await(r.engine, r.submit(r.engine, "w-1").ID, model.JobSucceeded)
+
+	conns := r.connects()
+	atWipe := conns[len(conns)-1]
+	if len(atWipe.PodsOnNode) != 0 {
+		t.Errorf("when the wipe connected the node still listed %v; the drain must wait for the "+
+			"pods to be gone", atWipe.PodsOnNode)
+	}
+	if len(atWipe.Evicted) != 2 {
+		t.Errorf("when the wipe connected, evicted=%v, want both pods", atWipe.Evicted)
 	}
 }

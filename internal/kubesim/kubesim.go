@@ -326,8 +326,28 @@ type Pod struct {
 	Claims []string
 
 	// BudgetRefuses makes an eviction of this pod answer 429, which is what a
-	// PodDisruptionBudget looks like from the client's side.
+	// PodDisruptionBudget looks like from the client's side. A test opens the
+	// budget while a drain waits with SetBudgetRefuses.
 	BudgetRefuses bool
+
+	// BudgetName is the name a budget gives itself in the 429. Set, the answer
+	// carries what a real API server writes: a Details with one cause of type
+	// DisruptionBudget whose message names the budget. Empty leaves the answer
+	// as it always was, without Details, which is what a client has to cope with
+	// too -- a 429 is not always a budget.
+	BudgetName string
+
+	// LingersAfterEviction makes an accepted eviction leave the pod on the node,
+	// terminating, until FinishTermination says its grace period is over. That
+	// is what an eviction is in a real cluster: the server accepts the deletion
+	// and the kubelet takes its time. Without it the pod is gone at once, as
+	// every test written before this field assumed.
+	LingersAfterEviction bool
+
+	// Terminating gives the pod a deletion timestamp: it is already shutting
+	// down. Evicting one is accepted without asking any budget, as a real
+	// server does for a pod that is going anyway.
+	Terminating bool
 
 	// ContainerNames gives the pod several containers. Empty means one called
 	// after the pod, which is the ordinary shape and keeps every existing test
@@ -1395,25 +1415,57 @@ func (s *Server) evictPod(w http.ResponseWriter, r *http.Request, namespace, nam
 		s.serveNotFound(w, r)
 		return
 	}
+	if s.pods[index].Terminating {
+		// Already going: accepted, no budget asked and no second eviction on
+		// the record.
+		s.mu.Unlock()
+		writeJSON(w, http.StatusCreated, metav1.Status{
+			TypeMeta: metav1.TypeMeta{APIVersion: "v1", Kind: "Status"},
+			Status:   "Success",
+			Code:     http.StatusCreated,
+		})
+		return
+	}
 	if s.pods[index].BudgetRefuses {
+		budget := s.pods[index].BudgetName
 		s.mu.Unlock()
 		// 429 with a Status body: what a real API server answers when a budget
 		// would be violated, and what client-go turns into IsTooManyRequests.
-		writeJSON(w, http.StatusTooManyRequests, metav1.Status{
+		status := metav1.Status{
 			TypeMeta: metav1.TypeMeta{APIVersion: "v1", Kind: "Status"},
 			Status:   "Failure",
 			Message: "Cannot evict pod as it would violate the pod's disruption budget: " +
 				"the budget allows no further disruption",
 			Reason: metav1.StatusReasonTooManyRequests,
 			Code:   http.StatusTooManyRequests,
-		})
+		}
+		if budget != "" {
+			// The shape of the server's own answer, read from the Kubernetes
+			// source and not from a running API server: one cause of the type
+			// policy/v1 names, whose message carries the budget's name.
+			status.Details = &metav1.StatusDetails{
+				Causes: []metav1.StatusCause{{
+					Type: policyv1.DisruptionBudgetCause,
+					Message: "The disruption budget " + budget +
+						" needs 1 healthy pods and has 0 currently",
+				}},
+			}
+		}
+		writeJSON(w, http.StatusTooManyRequests, status)
 		return
 	}
 
-	// The pod is really gone, which is what makes a drain measurable: the next
-	// list does not contain it.
-	s.pods = append(s.pods[:index:index], s.pods[index+1:]...)
+	// An accepted eviction is on the record whether or not the pod is gone yet.
 	s.evicted = append(s.evicted, namespace+"/"+name)
+	if s.pods[index].LingersAfterEviction {
+		// The kubelet has not finished: the pod stays on the node, shutting
+		// down, until FinishTermination.
+		s.pods[index].Terminating = true
+	} else {
+		// The pod is really gone, which is what makes a drain measurable: the
+		// next list does not contain it.
+		s.pods = append(s.pods[:index:index], s.pods[index+1:]...)
+	}
 	s.mu.Unlock()
 
 	writeJSON(w, http.StatusCreated, metav1.Status{
@@ -1491,6 +1543,12 @@ func renderPod(p Pod) corev1.Pod {
 		Namespace:         p.Namespace,
 		CreationTimestamp: created,
 		Labels:            p.Labels,
+	}
+	if p.Terminating {
+		// What a pod that is shutting down carries, and what a client reads to
+		// tell "evicted and still here" from "running".
+		deleting := metav1.NewTime(time.Now().UTC())
+		meta.DeletionTimestamp = &deleting
 	}
 	if p.OwnerKind != "" {
 		// A controller reference: what a drain and a restart both read to
@@ -1901,7 +1959,54 @@ func renderScale(d Deployment) autoscalingv1.Scale {
 	}
 }
 
-// Evicted is what evictions actually removed, in order.
+// SetBudgetRefuses opens or closes a pod's budget while a test is running: a
+// drain that waits is only measurable if the budget can change under it.
+func (s *Server) SetBudgetRefuses(namespace, name string, refuses bool) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for i := range s.pods {
+		if s.pods[i].Namespace == namespace && s.pods[i].Name == name {
+			s.pods[i].BudgetRefuses = refuses
+			return nil
+		}
+	}
+	return fmt.Errorf("kubesim: no pod %s/%s", namespace, name)
+}
+
+// FinishTermination ends a terminating pod's grace period: the pod leaves the
+// node. A pod that is not terminating is an error, because removing one
+// would be a pod gone with nothing in Evicted to account for it.
+func (s *Server) FinishTermination(namespace, name string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for i := range s.pods {
+		if s.pods[i].Namespace == namespace && s.pods[i].Name == name {
+			if !s.pods[i].Terminating {
+				return fmt.Errorf("kubesim: pod %s/%s is not terminating", namespace, name)
+			}
+			s.pods = append(s.pods[:i:i], s.pods[i+1:]...)
+			return nil
+		}
+	}
+	return fmt.Errorf("kubesim: no pod %s/%s", namespace, name)
+}
+
+// PodsOn is the pods the server lists on one node, as "namespace/name" -- what
+// a test reads to see whether a node is empty at a given moment.
+func (s *Server) PodsOn(node string) []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var out []string
+	for _, p := range s.pods {
+		if p.Node == node {
+			out = append(out, p.Namespace+"/"+p.Name)
+		}
+	}
+	return out
+}
+
+// Evicted is what evictions the server accepted, in order. A pod that lingers
+// after its eviction is in this list while it is still on the node.
 func (s *Server) Evicted() []string {
 	s.mu.Lock()
 	defer s.mu.Unlock()

@@ -1,10 +1,12 @@
 package kube_test
 
 import (
+	"context"
 	"errors"
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 
@@ -230,3 +232,282 @@ func TestAFinishedPodIsNotEvicted(t *testing.T) {
 }
 
 func contains(haystack, needle string) bool { return strings.Contains(haystack, needle) }
+
+// evictionOf is the path a pod's eviction is POSTed to, which is what a test
+// counts attempts by.
+func evictionOf(namespace, name string) string {
+	return "POST /api/v1/namespaces/" + namespace + "/pods/" + name + "/eviction"
+}
+
+// budgetPod is a StatefulSet's pod that a PodDisruptionBudget named db-pdb is
+// holding.
+func budgetPod(node string) kubesim.Pod {
+	return kubesim.Pod{
+		Namespace: "default", Name: "db-0", Node: node, OwnerKind: "StatefulSet",
+		BudgetRefuses: true, BudgetName: "db-pdb",
+	}
+}
+
+// TestADrainThatMayRetryWaitsOutABudgetAndThenFinishes is what a removal needs
+// and a plain drain must not do: the budget belongs to somebody else, and when
+// its owner lets it open -- a replacement became ready elsewhere -- the pod
+// can go.
+func TestADrainThatMayRetryWaitsOutABudgetAndThenFinishes(t *testing.T) {
+	t.Parallel()
+
+	ctx := testContext(t)
+	sim, client := newCluster(t, kubesim.Options{
+		Nodes: []kubesim.Node{{Name: "cp-1"}},
+		Pods:  []kubesim.Pod{budgetPod("cp-1")},
+	})
+
+	// The budget opens after the third attempt. A drain that does not ask
+	// again never gets there.
+	go func() {
+		for sim.Calls(evictionOf("default", "db-0")) < 3 && ctx.Err() == nil {
+			time.Sleep(2 * time.Millisecond)
+		}
+		_ = sim.SetBudgetRefuses("default", "db-0", false)
+	}()
+
+	result, err := client.Drain(ctx, "cp-1", kube.DrainOptions{
+		RetryBlocked: 10 * time.Millisecond, Timeout: 10 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("Drain: %v (result %+v)", err, result)
+	}
+	if !slices.Equal(sim.Evicted(), []string{"default/db-0"}) {
+		t.Errorf("the server evicted %v, want the pod once the budget opened", sim.Evicted())
+	}
+	if !slices.Equal(result.Evicted, []string{"default/db-0"}) {
+		t.Errorf("the result lists %v as evicted, want the pod once, however many passes it took",
+			result.Evicted)
+	}
+	if got := sim.Calls(evictionOf("default", "db-0")); got < 3 {
+		t.Errorf("the eviction was attempted %d times, want at least 3", got)
+	}
+}
+
+// TestADrainWhoseBudgetNeverOpensEndsAtItsDeadline: a budget with one replica
+// never opens, and a loop with no end would run into the thirty seconds of the
+// test's own context. The drain ends at its own deadline, with the verdict a
+// drain gives -- blocked -- and not with the context's error.
+func TestADrainWhoseBudgetNeverOpensEndsAtItsDeadline(t *testing.T) {
+	t.Parallel()
+
+	ctx := testContext(t)
+	sim, client := newCluster(t, kubesim.Options{
+		Nodes: []kubesim.Node{{Name: "cp-1"}},
+		Pods:  []kubesim.Pod{budgetPod("cp-1")},
+	})
+
+	started := time.Now()
+	result, err := client.Drain(ctx, "cp-1", kube.DrainOptions{
+		RetryBlocked: 10 * time.Millisecond, Timeout: 200 * time.Millisecond,
+	})
+	took := time.Since(started)
+
+	if !errors.Is(err, kube.ErrDrainBlocked) {
+		t.Fatalf("Drain = %v, want ErrDrainBlocked", err)
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		t.Errorf("Drain = %v: a drain that ran out of time says blocked, not that a context expired", err)
+	}
+	if took > 5*time.Second {
+		t.Errorf("the drain took %s with a 200ms deadline", took)
+	}
+	if got := sim.Evicted(); len(got) != 0 {
+		t.Errorf("the server evicted %v despite the budget", got)
+	}
+	if got := sim.Calls(evictionOf("default", "db-0")); got < 2 {
+		t.Errorf("the eviction was attempted %d times, want it asked again until the deadline", got)
+	}
+	if len(result.Blocked) != 1 || result.Blocked[0].Pod != "default/db-0" ||
+		!contains(result.Blocked[0].Reason, "db-pdb") {
+		t.Errorf("blocked = %+v, want the pod with the budget named, from the last attempt that "+
+			"completed", result.Blocked)
+	}
+	if got := sim.Deleted(); len(got) != 0 {
+		t.Errorf("the drain deleted %v: an eviction that is refused is never turned into a delete", got)
+	}
+}
+
+// TestADrainNamesTheBudgetTheServerNames: the server writes the budget's name
+// into the 429 itself, and the operator's next move is to look at that
+// budget. The name is taken as the server wrote it.
+func TestADrainNamesTheBudgetTheServerNames(t *testing.T) {
+	t.Parallel()
+
+	ctx := testContext(t)
+	_, client := newCluster(t, kubesim.Options{
+		Nodes: []kubesim.Node{{Name: "cp-1"}},
+		Pods:  []kubesim.Pod{budgetPod("cp-1")},
+	})
+
+	result, err := client.Drain(ctx, "cp-1", kube.DrainOptions{})
+	if !errors.Is(err, kube.ErrDrainBlocked) {
+		t.Fatalf("Drain = %v, want ErrDrainBlocked", err)
+	}
+	if len(result.Blocked) != 1 {
+		t.Fatalf("blocked = %+v", result.Blocked)
+	}
+	reason := result.Blocked[0].Reason
+	if !contains(reason, "db-pdb") || !contains(reason, "a PodDisruptionBudget refuses") {
+		t.Errorf("the reason %q must name the budget and say a PodDisruptionBudget refuses", reason)
+	}
+}
+
+// TestADrainThatWaitsForTheGoneWaitsForTerminatingPods: an accepted eviction is
+// not a finished one. The pod is still on the node while its grace period runs,
+// and a removal that wiped into that would wipe a node still running pods.
+func TestADrainThatWaitsForTheGoneWaitsForTerminatingPods(t *testing.T) {
+	t.Parallel()
+
+	ctx := testContext(t)
+	sim, client := newCluster(t, kubesim.Options{
+		Nodes: []kubesim.Node{{Name: "cp-1"}},
+		Pods: []kubesim.Pod{
+			{Namespace: "default", Name: "web-1", Node: "cp-1", OwnerKind: "ReplicaSet", LingersAfterEviction: true},
+		},
+	})
+
+	go finishTerminationAfter(ctx, sim, 150*time.Millisecond, "default", "web-1")
+
+	started := time.Now()
+	result, err := client.Drain(ctx, "cp-1", kube.DrainOptions{WaitGone: 10 * time.Millisecond})
+	took := time.Since(started)
+	if err != nil {
+		t.Fatalf("Drain: %v (result %+v)", err, result)
+	}
+	if took < 150*time.Millisecond {
+		t.Errorf("the drain returned after %s, before the pod finished terminating", took)
+	}
+	if got := sim.PodsOn("cp-1"); len(got) != 0 {
+		t.Errorf("the node still lists %v after a drain that waited for the pods to go", got)
+	}
+}
+
+// finishTerminationAfter ends a lingering pod's termination once d has passed
+// and the pod is in fact terminating. It tries until it works or ctx ends: the
+// test's drain may not have evicted the pod yet.
+func finishTerminationAfter(ctx context.Context, sim *kubesim.Server, d time.Duration, ns, name string) {
+	time.Sleep(d)
+	for ctx.Err() == nil {
+		if sim.FinishTermination(ns, name) == nil {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
+// TestADrainThatDoesNotWaitReturnsWhileAPodIsStillTerminating: the option's
+// zero value is the drain every caller before it had.
+func TestADrainThatDoesNotWaitReturnsWhileAPodIsStillTerminating(t *testing.T) {
+	t.Parallel()
+
+	ctx := testContext(t)
+	sim, client := newCluster(t, kubesim.Options{
+		Nodes: []kubesim.Node{{Name: "cp-1"}},
+		Pods: []kubesim.Pod{
+			{Namespace: "default", Name: "web-1", Node: "cp-1", OwnerKind: "ReplicaSet", LingersAfterEviction: true},
+		},
+	})
+
+	started := time.Now()
+	if _, err := client.Drain(ctx, "cp-1", kube.DrainOptions{}); err != nil {
+		t.Fatalf("Drain: %v", err)
+	}
+	if took := time.Since(started); took > 5*time.Second {
+		t.Errorf("a drain that does not wait took %s", took)
+	}
+	if got := sim.PodsOn("cp-1"); !slices.Equal(got, []string{"default/web-1"}) {
+		t.Errorf("the node lists %v, want the pod still there, terminating", got)
+	}
+	if !slices.Equal(sim.Evicted(), []string{"default/web-1"}) {
+		t.Errorf("the server accepted evictions for %v, want the pod", sim.Evicted())
+	}
+}
+
+// TestADrainThatWaitsForTheGoneEndsAtItsDeadlineNamingTheStragglers: a kubelet
+// that never confirms a termination must not hold the job for ever.
+func TestADrainThatWaitsForTheGoneEndsAtItsDeadlineNamingTheStragglers(t *testing.T) {
+	t.Parallel()
+
+	ctx := testContext(t)
+	_, client := newCluster(t, kubesim.Options{
+		Nodes: []kubesim.Node{{Name: "cp-1"}},
+		Pods: []kubesim.Pod{
+			{Namespace: "default", Name: "web-1", Node: "cp-1", OwnerKind: "ReplicaSet", LingersAfterEviction: true},
+		},
+	})
+
+	started := time.Now()
+	result, err := client.Drain(ctx, "cp-1", kube.DrainOptions{
+		WaitGone: 10 * time.Millisecond, Timeout: 300 * time.Millisecond,
+	})
+	if !errors.Is(err, kube.ErrDrainBlocked) {
+		t.Fatalf("Drain = %v, want ErrDrainBlocked", err)
+	}
+	if took := time.Since(started); took > 5*time.Second {
+		t.Errorf("the drain took %s with a 300ms deadline", took)
+	}
+	if len(result.Blocked) != 1 || result.Blocked[0].Pod != "default/web-1" ||
+		!contains(result.Blocked[0].Reason, "still shutting down") {
+		t.Errorf("blocked = %+v, want the pod named as evicted and still shutting down", result.Blocked)
+	}
+}
+
+// TestAPermanentBlockerIsNotWaitedOut: a pod nothing owns is not coming back
+// and no amount of waiting changes that, so a drain allowed to retry still
+// stops at once.
+func TestAPermanentBlockerIsNotWaitedOut(t *testing.T) {
+	t.Parallel()
+
+	ctx := testContext(t)
+	_, client := newCluster(t, kubesim.Options{
+		Nodes: []kubesim.Node{{Name: "cp-1"}},
+		Pods:  []kubesim.Pod{{Namespace: "default", Name: "scratch", Node: "cp-1"}},
+	})
+
+	started := time.Now()
+	result, err := client.Drain(ctx, "cp-1", kube.DrainOptions{
+		RetryBlocked: 5 * time.Second, Timeout: 20 * time.Second,
+	})
+	if !errors.Is(err, kube.ErrDrainBlocked) {
+		t.Fatalf("Drain = %v, want ErrDrainBlocked", err)
+	}
+	if took := time.Since(started); took > 2*time.Second {
+		t.Errorf("the drain waited %s for a pod no waiting can move", took)
+	}
+	if len(result.Blocked) != 1 {
+		t.Errorf("blocked = %+v", result.Blocked)
+	}
+}
+
+// TestEvictingAPodThatIsAlreadyTerminatingIsAcceptedAgain pins the simulator's
+// own behaviour, which the removal's tests lean on: a second eviction of a pod
+// that is shutting down is accepted without asking the budget and is not a
+// second eviction.
+func TestEvictingAPodThatIsAlreadyTerminatingIsAcceptedAgain(t *testing.T) {
+	t.Parallel()
+
+	ctx := testContext(t)
+	sim, client := newCluster(t, kubesim.Options{
+		Nodes: []kubesim.Node{{Name: "cp-1"}},
+		Pods: []kubesim.Pod{
+			{Namespace: "default", Name: "web-1", Node: "cp-1", OwnerKind: "ReplicaSet", LingersAfterEviction: true},
+		},
+	})
+
+	for range 2 {
+		if _, err := client.Drain(ctx, "cp-1", kube.DrainOptions{}); err != nil {
+			t.Fatalf("Drain: %v", err)
+		}
+	}
+	if got := sim.Evicted(); !slices.Equal(got, []string{"default/web-1"}) {
+		t.Errorf("the server recorded evictions %v, want the one", got)
+	}
+	if err := sim.SetBudgetRefuses("default", "no-such-pod", true); err == nil {
+		t.Error("SetBudgetRefuses accepted a pod that does not exist")
+	}
+}
