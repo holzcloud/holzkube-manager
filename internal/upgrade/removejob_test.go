@@ -52,8 +52,10 @@ type removalRig struct {
 	ksim   *kubesim.Server
 	hostOf map[model.MachineID]string
 
-	// snaps is one rigSnapshot per Connect, in order.
-	snaps []rigSnapshot
+	// snaps is one rigSnapshot per Connect, in order, and forgot one per call
+	// of the inventory's Forget.
+	snaps  []rigSnapshot
+	forgot []rigSnapshot
 
 	// waits is every duration the settle step asked to wait, and atWait is what
 	// the leaving node and the cluster looked like at that moment.
@@ -88,6 +90,12 @@ type removalRigOptions struct {
 	// attempts. Zero is 5 s and 10 ms here; production runs with the
 	// constants of internal/kube.
 	DrainBudget, DrainPace time.Duration
+
+	// KubeDownAfterWipe makes Deps.Kube answer with a connection error as soon
+	// as any simulated node has been wiped. It is the cluster whose Kubernetes
+	// endpoint is the address of the node being removed: the API is there
+	// until the node is wiped and not after.
+	KubeDownAfterWipe bool
 }
 
 // rigSnapshot is what the rig can see at one moment: the node a Connect
@@ -223,6 +231,7 @@ func newRemovalRigWith(t *testing.T, controlPlanes int, workers int, opts remova
 		Forget: func(_ context.Context, id model.MachineID) error {
 			r.mu.Lock()
 			defer r.mu.Unlock()
+			r.forgot = append(r.forgot, r.snapshotOf(r.hostOf[id]))
 			for i, m := range r.machines {
 				if m.ID == id {
 					r.machines = append(r.machines[:i:i], r.machines[i+1:]...)
@@ -254,6 +263,23 @@ func newRemovalRigWith(t *testing.T, controlPlanes int, workers int, opts remova
 	if opts.Kube != nil {
 		r.deps.Kube = opts.Kube(r)
 	}
+	if opts.KubeDownAfterWipe {
+		up := r.deps.Kube
+		r.deps.Kube = func(ctx context.Context, cluster model.ClusterID) (*kube.Client, error) {
+			r.mu.Lock()
+			wiped := false
+			for _, sim := range r.sims {
+				if sim.Node().Resets > 0 {
+					wiped = true
+				}
+			}
+			r.mu.Unlock()
+			if wiped {
+				return nil, errors.New("dial tcp 192.168.1.10:6443: connect: connection refused")
+			}
+			return up(ctx, cluster)
+		}
+	}
 
 	r.engine = r.newEngine()
 	return r
@@ -283,10 +309,19 @@ func (r *removalRig) kubeClient(t *testing.T) *kube.Client {
 // snapshotOf reads what the rig can see about one host right now.
 func (r *removalRig) snapshotOf(host string) rigSnapshot {
 	return rigSnapshot{
-		Node:       r.simByHost[host].Node(),
-		Evicted:    r.ksim.Evicted(),
-		PodsOnNode: r.ksim.PodsOn(host),
+		Node:         r.simByHost[host].Node(),
+		Evicted:      r.ksim.Evicted(),
+		PodsOnNode:   r.ksim.PodsOn(host),
+		DeletedNodes: r.ksim.DeletedNodes(),
 	}
+}
+
+// forgets is one rigSnapshot per call of the inventory's Forget, taken at that
+// moment, for the host being forgotten.
+func (r *removalRig) forgets() []rigSnapshot {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return slices.Clone(r.forgot)
 }
 
 // connects is one rigSnapshot per Connect, read from the Connect's target at
@@ -395,12 +430,13 @@ func removalStepNames(role model.MachineRole) []string {
 	if role == model.RoleControlPlane {
 		return []string{
 			"check the node answers", "cordon the node", "drain the node",
-			"leave etcd", "let etcd settle", "wipe the node", "forget the node",
+			"leave etcd", "let etcd settle", "wipe the node",
+			"delete the Kubernetes node object", "forget the node",
 		}
 	}
 	return []string{
 		"check the node answers", "cordon the node", "drain the node",
-		"wipe the node", "forget the node",
+		"wipe the node", "delete the Kubernetes node object", "forget the node",
 	}
 }
 
@@ -1050,10 +1086,16 @@ func TestRemovingAMachineKubernetesHasNoNodeForSaysSo(t *testing.T) {
 
 	j := r.await(r.engine, r.submit(r.engine, "w-1").ID, model.JobSucceeded)
 
-	for _, name := range []string{"cordon the node", "drain the node"} {
+	for _, name := range []string{"cordon the node", "drain the node", "delete the Kubernetes node object"} {
 		if d := stepNamed(j, name).Detail; !strings.Contains(d, "no node") {
 			t.Errorf("step %q says %q; it must say Kubernetes knows no node for this machine", name, d)
 		}
+	}
+	if d := stepNamed(j, "delete the Kubernetes node object").Detail; !strings.Contains(d, "nothing to delete") {
+		t.Errorf("the deletion step says %q; it must say there was nothing to delete", d)
+	}
+	if got := r.ksim.DeletedNodes(); len(got) != 0 {
+		t.Errorf("deleted nodes %v for a machine Kubernetes has no node for", got)
 	}
 	if r.sim("w-1").Node().Resets != 1 {
 		t.Error("the removal did not go on to wipe the node")
@@ -1254,5 +1296,193 @@ func TestARemovalWaitsForTerminatingPodsBeforeTheWipe(t *testing.T) {
 	}
 	if len(atWipe.Evicted) != 2 {
 		t.Errorf("when the wipe connected, evicted=%v, want both pods", atWipe.Evicted)
+	}
+}
+
+// TestTheKubernetesNodeObjectIsDeletedAfterTheWipeAndBeforeTheForget is D-03
+// Q4: once the machine is wiped its Node object is a promise nobody keeps, and
+// it is deleted -- after the wipe, because a kubelet that is still running
+// could put its object back, and before the forget, because forgetting is what
+// makes the removal look finished.
+func TestTheKubernetesNodeObjectIsDeletedAfterTheWipeAndBeforeTheForget(t *testing.T) {
+	t.Parallel()
+	r := newRemovalRigWith(t, 1, 1, removalRigOptions{Pods: []kubesim.Pod{
+		replicaPod("web-1", "w-1"), replicaPod("web-2", "w-1"),
+	}})
+
+	j := r.await(r.engine, r.submit(r.engine, "w-1").ID, model.JobSucceeded)
+
+	// Errorf and not Fatalf: a step list in the wrong order is one failure,
+	// what the cluster looked like at the wipe is another, and the second is
+	// the one that says why the order matters.
+	want := removalStepNames(model.RoleWorker)
+	if got := stepNames(j); strings.Join(got, "|") != strings.Join(want, "|") {
+		t.Errorf("steps = %v, want %v", got, want)
+	}
+	for _, s := range j.Steps {
+		if wantV := s.Name != "wipe the node"; s.Verifiable != wantV {
+			t.Errorf("step %q is recorded Verifiable=%v, want %v", s.Name, s.Verifiable, wantV)
+		}
+		if s.State != model.StepDone {
+			t.Errorf("step %q is %s, want done", s.Name, s.State)
+		}
+	}
+
+	if got := r.ksim.DeletedNodes(); !slices.Equal(got, []string{"w-1"}) {
+		t.Fatalf("deleted nodes %v, want exactly [w-1]", got)
+	}
+	nodes, err := r.kubeClient(t).Nodes(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, n := range nodes {
+		if n.Name == "w-1" {
+			t.Error("the Node object is still listed after the removal")
+		}
+	}
+
+	conns := r.connects()
+	atWipe := conns[len(conns)-1]
+	if len(atWipe.DeletedNodes) != 0 || atWipe.Node.Resets != 0 {
+		t.Errorf("when the wipe connected, deleted=%v resets=%d; the object must still be there "+
+			"(the kubelet could put it back before the wipe)", atWipe.DeletedNodes, atWipe.Node.Resets)
+	}
+	forgets := r.forgets()
+	if len(forgets) != 1 {
+		t.Fatalf("the inventory forgot %d machines, want 1", len(forgets))
+	}
+	if !slices.Equal(forgets[0].DeletedNodes, []string{"w-1"}) || forgets[0].Node.Resets != 1 {
+		t.Errorf("when the machine was forgotten, deleted=%v resets=%d; the object must be gone "+
+			"and the node wiped by then", forgets[0].DeletedNodes, forgets[0].Node.Resets)
+	}
+}
+
+// TestAKubernetesThatIsGoneAfterTheWipeFailsTheRemovalWithTheCommandToRun: the
+// Kubernetes endpoint of a control-plane node's configuration may be that
+// node's own address. After the wipe nothing answers there, the Node object
+// cannot be deleted, and the job says so -- with the command that finishes it
+// -- instead of passing over it.
+func TestAKubernetesThatIsGoneAfterTheWipeFailsTheRemovalWithTheCommandToRun(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		host     string
+		cps, wks int
+		says     []string
+	}{
+		{"w-1", 1, 1, []string{"kubectl delete node w-1", "has been wiped", "stays listed here"}},
+		// A control-plane node has also left etcd, and the sentence says so; a
+		// worker never was a member and the sentence does not claim it.
+		{"cp-1", 3, 0, []string{"kubectl delete node cp-1", "has been wiped and has left etcd", "stays listed here"}},
+	} {
+		t.Run(tc.host, func(t *testing.T) {
+			t.Parallel()
+			r := newRemovalRigWith(t, tc.cps, tc.wks, removalRigOptions{KubeDownAfterWipe: true})
+
+			j := r.await(r.engine, r.submit(r.engine, tc.host).ID, model.JobFailed)
+
+			if cur := j.Steps[j.Current].Name; cur != "delete the Kubernetes node object" {
+				t.Fatalf("the job failed in %q, want the deletion of the Node object", cur)
+			}
+			d := stepNamed(j, "delete the Kubernetes node object").Detail
+			for _, want := range tc.says {
+				if !strings.Contains(d, want) {
+					t.Errorf("the failure %q does not say %q", d, want)
+				}
+			}
+			if tc.host == "w-1" && strings.Contains(d, "left etcd") {
+				t.Errorf("the failure %q claims a worker left etcd", d)
+			}
+			if got := r.sim(tc.host).Node().Resets; got != 1 {
+				t.Errorf("the node was wiped %d times, want once", got)
+			}
+			if !r.known(tc.host) {
+				t.Error("the machine was forgotten although the Node object could not be deleted")
+			}
+			if st := stepNamed(j, "forget the node").State; st != model.StepPending {
+				t.Errorf("the forget step is %s, want pending: it did not run", st)
+			}
+		})
+	}
+}
+
+// TestAFailedNodeObjectDeletionFailsTheRemovalAndNamesTheNodeTheClusterCalledIt:
+// the API answers and refuses. The name in the command is the one the cluster
+// listed, not text from the request.
+func TestAFailedNodeObjectDeletionFailsTheRemovalAndNamesTheNodeTheClusterCalledIt(t *testing.T) {
+	t.Parallel()
+	r := newRemovalRigWith(t, 1, 1, removalRigOptions{
+		// The cluster knows the kubelet as W-1; the inventory says w-1.
+		Nodes: []kubesim.Node{{Name: "W-1"}},
+		Sim: func(o *kubesim.Options) {
+			o.Nodes = slices.DeleteFunc(o.Nodes, func(n kubesim.Node) bool { return n.Name == "w-1" })
+		},
+	})
+	r.ksim.FailNodeDeletes(true)
+
+	j := r.await(r.engine, r.submit(r.engine, "w-1").ID, model.JobFailed)
+
+	if cur := j.Steps[j.Current].Name; cur != "delete the Kubernetes node object" {
+		t.Fatalf("the job failed in %q, want the deletion of the Node object", cur)
+	}
+	d := stepNamed(j, "delete the Kubernetes node object").Detail
+	for _, want := range []string{"kubectl delete node W-1", "has been wiped", "stays listed here"} {
+		if !strings.Contains(d, want) {
+			t.Errorf("the failure %q does not say %q", d, want)
+		}
+	}
+	if !r.known("w-1") || r.sim("w-1").Node().Resets != 1 {
+		t.Error("the node must be wiped and still in the inventory")
+	}
+}
+
+// TestARestartBeforeTheNodeObjectDeletionStillDeletesIt: the wipe is done, the
+// object is still there.
+func TestARestartBeforeTheNodeObjectDeletionStillDeletesIt(t *testing.T) {
+	t.Parallel()
+	r := newRemovalRig(t, 1, 1)
+	r.stage(t, r.machine("w-1"), "delete the Kubernetes node object", model.StepPending)
+
+	second := r.newEngine()
+	if err := second.Resume(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	all, _ := second.List(t.Context())
+	r.await(second, all[0].ID, model.JobSucceeded)
+
+	if got := r.ksim.DeletedNodes(); !slices.Equal(got, []string{"w-1"}) {
+		t.Errorf("deleted nodes %v, want [w-1]", got)
+	}
+	if got := r.sim("w-1").Node().Resets; got != 0 {
+		t.Errorf("a resume at the deletion wiped the node %d times", got)
+	}
+	if r.known("w-1") {
+		t.Error("the machine is still in the inventory")
+	}
+}
+
+// TestARestartInsideTheNodeObjectDeletionDoesNotFailOnANodeThatIsAlreadyGone:
+// the DELETE went through just before the crash. The step asks, finds no node
+// and is skipped; it does not fail on the second DELETE.
+func TestARestartInsideTheNodeObjectDeletionDoesNotFailOnANodeThatIsAlreadyGone(t *testing.T) {
+	t.Parallel()
+	r := newRemovalRig(t, 1, 1)
+	if err := r.kubeClient(t).DeleteNode(t.Context(), "w-1"); err != nil {
+		t.Fatalf("DeleteNode: %v", err)
+	}
+	r.stage(t, r.machine("w-1"), "delete the Kubernetes node object", model.StepRunning)
+
+	second := r.newEngine()
+	if err := second.Resume(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	all, _ := second.List(t.Context())
+	after := r.await(second, all[0].ID, model.JobSucceeded)
+
+	if st := stepNamed(after, "delete the Kubernetes node object").State; st != model.StepSkipped {
+		t.Errorf("the deletion step is %s, want skipped: the object was already gone", st)
+	}
+	if r.known("w-1") {
+		t.Error("the machine is still in the inventory")
 	}
 }

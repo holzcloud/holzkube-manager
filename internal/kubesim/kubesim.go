@@ -707,6 +707,11 @@ type Server struct {
 	// pass because something was evicted, and the reverse.
 	deleted []string
 
+	// deletedNodes is the Node objects a DELETE removed, in order, and
+	// failNodeDeletes makes a DELETE of a Node answer 500 instead.
+	deletedNodes    []string
+	failNodeDeletes bool
+
 	deployments []Deployment
 
 	// applied are the objects server-side apply wrote, keyed by
@@ -1315,11 +1320,14 @@ func renderNode(n Node) corev1.Node {
 	}
 }
 
-// serveNode is one node: the patch a cordon is, and nothing else.
+// serveNode is one node: the get a detail reads, the patch a cordon is, and
+// the delete that ends a removal.
 //
-// Only spec.unschedulable is applied, deliberately: a fake that applied any
-// patch would accept patches a real API server rejects, and the product sends
-// exactly this one.
+// Only spec.unschedulable is applied by a patch, deliberately: a fake that
+// applied any patch would accept patches a real API server rejects, and the
+// product sends exactly this one. A delete removes the Node object and leaves
+// its pods as they are: tidying the pods of a node that is gone is the
+// cluster's pod garbage collection, and not something this simulation does.
 func (s *Server) serveNode(w http.ResponseWriter, r *http.Request) {
 	name := strings.TrimPrefix(r.URL.Path, "/api/v1/nodes/")
 	// The kubelet's summary, through the node proxy: the one proxied node path
@@ -1338,6 +1346,10 @@ func (s *Server) serveNode(w http.ResponseWriter, r *http.Request) {
 	// because until then nothing asked for one node.
 	if r.Method == http.MethodGet {
 		s.writeNode(w, name)
+		return
+	}
+	if r.Method == http.MethodDelete {
+		s.deleteNode(w, name)
 		return
 	}
 	if r.Method != http.MethodPatch {
@@ -1367,6 +1379,65 @@ func (s *Server) serveNode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.writeNode(w, name)
+}
+
+// deleteNode removes a Node object, or answers NotFound as the real server
+// does for one it does not have.
+func (s *Server) deleteNode(w http.ResponseWriter, name string) {
+	s.mu.Lock()
+	if s.failNodeDeletes {
+		s.mu.Unlock()
+		writeJSON(w, http.StatusInternalServerError, metav1.Status{
+			TypeMeta: metav1.TypeMeta{APIVersion: "v1", Kind: "Status"},
+			Status:   "Failure",
+			Message:  "kubesim was told to fail node deletions",
+			Reason:   metav1.StatusReasonInternalError,
+			Code:     http.StatusInternalServerError,
+		})
+		return
+	}
+	found := false
+	for i := range s.nodes {
+		if s.nodes[i].Name == name {
+			s.nodes = append(s.nodes[:i:i], s.nodes[i+1:]...)
+			s.deletedNodes = append(s.deletedNodes, name)
+			found = true
+			break
+		}
+	}
+	s.mu.Unlock()
+
+	if !found {
+		writeJSON(w, http.StatusNotFound, metav1.Status{
+			TypeMeta: metav1.TypeMeta{APIVersion: "v1", Kind: "Status"},
+			Status:   "Failure",
+			Reason:   metav1.StatusReasonNotFound,
+			Code:     http.StatusNotFound,
+		})
+		return
+	}
+	writeJSON(w, http.StatusOK, metav1.Status{
+		TypeMeta: metav1.TypeMeta{APIVersion: "v1", Kind: "Status"},
+		Status:   "Success",
+		Code:     http.StatusOK,
+	})
+}
+
+// FailNodeDeletes makes every DELETE of a Node answer 500 until it is turned
+// off: the API that is there and does not do what it is asked, which a test
+// cannot get from a server that is simply closed.
+func (s *Server) FailNodeDeletes(fail bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.failNodeDeletes = fail
+}
+
+// DeletedNodes is the Node objects a DELETE removed, in the order the calls
+// came. A test reads it to prove a node was deleted rather than assume it.
+func (s *Server) DeletedNodes() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]string(nil), s.deletedNodes...)
 }
 
 // writeNode answers one node, which is a patch's response body.

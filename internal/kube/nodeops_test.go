@@ -71,3 +71,31 @@ func TestFindNodeForNeverMatchesAnEmptyHostname(t *testing.T) {
 		t.Fatalf("FindNodeIn with no hostname and no address matched %+v", n)
 	}
 }
+
+// TestDeleteNodeIsGoneInTheNextListAndNotFoundIsNotAnError: deleting the Node
+// object of a machine that was wiped removes it from what the cluster lists,
+// and deleting one that is already gone is the outcome that was asked for.
+func TestDeleteNodeIsGoneInTheNextListAndNotFoundIsNotAnError(t *testing.T) {
+	t.Parallel()
+
+	ctx := testContext(t)
+	sim, client := newCluster(t, kubesim.Options{Nodes: []kubesim.Node{{Name: "cp-1"}, {Name: "w-1"}}})
+
+	if err := client.DeleteNode(ctx, "w-1"); err != nil {
+		t.Fatalf("DeleteNode: %v", err)
+	}
+	nodes, err := client.Nodes(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(nodes) != 1 || nodes[0].Name != "cp-1" {
+		t.Errorf("the cluster lists %+v after the delete, want only cp-1", nodes)
+	}
+	if got := sim.DeletedNodes(); len(got) != 1 || got[0] != "w-1" {
+		t.Errorf("DeletedNodes = %v, want [w-1]", got)
+	}
+
+	if err := client.DeleteNode(ctx, "w-1"); err != nil {
+		t.Errorf("deleting a node that is already gone returned %v, want nil", err)
+	}
+}

@@ -3,7 +3,11 @@ package kube
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
+
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 // ErrNoNodeFor reports a machine Kubernetes has no node for: one that never
@@ -52,4 +56,21 @@ func (c *Client) FindNodeFor(ctx context.Context, hostname, addr string) (Node, 
 		return n, nil
 	}
 	return Node{}, ErrNoNodeFor
+}
+
+// DeleteNode deletes a node's Node object.
+//
+// A node that is already gone is not an error: the object not being there is
+// the outcome that was asked for, and a removal that was interrupted just
+// after the delete went through must be able to say so on its second look.
+// Any other failure comes back with the verb, in the pattern of Cordon.
+//
+// The name is the one the cluster gave (FindNodeFor), never one a request
+// carried.
+func (c *Client) DeleteNode(ctx context.Context, node string) error {
+	err := c.cs.CoreV1().Nodes().Delete(ctx, node, metav1.DeleteOptions{})
+	if err != nil && !apierrors.IsNotFound(err) {
+		return fmt.Errorf("kube: deleting node %s: %w", node, err)
+	}
+	return nil
 }

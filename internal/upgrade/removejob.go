@@ -48,7 +48,15 @@ import (
 //     removal of one member looks to the cluster like the loss of two.
 //  6. **wipe the node**: reset of the system disk, so the machine does not
 //     rejoin on its next boot with the cluster's PKI.
-//  7. **forget the node**: take it out of the inventory. Without it the
+//  7. **delete the Kubernetes node object** (all roles), through the
+//     Kubernetes API. After the wipe and not before: a kubelet that is still
+//     running puts its object back, and once the machine is wiped none is
+//     left to. Nothing else deletes the object, so without this step the
+//     machine stays on the cluster's node list as NotReady for ever. If the
+//     API no longer answers -- the endpoint in a control-plane node's
+//     configuration can be that node's own address -- the job fails here, in
+//     words that name `kubectl delete node`, rather than pass over it.
+//  8. **forget the node**: take it out of the inventory. Without it the
 //     dashboard shows a node that is never coming back, which is
 //     indistinguishable from one that is down.
 //
@@ -68,6 +76,11 @@ import (
 //     tells "wiped a moment ago" from "booting for another reason", and the
 //     cost of guessing wrong is a second wipe. The RPC only initiates, so the
 //     window is milliseconds, and the job parks for a person.
+//   - delete the node object: verifiable. Kubernetes lists a node for the
+//     machine or it does not; one that is not listed has been deleted, and a
+//     restart inside the DELETE skips the step instead of failing on a second
+//     one. Cannot tell (Kubernetes does not answer) is not an error: the
+//     delete is safe to repeat, and the repeat says what is left.
 //   - forget: verifiable. The machine is in the inventory or it is not.
 
 // removeRoleParam is the job parameter that decides the step list. It is
@@ -99,7 +112,7 @@ func removeNodeSteps(d Deps, j model.Job) ([]jobs.Step, error) {
 	if role == model.RoleControlPlane {
 		steps = append(steps, d.leaveEtcdStep(j), d.settleStep())
 	}
-	return append(steps, d.wipeStep(j), d.forgetStep(j)), nil
+	return append(steps, d.wipeStep(j), d.deleteNodeStep(j), d.forgetStep(j)), nil
 }
 
 // wait is how long the settle step waits.
@@ -451,6 +464,15 @@ type kubeTarget struct {
 	node    kube.Node
 }
 
+// kubeDown is a Kubernetes that did not answer: the client could not be had,
+// or the list of nodes could not be read. It is a type of its own because the
+// steps that find it say different things -- before the drain, nothing has
+// been changed; after the wipe, the node is gone and the object is not.
+type kubeDown struct{ err error }
+
+func (e *kubeDown) Error() string { return e.err.Error() }
+func (e *kubeDown) Unwrap() error { return e.err }
+
 // kubeNode resolves a removal's machine to its Kubernetes node.
 //
 // It returns work, a visible skip, or an error. A Kubernetes that does not
@@ -462,26 +484,46 @@ type kubeTarget struct {
 // first is the cordon step's: nothing has been changed yet, and the sentence
 // says so, because that is what the operator most needs to hear.
 func (d Deps) kubeNode(ctx context.Context, job *model.Job, first bool) (kubeTarget, kubeSkip, error) {
-	m, _, err := d.thisMachine(ctx, job)
-	if err != nil {
-		return kubeTarget{}, kubeWork, err
+	t, skip, err := d.resolveNode(ctx, job)
+	if err == nil {
+		return t, skip, nil
 	}
 	changed := ""
 	if first {
 		changed = ". Nothing has been changed"
 	}
-
-	if d.Kube == nil {
+	var down *kubeDown
+	if errors.As(err, &down) {
+		return kubeTarget{}, kubeWork, fmt.Errorf("upgrade: Kubernetes did not answer, so %s cannot "+
+			"be drained before it is removed: %w%s", nameOf(t.machine), down.err, changed)
+	}
+	if t.machine.ID != "" && errors.Is(err, errNoKubeClient) {
 		return kubeTarget{}, kubeWork, fmt.Errorf("upgrade: this build was wired without a Kubernetes "+
-			"client, so %s cannot be drained before it is removed%s", nameOf(m), changed)
+			"client, so %s cannot be drained before it is removed%s", nameOf(t.machine), changed)
+	}
+	return kubeTarget{}, kubeWork, err
+}
+
+// errNoKubeClient is a build wired without Deps.Kube.
+var errNoKubeClient = errors.New("upgrade: no Kubernetes client was wired")
+
+// resolveNode is kubeNode without the words: what Kubernetes says about the
+// machine, with the machine returned alongside any failure so that the caller
+// can name it.
+func (d Deps) resolveNode(ctx context.Context, job *model.Job) (kubeTarget, kubeSkip, error) {
+	m, _, err := d.thisMachine(ctx, job)
+	if err != nil {
+		return kubeTarget{}, kubeWork, err
+	}
+	if d.Kube == nil {
+		return kubeTarget{machine: m}, kubeWork, errNoKubeClient
 	}
 	client, err := d.Kube(ctx, job.Cluster)
 	if errors.Is(err, kube.ErrNoKubernetesAuthority) {
 		return kubeTarget{machine: m}, kubeNoAccess, nil
 	}
 	if err != nil {
-		return kubeTarget{}, kubeWork, fmt.Errorf("upgrade: Kubernetes did not answer, so %s cannot "+
-			"be drained before it is removed: %w%s", nameOf(m), err, changed)
+		return kubeTarget{machine: m}, kubeWork, &kubeDown{err: err}
 	}
 
 	node, err := client.FindNodeFor(ctx, m.Hostname, m.Addr)
@@ -489,8 +531,7 @@ func (d Deps) kubeNode(ctx context.Context, job *model.Job, first bool) (kubeTar
 		return kubeTarget{machine: m}, kubeNoNode, nil
 	}
 	if err != nil {
-		return kubeTarget{}, kubeWork, fmt.Errorf("upgrade: Kubernetes did not answer, so %s cannot "+
-			"be drained before it is removed: %w%s", nameOf(m), err, changed)
+		return kubeTarget{machine: m}, kubeWork, &kubeDown{err: err}
 	}
 	return kubeTarget{machine: m, client: client, node: node}, kubeWork, nil
 }
@@ -588,6 +629,84 @@ func (d Deps) drainStep(_ model.Job) jobs.Step {
 			return len(left) == 0, nil
 		},
 	}
+}
+
+// deleteNodeStep deletes the machine's Node object, after the wipe.
+//
+// After and not before: a kubelet that is still running puts its object back
+// within seconds of a delete, so a delete before the wipe can be undone by the
+// node it was meant to remove. Once the machine is wiped no kubelet is left to
+// do that. The object has to go at all because nothing else deletes it: Talos
+// does not, and a removed machine would stay on every node list as NotReady for
+// ever, indistinguishable from one that is down.
+//
+// The API may not answer any more. The Kubernetes endpoint in the
+// configuration of a control-plane node is sometimes that node's own address,
+// which no longer answers once it is wiped; this cannot be told from the
+// repository. Then the step fails, in words that name the command which
+// finishes it, and it does not skip: a removal that reports success with the
+// object still listed is worse than one that says what is left.
+func (d Deps) deleteNodeStep(_ model.Job) jobs.Step {
+	return jobs.Step{
+		Name: "delete the Kubernetes node object",
+		Do: func(ctx context.Context, job *model.Job) error {
+			detail := &job.Steps[job.Current].Detail
+			t, skip, err := d.resolveNode(ctx, job)
+			if err != nil {
+				if ctx.Err() != nil {
+					// Shutting down or cancelled: an interruption, not a verdict.
+					return err
+				}
+				return d.nodeObjectLeft(job, t.machine, "", err)
+			}
+			switch skip {
+			case kubeNoAccess:
+				*detail = "this cluster has no Kubernetes access configured, so the node's " +
+					"Kubernetes object was not deleted"
+				return nil
+			case kubeNoNode:
+				*detail = "Kubernetes has no node for " + nameOf(t.machine) +
+					", so there was nothing to delete"
+				return nil
+			case kubeWork:
+			}
+
+			if err := t.client.DeleteNode(ctx, t.node.Name); err != nil {
+				if ctx.Err() != nil {
+					return err
+				}
+				return d.nodeObjectLeft(job, t.machine, t.node.Name, err)
+			}
+			*detail = "deleted the Kubernetes node object " + t.node.Name
+			return nil
+		},
+		// An object that is not there has been deleted. Cannot tell is not an
+		// error: deleting twice is harmless, and an error would park a job that
+		// is safe to carry on.
+		Happened: func(ctx context.Context, job *model.Job) (bool, error) {
+			_, skip, err := d.resolveNode(ctx, job)
+			if err != nil {
+				return false, nil //nolint:nilerr // cannot tell; the delete is safe to repeat
+			}
+			return skip == kubeNoNode, nil
+		},
+	}
+}
+
+// nodeObjectLeft is the sentence for a Node object that could not be deleted.
+// The machine is wiped by now, and for a control-plane node it has left etcd,
+// so the sentence says what is true and what to run.
+func (d Deps) nodeObjectLeft(job *model.Job, m model.Machine, node string, cause error) error {
+	if node == "" {
+		node = nameOf(m)
+	}
+	done := "has been wiped"
+	if model.MachineRole(job.Params[removeRoleParam]) == model.RoleControlPlane {
+		done = "has been wiped and has left etcd"
+	}
+	return fmt.Errorf("upgrade: %s %s, but its Kubernetes node object could not be deleted: %w. "+
+		"Delete it yourself with `kubectl delete node %s`. The machine stays listed here until "+
+		"it is forgotten by hand", nameOf(m), done, cause, node)
 }
 
 // drainFailure is the sentence a drain that did not finish ends the job with.
