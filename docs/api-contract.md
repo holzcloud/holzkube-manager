@@ -5119,8 +5119,11 @@ Kubernetes API before anything that cannot be taken back, in this order:
   (`kubernetes_node`), also when the node was already cordoned, and removes it
   when it skips. A node that was already cordoned stays as it is and is not
   marked.
-- `drain the node` evicts the node's pods through the eviction API and never
-  deletes one. It honours every budget: for a pod a budget refuses it asks again,
+- `drain the node` acts on the node the cordon step named (`kubernetes_node`), not
+  on a new search through the inventory, so a machine the inventory lists under
+  another hostname or address since the cordon is still drained; only that name
+  missing from the cluster's list of nodes is "nothing to drain". It evicts the
+  node's pods through the eviction API and never deletes one. It honours every budget: for a pod a budget refuses it asks again,
   up to ten minutes (`DrainBudget`), and it waits for the evicted pods to leave.
   DaemonSet and static pods stay; a pod with an `emptyDir` is evicted and counted;
   a node whose kubelet is not Ready has its pods evicted but not waited for.

@@ -563,7 +563,7 @@ func (e *kubeDown) Unwrap() error { return e.err }
 // first is the cordon step's: nothing has been changed yet, and the sentence
 // says so, because that is what the operator most needs to hear.
 func (d Deps) kubeNode(ctx context.Context, job *model.Job, first bool) (kubeTarget, kubeSkip, error) {
-	t, skip, err := d.resolveNode(ctx, job)
+	t, skip, err := d.resolveNode(ctx, job, !first)
 	if err == nil {
 		return t, skip, nil
 	}
@@ -591,7 +591,11 @@ var errNoKubeClient = errors.New("upgrade: no Kubernetes client was wired")
 // resolveNode is kubeNode without the words: what Kubernetes says about the
 // machine, with the machine returned alongside any failure so that the caller
 // can name it.
-func (d Deps) resolveNode(ctx context.Context, job *model.Job) (kubeTarget, kubeSkip, error) {
+//
+// byKeptName is every step after the cordon: they act on the node the cordon
+// step named. The cordon step itself never does -- it is the one that writes
+// the name, so a name it finds in the parameters is not one it can trust.
+func (d Deps) resolveNode(ctx context.Context, job *model.Job, byKeptName bool) (kubeTarget, kubeSkip, error) {
 	m, _, err := d.thisMachine(ctx, job)
 	if err != nil {
 		return kubeTarget{}, kubeWork, err
@@ -605,6 +609,24 @@ func (d Deps) resolveNode(ctx context.Context, job *model.Job) (kubeTarget, kube
 	}
 	if err != nil {
 		return kubeTarget{machine: m}, kubeWork, &kubeDown{err: err}
+	}
+
+	// A name the cordon step kept is the node, whatever the inventory says
+	// about the machine since: a machine renamed between two steps would
+	// otherwise be found nowhere, and the drain would say "nothing to drain"
+	// and let the wipe run with the pods still there (review IN-06). Only that
+	// name missing from the cluster's own list is no node.
+	if name := job.Params[kubeNodeParam]; byKeptName && name != "" {
+		nodes, err := client.Nodes(ctx)
+		if err != nil {
+			return kubeTarget{machine: m}, kubeWork, &kubeDown{err: err}
+		}
+		for _, n := range nodes {
+			if n.Name == name {
+				return kubeTarget{machine: m, client: client, node: n}, kubeWork, nil
+			}
+		}
+		return kubeTarget{machine: m}, kubeNoNode, nil
 	}
 
 	node, err := client.FindNodeFor(ctx, m.Hostname, m.Addr)
@@ -684,7 +706,9 @@ func (d Deps) cordonStep(j model.Job) jobs.Step {
 		// Cannot tell is not an error: repeating a cordon is harmless, and an
 		// error here would park a job that is safe to carry on.
 		Happened: func(ctx context.Context, job *model.Job) (bool, error) {
-			t, skip, err := d.kubeNode(ctx, job, false)
+			// first: the cordon step's own check resolves the way its Do
+			// does, through the inventory (see resolveNode).
+			t, skip, err := d.kubeNode(ctx, job, true)
 			if err != nil || skip != kubeWork {
 				return false, nil //nolint:nilerr // cannot tell; the cordon is safe to repeat
 			}
@@ -841,7 +865,7 @@ func (d Deps) deleteNodeStep(_ model.Job) jobs.Step {
 			}
 
 			detail := &job.Steps[job.Current].Detail
-			t, skip, err := d.resolveNode(ctx, job)
+			t, skip, err := d.resolveNode(ctx, job, true)
 			if err != nil {
 				if ctx.Err() != nil {
 					// Shutting down or cancelled: an interruption, not a verdict.
@@ -888,7 +912,7 @@ func (d Deps) deleteNodeStep(_ model.Job) jobs.Step {
 				return errors.Is(err, kube.ErrNoNodeFor), nil
 			}
 
-			_, skip, err := d.resolveNode(ctx, job)
+			_, skip, err := d.resolveNode(ctx, job, true)
 			if err != nil {
 				return false, nil //nolint:nilerr // cannot tell; the delete is safe to repeat
 			}

@@ -1761,3 +1761,43 @@ func TestAStaleRecordedNodeNameIsNeverDeleted(t *testing.T) {
 		t.Errorf("the job still carries kubernetes_node=%q after a cordon step that found no node", v)
 	}
 }
+
+// renamedAfterTheCordon is an inventory that refreshes a machine right after
+// the cordon step patched its node, before the drain runs: the window between
+// two adjacent steps that the review named IN-06.
+func renamedAfterTheCordon(host string) func(*removalRig, model.Machine) model.Machine {
+	return func(r *removalRig, m model.Machine) model.Machine {
+		if m.Hostname == host && r.ksim.Calls("PATCH /api/v1/nodes/"+host) > 0 {
+			m.Hostname = "talos-2xk-9qa"
+			m.Addr = "192.168.1.99"
+		}
+		return m
+	}
+}
+
+// TestADrainFindsTheNodeByTheKeptNameWhenTheInventoryChangedAfterTheCordon is
+// IN-06: the drain step looked the machine up again by hostname and address,
+// so a machine the inventory renamed after the cordon was found nowhere, the
+// step said "nothing to drain", and the wipe ran with the pods still on the
+// node. With a name kept by the cordon step, the drain acts on that node.
+func TestADrainFindsTheNodeByTheKeptNameWhenTheInventoryChangedAfterTheCordon(t *testing.T) {
+	t.Parallel()
+	r := newRemovalRigWith(t, 1, 1, removalRigOptions{
+		Pods:      []kubesim.Pod{replicaPod("web-1", "w-1"), replicaPod("web-2", "w-1")},
+		Inventory: renamedAfterTheCordon("w-1"),
+	})
+
+	j := r.await(r.engine, r.submit(r.engine, "w-1").ID, model.JobSucceeded)
+
+	evicted := r.ksim.Evicted()
+	slices.Sort(evicted)
+	if want := []string{"default/web-1", "default/web-2"}; !slices.Equal(evicted, want) {
+		t.Fatalf("evicted %v, want %v: the wipe ran without the drain", evicted, want)
+	}
+	if d := stepNamed(j, "drain the node").Detail; strings.Contains(d, "nothing to drain") {
+		t.Errorf("the drain step says %q for a node that was there", d)
+	}
+	if got := r.ksim.DeletedNodes(); !slices.Equal(got, []string{"w-1"}) {
+		t.Errorf("deleted nodes %v, want exactly [w-1]", got)
+	}
+}
