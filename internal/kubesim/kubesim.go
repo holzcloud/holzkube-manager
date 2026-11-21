@@ -934,6 +934,20 @@ func (s *Server) SetUnschedulable(name string, unschedulable bool) error {
 	return fmt.Errorf("kubesim: no node named %q", name)
 }
 
+// SetReady changes a node's Ready condition while a test is running: a gate
+// that waits for a node to come back is only measurable if the node can.
+func (s *Server) SetReady(name string, status corev1.ConditionStatus) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for i := range s.nodes {
+		if s.nodes[i].Name == name {
+			s.nodes[i].Ready = status
+			return nil
+		}
+	}
+	return fmt.Errorf("kubesim: no node named %q", name)
+}
+
 func (s *Server) routes() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/version", s.record(s.serveVersion))

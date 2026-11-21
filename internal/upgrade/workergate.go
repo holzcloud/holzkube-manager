@@ -81,6 +81,9 @@ type WorkerInput struct {
 	// Node is the worker's name in Kubernetes.
 	Node string
 
+	// Others is how many other nodes the cluster has that were counted.
+	Others int
+
 	// PodsChecked is how many pods a drain would move, which were asked about.
 	PodsChecked int
 
@@ -114,6 +117,11 @@ type WorkerVerdict struct {
 	Reason string
 
 	Input WorkerInput
+
+	// unanswered is a closed gate because Kubernetes could not be asked, as
+	// against one that was asked and said no. It decides which sentence the
+	// step ends with when the two alternate.
+	unanswered bool
 }
 
 // workerGateBudget is the budget this run uses.
@@ -125,25 +133,54 @@ func (d Deps) workerGateBudget() time.Duration {
 }
 
 // decideWorker is the rule, as a pure function of what was read: a gate is open
-// when no pod would be held. It is separate from the reading for the reason
-// decide is: every branch is about a cluster in a state that is dear to produce.
+// when every other node is Ready and no pod would be held. It is separate from
+// the reading for the reason decide is: every branch is about a cluster in a
+// state that is dear to produce.
+//
+// Readiness comes before the budget in the sentence, and when both are closed
+// both are in it: the operator who fixes one and starts again should not meet
+// the other for the first time then.
 func decideWorker(in WorkerInput) WorkerVerdict {
 	v := WorkerVerdict{Input: in}
-	if len(in.Refusals) == 0 {
+
+	var reasons []string
+	if len(in.NotReady) > 0 {
+		verb, short := "is", "one node"
+		if n := len(in.NotReady); n > 1 {
+			verb, short = "are", strconv.Itoa(n)+" nodes"
+		}
+		reasons = append(reasons, fmt.Sprintf("%s %s not Ready, so this cluster is already %s short of "+
+			"what it has. Taking %s down now is the second failure, not the first. Wait until %s Ready again "+
+			"(or disable the node if it is meant to stay off)",
+			strings.Join(in.NotReady, ", "), verb, short, in.Node, pronounFor(len(in.NotReady))))
+	}
+	if len(in.Refusals) > 0 {
+		held := make([]string, 0, len(in.Refusals))
+		for _, r := range in.Refusals {
+			held = append(held, r.Pod+": "+r.Reason)
+		}
+		reasons = append(reasons, fmt.Sprintf("%s would be held on %s: %s. Talos drains a worker itself when "+
+			"it upgrades and gives up after five minutes and goes on, so a budget would not protect a pod "+
+			"through this upgrade. Raise the replica count of the workload, loosen the budget or move the "+
+			"load, then start the upgrade again",
+			podCount(len(in.Refusals)), in.Node, strings.Join(held, "; ")))
+	}
+
+	if len(reasons) == 0 {
 		v.OK = true
 		return v
 	}
-
-	held := make([]string, 0, len(in.Refusals))
-	for _, r := range in.Refusals {
-		held = append(held, r.Pod+": "+r.Reason)
-	}
-	v.Reason = fmt.Sprintf("%s would be held on %s: %s. Talos drains a worker itself when it upgrades and "+
-		"gives up after five minutes and goes on, so a budget would not protect a pod through this upgrade. "+
-		"Raise the replica count of the workload, loosen the budget or move the load, then start the "+
-		"upgrade again",
-		podCount(len(in.Refusals)), in.Node, strings.Join(held, "; "))
+	v.Reason = strings.Join(reasons, ". ")
 	return v
+}
+
+// pronounFor is "it is" for one node and "they are" for several, as the
+// sentence about waiting needs it.
+func pronounFor(n int) string {
+	if n == 1 {
+		return "it is"
+	}
+	return "they are"
 }
 
 // podCount is "1 pod" or "3 pods".
@@ -154,10 +191,35 @@ func podCount(n int) string {
 	return strconv.Itoa(n) + " pods"
 }
 
-// summary is the detail of a gate that passed.
+// summary is the detail of a gate that passed: what it looked at, what it left
+// out on purpose, and what it saw and does not refuse for.
 func (v WorkerVerdict) summary(name string) string {
-	return fmt.Sprintf("Kubernetes can spare %s: %s asked about, none would be held (dry run, nothing was changed)",
-		name, podCount(v.Input.PodsChecked))
+	in := v.Input
+	others := "no other node to check"
+	switch in.Others {
+	case 0:
+	case 1:
+		others = "1 other node Ready"
+	default:
+		others = strconv.Itoa(in.Others) + " other nodes Ready"
+	}
+	parts := []string{fmt.Sprintf("Kubernetes can spare %s: %s, %s asked about and none would be held "+
+		"(a dry run, nothing was changed)", name, others, podCount(in.PodsChecked))}
+
+	if len(in.Ignored) > 0 {
+		parts = append(parts, strings.Join(in.Ignored, ", ")+" left out of the readiness check: its machine "+
+			"is switched off on purpose (Disabled here)")
+	}
+	if in.SelfReady != "" && in.SelfReady != "True" {
+		parts = append(parts, fmt.Sprintf("%s is not Ready itself (Ready=%s), so its reboot takes nothing "+
+			"away and the gate does not hold it for that", name, in.SelfReady))
+	}
+	if len(in.Unowned) > 0 {
+		parts = append(parts, "pods that no controller owns: "+strings.Join(in.Unowned, ", ")+
+			". Talos stops them when the node reboots, nothing recreates them, and no budget protects them. "+
+			"This does not hold the gate")
+	}
+	return strings.Join(parts, "; ")
 }
 
 // workerGateStep is the step before a node's upgrade step. One for every node,
@@ -189,7 +251,7 @@ func workerGateStep(d Deps, cluster model.ClusterID, id model.MachineID) jobs.St
 					"step, so this one has nothing to check"
 				return nil
 			}
-			return d.holdWorkerGate(ctx, cluster, me, detail)
+			return d.holdWorkerGate(ctx, cluster, me, machines, detail)
 		},
 
 		// The gate only reads, and asking it again costs a call and risks
@@ -200,7 +262,13 @@ func workerGateStep(d Deps, cluster model.ClusterID, id model.MachineID) jobs.St
 }
 
 // holdWorkerGate asks until the gate is open, the budget ends, or ctx does.
-func (d Deps) holdWorkerGate(ctx context.Context, cluster model.ClusterID, me model.Machine, detail *string) error {
+func (d Deps) holdWorkerGate(
+	ctx context.Context,
+	cluster model.ClusterID,
+	me model.Machine,
+	machines []model.Machine,
+	detail *string,
+) error {
 	budget := d.workerGateBudget()
 	deadline := d.now().Add(budget)
 	var last string
@@ -214,8 +282,7 @@ func (d Deps) holdWorkerGate(ctx context.Context, cluster model.ClusterID, me mo
 		// One pass, under a context that ends with the budget: the call that
 		// hangs is bounded by it, not only the loop around it.
 		passCtx, cancel := context.WithTimeout(ctx, remaining)
-		verdict, err := d.evaluateWorker(passCtx, cluster, me)
-		cut := passCtx.Err() != nil // the budget ended while this pass was asking
+		verdict, err := d.evaluateWorker(passCtx, cluster, me, machines)
 		cancel()
 
 		if ctx.Err() != nil {
@@ -233,10 +300,12 @@ func (d Deps) holdWorkerGate(ctx context.Context, cluster model.ClusterID, me mo
 			*detail = verdict.summary(nameOf(me))
 			return nil
 		}
-		// A pass the budget cut short has not learned anything: what it reports
-		// is the budget's end, and it must not replace what the last complete
-		// pass found, which is the reason the operator can act on.
-		if !cut || last == "" {
+		// A pass that could not ask has not learned anything. Near the end of the
+		// budget the passes that cannot ask are mostly the budget's own end, in
+		// the client's words, and one of them must not replace what an earlier
+		// pass found: a pod held by a named budget is the reason the operator can
+		// act on, and the gate stays closed either way.
+		if !verdict.unanswered || last == "" {
 			last = verdict.Reason
 		}
 
@@ -262,7 +331,12 @@ func closedGate(me model.Machine, budget time.Duration, reason string) error {
 // evaluateWorker reads the cluster once and decides. An error is only for a
 // build that cannot ask at all; everything Kubernetes does wrong is a verdict
 // that is not OK, and the loop asks again.
-func (d Deps) evaluateWorker(ctx context.Context, cluster model.ClusterID, me model.Machine) (WorkerVerdict, error) {
+func (d Deps) evaluateWorker(
+	ctx context.Context,
+	cluster model.ClusterID,
+	me model.Machine,
+	machines []model.Machine,
+) (WorkerVerdict, error) {
 	if d.Kube == nil {
 		return WorkerVerdict{}, fmt.Errorf("upgrade: this build was wired without a Kubernetes client, so "+
 			"the gate before %s cannot run. A gate that never runs would be a lie, so the upgrade stops", nameOf(me))
@@ -277,25 +351,53 @@ func (d Deps) evaluateWorker(ctx context.Context, cluster model.ClusterID, me mo
 		return unanswered(ctx, err), nil
 	}
 
-	node, err := client.FindNodeFor(ctx, me.Hostname, me.Addr)
-	if errors.Is(err, kube.ErrNoNodeFor) {
+	nodes, err := client.Nodes(ctx)
+	if err != nil {
+		return unanswered(ctx, err), nil
+	}
+	node, ok := kube.FindNodeIn(nodes, me.Hostname, me.Addr)
+	if !ok {
 		return WorkerVerdict{Skipped: "Kubernetes has no node for " + nameOf(me) +
 			" (it never joined, or the cluster has forgotten it), so there is nothing to check"}, nil
 	}
-	if err != nil {
-		return unanswered(ctx, err), nil
+
+	// The nodes this cluster's own inventory says are off on purpose are not
+	// counted: the power model keeps them off, and a gate that counted them
+	// would refuse every upgrade for as long as an operator had switched one
+	// off. They are named in the detail. This is a judgement of this gate and
+	// not something Kubernetes says.
+	ignored := map[string]bool{}
+	for _, m := range machines {
+		if !m.Disabled || m.ID == me.ID {
+			continue
+		}
+		if n, found := kube.FindNodeIn(nodes, m.Hostname, m.Addr); found {
+			ignored[n.Name] = true
+		}
+	}
+
+	in := WorkerInput{Node: node.Name, SelfReady: node.Ready}
+	for _, n := range nodes {
+		switch {
+		case n.Name == node.Name:
+		case ignored[n.Name]:
+			in.Ignored = append(in.Ignored, n.Name)
+		default:
+			in.Others++
+			if n.Ready != "True" {
+				in.NotReady = append(in.NotReady, n.Name+" (Ready="+n.Ready+")")
+			}
+		}
 	}
 
 	check, err := client.CheckEvictions(ctx, node.Name, kube.DrainOptions{DeleteLocalData: true})
 	if err != nil {
 		return unanswered(ctx, err), nil
 	}
-	return decideWorker(WorkerInput{
-		Node:        node.Name,
-		PodsChecked: check.Checked,
-		Refusals:    check.Refusals,
-		Unowned:     check.Unowned,
-	}), nil
+	in.PodsChecked = check.Checked
+	in.Refusals = check.Refusals
+	in.Unowned = check.Unowned
+	return decideWorker(in), nil
 }
 
 // unanswered is the verdict for a Kubernetes that could not be asked: not OK,
@@ -307,6 +409,6 @@ func unanswered(ctx context.Context, err error) WorkerVerdict {
 	if ctx.Err() == nil && !errors.Is(err, context.DeadlineExceeded) && !errors.Is(err, context.Canceled) {
 		reason = "Kubernetes did not answer (" + err.Error() + ")"
 	}
-	return WorkerVerdict{Reason: reason + ". A cluster whose API does not answer is not taken as being " +
-		"fine to go on with"}
+	return WorkerVerdict{unanswered: true, Reason: reason + ". A cluster whose API does not answer is " +
+		"not taken as being fine to go on with"}
 }

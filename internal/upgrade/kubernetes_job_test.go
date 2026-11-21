@@ -143,6 +143,17 @@ func TestAKubernetesUpgradeMovesEveryPartAndKeepsTheConfiguration(t *testing.T) 
 		t.Fatalf("the Kubernetes upgrade ended %s", j.State)
 	}
 
+	// No node is rebooted by this upgrade -- a change of the kubelet's
+	// configuration restarts the kubelet and not the machine (assumption A2 of
+	// phase 18, not measured against hardware) -- so it has no gate before a
+	// reboot, and it needs no Kubernetes access to run: this engine is wired
+	// without any.
+	for _, s := range j.Steps {
+		if strings.HasPrefix(s.Name, "check Kubernetes can spare") {
+			t.Errorf("the Kubernetes upgrade has the step %q: a worker's reboot gate belongs to the Talos upgrade", s.Name)
+		}
+	}
+
 	after := readConfig()
 	// The configuration is the node's whole configuration still, with the
 	// images moved -- not the image lines alone.

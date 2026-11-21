@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	corev1 "k8s.io/api/core/v1"
+
 	"github.com/holzcloud/holzkube-manager/internal/jobs"
 	"github.com/holzcloud/holzkube-manager/internal/kube"
 	"github.com/holzcloud/holzkube-manager/internal/kubesim"
@@ -260,5 +262,164 @@ func TestTheGateWaitEndsWhenTheJobIsCancelled(t *testing.T) {
 	}
 	if n := r.sim("w-1").Calls("ImagePull"); n != 0 {
 		t.Errorf("ImagePull was called %d times on a cancelled gate", n)
+	}
+}
+
+// gateStepOf is the gate step of one host in a finished job.
+func gateStepOf(r *removalRig, j model.Job, host string) model.JobStep {
+	return stepNamed(j, gateStepPrefix+string(r.machine(host).ID))
+}
+
+// TestTheGateRefusesWhileAnotherNodeIsNotReady: losing a worker when another
+// one is already out is the second failure. The node is named and nothing was
+// called on the one being upgraded.
+func TestTheGateRefusesWhileAnotherNodeIsNotReady(t *testing.T) {
+	r := newRemovalRigWith(t, 1, 2, removalRigOptions{
+		Nodes: []kubesim.Node{{Name: "w-2", Ready: corev1.ConditionFalse}},
+	})
+	r.deps.WorkerGateBudget = 300 * time.Millisecond
+	e := r.newEngine()
+	upgrade.FastPolling(t)
+
+	j := r.await(e, upgradeWorkers(t, r, e, "w-1").ID, model.JobFailed)
+
+	gate := gateStepOf(r, j, "w-1")
+	if gate.State != model.StepFailed {
+		t.Fatalf("the gate step is %s, want failed", gate.State)
+	}
+	if !strings.Contains(gate.Detail, "w-2") || !strings.Contains(gate.Detail, "Ready=False") {
+		t.Errorf("the failure %q does not name w-2 and its state", gate.Detail)
+	}
+	if n := r.sim("w-1").Calls("ImagePull"); n != 0 {
+		t.Errorf("ImagePull was called %d times on a node the gate had refused", n)
+	}
+	if n := r.sim("w-1").Calls("Upgrade"); n != 0 {
+		t.Errorf("Upgrade was called %d times on a node the gate had refused", n)
+	}
+}
+
+// TestTheGateWaitsForTheNodeToComeBack: the second worker of a rolling upgrade
+// meets the gate while the first one is still coming back.
+func TestTheGateWaitsForTheNodeToComeBack(t *testing.T) {
+	r := newRemovalRigWith(t, 1, 2, removalRigOptions{
+		Nodes: []kubesim.Node{{Name: "w-2", Ready: corev1.ConditionFalse}},
+	})
+	r.deps.WorkerGateBudget = 5 * time.Second
+	e := r.newEngine()
+	upgrade.FastPolling(t)
+
+	go func() {
+		time.Sleep(100 * time.Millisecond)
+		_ = r.ksim.SetReady("w-2", corev1.ConditionTrue)
+	}()
+
+	j := r.await(e, upgradeWorkers(t, r, e, "w-1").ID, model.JobSucceeded)
+	if gate := gateStepOf(r, j, "w-1"); gate.State != model.StepDone {
+		t.Errorf("the gate step is %s, want done", gate.State)
+	}
+	if n := r.sim("w-1").Calls("Upgrade"); n != 1 {
+		t.Errorf("Upgrade was called %d times, want once", n)
+	}
+}
+
+// TestADisabledNodeDoesNotCloseTheGate: a node that is off on purpose is not a
+// node that failed, and without this exception a gate would refuse every
+// upgrade for as long as the operator had switched a node off.
+func TestADisabledNodeDoesNotCloseTheGate(t *testing.T) {
+	r := newRemovalRigWith(t, 1, 2, removalRigOptions{
+		Nodes: []kubesim.Node{{Name: "w-2", Ready: corev1.ConditionFalse}},
+	})
+	r.mu.Lock()
+	for i := range r.machines {
+		if r.machines[i].Hostname == "w-2" {
+			r.machines[i].Disabled = true
+		}
+	}
+	r.mu.Unlock()
+	e := r.newEngine()
+	upgrade.FastPolling(t)
+
+	j := r.await(e, upgradeWorkers(t, r, e, "w-1").ID, model.JobSucceeded)
+
+	if d := gateStepOf(r, j, "w-1").Detail; !strings.Contains(d, "w-2") || !strings.Contains(d, "off on purpose") {
+		t.Errorf("the gate's detail %q does not name w-2 as left out because it is switched off", d)
+	}
+}
+
+// TestTheNodeBeingUpgradedMayItselfBeNotReady: its reboot takes nothing from a
+// node that is not serving, and the detail says that the gate let it through
+// for that reason.
+func TestTheNodeBeingUpgradedMayItselfBeNotReady(t *testing.T) {
+	r := newRemovalRigWith(t, 1, 2, removalRigOptions{
+		Nodes: []kubesim.Node{{Name: "w-1", Ready: corev1.ConditionFalse}},
+	})
+	e := r.newEngine()
+	upgrade.FastPolling(t)
+
+	j := r.await(e, upgradeWorkers(t, r, e, "w-1").ID, model.JobSucceeded)
+
+	if d := gateStepOf(r, j, "w-1").Detail; !strings.Contains(d, "not Ready itself") {
+		t.Errorf("the gate's detail %q does not say the node being upgraded is not Ready", d)
+	}
+}
+
+// TestTheGateRefusesWhenTheClusterCannotSayWhetherAPodMayGo: two budgets on one
+// pod make the server answer 500, which is neither a veto nor consent.
+func TestTheGateRefusesWhenTheClusterCannotSayWhetherAPodMayGo(t *testing.T) {
+	r := newRemovalRigWith(t, 1, 2, removalRigOptions{Pods: []kubesim.Pod{{
+		Namespace: "default", Name: "api-0", Node: "w-1", OwnerKind: "StatefulSet", BudgetsConflict: true,
+	}}})
+	r.deps.WorkerGateBudget = 300 * time.Millisecond
+	e := r.newEngine()
+	upgrade.FastPolling(t)
+
+	j := r.await(e, upgradeWorkers(t, r, e, "w-1").ID, model.JobFailed)
+
+	gate := gateStepOf(r, j, "w-1")
+	if !strings.Contains(gate.Detail, "could not be asked") || !strings.Contains(gate.Detail, "default/api-0") {
+		t.Errorf("the failure %q does not say that the cluster could not be asked about default/api-0", gate.Detail)
+	}
+	if n := r.sim("w-1").Calls("ImagePull"); n != 0 {
+		t.Errorf("ImagePull was called %d times on a node the gate had refused", n)
+	}
+}
+
+// TestAnUnknownKubernetesNodeIsASkipThatSaysSo: a machine that never joined has
+// no pods to protect, and the gate says that it looked and found nothing.
+func TestAnUnknownKubernetesNodeIsASkipThatSaysSo(t *testing.T) {
+	r := newRemovalRigWith(t, 1, 2, removalRigOptions{
+		Sim: func(o *kubesim.Options) {
+			o.Nodes = slices.DeleteFunc(o.Nodes, func(n kubesim.Node) bool { return n.Name == "w-1" })
+		},
+	})
+	e := r.newEngine()
+	upgrade.FastPolling(t)
+
+	j := r.await(e, upgradeWorkers(t, r, e, "w-1").ID, model.JobSucceeded)
+
+	if d := gateStepOf(r, j, "w-1").Detail; !strings.Contains(d, "no node") {
+		t.Errorf("the gate's detail %q does not say that Kubernetes knows no node for the machine", d)
+	}
+}
+
+// TestTheGateNamesPodsNothingOwnsWithoutRefusing: no budget can protect a pod no
+// controller owns, and Talos stops it at the reboot. The gate asks readiness and
+// budgets of the cluster; it says what it saw and does not refuse for this.
+func TestTheGateNamesPodsNothingOwnsWithoutRefusing(t *testing.T) {
+	r := newRemovalRigWith(t, 1, 2, removalRigOptions{Pods: []kubesim.Pod{
+		{Namespace: "default", Name: "scratch", Node: "w-1"},
+		replicaPod("web-1", "w-1"),
+	}})
+	e := r.newEngine()
+	upgrade.FastPolling(t)
+
+	j := r.await(e, upgradeWorkers(t, r, e, "w-1").ID, model.JobSucceeded)
+
+	d := gateStepOf(r, j, "w-1").Detail
+	if !strings.Contains(d, "default/scratch") || !strings.Contains(d, "Talos stops") {
+		t.Errorf("the gate's detail %q does not name the pod nothing owns and say that Talos stops it", d)
+	}
+	if got := r.ksim.Evicted(); len(got) != 0 {
+		t.Errorf("evicted %v: the gate never changes a workload", got)
 	}
 }
