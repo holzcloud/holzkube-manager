@@ -96,6 +96,13 @@ type removalRigOptions struct {
 	// endpoint is the address of the node being removed: the API is there
 	// until the node is wiped and not after.
 	KubeDownAfterWipe bool
+
+	// Inventory is what the inventory says about a machine at the moment it is
+	// asked. A refresh after the wipe can give a wiped machine, which boots
+	// into maintenance mode, another hostname and another address: this is how
+	// a test says so. Nil is the machine as it was created. The function is
+	// called under the rig's lock and must not take it.
+	Inventory func(r *removalRig, m model.Machine) model.Machine
 }
 
 // rigSnapshot is what the rig can see at one moment: the node a Connect
@@ -226,7 +233,13 @@ func newRemovalRigWith(t *testing.T, controlPlanes int, workers int, opts remova
 		Machines: func(context.Context, model.ClusterID) ([]model.Machine, error) {
 			r.mu.Lock()
 			defer r.mu.Unlock()
-			return append([]model.Machine(nil), r.machines...), nil
+			out := append([]model.Machine(nil), r.machines...)
+			if opts.Inventory != nil {
+				for i := range out {
+					out[i] = opts.Inventory(r, out[i])
+				}
+			}
+			return out, nil
 		},
 		Forget: func(_ context.Context, id model.MachineID) error {
 			r.mu.Lock()
@@ -1493,5 +1506,258 @@ func TestARestartInsideTheNodeObjectDeletionDoesNotFailOnANodeThatIsAlreadyGone(
 	}
 	if r.known("w-1") {
 		t.Error("the machine is still in the inventory")
+	}
+}
+
+// renamedAfterTheWipe is an inventory that has refreshed a machine after its
+// wipe: a machine in maintenance mode asks DHCP again and comes back under
+// another hostname and another address. Whether a real inventory does that
+// between the wipe and the deletion of the Node object is not known; the
+// review could not rule it out, so the rig makes it so.
+func renamedAfterTheWipe(host string) func(*removalRig, model.Machine) model.Machine {
+	return func(r *removalRig, m model.Machine) model.Machine {
+		if m.Hostname == host && r.sim(host).Node().Resets > 0 {
+			m.Hostname = "talos-2xk-9qa"
+			m.Addr = "192.168.1.99"
+		}
+		return m
+	}
+}
+
+// renamedFromTheStart is the same inventory without the wait for the wipe, for
+// a test that stages a job at the deletion step.
+func renamedFromTheStart(host string) func(*removalRig, model.Machine) model.Machine {
+	return func(_ *removalRig, m model.Machine) model.Machine {
+		if m.Hostname == host {
+			m.Hostname = "talos-2xk-9qa"
+			m.Addr = "192.168.1.99"
+		}
+		return m
+	}
+}
+
+// recordNodeName writes the parameter the cordon step leaves into a staged job,
+// the way a process that died after that step would have stored it.
+func recordNodeName(t *testing.T, r *removalRig, name string) {
+	t.Helper()
+	j, err := r.st.Jobs().Get(t.Context(), "staged-removal")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if j.Params == nil {
+		j.Params = map[string]string{}
+	}
+	j.Params["kubernetes_node"] = name
+	if _, err := r.st.Jobs().Put(t.Context(), j); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestTheNodeObjectIsDeletedByTheNameTheCordonFoundWhenTheInventoryChangedAfterTheWipe
+// is WR-02: the deletion used to look the machine up again by hostname and
+// address, and a machine the inventory calls something else after its wipe was
+// found nowhere, which the step reported as "nothing to delete": success, with
+// the Node object still listed. The cordon step now keeps the name the cluster
+// gave the node, and that name is what is deleted.
+func TestTheNodeObjectIsDeletedByTheNameTheCordonFoundWhenTheInventoryChangedAfterTheWipe(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name  string
+		nodes []kubesim.Node
+	}{
+		{"schedulable", nil},
+		// The name is held when the node was cordoned before the job as well:
+		// the deletion needs it either way.
+		{"already-cordoned", []kubesim.Node{{Name: "w-1", Unschedulable: true}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			r := newRemovalRigWith(t, 1, 1, removalRigOptions{
+				Nodes:     tc.nodes,
+				Inventory: renamedAfterTheWipe("w-1"),
+			})
+
+			j := r.await(r.engine, r.submit(r.engine, "w-1").ID, model.JobSucceeded)
+
+			if got := r.ksim.DeletedNodes(); !slices.Equal(got, []string{"w-1"}) {
+				t.Fatalf("deleted nodes %v, want exactly [w-1]", got)
+			}
+			nodes, err := r.kubeClient(t).Nodes(t.Context())
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, n := range nodes {
+				if n.Name == "w-1" {
+					t.Error("the Node object is still listed after the removal")
+				}
+			}
+			d := stepNamed(j, "delete the Kubernetes node object").Detail
+			if !strings.Contains(d, "w-1") || strings.Contains(d, "nothing to delete") {
+				t.Errorf("the deletion step says %q, want it to name w-1 and not say there was nothing to delete", d)
+			}
+			if got := j.Params["kubernetes_node"]; got != "w-1" {
+				t.Errorf("the job's parameters are %v, want kubernetes_node=w-1", j.Params)
+			}
+		})
+	}
+}
+
+// TestARecordedNodeObjectIsNeverReportedAsNothingToDelete: once the cordon step
+// has kept a name there is a Node object to delete, and the deletion either
+// deletes it or fails with the command to run. Kubernetes that does not answer,
+// a configuration that has lost its Kubernetes authority since, and a DELETE the
+// API refuses are the three ways it cannot; none is a skip, and none names the
+// machine by the hostname the inventory now has.
+func TestARecordedNodeObjectIsNeverReportedAsNothingToDelete(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name string
+		opts func(*removalRigOptions)
+		pre  func(*removalRig)
+	}{
+		{"kubernetes-gone", func(o *removalRigOptions) { o.KubeDownAfterWipe = true }, nil},
+		{"authority-gone", func(o *removalRigOptions) {
+			o.Kube = func(r *removalRig) func(context.Context, model.ClusterID) (*kube.Client, error) {
+				return func(ctx context.Context, cluster model.ClusterID) (*kube.Client, error) {
+					if r.sim("w-1").Node().Resets > 0 {
+						return nil, fmt.Errorf("inventory: cluster homelab: %w", kube.ErrNoKubernetesAuthority)
+					}
+					return r.newKubeClient(ctx, cluster)
+				}
+			}
+		}, nil},
+		{"delete-refused", func(*removalRigOptions) {}, func(r *removalRig) { r.ksim.FailNodeDeletes(true) }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			opts := removalRigOptions{Inventory: renamedAfterTheWipe("w-1")}
+			tc.opts(&opts)
+			r := newRemovalRigWith(t, 1, 1, opts)
+			if tc.pre != nil {
+				tc.pre(r)
+			}
+
+			j := r.await(r.engine, r.submit(r.engine, "w-1").ID, model.JobFailed)
+
+			if cur := j.Steps[j.Current].Name; cur != "delete the Kubernetes node object" {
+				t.Fatalf("the job failed in %q, want the deletion of the Node object", cur)
+			}
+			d := stepNamed(j, "delete the Kubernetes node object").Detail
+			for _, want := range []string{"kubectl delete node w-1", "has been wiped"} {
+				if !strings.Contains(d, want) {
+					t.Errorf("the failure %q does not say %q", d, want)
+				}
+			}
+			for _, not := range []string{
+				"kubectl delete node talos-2xk-9qa", "nothing to delete", "no Kubernetes access configured",
+			} {
+				if strings.Contains(d, not) {
+					t.Errorf("the failure %q says %q", d, not)
+				}
+			}
+			if !r.known("w-1") {
+				t.Error("the machine was forgotten although the Node object could not be deleted")
+			}
+			if st := stepNamed(j, "forget the node").State; st != model.StepPending {
+				t.Errorf("the forget step is %s, want pending: it did not run", st)
+			}
+		})
+	}
+}
+
+// TestARestartInsideTheNodeObjectDeletionAsksForTheRecordedName: after a
+// restart the step asks about the name that was kept, not about the machine's
+// hostname, which the inventory has since changed. A node that is listed is
+// deleted; a Kubernetes that does not answer fails the step with the command
+// and is not taken for "already gone".
+func TestARestartInsideTheNodeObjectDeletionAsksForTheRecordedName(t *testing.T) {
+	t.Parallel()
+
+	t.Run("kubernetes-answers", func(t *testing.T) {
+		t.Parallel()
+		r := newRemovalRigWith(t, 1, 1, removalRigOptions{Inventory: renamedFromTheStart("w-1")})
+		r.stage(t, r.machine("w-1"), "delete the Kubernetes node object", model.StepRunning)
+		recordNodeName(t, r, "w-1")
+
+		second := r.newEngine()
+		if err := second.Resume(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+		after := r.await(second, "staged-removal", model.JobSucceeded)
+
+		if st := stepNamed(after, "delete the Kubernetes node object").State; st != model.StepDone {
+			t.Errorf("the deletion step is %s, want done: the node was still listed", st)
+		}
+		if got := r.ksim.DeletedNodes(); !slices.Equal(got, []string{"w-1"}) {
+			t.Errorf("deleted nodes %v, want [w-1]", got)
+		}
+	})
+
+	t.Run("kubernetes-silent", func(t *testing.T) {
+		t.Parallel()
+		r := newRemovalRigWith(t, 1, 1, removalRigOptions{
+			Inventory: renamedFromTheStart("w-1"),
+			Kube: func(*removalRig) func(context.Context, model.ClusterID) (*kube.Client, error) {
+				return func(context.Context, model.ClusterID) (*kube.Client, error) {
+					return nil, errors.New("dial tcp 192.168.1.10:6443: connect: connection refused")
+				}
+			},
+		})
+		r.stage(t, r.machine("w-1"), "delete the Kubernetes node object", model.StepRunning)
+		recordNodeName(t, r, "w-1")
+
+		second := r.newEngine()
+		if err := second.Resume(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+		after := r.await(second, "staged-removal", model.JobFailed)
+
+		if cur := after.Steps[after.Current].Name; cur != "delete the Kubernetes node object" {
+			t.Fatalf("the job failed in %q, want the deletion of the Node object", cur)
+		}
+		if d := stepNamed(after, "delete the Kubernetes node object").Detail; !strings.Contains(d, "kubectl delete node w-1") {
+			t.Errorf("the failure %q does not name the command for w-1", d)
+		}
+		if !r.known("w-1") {
+			t.Error("the machine was forgotten although the Node object was not deleted")
+		}
+	})
+}
+
+// TestAStaleRecordedNodeNameIsNeverDeleted: a name that stood in the job's
+// parameters before the cordon step ran is not the cordon step's. When that
+// step finds no node for the machine it takes the parameter away, and the
+// deletion deletes nothing -- least of all the other node the stale name is.
+func TestAStaleRecordedNodeNameIsNeverDeleted(t *testing.T) {
+	t.Parallel()
+	r := newRemovalRigWith(t, 1, 1, removalRigOptions{
+		Nodes: []kubesim.Node{{Name: "w-9"}},
+		Sim: func(o *kubesim.Options) {
+			o.Nodes = slices.DeleteFunc(o.Nodes, func(n kubesim.Node) bool { return n.Name == "w-1" })
+		},
+	})
+	r.stage(t, r.machine("w-1"), "cordon the node", model.StepPending)
+	recordNodeName(t, r, "w-9")
+
+	second := r.newEngine()
+	if err := second.Resume(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	after := r.await(second, "staged-removal", model.JobSucceeded)
+
+	if slices.Contains(r.ksim.DeletedNodes(), "w-9") {
+		t.Error("the stale name was deleted: a Node object that is not the machine's is gone")
+	}
+	nodes, err := r.kubeClient(t).Nodes(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.ContainsFunc(nodes, func(n kube.Node) bool { return n.Name == "w-9" }) {
+		t.Error("w-9 is no longer listed")
+	}
+	if v, ok := after.Params["kubernetes_node"]; ok {
+		t.Errorf("the job still carries kubernetes_node=%q after a cordon step that found no node", v)
 	}
 }

@@ -34,6 +34,8 @@ import (
 //     refuses, before the first change: for a control-plane node the quorum
 //     rule, for every node whether the identity the removal acts as may patch
 //     and delete nodes and evict pods, and whether Kubernetes answers at all.
+//     It also keeps the name the cluster gives the node (kubeNodeParam), for
+//     the steps that come after the wipe.
 //  3. **drain the node** (all roles), through the eviction API, so every
 //     PodDisruptionBudget is honoured. The pods have to be gone before the
 //     node leaves the membership or is wiped, and every refusal has to stand
@@ -62,10 +64,15 @@ import (
 //     Kubernetes API. After the wipe and not before: a kubelet that is still
 //     running puts its object back, and once the machine is wiped none is
 //     left to. Nothing else deletes the object, so without this step the
-//     machine stays on the cluster's node list as NotReady for ever. If the
-//     API no longer answers -- the endpoint in a control-plane node's
-//     configuration can be that node's own address -- the job fails here, in
-//     words that name `kubectl delete node`, rather than pass over it.
+//     machine stays on the cluster's node list as NotReady for ever. The
+//     object deleted is the one the cordon step named, not one found again
+//     through the inventory: a wiped machine boots into maintenance mode and the
+//     inventory may call it something else by then. If the API no longer
+//     answers -- the endpoint in a control-plane node's configuration can be
+//     that node's own address -- or the configuration has lost its Kubernetes
+//     authority since, the job fails here, in words that name `kubectl delete
+//     node <name>`, rather than pass over it. A job that kept no name looks the
+//     machine up through the inventory, as it always did.
 //  8. **forget the node**: take it out of the inventory. Without it the
 //     dashboard shows a node that is never coming back, which is
 //     indistinguishable from one that is down.
@@ -96,8 +103,9 @@ import (
 //     tells "wiped a moment ago" from "booting for another reason", and the
 //     cost of guessing wrong is a second wipe. The RPC only initiates, so the
 //     window is milliseconds, and the job parks for a person.
-//   - delete the node object: verifiable. Kubernetes lists a node for the
-//     machine or it does not; one that is not listed has been deleted, and a
+//   - delete the node object: verifiable. Kubernetes lists a node of the name
+//     the cordon step kept or it does not (a job without that name asks about
+//     the machine instead); one that is not listed has been deleted, and a
 //     restart inside the DELETE skips the step instead of failing on a second
 //     one. Cannot tell (Kubernetes does not answer) is not an error: the
 //     delete is safe to repeat, and the repeat says what is left.
@@ -117,6 +125,23 @@ const removeRoleParam = "role"
 // round: a cordon somebody else set is never released, one too many left in
 // place is named in the sentence.
 const cordonedByJobParam = "cordoned_by_job"
+
+// kubeNodeParam is the job parameter that holds the name the cluster itself
+// gives this machine's Node object, as its own list of nodes shows it (never
+// text from a request). The cordon step writes it as soon as it finds the node,
+// whether the node was cordoned already or not, and removes it when it skips:
+// a value that was there before that step ran is not that step's. The deletion
+// of the Node object reads it, and so does the drain step when it can no longer
+// resolve the node.
+//
+// It exists because the deletion comes after the wipe, and a wiped machine
+// boots into maintenance mode: the inventory may call it something else by
+// then, with another address, and a lookup by hostname and address would find no
+// node and call that success while the object is still listed. A job without
+// the parameter -- the cordon step found no node, or was confirmed after a
+// restart without running -- looks the machine up through the inventory as it
+// always did.
+const kubeNodeParam = "kubernetes_node"
 
 // removalPermissions is what the removal's identity must be allowed to do, and
 // the cordon step asks before it changes anything: a removal that learned
@@ -602,15 +627,24 @@ func (d Deps) cordonStep(j model.Job) jobs.Step {
 			}
 			switch skip {
 			case kubeNoAccess:
+				delete(job.Params, kubeNodeParam)
 				*detail = "this cluster has no Kubernetes access configured, so the node was " +
 					"not cordoned and not drained"
 				return nil
 			case kubeNoNode:
+				delete(job.Params, kubeNodeParam)
 				*detail = "Kubernetes has no node for " + nameOf(t.machine) +
 					", so there was nothing to cordon"
 				return nil
 			case kubeWork:
 			}
+
+			// Kept for the steps after the wipe, which cannot look the machine
+			// up again: see kubeNodeParam.
+			if job.Params == nil {
+				job.Params = map[string]string{}
+			}
+			job.Params[kubeNodeParam] = t.node.Name
 
 			if err := mayRemoveNodes(ctx, t); err != nil {
 				return err
@@ -619,9 +653,6 @@ func (d Deps) cordonStep(j model.Job) jobs.Step {
 			if t.node.Unschedulable {
 				*detail = t.node.Name + " was already cordoned"
 				return nil
-			}
-			if job.Params == nil {
-				job.Params = map[string]string{}
 			}
 			job.Params[cordonedByJobParam] = "true"
 			if err := t.client.Cordon(ctx, t.node.Name, true); err != nil {
@@ -766,6 +797,12 @@ func (d Deps) deleteNodeStep(_ model.Job) jobs.Step {
 	return jobs.Step{
 		Name: "delete the Kubernetes node object",
 		Do: func(ctx context.Context, job *model.Job) error {
+			// A name the cordon step kept is deleted as it is: no new lookup,
+			// and no skip. See kubeNodeParam.
+			if name := job.Params[kubeNodeParam]; name != "" {
+				return d.deleteRecordedNode(ctx, job, name)
+			}
+
 			detail := &job.Steps[job.Current].Detail
 			t, skip, err := d.resolveNode(ctx, job)
 			if err != nil {
@@ -800,6 +837,20 @@ func (d Deps) deleteNodeStep(_ model.Job) jobs.Step {
 		// error: deleting twice is harmless, and an error would park a job that
 		// is safe to carry on.
 		Happened: func(ctx context.Context, job *model.Job) (bool, error) {
+			if name := job.Params[kubeNodeParam]; name != "" {
+				// Asked by the name the cluster gave, not by the machine: only an
+				// answer that lists no node of that name says it is gone.
+				if d.Kube == nil {
+					return false, nil
+				}
+				client, err := d.Kube(ctx, job.Cluster)
+				if err != nil {
+					return false, nil //nolint:nilerr // cannot tell; the delete is safe to repeat
+				}
+				_, err = client.FindNodeFor(ctx, name, "")
+				return errors.Is(err, kube.ErrNoNodeFor), nil
+			}
+
 			_, skip, err := d.resolveNode(ctx, job)
 			if err != nil {
 				return false, nil //nolint:nilerr // cannot tell; the delete is safe to repeat
@@ -809,6 +860,40 @@ func (d Deps) deleteNodeStep(_ model.Job) jobs.Step {
 	}
 }
 
+// deleteRecordedNode deletes the Node object the cordon step named. Every way
+// of not being able to is a failure that names `kubectl delete node <name>`:
+// with a name kept there is an object to delete, so a Kubernetes that does not
+// answer, a configuration that has lost its Kubernetes authority since the
+// cordon, and a DELETE the API refuses are none of them "nothing to delete".
+// The machine is looked up only to say who it is in the sentence.
+func (d Deps) deleteRecordedNode(ctx context.Context, job *model.Job, name string) error {
+	m, _, err := d.thisMachine(ctx, job)
+	if err != nil {
+		if ctx.Err() != nil {
+			return err
+		}
+		return d.nodeObjectLeft(job, model.Machine{}, name, err)
+	}
+	if d.Kube == nil {
+		return d.nodeObjectLeft(job, m, name, errNoKubeClient)
+	}
+	client, err := d.Kube(ctx, job.Cluster)
+	if err != nil {
+		if ctx.Err() != nil {
+			return err
+		}
+		return d.nodeObjectLeft(job, m, name, err)
+	}
+	if err := client.DeleteNode(ctx, name); err != nil {
+		if ctx.Err() != nil {
+			return err
+		}
+		return d.nodeObjectLeft(job, m, name, err)
+	}
+	job.Steps[job.Current].Detail = "deleted the Kubernetes node object " + name
+	return nil
+}
+
 // nodeObjectLeft is the sentence for a Node object that could not be deleted.
 // The machine is wiped by now, and for a control-plane node it has left etcd,
 // so the sentence says what is true and what to run.
@@ -816,13 +901,17 @@ func (d Deps) nodeObjectLeft(job *model.Job, m model.Machine, node string, cause
 	if node == "" {
 		node = nameOf(m)
 	}
+	who := nameOf(m)
+	if who == "" {
+		who = node
+	}
 	done := "has been wiped"
 	if model.MachineRole(job.Params[removeRoleParam]) == model.RoleControlPlane {
 		done = "has been wiped and has left etcd"
 	}
 	return fmt.Errorf("upgrade: %s %s, but its Kubernetes node object could not be deleted: %w. "+
 		"Delete it yourself with `kubectl delete node %s`. The machine stays listed here until "+
-		"it is forgotten by hand", nameOf(m), done, cause, node)
+		"it is forgotten by hand", who, done, cause, node)
 }
 
 // rollbackBudget is how long giving the cordon back may take. Its own deadline,
