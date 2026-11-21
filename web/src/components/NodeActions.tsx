@@ -116,20 +116,25 @@ export function NodeActions({
  * Three things are said here and nowhere else. The first is what happens to the
  * workloads: the node is cordoned and drained first, through the eviction API,
  * so every PodDisruptionBudget holds; a budget that holds a pod for ten minutes
- * or a pod no controller owns stops the removal before anything on the node has
- * changed; and the node's Kubernetes node object is deleted at the end. The
- * server sends the same content back with the job as well (the notice), and it
- * is shown again afterwards on purpose: an operator who read it on the way in
- * has stopped reading by the time it is true. The two have to agree, and
- * neither may say anything that was true only while the product could not
- * drain.
+ * or a pod no controller owns stops the removal before the node leaves etcd or
+ * is wiped, and pods it had already evicted stay evicted (the drain evicts
+ * everything that may go before it reports the ones a budget holds); and the
+ * node's Kubernetes node object is deleted at the end. A cluster this product
+ * has no Kubernetes access to from the start is removed without the cordon, the
+ * drain and the deletion of the node object, and the job says so; a removal
+ * that had access and loses it on the way fails instead. The server sends the
+ * same content back with the job as well (the notice), and it is shown again
+ * afterwards on purpose: an operator who read it on the way in has stopped
+ * reading by the time it is true. The two have to agree, and neither may say
+ * anything that was true only while the product could not drain.
  *
  * The second is that the node's system disk is wiped. It is not wiped further:
  * data disks stay, and the machine comes back in maintenance mode, ready to be
  * provisioned again.
  *
  * The third is where a job that did not finish leaves things. A failure before
- * the wipe leaves the node as it was; a parked job means the wipe may or may
+ * the wipe leaves the node unwiped, in etcd and in the inventory, with the pods
+ * already evicted running elsewhere; a parked job means the wipe may or may
  * not have run, and a person has to look.
  */
 function RemoveFromClusterDialog({
@@ -208,8 +213,16 @@ function RemoveFromClusterDialog({
             <p className="rounded-md border border-amber-600/40 bg-amber-600/10 px-3 py-2 text-amber-700 dark:text-amber-300">
               holzkube-manager cordons this node and drains it first. Pods are evicted, never
               deleted, so every PodDisruptionBudget is honoured. If a budget holds a pod for ten
-              minutes, or a pod no controller owns would be lost, the removal stops before anything
-              on the node has changed. Afterwards the node's Kubernetes node object is deleted.
+              minutes, or a pod no controller owns would be lost, the removal stops before the node
+              leaves etcd or is wiped. Pods it had already evicted stay evicted, and their
+              controllers start them elsewhere; the cordon it set is taken back, or the job says it
+              could not be. Afterwards the node's Kubernetes node object is deleted.
+            </p>
+
+            <p className="rounded-md border border-amber-600/40 bg-amber-600/10 px-3 py-2 text-amber-700 dark:text-amber-300">
+              A cluster this product has no Kubernetes access to from the start is removed without
+              the cordon, the drain and the deletion of the node object, and the job says so; a
+              removal that had access and loses it on the way fails instead.
             </p>
 
             {machine.etcd_member.value && (

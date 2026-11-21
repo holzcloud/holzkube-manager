@@ -10,10 +10,12 @@ import { NodeActions } from '@/components/NodeActions'
  *
  * The route shipped in phase 9 with nothing to click, which made the whole of
  * that phase's etcd work reachable only with curl — the same gap the password
- * form had, and the support bundle after it. What these tests hold is the two
+ * form had, and the support bundle after it. What these tests hold is the
  * things the dialog says that nothing else does: what happens to the workloads
  * before anything else happens (they are cordoned and drained, and a
- * PodDisruptionBudget stops it), and that a removal is not a reset.
+ * PodDisruptionBudget stops it before etcd and the wipe), that a cluster
+ * without Kubernetes access from the start is removed without the drain while
+ * one that loses it on the way fails, and that a removal is not a reset.
  */
 
 function wrap(node: ReactNode) {
@@ -88,10 +90,34 @@ describe('removing a node from its cluster', () => {
     // would not start.
     expect(screen.getByText(/cordons this node and drains it first/i)).toBeInTheDocument()
     expect(screen.getByText(/PodDisruptionBudget/)).toBeInTheDocument()
+    // Where a stopped removal stops, and what it leaves. The drain evicts every
+    // pod that may go before it reports the ones a budget holds, so a failed
+    // removal has already moved some pods; the operator decides from this
+    // sentence whether repeating it is harmless.
+    expect(screen.getByText(/stops before the node leaves etcd or is wiped/i)).toBeInTheDocument()
+    expect(screen.getByText(/already evicted/i)).toBeInTheDocument()
+    expect(screen.queryByText(/before anything on the node/i)).not.toBeInTheDocument()
     // What the screen used to say, and is false since the product drains: the
     // instruction to run the drain by hand before clicking.
     expect(screen.queryByText(/kubectl drain/)).not.toBeInTheDocument()
     expect(screen.queryByText(/cannot\s+cordon or drain/i)).not.toBeInTheDocument()
+  })
+
+  it('says that a cluster without Kubernetes access is removed without the drain', () => {
+    wrap(<NodeActions machine={machine} />)
+    fireEvent.click(screen.getByRole('button', { name: /remove from cluster/i }))
+
+    // Cordon, drain and the deletion of the node object are not unconditional:
+    // a cluster this product has no Kubernetes access to from the start skips
+    // all three, and the job says so. The sentence names its condition, because
+    // a removal that had access and loses it on the way fails instead of
+    // skipping (D-03 Q7 as made precise on 2026-11-21).
+    expect(
+      screen.getByText(
+        /no Kubernetes access to from the start is removed without the cordon, the drain and the deletion of the node object/i,
+      ),
+    ).toBeInTheDocument()
+    expect(screen.getByText(/loses it on the way fails instead/i)).toBeInTheDocument()
   })
 
   it('says that a removal is not a wipe', () => {
