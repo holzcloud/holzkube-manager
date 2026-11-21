@@ -198,5 +198,6 @@ func EveryPermissionThisProductUses(namespace string) []Permission {
 		{Verb: "list", Resource: "services", Namespace: namespace},
 		{Verb: "list", Resource: "nodes"},
 		{Verb: "patch", Resource: "nodes"},
+		{Verb: "delete", Resource: "nodes"},
 	}
 }

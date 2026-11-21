@@ -7,6 +7,8 @@ import (
 	"strings"
 	"time"
 
+	corev1 "k8s.io/api/core/v1"
+
 	"github.com/holzcloud/holzkube-manager/internal/jobs"
 	"github.com/holzcloud/holzkube-manager/internal/kube"
 	"github.com/holzcloud/holzkube-manager/internal/model"
@@ -27,16 +29,24 @@ import (
 //  1. **check the node answers** (all roles). A node that is down fails the job
 //     here, before anything has changed.
 //  2. **cordon the node** (all roles), through the Kubernetes API: nothing new
-//     is scheduled onto it from here on.
+//     is scheduled onto it from here on. This is the first step that asks
+//     anything of the cluster, so it is where everything that can refuse
+//     refuses, before the first change: for a control-plane node the quorum
+//     rule, for every node whether the identity the removal acts as may patch
+//     and delete nodes and evict pods, and whether Kubernetes answers at all.
 //  3. **drain the node** (all roles), through the eviction API, so every
 //     PodDisruptionBudget is honoured. The pods have to be gone before the
 //     node leaves the membership or is wiped, and every refusal has to stand
-//     before the first step that changes the node: a budget that holds, or a
-//     Kubernetes that does not answer, ends the job here with nothing wiped and
-//     the node still in etcd. Talos drains by itself when it resets a node, but
-//     it gives up after five minutes, logs a warning and goes on -- a pod a
-//     budget protects is stopped anyway. This drain takes the veto seriously
-//     and never deletes a pod instead of evicting it.
+//     before the first step that changes the node: a budget that holds, a pod
+//     no controller owns, or a Kubernetes that does not answer ends the job
+//     here with nothing wiped and the node still in etcd. Talos drains by
+//     itself when it resets a node, but it gives up after five minutes, logs a
+//     warning and goes on -- a pod a budget protects is stopped anyway. This
+//     drain takes the veto seriously and never deletes a pod instead of
+//     evicting it, and never evicts a pod nothing would recreate: it names it.
+//     A node whose kubelet reports nothing is the exception to waiting: its
+//     pods cannot finish shutting down, so they are evicted and not waited
+//     for.
 //  4. **leave etcd** (control plane only), on the node itself, so it forfeits
 //     leadership if it has it and removes itself from the membership. Doing
 //     this from another node while this one still runs leaves a member that
@@ -59,6 +69,16 @@ import (
 //  8. **forget the node**: take it out of the inventory. Without it the
 //     dashboard shows a node that is never coming back, which is
 //     indistinguishable from one that is down.
+//
+// A removal that stops before the first irreversible step leaves the node as
+// it found it. When the drain fails -- a budget that holds past the deadline, a
+// pod nothing owns, an API that went away -- the job takes back the cordon it
+// made itself, and says so in the failure. Only its own: the cordon step notes
+// in the job's parameters (cordonedByJobParam) when it was the one that made
+// the node unschedulable, and a cordon without that note was somebody else's
+// and stays. When the job is interrupted instead -- the daemon is shutting
+// down, or the operator cancelled -- nothing is given back, because the job is
+// not over: a restart carries on with the cordon in place.
 //
 // What each step says after an interruption (Resume):
 //
@@ -87,6 +107,30 @@ import (
 // stored with the job so a resumed run rebuilds the steps it was submitted
 // with, whatever the inventory says about the node by then.
 const removeRoleParam = "role"
+
+// cordonedByJobParam is the job parameter that says the cordon step made this
+// node unschedulable itself. It decides, when the drain stops, whether the job
+// gives the cordon back: a cordon the operator set before asking for the
+// removal is theirs and stays. It is written with the end of the cordon step,
+// when the engine saves the job. A crash between the patch and that save
+// leaves the node cordoned and the parameter unset, which is the safe way
+// round: a cordon somebody else set is never released, one too many left in
+// place is named in the sentence.
+const cordonedByJobParam = "cordoned_by_job"
+
+// removalPermissions is what the removal's identity must be allowed to do, and
+// the cordon step asks before it changes anything: a removal that learned
+// after the wipe that it may not delete the Node object would have wiped a
+// machine and left it listed.
+//
+//   - patch nodes: the cordon (and its rollback).
+//   - delete nodes: the deletion of the Node object, after the wipe.
+//   - create pods/eviction: the eviction of every pod the drain moves.
+var removalPermissions = []kube.Permission{
+	{Verb: "patch", Resource: "nodes"},
+	{Verb: "delete", Resource: "nodes"},
+	{Verb: "create", Resource: "pods/eviction"},
+}
 
 // RemovalParams is what a removal job stores.
 func RemovalParams(m model.Machine) map[string]string {
@@ -390,12 +434,6 @@ func (d Deps) forgetStep(j model.Job) jobs.Step {
 	}
 }
 
-// cordonLeftNote is what a failed drain says about the cordon it leaves
-// behind. The job does not take it back yet; the sentence says so rather than
-// leave the operator to find a node nothing is scheduled onto.
-const cordonLeftNote = "The node stays cordoned, so nothing new is scheduled onto it, until it is " +
-	"made schedulable again."
-
 // drainOptions are the drain a removal runs.
 //
 // DeleteLocalData for the reason power.drainOptions gives: the node is about
@@ -536,11 +574,28 @@ func (d Deps) resolveNode(ctx context.Context, job *model.Job) (kubeTarget, kube
 	return kubeTarget{machine: m, client: client, node: node}, kubeWork, nil
 }
 
-func (d Deps) cordonStep(_ model.Job) jobs.Step {
+func (d Deps) cordonStep(j model.Job) jobs.Step {
+	controlPlane := model.MachineRole(j.Params[removeRoleParam]) == model.RoleControlPlane
 	return jobs.Step{
 		Name: "cordon the node",
 		Do: func(ctx context.Context, job *model.Job) error {
 			detail := &job.Steps[job.Current].Detail
+
+			// The quorum rule first, before anything in Kubernetes: a rule that
+			// refuses only after the pods have moved has already cost something.
+			// It is asked again at the leave, which is where it was always
+			// asked, because a job starts later than the request that checked
+			// it and runs for longer than the drain.
+			if controlPlane {
+				m, machines, err := d.thisMachine(ctx, job)
+				if err != nil {
+					return err
+				}
+				if _, err := d.checkRemovable(ctx, m, machines); err != nil {
+					return err
+				}
+			}
+
 			t, skip, err := d.kubeNode(ctx, job, true)
 			if err != nil {
 				return err
@@ -557,11 +612,20 @@ func (d Deps) cordonStep(_ model.Job) jobs.Step {
 			case kubeWork:
 			}
 
+			if err := mayRemoveNodes(ctx, t); err != nil {
+				return err
+			}
+
 			if t.node.Unschedulable {
 				*detail = t.node.Name + " was already cordoned"
 				return nil
 			}
+			if job.Params == nil {
+				job.Params = map[string]string{}
+			}
+			job.Params[cordonedByJobParam] = "true"
 			if err := t.client.Cordon(ctx, t.node.Name, true); err != nil {
+				delete(job.Params, cordonedByJobParam)
 				return fmt.Errorf("upgrade: %s could not be cordoned: %w. Nothing has been changed",
 					nameOf(t.machine), err)
 			}
@@ -578,6 +642,41 @@ func (d Deps) cordonStep(_ model.Job) jobs.Step {
 			return t.node.Unschedulable, nil
 		},
 	}
+}
+
+// mayRemoveNodes asks the cluster whether the identity the removal acts as may
+// do everything the removal will do, and refuses with a sentence if it may not
+// -- or if the cluster cannot be asked, which is no answer to proceed on.
+//
+// The answer is the cluster's own (SelfSubjectAccessReview), so on a client
+// that acts as the operator it is the operator's rights that are checked and
+// not this product's certificate's.
+func mayRemoveNodes(ctx context.Context, t kubeTarget) error {
+	who := t.client.Identity().String()
+	answers, err := t.client.WhatMayI(ctx, removalPermissions)
+	if err != nil {
+		return fmt.Errorf("upgrade: Kubernetes could not be asked whether %s may cordon, evict "+
+			"and delete nodes, so %s was not removed: %w. Nothing has been changed",
+			who, nameOf(t.machine), err)
+	}
+
+	var missing []string
+	for _, a := range answers {
+		if a.Allowed {
+			continue
+		}
+		what := a.Verb + " " + a.Resource
+		if a.Reason != "" {
+			what += " (" + a.Reason + ")"
+		}
+		missing = append(missing, what)
+	}
+	if len(missing) > 0 {
+		return fmt.Errorf("upgrade: removing %s needs permission to cordon, evict and delete nodes, "+
+			"and %s may not: %s. Nothing has been changed",
+			nameOf(t.machine), who, strings.Join(missing, "; "))
+	}
+	return nil
 }
 
 func (d Deps) drainStep(_ model.Job) jobs.Step {
@@ -601,15 +700,32 @@ func (d Deps) drainStep(_ model.Job) jobs.Step {
 			case kubeWork:
 			}
 
-			result, err := t.client.Drain(ctx, t.node.Name, d.drainOptions())
+			opts := d.drainOptions()
+			silent := t.node.Ready != string(corev1.ConditionTrue)
+			if silent {
+				// A kubelet that reports nothing cannot finish shutting a pod
+				// down, so waiting for the pods to leave would be waiting for
+				// the deadline. They are evicted, and the node can still be
+				// removed: it is being wiped anyway.
+				opts.WaitGone = 0
+			}
+
+			result, err := t.client.Drain(ctx, t.node.Name, opts)
 			*detail = result.Summary()
 			if err != nil {
 				if ctx.Err() != nil {
 					// The daemon is shutting down or the operator cancelled:
 					// the engine reads this as an interruption, not a verdict.
+					// Nothing is given back: the job is not over, and a restart
+					// carries on with the cordon in place.
 					return err
 				}
-				return drainFailure(nameOf(t.machine), result, err, cordonLeftNote)
+				return drainFailure(nameOf(t.machine), result, err, giveBackCordon(ctx, job, t))
+			}
+			if silent {
+				*detail += ". The kubelet on this node reports nothing (Ready is " + t.node.Ready +
+					"), so the evicted pods were not waited for: they stay terminating until the " +
+					"cluster's pod garbage collection removes them"
 			}
 			return nil
 		},
@@ -709,18 +825,74 @@ func (d Deps) nodeObjectLeft(job *model.Job, m model.Machine, node string, cause
 		"it is forgotten by hand", nameOf(m), done, cause, node)
 }
 
+// rollbackBudget is how long giving the cordon back may take. Its own deadline,
+// because the context of a job that has just failed may be one that is nearly
+// out of time, and a cordon left in place for want of a second is the kind of
+// thing this exists to prevent.
+const rollbackBudget = 15 * time.Second
+
+// giveBackCordon takes back the cordon the cordon step made, when it made it,
+// and says in a sentence what became of it. The node was schedulable when the
+// job started; a failed drain leaves it as the job found it, except for the
+// pods that have already moved.
+//
+// Only the job's own cordon: one that was there before is the operator's, and
+// releasing it would undo a decision somebody else made.
+func giveBackCordon(ctx context.Context, job *model.Job, t kubeTarget) string {
+	if job.Params[cordonedByJobParam] != "true" {
+		return "It was already cordoned before this removal, as far as the job recorded, and is " +
+			"left that way."
+	}
+
+	// WithoutCancel: a failed drain is the case this is for, and the job's own
+	// context may be about to end.
+	rollback, cancel := context.WithTimeout(context.WithoutCancel(ctx), rollbackBudget)
+	defer cancel()
+	if err := t.client.Cordon(rollback, t.node.Name, false); err != nil {
+		return fmt.Sprintf("It could not be uncordoned again (%v); run `kubectl uncordon %s`.",
+			err, t.node.Name)
+	}
+	return "It was cordoned for this removal and has been uncordoned again."
+}
+
 // drainFailure is the sentence a drain that did not finish ends the job with.
 // It carries what the server said about each pod that stayed -- the budget's
 // own message and the pod's name -- and what is still true: nothing has been
 // wiped and the node has not left etcd. cordonNote says what became of the
-// cordon, and is a parameter because that is the one part which changes when
-// the job learns to take its own cordon back.
+// cordon.
+//
+// Two kinds of pod are told apart from the rest, because what to do about them
+// differs: a pod a PodDisruptionBudget holds, which will move when the budget
+// allows it, and a pod no controller owns, which no waiting will move and
+// which this never evicts.
 func drainFailure(node string, result kube.DrainResult, err error, cordonNote string) error {
 	const untouched = "Nothing has been wiped and the node has not left etcd."
 	if errors.Is(err, kube.ErrDrainBlocked) {
-		return fmt.Errorf("upgrade: %s was not removed: its pods could not all be moved off it (%s). %s %s",
-			node, result.Summary(), untouched, cordonNote)
+		var advice []string
+		if bare := podsBlockedBy(result, func(b kube.BlockedPod) bool { return b.Reason == kube.BarePodReason }); len(bare) > 0 {
+			advice = append(advice, "Pods that no controller owns are never moved by a removal ("+
+				strings.Join(bare, ", ")+"): they have to be deleted or recreated by hand, and the "+
+				"removal can then be repeated.")
+		}
+		if held := podsBlockedBy(result, func(b kube.BlockedPod) bool { return b.Budget }); len(held) > 0 {
+			advice = append(advice, "A PodDisruptionBudget holds "+strings.Join(held, ", ")+
+				": change the budget or wait until it allows the eviction, then repeat the removal.")
+		}
+		advice = append(advice, untouched, cordonNote)
+		return fmt.Errorf("upgrade: %s was not removed: its pods could not all be moved off it (%s). %s",
+			node, result.Summary(), strings.Join(advice, " "))
 	}
 	return fmt.Errorf("upgrade: %s was not removed: draining it failed (%s): %w. %s %s",
 		node, result.Summary(), err, untouched, cordonNote)
+}
+
+// podsBlockedBy names the pods of a drain's result that match.
+func podsBlockedBy(result kube.DrainResult, match func(kube.BlockedPod) bool) []string {
+	var out []string
+	for _, b := range result.Blocked {
+		if match(b) {
+			out = append(out, b.Pod)
+		}
+	}
+	return out
 }

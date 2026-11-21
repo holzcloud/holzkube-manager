@@ -572,16 +572,25 @@ func TestANodeThatAlreadyLeftEtcdSkipsTheLeave(t *testing.T) {
 
 // TestTheLeaveStepRefusesWhenTheClusterCannotSpareTheVoter: the quorum rule
 // runs inside the job too, immediately before the leave, because the job
-// starts later than the request that checked it.
+// starts later than the request that checked it. The cordon step asks it
+// first now (see removejob_kube_test.go), so a refusal at the leave is
+// staged: the job resumes at that step, as it does when the cluster lost a
+// voter while the drain was moving pods.
 func TestTheLeaveStepRefusesWhenTheClusterCannotSpareTheVoter(t *testing.T) {
 	t.Parallel()
 	r := newRemovalRig(t, 2, 0)
+	r.stage(t, r.machine("cp-1"), "leave etcd", model.StepPending)
 
-	id := r.submit(r.engine, "cp-1").ID
+	second := r.newEngine()
+	if err := second.Resume(t.Context()); err != nil {
+		t.Fatalf("Resume: %v", err)
+	}
+	all, _ := second.List(t.Context())
+	id := all[0].ID
 	deadline := time.Now().Add(30 * time.Second)
 	var j model.Job
 	for {
-		j, _ = r.engine.Get(t.Context(), id)
+		j, _ = second.Get(t.Context(), id)
 		if j.State == model.JobFailed || time.Now().After(deadline) {
 			break
 		}

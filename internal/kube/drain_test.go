@@ -511,3 +511,45 @@ func TestEvictingAPodThatIsAlreadyTerminatingIsAcceptedAgain(t *testing.T) {
 		t.Error("SetBudgetRefuses accepted a pod that does not exist")
 	}
 }
+
+// TestADrainCountsThePodsWhoseLocalDataWentWithThem: with the flag, a pod with
+// an emptyDir is evicted and the result says that its contents went with it --
+// a drain that moved it quietly would be the thing DeleteLocalData exists to
+// make a decision. Without the flag the same pod still blocks.
+func TestADrainCountsThePodsWhoseLocalDataWentWithThem(t *testing.T) {
+	t.Parallel()
+
+	ctx := testContext(t)
+	_, client := newCluster(t, kubesim.Options{
+		Nodes: []kubesim.Node{{Name: "w-1"}},
+		Pods: []kubesim.Pod{
+			{Namespace: "default", Name: "cache-0", Node: "w-1", OwnerKind: "ReplicaSet", LocalData: true},
+			{Namespace: "default", Name: "web-1", Node: "w-1", OwnerKind: "ReplicaSet"},
+		},
+	})
+
+	result, err := client.Drain(ctx, "w-1", kube.DrainOptions{DeleteLocalData: true})
+	if err != nil {
+		t.Fatalf("Drain: %v", err)
+	}
+	if !slices.Equal(result.LocalData, []string{"default/cache-0"}) {
+		t.Errorf("LocalData = %v, want only the pod that had an emptyDir", result.LocalData)
+	}
+	if len(result.Evicted) != 2 {
+		t.Errorf("evicted = %v, want both pods", result.Evicted)
+	}
+
+	_, other := newCluster(t, kubesim.Options{
+		Nodes: []kubesim.Node{{Name: "w-1"}},
+		Pods: []kubesim.Pod{
+			{Namespace: "default", Name: "cache-0", Node: "w-1", OwnerKind: "ReplicaSet", LocalData: true},
+		},
+	})
+	without, err := other.Drain(ctx, "w-1", kube.DrainOptions{})
+	if !errors.Is(err, kube.ErrDrainBlocked) {
+		t.Fatalf("a drain without DeleteLocalData returned %v, want ErrDrainBlocked", err)
+	}
+	if len(without.LocalData) != 0 {
+		t.Errorf("LocalData = %v for a pod that was not evicted", without.LocalData)
+	}
+}

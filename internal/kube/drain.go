@@ -135,12 +135,22 @@ type DrainResult struct {
 	// Blocked are the pods that stopped the drain, with the reason each one
 	// gave. A drain with anything here did not finish.
 	Blocked []BlockedPod `json:"blocked"`
+
+	// LocalData are the evicted pods that had an emptyDir volume, whose
+	// contents went with them. Only set when DeleteLocalData allowed it: a
+	// drain that moved such a pod quietly would make the decision
+	// DeleteLocalData exists to put to the caller.
+	LocalData []string `json:"local_data,omitempty"`
 }
 
 // Summary is the sentence a job screen shows for a drain: what moved, what was
 // left on purpose, and each pod that stopped it with the reason it gave.
 func (r DrainResult) Summary() string {
-	parts := []string{strconv.Itoa(len(r.Evicted)) + " evicted"}
+	evicted := strconv.Itoa(len(r.Evicted)) + " evicted"
+	if n := len(r.LocalData); n > 0 {
+		evicted += " (" + strconv.Itoa(n) + " with local storage that went with them)"
+	}
+	parts := []string{evicted}
 	if n := len(r.SkippedDaemonSet); n > 0 {
 		parts = append(parts, strconv.Itoa(n)+" DaemonSet pods left in place")
 	}
@@ -153,10 +163,22 @@ func (r DrainResult) Summary() string {
 	return strings.Join(parts, "; ")
 }
 
+// BarePodReason is the reason a drain gives for a pod no controller owns. It is
+// a constant so that a caller can tell that pod from the others it names
+// without reading the sentence: nothing will recreate such a pod, and only a
+// person can decide what becomes of it.
+const BarePodReason = "no controller owns this pod, so nothing will recreate it elsewhere. " +
+	"Evicting it means losing it"
+
 // BlockedPod is one pod a drain could not move, and why.
 type BlockedPod struct {
 	Pod    string `json:"pod"`
 	Reason string `json:"reason"`
+
+	// Budget is true when a PodDisruptionBudget refused the eviction: the one
+	// reason that waiting can change, and somebody else's statement about their
+	// own availability.
+	Budget bool `json:"budget,omitempty"`
 }
 
 // Cordon marks a node unschedulable, or lets it schedule again.
@@ -222,6 +244,7 @@ func (c *Client) Drain(ctx context.Context, node string, opts DrainOptions) (Dra
 		result.Evicted = unionOf(result.Evicted, pass.result.Evicted)
 		result.SkippedDaemonSet = pass.result.SkippedDaemonSet
 		result.SkippedMirror = pass.result.SkippedMirror
+		result.LocalData = unionOf(result.LocalData, pass.result.LocalData)
 		result.Blocked = pass.result.Blocked
 
 		if waits && parent.Err() != nil {
@@ -388,11 +411,7 @@ func (c *Client) drainPass(ctx context.Context, node string, opts DrainOptions) 
 			// move, and evicting it would only change a record.
 			continue
 		case podBare:
-			result.Blocked = append(result.Blocked, BlockedPod{
-				Pod: name,
-				Reason: "no controller owns this pod, so nothing will recreate it elsewhere. " +
-					"Evicting it means losing it",
-			})
+			result.Blocked = append(result.Blocked, BlockedPod{Pod: name, Reason: BarePodReason})
 			continue
 		case podLocalData:
 			result.Blocked = append(result.Blocked, BlockedPod{
@@ -406,13 +425,17 @@ func (c *Client) drainPass(ctx context.Context, node string, opts DrainOptions) 
 
 		if err := c.evict(ctx, pod, opts); err != nil {
 			var veto *vetoError
-			if errors.As(err, &veto) {
+			isVeto := errors.As(err, &veto)
+			if isVeto {
 				pass.vetoes++
 			}
-			result.Blocked = append(result.Blocked, BlockedPod{Pod: name, Reason: err.Error()})
+			result.Blocked = append(result.Blocked, BlockedPod{Pod: name, Reason: err.Error(), Budget: isVeto})
 			continue
 		}
 		result.Evicted = append(result.Evicted, name)
+		if opts.DeleteLocalData && hasLocalData(pod) {
+			result.LocalData = append(result.LocalData, name)
+		}
 	}
 	return pass, nil
 }
