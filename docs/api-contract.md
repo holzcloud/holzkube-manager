@@ -5114,8 +5114,11 @@ Kubernetes API before anything that cannot be taken back, in this order:
   the removal acts as may `patch nodes`, `delete nodes` and `create pods/eviction`
   (a `SelfSubjectAccessReview`: a refusal names verb, resource and identity, and a
   review that cannot be answered is a refusal too); then it cordons the node and
-  notes in the job's parameters that the job did. A node that was already cordoned
-  stays as it is and is not marked.
+  notes in the job's parameters that the job did. As soon as it finds the node it
+  also keeps the name the cluster lists it under in the job's parameters
+  (`kubernetes_node`), also when the node was already cordoned, and removes it
+  when it skips. A node that was already cordoned stays as it is and is not
+  marked.
 - `drain the node` evicts the node's pods through the eviction API and never
   deletes one. It honours every budget: for a pod a budget refuses it asks again,
   up to ten minutes (`DrainBudget`), and it waits for the evicted pods to leave.
@@ -5128,20 +5131,37 @@ the budget and the pod); a pod no controller owns (named and never evicted, sinc
 only a person decides what becomes of it); a Kubernetes that does not answer, or a
 build wired without a Kubernetes client (a check that cannot look refuses, it does
 not skip); a missing permission. Nothing was wiped and the node has not left etcd.
-The cordon the job made is given back and one that was there before is left; a
-drain interrupted by a shutdown or by a cancel gives nothing back, because the job
-is not over.
+Pods the drain had already evicted stay evicted, and their controllers start them
+elsewhere (the drain evicts every pod that may go before it reports the ones a
+budget holds). The cordon the job set is taken back, or the job says it could not
+be and names `kubectl uncordon <name>`; one that was there before is left. When
+Kubernetes stops answering between `cordon the node` and `drain the node`, the
+drain step fails with that sentence and makes one attempt, through a fresh client
+and its own deadline, to take its cordon back under the kept name: the `detail`
+says it was uncordoned again, or that the node is still cordoned by this removal,
+with `kubectl uncordon <name>`. A drain interrupted by a shutdown or by a cancel
+gives nothing back here either, because the job is not over.
 
-A cluster whose stored configuration holds no Kubernetes authority is removed
-without the drain: the cordon, drain and deletion steps end `done` with a `detail`
-that says they did not run. A machine Kubernetes has no node for is reported the
-same way.
+A cluster whose stored configuration has held no Kubernetes authority from the
+start is removed without the cordon, the drain and the deletion of the node object:
+those steps end `done` with a `detail` that says they did not run. A machine
+Kubernetes has no node for is reported the same way. A job whose `cordon the node`
+kept a name had access and is not such a cluster: if it loses the authority, it
+fails instead, in `drain the node` before the wipe or in `delete the Kubernetes
+node object` after it.
 
 `delete the Kubernetes node object` runs after the wipe, because a kubelet that is
-still running puts its object back within seconds. If it fails (the API does not
-answer any more, or the delete is refused) the job is `failed` with a sentence
-that says the node has been wiped (and, for a control-plane node, has left etcd),
-why the object could not be deleted, and `kubectl delete node <name>`; the machine
+still running puts its object back within seconds. It deletes the name kept in
+`kubernetes_node`, not the result of a new search, because the inventory may list a
+wiped machine under another hostname or address by then. With a kept name, a
+Kubernetes that does not answer, a configuration without Kubernetes authority and
+a refused DELETE are each `failed` with a sentence that says the node has been
+wiped (and, for a control-plane node, has left etcd), why the object could not be
+deleted, and `kubectl delete node <name>` with that name; it never ends `done`
+with "nothing to delete". After a restart inside the step it counts as done only
+if Kubernetes answers and lists no node of that name. A job without a kept name
+(Kubernetes had no node for the machine then, or `cordon the node` was confirmed
+after a restart without running) looks the machine up as before. The machine
 stays listed until it is forgotten by hand.
 
 A job stored before this change, with the earlier list of steps, is **parked** by

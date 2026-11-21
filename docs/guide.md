@@ -1598,22 +1598,29 @@ it for five minutes and then not at all.
   clicked.
 - **It holds the cluster, like any job.** Only one job runs on a cluster at a
   time, so a removal while an upgrade is running is refused until it finishes.
-- **A budget that holds stops the removal before anything on the node has
-  changed.** The drain evicts, it never deletes, so every PodDisruptionBudget is
+- **A budget that holds stops the removal before the node leaves etcd or is
+  wiped.** The drain evicts, it never deletes, so every PodDisruptionBudget is
   honoured, and it asks again for up to ten minutes. Then the job fails in
   *drain the node* and names the budget and the pod. Nothing was wiped and the
-  node has not left etcd. The cordon the job set is taken back; one that was
-  already there stays. Nothing here forces a removal: there is no way past a
-  budget except changing it or waiting for it. A node whose kubelet reports
-  nothing is evicted but not waited for, because it could not finish shutting a
-  pod down.
+  node has not left etcd, but the node is not untouched: the drain evicts every
+  pod that may go before it reports the ones a budget holds, so pods it had
+  already evicted stay evicted, and their controllers have started them on other
+  nodes. The cordon the job set is taken back, or the job says it could not be
+  and names `kubectl uncordon <name>`; a cordon that was already there stays.
+  Nothing here forces a removal: there is no way past a budget except changing
+  it or waiting for it. A node whose kubelet reports nothing is evicted but not
+  waited for, because it could not finish shutting a pod down.
 - **Pods nothing owns stop it too**, by name. Nothing would recreate such a pod,
   so the removal never evicts it: delete it or recreate it yourself, and start
   the removal again.
-- **A cluster this product has no Kubernetes access to** is removed without the
-  drain, and the job says so in its steps. The same goes for a machine
-  Kubernetes has no node for. A Kubernetes that does not answer is different: it
-  stops the removal in the first step, before anything has changed.
+- **A cluster this product has no Kubernetes access to from the start** is
+  removed without the cordon, the drain and the deletion of the node object, and
+  the job says so in its steps. The same goes for a machine Kubernetes has no
+  node for. A removal that had access when it cordoned and loses it on the way
+  fails instead: in *drain the node* before the wipe, or in *delete the
+  Kubernetes node object* after it, with `kubectl delete node <name>`. A
+  Kubernetes that does not answer is different again: it stops the removal in
+  the first step, before anything has changed.
 - **It survives closing the dialog, the browser and a restart of the daemon.** It
   continues where it was: a node that already left etcd is not told to leave
   again, a drain that was interrupted carries on, and the settle wait is not
@@ -1627,12 +1634,19 @@ it for five minutes and then not at all.
   parked.** Their lists of steps changed in this release, so the position the
   job had recorded no longer means what it did. Look at the node, then start it
   again.
-- **What a failure leaves.** Before the wipe, nothing on the node was wiped, it is
-  still listed here and the cordon the job made is given back. After the node
-  left etcd, it stays out; run the removal again to finish it. After the wipe, if
-  only the deletion of the Kubernetes node object fails (the API may not answer
-  any more), the job says so and names `kubectl delete node <name>`; the machine
-  stays listed here until you forget it by hand.
+- **What a failure leaves.** Before the wipe, the node was not wiped and is still
+  listed here, and pods the drain had already evicted run elsewhere. The cordon
+  the job set is taken back, or the job says it could not be (for example when
+  Kubernetes stopped answering after the cordon): then it says the node is still
+  cordoned by this removal and names `kubectl uncordon <name>`. After the node
+  left etcd, it stays out; run the removal again to finish it. After the wipe,
+  the job deletes the Kubernetes node object under the name Kubernetes gave the
+  node when the job cordoned it, so a machine that comes back in maintenance
+  mode under another hostname or address still loses its object; with that name
+  it never reports that there was nothing to delete, it fails and names
+  `kubectl delete node <name>`. That also covers the API not answering any more
+  or refusing the delete; the machine stays listed here until you forget it by
+  hand.
 
 ### Cluster templates
 
@@ -1848,8 +1862,8 @@ Pods a DaemonSet owns and mirror pods are reported and not evicted: they come
 straight back on the same node, which is what they are for.
 
 This closes a gap the product had been papering over with a sentence. Removing a
-node from a cluster now cordons and drains it itself, before anything on the node
-changes, and the upgrade of a worker checks that the cluster can spare it before
+node from a cluster now cordons and drains it itself, before the node leaves etcd
+or is wiped, and the upgrade of a worker checks that the cluster can spare it before
 the node is touched (see the paragraph on workers under *Upgrades and
 SecureBoot*).
 
