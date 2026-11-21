@@ -1168,6 +1168,32 @@ not undo an upgrade; see *It verifies upgrades and does not undo them* below for
 what a rollback is and is not. The snapshot is the way back from the one failure
 a rollback cannot help with.
 
+**Workers have a gate of their own.** Before a worker is rebooted, a step of its
+own (*check Kubernetes can spare ...*, one before every node's upgrade step)
+checks that every other node is Ready (a node you switched off on purpose,
+*Disabled* here, does not count and is named) and asks the cluster, in a dry-run
+eviction, whether each pod a drain would move may go. It never changes a
+workload. If the gate is closed it asks again every ten seconds for up to five
+minutes, because the second worker of a rolling upgrade meets it while the first
+one's pods are still coming back; then the step ends with a sentence, and nothing
+was pulled or started on the node. A budget that allows no disruption at all (a
+single replica with `minAvailable: 1`) stops it **with no way past it**: raise
+the replica count, loosen the budget or move the load, then start the upgrade
+again. Talos drains a worker itself when it upgrades, but its drain gives up
+after five minutes and goes on, so the budget would not protect that pod through
+the whole upgrade; the gate is the reason to say so before the reboot instead of
+after.
+
+What it does not do: it is a snapshot (Talos drains on its own afterwards, and
+the cluster can change in between); it asks one pod at a time (two pods of a
+budget that allows one disruption both pass, and the budget that is dangerous is
+the one that allows none, which it finds); and the preview in the plan does not
+show it, because it runs only in the job. Control-plane nodes keep their etcd
+gate and get no check here, a locked node is skipped, and the Kubernetes upgrade
+has no such gate because it does not reboot a node. A cluster this product has
+no Kubernetes access to gets a step that says the gate did not run; a Kubernetes
+that does not answer refuses.
+
 ### Scheduled etcd backups
 
 *Upgrades -> Backups* (under the etcd panel) keeps etcd snapshots on a schedule.
@@ -1556,10 +1582,15 @@ reason they wrote is on the refusal.
 
 **Removing the node is a job.** *Remove from cluster* on a node's page asks you
 to type its hostname, then runs as a job you can watch in the dialog and on the
-Jobs page, with these steps: check the node answers; *(control plane only)*
-leave etcd and wait for it to settle; wipe the node's system disk; forget the
-node here. Only the system disk is wiped, so the machine comes back in
-maintenance mode and can be provisioned again; its other disks are left alone.
+Jobs page, with these steps: check the node answers; cordon and drain it;
+*(control plane only)* leave etcd and wait for it to settle; wipe the node's
+system disk; delete its Kubernetes node object; forget the node here. Only the
+system disk is wiped, so the machine comes back in maintenance mode and can be
+provisioned again; its other disks are left alone.
+
+The drain comes first because Talos' own drain, inside the reset, gives up after
+five minutes and goes on: a PodDisruptionBudget that holds a pod would protect
+it for five minutes and then not at all.
 
 - **A refusal is immediate.** If the cluster cannot spare the voter, you get the
   reason at once and no job exists. The same rule is checked again right before
@@ -1567,17 +1598,41 @@ maintenance mode and can be provisioned again; its other disks are left alone.
   clicked.
 - **It holds the cluster, like any job.** Only one job runs on a cluster at a
   time, so a removal while an upgrade is running is refused until it finishes.
+- **A budget that holds stops the removal before anything on the node has
+  changed.** The drain evicts, it never deletes, so every PodDisruptionBudget is
+  honoured, and it asks again for up to ten minutes. Then the job fails in
+  *drain the node* and names the budget and the pod. Nothing was wiped and the
+  node has not left etcd. The cordon the job set is taken back; one that was
+  already there stays. Nothing here forces a removal: there is no way past a
+  budget except changing it or waiting for it. A node whose kubelet reports
+  nothing is evicted but not waited for, because it could not finish shutting a
+  pod down.
+- **Pods nothing owns stop it too**, by name. Nothing would recreate such a pod,
+  so the removal never evicts it: delete it or recreate it yourself, and start
+  the removal again.
+- **A cluster this product has no Kubernetes access to** is removed without the
+  drain, and the job says so in its steps. The same goes for a machine
+  Kubernetes has no node for. A Kubernetes that does not answer is different: it
+  stops the removal in the first step, before anything has changed.
 - **It survives closing the dialog, the browser and a restart of the daemon.** It
   continues where it was: a node that already left etcd is not told to leave
-  again, and the settle wait is not waited twice. The one step it cannot check
-  afterwards is the wipe. If the daemon is restarted exactly inside it, the job
-  is **parked** and asks you to look at the node, because a second wipe is the
-  one thing it must not do by guessing. A parked removal can be started again
-  from the node's page: a node that is no longer an etcd member is not refused
-  for the quorum it no longer counts in.
-- **What a failure leaves.** Before the wipe, nothing on the node was wiped and it
-  is still listed here. After the node left etcd, it stays out; run the removal
-  again to finish it.
+  again, a drain that was interrupted carries on, and the settle wait is not
+  waited twice. The one step it cannot check afterwards is the wipe. If the
+  daemon is restarted exactly inside it, the job is **parked** and asks you to
+  look at the node, because a second wipe is the one thing it must not do by
+  guessing. A parked removal can be started again from the node's page: a node
+  that is no longer an etcd member is not refused for the quorum it no longer
+  counts in.
+- **A removal or a Talos upgrade that was running while the daemon updated is
+  parked.** Their lists of steps changed in this release, so the position the
+  job had recorded no longer means what it did. Look at the node, then start it
+  again.
+- **What a failure leaves.** Before the wipe, nothing on the node was wiped, it is
+  still listed here and the cordon the job made is given back. After the node
+  left etcd, it stays out; run the removal again to finish it. After the wipe, if
+  only the deletion of the Kubernetes node object fails (the API may not answer
+  any more), the job says so and names `kubectl delete node <name>`; the machine
+  stays listed here until you forget it by hand.
 
 ### Cluster templates
 
@@ -1793,8 +1848,10 @@ Pods a DaemonSet owns and mirror pods are reported and not evicted: they come
 straight back on the same node, which is what they are for.
 
 This closes a gap the product had been papering over with a sentence. Removing a
-node from a cluster and upgrading one both used to tell you to cordon and drain
-by hand first, because there was no Kubernetes client to do it with.
+node from a cluster now cordons and drains it itself, before anything on the node
+changes, and the upgrade of a worker checks that the cluster can spare it before
+the node is touched (see the paragraph on workers under *Upgrades and
+SecureBoot*).
 
 ### Pods and deployments
 

@@ -4740,6 +4740,67 @@ voters while believing it is taking down the first of three.
 **A single-node cluster is the deliberate exception.** It has no quorum to lose,
 and refusing it would make the smallest homelab unupgradeable.
 
+### Workers have a gate of their own
+
+Before the upgrade step of every node, the job `cluster.upgrade-talos` has a step
+of its own, `check Kubernetes can spare <machine id>`: the list of steps is gate,
+upgrade, gate, upgrade. For a worker it looks at the cluster as it is at that
+moment and checks:
+
+- that every other Kubernetes node is Ready (`Ready` is `True`; `False` and
+  `Unknown` both refuse). A node whose machine is `disabled` in the inventory is
+  off on purpose and is left out, named in the step's `detail`. The node being
+  upgraded may itself be not Ready: its reboot takes nothing from a node that is
+  not serving, and the `detail` says so.
+- for every pod a drain would move, whether the cluster would let it go, as a
+  dry-run eviction (`DeleteOptions.dryRun = All`). The server applies its own
+  budget logic (selector, `maxUnavailable`, `unhealthyPodEvictionPolicy`, several
+  budgets) and nothing of it is recomputed here. **A dry-run eviction changes
+  nothing**: no pod is evicted, deleted or marked terminating. A pod the server
+  cannot answer for (a pod two budgets select answers `500`) is a refusal that says
+  the cluster could not be asked. Pods no controller owns never refuse; they are
+  named in the `detail`, because no budget can protect them and Talos stops them at
+  the reboot.
+
+A gate that is closed is asked again every `pollInterval` (10 s) until
+`WorkerGateBudget` (5 min). The budget is the only time limit the gate has: the
+job engine puts none on a step, so the limit lies in the step itself, and it also
+bounds a single call to Kubernetes that never answers (the step then ends at the
+budget with a sentence that says Kubernetes did not answer, not with a context
+error). A cancel of the job ends the wait at once and the job is `cancelled`, not
+`failed`. When the budget ends the step is `failed` with a sentence that names the
+node, the budget and the pod and says what to do (raise the replica count of the
+workload, loosen the budget or move the load), and nothing was called on the node:
+no image was pulled and nothing was restarted, and the node's upgrade step stays
+`pending`.
+
+The gate is **strict, with no way past it**: a budget that allows no disruption
+(a single replica with `minAvailable: 1`) stops every upgrade of that worker until
+somebody changes the workload or the budget. Talos drains a worker itself during
+the upgrade and gives up after five minutes, so a budget would not protect the pod
+for the whole upgrade; the gate exists to say that before the reboot.
+
+Which nodes get what:
+
+| node | the gate step |
+|---|---|
+| worker | the checks above |
+| control-plane node | a declared no-op: etcd's gate stands in its upgrade step; Kubernetes is not asked |
+| locked node | a declared no-op: the upgrade step skips it; Kubernetes is not asked |
+| a cluster whose stored configuration holds no Kubernetes authority (`ErrNoKubernetesAuthority`) | a visible skip: the `detail` says the gate did not run |
+| a machine Kubernetes has no node for | a visible skip: there is nothing to check |
+| any other failure to reach Kubernetes (timeout, `5xx`, TLS, `403`), a build wired without a Kubernetes client, a `pods/eviction` that is not answered | refuses (a cluster whose API does not answer is not taken as fine); a build with no client fails at once, the rest are asked again until the budget |
+
+`cluster.upgrade-kubernetes` has no such gate: a change of the kubelet's
+configuration restarts the kubelet and not the machine (an assumption, not
+measured on hardware).
+
+The limits: the check is a **snapshot** (Talos drains afterwards on its own and
+the cluster can change in between); it asks **one pod at a time** (two pods of a
+budget that allows one disruption both pass, and the budget that is dangerous is
+the one that allows none, which it finds); and `plan` and `gate_preview` **do not
+show it**, because it runs only in the job.
+
 ### Two voters is the number that decides
 
 Three voting members survive losing one. Two survive losing none: the remaining
@@ -5009,8 +5070,9 @@ reset and rejoined. Nothing in this API does that.
 `POST /api/v1/machines/{id}/remove-from-cluster` takes `{"cluster", "confirmation"}`
 (a token for `node.remove-from-cluster`, bound to that cluster) and **submits a
 job**. It answers `202` with `Location: /api/v1/jobs/{job}` and
-`{"job", "topic", "notice"}`, like every other job route; `notice` is the
-cordon-and-drain sentence below. It used to do the work inside the request and
+`{"job", "topic", "notice"}`, like every other job route; `notice` is the text
+of the constant `RemoveNodeNotice` (what the removal does to the workloads and to
+the node's place in Kubernetes, described below). It used to do the work inside the request and
 answer `200` with `{"machine", "notice"}`; a client that went away, a budget that
 expired or a restart of the daemon left a node out of etcd and not wiped, and the
 route took no cluster lease.
@@ -5021,9 +5083,12 @@ The job's kind is `node.remove-from-cluster` and its parameters are `cluster` an
 | step | roles | resumable after a restart? |
 |---|---|---|
 | `check the node answers` | all | yes (a read) |
+| `cordon the node` | all | yes: whether the node is cordoned is read from the node, and repeating a cordon is harmless; a read that cannot be answered runs the step again |
+| `drain the node` | all | yes: asks whether anything is left on the node that the drain would move; a read that cannot be answered runs the step again |
 | `leave etcd` | control plane | yes: etcd's membership is read through a peer; a node it no longer lists has left, and is **not** told to leave again |
 | `let etcd settle` | control plane | yes: waits `EvictionWait` (15 s) so a raft that has just lost a member settles before the wipe; done once that long has passed since it started |
 | `wipe the node` | all | **no**: reset of the system disk only, `graceful`, rebooting. Nothing can be asked of a node that tells "wiped a moment ago" from "booting for another reason", so a restart inside this step **parks** the job |
+| `delete the Kubernetes node object` | all | yes: the node is in the cluster's list or it is not; deleting twice is harmless |
 | `forget the node` | all | yes: the machine is in the inventory or it is not |
 
 The job holds the cluster's lease (JOB-03): a removal while another job runs on the
@@ -5038,9 +5103,51 @@ leave. A control-plane node etcd no longer lists is not refused for quorum: ther
 is nothing left to lose, and refusing would make a half-finished removal
 impossible to finish.
 
-**Cordon and drain are not performed**, and the response says so. holzkube-manager
-speaks the Talos machine API and not the Kubernetes API. Anything still scheduled
-on the node stops when it does.
+**Cordon and drain come first.** Talos drains in its own reset, but gives up after
+five minutes and goes on, so a PodDisruptionBudget that holds a pod would protect
+it for five minutes and then not at all. The job therefore drains through the
+Kubernetes API before anything that cannot be taken back, in this order:
+
+- `cordon the node` asks, before it changes anything: for a control-plane node the
+  quorum rule (as `failed` of the job with the reason the route's `409` gives; the
+  `409` of the request stays reserved for that rule); then whether the identity
+  the removal acts as may `patch nodes`, `delete nodes` and `create pods/eviction`
+  (a `SelfSubjectAccessReview`: a refusal names verb, resource and identity, and a
+  review that cannot be answered is a refusal too); then it cordons the node and
+  notes in the job's parameters that the job did. A node that was already cordoned
+  stays as it is and is not marked.
+- `drain the node` evicts the node's pods through the eviction API and never
+  deletes one. It honours every budget: for a pod a budget refuses it asks again,
+  up to ten minutes (`DrainBudget`), and it waits for the evicted pods to leave.
+  DaemonSet and static pods stay; a pod with an `emptyDir` is evicted and counted;
+  a node whose kubelet is not Ready has its pods evicted but not waited for.
+
+Each of these ends the job `failed` in its step, before the wipe, with the sentence
+in the step's `detail`: a budget that holds past the deadline (the sentence names
+the budget and the pod); a pod no controller owns (named and never evicted, since
+only a person decides what becomes of it); a Kubernetes that does not answer, or a
+build wired without a Kubernetes client (a check that cannot look refuses, it does
+not skip); a missing permission. Nothing was wiped and the node has not left etcd.
+The cordon the job made is given back and one that was there before is left; a
+drain interrupted by a shutdown or by a cancel gives nothing back, because the job
+is not over.
+
+A cluster whose stored configuration holds no Kubernetes authority is removed
+without the drain: the cordon, drain and deletion steps end `done` with a `detail`
+that says they did not run. A machine Kubernetes has no node for is reported the
+same way.
+
+`delete the Kubernetes node object` runs after the wipe, because a kubelet that is
+still running puts its object back within seconds. If it fails (the API does not
+answer any more, or the delete is refused) the job is `failed` with a sentence
+that says the node has been wiped (and, for a control-plane node, has left etcd),
+why the object could not be deleted, and `kubectl delete node <name>`; the machine
+stays listed until it is forgotten by hand.
+
+A job stored before this change, with the earlier list of steps, is **parked** by
+the engine when the daemon starts, because its recorded position no longer means
+what it did. The same holds for a `cluster.upgrade-talos` job, whose list of steps
+gained the gate described under *Upgrades and etcd*.
 
 **A control-plane node's removal is gated on etcd's membership**, read before
 anything is changed, and refused with `409 conflict.last-voting-member` when the

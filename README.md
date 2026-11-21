@@ -45,8 +45,10 @@ just said, nothing cached or guessed.
   removing a node cordons and drains it first and honours every
   PodDisruptionBudget, and deletes its Kubernetes node object at the end.
 - **Upgrades:** Talos upgrades built from Image Factory schematics, one node at
-  a time behind an etcd health gate, and never without a fresh etcd snapshot.
-  Kubernetes upgrades follow the order of `talosctl upgrade-k8s`.
+  a time behind an etcd health gate (workers get a Kubernetes gate too: every
+  other node Ready, no PodDisruptionBudget that would hold a pod), and never
+  without a fresh etcd snapshot. Kubernetes upgrades follow the order of
+  `talosctl upgrade-k8s`.
 - **etcd backup and restore:** snapshots on a schedule (every 6 hours, daily or
   weekly), with download, checksum and an "overdue" warning.
 - **Certificates and security:** certificate expiry read from the cluster and
