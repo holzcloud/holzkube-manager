@@ -2,7 +2,7 @@ module github.com/holzcloud/holzkube-manager
 
 go 1.26.6
 
-toolchain go1.26.10
+toolchain go1.26.11
 
 require (
 	github.com/alexedwards/argon2id v1.0.0
