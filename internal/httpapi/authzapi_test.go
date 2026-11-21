@@ -285,6 +285,7 @@ func TestAServiceAccountTokenWorksOverHTTP(t *testing.T) {
 		Token   string `json:"token"`
 		Notice  string `json:"notice"`
 		Account struct {
+			ID   string `json:"id"`
 			Kind string `json:"kind"`
 			Role string `json:"role"`
 		} `json:"account"`
@@ -300,6 +301,16 @@ func TestAServiceAccountTokenWorksOverHTTP(t *testing.T) {
 	}
 	if created.Notice == "" {
 		t.Error("nothing told the operator this is the only time the token is shown")
+	}
+
+	// The admin resetting its password. A service account has none to reset,
+	// and before SetPassword refused it the hash was stored and the answer was
+	// 204 -- a reset reported done that could never sign anybody in.
+	if resp, raw := h.do(t, http.MethodPost, "/api/v1/users/"+created.Account.ID+"/password",
+		map[string]string{"password": "long-enough-to-pass"}); resp.StatusCode != http.StatusConflict ||
+		!strings.Contains(string(raw), "conflict.not-a-person") {
+		t.Errorf("resetting a service account's password answered %d, want 409 not-a-person (%s)",
+			resp.StatusCode, raw)
 	}
 
 	c := &asClient{srv: h.srv.URL, client: h.srv.Client(), bearer: created.Token}

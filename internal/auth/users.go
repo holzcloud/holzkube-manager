@@ -11,6 +11,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 
 	"github.com/holzcloud/holzkube-manager/internal/model"
@@ -149,6 +150,12 @@ func (s *Service) SetPassword(ctx context.Context, id model.UserID, password str
 	if err != nil {
 		return err
 	}
+	// A service account signs in with a token and never with a password, so
+	// a password set on one would be stored and mean nothing -- and the
+	// answer would say it had been done.
+	if u.IsService() {
+		return ErrNotAPerson
+	}
 
 	hash, err := Hash(password)
 	if err != nil {
@@ -156,8 +163,22 @@ func (s *Service) SetPassword(ctx context.Context, id model.UserID, password str
 	}
 	u.PasswordHash = hash
 
-	_, err = s.store.Users().Put(ctx, u)
-	return err
+	if _, err := s.store.Users().Put(ctx, u); err != nil {
+		return err
+	}
+
+	// A reset is what an admin does about an account they no longer trust,
+	// and a session opened with the old password is the thing not trusted. It
+	// used to stay open until it expired. The session doing the reset is kept
+	// when it is the account's own -- an admin resetting their own password
+	// this way is not signing themselves out.
+	if err := s.InvalidateUser(ctx, id, s.currentToken(ctx)); err != nil {
+		// As in ChangePassword: the password is written, and reporting a
+		// failure here would say it was not.
+		slog.ErrorContext(ctx, "password reset, but the account's sessions could not all be ended",
+			slog.Any("error", err))
+	}
+	return nil
 }
 
 // refuseIfLastAdmin fails when id is the only account that can manage this

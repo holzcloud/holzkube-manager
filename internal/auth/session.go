@@ -74,6 +74,22 @@ func (s *Service) SessionID(ctx context.Context) string {
 	return s.sm.Token(ctx)
 }
 
+// currentToken is the token of the session ctx carries, or "" when it carries
+// none.
+//
+// scs answers a context without session data with a panic, not an error. A
+// password reset is reached through the session middleware today, but nothing
+// about resetting a password needs a session, and a caller without one -- a
+// test, a command on the host -- must get a reset, not a crash.
+func (s *Service) currentToken(ctx context.Context) (token string) {
+	defer func() {
+		if recover() != nil {
+			token = ""
+		}
+	}()
+	return s.sm.Token(ctx)
+}
+
 // markAuthenticated attaches an identity to the session and stamps the moment
 // the absolute lifetime is counted from.
 //
@@ -157,19 +173,34 @@ func (s *Service) withinAbsoluteLifetime(ctx context.Context) bool {
 	return s.now().Before(time.Unix(0, stamp).Add(s.lifetime))
 }
 
-// InvalidateAllExcept deletes every session record but one.
+// InvalidateUser ends every session of one account except keep.
 //
-// It reaches the sessions through the store rather than through the session
-// manager because there is no per-user index: holzkube-manager has exactly one
-// operator, so every other live session belongs to them, and the question
-// "which of my sessions are these" has no interesting answer.
-func (s *Service) InvalidateAllExcept(ctx context.Context, keep string) error {
+// This used to delete every session record there was, on the reasoning that
+// the instance has exactly one operator and every live session is therefore
+// theirs. It has had accounts and roles since, and the reasoning stayed: any
+// account changing its own password -- a reader will do -- signed everybody
+// else out, and took the sign-ins that were mid-way through the identity
+// provider with them. The other half was missing altogether: an admin
+// resetting somebody's password, which is what one does about an account
+// that is no longer trusted, ended none of that account's sessions.
+//
+// There is no per-user index, so the records are read and each one's owner is
+// taken from its own data. A record that does not decode is left alone: it
+// cannot be said to be this account's, and it authenticates nobody.
+func (s *Service) InvalidateUser(ctx context.Context, user model.UserID, keep string) error {
 	records, err := s.store.Sessions().List(ctx)
 	if err != nil {
 		return fmt.Errorf("auth: list sessions: %w", err)
 	}
 	for _, rec := range records {
 		if rec.ID == keep {
+			continue
+		}
+		_, values, err := s.sm.Codec.Decode(rec.Data)
+		if err != nil {
+			continue
+		}
+		if owner, _ := values[sessionKeyUser].(string); owner != string(user) {
 			continue
 		}
 		if err := s.store.Sessions().Delete(ctx, rec.ID); err != nil {

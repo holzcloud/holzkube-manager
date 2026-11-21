@@ -628,6 +628,11 @@ own change still asks for it, and that asymmetry is deliberate: the account's ow
 change defends against a stolen session, and a reset exists precisely because
 nobody has the old password any more.
 
+Either way, the account's other sessions end: whoever was signed in with the old
+password has to sign in again. A reset keeps the admin's own session, and an own
+change keeps the session that made it. Other accounts stay signed in. A service
+account has no password to reset; it gets a new token instead.
+
 **Upgrading from a single-account installation changes nothing.** An account
 stored before roles existed has none, and that is read as admin — it was the only
 account, so it could do everything, and demoting it on upgrade would be a lockout
