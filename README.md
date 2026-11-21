@@ -41,7 +41,9 @@ just said, nothing cached or guessed.
 - **Live node hardware:** load per core, temperatures, fans, memory, disks and
   network, with 24 hours of history kept across restarts.
 - **Kubernetes:** workloads, pods and why one is broken, events, storage,
-  networking, cordon and drain, apply a manifest, run a command in a container.
+  networking, cordon and drain, apply a manifest, run a command in a container;
+  removing a node cordons and drains it first and honours every
+  PodDisruptionBudget, and deletes its Kubernetes node object at the end.
 - **Upgrades:** Talos upgrades built from Image Factory schematics, one node at
   a time behind an etcd health gate, and never without a fresh etcd snapshot.
   Kubernetes upgrades follow the order of `talosctl upgrade-k8s`.
