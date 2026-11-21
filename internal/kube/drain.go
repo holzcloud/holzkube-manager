@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
+	"strings"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -54,6 +56,18 @@ import (
 // force it, or they fix the budget, or they leave the node alone.
 var ErrDrainBlocked = errors.New("kube: pods on this node cannot be evicted")
 
+// DrainRetry is how long a drain that may retry waits before it asks again for
+// a pod a PodDisruptionBudget refused. Five seconds is the pause Talos' own
+// drain loop takes between attempts, so a removal that drains first is no more
+// insistent on the API server than the reset that follows it.
+const DrainRetry = 5 * time.Second
+
+// DrainGonePoll is how often a drain that waits looks again at pods it has
+// evicted and that are still shutting down. A look is one list call filtered
+// to the node, and a grace period is counted in seconds, so two seconds is
+// quick enough to notice and slow enough not to matter to the API server.
+const DrainGonePoll = 2 * time.Second
+
 // DrainOptions are the choices a drain offers, and each one is a decision this
 // product refuses to make silently.
 type DrainOptions struct {
@@ -97,6 +111,22 @@ type DrainResult struct {
 	// Blocked are the pods that stopped the drain, with the reason each one
 	// gave. A drain with anything here did not finish.
 	Blocked []BlockedPod `json:"blocked"`
+}
+
+// Summary is the sentence a job screen shows for a drain: what moved, what was
+// left on purpose, and each pod that stopped it with the reason it gave.
+func (r DrainResult) Summary() string {
+	parts := []string{strconv.Itoa(len(r.Evicted)) + " evicted"}
+	if n := len(r.SkippedDaemonSet); n > 0 {
+		parts = append(parts, strconv.Itoa(n)+" DaemonSet pods left in place")
+	}
+	if n := len(r.SkippedMirror); n > 0 {
+		parts = append(parts, strconv.Itoa(n)+" static pods left in place")
+	}
+	for _, b := range r.Blocked {
+		parts = append(parts, b.Pod+": "+b.Reason)
+	}
+	return strings.Join(parts, "; ")
 }
 
 // BlockedPod is one pod a drain could not move, and why.

@@ -3,14 +3,18 @@ package upgrade_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"os"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/holzcloud/holzkube-manager/internal/jobs"
+	"github.com/holzcloud/holzkube-manager/internal/kube"
+	"github.com/holzcloud/holzkube-manager/internal/kubesim"
 	"github.com/holzcloud/holzkube-manager/internal/model"
 	"github.com/holzcloud/holzkube-manager/internal/store"
 	"github.com/holzcloud/holzkube-manager/internal/store/fsstore"
@@ -43,10 +47,18 @@ type removalRig struct {
 	all       map[string]model.Machine
 	simByHost map[string]*talossim.Server
 
+	// ksim is the cluster's Kubernetes API, and hostOf names the host behind
+	// each machine id so that a Connect can be recorded against its target.
+	ksim   *kubesim.Server
+	hostOf map[model.MachineID]string
+
+	// snaps is one rigSnapshot per Connect, in order.
+	snaps []rigSnapshot
+
 	// waits is every duration the settle step asked to wait, and atWait is what
-	// the leaving node looked like at that moment.
+	// the leaving node and the cluster looked like at that moment.
 	waits  []time.Duration
-	atWait []talossim.NodeState
+	atWait []rigSnapshot
 	// blockWait makes the fake Wait hang until its context ends, which is how a
 	// test holds a job inside the settle step.
 	blockWait chan struct{}
@@ -54,7 +66,47 @@ type removalRig struct {
 	once      sync.Once
 }
 
+// removalRigOptions are the choices a test makes about the Kubernetes side of
+// a rig and the drain's pace. The zero value is the rig every older test uses:
+// one node per host, no pods, a drain that retries every 10 ms for up to 5 s.
+type removalRigOptions struct {
+	// Pods are the cluster's pods, in kubesim's words.
+	Pods []kubesim.Pod
+
+	// Nodes override the node of the same name; a name no host has is added.
+	Nodes []kubesim.Node
+
+	// Sim edits kubesim's options last, so a test can take the default nodes
+	// away ("Kubernetes has no node for this machine") or add a denial.
+	Sim func(*kubesim.Options)
+
+	// Kube replaces Deps.Kube. It receives the rig so that it can build a
+	// client from the rig's own cluster, or ignore it and fail.
+	Kube func(r *removalRig) func(ctx context.Context, cluster model.ClusterID) (*kube.Client, error)
+
+	// DrainBudget and DrainPace are the drain's deadline and its pause between
+	// attempts. Zero is 5 s and 10 ms here; production runs with the
+	// constants of internal/kube.
+	DrainBudget, DrainPace time.Duration
+}
+
+// rigSnapshot is what the rig can see at one moment: the node a Connect
+// targets, and the cluster around it.
+type rigSnapshot struct {
+	Node talossim.NodeState
+
+	// Evicted is what kubesim has accepted evictions for. PodsOnNode is the
+	// pods kubesim still lists on that node, as "namespace/name".
+	// DeletedNodes is the Node objects kubesim no longer has.
+	Evicted, PodsOnNode, DeletedNodes []string
+}
+
 func newRemovalRig(t *testing.T, controlPlanes int, workers int) *removalRig {
+	t.Helper()
+	return newRemovalRigWith(t, controlPlanes, workers, removalRigOptions{})
+}
+
+func newRemovalRigWith(t *testing.T, controlPlanes int, workers int, opts removalRigOptions) *removalRig {
 	t.Helper()
 
 	cl, err := talossim.NewCluster("homelab", "https://192.168.1.10:6443")
@@ -79,6 +131,7 @@ func newRemovalRig(t *testing.T, controlPlanes int, workers int) *removalRig {
 		sims:      map[model.MachineID]*talossim.Server{},
 		all:       map[string]model.Machine{},
 		simByHost: map[string]*talossim.Server{},
+		hostOf:    map[model.MachineID]string{},
 		entered:   make(chan struct{}),
 	}
 
@@ -100,6 +153,7 @@ func newRemovalRig(t *testing.T, controlPlanes int, workers int) *removalRig {
 		mid := model.MachineID(id)
 		mach := model.Machine{ID: mid, Cluster: removeCluster, Role: role, Hostname: host}
 		r.sims[mid] = sim
+		r.hostOf[mid] = host
 		r.all[host] = mach
 		r.simByHost[host] = sim
 		r.machines = append(r.machines, mach)
@@ -111,7 +165,41 @@ func newRemovalRig(t *testing.T, controlPlanes int, workers int) *removalRig {
 		add("w-"+string(rune('0'+i)), false, "00000000-0000-4000-8000-0000000000"+string(rune('1'+i))+"0")
 	}
 
+	// The cluster's Kubernetes API: one node per host, then what the test says.
+	kopts := kubesim.Options{Pods: opts.Pods}
+	for _, m := range r.machines {
+		kopts.Nodes = append(kopts.Nodes, kubesim.Node{Name: m.Hostname})
+	}
+	for _, n := range opts.Nodes {
+		i := slices.IndexFunc(kopts.Nodes, func(have kubesim.Node) bool { return have.Name == n.Name })
+		if i >= 0 {
+			kopts.Nodes[i] = n
+		} else {
+			kopts.Nodes = append(kopts.Nodes, n)
+		}
+	}
+	if opts.Sim != nil {
+		opts.Sim(&kopts)
+	}
+	ksim, err := kubesim.New(kopts)
+	if err != nil {
+		t.Fatalf("kubesim.New: %v", err)
+	}
+	t.Cleanup(ksim.Close)
+	r.ksim = ksim
+
+	drainBudget, drainPace := opts.DrainBudget, opts.DrainPace
+	if drainBudget == 0 {
+		drainBudget = 5 * time.Second
+	}
+	if drainPace == 0 {
+		drainPace = 10 * time.Millisecond
+	}
+
 	r.deps = upgrade.Deps{
+		DrainBudget:      drainBudget,
+		DrainPace:        drainPace,
+		Kube:             r.newKubeClient,
 		ResolveInstaller: func(context.Context, string, string, bool) (string, error) { return "", nil },
 		Connect: func(ctx context.Context, id model.MachineID) (*talos.ClusterClient, error) {
 			r.mu.Lock()
@@ -120,6 +208,9 @@ func newRemovalRig(t *testing.T, controlPlanes int, workers int) *removalRig {
 			if !ok {
 				return nil, errors.New("no such simulated node")
 			}
+			r.mu.Lock()
+			r.snaps = append(r.snaps, r.snapshotOf(r.hostOf[id]))
+			r.mu.Unlock()
 			return talos.NewClusterClient(ctx, sim.Dialer(), talos.Target{
 				Cluster: "c1", Machine: id, Addr: sim.Host(),
 			}, sim.ClientCreds(), talos.Mode{})
@@ -145,7 +236,7 @@ func newRemovalRig(t *testing.T, controlPlanes int, workers int) *removalRig {
 			r.waits = append(r.waits, d)
 			// What the node being removed looked like when the wait began:
 			// the settle step must come after the leave and before the wipe.
-			r.atWait = append(r.atWait, r.simByHost["cp-1"].Node())
+			r.atWait = append(r.atWait, r.snapshotOf("cp-1"))
 			block := r.blockWait
 			r.mu.Unlock()
 			r.once.Do(func() { close(r.entered) })
@@ -160,8 +251,50 @@ func newRemovalRig(t *testing.T, controlPlanes int, workers int) *removalRig {
 		},
 	}
 
+	if opts.Kube != nil {
+		r.deps.Kube = opts.Kube(r)
+	}
+
 	r.engine = r.newEngine()
 	return r
+}
+
+// newKubeClient is how the daemon reaches the cluster: a certificate minted
+// from the cluster's own Kubernetes authority, fresh every time.
+func (r *removalRig) newKubeClient(context.Context, model.ClusterID) (*kube.Client, error) {
+	caCrt, caKey := r.ksim.AuthorityPEM()
+	creds, err := kube.MintCreds(r.ksim.Endpoint(), caCrt, caKey, time.Now())
+	if err != nil {
+		return nil, err
+	}
+	return kube.New(creds)
+}
+
+// kubeClient is a client for a test's own questions to the cluster.
+func (r *removalRig) kubeClient(t *testing.T) *kube.Client {
+	t.Helper()
+	c, err := r.newKubeClient(t.Context(), removeCluster)
+	if err != nil {
+		t.Fatalf("a client for the simulated cluster: %v", err)
+	}
+	return c
+}
+
+// snapshotOf reads what the rig can see about one host right now.
+func (r *removalRig) snapshotOf(host string) rigSnapshot {
+	return rigSnapshot{
+		Node:    r.simByHost[host].Node(),
+		Evicted: r.ksim.Evicted(),
+	}
+}
+
+// connects is one rigSnapshot per Connect, read from the Connect's target at
+// the moment it was opened. The last one of a removal that ran to the end is
+// the wipe's: it shows what the cluster looked like when the node was reset.
+func (r *removalRig) connects() []rigSnapshot {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return slices.Clone(r.snaps)
 }
 
 func (r *removalRig) newEngine() *jobs.Engine {
@@ -191,10 +324,10 @@ func (r *removalRig) waitList() []time.Duration {
 	return append([]time.Duration(nil), r.waits...)
 }
 
-func (r *removalRig) atWaitList() []talossim.NodeState {
+func (r *removalRig) atWaitList() []rigSnapshot {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	return append([]talossim.NodeState(nil), r.atWait...)
+	return slices.Clone(r.atWait)
 }
 
 func (r *removalRig) submit(e *jobs.Engine, host string) model.Job {
@@ -254,6 +387,33 @@ func leaveCtx(t *testing.T) context.Context {
 	return ctx
 }
 
+// removalStepNames is the step list a removal of this role is submitted with.
+// A test asks for steps by these names, never by position: a step inserted
+// later moves every index and no name.
+func removalStepNames(role model.MachineRole) []string {
+	if role == model.RoleControlPlane {
+		return []string{
+			"check the node answers", "cordon the node", "drain the node",
+			"leave etcd", "let etcd settle", "wipe the node", "forget the node",
+		}
+	}
+	return []string{
+		"check the node answers", "cordon the node", "drain the node",
+		"wipe the node", "forget the node",
+	}
+}
+
+// stepNamed is the job's step of that name. A name the job does not have is
+// the zero step, whose state and detail match no expectation.
+func stepNamed(j model.Job, name string) model.JobStep {
+	for _, s := range j.Steps {
+		if s.Name == name {
+			return s
+		}
+	}
+	return model.JobStep{}
+}
+
 func stepNames(j model.Job) []string {
 	out := make([]string, 0, len(j.Steps))
 	for _, s := range j.Steps {
@@ -271,7 +431,7 @@ func TestRemovingAControlPlaneNodeRunsEveryStepInOrder(t *testing.T) {
 
 	j := r.await(r.engine, r.submit(r.engine, "cp-1").ID, model.JobSucceeded)
 
-	want := []string{"check the node answers", "leave etcd", "let etcd settle", "wipe the node", "forget the node"}
+	want := removalStepNames(model.RoleControlPlane)
 	if got := stepNames(j); strings.Join(got, "|") != strings.Join(want, "|") {
 		t.Fatalf("steps = %v, want %v", got, want)
 	}
@@ -290,7 +450,7 @@ func TestRemovingAControlPlaneNodeRunsEveryStepInOrder(t *testing.T) {
 	if w := r.waitList(); len(w) != 1 || w[0] != upgrade.EvictionWait {
 		t.Fatalf("the settle step waited %v, want exactly [EvictionWait = %s]", w, upgrade.EvictionWait)
 	}
-	if at := r.atWaitList(); len(at) != 1 || at[0].EtcdLeaves != 1 || at[0].Resets != 0 {
+	if at := r.atWaitList(); len(at) != 1 || at[0].Node.EtcdLeaves != 1 || at[0].Node.Resets != 0 {
 		t.Fatalf("at the moment of the wait the node had %+v; it must have left etcd (1 leave) "+
 			"and not yet been wiped (0 resets)", at)
 	}
@@ -310,7 +470,7 @@ func TestRemovingAWorkerLeavesNoEtcdStepsAndWaitsForNothing(t *testing.T) {
 	r := newRemovalRig(t, 1, 1)
 
 	j := r.await(r.engine, r.submit(r.engine, "w-1").ID, model.JobSucceeded)
-	want := []string{"check the node answers", "wipe the node", "forget the node"}
+	want := removalStepNames(model.RoleWorker)
 	if got := stepNames(j); strings.Join(got, "|") != strings.Join(want, "|") {
 		t.Fatalf("steps = %v, want %v", got, want)
 	}
@@ -332,9 +492,9 @@ func TestTheSettleStepReallyWaits(t *testing.T) {
 
 	j := r.await(e, r.submit(e, "cp-1").ID, model.JobSucceeded)
 
-	settle := j.Steps[2]
-	if settle.Name != "let etcd settle" {
-		t.Fatalf("step 2 is %q", settle.Name)
+	settle := stepNamed(j, "let etcd settle")
+	if settle.Name == "" {
+		t.Fatalf("the job has no settle step: %v", stepNames(j))
 	}
 	if took := settle.FinishedAt.Sub(settle.StartedAt); took < 300*time.Millisecond {
 		t.Fatalf("the settle step took %s, want at least the 300ms it was configured with", took)
@@ -365,7 +525,7 @@ func TestANodeThatAlreadyLeftEtcdSkipsTheLeave(t *testing.T) {
 	if got := r.sim("cp-1").Node().EtcdLeaves; got != 1 {
 		t.Fatalf("the node left etcd %d times, want once (the one done by hand)", got)
 	}
-	if d := j.Steps[1].Detail; !strings.Contains(d, "nothing to leave") {
+	if d := stepNamed(j, "leave etcd").Detail; !strings.Contains(d, "nothing to leave") {
 		t.Errorf("the leave step says %q; it should say there was nothing to leave", d)
 	}
 	if r.sim("cp-1").Node().Resets != 1 {
@@ -393,8 +553,8 @@ func TestTheLeaveStepRefusesWhenTheClusterCannotSpareTheVoter(t *testing.T) {
 	if j.State != model.JobFailed {
 		t.Fatalf("job is %s, want failed", j.State)
 	}
-	if !strings.Contains(j.Steps[1].Detail, "voting members") {
-		t.Errorf("the failure %q does not say why", j.Steps[1].Detail)
+	if d := stepNamed(j, "leave etcd").Detail; !strings.Contains(d, "voting members") {
+		t.Errorf("the failure %q does not say why", d)
 	}
 	if n := r.sim("cp-1").Node(); n.EtcdLeaves != 0 || n.Resets != 0 {
 		t.Errorf("the node was touched despite the refusal: %+v", n)
@@ -460,7 +620,8 @@ func TestARestartInsideTheSettleWaitContinuesWithTheWipe(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if stored.Steps[2].State != model.StepRunning || stored.Steps[1].State != model.StepDone {
+	if stepNamed(stored, "let etcd settle").State != model.StepRunning ||
+		stepNamed(stored, "leave etcd").State != model.StepDone {
 		t.Fatalf("the crash left %+v, want leave done and settle running", stored.Steps)
 	}
 	if r.sim("cp-1").Node().Resets != 0 {
@@ -485,8 +646,8 @@ func TestARestartInsideTheSettleWaitContinuesWithTheWipe(t *testing.T) {
 	if r.known("cp-1") {
 		t.Error("the node is still in the inventory after the resumed job finished")
 	}
-	if after.Steps[1].State != model.StepDone {
-		t.Errorf("the leave step is %s, want done: it finished before the crash", after.Steps[1].State)
+	if st := stepNamed(after, "leave etcd").State; st != model.StepDone {
+		t.Errorf("the leave step is %s, want done: it finished before the crash", st)
 	}
 }
 
@@ -512,8 +673,8 @@ func TestARestartAfterTheSettleTimeHasPassedDoesNotWaitAgain(t *testing.T) {
 	}
 	after := r.await(second, j.ID, model.JobSucceeded)
 
-	if after.Steps[2].State != model.StepSkipped {
-		t.Errorf("the settle step is %s, want skipped: the wait had long passed", after.Steps[2].State)
+	if st := stepNamed(after, "let etcd settle").State; st != model.StepSkipped {
+		t.Errorf("the settle step is %s, want skipped: the wait had long passed", st)
 	}
 	if w := r.waitList(); len(w) != waitsBefore {
 		t.Errorf("the resumed job waited again (%v)", w)
@@ -537,7 +698,7 @@ func TestARestartInsideTheLeaveWhenTheNodeAlreadyLeftDoesNotLeaveTwice(t *testin
 	}
 	_ = cc.Close()
 
-	r.stage(t, m, 1, model.StepRunning)
+	r.stage(t, m, "leave etcd", model.StepRunning)
 
 	second := r.newEngine()
 	if err := second.Resume(t.Context()); err != nil {
@@ -546,8 +707,8 @@ func TestARestartInsideTheLeaveWhenTheNodeAlreadyLeftDoesNotLeaveTwice(t *testin
 	jobs, _ := second.List(t.Context())
 	after := r.await(second, jobs[0].ID, model.JobSucceeded)
 
-	if after.Steps[1].State != model.StepSkipped {
-		t.Errorf("the leave step is %s, want skipped: etcd no longer lists the node", after.Steps[1].State)
+	if st := stepNamed(after, "leave etcd").State; st != model.StepSkipped {
+		t.Errorf("the leave step is %s, want skipped: etcd no longer lists the node", st)
 	}
 	if got := r.sim("cp-1").Node().EtcdLeaves; got != 1 {
 		t.Errorf("the node left etcd %d times, want once", got)
@@ -559,7 +720,7 @@ func TestARestartInsideTheLeaveWhenTheNodeAlreadyLeftDoesNotLeaveTwice(t *testin
 func TestARestartInsideTheLeaveWhenTheNodeHasNotLeftRunsTheLeave(t *testing.T) {
 	t.Parallel()
 	r := newRemovalRig(t, 3, 0)
-	r.stage(t, r.machine("cp-1"), 1, model.StepRunning)
+	r.stage(t, r.machine("cp-1"), "leave etcd", model.StepRunning)
 
 	second := r.newEngine()
 	if err := second.Resume(t.Context()); err != nil {
@@ -578,7 +739,7 @@ func TestARestartInsideTheLeaveWhenTheNodeHasNotLeftRunsTheLeave(t *testing.T) {
 func TestARestartInsideTheWipeParksTheJobAndDoesNotWipeAgain(t *testing.T) {
 	t.Parallel()
 	r := newRemovalRig(t, 3, 0)
-	r.stage(t, r.machine("cp-1"), 3, model.StepRunning)
+	r.stage(t, r.machine("cp-1"), "wipe the node", model.StepRunning)
 
 	second := r.newEngine()
 	if err := second.Resume(t.Context()); err != nil {
@@ -604,7 +765,7 @@ func TestARestartInsideTheWipeParksTheJobAndDoesNotWipeAgain(t *testing.T) {
 func TestARestartBeforeTheForgetStillForgets(t *testing.T) {
 	t.Parallel()
 	r := newRemovalRig(t, 3, 0)
-	r.stage(t, r.machine("cp-1"), 4, model.StepPending)
+	r.stage(t, r.machine("cp-1"), "forget the node", model.StepPending)
 
 	second := r.newEngine()
 	if err := second.Resume(t.Context()); err != nil {
@@ -646,34 +807,29 @@ func TestASecondRemovalOnTheSameClusterIsRefusedByTheLease(t *testing.T) {
 	r.await(r.engine, first.ID, model.JobSucceeded)
 }
 
-// stage writes the record a process that died at this point would have left:
-// every step before `at` done, step `at` in the given state, the rest pending.
-func (r *removalRig) stage(t *testing.T, m model.Machine, at int, state model.StepState) {
+// stage writes the record a process that died at this step would have left:
+// every step before it done, the named step in the given state, the rest
+// pending. The step list is the one a removal of the machine's role is
+// submitted with, and the step is found by name.
+func (r *removalRig) stage(t *testing.T, m model.Machine, step string, state model.StepState) {
 	t.Helper()
 
-	build := func() model.Job {
-		j := model.Job{
-			ID: "staged-removal", Kind: model.JobRemoveFromCluster, Cluster: m.Cluster, Machine: m.ID,
-			State: model.JobRunning, Current: at, Params: upgrade.RemovalParams(m),
-			CreatedAt: time.Now().Add(-time.Minute), StartedAt: time.Now().Add(-time.Minute),
-		}
-		return j
-	}
-	j := build()
-
-	// The control-plane step list, as removeNodeSteps builds it, with the
-	// Verifiable flag each had when it was submitted: everything can be asked
-	// about except the wipe.
-	submitted := []model.JobStep{
-		{Name: "check the node answers", Verifiable: true},
-		{Name: "leave etcd", Verifiable: true},
-		{Name: "let etcd settle", Verifiable: true},
-		{Name: "wipe the node", Verifiable: false},
-		{Name: "forget the node", Verifiable: true},
+	names := removalStepNames(m.Role)
+	at := slices.Index(names, step)
+	if at < 0 {
+		t.Fatalf("a %s's removal has no step %q (it has %v)", m.Role, step, names)
 	}
 
-	for i, s := range submitted {
-		s.State = model.StepPending
+	j := model.Job{
+		ID: "staged-removal", Kind: model.JobRemoveFromCluster, Cluster: m.Cluster, Machine: m.ID,
+		State: model.JobRunning, Current: at, Params: upgrade.RemovalParams(m),
+		CreatedAt: time.Now().Add(-time.Minute), StartedAt: time.Now().Add(-time.Minute),
+	}
+
+	for i, name := range names {
+		// What each step could be asked about when it was submitted:
+		// everything except the wipe.
+		s := model.JobStep{Name: name, Verifiable: name != "wipe the node", State: model.StepPending}
 		if i < at {
 			s.State = model.StepDone
 		}
@@ -687,5 +843,286 @@ func (r *removalRig) stage(t *testing.T, m model.Machine, at int, state model.St
 	}
 	if _, err := r.st.Jobs().Put(t.Context(), j); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// replicaPod is a pod a ReplicaSet owns: the ordinary kind a drain moves.
+func replicaPod(name, node string) kubesim.Pod {
+	return kubesim.Pod{Namespace: "default", Name: name, Node: node, OwnerKind: "ReplicaSet"}
+}
+
+// podNames is the pods kubesim still lists on a node, through the client the
+// daemon uses.
+func podNames(t *testing.T, c *kube.Client, node string) []string {
+	t.Helper()
+	pods, err := c.PodsOnNode(t.Context(), node)
+	if err != nil {
+		t.Fatalf("PodsOnNode(%s): %v", node, err)
+	}
+	out := make([]string, 0, len(pods))
+	for _, p := range pods {
+		out = append(out, p.Name())
+	}
+	slices.Sort(out)
+	return out
+}
+
+// TestRemovingAWorkerCordonsAndDrainsItBeforeTheWipe is D-01 for a worker: by
+// the time the wipe opens its connection, the node takes no new work and every
+// pod that can be evicted is gone through the eviction API. A DaemonSet's pod
+// stays, and nothing on another node is touched.
+func TestRemovingAWorkerCordonsAndDrainsItBeforeTheWipe(t *testing.T) {
+	t.Parallel()
+	r := newRemovalRigWith(t, 1, 1, removalRigOptions{Pods: []kubesim.Pod{
+		replicaPod("web-1", "w-1"),
+		replicaPod("web-2", "w-1"),
+		{Namespace: "kube-system", Name: "agent", Node: "w-1", OwnerKind: "DaemonSet"},
+		replicaPod("elsewhere", "cp-1"),
+	}})
+
+	j := r.await(r.engine, r.submit(r.engine, "w-1").ID, model.JobSucceeded)
+
+	want := removalStepNames(model.RoleWorker)
+	if got := stepNames(j); strings.Join(got, "|") != strings.Join(want, "|") {
+		t.Fatalf("steps = %v, want %v", got, want)
+	}
+	for _, s := range j.Steps {
+		if s.State != model.StepDone {
+			t.Errorf("step %q is %s, want done", s.Name, s.State)
+		}
+		if want := s.Name != "wipe the node"; s.Verifiable != want {
+			t.Errorf("step %q is recorded Verifiable=%v, want %v", s.Name, s.Verifiable, want)
+		}
+	}
+
+	evicted := r.ksim.Evicted()
+	slices.Sort(evicted)
+	if want := []string{"default/web-1", "default/web-2"}; !slices.Equal(evicted, want) {
+		t.Fatalf("evicted %v, want exactly the worker's two ReplicaSet pods %v", evicted, want)
+	}
+
+	c := r.kubeClient(t)
+	if got := podNames(t, c, "w-1"); !slices.Equal(got, []string{"kube-system/agent"}) {
+		t.Errorf("pods left on the worker: %v, want only the DaemonSet's", got)
+	}
+	if got := podNames(t, c, "cp-1"); !slices.Equal(got, []string{"default/elsewhere"}) {
+		t.Errorf("pods on the control plane: %v, a worker's drain touched them", got)
+	}
+	nodes, err := c.Nodes(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, n := range nodes {
+		if want := n.Name == "w-1"; n.Unschedulable != want {
+			t.Errorf("node %s unschedulable=%v, want %v", n.Name, n.Unschedulable, want)
+		}
+	}
+
+	// The moment that matters: the wipe's own connection. Everything above is
+	// also true of a drain that ran after the wipe.
+	conns := r.connects()
+	if len(conns) == 0 {
+		t.Fatal("no connection was recorded")
+	}
+	atWipe := conns[len(conns)-1]
+	if len(atWipe.Evicted) != 2 || atWipe.Node.Resets != 0 {
+		t.Errorf("when the wipe connected, evicted=%v and resets=%d; the pods must already be gone "+
+			"and the node not yet wiped", atWipe.Evicted, atWipe.Node.Resets)
+	}
+}
+
+// TestRemovingAControlPlaneNodeDrainsItBeforeItLeavesEtcd: leaving the
+// membership is the first step that cannot be taken back, so the pods have to
+// be gone before it. The settle wait comes after the leave, which makes it the
+// vantage point from which the order can be read.
+func TestRemovingAControlPlaneNodeDrainsItBeforeItLeavesEtcd(t *testing.T) {
+	t.Parallel()
+	r := newRemovalRigWith(t, 3, 0, removalRigOptions{Pods: []kubesim.Pod{replicaPod("web-1", "cp-1")}})
+
+	j := r.await(r.engine, r.submit(r.engine, "cp-1").ID, model.JobSucceeded)
+
+	want := removalStepNames(model.RoleControlPlane)
+	if got := stepNames(j); strings.Join(got, "|") != strings.Join(want, "|") {
+		t.Fatalf("steps = %v, want %v", got, want)
+	}
+	for _, s := range j.Steps {
+		if wantV := s.Name != "wipe the node"; s.Verifiable != wantV {
+			t.Errorf("step %q is recorded Verifiable=%v, want %v: a restart inside it would "+
+				"otherwise park or repeat", s.Name, s.Verifiable, wantV)
+		}
+	}
+
+	at := r.atWaitList()
+	if len(at) != 1 {
+		t.Fatalf("the settle step waited %d times, want once", len(at))
+	}
+	if at[0].Node.EtcdLeaves != 1 || at[0].Node.Resets != 0 {
+		t.Errorf("at the settle wait the node had %+v; it must have left etcd and not been wiped",
+			at[0].Node)
+	}
+	if !slices.Equal(at[0].Evicted, []string{"default/web-1"}) {
+		t.Errorf("at the settle wait the cluster had evicted %v; the pod must be gone by then "+
+			"(the drain comes before the leave)", at[0].Evicted)
+	}
+}
+
+// TestRemovingANodeOfAClusterWithoutKubernetesAuthoritySaysItDidNotDrain: a
+// cluster whose stored bundle has no Kubernetes authority cannot be reached at
+// all, and that is a fact about the configuration. It is a visible skip, not a
+// silent one: the screen says nothing was drained.
+func TestRemovingANodeOfAClusterWithoutKubernetesAuthoritySaysItDidNotDrain(t *testing.T) {
+	t.Parallel()
+	r := newRemovalRigWith(t, 1, 1, removalRigOptions{
+		Pods: []kubesim.Pod{replicaPod("web-1", "w-1")},
+		Kube: func(*removalRig) func(context.Context, model.ClusterID) (*kube.Client, error) {
+			return func(context.Context, model.ClusterID) (*kube.Client, error) {
+				return nil, fmt.Errorf("inventory: cluster homelab: %w", kube.ErrNoKubernetesAuthority)
+			}
+		},
+	})
+
+	j := r.await(r.engine, r.submit(r.engine, "w-1").ID, model.JobSucceeded)
+
+	for _, name := range []string{"cordon the node", "drain the node"} {
+		d := stepNamed(j, name).Detail
+		if !strings.Contains(d, "no Kubernetes access") || !strings.Contains(d, "not drained") {
+			t.Errorf("step %q says %q; it must say there is no Kubernetes access and that the "+
+				"node was not drained", name, d)
+		}
+	}
+	if got := r.ksim.Evicted(); len(got) != 0 {
+		t.Errorf("evicted %v with no Kubernetes access", got)
+	}
+	if r.sim("w-1").Node().Resets != 1 {
+		t.Error("the removal did not go on to wipe the node")
+	}
+}
+
+// TestRemovingANodeWhenKubernetesDoesNotAnswerChangesNothing is D-03 Q7: a
+// Kubernetes that does not answer is not a cluster without Kubernetes. Treating
+// it as a skip would remove the safety net exactly when an API server is
+// down, so the job refuses before it has changed anything.
+func TestRemovingANodeWhenKubernetesDoesNotAnswerChangesNothing(t *testing.T) {
+	t.Parallel()
+	r := newRemovalRigWith(t, 3, 1, removalRigOptions{
+		Pods: []kubesim.Pod{replicaPod("web-1", "w-1")},
+		Kube: func(*removalRig) func(context.Context, model.ClusterID) (*kube.Client, error) {
+			return func(context.Context, model.ClusterID) (*kube.Client, error) {
+				return nil, errors.New("dial tcp 192.168.1.10:6443: connect: connection refused")
+			}
+		},
+	})
+
+	for _, host := range []string{"w-1", "cp-1"} {
+		e := r.newEngine()
+		j := r.await(e, r.submit(e, host).ID, model.JobFailed)
+		if cur := j.Steps[j.Current].Name; cur != "cordon the node" {
+			t.Fatalf("%s: the job failed in %q, want the first Kubernetes step", host, cur)
+		}
+		if d := stepNamed(j, "cordon the node").Detail; !strings.Contains(d, "Nothing has been changed") {
+			t.Errorf("%s: the failure %q does not say nothing was changed", host, d)
+		}
+		if n := r.sim(host).Node(); n.Resets != 0 || n.EtcdLeaves != 0 {
+			t.Errorf("%s was touched although Kubernetes did not answer: %+v", host, n)
+		}
+		if !r.known(host) {
+			t.Errorf("%s was forgotten", host)
+		}
+		// Only one removal may run on the cluster at a time, and this one has
+		// ended, so the next host can be tried.
+	}
+	if got := r.ksim.Evicted(); len(got) != 0 {
+		t.Errorf("evicted %v while Kubernetes did not answer", got)
+	}
+}
+
+// TestRemovingAMachineKubernetesHasNoNodeForSaysSo: a machine that never
+// joined, or one the API server has forgotten, has nothing to drain. That is
+// said, and the removal goes on.
+func TestRemovingAMachineKubernetesHasNoNodeForSaysSo(t *testing.T) {
+	t.Parallel()
+	r := newRemovalRigWith(t, 1, 1, removalRigOptions{
+		Sim: func(o *kubesim.Options) {
+			o.Nodes = slices.DeleteFunc(o.Nodes, func(n kubesim.Node) bool { return n.Name == "w-1" })
+		},
+	})
+
+	j := r.await(r.engine, r.submit(r.engine, "w-1").ID, model.JobSucceeded)
+
+	for _, name := range []string{"cordon the node", "drain the node"} {
+		if d := stepNamed(j, name).Detail; !strings.Contains(d, "no node") {
+			t.Errorf("step %q says %q; it must say Kubernetes knows no node for this machine", name, d)
+		}
+	}
+	if r.sim("w-1").Node().Resets != 1 {
+		t.Error("the removal did not go on to wipe the node")
+	}
+}
+
+// TestRemovingWithoutAKubernetesClientWiredIsRefusedBeforeAnythingChanges: a
+// build that was wired without Kubernetes must refuse, not skip. A skip is a
+// claim that there was nothing to drain; this build cannot know.
+func TestRemovingWithoutAKubernetesClientWiredIsRefusedBeforeAnythingChanges(t *testing.T) {
+	t.Parallel()
+	r := newRemovalRig(t, 1, 1)
+	r.deps.Kube = nil
+	e := r.newEngine()
+
+	j := r.await(e, r.submit(e, "w-1").ID, model.JobFailed)
+
+	if cur := j.Steps[j.Current].Name; cur != "cordon the node" {
+		t.Fatalf("the job failed in %q, want cordon the node", cur)
+	}
+	if d := stepNamed(j, "cordon the node").Detail; !strings.Contains(d, "without a Kubernetes client") {
+		t.Errorf("the failure %q does not say this build has no Kubernetes client", d)
+	}
+	if r.sim("w-1").Node().Resets != 0 || !r.known("w-1") {
+		t.Error("the node was touched although the build could not drain it")
+	}
+}
+
+// TestARestartInsideTheDrainKeepsDrainingAndDoesNotPark: the drain is the one
+// new step that moves things, and it can be asked "is anything left that you
+// would move", so a restart inside it carries on rather than parking for a
+// person. A restart inside the wipe still parks (above).
+func TestARestartInsideTheDrainKeepsDrainingAndDoesNotPark(t *testing.T) {
+	t.Parallel()
+	r := newRemovalRigWith(t, 1, 1, removalRigOptions{Pods: []kubesim.Pod{replicaPod("web-1", "w-1")}})
+	r.stage(t, r.machine("w-1"), "drain the node", model.StepRunning)
+
+	second := r.newEngine()
+	if err := second.Resume(t.Context()); err != nil {
+		t.Fatalf("Resume: %v", err)
+	}
+	all, _ := second.List(t.Context())
+	after := r.await(second, all[0].ID, model.JobSucceeded)
+
+	if !slices.Equal(r.ksim.Evicted(), []string{"default/web-1"}) {
+		t.Errorf("the resumed drain evicted %v, want the pod that was still there", r.ksim.Evicted())
+	}
+	if st := stepNamed(after, "drain the node").State; st != model.StepDone {
+		t.Errorf("the drain step is %s, want done: pods were left to move", st)
+	}
+	if r.sim("w-1").Node().Resets != 1 {
+		t.Error("the resumed removal did not wipe the node")
+	}
+}
+
+// TestARestartInsideTheDrainWhenNothingIsLeftSkipsIt: the other answer of the
+// same question.
+func TestARestartInsideTheDrainWhenNothingIsLeftSkipsIt(t *testing.T) {
+	t.Parallel()
+	r := newRemovalRig(t, 1, 1)
+	r.stage(t, r.machine("w-1"), "drain the node", model.StepRunning)
+
+	second := r.newEngine()
+	if err := second.Resume(t.Context()); err != nil {
+		t.Fatalf("Resume: %v", err)
+	}
+	all, _ := second.List(t.Context())
+	after := r.await(second, all[0].ID, model.JobSucceeded)
+
+	if st := stepNamed(after, "drain the node").State; st != model.StepSkipped {
+		t.Errorf("the drain step is %s, want skipped: nothing was left to move", st)
 	}
 }

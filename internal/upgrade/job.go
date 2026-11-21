@@ -11,6 +11,7 @@ import (
 	"github.com/siderolabs/talos/pkg/machinery/config/configloader"
 
 	"github.com/holzcloud/holzkube-manager/internal/jobs"
+	"github.com/holzcloud/holzkube-manager/internal/kube"
 	"github.com/holzcloud/holzkube-manager/internal/machineconfig"
 	"github.com/holzcloud/holzkube-manager/internal/model"
 	"github.com/holzcloud/holzkube-manager/internal/talos"
@@ -102,6 +103,28 @@ type Deps struct {
 	// Now is the clock the settle step's Happened check reads. Nil is
 	// time.Now.
 	Now func() time.Time
+
+	// Kube returns a client for one cluster's Kubernetes API. A removal asks
+	// for it in every step that needs it and never holds it: the certificate
+	// it carries is good for an hour and the endpoint can move. A cluster
+	// whose stored bundle has no Kubernetes authority answers with an error
+	// wrapping kube.ErrNoKubernetesAuthority, which a removal reports as a
+	// visible skip.
+	//
+	// Nil means this build was wired without Kubernetes, and a removal then
+	// refuses rather than skips: a skip says there was nothing to drain, and
+	// a build that cannot look does not know that.
+	Kube func(ctx context.Context, cluster model.ClusterID) (*kube.Client, error)
+
+	// DrainBudget is how long a removal's drain waits for a PodDisruptionBudget
+	// to let its pods go. Zero is kube.DrainBudget, which is what production
+	// runs with; the field is a seam, like EvictionWait.
+	DrainBudget time.Duration
+
+	// DrainPace is the pause between the drain's attempts and between its
+	// looks at pods that are still shutting down. Zero is kube.DrainRetry and
+	// kube.DrainGonePoll.
+	DrainPace time.Duration
 }
 
 // Register teaches a job engine both rolling upgrades.

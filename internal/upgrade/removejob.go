@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/holzcloud/holzkube-manager/internal/jobs"
+	"github.com/holzcloud/holzkube-manager/internal/kube"
 	"github.com/holzcloud/holzkube-manager/internal/model"
 	"github.com/holzcloud/holzkube-manager/internal/talos"
 )
@@ -25,23 +26,39 @@ import (
 //
 //  1. **check the node answers** (all roles). A node that is down fails the job
 //     here, before anything has changed.
-//  2. **leave etcd** (control plane only), on the node itself, so it forfeits
+//  2. **cordon the node** (all roles), through the Kubernetes API: nothing new
+//     is scheduled onto it from here on.
+//  3. **drain the node** (all roles), through the eviction API, so every
+//     PodDisruptionBudget is honoured. The pods have to be gone before the
+//     node leaves the membership or is wiped, and every refusal has to stand
+//     before the first step that changes the node: a budget that holds, or a
+//     Kubernetes that does not answer, ends the job here with nothing wiped and
+//     the node still in etcd. Talos drains by itself when it resets a node, but
+//     it gives up after five minutes, logs a warning and goes on -- a pod a
+//     budget protects is stopped anyway. This drain takes the veto seriously
+//     and never deletes a pod instead of evicting it.
+//  4. **leave etcd** (control plane only), on the node itself, so it forfeits
 //     leadership if it has it and removes itself from the membership. Doing
 //     this from another node while this one still runs leaves a member that
 //     believes it is still in a cluster that has forgotten it. The quorum rule
 //     is applied again here, immediately before the leave, because a job
 //     starts later than the request that checked it.
-//  3. **let etcd settle** (control plane only), EvictionWait: the gap in which
+//  5. **let etcd settle** (control plane only), EvictionWait: the gap in which
 //     a raft that has just lost a member settles. Wiping into it is how the
 //     removal of one member looks to the cluster like the loss of two.
-//  4. **wipe the node**: reset of the system disk, so the machine does not
+//  6. **wipe the node**: reset of the system disk, so the machine does not
 //     rejoin on its next boot with the cluster's PKI.
-//  5. **forget the node**: take it out of the inventory. Without it the
+//  7. **forget the node**: take it out of the inventory. Without it the
 //     dashboard shows a node that is never coming back, which is
 //     indistinguishable from one that is down.
 //
 // What each step says after an interruption (Resume):
 //
+//   - cordon: verifiable. The node is unschedulable or it is not; repeating
+//     the cordon is harmless.
+//   - drain: verifiable. "Is anything left here that this drain would move" is
+//     a read, the same question the drain was asked, so a restart inside the
+//     drain carries on instead of parking.
 //   - leave etcd: verifiable. The membership is read through a peer; a node
 //     that is no longer listed has left.
 //   - settle: verifiable. It is a wait, so it has happened once EvictionWait
@@ -52,8 +69,6 @@ import (
 //     cost of guessing wrong is a second wipe. The RPC only initiates, so the
 //     window is milliseconds, and the job parks for a person.
 //   - forget: verifiable. The machine is in the inventory or it is not.
-//
-// Cordon and drain are not here and RemoveNodeNotice says so.
 
 // removeRoleParam is the job parameter that decides the step list. It is
 // stored with the job so a resumed run rebuilds the steps it was submitted
@@ -80,7 +95,7 @@ func removeNodeSteps(d Deps, j model.Job) ([]jobs.Step, error) {
 			"worker's do not", model.RoleControlPlane, model.RoleWorker, role)
 	}
 
-	steps := []jobs.Step{jobs.ReachableStep(d.Connect, j.Machine)}
+	steps := []jobs.Step{jobs.ReachableStep(d.Connect, j.Machine), d.cordonStep(j), d.drainStep(j)}
 	if role == model.RoleControlPlane {
 		steps = append(steps, d.leaveEtcdStep(j), d.settleStep())
 	}
@@ -360,4 +375,226 @@ func (d Deps) forgetStep(j model.Job) jobs.Step {
 			return !present, nil
 		},
 	}
+}
+
+// cordonLeftNote is what a failed drain says about the cordon it leaves
+// behind. The job does not take it back yet; the sentence says so rather than
+// leave the operator to find a node nothing is scheduled onto.
+const cordonLeftNote = "The node stays cordoned, so nothing new is scheduled onto it, until it is " +
+	"made schedulable again."
+
+// drainOptions are the drain a removal runs.
+//
+// DeleteLocalData for the reason power.drainOptions gives: the node is about
+// to be wiped, and its emptyDir goes with it whatever this does. No Force: a
+// pod no controller owns is not coming back anywhere, and it is named in the
+// failure instead of being lost. Budgets are honoured, always.
+func (d Deps) drainOptions() kube.DrainOptions {
+	return kube.DrainOptions{
+		DeleteLocalData: true,
+		Timeout:         d.drainBudget(),
+	}
+}
+
+// drainBudget is how long the drain may take.
+func (d Deps) drainBudget() time.Duration {
+	if d.DrainBudget > 0 {
+		return d.DrainBudget
+	}
+	return kube.DrainBudget
+}
+
+// drainRetry is the pause between the drain's attempts at a pod a budget
+// refuses.
+func (d Deps) drainRetry() time.Duration {
+	if d.DrainPace > 0 {
+		return d.DrainPace
+	}
+	return kube.DrainRetry
+}
+
+// drainGonePoll is how often the drain looks again at pods that were evicted
+// and are still shutting down.
+func (d Deps) drainGonePoll() time.Duration {
+	if d.DrainPace > 0 {
+		return d.DrainPace
+	}
+	return kube.DrainGonePoll
+}
+
+// kubeSkip says why a Kubernetes step has nothing to do.
+type kubeSkip int
+
+const (
+	// kubeWork: there is a node to act on.
+	kubeWork kubeSkip = iota
+	// kubeNoAccess: the cluster's configuration holds no Kubernetes authority,
+	// so no Kubernetes client can be had for it. That is a fact about the
+	// configuration, and the only thing that is a skip.
+	kubeNoAccess
+	// kubeNoNode: Kubernetes answers and has no node for this machine.
+	kubeNoNode
+)
+
+// kubeTarget is what a Kubernetes step acts on: the machine, a client for its
+// cluster, and the node that machine is there.
+type kubeTarget struct {
+	machine model.Machine
+	client  *kube.Client
+	node    kube.Node
+}
+
+// kubeNode resolves a removal's machine to its Kubernetes node.
+//
+// It returns work, a visible skip, or an error. A Kubernetes that does not
+// answer is an error and never a skip (D-03 Q7): an API server that is down
+// would otherwise remove the safety net at the very moment it is needed. The
+// only skips are a configuration without Kubernetes authority and a node
+// Kubernetes does not know.
+//
+// first is the cordon step's: nothing has been changed yet, and the sentence
+// says so, because that is what the operator most needs to hear.
+func (d Deps) kubeNode(ctx context.Context, job *model.Job, first bool) (kubeTarget, kubeSkip, error) {
+	m, _, err := d.thisMachine(ctx, job)
+	if err != nil {
+		return kubeTarget{}, kubeWork, err
+	}
+	changed := ""
+	if first {
+		changed = ". Nothing has been changed"
+	}
+
+	if d.Kube == nil {
+		return kubeTarget{}, kubeWork, fmt.Errorf("upgrade: this build was wired without a Kubernetes "+
+			"client, so %s cannot be drained before it is removed%s", nameOf(m), changed)
+	}
+	client, err := d.Kube(ctx, job.Cluster)
+	if errors.Is(err, kube.ErrNoKubernetesAuthority) {
+		return kubeTarget{machine: m}, kubeNoAccess, nil
+	}
+	if err != nil {
+		return kubeTarget{}, kubeWork, fmt.Errorf("upgrade: Kubernetes did not answer, so %s cannot "+
+			"be drained before it is removed: %w%s", nameOf(m), err, changed)
+	}
+
+	node, err := client.FindNodeFor(ctx, m.Hostname, m.Addr)
+	if errors.Is(err, kube.ErrNoNodeFor) {
+		return kubeTarget{machine: m}, kubeNoNode, nil
+	}
+	if err != nil {
+		return kubeTarget{}, kubeWork, fmt.Errorf("upgrade: Kubernetes did not answer, so %s cannot "+
+			"be drained before it is removed: %w%s", nameOf(m), err, changed)
+	}
+	return kubeTarget{machine: m, client: client, node: node}, kubeWork, nil
+}
+
+func (d Deps) cordonStep(_ model.Job) jobs.Step {
+	return jobs.Step{
+		Name: "cordon the node",
+		Do: func(ctx context.Context, job *model.Job) error {
+			detail := &job.Steps[job.Current].Detail
+			t, skip, err := d.kubeNode(ctx, job, true)
+			if err != nil {
+				return err
+			}
+			switch skip {
+			case kubeNoAccess:
+				*detail = "this cluster has no Kubernetes access configured, so the node was " +
+					"not cordoned and not drained"
+				return nil
+			case kubeNoNode:
+				*detail = "Kubernetes has no node for " + nameOf(t.machine) +
+					", so there was nothing to cordon"
+				return nil
+			case kubeWork:
+			}
+
+			if t.node.Unschedulable {
+				*detail = t.node.Name + " was already cordoned"
+				return nil
+			}
+			if err := t.client.Cordon(ctx, t.node.Name, true); err != nil {
+				return fmt.Errorf("upgrade: %s could not be cordoned: %w. Nothing has been changed",
+					nameOf(t.machine), err)
+			}
+			*detail = "cordoned " + t.node.Name + ": nothing new is scheduled onto it"
+			return nil
+		},
+		// Cannot tell is not an error: repeating a cordon is harmless, and an
+		// error here would park a job that is safe to carry on.
+		Happened: func(ctx context.Context, job *model.Job) (bool, error) {
+			t, skip, err := d.kubeNode(ctx, job, false)
+			if err != nil || skip != kubeWork {
+				return false, nil //nolint:nilerr // cannot tell; the cordon is safe to repeat
+			}
+			return t.node.Unschedulable, nil
+		},
+	}
+}
+
+func (d Deps) drainStep(_ model.Job) jobs.Step {
+	return jobs.Step{
+		Name: "drain the node",
+		Do: func(ctx context.Context, job *model.Job) error {
+			detail := &job.Steps[job.Current].Detail
+			t, skip, err := d.kubeNode(ctx, job, false)
+			if err != nil {
+				return err
+			}
+			switch skip {
+			case kubeNoAccess:
+				*detail = "this cluster has no Kubernetes access configured, so the node was " +
+					"not drained; its pods stop with the wipe"
+				return nil
+			case kubeNoNode:
+				*detail = "Kubernetes has no node for " + nameOf(t.machine) +
+					", so there was nothing to drain"
+				return nil
+			case kubeWork:
+			}
+
+			result, err := t.client.Drain(ctx, t.node.Name, d.drainOptions())
+			*detail = result.Summary()
+			if err != nil {
+				if ctx.Err() != nil {
+					// The daemon is shutting down or the operator cancelled:
+					// the engine reads this as an interruption, not a verdict.
+					return err
+				}
+				return drainFailure(nameOf(t.machine), result, err, cordonLeftNote)
+			}
+			return nil
+		},
+		// "Is anything left here that this drain would move" is a read, and
+		// it is the question the drain was asked, so an interrupted drain
+		// resumes instead of parking. Cannot tell is not an error: the drain
+		// is safe to repeat.
+		Happened: func(ctx context.Context, job *model.Job) (bool, error) {
+			t, skip, err := d.kubeNode(ctx, job, false)
+			if err != nil || skip != kubeWork {
+				return false, nil //nolint:nilerr // cannot tell; the drain is safe to repeat
+			}
+			left, err := t.client.Undrained(ctx, t.node.Name, d.drainOptions())
+			if err != nil {
+				return false, nil //nolint:nilerr // as above
+			}
+			return len(left) == 0, nil
+		},
+	}
+}
+
+// drainFailure is the sentence a drain that did not finish ends the job with.
+// It carries what the server said about each pod that stayed -- the budget's
+// own message and the pod's name -- and what is still true: nothing has been
+// wiped and the node has not left etcd. cordonNote says what became of the
+// cordon, and is a parameter because that is the one part which changes when
+// the job learns to take its own cordon back.
+func drainFailure(node string, result kube.DrainResult, err error, cordonNote string) error {
+	const untouched = "Nothing has been wiped and the node has not left etcd."
+	if errors.Is(err, kube.ErrDrainBlocked) {
+		return fmt.Errorf("upgrade: %s was not removed: its pods could not all be moved off it (%s). %s %s",
+			node, result.Summary(), untouched, cordonNote)
+	}
+	return fmt.Errorf("upgrade: %s was not removed: draining it failed (%s): %w. %s %s",
+		node, result.Summary(), err, untouched, cordonNote)
 }
