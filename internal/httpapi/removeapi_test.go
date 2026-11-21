@@ -230,17 +230,32 @@ func TestRemovingANodeAnswers202WithAJobAndIsDoneWhenTheJobIs(t *testing.T) {
 		t.Errorf("Location = %q, want the job's URL", loc)
 	}
 	// The notice says what the removal now does, and says nothing that was true
-	// only while the product could not cordon or drain.
+	// only while the product could not cordon or drain. It says where a stopped
+	// removal leaves the node (before etcd and the wipe, pods already evicted
+	// stay evicted) and not more: the drain evicts everything it may before it
+	// reports the pods a budget holds, so "nothing on the node has changed" is
+	// not a sentence it may carry. The exception for a cluster without
+	// Kubernetes access is conditional, and so is its sentence.
 	if body.Notice == "" {
 		t.Error("the cordon-and-drain notice is missing from the answer")
 	}
-	for _, want := range []string{"PodDisruptionBudget", "node object"} {
+	for _, want := range []string{
+		"PodDisruptionBudget",
+		"node object",
+		"before the node leaves etcd or is wiped",
+		"already evicted",
+		"no Kubernetes access to from the start",
+		"loses it on the way fails instead",
+	} {
 		if !strings.Contains(body.Notice, want) {
 			t.Errorf("the notice does not mention %q: %q", want, body.Notice)
 		}
 	}
 	if strings.Contains(body.Notice, "kubectl drain") {
 		t.Errorf("the notice still tells the operator to drain by hand, which the product does itself now: %q", body.Notice)
+	}
+	if strings.Contains(body.Notice, "before anything on the node") {
+		t.Errorf("the notice says a stopped removal changed nothing on the node, while evicted pods stay evicted: %q", body.Notice)
 	}
 
 	deadline := time.Now().Add(30 * time.Second)

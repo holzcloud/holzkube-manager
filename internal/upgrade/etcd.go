@@ -354,15 +354,27 @@ func Snapshot(ctx context.Context, cc *talos.ClusterClient, w io.Writer) (int64,
 // drained" while the job drains is worse than none. It describes the steps of
 // removejob.go in their order; when those change, this changes with them.
 //
-// The Kubernetes half is conditional on there being one: a cluster this
-// product has no Kubernetes access to is removed without the drain, and the
-// job's own steps say so when it happens.
+// The Kubernetes half is conditional, and so is what it says. A cluster this
+// product has no Kubernetes access to from the start is removed without the
+// cordon, the drain and the deletion of the node object, and the job's own
+// steps say so. A removal whose cordon step had access and loses it on the way
+// fails instead, in "drain the node" before the wipe or in "delete the
+// Kubernetes node object" after it (D-03 Q7 as made precise on 2026-11-21).
+//
+// The notice fixes where a stopped removal stops (before the node leaves etcd
+// or is wiped) and does not claim the node was left untouched: the drain
+// evicts, pass by pass, every pod that may go before it reports the ones a
+// budget holds (drainPass), so pods already evicted stay evicted when the job
+// fails, and the operator needs to know that before repeating it.
 const RemoveNodeNotice = "The node is cordoned and drained first: its pods are evicted, never deleted, " +
-	"so every PodDisruptionBudget is honoured. If a budget holds a pod for ten minutes, or a pod no " +
-	"controller owns would be lost, the removal stops before anything on the node has changed, and says " +
-	"which. Then a control-plane node leaves etcd, the node is wiped, its Kubernetes node object is " +
-	"deleted and it is forgotten here. A cluster this product has no Kubernetes access to is removed " +
-	"without the drain, and the job says so."
+	"so every PodDisruptionBudget is honoured. Then a control-plane node leaves etcd, the node is " +
+	"wiped, its Kubernetes node object is deleted and it is forgotten here. If a budget holds a pod " +
+	"for ten minutes, or a pod no controller owns would be lost, the removal stops before the node " +
+	"leaves etcd or is wiped, and says which. Pods it had already evicted stay evicted, and their " +
+	"controllers start them elsewhere; the cordon it set is taken back, or the job says it could not be. " +
+	"A cluster this product has no Kubernetes access to from the start is removed without the cordon, " +
+	"the drain and the deletion of the node object, and the job says so; a removal that had access and " +
+	"loses it on the way fails instead."
 
 // EvictionWait is how long a removal waits after the etcd leave before
 // wiping. The removal job's "let etcd settle" step waits exactly this long
