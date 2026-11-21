@@ -2,8 +2,12 @@ package upgrade_test
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"slices"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -43,9 +47,10 @@ func nodeNamed(t *testing.T, r *removalRig, name string) kube.Node {
 }
 
 // TestAVetoedRemovalGivesBackTheCordonItMade is D-03 Q2: a removal that stops
-// at a budget leaves the node as it found it, except for the pods that already
-// moved. The node was schedulable when the job started, the job made it
-// unschedulable, and the job makes it schedulable again.
+// at a budget leaves the node unwiped and still in etcd, and gives back the
+// cordon it made itself. The node was schedulable when the job started, the
+// job made it unschedulable, and the job makes it schedulable again. Pods the
+// drain had already evicted have moved and stay moved: that is not undone.
 func TestAVetoedRemovalGivesBackTheCordonItMade(t *testing.T) {
 	t.Parallel()
 	r := newRemovalRigWith(t, 1, 1, removalRigOptions{
@@ -433,5 +438,255 @@ func TestAJobStoredWithTheOldStepListIsParked(t *testing.T) {
 				t.Errorf("%s was forgotten", tc.host)
 			}
 		})
+	}
+}
+
+// cordonPatch is the call kubesim records for the cordon and for its
+// rollback: both are a PATCH of the node, and only the body tells them apart.
+const cordonPatch = "PATCH /api/v1/nodes/w-1"
+
+// afterTheCordon builds the Deps.Kube of a test that wants the cluster to
+// behave differently from the moment the cordon step has patched the node: the
+// client of the rig until then, and what `after` says from then on. `after`
+// gets the rig's own client builder so that it can let a call through.
+func afterTheCordon(
+	after func(ctx context.Context, cluster model.ClusterID, up func() (*kube.Client, error)) (*kube.Client, error),
+) func(*removalRig) func(context.Context, model.ClusterID) (*kube.Client, error) {
+	return func(r *removalRig) func(context.Context, model.ClusterID) (*kube.Client, error) {
+		return func(ctx context.Context, cluster model.ClusterID) (*kube.Client, error) {
+			up := func() (*kube.Client, error) { return r.newKubeClient(ctx, cluster) }
+			if r.ksim.Calls(cordonPatch) >= 1 {
+				return after(ctx, cluster, up)
+			}
+			return up()
+		}
+	}
+}
+
+// TestADrainThatCannotReachKubernetesSaysTheNodeIsStillCordoned is WR-01: the
+// cordon went through, and Kubernetes stopped answering before the drain could
+// look for the node. The job used to fail with the cause and nothing else,
+// leaving a node cordoned that the sentence did not mention. It now says that
+// nothing was wiped and that the node is still cordoned by this removal, with
+// the command, because the one attempt to take the cordon back could not reach
+// Kubernetes either -- and it does not claim a rollback that did not happen.
+func TestADrainThatCannotReachKubernetesSaysTheNodeIsStillCordoned(t *testing.T) {
+	t.Parallel()
+	r := newRemovalRigWith(t, 1, 1, removalRigOptions{
+		Pods: []kubesim.Pod{replicaPod("web-1", "w-1")},
+		Kube: afterTheCordon(func(context.Context, model.ClusterID, func() (*kube.Client, error)) (*kube.Client, error) {
+			return nil, errors.New("dial tcp 192.168.1.10:6443: connect: connection refused")
+		}),
+	})
+
+	j := r.await(r.engine, r.submit(r.engine, "w-1").ID, model.JobFailed)
+
+	if cur := j.Steps[j.Current].Name; cur != "drain the node" {
+		t.Fatalf("the job failed in %q, want the drain", cur)
+	}
+	d := stepNamed(j, "drain the node").Detail
+	for _, want := range []string{"still cordoned by this removal", "kubectl uncordon w-1", "Nothing has been wiped"} {
+		if !strings.Contains(d, want) {
+			t.Errorf("the failure %q does not say %q", d, want)
+		}
+	}
+	if strings.Contains(d, "has been uncordoned again") {
+		t.Errorf("the failure %q claims a cordon was taken back that could not be", d)
+	}
+	if !nodeNamed(t, r, "w-1").Unschedulable {
+		t.Error("w-1 is schedulable: the test did not leave the cordon in place")
+	}
+	if j.Params[cordonedFor] != "true" {
+		t.Errorf("the job's parameters are %v; the cordon was the job's own", j.Params)
+	}
+	if got := r.ksim.Evicted(); len(got) != 0 {
+		t.Errorf("evicted %v although the drain never found the node", got)
+	}
+	if n := r.sim("w-1").Node(); n.Resets != 0 || n.EtcdLeaves != 0 {
+		t.Errorf("w-1 was touched: %+v", n)
+	}
+	if !r.known("w-1") {
+		t.Error("w-1 was forgotten")
+	}
+}
+
+// TestADrainThatLostKubernetesForAMomentGivesBackTheCordon: Kubernetes missed
+// exactly one call between the cordon and the drain and answers again for the
+// attempt to take the cordon back. The attempt goes through a fresh client and
+// the name the cordon step kept, and the sentence says it worked.
+func TestADrainThatLostKubernetesForAMomentGivesBackTheCordon(t *testing.T) {
+	t.Parallel()
+	var missed atomic.Bool
+	r := newRemovalRigWith(t, 1, 1, removalRigOptions{
+		Pods: []kubesim.Pod{replicaPod("web-1", "w-1")},
+		Kube: afterTheCordon(func(_ context.Context, _ model.ClusterID, up func() (*kube.Client, error)) (*kube.Client, error) {
+			if missed.CompareAndSwap(false, true) {
+				return nil, errors.New("dial tcp 192.168.1.10:6443: i/o timeout")
+			}
+			return up()
+		}),
+	})
+
+	j := r.await(r.engine, r.submit(r.engine, "w-1").ID, model.JobFailed)
+
+	if cur := j.Steps[j.Current].Name; cur != "drain the node" {
+		t.Fatalf("the job failed in %q, want the drain", cur)
+	}
+	d := stepNamed(j, "drain the node").Detail
+	for _, want := range []string{"has been uncordoned again", "Nothing has been wiped"} {
+		if !strings.Contains(d, want) {
+			t.Errorf("the failure %q does not say %q", d, want)
+		}
+	}
+	if nodeNamed(t, r, "w-1").Unschedulable {
+		t.Error("w-1 is still cordoned although the sentence says it was given back")
+	}
+	if got := r.ksim.Calls(cordonPatch); got != 2 {
+		t.Errorf("w-1 was patched %d times, want 2: the cordon and its rollback", got)
+	}
+	if n := r.sim("w-1").Node(); n.Resets != 0 {
+		t.Errorf("w-1 was wiped: %+v", n)
+	}
+}
+
+// TestAShutdownWhileTheDrainLooksForTheNodeGivesNothingBack: the daemon is
+// stopped while the drain step is asking Kubernetes where the node is. That is
+// an interruption, and the new rollback must not run on it: the job is not
+// over, the cordon is the one the restart carries on with, and a cordon given
+// back here would let pods be scheduled onto a node the resumed job is about
+// to wipe.
+func TestAShutdownWhileTheDrainLooksForTheNodeGivesNothingBack(t *testing.T) {
+	t.Parallel()
+	var once sync.Once
+	blocked := make(chan struct{})
+	r := newRemovalRigWith(t, 1, 1, removalRigOptions{
+		Pods: []kubesim.Pod{replicaPod("web-1", "w-1")},
+		Kube: afterTheCordon(func(ctx context.Context, _ model.ClusterID, up func() (*kube.Client, error)) (*kube.Client, error) {
+			first := false
+			once.Do(func() { first = true })
+			if !first {
+				return up()
+			}
+			close(blocked)
+			<-ctx.Done()
+			return nil, ctx.Err()
+		}),
+	})
+
+	j := r.submit(r.engine, "w-1")
+	select {
+	case <-blocked:
+	case <-time.After(30 * time.Second):
+		t.Fatal("the drain never asked Kubernetes for the node")
+	}
+	if err := r.engine.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	stored, err := r.st.Jobs().Get(t.Context(), j.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.State != model.JobRunning || stepNamed(stored, "drain the node").State != model.StepRunning {
+		t.Fatalf("the shutdown left the job %s with the drain %s, want both running: it was interrupted, "+
+			"not ended", stored.State, stepNamed(stored, "drain the node").State)
+	}
+	if !nodeNamed(t, r, "w-1").Unschedulable {
+		t.Error("the cordon was given back on a shutdown")
+	}
+	if stored.Params[cordonedFor] != "true" {
+		t.Errorf("the stored parameters are %v; the note that the cordon was the job's own is gone", stored.Params)
+	}
+
+	second := r.newEngine()
+	if err := second.Resume(t.Context()); err != nil {
+		t.Fatalf("Resume: %v", err)
+	}
+	r.await(second, j.ID, model.JobSucceeded)
+	if r.sim("w-1").Node().Resets != 1 {
+		t.Error("the resumed removal did not wipe the node")
+	}
+}
+
+// TestADrainThatLostKubernetesAuthorityFailsInsteadOfSkipping is D-03 Q7 as the
+// operator made it precise on 2026-11-21: missing Kubernetes authority is a
+// visible skip for a cluster that never had access, and a failure for one the
+// job did have access to. This job cordoned the node, so it had; the
+// configuration lost its authority before the drain, and the drain must not be
+// skipped, because the wipe that follows would then run without it and Talos'
+// own drain gives up after five minutes. The job fails before the wipe.
+func TestADrainThatLostKubernetesAuthorityFailsInsteadOfSkipping(t *testing.T) {
+	t.Parallel()
+	r := newRemovalRigWith(t, 1, 1, removalRigOptions{
+		Pods: []kubesim.Pod{replicaPod("web-1", "w-1")},
+		Kube: afterTheCordon(func(context.Context, model.ClusterID, func() (*kube.Client, error)) (*kube.Client, error) {
+			return nil, fmt.Errorf("inventory: cluster homelab: %w", kube.ErrNoKubernetesAuthority)
+		}),
+	})
+
+	j := r.await(r.engine, r.submit(r.engine, "w-1").ID, model.JobFailed)
+
+	if cur := j.Steps[j.Current].Name; cur != "drain the node" {
+		t.Fatalf("the job failed in %q, want the drain: it must not be skipped", cur)
+	}
+	d := stepNamed(j, "drain the node").Detail
+	for _, want := range []string{"Nothing has been wiped", "still cordoned by this removal", "kubectl uncordon w-1"} {
+		if !strings.Contains(d, want) {
+			t.Errorf("the failure %q does not say %q", d, want)
+		}
+	}
+	if strings.Contains(d, "its pods stop with the wipe") {
+		t.Errorf("the failure %q is the sentence of a skip", d)
+	}
+	if got := r.ksim.Evicted(); len(got) != 0 {
+		t.Errorf("evicted %v although the drain did not run", got)
+	}
+	if n := r.sim("w-1").Node(); n.Resets != 0 {
+		t.Errorf("w-1 was wiped: %+v", n)
+	}
+	if !r.known("w-1") {
+		t.Error("w-1 was forgotten")
+	}
+}
+
+// TestARollbackThatKubernetesRefusesAfterTheClientWasHadIsNotClaimed: the attempt
+// to take the cordon back gets a client and the PATCH then fails (the cluster
+// went away between the two). Having a client is not having uncordoned the
+// node: the sentence says it is still cordoned and gives the command.
+func TestARollbackThatKubernetesRefusesAfterTheClientWasHadIsNotClaimed(t *testing.T) {
+	t.Parallel()
+	var calls atomic.Int32
+	r := newRemovalRigWith(t, 1, 1, removalRigOptions{
+		Pods: []kubesim.Pod{replicaPod("web-1", "w-1")},
+		Kube: func(r *removalRig) func(context.Context, model.ClusterID) (*kube.Client, error) {
+			return func(ctx context.Context, cluster model.ClusterID) (*kube.Client, error) {
+				if r.ksim.Calls(cordonPatch) < 1 {
+					return r.newKubeClient(ctx, cluster)
+				}
+				if calls.Add(1) == 1 {
+					return nil, errors.New("dial tcp 192.168.1.10:6443: i/o timeout")
+				}
+				// The rollback's own client: built, and then the API goes away
+				// before the PATCH it is for.
+				c, err := r.newKubeClient(ctx, cluster)
+				r.ksim.Close()
+				return c, err
+			}
+		},
+	})
+
+	j := r.await(r.engine, r.submit(r.engine, "w-1").ID, model.JobFailed)
+
+	d := stepNamed(j, "drain the node").Detail
+	for _, want := range []string{"still cordoned by this removal", "kubectl uncordon w-1", "Nothing has been wiped"} {
+		if !strings.Contains(d, want) {
+			t.Errorf("the failure %q does not say %q", d, want)
+		}
+	}
+	if strings.Contains(d, "has been uncordoned again") {
+		t.Errorf("the failure %q claims a cordon was taken back that was not", d)
+	}
+	if n := r.sim("w-1").Node(); n.Resets != 0 {
+		t.Errorf("w-1 was wiped: %+v", n)
 	}
 }

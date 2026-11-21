@@ -77,15 +77,29 @@ import (
 //     dashboard shows a node that is never coming back, which is
 //     indistinguishable from one that is down.
 //
-// A removal that stops before the first irreversible step leaves the node as
-// it found it. When the drain fails -- a budget that holds past the deadline, a
-// pod nothing owns, an API that went away -- the job takes back the cordon it
-// made itself, and says so in the failure. Only its own: the cordon step notes
-// in the job's parameters (cordonedByJobParam) when it was the one that made
-// the node unschedulable, and a cordon without that note was somebody else's
-// and stays. When the job is interrupted instead -- the daemon is shutting
-// down, or the operator cancelled -- nothing is given back, because the job is
-// not over: a restart carries on with the cordon in place.
+// A removal that stops before the first irreversible step has not wiped the
+// node, and the node is still in etcd and still in the inventory. It is not
+// untouched: the pods the drain had already evicted have moved, and their
+// controllers have started them elsewhere, so they stay moved. When the drain
+// fails -- a budget that holds past the deadline, a pod nothing owns, an API
+// that went away -- the job takes back the cordon it made itself, and says so
+// in the failure. That holds when Kubernetes stops answering between the cordon
+// and the drain as well: the step then makes one attempt, through a fresh
+// client and the name the cordon step kept (kubeNodeParam), and says what came
+// of it; a cordon it could not take back is named as still standing, with
+// `kubectl uncordon`, and a rollback that did not happen is never claimed.
+// Only its own cordon is given back: the cordon step notes in the job's
+// parameters (cordonedByJobParam) when it was the one that made the node
+// unschedulable, and a cordon without that note was somebody else's and stays.
+// When the job is interrupted instead -- the daemon is shutting down, or the
+// operator cancelled -- nothing is given back, because the job is not over: a
+// restart carries on with the cordon in place.
+//
+// A cluster that never had Kubernetes access is skipped, visibly, in the
+// cordon, drain and delete steps. A removal that did have access -- the cordon
+// step named the node -- and loses it on the way does not skip: the drain step
+// fails before the wipe, and the delete step after it, each in words that name
+// the command to run.
 //
 // What each step says after an interruption (Resume):
 //
@@ -555,16 +569,18 @@ func (d Deps) kubeNode(ctx context.Context, job *model.Job, first bool) (kubeTar
 	if first {
 		changed = ". Nothing has been changed"
 	}
+	// The target comes back with the machine resolveNode found, so that a step
+	// that fails here can still name it; nothing else in it is set.
 	var down *kubeDown
 	if errors.As(err, &down) {
-		return kubeTarget{}, kubeWork, fmt.Errorf("upgrade: Kubernetes did not answer, so %s cannot "+
+		return t, kubeWork, fmt.Errorf("upgrade: Kubernetes did not answer, so %s cannot "+
 			"be drained before it is removed: %w%s", nameOf(t.machine), down.err, changed)
 	}
 	if t.machine.ID != "" && errors.Is(err, errNoKubeClient) {
-		return kubeTarget{}, kubeWork, fmt.Errorf("upgrade: this build was wired without a Kubernetes "+
+		return t, kubeWork, fmt.Errorf("upgrade: this build was wired without a Kubernetes "+
 			"client, so %s cannot be drained before it is removed%s", nameOf(t.machine), changed)
 	}
-	return kubeTarget{}, kubeWork, err
+	return t, kubeWork, err
 }
 
 // errNoKubeClient is a build wired without Deps.Kube.
@@ -717,10 +733,29 @@ func (d Deps) drainStep(_ model.Job) jobs.Step {
 			detail := &job.Steps[job.Current].Detail
 			t, skip, err := d.kubeNode(ctx, job, false)
 			if err != nil {
-				return err
+				if ctx.Err() != nil {
+					// Shutting down or cancelled: an interruption, not a verdict.
+					// Nothing is given back, for the reason given below.
+					return err
+				}
+				// Kubernetes stopped answering after the cordon, or the machine
+				// could not be resolved. Nothing has been wiped, and the cordon
+				// this job made is still there unless it can be taken back.
+				return withCordonNote(fmt.Errorf("%w. %s", err, nothingWiped), d.giveBackCordonUnresolved(ctx, job, t.machine))
 			}
 			switch skip {
 			case kubeNoAccess:
+				if name := job.Params[kubeNodeParam]; name != "" {
+					// The cordon step had access and named the node, so this
+					// cluster is not one that never had any: its configuration
+					// lost the authority since. Skipping would let the wipe
+					// run without a drain (D-03 Q7, as the operator made it
+					// precise on 2026-11-21).
+					return withCordonNote(fmt.Errorf("upgrade: the configuration of this cluster holds no "+
+						"Kubernetes authority any more, although this removal cordoned %s with it, so %s "+
+						"cannot be drained before it is removed. %s",
+						name, nameOf(t.machine), nothingWiped), d.giveBackCordonUnresolved(ctx, job, t.machine))
+				}
 				*detail = "this cluster has no Kubernetes access configured, so the node was " +
 					"not drained; its pods stop with the wipe"
 				return nil
@@ -920,10 +955,34 @@ func (d Deps) nodeObjectLeft(job *model.Job, m model.Machine, node string, cause
 // thing this exists to prevent.
 const rollbackBudget = 15 * time.Second
 
+// cordonGivenBack is the sentence for a cordon the job made and took back.
+const cordonGivenBack = "It was cordoned for this removal and has been uncordoned again."
+
+// nothingWiped is what is true of every removal that stops in the drain step,
+// whatever stopped it: nothing irreversible has happened. The pods the drain
+// already evicted have moved and stay moved; that is not a claim made here.
+const nothingWiped = "Nothing has been wiped and the node has not left etcd."
+
+// cordonNotGivenBack is the sentence for a cordon the job made and could not
+// take back: it names the command, and it does not say the node was released.
+func cordonNotGivenBack(node string, cause error) string {
+	return fmt.Sprintf("It is still cordoned by this removal: it could not be uncordoned again (%v); "+
+		"run `kubectl uncordon %s`.", cause, node)
+}
+
+// withCordonNote appends the sentence about the cordon to an error, when there
+// is one: a job that did not make a cordon says nothing about taking it back.
+func withCordonNote(err error, note string) error {
+	if note == "" {
+		return err
+	}
+	return fmt.Errorf("%w %s", err, note)
+}
+
 // giveBackCordon takes back the cordon the cordon step made, when it made it,
 // and says in a sentence what became of it. The node was schedulable when the
-// job started; a failed drain leaves it as the job found it, except for the
-// pods that have already moved.
+// job started; a failed drain leaves it unwiped and in etcd, and schedulable
+// again, except for the pods that have already moved and stay moved.
 //
 // Only the job's own cordon: one that was there before is the operator's, and
 // releasing it would undo a decision somebody else made.
@@ -938,10 +997,40 @@ func giveBackCordon(ctx context.Context, job *model.Job, t kubeTarget) string {
 	rollback, cancel := context.WithTimeout(context.WithoutCancel(ctx), rollbackBudget)
 	defer cancel()
 	if err := t.client.Cordon(rollback, t.node.Name, false); err != nil {
-		return fmt.Sprintf("It could not be uncordoned again (%v); run `kubectl uncordon %s`.",
-			err, t.node.Name)
+		return cordonNotGivenBack(t.node.Name, err)
 	}
-	return "It was cordoned for this removal and has been uncordoned again."
+	return cordonGivenBack
+}
+
+// giveBackCordonUnresolved is giveBackCordon for a step that could not resolve
+// the node, so it has no client and no node: one attempt, through a fresh
+// client and the name the cordon step kept. It returns the sentence about the
+// cordon, or nothing when the job made none. It is only called for a failure,
+// never for an interruption (the caller has checked ctx.Err()), and it claims
+// the cordon is given back only when Cordon returned no error.
+func (d Deps) giveBackCordonUnresolved(ctx context.Context, job *model.Job, m model.Machine) string {
+	if job.Params[cordonedByJobParam] != "true" {
+		return ""
+	}
+	name := job.Params[kubeNodeParam]
+	if name == "" {
+		// No name to give a cordon back by, and none is guessed.
+		return cordonNotGivenBack(nameOf(m), errors.New("this job did not keep the node's name in Kubernetes"))
+	}
+	if d.Kube == nil {
+		return cordonNotGivenBack(name, errNoKubeClient)
+	}
+
+	rollback, cancel := context.WithTimeout(context.WithoutCancel(ctx), rollbackBudget)
+	defer cancel()
+	client, err := d.Kube(rollback, job.Cluster)
+	if err != nil {
+		return cordonNotGivenBack(name, err)
+	}
+	if err := client.Cordon(rollback, name, false); err != nil {
+		return cordonNotGivenBack(name, err)
+	}
+	return cordonGivenBack
 }
 
 // drainFailure is the sentence a drain that did not finish ends the job with.
@@ -955,7 +1044,6 @@ func giveBackCordon(ctx context.Context, job *model.Job, t kubeTarget) string {
 // allows it, and a pod no controller owns, which no waiting will move and
 // which this never evicts.
 func drainFailure(node string, result kube.DrainResult, err error, cordonNote string) error {
-	const untouched = "Nothing has been wiped and the node has not left etcd."
 	if errors.Is(err, kube.ErrDrainBlocked) {
 		var advice []string
 		if bare := podsBlockedBy(result, func(b kube.BlockedPod) bool { return b.Reason == kube.BarePodReason }); len(bare) > 0 {
@@ -967,12 +1055,12 @@ func drainFailure(node string, result kube.DrainResult, err error, cordonNote st
 			advice = append(advice, "A PodDisruptionBudget holds "+strings.Join(held, ", ")+
 				": change the budget or wait until it allows the eviction, then repeat the removal.")
 		}
-		advice = append(advice, untouched, cordonNote)
+		advice = append(advice, nothingWiped, cordonNote)
 		return fmt.Errorf("upgrade: %s was not removed: its pods could not all be moved off it (%s). %s",
 			node, result.Summary(), strings.Join(advice, " "))
 	}
 	return fmt.Errorf("upgrade: %s was not removed: draining it failed (%s): %w. %s %s",
-		node, result.Summary(), err, untouched, cordonNote)
+		node, result.Summary(), err, nothingWiped, cordonNote)
 }
 
 // podsBlockedBy names the pods of a drain's result that match.
