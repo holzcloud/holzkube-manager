@@ -293,28 +293,15 @@ func (s *Service) gate(cluster model.ClusterID, m member) jobs.Step {
 func never(context.Context, *model.Job) (bool, error) { return false, nil }
 
 // errNoKubeNode reports a machine Kubernetes has no node for -- a machine that
-// never joined, or one the API server has forgotten.
-var errNoKubeNode = errors.New("power: Kubernetes has no node for this machine")
+// never joined, or one the API server has forgotten. It is the one condition
+// kube names, so a removal and a power action cannot disagree about it.
+var errNoKubeNode = kube.ErrNoNodeFor
 
-// findNode finds a machine's Kubernetes node: by name first, since Talos
-// registers the kubelet under the hostname, then by address, for a cluster
-// that overrode the node name.
+// findNode finds a machine's Kubernetes node. The lookup is kube.FindNodeFor's:
+// by name first, since Talos registers the kubelet under the hostname, then by
+// address, for a cluster that overrode the node name.
 func findNode(ctx context.Context, client *kube.Client, m member) (kube.Node, error) {
-	nodes, err := client.Nodes(ctx)
-	if err != nil {
-		return kube.Node{}, err
-	}
-	for _, n := range nodes {
-		if strings.EqualFold(n.Name, m.Hostname) {
-			return n, nil
-		}
-	}
-	for _, n := range nodes {
-		if m.Addr != "" && n.InternalAddress == m.Addr {
-			return n, nil
-		}
-	}
-	return kube.Node{}, errNoKubeNode
+	return client.FindNodeFor(ctx, m.Hostname, m.Addr)
 }
 
 // cordon stops the scheduler placing anything new on a node, and records that
