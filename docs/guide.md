@@ -1617,8 +1617,11 @@ it for five minutes and then not at all.
   removed without the cordon, the drain and the deletion of the node object, and
   the job says so in its steps. The same goes for a machine Kubernetes has no
   node for. A removal that had access when it cordoned and loses it on the way
-  fails instead: in *drain the node* before the wipe, or in *delete the
-  Kubernetes node object* after it, with `kubectl delete node <name>`. A
+  fails instead. In *drain the node*, before the wipe, nothing has been wiped
+  and the job says what became of its cordon (see *What a failure leaves*); the
+  node object stays, as it must for a machine that is still there. In *delete
+  the Kubernetes node object*, after the wipe, it names
+  `kubectl delete node <name>`. A
   Kubernetes that does not answer is different again: it stops the removal in
   the first step, before anything has changed.
 - **It survives closing the dialog, the browser and a restart of the daemon.** It
@@ -1635,10 +1638,14 @@ it for five minutes and then not at all.
   job had recorded no longer means what it did. Look at the node, then start it
   again.
 - **What a failure leaves.** Before the wipe, the node was not wiped and is still
-  listed here, and pods the drain had already evicted run elsewhere. The cordon
-  the job set is taken back, or the job says it could not be (for example when
-  Kubernetes stopped answering after the cordon): then it says the node is still
-  cordoned by this removal and names `kubectl uncordon <name>`. After the node
+  listed here, and pods the drain had already evicted run elsewhere. When the
+  failure is in *drain the node*, the cordon the job set is taken back, or the
+  job says it could not be (for example when Kubernetes stopped answering after
+  the cordon): then it says the node is still cordoned by this removal and names
+  `kubectl uncordon <name>`. A control-plane node whose removal fails later, in
+  *leave etcd*, after a drain that finished, stays cordoned and drained: run the
+  removal again, or `kubectl uncordon <name>` if you keep the node. A removal
+  you cancel ends with its cordon still set, too. After the node
   left etcd, it stays out; run the removal again to finish it. After the wipe,
   the job deletes the Kubernetes node object under the name Kubernetes gave the
   node when the job cordoned it, so a machine that comes back in maintenance

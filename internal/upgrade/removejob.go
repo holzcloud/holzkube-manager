@@ -91,9 +91,11 @@ import (
 // Only its own cordon is given back: the cordon step notes in the job's
 // parameters (cordonedByJobParam) when it was the one that made the node
 // unschedulable, and a cordon without that note was somebody else's and stays.
-// When the job is interrupted instead -- the daemon is shutting down, or the
-// operator cancelled -- nothing is given back, because the job is not over: a
-// restart carries on with the cordon in place.
+// When the job is interrupted instead, nothing is given back. A shutdown leaves
+// the job unfinished, and a restart carries on with the cordon in place; a
+// cancel by the operator ends the job cancelled with its cordon still set.
+// Only a failure in the drain step gives the cordon back: a control-plane
+// removal that fails later, leaving etcd, leaves the node cordoned and drained.
 //
 // A cluster that never had Kubernetes access is skipped, visibly, in the
 // cordon, drain and delete steps. A removal that did have access -- the cordon

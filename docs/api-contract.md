@@ -5139,8 +5139,12 @@ Kubernetes stops answering between `cordon the node` and `drain the node`, the
 drain step fails with that sentence and makes one attempt, through a fresh client
 and its own deadline, to take its cordon back under the kept name: the `detail`
 says it was uncordoned again, or that the node is still cordoned by this removal,
-with `kubectl uncordon <name>`. A drain interrupted by a shutdown or by a cancel
-gives nothing back here either, because the job is not over.
+with `kubectl uncordon <name>`. A drain interrupted by a shutdown gives nothing
+back, because the job is not over: a restart carries on with the cordon in place.
+A drain the operator cancels gives nothing back either: the job ends `cancelled`
+with its cordon still set, and `kubectl uncordon <name>` takes it back. Only a
+failure in `drain the node` gives the cordon back; a control-plane removal that
+fails later, in `leave etcd`, leaves the node cordoned and drained.
 
 A cluster whose stored configuration has held no Kubernetes authority from the
 start is removed without the cordon, the drain and the deletion of the node object:
