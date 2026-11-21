@@ -337,6 +337,13 @@ type Pod struct {
 	// too -- a 429 is not always a budget.
 	BudgetName string
 
+	// BudgetsConflict makes an eviction of this pod answer 500: the pod is
+	// selected by more than one PodDisruptionBudget, which the eviction
+	// subresource does not support. It is the answer a client cannot read as a
+	// veto and cannot read as consent, and a gate that has to decide on it must
+	// say that it could not be told.
+	BudgetsConflict bool
+
 	// LingersAfterEviction makes an accepted eviction leave the pod on the node,
 	// terminating, until FinishTermination says its grace period is over. That
 	// is what an eviction is in a real cluster: the server accepts the deletion
@@ -701,6 +708,12 @@ type Server struct {
 	// evicted is what evictions actually removed, in order, so a test can
 	// assert what a drain moved rather than what it reported moving.
 	evicted []string
+
+	// dryRunEvictions is every eviction that asked with DryRun=All, as
+	// "namespace/name", in call order and repeated when asked again. A dry run
+	// changes nothing here: it is not in evicted and no pod is gone or
+	// terminating because of it.
+	dryRunEvictions []string
 
 	// deleted is what a DELETE removed, kept apart from evicted because the
 	// two are different operations: a test about restarting a pod must not
@@ -1467,10 +1480,28 @@ func (s *Server) writeNode(w http.ResponseWriter, name string) {
 
 // evictPod is the call a drain makes, and the one place a PodDisruptionBudget's
 // refusal is modelled.
+//
+// An eviction that carries DryRun=All goes through every check a real one does
+// -- an unknown pod, a pod with two budgets, a budget that refuses -- and then
+// changes nothing in this simulation: the pod is not removed, it does not start
+// to terminate, and the eviction is not on the record of Evicted. The question
+// is on the record of DryRunEvictions instead, as many times as it was asked.
 func (s *Server) evictPod(w http.ResponseWriter, r *http.Request, namespace, name string) {
 	if r.Method != http.MethodPost {
 		s.serveNotFound(w, r)
 		return
+	}
+
+	// The body is read before the lock and capped: an eviction is a few hundred
+	// bytes, and whatever else arrives is not one. A body that cannot be read
+	// is not a dry run, which keeps the behaviour every caller before the dry
+	// run had.
+	dryRun := false
+	if body, err := io.ReadAll(io.LimitReader(r.Body, 64<<10)); err == nil && len(body) > 0 {
+		var eviction policyv1.Eviction
+		if json.Unmarshal(body, &eviction) == nil && eviction.DeleteOptions != nil {
+			dryRun = slices.Equal(eviction.DeleteOptions.DryRun, []string{metav1.DryRunAll})
+		}
 	}
 
 	s.mu.Lock()
@@ -1486,6 +1517,9 @@ func (s *Server) evictPod(w http.ResponseWriter, r *http.Request, namespace, nam
 		s.serveNotFound(w, r)
 		return
 	}
+	if dryRun {
+		s.dryRunEvictions = append(s.dryRunEvictions, namespace+"/"+name)
+	}
 	if s.pods[index].Terminating {
 		// Already going: accepted, no budget asked and no second eviction on
 		// the record.
@@ -1494,6 +1528,20 @@ func (s *Server) evictPod(w http.ResponseWriter, r *http.Request, namespace, nam
 			TypeMeta: metav1.TypeMeta{APIVersion: "v1", Kind: "Status"},
 			Status:   "Success",
 			Code:     http.StatusCreated,
+		})
+		return
+	}
+	if s.pods[index].BudgetsConflict {
+		s.mu.Unlock()
+		// What the server says for a pod two budgets select: an internal error,
+		// not a refusal, with the sentence the Kubernetes source gives.
+		writeJSON(w, http.StatusInternalServerError, metav1.Status{
+			TypeMeta: metav1.TypeMeta{APIVersion: "v1", Kind: "Status"},
+			Status:   "Failure",
+			Message: "This pod has more than one PodDisruptionBudget, which the eviction " +
+				"subresource does not support.",
+			Reason: metav1.StatusReasonInternalError,
+			Code:   http.StatusInternalServerError,
 		})
 		return
 	}
@@ -1523,6 +1571,17 @@ func (s *Server) evictPod(w http.ResponseWriter, r *http.Request, namespace, nam
 			}
 		}
 		writeJSON(w, http.StatusTooManyRequests, status)
+		return
+	}
+
+	if dryRun {
+		// The server returns here, before it writes anything.
+		s.mu.Unlock()
+		writeJSON(w, http.StatusCreated, metav1.Status{
+			TypeMeta: metav1.TypeMeta{APIVersion: "v1", Kind: "Status"},
+			Status:   "Success",
+			Code:     http.StatusCreated,
+		})
 		return
 	}
 
@@ -2082,6 +2141,15 @@ func (s *Server) Evicted() []string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return append([]string(nil), s.evicted...)
+}
+
+// DryRunEvictions is every eviction asked with DryRun=All, as "namespace/name",
+// in the order they came and again for every repeat. None of them changed
+// anything: they are not in Evicted, and the pods are still where they were.
+func (s *Server) DryRunEvictions() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]string(nil), s.dryRunEvictions...)
 }
 
 func (s *Server) serveNotFound(w http.ResponseWriter, r *http.Request) {

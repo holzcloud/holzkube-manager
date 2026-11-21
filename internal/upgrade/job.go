@@ -31,6 +31,15 @@ import (
 // node is touched (UPG-02). Evaluating it once at the start would be
 // evaluating it against a cluster that the previous node has since changed,
 // which is exactly the cluster the requirement is about.
+//
+// A Talos upgrade has two steps for every node: the Kubernetes gate
+// ("check Kubernetes can spare <id>") and then the upgrade itself. They are
+// separate on purpose. A gate that is closed waits, up to its budget, and a
+// step shows its detail only when it ends: as a step of its own the wait at
+// least shows its name. And a restart treats them differently as it should --
+// the gate only reads, so it is asked again; the upgrade is verified by asking
+// the node what it runs. For a control-plane node the Kubernetes gate is a
+// declared no-op, because etcd's gate stands in its upgrade step.
 
 // JobKindTalosUpgrade and JobKindKubernetesUpgrade are the two rolling
 // upgrades. They are separate kinds rather than one with a parameter because
@@ -125,6 +134,11 @@ type Deps struct {
 	// looks at pods that are still shutting down. Zero is kube.DrainRetry and
 	// kube.DrainGonePoll.
 	DrainPace time.Duration
+
+	// WorkerGateBudget is how long the gate before a worker's upgrade is asked
+	// again while it is closed. Zero is WorkerGateBudget, which is what
+	// production runs with; the field is a seam, like DrainBudget.
+	WorkerGateBudget time.Duration
 }
 
 // Register teaches a job engine both rolling upgrades.
@@ -180,7 +194,8 @@ type Request struct {
 	Installers map[model.MachineID]string `json:"installers,omitempty"`
 }
 
-// talosSteps builds one step per node.
+// talosSteps builds the steps of a Talos upgrade: for every node a gate step and
+// then its upgrade step.
 func talosSteps(d Deps, req Request, cluster model.ClusterID) ([]jobs.Step, error) {
 	to, err := ParseVersion(req.To)
 	if err != nil {
@@ -190,7 +205,7 @@ func talosSteps(d Deps, req Request, cluster model.ClusterID) ([]jobs.Step, erro
 		return nil, errors.New("upgrade: this run names no nodes")
 	}
 
-	steps := make([]jobs.Step, 0, len(req.Machines))
+	steps := make([]jobs.Step, 0, 2*len(req.Machines))
 	for _, id := range req.Machines {
 		installer := req.Installers[id]
 		if installer == "" {
@@ -199,7 +214,9 @@ func talosSteps(d Deps, req Request, cluster model.ClusterID) ([]jobs.Step, erro
 				"node's SecureBoot state in it -- and a step that assembled one here would "+
 				"install something the operator never saw", id)
 		}
-		steps = append(steps, talosNodeStep(d, cluster, id, to, req.Schematics[id], installer))
+		steps = append(steps,
+			workerGateStep(d, cluster, id),
+			talosNodeStep(d, cluster, id, to, req.Schematics[id], installer))
 	}
 	return steps, nil
 }
@@ -840,7 +857,7 @@ func waitForUpgrade(
 		select {
 		case <-ctx.Done():
 			return Observed{}, ctx.Err()
-		case <-time.After(10 * time.Second):
+		case <-time.After(pollInterval):
 		}
 
 		cc, err := d.Connect(ctx, id)

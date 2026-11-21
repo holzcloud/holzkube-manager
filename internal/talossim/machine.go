@@ -44,6 +44,11 @@ type nodeState struct {
 	bootstrapped   bool
 	bootstrapCalls int
 
+	// worker is a node of a simulated cluster that is not a control-plane node.
+	// It never runs etcd, and its kubelet runs from the start: a worker is not
+	// bootstrapped, it joins. Set from the options and never changed.
+	worker bool
+
 	// uploadedSnapshot is what EtcdRecover has left on the node, and
 	// recoveredFrom is what a recovery bootstrap then started etcd from.
 	//
@@ -178,6 +183,7 @@ func newNodeState(opts Options) *nodeState {
 		version:      opts.TalosVersion,
 		lastBoot:     now(),
 		bootstrapped: opts.Bootstrapped,
+		worker:       opts.Cluster != nil && !opts.ControlPlane,
 		bootTakes:    opts.BootTakes,
 		ring:         opts.EtcdRing,
 	}
@@ -692,22 +698,33 @@ func (m *machineService) ServiceList(_ context.Context, _ *emptypb.Empty) (*mach
 	// only the kubelet stops running: machined, apid and etcd carry on. A
 	// scenario that took the whole service list down would be indistinguishable
 	// from a node that had gone away.
-	kubeletRunning := n.Bootstrapped
+	//
+	// A worker of a simulated cluster is the other shape: it has no etcd at all,
+	// as on hardware, and its kubelet runs because it has joined -- until it is
+	// reset. Reporting it as a control-plane node that was never bootstrapped
+	// made every worker an upgrade could not verify: etcd and kubelet "not
+	// running" on a node that never had the one and was running the other.
+	worker := m.server.node.worker
+	kubeletRunning := n.Bootstrapped || (worker && n.Resets == 0)
 	kubeletMessage := "kubelet is running"
 	if m.server.kubernetesIsDown() {
 		kubeletRunning = false
 		kubeletMessage = "kubelet is not running: failed to start, see logs"
 	}
 
+	services := []*machine.ServiceInfo{
+		service("machined", true, "service started"),
+		service("apid", true, "listening on :50000"),
+		service("kubelet", kubeletRunning, kubeletMessage),
+	}
+	if !worker {
+		services = append(services, service("etcd", n.Bootstrapped, etcdMessage))
+	}
+
 	return &machine.ServiceListResponse{
 		Messages: []*machine.ServiceList{{
 			Metadata: m.server.node.metadata(),
-			Services: []*machine.ServiceInfo{
-				service("machined", true, "service started"),
-				service("apid", true, "listening on :50000"),
-				service("kubelet", kubeletRunning, kubeletMessage),
-				service("etcd", n.Bootstrapped, etcdMessage),
-			},
+			Services: services,
 		}},
 	}, nil
 }
