@@ -9,6 +9,7 @@ import (
 	"os"
 	"slices"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -228,8 +229,18 @@ func TestRemovingANodeAnswers202WithAJobAndIsDoneWhenTheJobIs(t *testing.T) {
 	if loc := resp.Header.Get("Location"); loc != "/api/v1/jobs/"+body.Job.ID {
 		t.Errorf("Location = %q, want the job's URL", loc)
 	}
+	// The notice says what the removal now does, and says nothing that was true
+	// only while the product could not cordon or drain.
 	if body.Notice == "" {
 		t.Error("the cordon-and-drain notice is missing from the answer")
+	}
+	for _, want := range []string{"PodDisruptionBudget", "node object"} {
+		if !strings.Contains(body.Notice, want) {
+			t.Errorf("the notice does not mention %q: %q", want, body.Notice)
+		}
+	}
+	if strings.Contains(body.Notice, "kubectl drain") {
+		t.Errorf("the notice still tells the operator to drain by hand, which the product does itself now: %q", body.Notice)
 	}
 
 	deadline := time.Now().Add(30 * time.Second)

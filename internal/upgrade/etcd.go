@@ -345,15 +345,24 @@ func Snapshot(ctx context.Context, cc *talos.ClusterClient, w io.Writer) (int64,
 	return n, nil
 }
 
-// RemoveNodeNotice is what the screen says about cordon and drain (UPG-13).
+// RemoveNodeNotice is what the screen says a removal does to the workloads
+// and to the node's place in Kubernetes (UPG-13, DRAIN-06).
 //
-// It is stated rather than quietly omitted. An operator who reads "remove this
-// node" and expects the workloads to move first is an operator whose pods get
-// killed, and the honest answer is that this product does not speak to the
-// Kubernetes API at all.
-const RemoveNodeNotice = "holzkube-manager speaks the Talos machine API and not the Kubernetes API, " +
-	"so it cannot cordon or drain this node. Anything still scheduled on it stops when it does. " +
-	"Run `kubectl drain <node>` first if the workloads on it need to move rather than restart."
+// It travels in the 202 answer and is repeated in the removal dialog, and the
+// two have to say the same thing: whoever read it on the way in has stopped
+// reading by the time the job ends, and a sentence that says "nothing is
+// drained" while the job drains is worse than none. It describes the steps of
+// removejob.go in their order; when those change, this changes with them.
+//
+// The Kubernetes half is conditional on there being one: a cluster this
+// product has no Kubernetes access to is removed without the drain, and the
+// job's own steps say so when it happens.
+const RemoveNodeNotice = "The node is cordoned and drained first: its pods are evicted, never deleted, " +
+	"so every PodDisruptionBudget is honoured. If a budget holds a pod for ten minutes, or a pod no " +
+	"controller owns would be lost, the removal stops before anything on the node has changed, and says " +
+	"which. Then a control-plane node leaves etcd, the node is wiped, its Kubernetes node object is " +
+	"deleted and it is forgotten here. A cluster this product has no Kubernetes access to is removed " +
+	"without the drain, and the job says so."
 
 // EvictionWait is how long a removal waits after the etcd leave before
 // wiping. The removal job's "let etcd settle" step waits exactly this long
