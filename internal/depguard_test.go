@@ -52,9 +52,11 @@ const (
 	//
 	// cosiVersion moves with it. It arrives with machinery rather than by
 	// choice, which is why it is asserted here at all.
-	// Raised to v1.14.5 on 2026-11-01, the newest stable release (a patch; the
-	// supported range stays v1.14). Before that v1.14.2, from 2026-10-05.
-	machineryVersion = "v1.14.5"
+	// Raised to v1.14.6 on 2026-11-24, the newest stable release (a patch; the
+	// supported range stays v1.14), after the weekly upstream check failed on
+	// 2026-11-23. Before that v1.14.5, from 2026-11-01, and v1.14.2, from
+	// 2026-10-05.
+	machineryVersion = "v1.14.6"
 	cosiVersion      = "v1.16.3"
 
 	// clientGoVersion is the second upstream, and it became one on 2026-09-19:
