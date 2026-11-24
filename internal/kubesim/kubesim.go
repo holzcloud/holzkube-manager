@@ -934,6 +934,27 @@ func (s *Server) SetUnschedulable(name string, unschedulable bool) error {
 	return fmt.Errorf("kubesim: no node named %q", name)
 }
 
+// RenameNode is a kubelet that registered again under another name while a
+// test is running: the Node object of the old name is gone, one of the new
+// name is there with the same address and state, and the pods that ran on the
+// old name now run on the new one.
+func (s *Server) RenameNode(from, to string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for i := range s.nodes {
+		if s.nodes[i].Name == from {
+			s.nodes[i].Name = to
+			for j := range s.pods {
+				if s.pods[j].Node == from {
+					s.pods[j].Node = to
+				}
+			}
+			return nil
+		}
+	}
+	return fmt.Errorf("kubesim: no node named %q", from)
+}
+
 // SetReady changes a node's Ready condition while a test is running: a gate
 // that waits for a node to come back is only measurable if the node can.
 func (s *Server) SetReady(name string, status corev1.ConditionStatus) error {

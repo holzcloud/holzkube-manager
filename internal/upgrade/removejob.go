@@ -94,8 +94,10 @@ import (
 // When the job is interrupted instead, nothing is given back. A shutdown leaves
 // the job unfinished, and a restart carries on with the cordon in place; a
 // cancel by the operator ends the job cancelled with its cordon still set.
-// Only a failure in the drain step gives the cordon back: a control-plane
-// removal that fails later, leaving etcd, leaves the node cordoned and drained.
+// Only a failure in the drain step gives the cordon back. Every failure after a
+// drain that finished keeps it -- leave etcd and let etcd settle for a
+// control-plane node, the wipe for any node -- and leaves the node cordoned and
+// drained.
 //
 // A cluster that never had Kubernetes access is skipped, visibly, in the
 // cordon, drain and delete steps. A removal that did have access -- the cordon
@@ -614,8 +616,11 @@ func (d Deps) resolveNode(ctx context.Context, job *model.Job, byKeptName bool) 
 	// A name the cordon step kept is the node, whatever the inventory says
 	// about the machine since: a machine renamed between two steps would
 	// otherwise be found nowhere, and the drain would say "nothing to drain"
-	// and let the wipe run with the pods still there (review IN-06). Only that
-	// name missing from the cluster's own list is no node.
+	// and let the wipe run with the pods still there (review IN-06). A name
+	// gone from the cluster's list is not yet no node: a kubelet that
+	// registered again under another name since is still this machine, so it
+	// is looked up by hostname and address before "no node" is concluded
+	// (review WR-01, 2026-11-24). The caller sees the moved name in t.node.
 	if name := job.Params[kubeNodeParam]; byKeptName && name != "" {
 		nodes, err := client.Nodes(ctx)
 		if err != nil {
@@ -625,6 +630,9 @@ func (d Deps) resolveNode(ctx context.Context, job *model.Job, byKeptName bool) 
 			if n.Name == name {
 				return kubeTarget{machine: m, client: client, node: n}, kubeWork, nil
 			}
+		}
+		if n, ok := kube.FindNodeIn(nodes, m.Hostname, m.Addr); ok {
+			return kubeTarget{machine: m, client: client, node: n}, kubeWork, nil
 		}
 		return kubeTarget{machine: m}, kubeNoNode, nil
 	}
@@ -792,6 +800,21 @@ func (d Deps) drainStep(_ model.Job) jobs.Step {
 			case kubeWork:
 			}
 
+			// The node registered again under another name since the cordon
+			// (see resolveNode). Drain cordons it first; from here on it is
+			// the node this removal acts on, and the cordon on it is this
+			// job's unless it was already there.
+			moved := ""
+			if kept := job.Params[kubeNodeParam]; kept != "" && t.node.Name != kept {
+				moved = kept
+				job.Params[kubeNodeParam] = t.node.Name
+				if t.node.Unschedulable {
+					delete(job.Params, cordonedByJobParam)
+				} else {
+					job.Params[cordonedByJobParam] = "true"
+				}
+			}
+
 			opts := d.drainOptions()
 			silent := t.node.Ready != string(corev1.ConditionTrue)
 			if silent {
@@ -804,6 +827,11 @@ func (d Deps) drainStep(_ model.Job) jobs.Step {
 
 			result, err := t.client.Drain(ctx, t.node.Name, opts)
 			*detail = result.Summary()
+			if moved != "" {
+				*detail += ". Kubernetes lists this machine as " + t.node.Name + " now, not " + moved +
+					" as when it was cordoned: it registered again since, and " + t.node.Name +
+					" is the node that was drained"
+			}
 			if err != nil {
 				if ctx.Err() != nil {
 					// The daemon is shutting down or the operator cancelled:

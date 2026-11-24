@@ -1801,3 +1801,47 @@ func TestADrainFindsTheNodeByTheKeptNameWhenTheInventoryChangedAfterTheCordon(t 
 		t.Errorf("deleted nodes %v, want exactly [w-1]", got)
 	}
 }
+
+// TestADrainFindsANodeThatRegisteredAgainUnderAnotherNameAfterTheCordon is
+// review WR-01 of 2026-11-24: with a kept name, a name gone from the cluster's
+// list was taken for "no node", so a kubelet that registered again under
+// another name between the cordon and the drain was skipped and the wipe ran
+// with its pods still there. The machine is looked up by hostname and address
+// before "no node" is concluded, the node it is found as is drained, and that
+// is the name the node object is deleted by.
+func TestADrainFindsANodeThatRegisteredAgainUnderAnotherNameAfterTheCordon(t *testing.T) {
+	t.Parallel()
+	var once sync.Once
+	r := newRemovalRigWith(t, 1, 1, removalRigOptions{
+		Pods: []kubesim.Pod{replicaPod("web-1", "w-1"), replicaPod("web-2", "w-1")},
+		Inventory: func(r *removalRig, m model.Machine) model.Machine {
+			if m.Hostname == "w-1" && r.ksim.Calls("PATCH /api/v1/nodes/w-1") > 0 {
+				once.Do(func() {
+					if err := r.ksim.RenameNode("w-1", "w-1b"); err != nil {
+						t.Error(err)
+					}
+				})
+				m.Hostname = "w-1b"
+			}
+			return m
+		},
+	})
+
+	j := r.await(r.engine, r.submit(r.engine, "w-1").ID, model.JobSucceeded)
+
+	evicted := r.ksim.Evicted()
+	slices.Sort(evicted)
+	if want := []string{"default/web-1", "default/web-2"}; !slices.Equal(evicted, want) {
+		t.Fatalf("evicted %v, want %v: the wipe ran without the drain", evicted, want)
+	}
+	d := stepNamed(j, "drain the node").Detail
+	if strings.Contains(d, "nothing to drain") {
+		t.Errorf("the drain step says %q for a node that was there under another name", d)
+	}
+	if !strings.Contains(d, "w-1b") {
+		t.Errorf("the drain step %q does not name the node it drained, w-1b", d)
+	}
+	if got := r.ksim.DeletedNodes(); !slices.Equal(got, []string{"w-1b"}) {
+		t.Errorf("deleted nodes %v, want exactly [w-1b]", got)
+	}
+}
