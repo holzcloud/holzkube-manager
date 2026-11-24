@@ -120,6 +120,20 @@ describe('removing a node from its cluster', () => {
     expect(screen.getByText(/loses it on the way fails instead/i)).toBeInTheDocument()
   })
 
+  it('does not promise the cordon, the drain and the node object in the description unconditionally', () => {
+    wrap(<NodeActions machine={machine} />)
+    fireEvent.click(screen.getByRole('button', { name: /remove from cluster/i }))
+
+    // The description is the first thing read, and it is what a screen reader
+    // announces with the dialog: it must not say the node is drained when the
+    // paragraph below says a cluster without Kubernetes access is not (UI
+    // review of 2026-11-24).
+    const id = screen.getByRole('dialog').getAttribute('aria-describedby') ?? ''
+    const description = document.getElementById(id)
+    expect(description).not.toBeNull()
+    expect(description?.textContent).toMatch(/with Kubernetes access/i)
+  })
+
   it('says that a removal is not a wipe', () => {
     wrap(<NodeActions machine={machine} />)
     fireEvent.click(screen.getByRole('button', { name: /remove from cluster/i }))

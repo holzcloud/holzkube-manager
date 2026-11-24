@@ -5146,8 +5146,10 @@ with `kubectl uncordon <name>`. A drain interrupted by a shutdown gives nothing
 back, because the job is not over: a restart carries on with the cordon in place.
 A drain the operator cancels gives nothing back either: the job ends `cancelled`
 with its cordon still set, and `kubectl uncordon <name>` takes it back. Only a
-failure in `drain the node` gives the cordon back; a control-plane removal that
-fails later, in `leave etcd`, leaves the node cordoned and drained.
+failure in `drain the node` gives the cordon back. Every failure after a drain
+that finished keeps it: `leave etcd` and `let etcd settle` for a control-plane
+node, `wipe the node` for any node. Such a node stays cordoned and drained; run the
+removal again, or `kubectl uncordon <name>` if you keep the node.
 
 A cluster whose stored configuration has held no Kubernetes authority from the
 start is removed without the cordon, the drain and the deletion of the node object:
@@ -5160,7 +5162,12 @@ node object` after it.
 `delete the Kubernetes node object` runs after the wipe, because a kubelet that is
 still running puts its object back within seconds. It deletes the name kept in
 `kubernetes_node`, not the result of a new search, because the inventory may list a
-wiped machine under another hostname or address by then. With a kept name, a
+wiped machine under another hostname or address by then. The steps after the
+cordon act on that name too. Only when the cluster no longer lists it does
+`drain the node` look the machine up by hostname and address. A kubelet that
+registered again under another name is then drained under that name. That name
+becomes the kept one, and the `detail` names both. Only a machine found under
+neither is "nothing to drain". With a kept name, a
 Kubernetes that does not answer, a configuration without Kubernetes authority and
 a refused DELETE are each `failed` with a sentence that says the node has been
 wiped (and, for a control-plane node, has left etcd), why the object could not be

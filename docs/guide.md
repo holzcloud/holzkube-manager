@@ -1642,13 +1642,15 @@ it for five minutes and then not at all.
   failure is in *drain the node*, the cordon the job set is taken back, or the
   job says it could not be (for example when Kubernetes stopped answering after
   the cordon): then it says the node is still cordoned by this removal and names
-  `kubectl uncordon <name>`. A control-plane node whose removal fails later, in
-  *leave etcd*, after a drain that finished, stays cordoned and drained: run the
+  `kubectl uncordon <name>`. Every failure after a drain that finished keeps
+  the cordon: *leave etcd* and *let etcd settle* for a control-plane node,
+  *wipe the node* for any node. Such a node stays cordoned and drained: run the
   removal again, or `kubectl uncordon <name>` if you keep the node. A removal
   you cancel ends with its cordon still set, too. After the node
   left etcd, it stays out; run the removal again to finish it. After the wipe,
   the job deletes the Kubernetes node object under the name Kubernetes gave the
-  node when the job cordoned it, so a machine that comes back in maintenance
+  node when the job cordoned it (or, if the node registered again under another
+  name before the drain, the name it was drained under), so a machine that comes back in maintenance
   mode under another hostname or address still loses its object; with that name
   it never reports that there was nothing to delete, it fails and names
   `kubectl delete node <name>`. That also covers the API not answering any more

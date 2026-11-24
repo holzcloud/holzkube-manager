@@ -188,11 +188,11 @@ function RemoveFromClusterDialog({
             Remove {phrase} from its cluster
           </DialogTitle>
           <DialogDescription>
-            The node is cordoned and drained, leaves etcd (a control-plane node, forfeiting
-            leadership first if it holds it), waits for etcd to settle, has its system disk wiped,
-            has its Kubernetes node object deleted, and its record here is forgotten. This is not a
-            full reset: its other disks are left alone, and the machine comes back in maintenance
-            mode, ready to be provisioned again.
+            The node leaves etcd (a control-plane node, forfeiting leadership first if it holds it),
+            waits for etcd to settle, has its system disk wiped, and its record here is forgotten;
+            with Kubernetes access, it is cordoned and drained first and its Kubernetes node object
+            is deleted afterwards. This is not a full reset: its other disks are left alone, and the
+            machine comes back in maintenance mode, ready to be provisioned again.
           </DialogDescription>
         </DialogHeader>
 
