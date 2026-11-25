@@ -1,9 +1,55 @@
 # Actions are pinned to commit SHAs (a moving tag is whatever its owner pushes
 # next, and the release job builds the binary that lands on a Pi as root). A
 # pinned SHA does not move, so this is what brings a fixed version in.
+#
+# CI does not run on pull requests (Actions minutes), so a Dependabot PR is a
+# notice, not a verified change: check it out and run `./bin/task ci` before
+# merging. The groups keep that to a few PRs a week rather than one per module.
 version: 2
 updates:
   - package-ecosystem: github-actions
     directory: /
     schedule:
       interval: weekly
+
+  # The SPA. One PR for everything that is not a major; majors arrive one by
+  # one, because each is a migration of its own.
+  - package-ecosystem: npm
+    directory: /web
+    schedule:
+      interval: weekly
+    groups:
+      web:
+        update-types:
+          - minor
+          - patch
+
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly
+    ignore:
+      # The Talos API surface this product speaks. Raising it is a decision
+      # (CLAUDE.md, "Talos versions"; internal/depguard_test.go pins it), and
+      # .github/workflows/talos-upstream.yml is what notices a new release.
+      - dependency-name: github.com/siderolabs/talos/pkg/machinery
+      # Arrives with machinery and moves with it, never on its own.
+      - dependency-name: github.com/cosi-project/runtime
+      # The minor is the supported Kubernetes (internal/compat); patches of
+      # the pinned line are welcome, a new line is a decision.
+      - dependency-name: k8s.io/*
+        update-types:
+          - version-update:semver-major
+          - version-update:semver-minor
+    groups:
+      kubernetes:
+        patterns:
+          - k8s.io/*
+      go:
+        patterns:
+          - "*"
+        exclude-patterns:
+          - k8s.io/*
+        update-types:
+          - minor
+          - patch
