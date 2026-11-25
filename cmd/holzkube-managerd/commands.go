@@ -123,7 +123,7 @@ func cmdBackups(args []string) error {
 	return nil
 }
 
-// cmdRestore unpacks a backup over the data directory (OPS-01).
+// cmdRestore replaces the data directory's contents with a backup's (OPS-01).
 //
 // Two refusals stand in front of it, and both are about not making a bad
 // situation worse:

@@ -5277,7 +5277,7 @@ quiet exactly when something is added.
 | `holzkube-managerd` | serves (the default; no subcommand needed) |
 | `holzkube-managerd backup [--label X]` | writes a tarball into the data directory |
 | `holzkube-managerd backups` | lists what is there, newest first |
-| `holzkube-managerd restore FILE` | backs up what is there, then unpacks |
+| `holzkube-managerd restore FILE` | backs up what is there, then replaces it with the archive |
 | `holzkube-managerd verify-audit` | checks the audit hash chain; exits non-zero on a break |
 | `holzkube-managerd break-glass [--ttl=15m]` | mints a short-lived admin token on this machine |
 

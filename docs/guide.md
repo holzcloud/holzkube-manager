@@ -887,7 +887,7 @@ of reporting it.
 ```sh
 holzkube-managerd backup            # writes a tarball into the data directory
 holzkube-managerd backups           # lists what is there, newest first
-holzkube-managerd restore FILE      # backs up what is there, then unpacks
+holzkube-managerd restore FILE      # backs up what is there, then replaces it
 holzkube-managerd verify-audit      # checks the audit hash chain
 holzkube-managerd break-glass       # a short-lived admin token, on this machine
 ```
@@ -914,6 +914,15 @@ wrong without one would have replaced a working installation with a broken one
 and left nothing to go back to. Every entry in the archive is checked against
 the destination before a byte is written, because `../../../etc/shadow` is a
 valid tar entry.
+
+The archive is unpacked in full into a staging directory inside the data
+directory, and read to its end, gzip checksum included, before anything that is
+there is touched. A truncated or damaged archive is refused with the data
+directory exactly as it was. Only then are the current contents swapped out for
+the staged ones, so **the restored directory is the backup and nothing else**:
+a record written after the backup was taken is gone afterwards (it is in the
+pre-restore backup). What a backup never contains stays where it is: `backups/`,
+`upgrade-snapshots/` and the lock file.
 
 A backup contains every secret in the data directory verbatim. It is `0600`
 inside the `0700` directory; copying it somewhere else copies those secrets.
@@ -942,8 +951,9 @@ directory. There are two ways out:
   `holzkube-managerd restore <data-dir>/backups/pre-migration-6-to-7-<time>.tar.gz`.
   That puts the directory back to the version 6 state of the moment before the
   migration, so whatever was changed since is gone, and it takes a backup of what
-  is there first, as every restore does. The `config-baselines/` directory stays
-  where it is; a binary that does not know it leaves it alone.
+  is there first, as every restore does. The `config-baselines/` directory goes
+  with it, because a version 6 backup does not contain it; the newer version
+  creates it again on its next start and fills it as nodes are read.
 
 What is in `config-baselines/` and what is not (secret values are replaced, a
 few kinds of field are stored as the Config view shows them) is described under

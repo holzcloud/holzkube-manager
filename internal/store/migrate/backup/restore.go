@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/holzcloud/holzkube-manager/internal/store"
 )
 
 // Restoring a backup, and the two ways it must refuse.
@@ -56,7 +58,7 @@ func CreateNamed(dir, label string) (string, error) {
 	return path, writeArchive(path, dir)
 }
 
-// Restore unpacks an archive over a data directory.
+// Restore replaces a data directory's contents with an archive's.
 //
 // It refuses a directory that another holzkube-manager holds: the process lock
 // is what makes "one writer" true, and restoring underneath a running instance
@@ -68,6 +70,33 @@ func CreateNamed(dir, label string) (string, error) {
 // safety, when non-empty, is where the pre-restore backup of the *current*
 // contents is written first. Passing an empty string skips it, which is for
 // restoring into a directory that has nothing in it -- and nowhere else.
+//
+// The restore happens in two halves, and nothing of the current contents is
+// touched until the first one has finished:
+//
+//  1. The whole archive is unpacked into a staging directory inside the data
+//     directory and read to its end, the gzip length and checksum included. A
+//     truncated or corrupt archive, an entry that escapes, a symlink: each of
+//     these fails here, the staging directory is removed, and the data
+//     directory is as it was. A half-restored directory is worse than a
+//     refused restore: it is a directory that looks restored.
+//  2. The current contents are moved aside and the staged ones moved in, one
+//     rename per top-level entry, and what was moved aside is then deleted. The
+//     result is the archive and nothing else: a record written after the
+//     backup was taken does not survive into the restored directory (it is in
+//     the pre-restore backup). A rename that fails puts back what had moved.
+//
+// Staging inside the data directory rather than next to it is deliberate: the
+// data directory is the one place the service is sure to be allowed to write
+// (it owns /var/lib/holzkube-manager, not /var/lib), the renames stay on one
+// filesystem, and the directory keeps its own inode, owner and mode. The price
+// is that the swap is a rename per entry rather than one; a crash in the
+// middle of it leaves what was there in a .holzkube-manager-tmp-replaced-*
+// directory beside the pre-restore backup.
+//
+// What a backup never carries stays where it is: backups/ -- where the archive
+// being restored and the pre-restore backup usually are --, upgrade-snapshots/
+// and the lock file. An archive that tries to put something there is refused.
 func Restore(archive, dir, safety string) (safetyPath string, err error) {
 	if safety != "" {
 		if entries, rerr := os.ReadDir(dir); rerr == nil && len(entries) > 0 {
@@ -79,59 +108,194 @@ func Restore(archive, dir, safety string) (safetyPath string, err error) {
 		}
 	}
 
-	f, err := os.Open(archive) //nolint:gosec // the archive is named by the operator on their own host
-	if err != nil {
-		return safetyPath, fmt.Errorf("backup: open %s: %w", archive, err)
-	}
-	defer f.Close() //nolint:errcheck // the restore's verdict is the write's
-
-	gz, err := gzip.NewReader(f)
-	if err != nil {
-		return safetyPath, fmt.Errorf("backup: %s is not a gzip archive: %w", archive, err)
-	}
-	defer gz.Close() //nolint:errcheck // as above
-
-	// Every entry is validated against the destination before anything is
-	// written, and the whole archive is validated before the first byte lands.
-	// A half-restored directory is worse than a refused restore: it is a
-	// directory that looks restored.
 	if err := os.MkdirAll(dir, dirPerm); err != nil {
 		return safetyPath, fmt.Errorf("backup: create %s: %w", dir, err)
 	}
 
+	staging, err := os.MkdirTemp(dir, store.TempFilePrefix+"restore-")
+	if err != nil {
+		return safetyPath, fmt.Errorf("backup: create a staging directory in %s: %w", dir, err)
+	}
+	// Empty after a swap; after a refusal, what was unpacked before it.
+	defer os.RemoveAll(staging) //nolint:errcheck // the restore's verdict is unpack's or swapIn's
+
+	if err := unpack(archive, staging); err != nil {
+		return safetyPath, fmt.Errorf("%w (nothing in %s has been changed)", err, dir)
+	}
+	return safetyPath, swapIn(dir, staging)
+}
+
+// unpack reads the whole archive into staging, and fails on anything that is
+// not a complete, well-formed archive of files and directories.
+func unpack(archive, staging string) error {
+	f, err := os.Open(archive) //nolint:gosec // the archive is named by the operator on their own host
+	if err != nil {
+		return fmt.Errorf("backup: open %s: %w", archive, err)
+	}
+	defer f.Close() //nolint:errcheck // the restore's verdict is the read's
+
+	gz, err := gzip.NewReader(f)
+	if err != nil {
+		return fmt.Errorf("backup: %s is not a gzip archive: %w", archive, err)
+	}
+	defer gz.Close() //nolint:errcheck // as above
+
 	tr := tar.NewReader(gz)
 	for {
 		header, err := tr.Next()
-		switch {
-		case errors.Is(err, io.EOF):
-			return safetyPath, syncDir(dir)
-		case err != nil:
-			return safetyPath, fmt.Errorf("backup: read %s: %w", archive, err)
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			return fmt.Errorf("backup: read %s: %w", archive, err)
 		}
 
-		target, err := safeJoin(dir, header.Name)
+		target, err := safeJoin(staging, header.Name)
 		if err != nil {
-			return safetyPath, err
+			return err
+		}
+		if reserved(staging, target) {
+			return fmt.Errorf("backup: %s in this archive is where the data directory keeps "+
+				"what a backup never carries, and a restore does not replace it", header.Name)
 		}
 
 		switch header.Typeflag {
 		case tar.TypeDir:
 			if err := os.MkdirAll(target, dirPerm); err != nil {
-				return safetyPath, fmt.Errorf("backup: create %s: %w", target, err)
+				return fmt.Errorf("backup: create %s: %w", target, err)
 			}
 		case tar.TypeReg:
 			if err := writeFile(target, tr, header); err != nil {
-				return safetyPath, err
+				return err
 			}
 		default:
 			// Symlinks, devices, hard links: refused rather than skipped. A
 			// symlink in an archive is a path the next write follows, and
 			// silently dropping one produces a restored directory that is
 			// missing something nobody is told about.
-			return safetyPath, fmt.Errorf("backup: %s in this archive is a %q entry, and only "+
+			return fmt.Errorf("backup: %s in this archive is a %q entry, and only "+
 				"files and directories are restored", header.Name, entryKind(header.Typeflag))
 		}
 	}
+
+	// The tar end marker comes before the gzip trailer, so a stream cut after
+	// the last entry still reads as a complete tar. Reading the gzip stream to
+	// its end is what checks its length and CRC. What may follow the end
+	// marker is record padding (tar pads to 10 KiB blocks); more than that is
+	// not an archive this product wrote, and reading it unbounded would be a
+	// decompression bomb.
+	const maxPadding = 64 << 10
+	rest, err := io.Copy(io.Discard, io.LimitReader(gz, maxPadding+1))
+	if err != nil {
+		return fmt.Errorf("backup: read %s: %w", archive, err)
+	}
+	if rest > maxPadding {
+		return fmt.Errorf("backup: %s carries more than %d bytes after the end of its tar stream", archive, maxPadding)
+	}
+	return syncTree(staging)
+}
+
+// reserved reports whether an archive entry lands on something a backup never
+// carries: the names writeTree skips.
+func reserved(root, target string) bool {
+	rel, err := filepath.Rel(root, target)
+	if err != nil || rel == "." {
+		return false
+	}
+	parts := strings.Split(filepath.ToSlash(rel), "/")
+	if kept(parts[0]) {
+		return true
+	}
+	for _, part := range parts {
+		if strings.HasPrefix(part, store.TempFilePrefix) {
+			return true
+		}
+	}
+	return false
+}
+
+// kept reports whether a top-level entry of the data directory stays where it
+// is across a restore: the backups, the etcd snapshots taken before an
+// upgrade, the lock, and anything mid-write (the restore's own staging among
+// them).
+func kept(name string) bool {
+	return name == DirName || name == UpgradeSnapshotsDirName || name == store.LockFileName ||
+		strings.HasPrefix(name, store.TempFilePrefix)
+}
+
+// swapIn replaces the data directory's contents with staging's.
+func swapIn(dir, staging string) (err error) {
+	current, err := os.ReadDir(dir)
+	if err != nil {
+		return fmt.Errorf("backup: read %s: %w (nothing has been changed)", dir, err)
+	}
+	incoming, err := os.ReadDir(staging)
+	if err != nil {
+		return fmt.Errorf("backup: read %s: %w (nothing has been changed)", staging, err)
+	}
+	aside, err := os.MkdirTemp(dir, store.TempFilePrefix+"replaced-")
+	if err != nil {
+		return fmt.Errorf("backup: create a directory in %s: %w (nothing has been changed)", dir, err)
+	}
+
+	var movedAside, movedIn []string
+	inPlace := false
+	defer func() {
+		if err == nil || inPlace {
+			return
+		}
+		// Put back what was there.
+		for _, name := range movedIn {
+			_ = os.Rename(filepath.Join(dir, name), filepath.Join(staging, name))
+		}
+		for _, name := range movedAside {
+			_ = os.Rename(filepath.Join(aside, name), filepath.Join(dir, name))
+		}
+		_ = syncDir(dir)
+		_ = os.Remove(aside)
+	}()
+
+	for _, e := range current {
+		if kept(e.Name()) {
+			continue
+		}
+		if err := os.Rename(filepath.Join(dir, e.Name()), filepath.Join(aside, e.Name())); err != nil {
+			return fmt.Errorf("backup: move %s aside: %w (what was there has been put back)", e.Name(), err)
+		}
+		movedAside = append(movedAside, e.Name())
+	}
+	for _, e := range incoming {
+		if err := os.Rename(filepath.Join(staging, e.Name()), filepath.Join(dir, e.Name())); err != nil {
+			return fmt.Errorf("backup: move %s in: %w (what was there has been put back)", e.Name(), err)
+		}
+		movedIn = append(movedIn, e.Name())
+	}
+	if err := syncDir(dir); err != nil {
+		return err
+	}
+	inPlace = true
+
+	// The restore is in place, and what was there is in the pre-restore backup.
+	if rerr := os.RemoveAll(aside); rerr != nil {
+		return fmt.Errorf("backup: the restore is in place, but what it replaced could not be "+
+			"removed from %s: %w", aside, rerr)
+	}
+	return nil
+}
+
+// syncTree fsyncs every directory under root, so that the staged entries have
+// names on disk before they are renamed into place. writeFile has synced each
+// file's contents already.
+func syncTree(root string) error {
+	return filepath.WalkDir(root, func(p string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if !d.IsDir() {
+			return nil
+		}
+		return syncDir(p)
+	})
 }
 
 // writeFile restores one file with the permissions the data directory needs.

@@ -4,6 +4,8 @@ import (
 	"archive/tar"
 	"compress/gzip"
 	"errors"
+	"io/fs"
+	"math/rand/v2"
 	"os"
 	"path/filepath"
 	"strings"
@@ -330,4 +332,183 @@ func writeSymlinkArchive(t *testing.T, path string) {
 	if err := gz.Close(); err != nil {
 		t.Fatalf("close gzip: %v", err)
 	}
+}
+
+// TestATruncatedArchiveLeavesTheDataDirectoryUntouched.
+//
+// The restore used to unpack entry by entry straight over the data directory,
+// so an archive cut short -- a copy interrupted, a disk that filled -- left the
+// entries before the cut restored and the rest as they were: a mix of two
+// installations that looks like one. And an archive cut after its last tar
+// entry, in the gzip trailer, was not noticed at all, because the tar end
+// marker comes first. Both must be refused with nothing changed.
+func TestATruncatedArchiveLeavesTheDataDirectoryUntouched(t *testing.T) {
+	t.Parallel()
+
+	source := dataDir(t)
+	write(t, filepath.Join(source, "VERSION"), "5")
+	write(t, filepath.Join(source, "clusters", "c1.json"), `{"id":"c1","from":"the backup"}`)
+	// Incompressible and last in walk order, so that a cut in the middle of the
+	// archive falls after the small entries have been read.
+	large := make([]byte, 256<<10)
+	rng := rand.New(rand.NewChaCha8([32]byte{1})) //nolint:gosec // test data, not a secret
+	for i := range large {
+		large[i] = byte(rng.Uint32())
+	}
+	write(t, filepath.Join(source, "zz-large.bin"), string(large))
+
+	archive, err := backup.CreateNamed(source, "test")
+	if err != nil {
+		t.Fatalf("CreateNamed: %v", err)
+	}
+	whole, err := os.ReadFile(archive) //nolint:gosec // the test owns this path
+	if err != nil {
+		t.Fatalf("read archive: %v", err)
+	}
+
+	for name, cut := range map[string]int{
+		"in the middle":       len(whole) / 2,
+		"in the gzip trailer": len(whole) - 4,
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			truncated := filepath.Join(t.TempDir(), "truncated.tar.gz")
+			if err := os.WriteFile(truncated, whole[:cut], 0o600); err != nil {
+				t.Fatalf("write truncated archive: %v", err)
+			}
+
+			target := dataDir(t)
+			write(t, filepath.Join(target, "VERSION"), "4")
+			write(t, filepath.Join(target, "clusters", "c1.json"), `{"id":"c1","from":"the installation"}`)
+			write(t, filepath.Join(target, "only-here.json"), "the only copy")
+			before := tree(t, target)
+
+			if _, err := backup.Restore(truncated, target, "pre-restore"); err == nil {
+				t.Error("an archive cut short was restored without an error")
+			}
+
+			after := tree(t, target)
+			for path, want := range before {
+				if got, ok := after[path]; !ok {
+					t.Errorf("%s is gone after a refused restore", path)
+				} else if got != want {
+					t.Errorf("%s changed after a refused restore: %.40q, was %.40q", path, got, want)
+				}
+			}
+			for path := range after {
+				if _, ok := before[path]; !ok {
+					t.Errorf("%s appeared after a refused restore", path)
+				}
+			}
+		})
+	}
+}
+
+// TestARestoreLeavesNothingTheArchiveDoesNotContain.
+//
+// A restore puts the directory back to the moment of the backup. The one that
+// unpacked over the directory merged instead: a record written after the backup
+// was taken survived it, next to records from before it that it may contradict.
+// What was there is in the pre-restore backup; the restored directory is the
+// archive and nothing else, except what a backup never carries (backups/ and
+// the lock file), which stays.
+func TestARestoreLeavesNothingTheArchiveDoesNotContain(t *testing.T) {
+	t.Parallel()
+
+	dir := dataDir(t)
+	write(t, filepath.Join(dir, "VERSION"), "5")
+	write(t, filepath.Join(dir, "clusters", "c1.json"), `{"id":"c1"}`)
+
+	archive, err := backup.CreateNamed(dir, "test")
+	if err != nil {
+		t.Fatalf("CreateNamed: %v", err)
+	}
+
+	// Written after the backup.
+	write(t, filepath.Join(dir, "clusters", "c2.json"), `{"id":"c2"}`)
+	write(t, filepath.Join(dir, "later", "record.json"), "later")
+	write(t, filepath.Join(dir, "VERSION"), "6")
+
+	safety, err := backup.Restore(archive, dir, "pre-restore")
+	if err != nil {
+		t.Fatalf("Restore: %v", err)
+	}
+
+	got := tree(t, dir)
+	want := map[string]string{
+		"VERSION":          "5",
+		"clusters/c1.json": `{"id":"c1"}`,
+	}
+	for path, content := range want {
+		if got[path] != content {
+			t.Errorf("%s = %q after the restore, want %q", path, got[path], content)
+		}
+	}
+	for path := range got {
+		if _, ok := want[path]; !ok {
+			t.Errorf("%s survived a restore of an archive that does not contain it", path)
+		}
+	}
+
+	// The backups are not part of what is restored, and both are still there:
+	// the one restored from and the one taken of what was replaced.
+	for _, p := range []string{archive, safety} {
+		if _, err := os.Stat(p); err != nil {
+			t.Errorf("a backup is gone after the restore: %v", err)
+		}
+	}
+}
+
+// TestARestoreRefusesAnArchiveThatWritesIntoTheBackups.
+//
+// backups/ is kept across a restore -- the archive being restored usually
+// lives there -- so an archive with an entry under it is not one this product
+// wrote, and restoring it would replace a backup with whatever it carries.
+func TestARestoreRefusesAnArchiveThatWritesIntoTheBackups(t *testing.T) {
+	t.Parallel()
+
+	archive := filepath.Join(t.TempDir(), "backups.tar.gz")
+	writeEvilArchive(t, archive, backup.DirName+"/manual-20260101T000000Z.tar.gz")
+
+	dir := dataDir(t)
+	write(t, filepath.Join(dir, "VERSION"), "4")
+	if _, err := backup.Restore(archive, dir, ""); err == nil {
+		t.Fatal("an archive with an entry under backups/ was restored")
+	}
+	if got := tree(t, dir); got["VERSION"] != "4" || len(got) != 1 {
+		t.Errorf("a refused restore changed the data directory: %v", got)
+	}
+}
+
+// tree reads every file under dir except backups/, keyed by slash path.
+func tree(t *testing.T, dir string) map[string]string {
+	t.Helper()
+
+	out := map[string]string{}
+	err := filepath.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(dir, p)
+		if err != nil {
+			return err
+		}
+		if rel == backup.DirName && d.IsDir() {
+			return filepath.SkipDir
+		}
+		if d.IsDir() {
+			return nil
+		}
+		b, err := os.ReadFile(p) //nolint:gosec // the test owns this tree
+		if err != nil {
+			return err
+		}
+		out[filepath.ToSlash(rel)] = string(b)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walk %s: %v", dir, err)
+	}
+	return out
 }
