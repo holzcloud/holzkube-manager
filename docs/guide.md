@@ -37,9 +37,9 @@ of the above:
 go build -o bin/holzkubectl ./cmd/holzkubectl   # or: task build:cli
 ```
 
-Toolchain: Go 1.26.9 (pinned in `go.mod`), Node with npm, and — for the full
+Toolchain: Go 1.26.11 (pinned in `go.mod`), Node with npm, and — for the full
 task, lint and release chain — [`go-task`](https://taskfile.dev),
-`golangci-lint` v2.13.1 and `goreleaser` v2.18.0.
+`golangci-lint` v2.15.0 and `goreleaser` v2.20.3.
 
 ## Run
 

@@ -11,8 +11,8 @@ vars:
   # The linter version CI pins. It is here so that `task lint:go` can name it
   # next to the one actually installed; changing it means changing
   # .github/workflows/ci.yml in the same commit.
-  GOLANGCI_VERSION: v2.13.1
-  GOVULNCHECK_VERSION: v1.8.0
+  GOLANGCI_VERSION: v2.15.0
+  GOVULNCHECK_VERSION: v1.10.0
   # The race detector's ThreadSanitizer refuses the Raspberry Pi 5 kernel's
   # 47-bit address space, so on aarch64 the tests run without it and the race
   # detector stays CI's alone (CLAUDE.md). Everywhere else it is on.

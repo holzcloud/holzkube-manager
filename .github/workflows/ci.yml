@@ -73,7 +73,7 @@ jobs:
 
       - uses: go-task/setup-task@a00fbb05ce67b35648be3c78cbc9fd85354c757e # v2.2.0
         with:
-          version: 3.53.1
+          version: 3.54.0
 
       # ci, not install: it installs exactly what web/package-lock.json pins and
       # fails if the lockfile and the manifest disagree. The frontend gates below
@@ -114,7 +114,7 @@ jobs:
       - name: Lint Go
         uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9
         with:
-          version: v2.13.1
+          version: v2.15.0
 
       # The host helper's root matrix (internal/host/hostaction and the round
       # trip in internal/httpapi) runs the script as root only inside an
@@ -137,7 +137,7 @@ jobs:
       # Reachable known vulnerabilities in the Go code and its modules. Pinned
       # like the linter; Taskfile.yml's GOVULNCHECK_VERSION is the other copy.
       - name: Check for known vulnerabilities
-        run: go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./...
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.10.0 ./...
 
       # Last, because it starts the product and drives a browser over every
       # route, and because it needs the binary the Build step above produced.
@@ -275,7 +275,7 @@ jobs:
       - uses: goreleaser/goreleaser-action@a4f02ab5355a589de60d917a659ce617ed19b3de # v7.3.0
         with:
           distribution: goreleaser
-          version: v2.18.0
+          version: v2.20.3
           args: release --clean --release-notes=/tmp/release-notes.md
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
