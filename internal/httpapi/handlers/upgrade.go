@@ -181,7 +181,12 @@ func upgradeRoutes(d httpapi.Deps) []httpapi.Route {
 			MinRole:         model.RoleAdmin,
 			Destructive:     true,
 			Action:          "etcd.restore",
-			Handler:         handler(etcdRestore(d)),
+			// The most destructive route in the product used to be the one
+			// the read-only lock did not see: it is a machine route, and it
+			// declared no cluster. The cluster is the machine's, read from
+			// the inventory as the other machine routes do (d02b14f).
+			ClusterScope: machineClusterFromPath(d),
+			Handler:      handler(etcdRestore(d)),
 		},
 		{
 			Method:          http.MethodPost,

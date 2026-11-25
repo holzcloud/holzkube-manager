@@ -1425,6 +1425,14 @@ somebody adopted read-only belongs in the archive — and **outside** the sudo
 gate, because asking for a password and then refusing anyway teaches an operator
 that the prompt means nothing.
 
+A route that acts on one machine asks the lock of **that machine's** cluster,
+read from the inventory, never a cluster named in the body: reboot, shutdown,
+reset, `config/apply` and `POST /api/v1/machines/{id}/etcd/restore`. Forgetting
+records is not under the lock: `DELETE /api/v1/machines/{id}` and
+`DELETE /api/v1/clusters/{id}` remove this installation's records and send
+nothing to any node, and "read-only" is a promise about the cluster, not about
+what this installation remembers of it.
+
 ### Codes minted here
 
 | code | HTTP | when |
