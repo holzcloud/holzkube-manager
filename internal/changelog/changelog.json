@@ -1,5 +1,35 @@
 [
   {
+    "version": "v0.10.0",
+    "date": "2026-11-25",
+    "changes": [
+      {
+        "icon": "🧹",
+        "text": "Removing a node cordons and drains it first. The removal now marks the node unschedulable and moves its pods away before the node leaves etcd or is wiped, and it deletes the Kubernetes node object at the end, so no stale NotReady node stays behind. The drain evicts and never deletes, so every PodDisruptionBudget is honoured: a budget that holds a pod, or a pod nothing owns, stops the removal by name before anything irreversible has happened. Pods the drain had already moved stay where they went. A failure in the drain gives back the cordon the job set, or names kubectl uncordon when it cannot. A cluster this product has no Kubernetes access to is removed as before, and the job says the drain was skipped."
+      },
+      {
+        "icon": "🚦",
+        "text": "Workers get a Kubernetes gate before their Talos upgrade. Before a worker reboots, a new step checks that every other node is Ready (nodes you switched off on purpose are left out and named) and asks the cluster, as a dry run that changes nothing, whether each pod may be evicted. If not, it waits up to five minutes and then stops the upgrade with a sentence, before anything was pulled or started on the node. A budget that allows no disruption at all (one replica with minAvailable: 1) can only be passed by changing the budget or the workload."
+      },
+      {
+        "icon": "⏸️",
+        "text": "A removal or a Talos upgrade that was running while the daemon updated to this version is parked, because its list of steps changed. Look at the node, then start it again from its page."
+      },
+      {
+        "icon": "📦",
+        "text": "Talos machinery v1.14.6. The library that reads node configurations is raised from v1.14.5, and the weekly check against newer Talos releases is green again. The supported range is still v1.14."
+      },
+      {
+        "icon": "🔒",
+        "text": "Built with Go 1.26.11, which fixes a vulnerability in net/http (GO-2026-6859) that this daemon's code can reach."
+      },
+      {
+        "icon": "⚠️",
+        "text": "What to know. The drain and the worker gate are proven against the simulators only. Still open on a real cluster: a removal and a worker upgrade held by a PodDisruptionBudget, a node that registers again under another hostname during a removal, and removal through a VIP versus a single endpoint (ledger entry 183). The product is alpha and breaking changes are possible in any release."
+      }
+    ]
+  },
+  {
     "version": "v0.9.0",
     "date": "2026-11-01",
     "changes": [
