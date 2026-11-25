@@ -11,8 +11,11 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
  * no raw response body: an internal message here would be free reconnaissance
  * against a binary that holds cluster PKI, and the server already refuses to
  * send one.
+ *
+ * `error` is `unknown` because anything can be thrown, and the router has typed
+ * its boundary's error that way as of 1.170.46: only a ProblemError is read.
  */
-export function ErrorPage({ error, notFound = false }: { error: Error; notFound?: boolean }) {
+export function ErrorPage({ error, notFound = false }: { error: unknown; notFound?: boolean }) {
   const problem = error instanceof ProblemError ? error.problem : null
 
   // UAT G-01-5: an unknown URL used to render the generic failure card, which
