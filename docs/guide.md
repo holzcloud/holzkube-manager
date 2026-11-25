@@ -1182,7 +1182,10 @@ gate's numbers. Then two things stand between the plan and the start:
 2. **The cluster's name, typed.**
 
 The job then upgrades one node at a time, with the health gate evaluated before
-each, and verifies every node afterwards (version, schematic, services). It does
+each, and verifies every node afterwards (version, schematic, services). The gate
+asks every control-plane node in the inventory, and it refuses when etcd lists a
+voting member that none of them answered as -- a member added by hand, or one a
+removal left behind -- because a voter it cannot ask is not one it can count on. It does
 not undo an upgrade; see *It verifies upgrades and does not undo them* below for
 what a rollback is and is not. The snapshot is the way back from the one failure
 a rollback cannot help with.

@@ -194,6 +194,21 @@ func decide(in GateInput, taking model.MachineID, machines []model.Machine) Verd
 		return v
 	}
 
+	// Only the inventory's control-plane machines are asked, and etcd can have
+	// voters the inventory does not know: a node added by hand, a member left
+	// behind by a removal that never finished. Such a voter was counted in
+	// Voting and never probed, so three voters with an un-inventoried one down
+	// passed -- and taking another node lost quorum. A voter that did not
+	// answer as itself counts as one that did not answer.
+	if unasked := unaskedVoters(in); len(unasked) > 0 {
+		v.Reason = fmt.Sprintf(
+			"etcd lists %s as voting, and no control-plane node in the inventory answered as it, "+
+				"so whether it is up is not known. A voter that cannot be asked is not a vote this "+
+				"gate can count on. Refresh the cluster, or remove the member if it is gone.",
+			strings.Join(unasked, ", "))
+		return v
+	}
+
 	if in.Voting < MinVotingMembers {
 		v.Reason = fmt.Sprintf(
 			"etcd has %d voting member(s). Three is the smallest number that survives losing one: "+
@@ -285,6 +300,25 @@ func (g *Gate) read(ctx context.Context, id model.MachineID) (
 	}
 
 	return status, members, alarms, nil
+}
+
+// unaskedVoters names the voting members no answering machine spoke for. A
+// member is matched by the id it reported about itself, which is the one
+// identity etcd and the node agree on whatever the inventory calls it.
+func unaskedVoters(in GateInput) []string {
+	answered := make(map[uint64]bool, len(in.Statuses))
+	for _, s := range in.Statuses {
+		answered[s.MemberID] = true
+	}
+	var out []string
+	for _, m := range in.Members {
+		if m.IsLearner || answered[m.ID] {
+			continue
+		}
+		out = append(out, talos.DescribeMember(m))
+	}
+	sort.Strings(out)
+	return out
 }
 
 func nameOf(m model.Machine) string {
