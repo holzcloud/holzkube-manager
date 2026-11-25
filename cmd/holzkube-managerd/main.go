@@ -465,6 +465,16 @@ func run(args []string) error {
 		}
 	}
 
+	// A node's removal drains it through the Kubernetes API before anything is
+	// wiped. The client is fetched for every step that needs it and never held:
+	// its certificate is good for an hour and the endpoint can move. A cluster
+	// whose stored bundle has no Kubernetes authority comes back as
+	// kube.ErrNoKubernetesAuthority, which makes cordon and drain a visible
+	// skip; any other error stops the removal before it has changed anything.
+	upgradeDeps.Kube = func(ctx context.Context, cluster model.ClusterID) (*kube.Client, error) {
+		return inv.KubeClient(ctx, cluster)
+	}
+
 	upgrade.Register(engine, upgradeDeps)
 	// Draining a node (milestone v1.17 slice 3). The client is a function
 	// rather than a value because a job outlives the request that submitted it

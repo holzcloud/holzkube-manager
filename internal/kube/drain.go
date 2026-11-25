@@ -4,6 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
+	"strconv"
+	"strings"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -39,13 +42,22 @@ import (
 //     emptyDir goes with it, and that is data somebody may not know they are
 //     losing.
 //
-// # What is deliberately not here
+// # What a drain does and does not decide for its caller
 //
-// Waiting for a pod to be rescheduled somewhere else. A drain's promise is that
-// the node is empty, not that the cluster absorbed the load: a single-node
-// cluster drains successfully and runs nothing afterwards, and a drain that
-// blocked on rescheduling would hang for ever there instead of saying what it
-// did.
+// A drain without RetryBlocked and WaitGone is one pass. It does not wait for a
+// pod to be rescheduled somewhere else, nor for an evicted pod to finish
+// shutting down: its promise is that the node was asked to give its pods up,
+// not that the cluster absorbed the load. A single-node cluster drains
+// successfully and runs nothing afterwards, and a drain that blocked on
+// rescheduling would hang for ever there instead of saying what it did. And it
+// never decides for the owner of a PodDisruptionBudget: a refusal is reported
+// the moment it comes.
+//
+// The node-removal job sets both options on purpose. It is about to take the
+// node out of etcd and wipe it, so it waits -- up to the drain's deadline -- for
+// a budget to open and for the evicted pods to be gone. What it does not do,
+// ever, is treat a veto as something it can overcome by deleting: after the
+// deadline the drain ends blocked, with the budget named.
 
 // ErrDrainBlocked reports pods a drain cannot move.
 //
@@ -53,6 +65,18 @@ import (
 // next decision is about the node and not about the third pod: either they
 // force it, or they fix the budget, or they leave the node alone.
 var ErrDrainBlocked = errors.New("kube: pods on this node cannot be evicted")
+
+// DrainRetry is how long a drain that may retry waits before it asks again for
+// a pod a PodDisruptionBudget refused. Five seconds is the pause Talos' own
+// drain loop takes between attempts, so a removal that drains first is no more
+// insistent on the API server than the reset that follows it.
+const DrainRetry = 5 * time.Second
+
+// DrainGonePoll is how often a drain that waits looks again at pods it has
+// evicted and that are still shutting down. A look is one list call filtered
+// to the node, and a grace period is counted in seconds, so two seconds is
+// quick enough to notice and slow enough not to matter to the API server.
+const DrainGonePoll = 2 * time.Second
 
 // DrainOptions are the choices a drain offers, and each one is a decision this
 // product refuses to make silently.
@@ -79,6 +103,20 @@ type DrainOptions struct {
 	// context dies leaves the operator with a screen that says nothing about
 	// how far it got.
 	Timeout time.Duration
+
+	// RetryBlocked is the pause between passes that failed only because a
+	// PodDisruptionBudget refused a pod. Zero is one pass and no retry, which
+	// is what a drain was before this existed. A pod no waiting can move -- one
+	// nothing owns, one with local data it may not lose -- ends the drain at
+	// once whatever this says. Ends with Timeout, with ErrDrainBlocked and the
+	// last state, not with the context's error.
+	RetryBlocked time.Duration
+
+	// WaitGone is how often to look again, after the last eviction, until the
+	// evicted pods have left the node. Zero returns as soon as the server has
+	// accepted the evictions. Ends with Timeout, with the pods still there named
+	// in Blocked.
+	WaitGone time.Duration
 }
 
 // DrainResult is what a drain did, in the words the screen needs.
@@ -97,12 +135,50 @@ type DrainResult struct {
 	// Blocked are the pods that stopped the drain, with the reason each one
 	// gave. A drain with anything here did not finish.
 	Blocked []BlockedPod `json:"blocked"`
+
+	// LocalData are the evicted pods that had an emptyDir volume, whose
+	// contents went with them. Only set when DeleteLocalData allowed it: a
+	// drain that moved such a pod quietly would make the decision
+	// DeleteLocalData exists to put to the caller.
+	LocalData []string `json:"local_data,omitempty"`
 }
+
+// Summary is the sentence a job screen shows for a drain: what moved, what was
+// left on purpose, and each pod that stopped it with the reason it gave.
+func (r DrainResult) Summary() string {
+	evicted := strconv.Itoa(len(r.Evicted)) + " evicted"
+	if n := len(r.LocalData); n > 0 {
+		evicted += " (" + strconv.Itoa(n) + " with local storage that went with them)"
+	}
+	parts := []string{evicted}
+	if n := len(r.SkippedDaemonSet); n > 0 {
+		parts = append(parts, strconv.Itoa(n)+" DaemonSet pods left in place")
+	}
+	if n := len(r.SkippedMirror); n > 0 {
+		parts = append(parts, strconv.Itoa(n)+" static pods left in place")
+	}
+	for _, b := range r.Blocked {
+		parts = append(parts, b.Pod+": "+b.Reason)
+	}
+	return strings.Join(parts, "; ")
+}
+
+// BarePodReason is the reason a drain gives for a pod no controller owns. It is
+// a constant so that a caller can tell that pod from the others it names
+// without reading the sentence: nothing will recreate such a pod, and only a
+// person can decide what becomes of it.
+const BarePodReason = "no controller owns this pod, so nothing will recreate it elsewhere. " +
+	"Evicting it means losing it"
 
 // BlockedPod is one pod a drain could not move, and why.
 type BlockedPod struct {
 	Pod    string `json:"pod"`
 	Reason string `json:"reason"`
+
+	// Budget is true when a PodDisruptionBudget refused the eviction: the one
+	// reason that waiting can change, and somebody else's statement about their
+	// own availability.
+	Budget bool `json:"budget,omitempty"`
 }
 
 // Cordon marks a node unschedulable, or lets it schedule again.
@@ -132,6 +208,10 @@ func (c *Client) Cordon(ctx context.Context, node string, unschedulable bool) er
 // accepts work is a race against the scheduler, and losing it means evicting a
 // pod that was placed while the drain was running.
 func (c *Client) Drain(ctx context.Context, node string, opts DrainOptions) (DrainResult, error) {
+	// parent is the caller's context. Timeout ends a child of it, and the two
+	// ending are different things: a drain that ran out of time is blocked, a
+	// caller that went away is cancelled.
+	parent := ctx
 	if opts.Timeout > 0 {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, opts.Timeout)
@@ -142,14 +222,180 @@ func (c *Client) Drain(ctx context.Context, node string, opts DrainOptions) (Dra
 		return DrainResult{}, err
 	}
 
+	waits := opts.RetryBlocked > 0 || opts.WaitGone > 0
+
+	var result DrainResult
+	var lastBlocked []BlockedPod // from the last pass that ran to the end
+	for {
+		pass, err := c.drainPass(ctx, node, opts)
+		if err != nil {
+			if waits && parent.Err() != nil {
+				return result, parent.Err()
+			}
+			if expired(ctx) && lastBlocked != nil {
+				// The deadline came while the pass was asking the server. Out
+				// of time is a verdict, not a failure: the last complete pass
+				// is what is reported.
+				result.Blocked = lastBlocked
+				return result, blockedError(result, len(lastBlocked))
+			}
+			return result, err
+		}
+		result.Evicted = unionOf(result.Evicted, pass.result.Evicted)
+		result.SkippedDaemonSet = pass.result.SkippedDaemonSet
+		result.SkippedMirror = pass.result.SkippedMirror
+		result.LocalData = unionOf(result.LocalData, pass.result.LocalData)
+		result.Blocked = pass.result.Blocked
+
+		if waits && parent.Err() != nil {
+			return result, parent.Err()
+		}
+		if expired(ctx) && lastBlocked != nil {
+			// The deadline came in the middle of a pass. That pass is cut short
+			// and says so with errors about a context; the state worth
+			// reporting is the last one that was complete.
+			result.Blocked = lastBlocked
+			return result, blockedError(result, pass.total)
+		}
+		if len(result.Blocked) == 0 {
+			break
+		}
+		if opts.RetryBlocked <= 0 || pass.vetoes != len(result.Blocked) {
+			return result, blockedError(result, pass.total)
+		}
+
+		lastBlocked = slices.Clone(result.Blocked)
+		if !pause(ctx, opts.RetryBlocked) {
+			if parent.Err() != nil {
+				return result, parent.Err()
+			}
+			return result, blockedError(result, pass.total)
+		}
+	}
+
+	if opts.WaitGone > 0 {
+		return c.waitGone(ctx, parent, node, opts, result)
+	}
+	return result, nil
+}
+
+// blockedError is the verdict of a drain that left pods behind.
+func blockedError(result DrainResult, total int) error {
+	return fmt.Errorf("%w: %d of %d pods stayed. The node is cordoned, so nothing new "+
+		"is scheduled onto it, and what is left is listed with the reason each one gave",
+		ErrDrainBlocked, len(result.Blocked), total)
+}
+
+// expired reports whether the context's deadline has passed, whether or not
+// its Done channel has been closed yet. The difference is not academic: the
+// client's rate limiter refuses a call that cannot start before the deadline
+// with "would exceed context deadline" in the instant after the deadline and
+// before the context notices, and a drain that asked ctx.Err() would take that
+// for a failure of the server instead of for running out of time.
+func expired(ctx context.Context) bool {
+	if ctx.Err() != nil {
+		return true
+	}
+	deadline, ok := ctx.Deadline()
+	return ok && !time.Now().Before(deadline)
+}
+
+// pause waits d, or until ctx ends. It reports whether the time passed.
+func pause(ctx context.Context, d time.Duration) bool {
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+	select {
+	case <-timer.C:
+		return true
+	case <-ctx.Done():
+		return false
+	}
+}
+
+// unionOf appends what is not yet there, in order.
+func unionOf(have, more []string) []string {
+	for _, m := range more {
+		if !slices.Contains(have, m) {
+			have = append(have, m)
+		}
+	}
+	return have
+}
+
+// waitGone returns once the pods this drain evicted have left the node, or
+// ends blocked at the deadline naming the ones that have not.
+//
+// An eviction the server accepted is not a pod that is gone: it is on the node
+// until its grace period is over. Asking Undrained is asking the question the
+// drain was asked, so the wait and the check that follows a restart cannot
+// disagree.
+func (c *Client) waitGone(
+	ctx, parent context.Context,
+	node string,
+	opts DrainOptions,
+	result DrainResult,
+) (DrainResult, error) {
+	var left []string
+	for {
+		got, err := c.Undrained(ctx, node, opts)
+		switch {
+		case err == nil:
+			left = got
+		case parent.Err() != nil:
+			return result, parent.Err()
+		case expired(ctx):
+			// Out of time in the middle of a look: the last complete look
+			// stands. With none, the pods this drain evicted are the ones it
+			// could not see leave.
+			if left == nil {
+				left = result.Evicted
+			}
+		default:
+			return result, fmt.Errorf("kube: waiting for the pods on %s to leave: %w", node, err)
+		}
+		if err == nil && len(left) == 0 {
+			return result, nil
+		}
+		if err == nil && pause(ctx, opts.WaitGone) {
+			continue
+		}
+		if parent.Err() != nil {
+			return result, parent.Err()
+		}
+
+		for _, name := range left {
+			result.Blocked = append(result.Blocked, BlockedPod{
+				Pod: name,
+				Reason: "still on the node when the drain's time ran out; it was evicted and " +
+					"is still shutting down",
+			})
+		}
+		return result, fmt.Errorf("%w: %d pods were evicted and are still shutting down. The node is "+
+			"cordoned, so nothing new is scheduled onto it, and the pods still there are listed",
+			ErrDrainBlocked, len(left))
+	}
+}
+
+// drainPassResult is one pass over a node's pods.
+type drainPassResult struct {
+	result DrainResult
+
+	// total is the pods the node had, vetoes the blocked ones that were a
+	// PodDisruptionBudget's refusal -- the only kind waiting can change.
+	total, vetoes int
+}
+
+// drainPass lists a node's pods once and evicts what a drain moves.
+func (c *Client) drainPass(ctx context.Context, node string, opts DrainOptions) (drainPassResult, error) {
 	pods, err := c.cs.CoreV1().Pods("").List(ctx, metav1.ListOptions{
 		FieldSelector: "spec.nodeName=" + node,
 	})
 	if err != nil {
-		return DrainResult{}, fmt.Errorf("kube: listing the pods on %s: %w", node, err)
+		return drainPassResult{}, fmt.Errorf("kube: listing the pods on %s: %w", node, err)
 	}
 
-	var result DrainResult
+	pass := drainPassResult{total: len(pods.Items)}
+	result := &pass.result
 	for _, pod := range pods.Items {
 		name := pod.Namespace + "/" + pod.Name
 
@@ -165,11 +411,7 @@ func (c *Client) Drain(ctx context.Context, node string, opts DrainOptions) (Dra
 			// move, and evicting it would only change a record.
 			continue
 		case podBare:
-			result.Blocked = append(result.Blocked, BlockedPod{
-				Pod: name,
-				Reason: "no controller owns this pod, so nothing will recreate it elsewhere. " +
-					"Evicting it means losing it",
-			})
+			result.Blocked = append(result.Blocked, BlockedPod{Pod: name, Reason: BarePodReason})
 			continue
 		case podLocalData:
 			result.Blocked = append(result.Blocked, BlockedPod{
@@ -182,18 +424,60 @@ func (c *Client) Drain(ctx context.Context, node string, opts DrainOptions) (Dra
 		}
 
 		if err := c.evict(ctx, pod, opts); err != nil {
-			result.Blocked = append(result.Blocked, BlockedPod{Pod: name, Reason: err.Error()})
+			var veto *vetoError
+			isVeto := errors.As(err, &veto)
+			if isVeto {
+				pass.vetoes++
+			}
+			result.Blocked = append(result.Blocked, BlockedPod{Pod: name, Reason: err.Error(), Budget: isVeto})
 			continue
 		}
 		result.Evicted = append(result.Evicted, name)
+		if opts.DeleteLocalData && hasLocalData(pod) {
+			result.LocalData = append(result.LocalData, name)
+		}
 	}
+	return pass, nil
+}
 
-	if len(result.Blocked) > 0 {
-		return result, fmt.Errorf("%w: %d of %d pods stayed. The node is cordoned, so nothing new "+
-			"is scheduled onto it, and what is left is listed with the reason each one gave",
-			ErrDrainBlocked, len(result.Blocked), len(pods.Items))
+// vetoError is an eviction a PodDisruptionBudget refused. It is a type of its
+// own because the drain loop treats it differently from every other failure:
+// it is the one refusal that waiting can change.
+type vetoError struct {
+	reason string
+	err    error
+}
+
+func (e *vetoError) Error() string { return e.reason }
+func (e *vetoError) Unwrap() error { return e.err }
+
+// vetoReason is the one sentence for a pod a budget refuses to let go, and
+// whether err is such a refusal at all.
+//
+// A 429 is taken as a veto even without a cause, because the server answers
+// 429 for a budget it has not finished counting, too, and then waiting is
+// right. Only when the server names the budget -- a cause of the type
+// policy/v1 defines -- is the budget in the sentence, and its message is taken
+// as the server wrote it: the name is in it, and parsing it would break at the
+// first rewording.
+func vetoReason(err error) (reason string, isVeto bool) {
+	if !apierrors.IsTooManyRequests(err) {
+		return "", false
 	}
-	return result, nil
+	reason = "a PodDisruptionBudget refuses to let this pod go right now: " + err.Error()
+
+	var status apierrors.APIStatus
+	if errors.As(err, &status) {
+		if details := status.Status().Details; details != nil {
+			for _, cause := range details.Causes {
+				if cause.Type == policyv1.DisruptionBudgetCause {
+					reason += " (" + cause.Message + ")"
+					break
+				}
+			}
+		}
+	}
+	return reason, true
 }
 
 // evict asks the API server to evict one pod, which is the call that honours a
@@ -208,22 +492,23 @@ func (c *Client) evict(ctx context.Context, pod corev1.Pod, opts DrainOptions) e
 	}
 
 	err := c.cs.PolicyV1().Evictions(pod.Namespace).Evict(ctx, eviction)
-	switch {
-	case err == nil:
+	if err == nil {
 		return nil
-	case apierrors.IsTooManyRequests(err):
+	}
+	if reason, ok := vetoReason(err); ok {
 		// 429 from an eviction is a PodDisruptionBudget refusing, and it is the
-		// one refusal that must not be retried into submission here: the budget
-		// is somebody's statement about their own availability, and a drain
-		// that waited it out would be making that decision for them.
-		return fmt.Errorf("a PodDisruptionBudget refuses to let this pod go right now: %w", err)
-	case apierrors.IsNotFound(err):
+		// one refusal that is never overridden: the budget is somebody's
+		// statement about their own availability. A drain that was told to
+		// retry asks again, up to its deadline; it never turns a refusal into a
+		// delete.
+		return &vetoError{reason: reason, err: err}
+	}
+	if apierrors.IsNotFound(err) {
 		// Gone while this was running, which is the outcome the eviction was
 		// asking for.
 		return nil
-	default:
-		return err
 	}
+	return err
 }
 
 // podKind is how a drain has to treat one pod.

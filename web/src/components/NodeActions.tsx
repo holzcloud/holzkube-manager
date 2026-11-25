@@ -40,8 +40,9 @@ export function NodeActions({
    * Called once the operator closes the removal dialog after the removal job
    * has succeeded. The record is gone by then, so the screen this component is
    * on is about a machine that no longer exists — but the dialog is also the
-   * only place the cordon-and-drain notice appears, so navigating away the
-   * instant the job finishes would take it off the screen before it was read.
+   * only place the server's notice about what the removal did appears, so
+   * navigating away the instant the job finishes would take it off the screen
+   * before it was read.
    * The caller decides where to go, after the reading. It is not called for a
    * job that failed or is parked: the record is still there.
    */
@@ -107,23 +108,33 @@ export function NodeActions({
  *
  * It is a job. Submitting answers 202 straight away — or 409 when the cluster
  * cannot spare the voter, which is checked before any job exists — and the
- * dialog then follows the job through its steps (leave etcd, wait, wipe,
- * forget) until it is done, failed or parked. Closing the dialog does not stop
- * it: the job lives on the daemon and on the Jobs page.
+ * dialog then follows the job through its steps (cordon and drain, leave etcd,
+ * wait, wipe, delete the Kubernetes node object, forget) until it is done,
+ * failed or parked. Closing the dialog does not stop it: the job lives on the
+ * daemon and on the Jobs page.
  *
- * Three things are said here and nowhere else. The first is that
- * holzkube-manager cannot cordon or drain -- it speaks the Talos machine API
- * and not the Kubernetes one -- so anything still scheduled on the node stops
- * when it does. The server sends that sentence back with the job as well, and
- * it is shown again afterwards on purpose: an operator who read it on the way
- * in has stopped reading by the time it is true.
+ * Three things are said here and nowhere else. The first is what happens to the
+ * workloads: the node is cordoned and drained first, through the eviction API,
+ * so every PodDisruptionBudget holds; a budget that holds a pod for ten minutes
+ * or a pod no controller owns stops the removal before the node leaves etcd or
+ * is wiped, and pods it had already evicted stay evicted (the drain evicts
+ * everything that may go before it reports the ones a budget holds); and the
+ * node's Kubernetes node object is deleted at the end. A cluster this product
+ * has no Kubernetes access to from the start is removed without the cordon, the
+ * drain and the deletion of the node object, and the job says so; a removal
+ * that had access and loses it on the way fails instead. The server sends the
+ * same content back with the job as well (the notice), and it is shown again
+ * afterwards on purpose: an operator who read it on the way in has stopped
+ * reading by the time it is true. The two have to agree, and neither may say
+ * anything that was true only while the product could not drain.
  *
  * The second is that the node's system disk is wiped. It is not wiped further:
  * data disks stay, and the machine comes back in maintenance mode, ready to be
  * provisioned again.
  *
  * The third is where a job that did not finish leaves things. A failure before
- * the wipe leaves the node as it was; a parked job means the wipe may or may
+ * the wipe leaves the node unwiped, in etcd and in the inventory, with the pods
+ * already evicted running elsewhere; a parked job means the wipe may or may
  * not have run, and a person has to look.
  */
 function RemoveFromClusterDialog({
@@ -177,10 +188,11 @@ function RemoveFromClusterDialog({
             Remove {phrase} from its cluster
           </DialogTitle>
           <DialogDescription>
-            The node leaves etcd, forfeiting leadership first if it holds it, waits for etcd to
-            settle, has its system disk wiped, and its record here is forgotten. This is not a full
-            reset: its other disks are left alone, and the machine comes back in maintenance mode,
-            ready to be provisioned again.
+            The node leaves etcd (a control-plane node, forfeiting leadership first if it holds it),
+            waits for etcd to settle, has its system disk wiped, and its record here is forgotten;
+            with Kubernetes access, it is cordoned and drained first and its Kubernetes node object
+            is deleted afterwards. This is not a full reset: its other disks are left alone, and the
+            machine comes back in maintenance mode, ready to be provisioned again.
           </DialogDescription>
         </DialogHeader>
 
@@ -199,10 +211,18 @@ function RemoveFromClusterDialog({
         ) : (
           <div className="space-y-4 text-sm">
             <p className="rounded-md border border-amber-600/40 bg-amber-600/10 px-3 py-2 text-amber-700 dark:text-amber-300">
-              holzkube-manager speaks the Talos machine API and not the Kubernetes API, so it cannot
-              cordon or drain this node. Anything still scheduled on it stops when it does. Run{' '}
-              <code>kubectl drain &lt;node&gt;</code> first if those workloads need to move rather
-              than restart.
+              holzkube-manager cordons this node and drains it first. Pods are evicted, never
+              deleted, so every PodDisruptionBudget is honoured. If a budget holds a pod for ten
+              minutes, or a pod no controller owns would be lost, the removal stops before the node
+              leaves etcd or is wiped. Pods it had already evicted stay evicted, and their
+              controllers start them elsewhere; the cordon it set is taken back, or the job says it
+              could not be. Afterwards the node's Kubernetes node object is deleted.
+            </p>
+
+            <p className="rounded-md border border-amber-600/40 bg-amber-600/10 px-3 py-2 text-amber-700 dark:text-amber-300">
+              A cluster this product has no Kubernetes access to from the start is removed without
+              the cordon, the drain and the deletion of the node object, and the job says so; a
+              removal that had access and loses it on the way fails instead.
             </p>
 
             {machine.etcd_member.value && (
@@ -339,7 +359,9 @@ function RemovalProgress({
               The removal stopped at “{failedStep?.name ?? 'a step'}”.{' '}
               {failedStep?.name === 'wipe the node' || failedStep?.name === 'forget the node'
                 ? 'The node has already left etcd and may be wiped. Look at it before trying again.'
-                : 'Nothing was wiped and the node is still in the inventory.'}
+                : failedStep?.name === 'delete the Kubernetes node object'
+                  ? 'The node has been wiped. Only its Kubernetes node object is still there, and the step says what to run.'
+                  : 'Nothing was wiped and the node is still in the inventory.'}
             </p>
           )}
 

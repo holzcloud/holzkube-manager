@@ -10,9 +10,12 @@ import { NodeActions } from '@/components/NodeActions'
  *
  * The route shipped in phase 9 with nothing to click, which made the whole of
  * that phase's etcd work reachable only with curl — the same gap the password
- * form had, and the support bundle after it. What these tests hold is the two
- * things the dialog says that nothing else does: that this product cannot
- * cordon or drain, and that a removal is not a reset.
+ * form had, and the support bundle after it. What these tests hold is the
+ * things the dialog says that nothing else does: what happens to the workloads
+ * before anything else happens (they are cordoned and drained, and a
+ * PodDisruptionBudget stops it before etcd and the wipe), that a cluster
+ * without Kubernetes access from the start is removed without the drain while
+ * one that loses it on the way fails, and that a removal is not a reset.
  */
 
 function wrap(node: ReactNode) {
@@ -76,15 +79,59 @@ describe('removing a node from its cluster', () => {
     expect(screen.queryByRole('button', { name: /remove from cluster/i })).not.toBeInTheDocument()
   })
 
-  it('says that nothing is cordoned or drained, before anything happens', () => {
+  it('says what happens to the workloads before anything happens', () => {
     wrap(<NodeActions machine={machine} />)
     fireEvent.click(screen.getByRole('button', { name: /remove from cluster/i }))
 
-    // The single most expensive misunderstanding available on this screen: an
-    // operator who expects the workloads to move first is an operator whose
-    // pods get killed.
-    expect(screen.getByText(/cannot\s+cordon or drain/i)).toBeInTheDocument()
-    expect(screen.getByText(/kubectl drain/)).toBeInTheDocument()
+    // The most expensive misunderstanding available on this screen is about the
+    // workloads. The product cordons and drains the node itself, through the
+    // eviction API, so a budget holds it; an operator who still believes it
+    // cannot would drain by hand first, and one who believes it kills pods
+    // would not start.
+    expect(screen.getByText(/cordons this node and drains it first/i)).toBeInTheDocument()
+    expect(screen.getByText(/PodDisruptionBudget/)).toBeInTheDocument()
+    // Where a stopped removal stops, and what it leaves. The drain evicts every
+    // pod that may go before it reports the ones a budget holds, so a failed
+    // removal has already moved some pods; the operator decides from this
+    // sentence whether repeating it is harmless.
+    expect(screen.getByText(/stops before the node leaves etcd or is wiped/i)).toBeInTheDocument()
+    expect(screen.getByText(/already evicted/i)).toBeInTheDocument()
+    expect(screen.queryByText(/before anything on the node/i)).not.toBeInTheDocument()
+    // What the screen used to say, and is false since the product drains: the
+    // instruction to run the drain by hand before clicking.
+    expect(screen.queryByText(/kubectl drain/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/cannot\s+cordon or drain/i)).not.toBeInTheDocument()
+  })
+
+  it('says that a cluster without Kubernetes access is removed without the drain', () => {
+    wrap(<NodeActions machine={machine} />)
+    fireEvent.click(screen.getByRole('button', { name: /remove from cluster/i }))
+
+    // Cordon, drain and the deletion of the node object are not unconditional:
+    // a cluster this product has no Kubernetes access to from the start skips
+    // all three, and the job says so. The sentence names its condition, because
+    // a removal that had access and loses it on the way fails instead of
+    // skipping (D-03 Q7 as made precise on 2026-11-21).
+    expect(
+      screen.getByText(
+        /no Kubernetes access to from the start is removed without the cordon, the drain and the deletion of the node object/i,
+      ),
+    ).toBeInTheDocument()
+    expect(screen.getByText(/loses it on the way fails instead/i)).toBeInTheDocument()
+  })
+
+  it('does not promise the cordon, the drain and the node object in the description unconditionally', () => {
+    wrap(<NodeActions machine={machine} />)
+    fireEvent.click(screen.getByRole('button', { name: /remove from cluster/i }))
+
+    // The description is the first thing read, and it is what a screen reader
+    // announces with the dialog: it must not say the node is drained when the
+    // paragraph below says a cluster without Kubernetes access is not (UI
+    // review of 2026-11-24).
+    const id = screen.getByRole('dialog').getAttribute('aria-describedby') ?? ''
+    const description = document.getElementById(id)
+    expect(description).not.toBeNull()
+    expect(description?.textContent).toMatch(/with Kubernetes access/i)
   })
 
   it('says that a removal is not a wipe', () => {
@@ -200,7 +247,7 @@ function typeAndSubmit() {
   fireEvent.click(screen.getAllByRole('button', { name: /remove from cluster/i }).at(-1) as Element)
 }
 
-async function submitRemoval(job: Job, notice = 'Nothing was drained.') {
+async function submitRemoval(job: Job, notice = 'The notice from the server.') {
   vi.spyOn(api.machines, 'confirm').mockResolvedValue({ token: 'tok', expires: '' })
   const remove = vi.spyOn(api.machines, 'removeFromCluster').mockResolvedValue({
     job,
@@ -216,9 +263,12 @@ async function submitRemoval(job: Job, notice = 'Nothing was drained.') {
 
 const allDone = [
   'check the node answers',
+  'cordon the node',
+  'drain the node',
   'leave etcd',
   'let etcd settle',
   'wipe the node',
+  'delete the Kubernetes node object',
   'forget the node',
 ].map((n) => step(n, 'done'))
 
@@ -228,9 +278,12 @@ describe('following the removal job', () => {
   it('does not claim the node is removed while the job is still running', async () => {
     const running = jobWith('running', [
       step('check the node answers', 'done'),
+      step('cordon the node', 'done'),
+      step('drain the node', 'done'),
       step('leave etcd', 'running'),
       step('let etcd settle', 'pending'),
       step('wipe the node', 'pending'),
+      step('delete the Kubernetes node object', 'pending'),
       step('forget the node', 'pending'),
     ])
     vi.spyOn(api.jobs, 'get').mockResolvedValue(running)
@@ -239,9 +292,8 @@ describe('following the removal job', () => {
     expect(remove).toHaveBeenCalledWith(machine.id, 'c-1', 'tok')
     expect(screen.getByText('leave etcd')).toBeInTheDocument()
     expect(screen.queryByText(/has been removed/i)).not.toBeInTheDocument()
-    // The notice about cordon and drain is on screen while it runs, not only
-    // after.
-    expect(screen.getByText('Nothing was drained.')).toBeInTheDocument()
+    // The notice the server sent is on screen while it runs, not only after.
+    expect(screen.getByText('The notice from the server.')).toBeInTheDocument()
   })
 
   it('says it is removed once the job has succeeded, and only then lets the caller leave', async () => {
@@ -278,6 +330,30 @@ describe('following the removal job', () => {
     expect(screen.getByText('only 1 of 3 voting members answer')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Done' }))
     // The record is still there: leaving the node's page would be wrong.
+    expect(onRemoved).not.toHaveBeenCalled()
+  })
+
+  it('says the node is already wiped when only its Kubernetes node object is left', async () => {
+    // The step after the wipe: the machine is gone from the cluster's side and
+    // wiped, and the object Kubernetes keeps for it is not. "Nothing was wiped"
+    // here would be the opposite of the truth.
+    const failed = jobWith('failed', [
+      ...allDone.slice(0, 6),
+      step(
+        'delete the Kubernetes node object',
+        'failed',
+        'run kubectl delete node cp-1; the machine stays listed here until it is forgotten by hand',
+      ),
+      step('forget the node', 'pending'),
+    ])
+    vi.spyOn(api.jobs, 'get').mockResolvedValue(failed)
+    const { onRemoved } = await submitRemoval(failed)
+
+    const stopped = await screen.findByText(/stopped at/i)
+    expect(stopped).toHaveTextContent(/delete the Kubernetes node object/i)
+    expect(stopped).toHaveTextContent(/wiped/i)
+    expect(stopped).not.toHaveTextContent(/nothing was wiped/i)
+    fireEvent.click(screen.getByRole('button', { name: 'Done' }))
     expect(onRemoved).not.toHaveBeenCalled()
   })
 

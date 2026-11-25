@@ -345,15 +345,36 @@ func Snapshot(ctx context.Context, cc *talos.ClusterClient, w io.Writer) (int64,
 	return n, nil
 }
 
-// RemoveNodeNotice is what the screen says about cordon and drain (UPG-13).
+// RemoveNodeNotice is what the screen says a removal does to the workloads
+// and to the node's place in Kubernetes (UPG-13, DRAIN-06).
 //
-// It is stated rather than quietly omitted. An operator who reads "remove this
-// node" and expects the workloads to move first is an operator whose pods get
-// killed, and the honest answer is that this product does not speak to the
-// Kubernetes API at all.
-const RemoveNodeNotice = "holzkube-manager speaks the Talos machine API and not the Kubernetes API, " +
-	"so it cannot cordon or drain this node. Anything still scheduled on it stops when it does. " +
-	"Run `kubectl drain <node>` first if the workloads on it need to move rather than restart."
+// It travels in the 202 answer and is repeated in the removal dialog, and the
+// two have to say the same thing: whoever read it on the way in has stopped
+// reading by the time the job ends, and a sentence that says "nothing is
+// drained" while the job drains is worse than none. It describes the steps of
+// removejob.go in their order; when those change, this changes with them.
+//
+// The Kubernetes half is conditional, and so is what it says. A cluster this
+// product has no Kubernetes access to from the start is removed without the
+// cordon, the drain and the deletion of the node object, and the job's own
+// steps say so. A removal whose cordon step had access and loses it on the way
+// fails instead, in "drain the node" before the wipe or in "delete the
+// Kubernetes node object" after it (D-03 Q7 as made precise on 2026-11-21).
+//
+// The notice fixes where a stopped removal stops (before the node leaves etcd
+// or is wiped) and does not claim the node was left untouched: the drain
+// evicts, pass by pass, every pod that may go before it reports the ones a
+// budget holds (drainPass), so pods already evicted stay evicted when the job
+// fails, and the operator needs to know that before repeating it.
+const RemoveNodeNotice = "The node is cordoned and drained first: its pods are evicted, never deleted, " +
+	"so every PodDisruptionBudget is honoured. Then a control-plane node leaves etcd, the node is " +
+	"wiped, its Kubernetes node object is deleted and it is forgotten here. If a budget holds a pod " +
+	"for ten minutes, or a pod no controller owns would be lost, the removal stops before the node " +
+	"leaves etcd or is wiped, and says which. Pods it had already evicted stay evicted, and their " +
+	"controllers start them elsewhere; the cordon it set is taken back, or the job says it could not be. " +
+	"A cluster this product has no Kubernetes access to from the start is removed without the cordon, " +
+	"the drain and the deletion of the node object, and the job says so; a removal that had access and " +
+	"loses it on the way fails instead."
 
 // EvictionWait is how long a removal waits after the etcd leave before
 // wiping. The removal job's "let etcd settle" step waits exactly this long

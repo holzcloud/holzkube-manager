@@ -53,8 +53,8 @@ func (l *lifecycleService) Upgrade(
 	req *machine.LifecycleServiceUpgradeRequest,
 	stream machine.LifecycleService_UpgradeServer,
 ) error {
-	l.server.recordCall("Upgrade")
-
+	// Not counted here: the stream interceptor has counted this call already,
+	// and a second count made Calls("Upgrade") say two for one upgrade.
 	if err := l.server.node.up(); err != nil {
 		return err
 	}

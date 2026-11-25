@@ -32,6 +32,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"sync"
 	"time"
 
@@ -711,6 +712,12 @@ func (e *Engine) save(ctx context.Context, j model.Job) model.Job {
 		stored.StartedAt = j.StartedAt
 		stored.FinishedAt = j.FinishedAt
 		stored.ParkedReason = j.ParkedReason
+		// A step may note something in the parameters for a later step (the
+		// removal's cordon step records that the cordon was its own). Nothing
+		// else writes them after Submit, so the run's copy is the newer one;
+		// without this the note is lost at the end of the very step that made
+		// it, in memory as well as on disk.
+		stored.Params = maps.Clone(j.Params)
 
 		saved, err := e.deps.Store.Jobs().Put(ctx, stored)
 		if err == nil {

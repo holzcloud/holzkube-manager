@@ -326,8 +326,35 @@ type Pod struct {
 	Claims []string
 
 	// BudgetRefuses makes an eviction of this pod answer 429, which is what a
-	// PodDisruptionBudget looks like from the client's side.
+	// PodDisruptionBudget looks like from the client's side. A test opens the
+	// budget while a drain waits with SetBudgetRefuses.
 	BudgetRefuses bool
+
+	// BudgetName is the name a budget gives itself in the 429. Set, the answer
+	// carries what a real API server writes: a Details with one cause of type
+	// DisruptionBudget whose message names the budget. Empty leaves the answer
+	// as it always was, without Details, which is what a client has to cope with
+	// too -- a 429 is not always a budget.
+	BudgetName string
+
+	// BudgetsConflict makes an eviction of this pod answer 500: the pod is
+	// selected by more than one PodDisruptionBudget, which the eviction
+	// subresource does not support. It is the answer a client cannot read as a
+	// veto and cannot read as consent, and a gate that has to decide on it must
+	// say that it could not be told.
+	BudgetsConflict bool
+
+	// LingersAfterEviction makes an accepted eviction leave the pod on the node,
+	// terminating, until FinishTermination says its grace period is over. That
+	// is what an eviction is in a real cluster: the server accepts the deletion
+	// and the kubelet takes its time. Without it the pod is gone at once, as
+	// every test written before this field assumed.
+	LingersAfterEviction bool
+
+	// Terminating gives the pod a deletion timestamp: it is already shutting
+	// down. Evicting one is accepted without asking any budget, as a real
+	// server does for a pod that is going anyway.
+	Terminating bool
 
 	// ContainerNames gives the pod several containers. Empty means one called
 	// after the pod, which is the ordinary shape and keeps every existing test
@@ -682,10 +709,21 @@ type Server struct {
 	// assert what a drain moved rather than what it reported moving.
 	evicted []string
 
+	// dryRunEvictions is every eviction that asked with DryRun=All, as
+	// "namespace/name", in call order and repeated when asked again. A dry run
+	// changes nothing here: it is not in evicted and no pod is gone or
+	// terminating because of it.
+	dryRunEvictions []string
+
 	// deleted is what a DELETE removed, kept apart from evicted because the
 	// two are different operations: a test about restarting a pod must not
 	// pass because something was evicted, and the reverse.
 	deleted []string
+
+	// deletedNodes is the Node objects a DELETE removed, in order, and
+	// failNodeDeletes makes a DELETE of a Node answer 500 instead.
+	deletedNodes    []string
+	failNodeDeletes bool
 
 	deployments []Deployment
 
@@ -890,6 +928,41 @@ func (s *Server) SetUnschedulable(name string, unschedulable bool) error {
 	for i := range s.nodes {
 		if s.nodes[i].Name == name {
 			s.nodes[i].Unschedulable = unschedulable
+			return nil
+		}
+	}
+	return fmt.Errorf("kubesim: no node named %q", name)
+}
+
+// RenameNode is a kubelet that registered again under another name while a
+// test is running: the Node object of the old name is gone, one of the new
+// name is there with the same address and state, and the pods that ran on the
+// old name now run on the new one.
+func (s *Server) RenameNode(from, to string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for i := range s.nodes {
+		if s.nodes[i].Name == from {
+			s.nodes[i].Name = to
+			for j := range s.pods {
+				if s.pods[j].Node == from {
+					s.pods[j].Node = to
+				}
+			}
+			return nil
+		}
+	}
+	return fmt.Errorf("kubesim: no node named %q", from)
+}
+
+// SetReady changes a node's Ready condition while a test is running: a gate
+// that waits for a node to come back is only measurable if the node can.
+func (s *Server) SetReady(name string, status corev1.ConditionStatus) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for i := range s.nodes {
+		if s.nodes[i].Name == name {
+			s.nodes[i].Ready = status
 			return nil
 		}
 	}
@@ -1295,11 +1368,14 @@ func renderNode(n Node) corev1.Node {
 	}
 }
 
-// serveNode is one node: the patch a cordon is, and nothing else.
+// serveNode is one node: the get a detail reads, the patch a cordon is, and
+// the delete that ends a removal.
 //
-// Only spec.unschedulable is applied, deliberately: a fake that applied any
-// patch would accept patches a real API server rejects, and the product sends
-// exactly this one.
+// Only spec.unschedulable is applied by a patch, deliberately: a fake that
+// applied any patch would accept patches a real API server rejects, and the
+// product sends exactly this one. A delete removes the Node object and leaves
+// its pods as they are: tidying the pods of a node that is gone is the
+// cluster's pod garbage collection, and not something this simulation does.
 func (s *Server) serveNode(w http.ResponseWriter, r *http.Request) {
 	name := strings.TrimPrefix(r.URL.Path, "/api/v1/nodes/")
 	// The kubelet's summary, through the node proxy: the one proxied node path
@@ -1318,6 +1394,10 @@ func (s *Server) serveNode(w http.ResponseWriter, r *http.Request) {
 	// because until then nothing asked for one node.
 	if r.Method == http.MethodGet {
 		s.writeNode(w, name)
+		return
+	}
+	if r.Method == http.MethodDelete {
+		s.deleteNode(w, name)
 		return
 	}
 	if r.Method != http.MethodPatch {
@@ -1349,6 +1429,65 @@ func (s *Server) serveNode(w http.ResponseWriter, r *http.Request) {
 	s.writeNode(w, name)
 }
 
+// deleteNode removes a Node object, or answers NotFound as the real server
+// does for one it does not have.
+func (s *Server) deleteNode(w http.ResponseWriter, name string) {
+	s.mu.Lock()
+	if s.failNodeDeletes {
+		s.mu.Unlock()
+		writeJSON(w, http.StatusInternalServerError, metav1.Status{
+			TypeMeta: metav1.TypeMeta{APIVersion: "v1", Kind: "Status"},
+			Status:   "Failure",
+			Message:  "kubesim was told to fail node deletions",
+			Reason:   metav1.StatusReasonInternalError,
+			Code:     http.StatusInternalServerError,
+		})
+		return
+	}
+	found := false
+	for i := range s.nodes {
+		if s.nodes[i].Name == name {
+			s.nodes = append(s.nodes[:i:i], s.nodes[i+1:]...)
+			s.deletedNodes = append(s.deletedNodes, name)
+			found = true
+			break
+		}
+	}
+	s.mu.Unlock()
+
+	if !found {
+		writeJSON(w, http.StatusNotFound, metav1.Status{
+			TypeMeta: metav1.TypeMeta{APIVersion: "v1", Kind: "Status"},
+			Status:   "Failure",
+			Reason:   metav1.StatusReasonNotFound,
+			Code:     http.StatusNotFound,
+		})
+		return
+	}
+	writeJSON(w, http.StatusOK, metav1.Status{
+		TypeMeta: metav1.TypeMeta{APIVersion: "v1", Kind: "Status"},
+		Status:   "Success",
+		Code:     http.StatusOK,
+	})
+}
+
+// FailNodeDeletes makes every DELETE of a Node answer 500 until it is turned
+// off: the API that is there and does not do what it is asked, which a test
+// cannot get from a server that is simply closed.
+func (s *Server) FailNodeDeletes(fail bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.failNodeDeletes = fail
+}
+
+// DeletedNodes is the Node objects a DELETE removed, in the order the calls
+// came. A test reads it to prove a node was deleted rather than assume it.
+func (s *Server) DeletedNodes() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]string(nil), s.deletedNodes...)
+}
+
 // writeNode answers one node, which is a patch's response body.
 func (s *Server) writeNode(w http.ResponseWriter, name string) {
 	s.mu.Lock()
@@ -1376,10 +1515,28 @@ func (s *Server) writeNode(w http.ResponseWriter, name string) {
 
 // evictPod is the call a drain makes, and the one place a PodDisruptionBudget's
 // refusal is modelled.
+//
+// An eviction that carries DryRun=All goes through every check a real one does
+// -- an unknown pod, a pod with two budgets, a budget that refuses -- and then
+// changes nothing in this simulation: the pod is not removed, it does not start
+// to terminate, and the eviction is not on the record of Evicted. The question
+// is on the record of DryRunEvictions instead, as many times as it was asked.
 func (s *Server) evictPod(w http.ResponseWriter, r *http.Request, namespace, name string) {
 	if r.Method != http.MethodPost {
 		s.serveNotFound(w, r)
 		return
+	}
+
+	// The body is read before the lock and capped: an eviction is a few hundred
+	// bytes, and whatever else arrives is not one. A body that cannot be read
+	// is not a dry run, which keeps the behaviour every caller before the dry
+	// run had.
+	dryRun := false
+	if body, err := io.ReadAll(io.LimitReader(r.Body, 64<<10)); err == nil && len(body) > 0 {
+		var eviction policyv1.Eviction
+		if json.Unmarshal(body, &eviction) == nil && eviction.DeleteOptions != nil {
+			dryRun = slices.Equal(eviction.DeleteOptions.DryRun, []string{metav1.DryRunAll})
+		}
 	}
 
 	s.mu.Lock()
@@ -1395,25 +1552,85 @@ func (s *Server) evictPod(w http.ResponseWriter, r *http.Request, namespace, nam
 		s.serveNotFound(w, r)
 		return
 	}
+	if dryRun {
+		s.dryRunEvictions = append(s.dryRunEvictions, namespace+"/"+name)
+	}
+	if s.pods[index].Terminating {
+		// Already going: accepted, no budget asked and no second eviction on
+		// the record.
+		s.mu.Unlock()
+		writeJSON(w, http.StatusCreated, metav1.Status{
+			TypeMeta: metav1.TypeMeta{APIVersion: "v1", Kind: "Status"},
+			Status:   "Success",
+			Code:     http.StatusCreated,
+		})
+		return
+	}
+	if s.pods[index].BudgetsConflict {
+		s.mu.Unlock()
+		// What the server says for a pod two budgets select: an internal error,
+		// not a refusal, with the sentence the Kubernetes source gives.
+		writeJSON(w, http.StatusInternalServerError, metav1.Status{
+			TypeMeta: metav1.TypeMeta{APIVersion: "v1", Kind: "Status"},
+			Status:   "Failure",
+			Message: "This pod has more than one PodDisruptionBudget, which the eviction " +
+				"subresource does not support.",
+			Reason: metav1.StatusReasonInternalError,
+			Code:   http.StatusInternalServerError,
+		})
+		return
+	}
 	if s.pods[index].BudgetRefuses {
+		budget := s.pods[index].BudgetName
 		s.mu.Unlock()
 		// 429 with a Status body: what a real API server answers when a budget
 		// would be violated, and what client-go turns into IsTooManyRequests.
-		writeJSON(w, http.StatusTooManyRequests, metav1.Status{
+		status := metav1.Status{
 			TypeMeta: metav1.TypeMeta{APIVersion: "v1", Kind: "Status"},
 			Status:   "Failure",
 			Message: "Cannot evict pod as it would violate the pod's disruption budget: " +
 				"the budget allows no further disruption",
 			Reason: metav1.StatusReasonTooManyRequests,
 			Code:   http.StatusTooManyRequests,
+		}
+		if budget != "" {
+			// The shape of the server's own answer, read from the Kubernetes
+			// source and not from a running API server: one cause of the type
+			// policy/v1 names, whose message carries the budget's name.
+			status.Details = &metav1.StatusDetails{
+				Causes: []metav1.StatusCause{{
+					Type: policyv1.DisruptionBudgetCause,
+					Message: "The disruption budget " + budget +
+						" needs 1 healthy pods and has 0 currently",
+				}},
+			}
+		}
+		writeJSON(w, http.StatusTooManyRequests, status)
+		return
+	}
+
+	if dryRun {
+		// The server returns here, before it writes anything.
+		s.mu.Unlock()
+		writeJSON(w, http.StatusCreated, metav1.Status{
+			TypeMeta: metav1.TypeMeta{APIVersion: "v1", Kind: "Status"},
+			Status:   "Success",
+			Code:     http.StatusCreated,
 		})
 		return
 	}
 
-	// The pod is really gone, which is what makes a drain measurable: the next
-	// list does not contain it.
-	s.pods = append(s.pods[:index:index], s.pods[index+1:]...)
+	// An accepted eviction is on the record whether or not the pod is gone yet.
 	s.evicted = append(s.evicted, namespace+"/"+name)
+	if s.pods[index].LingersAfterEviction {
+		// The kubelet has not finished: the pod stays on the node, shutting
+		// down, until FinishTermination.
+		s.pods[index].Terminating = true
+	} else {
+		// The pod is really gone, which is what makes a drain measurable: the
+		// next list does not contain it.
+		s.pods = append(s.pods[:index:index], s.pods[index+1:]...)
+	}
 	s.mu.Unlock()
 
 	writeJSON(w, http.StatusCreated, metav1.Status{
@@ -1491,6 +1708,12 @@ func renderPod(p Pod) corev1.Pod {
 		Namespace:         p.Namespace,
 		CreationTimestamp: created,
 		Labels:            p.Labels,
+	}
+	if p.Terminating {
+		// What a pod that is shutting down carries, and what a client reads to
+		// tell "evicted and still here" from "running".
+		deleting := metav1.NewTime(time.Now().UTC())
+		meta.DeletionTimestamp = &deleting
 	}
 	if p.OwnerKind != "" {
 		// A controller reference: what a drain and a restart both read to
@@ -1901,11 +2124,67 @@ func renderScale(d Deployment) autoscalingv1.Scale {
 	}
 }
 
-// Evicted is what evictions actually removed, in order.
+// SetBudgetRefuses opens or closes a pod's budget while a test is running: a
+// drain that waits is only measurable if the budget can change under it.
+func (s *Server) SetBudgetRefuses(namespace, name string, refuses bool) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for i := range s.pods {
+		if s.pods[i].Namespace == namespace && s.pods[i].Name == name {
+			s.pods[i].BudgetRefuses = refuses
+			return nil
+		}
+	}
+	return fmt.Errorf("kubesim: no pod %s/%s", namespace, name)
+}
+
+// FinishTermination ends a terminating pod's grace period: the pod leaves the
+// node. A pod that is not terminating is an error, because removing one
+// would be a pod gone with nothing in Evicted to account for it.
+func (s *Server) FinishTermination(namespace, name string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for i := range s.pods {
+		if s.pods[i].Namespace == namespace && s.pods[i].Name == name {
+			if !s.pods[i].Terminating {
+				return fmt.Errorf("kubesim: pod %s/%s is not terminating", namespace, name)
+			}
+			s.pods = append(s.pods[:i:i], s.pods[i+1:]...)
+			return nil
+		}
+	}
+	return fmt.Errorf("kubesim: no pod %s/%s", namespace, name)
+}
+
+// PodsOn is the pods the server lists on one node, as "namespace/name" -- what
+// a test reads to see whether a node is empty at a given moment.
+func (s *Server) PodsOn(node string) []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var out []string
+	for _, p := range s.pods {
+		if p.Node == node {
+			out = append(out, p.Namespace+"/"+p.Name)
+		}
+	}
+	return out
+}
+
+// Evicted is what evictions the server accepted, in order. A pod that lingers
+// after its eviction is in this list while it is still on the node.
 func (s *Server) Evicted() []string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return append([]string(nil), s.evicted...)
+}
+
+// DryRunEvictions is every eviction asked with DryRun=All, as "namespace/name",
+// in the order they came and again for every repeat. None of them changed
+// anything: they are not in Evicted, and the pods are still where they were.
+func (s *Server) DryRunEvictions() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]string(nil), s.dryRunEvictions...)
 }
 
 func (s *Server) serveNotFound(w http.ResponseWriter, r *http.Request) {

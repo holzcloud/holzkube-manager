@@ -7,13 +7,17 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"slices"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/holzcloud/holzkube-manager/internal/httpapi"
 	"github.com/holzcloud/holzkube-manager/internal/inventory"
 	"github.com/holzcloud/holzkube-manager/internal/jobs"
+	"github.com/holzcloud/holzkube-manager/internal/kube"
+	"github.com/holzcloud/holzkube-manager/internal/kubesim"
 	"github.com/holzcloud/holzkube-manager/internal/model"
 	"github.com/holzcloud/holzkube-manager/internal/store/fsstore"
 	"github.com/holzcloud/holzkube-manager/internal/talos"
@@ -28,6 +32,11 @@ type removalHarness struct {
 	*inventoryHarness
 	cp, worker       model.MachineID
 	cpSim, workerSim *talossim.Server
+
+	// ksim is the cluster's Kubernetes API. A removal drains the node through
+	// it before the node is wiped, so a harness without one cannot remove
+	// anything.
+	ksim *kubesim.Server
 }
 
 func newRemovalHarness(t *testing.T) *removalHarness {
@@ -66,6 +75,19 @@ func newRemovalHarness(t *testing.T) *removalHarness {
 		t.Fatalf("AddMember: %v", err)
 	}
 
+	// The cluster's Kubernetes API, with one pod a ReplicaSet owns on the worker
+	// for the removal to move.
+	ksim, err := kubesim.New(kubesim.Options{
+		Nodes: []kubesim.Node{{Name: "cp-1"}, {Name: "w-1"}},
+		Pods: []kubesim.Pod{
+			{Namespace: "default", Name: "web-1", Node: "w-1", OwnerKind: "ReplicaSet"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("kubesim.New: %v", err)
+	}
+	t.Cleanup(ksim.Close)
+
 	h := newHarness(t,
 		withInventory(func(st *fsstore.Store) *inventory.Service {
 			return inventory.New(inventory.Deps{
@@ -82,6 +104,16 @@ func newRemovalHarness(t *testing.T) *removalHarness {
 				},
 				Machines: h.inv.MachinesOf,
 				Forget:   h.inv.ForgetMachine,
+				// A client per call, as the daemon does: minted from the
+				// cluster's own Kubernetes authority, never held.
+				Kube: func(context.Context, model.ClusterID) (*kube.Client, error) {
+					caCrt, caKey := ksim.AuthorityPEM()
+					creds, err := kube.MintCreds(ksim.Endpoint(), caCrt, caKey, time.Now())
+					if err != nil {
+						return nil, err
+					}
+					return kube.New(creds)
+				},
 				ResolveInstaller: func(context.Context, string, string, bool) (string, error) {
 					return "", nil
 				},
@@ -112,7 +144,7 @@ func newRemovalHarness(t *testing.T) *removalHarness {
 	ih.adopt(t)
 	ih.unlockEverything(t)
 
-	rh := &removalHarness{inventoryHarness: ih, cpSim: cpSim, workerSim: workerSim}
+	rh := &removalHarness{inventoryHarness: ih, cpSim: cpSim, workerSim: workerSim, ksim: ksim}
 	rh.cp, rh.worker = rh.machineNamed(t, "cp-1"), rh.machineNamed(t, "w-1")
 	return rh
 }
@@ -197,8 +229,33 @@ func TestRemovingANodeAnswers202WithAJobAndIsDoneWhenTheJobIs(t *testing.T) {
 	if loc := resp.Header.Get("Location"); loc != "/api/v1/jobs/"+body.Job.ID {
 		t.Errorf("Location = %q, want the job's URL", loc)
 	}
+	// The notice says what the removal now does, and says nothing that was true
+	// only while the product could not cordon or drain. It says where a stopped
+	// removal leaves the node (before etcd and the wipe, pods already evicted
+	// stay evicted) and not more: the drain evicts everything it may before it
+	// reports the pods a budget holds, so "nothing on the node has changed" is
+	// not a sentence it may carry. The exception for a cluster without
+	// Kubernetes access is conditional, and so is its sentence.
 	if body.Notice == "" {
 		t.Error("the cordon-and-drain notice is missing from the answer")
+	}
+	for _, want := range []string{
+		"PodDisruptionBudget",
+		"node object",
+		"before the node leaves etcd or is wiped",
+		"already evicted",
+		"no Kubernetes access to from the start",
+		"loses it on the way fails instead",
+	} {
+		if !strings.Contains(body.Notice, want) {
+			t.Errorf("the notice does not mention %q: %q", want, body.Notice)
+		}
+	}
+	if strings.Contains(body.Notice, "kubectl drain") {
+		t.Errorf("the notice still tells the operator to drain by hand, which the product does itself now: %q", body.Notice)
+	}
+	if strings.Contains(body.Notice, "before anything on the node") {
+		t.Errorf("the notice says a stopped removal changed nothing on the node, while evicted pods stay evicted: %q", body.Notice)
 	}
 
 	deadline := time.Now().Add(30 * time.Second)
@@ -214,6 +271,11 @@ func TestRemovingANodeAnswers202WithAJobAndIsDoneWhenTheJobIs(t *testing.T) {
 	}
 	if n := h.cpSim.Node(); n.EtcdLeaves != 0 || n.Resets != 0 {
 		t.Errorf("the control plane was touched by a worker's removal: %+v", n)
+	}
+	// Through the real route the job drains first: the worker's pod went
+	// through the eviction API before the wipe.
+	if got := h.ksim.Evicted(); !slices.Equal(got, []string{"default/web-1"}) {
+		t.Errorf("the route's removal evicted %v, want exactly the worker's pod", got)
 	}
 	resp, raw = h.do(t, http.MethodGet, "/api/v1/machines/"+string(h.worker), nil)
 	if resp.StatusCode != http.StatusNotFound {
