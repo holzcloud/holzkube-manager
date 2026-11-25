@@ -190,3 +190,109 @@ func TestSubmitAfterCloseLeavesNothingBehind(t *testing.T) {
 		t.Fatalf("Submit after Close left %d job record(s) behind, first is %q", len(all), all[0].State)
 	}
 }
+
+// errRPCCancelled is the shape a cancelled gRPC call hands back: a status
+// error, which is neither context.Canceled nor a wrapper around it. Spelled
+// out here instead of built with google.golang.org/grpc/status so that the
+// engine's tests keep saying the engine knows nothing about a transport.
+type errRPCCancelled struct{}
+
+func (errRPCCancelled) Error() string { return "rpc error: code = Canceled desc = context canceled" }
+
+// TestShutdownInsideARemoteCallLeavesTheJobForResume is the daemon restarting
+// while a step is inside a Talos call -- which is what the hourly update does
+// to whatever is running.
+//
+// The step's error is the transport's, not the context's, and the engine used
+// to tell an interruption by the error. It recorded the job as failed, so the
+// next start had nothing to resume and the remaining nodes of an upgrade were
+// never walked.
+func TestShutdownInsideARemoteCallLeavesTheJobForResume(t *testing.T) {
+	t.Parallel()
+
+	st := newStore(t)
+	e := newEngine(t, st)
+	entered := make(chan struct{})
+	e.Register(model.JobReboot, func(model.Job) ([]jobs.Step, error) {
+		return []jobs.Step{{
+			Name: "upgrade the node",
+			Do: func(ctx context.Context, _ *model.Job) error {
+				close(entered)
+				<-ctx.Done()
+				return errRPCCancelled{}
+			},
+			Happened: func(context.Context, *model.Job) (bool, error) { return false, nil },
+		}}, nil
+	})
+
+	j, err := e.Submit(t.Context(), model.Job{Kind: model.JobReboot, Cluster: testCluster, Machine: "m1"})
+	if err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	waitEntered(t, entered)
+	if err := e.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	stored, err := st.Jobs().Get(t.Context(), j.ID)
+	if err != nil {
+		t.Fatalf("get job after the shutdown: %v", err)
+	}
+	if stored.State != model.JobRunning || stored.Steps[0].State != model.StepRunning {
+		t.Fatalf("after a shutdown inside a remote call the job is %q and its step %q, want running "+
+			"and running: a job written down as failed is one Resume never looks at again",
+			stored.State, stored.Steps[0].State)
+	}
+
+	// And the restart does pick it up.
+	ran := make(chan struct{})
+	second := newEngine(t, st)
+	second.Register(model.JobReboot, func(model.Job) ([]jobs.Step, error) {
+		return []jobs.Step{{
+			Name:     "upgrade the node",
+			Do:       func(context.Context, *model.Job) error { close(ran); return nil },
+			Happened: func(context.Context, *model.Job) (bool, error) { return false, nil },
+		}}, nil
+	})
+	if err := second.Resume(t.Context()); err != nil {
+		t.Fatalf("Resume: %v", err)
+	}
+	select {
+	case <-ran:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the interrupted step was not run again after the restart")
+	}
+}
+
+// TestCancelInsideARemoteCallEndsCancelled is the operator's cancel arriving
+// while the step is inside a Talos call: cancelled, not failed.
+func TestCancelInsideARemoteCallEndsCancelled(t *testing.T) {
+	t.Parallel()
+
+	st := newStore(t)
+	e := newEngine(t, st)
+	entered := make(chan struct{})
+	e.Register(model.JobReboot, func(model.Job) ([]jobs.Step, error) {
+		return []jobs.Step{{
+			Name: "upgrade the node",
+			Do: func(ctx context.Context, _ *model.Job) error {
+				close(entered)
+				<-ctx.Done()
+				return errRPCCancelled{}
+			},
+			Happened: func(context.Context, *model.Job) (bool, error) { return false, nil },
+		}}, nil
+	})
+
+	j, err := e.Submit(t.Context(), model.Job{Kind: model.JobReboot, Cluster: testCluster, Machine: "m1"})
+	if err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	waitEntered(t, entered)
+	if _, err := e.Cancel(t.Context(), j.ID); err != nil {
+		t.Fatalf("Cancel: %v", err)
+	}
+	if done := waitForTerminal(t, e, j.ID, 10*time.Second); done.State != model.JobCancelled {
+		t.Fatalf("job is %q after an operator cancel inside a remote call, want cancelled", done.State)
+	}
+}

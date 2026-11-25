@@ -253,7 +253,7 @@ func (s *Service) ChangePassword(ctx context.Context, current, next string) erro
 		return fmt.Errorf("auth: store new password: %w", err)
 	}
 
-	if err := s.InvalidateAllExcept(ctx, s.sm.Token(ctx)); err != nil {
+	if err := s.InvalidateUser(ctx, u.ID, s.sm.Token(ctx)); err != nil {
 		// The password write above is the operation, and it is already
 		// durable. Reporting failure here maps to a 500 and tells the operator
 		// the change did not happen -- so they retry with the old current

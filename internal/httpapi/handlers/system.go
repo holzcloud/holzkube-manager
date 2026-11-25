@@ -13,6 +13,12 @@ type systemStatus struct {
 	SetupRequired bool                `json:"setup_required"`
 	AuditChain    httpapi.ChainStatus `json:"audit_chain"`
 
+	// Busy says a job is executing right now, so that whatever is about to
+	// restart this process -- the hourly update first of all -- can wait
+	// instead of interrupting it. One bit, and nothing about which job or
+	// which cluster: the route answers before authentication.
+	Busy bool `json:"busy"`
+
 	// The two ways in, as they apply to the address this request arrived on.
 	// The sign-in page renders from these rather than from a build-time
 	// assumption: one instance answers on a LAN address that offers both and a
@@ -173,6 +179,7 @@ func SystemRoutes(d httpapi.Deps) []httpapi.Route {
 
 				writeJSON(w, http.StatusOK, systemStatus{
 					SetupRequired: len(users) == 0,
+					Busy:          d.Jobs != nil && d.Jobs.Busy(),
 					OIDCEnabled:   d.OIDC != nil,
 					PasswordLogin: !d.SSOOnly(r),
 					// Only on an address that refuses the local account: on one

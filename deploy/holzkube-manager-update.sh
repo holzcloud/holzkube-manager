@@ -188,6 +188,52 @@ clear_bad() {
   rm -f "$STATUS_DIR/bad-version" 2>/dev/null || true
 }
 
+# --- Aufgeschoben, weil ein Job laeuft ---------------------------------------
+# Ein Update startet den Daemon neu, und ein Neustart unterbricht den Job, der
+# gerade laeuft: bestenfalls setzt der Daemon ihn danach fort, schlimmstenfalls
+# stand er in einem Schritt, von dem sich nicht pruefen laesst, ob er gewirkt
+# hat, und wartet dann auf einen Menschen -- ein Upgrade, das auf halbem Weg
+# stehen bleibt, weil der stuendliche Timer dazwischenkam. Der Daemon sagt
+# unter $HEALTH_URL, ob er gerade einen Job ausfuehrt ("busy":true), und dann
+# wartet der Lauf auf die naechste Stunde.
+#
+# Nicht fuer immer: ein Job, der haengt, hielte sonst genau das Update auf, das
+# ihn repariert. Seit wann aufgeschoben wird, steht in
+# $STATUS_DIR/deferred-since; nach BUSY_MAX_SECONDS wird trotzdem installiert.
+# --force wartet gar nicht.
+#
+# Ein Daemon, der die Frage nicht kennt (aelter als dieses Skript), nicht
+# laeuft oder nicht antwortet, gilt als frei: dann gibt es keinen Job zu
+# unterbrechen, oder das Update ist das, was ihn zurueckbringt.
+BUSY_MAX_SECONDS=$((24 * 3600))
+
+busy() {
+  systemctl is-active --quiet "$SERVICE" \
+    && status_body | grep -q '"busy":true'
+}
+
+deferred_since() {
+  local f=$STATUS_DIR/deferred-since
+  [[ -n ${STATUS_DIR:-} && -f $f && ! -L $f ]] || return 0
+  tr -cd '0-9' < "$f" 2>/dev/null | head -c 12 || true
+}
+
+mark_deferred() {
+  local f=$STATUS_DIR/deferred-since t
+  status_dir_ok >/dev/null 2>&1 || return 0
+  t=$(mktemp "$STATUS_DIR/.deferred.XXXXXX") || return 0
+  if printf '%s\n' "$1" > "$t" && chmod 0644 "$t" && mv -f "$t" "$f"; then
+    return 0
+  fi
+  rm -f "$t"
+  return 0
+}
+
+clear_deferred() {
+  [[ -n ${STATUS_DIR:-} && ! -L $STATUS_DIR ]] || return 0
+  rm -f "$STATUS_DIR/deferred-since" 2>/dev/null || true
+}
+
 # --- Was zuletzt geschah ----------------------------------------------------
 # Nach jedem Lauf, der zu einer Entscheidung kommt, steht in
 # $STATUS_DIR/status.json, wann nachgesehen wurde, was installiert war, was das
@@ -459,10 +505,17 @@ command -v curl    >/dev/null || fail "curl fehlt"
 command -v tar     >/dev/null || fail "tar fehlt"
 command -v python3 >/dev/null || fail "python3 fehlt"
 
+# status_body fragt den Daemon einmal nach seinem Status. Eine Stelle, damit
+# jede Frage an $HEALTH_URL dieselbe Frist hat und der Zeitvertrag der Unit
+# (internal/host/hostaction, TestTheUpdateTimingContract) sie zaehlen kann.
+status_body() {
+  curl -sk --max-time 5 "$HEALTH_URL"
+}
+
 # healthy fragt einmal, ob der Dienst laeuft und unter $HEALTH_URL antwortet.
 healthy() {
   systemctl is-active --quiet "$SERVICE" \
-    && curl -sk --max-time 5 "$HEALTH_URL" | grep -q '"audit_chain"'
+    && status_body | grep -q '"audit_chain"'
 }
 
 # service_ident ist, woran man einen Neustart des Dienstes erkennt: die PID des
@@ -737,6 +790,24 @@ case $WANT in
     log "$REMOTE_VERSION wurde nach einem frueheren Update nicht gesund (oder per --rollback verlassen) und wird uebergangen, bis ein neueres Release kommt. --force installiert sie trotzdem."
     exit 0 ;;
 esac
+
+# Bis hierher steht fest, dass installiert werden soll. Vor dem Laden die
+# Frage, ob der Daemon gerade einen Job ausfuehrt (siehe busy oben).
+if [[ $FORCE -eq 0 ]] && busy; then
+  NOW=$(date +%s)
+  SINCE=$(deferred_since)
+  if [[ -z $SINCE ]]; then
+    SINCE=$NOW
+    mark_deferred "$NOW"
+  fi
+  if (( NOW - SINCE < BUSY_MAX_SECONDS )); then
+    OUTCOME=available
+    log "$REMOTE_VERSION ist verfuegbar, wird aber jetzt nicht installiert: der Daemon fuehrt gerade einen Job aus, und der Neustart unterbraeche ihn. Der naechste Lauf fragt wieder; --force installiert sofort."
+    exit 0
+  fi
+  log "Der Daemon fuehrt seit mehr als $((BUSY_MAX_SECONDS / 3600)) Stunden bei jedem Lauf einen Job aus. Es wird trotzdem installiert: ein Job, der haengt, darf das Update nicht aufhalten, das ihn repariert."
+fi
+clear_deferred
 
 # Ohne Pruefsumme wird nichts installiert. Ein Release ohne checksums.txt ist
 # kaputt oder manipuliert, und eine Warnung, die niemand liest, lieferte ein

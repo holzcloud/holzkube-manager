@@ -100,3 +100,37 @@ func TestNodeUsageIsReadPerNode(t *testing.T) {
 		t.Errorf("the namespaced metrics path was requested %d times", got)
 	}
 }
+
+// TestANamespaceCannotWalkOutOfTheMetricsPath is the one read whose namespace
+// goes into a path built by hand.
+//
+// client-go cleans a path before sending it, so ".." segments in the namespace
+// turned "pods in this namespace" into a request for any path of the API
+// server, under this installation's own certificate. The route is a reader's.
+func TestANamespaceCannotWalkOutOfTheMetricsPath(t *testing.T) {
+	t.Parallel()
+
+	ctx := testContext(t)
+	_, client := newCluster(t, kubesim.Options{Usage: map[string]string{
+		"pod/default/website-abc": "400m,512Mi",
+	}})
+
+	for _, namespace := range []string{
+		"../../../../api/v1/namespaces/kube-system/secrets/..",
+		"default/../kube-system",
+		"..",
+		"default/pods/x",
+		"Default",
+		"default%2F..",
+	} {
+		usage, err := client.PodUsage(ctx, namespace)
+		if !errors.Is(err, kube.ErrBadNamespace) {
+			t.Errorf("PodUsage(%q) = %+v, %v; want ErrBadNamespace and no request made", namespace, usage, err)
+		}
+	}
+
+	// And a real one still reads.
+	if usage, err := client.PodUsage(ctx, "default"); err != nil || len(usage) != 1 {
+		t.Errorf("PodUsage(default) = %+v, %v", usage, err)
+	}
+}

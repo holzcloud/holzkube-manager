@@ -83,7 +83,7 @@ func JobRoutes(d httpapi.Deps) []httpapi.Route {
 			MinRole:         model.RoleOperator,
 			Destructive:     true,
 			Action:          "node.reboot",
-			ClusterScope:    clusterFromBody,
+			ClusterScope:    machineClusterFromPath(d),
 			Handler:         handler(nodeAction(d, model.JobReboot)),
 		},
 		{
@@ -93,7 +93,7 @@ func JobRoutes(d httpapi.Deps) []httpapi.Route {
 			MinRole:         model.RoleOperator,
 			Destructive:     true,
 			Action:          "node.shutdown",
-			ClusterScope:    clusterFromBody,
+			ClusterScope:    machineClusterFromPath(d),
 			Handler:         handler(nodeAction(d, model.JobShutdown)),
 		},
 		{
@@ -103,7 +103,7 @@ func JobRoutes(d httpapi.Deps) []httpapi.Route {
 			MinRole:         model.RoleOperator,
 			Destructive:     true,
 			Action:          "node.reset",
-			ClusterScope:    clusterFromBody,
+			ClusterScope:    machineClusterFromPath(d),
 			Handler:         handler(nodeAction(d, model.JobReset)),
 		},
 	}

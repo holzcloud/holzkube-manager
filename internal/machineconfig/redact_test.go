@@ -1,6 +1,7 @@
 package machineconfig_test
 
 import (
+	"encoding/base64"
 	"strings"
 	"testing"
 
@@ -129,10 +130,11 @@ func TestNoExitLeaksASecret(t *testing.T) {
 // TestRedactionSurvivesAConfigThatDoesNotParse is the case that would
 // otherwise be a leak dressed as an error.
 //
-// A configuration holzkube-manager cannot parse still has to be safe to show, and the
-// operator still has to be able to see what is wrong with it. Refusing to show
-// anything would hide the problem; showing the bytes because the parser was
-// unhappy would hand over the key.
+// A configuration holzkube-manager cannot parse must not come back with a key
+// in it. Since 2026-11-11 it does not come back at all -- see
+// TestAConfigThatDoesNotParseLeavesNothing for why a sweep of the text was not
+// enough -- so this test now holds trivially, and stays as the statement of
+// the literal-PEM case.
 func TestRedactionSurvivesAConfigThatDoesNotParse(t *testing.T) {
 	t.Parallel()
 
@@ -180,4 +182,41 @@ func indent(s string) string {
 		b.WriteString("\n")
 	}
 	return b.String()
+}
+
+// TestAConfigThatDoesNotParseLeavesNothing is the leak the test above this one
+// could not see.
+//
+// That test stages a key as a literal PEM block. No Talos configuration holds
+// one: the keys sit in the YAML as base64 of the PEM, which the text sweep --
+// all that ran over a configuration that did not parse -- does not match. And
+// a real configuration stops parsing the day a node runs a Talos with a
+// document kind this build has never heard of, which has happened here
+// (DiscoveryServiceConfig, v1.14 against a v1.13 machinery). So the bytes that
+// came back alongside the error were the whole configuration: the authorities'
+// private keys, the tokens, the secretbox key.
+//
+// Nothing comes back now. The error still says the configuration did not
+// parse; what is wrong with it is for somebody holding the node, not for a
+// file that gets attached to an issue.
+func TestAConfigThatDoesNotParseLeavesNothing(t *testing.T) {
+	t.Parallel()
+
+	cl, raw := fixture(t)
+	unparsable := string(raw) + "\n---\napiVersion: v1alpha1\nkind: SomethingThisBuildHasNeverHeardOf\nname: x\n"
+
+	out, err := machineconfig.Redact([]byte(unparsable))
+	if err == nil {
+		t.Fatal("a configuration with an unknown document kind parsed; this test needs one that does not")
+	}
+	if len(out) != 0 {
+		t.Errorf("an unparsable configuration came back as %d bytes; it must come back as none", len(out))
+	}
+	for name, secret := range secretsOf(t, cl) {
+		for _, form := range []string{secret, base64.StdEncoding.EncodeToString([]byte(secret))} {
+			if form != "" && strings.Contains(string(out), form) {
+				t.Errorf("%s is in what an unparsable configuration came back as", name)
+			}
+		}
+	}
 }

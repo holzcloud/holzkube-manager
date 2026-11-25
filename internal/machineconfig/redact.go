@@ -55,17 +55,27 @@ var pemPrivateKey = regexp.MustCompile(`(?s)-----BEGIN [A-Z ]*PRIVATE KEY-----.*
 //
 // Neither alone is enough. The first misses what upstream adds after this
 // build; the second misses anything that is a secret without looking like one.
+//
+// A configuration that does not parse is returned as nothing, with the error:
+// the first pass cannot run on it, and the second alone is not a redaction.
 func Redact(raw []byte) ([]byte, error) {
 	provider, err := configloader.NewFromBytes(raw)
 	if err != nil {
-		// A configuration that does not parse still has to be safe to show,
-		// and the operator still has to be able to see what is wrong with it.
-		// So the text sweep runs on its own and the parse failure is reported
-		// alongside -- rather than either refusing to show anything, or
-		// showing unredacted bytes because the parser was unhappy.
-		return pemPrivateKey.ReplaceAll(raw, []byte(RedactedMarker)),
-			fmt.Errorf("machineconfig: the configuration did not parse, so only the text-level "+
-				"redaction ran over it: %w", err)
+		// Nothing comes back. This used to return the bytes with the PEM
+		// sweep run over them, on the reasoning that an operator has to be
+		// able to see what is wrong with a configuration that does not parse.
+		// But the sweep finds literal PEM blocks, and a Talos configuration
+		// has none: its keys are base64 of the PEM, and its tokens are not
+		// PEM at all. A configuration that did not parse -- one document kind
+		// this build has never heard of is enough -- therefore came back
+		// whole, and the support bundle wrote it into a file meant to be
+		// handed to somebody else.
+		//
+		// There is no text-level redaction that is safe here: without the
+		// schema, a secret is any string, and guessing which ones removes
+		// either too little or what the reader needed.
+		return nil, fmt.Errorf("machineconfig: the configuration did not parse, so it cannot be "+
+			"redacted and none of it is shown: %w", err)
 	}
 
 	redacted := provider.RedactSecrets(RedactedMarker)
