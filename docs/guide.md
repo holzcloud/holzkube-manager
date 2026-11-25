@@ -2425,6 +2425,15 @@ Every failed verification says so in its own message, because the job screen
 renders a step's detail verbatim and that message is the screen at the moment
 it matters.
 
+**Each node's step reads what the node runs before it installs anything**, and
+that matters most after a restart of the daemon in the middle of a run. A node
+already on the target is not installed or rebooted again: the step waits for
+its services and verifies it. A node already *past* the target -- moved by hand
+while the job sat unfinished, or a data directory restored from an older backup
+-- is never downgraded: the step fails with a sentence that names both versions,
+and a new run is planned from what the cluster runs now. The Kubernetes
+upgrade's kubelet step does the same with the kubelet's version.
+
 ### It applies manifests and has never done so against a real cluster
 
 Every part of the manifest path is measured — discovery, both scopes, the
