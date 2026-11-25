@@ -611,6 +611,12 @@ cluster: the talosconfig, the kubeconfig, the etcd snapshot and its restore, the
 support bundle, the audit archive, and the cluster lock — unlocking is what
 makes every other destructive route reachable.
 
+**Applying a Kubernetes manifest is admin-only too**, for the reason the
+kubeconfig is: a manifest can be any object, including a binding to
+`cluster-admin`, so whoever may apply arbitrary manifests can make themselves
+the cluster's administrator. An operator may still plan one; the form to apply
+it is shown only to admins.
+
 Every route names the least privileged role that may use it, and **a route that
 names none cannot be registered**: the process refuses to start. A permission
 nobody chose is not a permission anybody reviewed.
@@ -1934,7 +1940,9 @@ would take it down, and that is why both buttons exist.
 ### Applying a manifest
 
 Paste a manifest, press **Plan**, read what it would do, then **Apply**. Several
-documents separated by `---` are fine.
+documents separated by `---` are fine. The form is an admin's (see
+[Accounts and roles](#accounts-and-roles)): a manifest can grant anything in the
+cluster, including the role that grants everything.
 
 **The plan is not a courtesy, and Apply stays disabled until there is one for
 exactly the text in the box.** Editing the manifest throws the plan away: a plan

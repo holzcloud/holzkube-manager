@@ -149,6 +149,48 @@ func TestARoleIsEnforcedOnTheWayIn(t *testing.T) {
 	}
 }
 
+// TestApplyingAManifestIsForAdmins: a manifest can be any object of any kind,
+// including a binding that makes its author the cluster's administrator, so an
+// operator who could apply one could climb past their role. The plan, which
+// writes nothing, stays an operator's.
+func TestApplyingAManifestIsForAdmins(t *testing.T) {
+	t.Parallel()
+
+	h := newHarness(t)
+	h.setupAndLogin(t)
+	if resp, raw := h.do(t, http.MethodPost, "/api/v1/auth/sudo",
+		map[string]string{"password": testPass}); resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("sudo: %d (%s)", resp.StatusCode, raw)
+	}
+	if resp, raw := h.do(t, http.MethodPost, "/api/v1/users", map[string]string{
+		"username": "operator-account", "password": newAccountPass, "role": string(model.RoleOperator),
+	}); resp.StatusCode != http.StatusCreated {
+		t.Fatalf("creating the operator account: %d (%s)", resp.StatusCode, raw)
+	}
+
+	const (
+		apply = "/api/v1/clusters/x/kubernetes/manifest/apply"
+		plan  = "/api/v1/clusters/x/kubernetes/manifest/plan"
+	)
+	body := map[string]string{"manifest": "kind: ConfigMap"}
+	roleRefusal := func(got int, raw []byte) bool {
+		return got == http.StatusForbidden && strings.Contains(string(raw), httpapi.CodeForbiddenRole)
+	}
+
+	op := h.asUser(t, "operator-account", newAccountPass)
+	if got, raw := op.status(t, http.MethodPost, apply, body); !roleRefusal(got, raw) {
+		t.Errorf("an operator's manifest apply was not refused for its role: %d (%s)", got, raw)
+	}
+	if got, raw := op.status(t, http.MethodPost, plan, body); roleRefusal(got, raw) {
+		t.Errorf("an operator may no longer plan a manifest: %s", raw)
+	}
+
+	admin := h.asUser(t, testUser, testPass)
+	if got, raw := admin.status(t, http.MethodPost, apply, body); roleRefusal(got, raw) {
+		t.Errorf("an admin's manifest apply was refused for its role: %s", raw)
+	}
+}
+
 // newAccountPass is what the two accounts this test creates sign in with.
 const newAccountPass = "a-long-enough-passphrase"
 

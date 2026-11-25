@@ -3439,7 +3439,10 @@ Two routes, and the split is the point:
 | route | what it does |
 |---|---|
 | `POST /api/v1/clusters/{id}/kubernetes/manifest/plan` | takes `{"manifest": "<YAML>"}` and answers `{"objects": [...], "warnings": [...]}`. It writes nothing. |
-| `POST /api/v1/clusters/{id}/kubernetes/manifest/apply` | takes the same body and answers `{"applied": [...], "failed": [...], "fully_applied": bool}` |
+| `POST /api/v1/clusters/{id}/kubernetes/manifest/apply` | **admin**, destructive. Takes the same body and answers `{"applied": [...], "failed": [...], "fully_applied": bool}` |
+
+The plan is an operator's; the apply is an admin's, because a manifest can make
+its author the cluster's administrator (see the roles section).
 
 **The plan is not a courtesy.** An apply that runs without one is the same genus
 as a reset without a confirmation: the operator finds out what it did afterwards.
@@ -3634,6 +3637,12 @@ The admin-only reads are the ones that hand over a credential or the contents of
 a cluster: `talosconfig`, `kubeconfig`, the etcd snapshot and its restore, the
 support bundle, the audit archive, and the cluster lock — because unlocking is
 what makes every other destructive route reachable.
+
+`POST /api/v1/clusters/{id}/kubernetes/manifest/apply` is admin-only for the
+same reason as the kubeconfig: a manifest can be any object of any kind,
+including a binding to `cluster-admin`, so applying arbitrary manifests is
+holding the cluster's credentials by another route. The plan, which writes
+nothing, stays an operator's.
 
 A request from an account without the role answers **403 `forbidden.role`**, and
 the detail names the role it needed. It is a 403 and not a 404: everybody who

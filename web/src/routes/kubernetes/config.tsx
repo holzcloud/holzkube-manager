@@ -1,5 +1,5 @@
 import { createRoute } from '@tanstack/react-router'
-import { ApplyManifest } from '@/components/ApplyManifest'
+import { ApplyManifestCard } from '@/components/ApplyManifest'
 import { ClusterResources } from '@/components/ClusterResources'
 import { KubernetesShell, useClusterSelection } from '@/components/KubernetesSection'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -8,9 +8,9 @@ import { kubernetesRoute } from '@/routes/kubernetes'
 /**
  * ConfigMaps, Secrets, claims, Ingresses, autoscalers and budgets.
  *
- * The manifest form is on this page too: it is how any of them is changed, and
- * putting the reading and the writing of the same objects apart would make
- * somebody navigate between two pages to do one thing.
+ * The manifest form is on this page too, for admins: it is how any of them is
+ * changed, and putting the reading and the writing of the same objects apart
+ * would make somebody navigate between two pages to do one thing.
  */
 export function KubernetesConfigPage() {
   const { selected, namespace } = useClusterSelection()
@@ -26,14 +26,7 @@ export function KubernetesConfigPage() {
         </CardContent>
       </Card>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Apply a manifest</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <ApplyManifest clusterID={selected} />
-        </CardContent>
-      </Card>
+      <ApplyManifestCard clusterID={selected} />
     </KubernetesShell>
   )
 }
