@@ -621,7 +621,11 @@ func prepullStep(d Deps, cluster model.ClusterID, ids []model.MachineID, to Vers
 			return nil
 		},
 		// Pulling again is harmless and cheap once the images are there, so a
-		// resumed run simply does it again rather than guessing.
+		// resumed run simply does it again rather than guessing. That needs a
+		// Happened which says "not done": without one the step was
+		// unverifiable, and a run interrupted in its first and most harmless
+		// step was parked for a person.
+		Happened: func(context.Context, *model.Job) (bool, error) { return false, nil },
 	}
 }
 

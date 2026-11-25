@@ -25,16 +25,26 @@ import (
 // job: every step before it done, it running.
 func (r *removalRig) stageUpgrade(t *testing.T, kind model.JobKind, req upgrade.Request, names []string, verifiable map[string]bool) model.JobID {
 	t.Helper()
+	return r.stageUpgradeAt(t, kind, req, names, verifiable, len(names)-1)
+}
+
+// stageUpgradeAt is stageUpgrade with the crash inside step at; the steps
+// after it are pending.
+func (r *removalRig) stageUpgradeAt(t *testing.T, kind model.JobKind, req upgrade.Request, names []string, verifiable map[string]bool, at int) model.JobID {
+	t.Helper()
 	j := model.Job{
 		ID: "staged-upgrade", Kind: kind, Cluster: removeCluster,
-		State: model.JobRunning, Current: len(names) - 1, Params: req.Params(),
+		State: model.JobRunning, Current: at, Params: req.Params(),
 		CreatedAt: time.Now().Add(-time.Minute), StartedAt: time.Now().Add(-time.Minute),
 	}
 	for i, name := range names {
 		s := model.JobStep{Name: name, Verifiable: verifiable[name], State: model.StepDone}
-		if i == len(names)-1 {
+		switch {
+		case i == at:
 			s.State = model.StepRunning
 			s.StartedAt = time.Now().Add(-10 * time.Second)
+		case i > at:
+			s.State = model.StepPending
 		}
 		j.Steps = append(j.Steps, s)
 	}
