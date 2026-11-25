@@ -77,7 +77,11 @@ const (
 	// on code that did not yet import it had dropped the pinned requirement
 	// first. Three minors ahead of the server is outside Kubernetes's own skew
 	// policy; it was downgraded deliberately, and this guard is what noticed.
-	clientGoVersion = "v0.34.1"
+	//
+	// Raised to v0.34.13 on 2026-11-25, the newest patch of the 0.34 line, from
+	// v0.34.1. Patches only: the minor is the supported Kubernetes, and moving
+	// it is the decision this pin exists to make visible.
+	clientGoVersion = "v0.34.13"
 	clientGoModule  = "k8s.io/client-go"
 )
 
