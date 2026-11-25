@@ -213,6 +213,14 @@ per source IP (D-08).
 - A short wait is served by holding the request; anything longer answers `429`
   `ratelimit.delayed` with `Retry-After` in seconds.
 - A successful attempt clears the counter.
+- An attempt is counted before the password is checked and refunded when it is
+  right, so requests sent in parallel do not each get a check: one proceeds, the
+  others wait or meet `429`.
+- `POST /api/v1/auth/sudo` also counts per account, and has the per-peer request
+  bucket of the anonymous routes in front of it (30 in a burst, then one every
+  two seconds; the same `429` `ratelimit.delayed`). After 10 wrong passwords in a row for one
+  account, the `401` also ends the session that sent it; signing in again
+  clears the account's counter.
 - **There is no lock and therefore no unlock.** Waiting is always sufficient;
   no endpoint, flag or recovery path exists to clear the delay, and none may be
   added. Clients should show the `Retry-After` value and let the operator wait.

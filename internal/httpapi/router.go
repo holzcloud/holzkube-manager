@@ -593,7 +593,15 @@ func (d Deps) wrapRoute(rt Route) http.Handler {
 
 // anonLimit bounds the routes anyone can call that leave a permanent trace:
 // an audit pair, or a session file. See middleware.AnonLimit.
+//
+// The re-authentication is the one route behind a session that gets it too. It
+// is a password oracle like the login, every call leaves an audit pair, and
+// what calls it is whoever holds the cookie -- which is the person the window
+// exists to stop, not necessarily the operator.
 func (d Deps) anonLimit(rt Route) middleware.Middleware {
+	if rt.Action == "auth.sudo" {
+		return d.anonBucket
+	}
 	if rt.RequiresSession || rt.Action == "" ||
 		(!middleware.IsMutating(rt.Method) && !strings.HasPrefix(rt.Pattern, "/api/v1/auth/oidc/")) {
 		return nil

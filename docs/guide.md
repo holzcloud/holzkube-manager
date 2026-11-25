@@ -852,6 +852,27 @@ logout. Ending only the local session leaves the provider signed in, so the next
 sign-in returns immediately -- indistinguishable, to the operator, from the
 sign-out having been ignored.
 
+### Wrong passwords
+
+A wrong password makes the next attempt from the same address wait: a quarter of
+a second after the first, doubling, never more than thirty seconds. A wait over
+half a second is answered `429` with `Retry-After` instead of being held open.
+Nothing is ever locked: once the wait has passed the right password works, and
+it clears the count.
+
+The sign-in and the re-authentication for a destructive action share that count,
+so switching between them earns no fresh start. An attempt is counted **before**
+the password is checked and taken back only when it turns out right, so a burst
+of attempts sent at once does not all get checked: one goes through, the rest
+wait or are told to come back.
+
+The re-authentication counts per account as well as per address, and it has the
+same per-address request limit in front of it as the sign-in. **Ten wrong
+re-authentication passwords in a row for one account end the session that sent
+the tenth**: whoever holds a session cookie but not the password stops being
+able to guess with it. The operator who mistyped ten times signs in again, and
+signing in clears the account's count.
+
 ## Data directory
 
 Everything lives in one directory, `0700`, with `0600` contents:

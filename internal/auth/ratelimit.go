@@ -69,6 +69,14 @@ func NewLimiter() *Limiter {
 	}
 }
 
+// NewLimiterWithClock returns an empty limiter reading the time from now, so a
+// test outside this package can walk the backoff out without waiting it.
+func NewLimiterWithClock(now func() time.Time) *Limiter {
+	l := NewLimiter()
+	l.now = now
+	return l
+}
+
 // Delay reports how long this source must still wait before its next attempt is
 // worth making. It is zero for a source with no recent failures, and zero again
 // once the wait has been served.
@@ -103,6 +111,123 @@ func (l *Limiter) Fail(ip string) {
 	s.failures++
 	s.touched = now
 	s.nextAllowed = now.Add(backoff(s.failures))
+}
+
+// Reserve is the check and the charge of one password attempt, in one critical
+// section.
+//
+// Delay followed by Fail had a gap the length of a password verification
+// between the question and the answer, and nothing counted the attempts inside
+// it: twenty-four wrong logins sent at once all read "no delay" and all reached
+// argon2id, and the backoff only began after the last of them came back. So an
+// attempt is now charged as a failure before the password is looked at -- the
+// pessimistic bookkeeping -- and refunded by the outcome: Succeed forgets the
+// keys, Cancel takes the charge back when no password was checked at all.
+//
+// keys are every counter this attempt counts against; the attempt waits for the
+// slowest of them and charges all of them. When any key must still wait, Reserve
+// charges nothing and reports how long, and the Reservation is nil.
+func (l *Limiter) Reserve(keys ...string) (time.Duration, *Reservation) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	now := l.now()
+	var wait time.Duration
+	for _, k := range keys {
+		if s, ok := l.sources[k]; ok {
+			wait = max(wait, s.nextAllowed.Sub(now))
+		}
+	}
+	if wait > 0 {
+		return wait, nil
+	}
+
+	l.sweep(now)
+	for _, k := range keys {
+		s, ok := l.sources[k]
+		if !ok {
+			s = &source{}
+			l.sources[k] = s
+		}
+		s.failures++
+		s.touched = now
+		s.nextAllowed = now.Add(backoff(s.failures))
+	}
+	return 0, &Reservation{l: l, keys: keys}
+}
+
+// Failures reports how many failures in a row a key has on record, in-flight
+// reservations included.
+func (l *Limiter) Failures(key string) int {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	if s, ok := l.sources[key]; ok {
+		return s.failures
+	}
+	return 0
+}
+
+// Reservation is one attempt Reserve let through. Exactly one of Fail, Succeed
+// or Cancel ends it; the later calls do nothing.
+type Reservation struct {
+	l    *Limiter
+	keys []string
+	once sync.Once
+}
+
+// Fail keeps the charge, and restarts the wait from now: the delay a failure
+// earns is counted from when the answer was given, as Fail always did, and not
+// from when the attempt began.
+func (r *Reservation) Fail() {
+	r.once.Do(func() {
+		r.l.mu.Lock()
+		defer r.l.mu.Unlock()
+
+		now := r.l.now()
+		for _, k := range r.keys {
+			if s, ok := r.l.sources[k]; ok {
+				s.touched = now
+				if next := now.Add(backoff(s.failures)); next.After(s.nextAllowed) {
+					s.nextAllowed = next
+				}
+			}
+		}
+	})
+}
+
+// Succeed forgets every key of the attempt, as Limiter.Succeed does.
+func (r *Reservation) Succeed() {
+	r.once.Do(func() {
+		r.l.mu.Lock()
+		defer r.l.mu.Unlock()
+
+		for _, k := range r.keys {
+			delete(r.l.sources, k)
+		}
+	})
+}
+
+// Cancel takes the charge back for an attempt that checked no password -- an
+// internal error, a client gone away. The wait it scheduled stays: undoing it
+// exactly would need the state from before, and a few hundred milliseconds too
+// many after an error is not worth that.
+func (r *Reservation) Cancel() {
+	r.once.Do(func() {
+		r.l.mu.Lock()
+		defer r.l.mu.Unlock()
+
+		for _, k := range r.keys {
+			s, ok := r.l.sources[k]
+			if !ok {
+				continue
+			}
+			s.failures--
+			if s.failures <= 0 {
+				delete(r.l.sources, k)
+			}
+		}
+	})
 }
 
 // Succeed forgets a source. Proving you know the password ends the episode: the
