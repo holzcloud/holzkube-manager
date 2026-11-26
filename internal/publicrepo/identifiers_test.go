@@ -61,6 +61,9 @@ var forbidden = map[string]bool{
 	// node of the real cluster (Talos machine UUIDs are per machine and stable).
 	"a86a19f697da3b51004df75e9a78dded8a3119f03e4052f6fb7b370299597c32": true,
 	"650d8f5c2c9ca7a4de574993528ff2a92cb139538b432589d44ac99e12f0f25f": true,
+	// The MAC of a device on the operator's LAN, read from the production
+	// host's neighbour table on 2026-11-26.
+	"b4dd84de345dc7bdc1286e108621dbcb5fec632a7b278a55c4c8d8386f75531f": true,
 }
 
 // The shapes a value is cut out of a line in. A dotted name is also tried
