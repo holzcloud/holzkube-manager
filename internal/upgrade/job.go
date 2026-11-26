@@ -812,6 +812,22 @@ func kubeProxyStep(d Deps, cluster model.ClusterID, ids []model.MachineID, to Ve
 	return jobs.Step{
 		Name: "move kube-proxy to " + to.String(),
 		Do: func(ctx context.Context, job *model.Job) error {
+			// What kube-proxy runs, before anything is changed: one moved past
+			// the target by hand is not moved back, in the DaemonSet or in the
+			// configuration it is rendered from. A version that cannot be read
+			// -- no Kubernetes access, an API server that does not answer, no
+			// kube-proxy DaemonSet, a digest-pinned image -- is not newer than
+			// anything, and the step goes ahead as it always did. One on the
+			// target goes ahead too: both halves below are idempotent (see
+			// Happened), and the configuration of each node is not proven to
+			// match by what the DaemonSet runs.
+			if running, ok := runningProxyVersion(ctx, d, cluster); ok && newerRelease(running, to) {
+				return fmt.Errorf("upgrade: kube-proxy already runs %s, which is newer than the %s "+
+					"this run installs. It is not moved back: a downgrade is a decision of its own. "+
+					"Nothing was changed by this step. Plan a new run from what the cluster runs now",
+					running, to)
+			}
+
 			cps, err := controlPlaneOf(ctx, d, cluster, ids)
 			if err != nil {
 				return err
@@ -845,6 +861,29 @@ func kubeProxyStep(d Deps, cluster model.ClusterID, ids []model.MachineID, to Ve
 		// was unverifiable and a restart inside it parked the upgrade.
 		Happened: func(context.Context, *model.Job) (bool, error) { return false, nil },
 	}
+}
+
+// runningProxyVersion reads the version of the image kube-proxy's DaemonSet
+// runs. ok is false when it cannot be told, for any reason: the caller then
+// proceeds as it did before this read existed.
+func runningProxyVersion(ctx context.Context, d Deps, cluster model.ClusterID) (Version, bool) {
+	if d.Kube == nil {
+		return Version{}, false
+	}
+	client, err := d.Kube(ctx, cluster)
+	if err != nil {
+		return Version{}, false
+	}
+	images, err := client.DaemonSetImages(ctx, "kube-system", "kube-proxy")
+	if err != nil {
+		return Version{}, false
+	}
+	for _, ref := range images {
+		if strings.Contains(ref, "kube-proxy") {
+			return imageVersion(ref)
+		}
+	}
+	return Version{}, false
 }
 
 // ErrNoKubeProxy is a cluster without a kube-proxy DaemonSet, which is a
