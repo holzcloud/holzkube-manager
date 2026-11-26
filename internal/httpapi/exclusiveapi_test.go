@@ -4,7 +4,6 @@ import (
 	"context"
 	"net/http"
 	"testing"
-	"time"
 
 	"github.com/holzcloud/holzkube-manager/internal/httpapi"
 	"github.com/holzcloud/holzkube-manager/internal/jobs"
@@ -108,17 +107,14 @@ func TestAConfigApplyHoldsTheClusterWhileItRuns(t *testing.T) {
 		t.Fatal("the apply took no hold on its cluster")
 	}
 
-	// And the cluster is free again once the apply answered.
-	deadline := time.Now().Add(5 * time.Second)
-	for {
-		_, err := h.jobs.Submit(t.Context(), model.Job{Kind: blockingKind, Cluster: cluster})
-		if err == nil {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("the cluster is still held after the apply answered: %v", err)
-		}
-		time.Sleep(10 * time.Millisecond)
+	// And the cluster is free the moment the apply answered -- not a moment
+	// later. A client that applies and then starts a job, or applies again,
+	// must not be told the cluster is busy by its own finished request. This
+	// polled for five seconds until the release waited for the hold job's end,
+	// and TestARebootApplyOnAControlPlaneNodeAsksTheEtcdGate, which sends two
+	// applies back to back, failed on "store.cluster-busy" now and then.
+	if _, err := h.jobs.Submit(t.Context(), model.Job{Kind: blockingKind, Cluster: cluster}); err != nil {
+		t.Fatalf("the cluster is still held after the apply answered: %v", err)
 	}
 }
 
