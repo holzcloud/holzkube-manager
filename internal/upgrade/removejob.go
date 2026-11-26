@@ -474,10 +474,19 @@ func (d Deps) settleStep() jobs.Step {
 		},
 		// A wait has happened once it has been waited. Measured from the
 		// step's recorded start, so a daemon that was down for longer than the
-		// wait does not wait again.
+		// wait does not wait again -- unless the measurement cannot be
+		// believed (jobs.PlausibleElapsed: a clock that went back or jumped).
+		// Then the answer is "not yet", and the cost is waiting once more.
 		Happened: func(_ context.Context, job *model.Job) (bool, error) {
 			started := job.Steps[job.Current].StartedAt
-			return !started.IsZero() && d.now().Sub(started) >= d.wait(), nil
+			if started.IsZero() {
+				return false, nil
+			}
+			elapsed := d.now().Sub(started)
+			if jobs.PlausibleElapsed(elapsed) != nil {
+				return false, nil //nolint:nilerr // an unbelievable clock is "not yet": wait again
+			}
+			return elapsed >= d.wait(), nil
 		},
 	}
 }
