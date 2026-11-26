@@ -41,7 +41,7 @@
     "@types/react": "19.2.9",
     "@types/react-dom": "19.2.3",
     "@vitejs/plugin-react": "6.1.0",
-    "@vitest/browser": "4.1.12",
+    "@vitest/browser": "5.1.1",
     "@vitest/browser-playwright": "4.1.12",
     "@vitest/coverage-v8": "4.1.12",
     "jsdom": "30.0.1",
