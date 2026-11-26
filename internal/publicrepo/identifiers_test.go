@@ -56,6 +56,11 @@ var forbidden = map[string]bool{
 	// The host names' common prefix on its own: a comment quoting how a name
 	// broke across lines carries the prefix and never the whole name.
 	"584c01d0704b9d8911e5ebf08cdb20114b4d02781f5799b947882ea0f6004d39": true,
+	// Seen 2026-11-26 in the operator's SSH configuration and the production
+	// journal: the second host of the installation, and the machine ID of a
+	// node of the real cluster (Talos machine UUIDs are per machine and stable).
+	"a86a19f697da3b51004df75e9a78dded8a3119f03e4052f6fb7b370299597c32": true,
+	"650d8f5c2c9ca7a4de574993528ff2a92cb139538b432589d44ac99e12f0f25f": true,
 }
 
 // The shapes a value is cut out of a line in. A dotted name is also tried
