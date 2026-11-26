@@ -837,6 +837,13 @@ func kubeProxyStep(d Deps, cluster model.ClusterID, ids []model.MachineID, to Ve
 			job.Steps[job.Current].Detail = detail
 			return nil
 		},
+		// Both halves are safe to repeat: the configuration apply merges the
+		// same image into the node's current configuration and applies it in
+		// no-reboot mode, and the DaemonSet patch sets the image it already
+		// has, which changes no template and starts no rollout. So a resumed
+		// run does it again, as the prepull does; without a Happened the step
+		// was unverifiable and a restart inside it parked the upgrade.
+		Happened: func(context.Context, *model.Job) (bool, error) { return false, nil },
 	}
 }
 
