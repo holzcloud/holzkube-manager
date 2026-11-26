@@ -238,6 +238,22 @@ func withJobs() harnessOpt {
 
 // newHarness wires the same object graph as cmd/holzkube-managerd against a throwaway
 // data directory and serves it over real TLS.
+// steadyClock is the wall clock as it read when it was made, moved on since
+// by the monotonic clock: the real time for as long as nobody steps the wall
+// clock or puts the machine to sleep, and still the time the test has run for
+// when somebody does.
+//
+// The harness's auth service reads its sudo window by it. A subtest of 17 s
+// was answered 428 sudo.required halfway through, which a 5-minute window
+// opened at its start cannot produce unless the wall clock moved by minutes
+// under it -- a laptop asleep in the middle of the suite, a time step. That is
+// a test of the wall clock, not of the window, and the window keeps its own
+// tests in internal/auth.
+func steadyClock() func() time.Time {
+	start := time.Now()
+	return func() time.Time { return start.Add(time.Since(start)) }
+}
+
 func newHarness(t *testing.T, opts ...harnessOpt) *harness {
 	t.Helper()
 
@@ -271,6 +287,7 @@ func newHarness(t *testing.T, opts ...harnessOpt) *harness {
 	if err != nil {
 		t.Fatalf("auth.New: %v", err)
 	}
+	au.SetClockForTest(steadyClock())
 
 	chainOK, chainFile, brokenLine, err := al.Verify(context.Background())
 	if err != nil {
