@@ -1595,6 +1595,12 @@ Two things this refuses that are worth naming:
   service, reset it.
 - **one of two.** The cluster stops accepting writes and the Kubernetes API
   stops with it. That one is recoverable by adding a control-plane node back.
+- **a node it cannot find in etcd.** The removal looks for the node among etcd's
+  members by hostname, by the address in the member's peer URL, and finally by
+  asking the node's own etcd which member it is. When none of that answers and
+  etcd lists a member no machine here accounts for, that member may be this
+  node, and the removal refuses before anything changes instead of taking the
+  node for one that already left etcd. Refresh the cluster and start it again.
 
 A locked node is not removable either (a lock is somebody saying "not this one",
 and a removal cannot walk past anything the way a rolling upgrade can), and the

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -284,18 +285,69 @@ func (d Deps) membersVia(ctx context.Context, via model.Machine, machines []mode
 	return Members(ctx, cc, machines)
 }
 
-// memberOf reports whether the list has this machine. known is false when it
-// cannot be told: a machine with no recorded hostname matches no member.
-func memberOf(list MemberList, m model.Machine) (member, known bool) {
-	if m.Hostname == "" {
-		return false, false
-	}
-	for _, e := range list.Members {
-		if e.Machine == m.ID || strings.EqualFold(e.Hostname, m.Hostname) {
-			return true, true
+// selfIn finds this machine among etcd's members. It answers the index of its
+// member, -1 when it is not one, and known=false when that cannot be told.
+//
+// By name and address first. Failing those, the node is asked which member its
+// own etcd is -- the one identity etcd and the node agree on, whatever the
+// inventory calls the machine. A node whose etcd does not answer (stopped by a
+// leave, or down) is "not a member" only when every member is accounted for by
+// another machine of the inventory; otherwise it may be the member nobody could
+// name, and saying "not a member" is how a removal used to skip the quorum
+// check and the leave, then wipe a voter.
+func (d Deps) selfIn(ctx context.Context, list MemberList, m model.Machine, machines []model.Machine) (idx int, known bool) {
+	for i, e := range list.Members {
+		if matchesMachine(e, m) {
+			return i, true
 		}
 	}
-	return false, true
+
+	if id, err := d.ownMemberID(ctx, m.ID); err == nil {
+		for i, e := range list.Members {
+			if strings.EqualFold(e.ID, fmt.Sprintf("%x", id)) {
+				return i, true
+			}
+		}
+		return -1, true
+	}
+
+	for _, e := range list.Members {
+		accounted := false
+		for _, other := range machines {
+			if other.ID != m.ID && matchesMachine(e, other) {
+				accounted = true
+				break
+			}
+		}
+		if !accounted {
+			return -1, false
+		}
+	}
+	return -1, true
+}
+
+// ownMemberID asks a node's etcd which member it is.
+func (d Deps) ownMemberID(ctx context.Context, id model.MachineID) (uint64, error) {
+	cc, err := d.Connect(ctx, id)
+	if err != nil {
+		return 0, err
+	}
+	defer cc.Close() //nolint:errcheck // the read's verdict is its own
+
+	statusCtx, cancel, err := talos.WithClassDeadline(ctx, talos.MethodEtcdStatus)
+	if err != nil {
+		return 0, err
+	}
+	defer cancel()
+
+	status, err := cc.EtcdStatus(statusCtx)
+	if err != nil {
+		return 0, err
+	}
+	if status.MemberID == 0 {
+		return 0, errors.New("the node's etcd reported no member id")
+	}
+	return status.MemberID, nil
 }
 
 // probeStatus asks one machine's etcd for its own status; an answer, however
@@ -330,11 +382,24 @@ func (d Deps) checkRemovable(ctx context.Context, m model.Machine, machines []mo
 			"membership could not be read, so there is no way to tell whether the cluster "+
 			"survives losing it. Nothing has been changed: %w", nameOf(m), err)
 	}
-	if member, known := memberOf(list, m); known && !member {
+	idx, known := d.selfIn(ctx, list, m, machines)
+	if !known {
+		return false, fmt.Errorf("upgrade: %s matches none of etcd's members by name or address, "+
+			"its own etcd did not say which member it is, and etcd lists a member no machine in "+
+			"the inventory accounts for. That member may be this node, so whether the cluster "+
+			"survives losing it cannot be told. Nothing has been changed. Refresh the cluster "+
+			"so the inventory knows the node's name and address, then start the removal again",
+			nameOf(m))
+	}
+	if idx < 0 {
 		return false, nil
 	}
+	// The member is this machine whatever name matched it, so the probe asks
+	// this machine and the rule counts this member.
+	list.Members = slices.Clone(list.Members)
+	list.Members[idx].Machine = m.ID
 	list = ProbeVoters(ctx, list, d.probeStatus)
-	if err := RefuseIfCannotSpareAVoter(list, nameOf(m)); err != nil {
+	if err := RefuseIfCannotSpareAVoter(list, list.Members[idx].Name); err != nil {
 		return false, err
 	}
 	return true, nil
@@ -386,12 +451,12 @@ func (d Deps) leaveEtcdStep(_ model.Job) jobs.Step {
 			if err != nil {
 				return false, fmt.Errorf("etcd's membership could not be read: %w", err)
 			}
-			member, known := memberOf(list, m)
+			idx, known := d.selfIn(ctx, list, m, machines)
 			if !known {
-				return false, errors.New("the node has no recorded hostname, so its etcd " +
-					"membership cannot be matched")
+				return false, errors.New("the node matches none of etcd's members by name or " +
+					"address, and its own etcd did not say which member it is")
 			}
-			return !member, nil
+			return idx < 0, nil
 		},
 	}
 }

@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/url"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -111,10 +113,20 @@ func Members(ctx context.Context, cc *talos.ClusterClient, machines []model.Mach
 			PeerURLs: m.PeerURLs,
 			Hostname: m.Hostname,
 		}
+		// The hostname over every machine first, then the address: one
+		// machine's stale address must not win over another's exact name.
 		for _, machine := range machines {
 			if machine.Hostname != "" && strings.EqualFold(machine.Hostname, m.Hostname) {
 				member.Machine = machine.ID
 				break
+			}
+		}
+		if member.Machine == "" {
+			for _, machine := range machines {
+				if matchesMachine(member, machine) {
+					member.Machine = machine.ID
+					break
+				}
 			}
 		}
 		out.Members = append(out.Members, member)
@@ -384,6 +396,35 @@ const RemoveNodeNotice = "The node is cordoned and drained first: its pods are e
 // lost a member settles, and wiping into that gap is how a removal of one
 // member looks to the cluster like the loss of two.
 const EvictionWait = 15 * time.Second
+
+// matchesMachine reports whether a member is this machine by what both sides
+// can name: the hostname, or the address the member's peer URL carries. The
+// hostname alone is not enough -- an inventory that recorded another name than
+// the one etcd lists (a hostname changed by a configuration, a machine added
+// before it had one) matched no member, and a removal then took the node for
+// one that had already left etcd.
+func matchesMachine(e Member, m model.Machine) bool {
+	if e.Machine != "" && e.Machine == m.ID {
+		return true
+	}
+	if m.Hostname != "" && strings.EqualFold(e.Hostname, m.Hostname) {
+		return true
+	}
+	return m.Addr != "" && slices.Contains(peerHosts(e.PeerURLs), m.Addr)
+}
+
+// peerHosts is the host part of each peer URL.
+func peerHosts(urls []string) []string {
+	out := make([]string, 0, len(urls))
+	for _, raw := range urls {
+		u, err := url.Parse(raw)
+		if err != nil || u.Hostname() == "" {
+			continue
+		}
+		out = append(out, u.Hostname())
+	}
+	return out
+}
 
 func findMember(list MemberList, id string) (Member, bool) {
 	for _, m := range list.Members {
