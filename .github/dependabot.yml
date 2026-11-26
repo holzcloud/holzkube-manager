@@ -18,6 +18,23 @@ updates:
     directory: /web
     schedule:
       interval: weekly
+    ignore:
+      # vitest 5 changes what toHaveTextContent means: in its browser runner a
+      # string is an exact match and a RegExp is not accepted (that moved to
+      # toMatchTextContent), while the jsdom project's jest-dom matcher is a
+      # partial one -- the same assertion typed with one meaning and run with
+      # another. @vitest/browser 5 needs vitest 5 exactly, and jest-dom 8 needs
+      # vitest >= 5, so the family moves together, as a migration of its own.
+      # Deferred by the operator on 2026-11-26 (Dependabot #29, #30, #32).
+      - dependency-name: vitest
+        update-types:
+          - version-update:semver-major
+      - dependency-name: "@vitest/*"
+        update-types:
+          - version-update:semver-major
+      - dependency-name: "@testing-library/jest-dom"
+        update-types:
+          - version-update:semver-major
     groups:
       web:
         update-types:

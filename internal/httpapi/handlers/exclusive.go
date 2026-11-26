@@ -7,6 +7,7 @@ import (
 	"errors"
 	"net/http"
 	"sync"
+	"time"
 
 	"github.com/holzcloud/holzkube-manager/internal/httpapi"
 	"github.com/holzcloud/holzkube-manager/internal/inventory"
@@ -167,13 +168,14 @@ func holdCluster(ctx context.Context, d httpapi.Deps, cluster model.ClusterID, a
 	if machine != "" {
 		params[exclusiveParamMachine] = string(machine)
 	}
-	if _, err := d.Jobs.Submit(context.WithoutCancel(ctx), model.Job{
+	held, err := d.Jobs.Submit(context.WithoutCancel(ctx), model.Job{
 		Kind:    JobKindExclusive,
 		Cluster: cluster,
 		Machine: machine,
 		Actor:   actor,
 		Params:  params,
-	}); err != nil {
+	})
+	if err != nil {
 		holds.Delete(token)
 		return nil, err
 	}
@@ -183,6 +185,30 @@ func holdCluster(ctx context.Context, d httpapi.Deps, cluster model.ClusterID, a
 		once.Do(func() {
 			close(done)
 			holds.Delete(token)
+			waitForHoldEnd(context.WithoutCancel(ctx), d.Jobs, held.ID)
 		})
 	}, nil
+}
+
+// holdEndWait bounds how long a release waits for its hold job to end. The
+// job has nothing left to do once done is closed, so this is the engine's
+// bookkeeping and nothing else; the bound is there so that an engine that
+// cannot write its store does not hold a request open.
+const holdEndWait = 5 * time.Second
+
+// waitForHoldEnd returns once the hold job is terminal, which is when its
+// lease has been given back: the engine frees the cluster before it stores
+// the end (v0.9.0). Without it the request answered while the lease was
+// still taken, and the next request -- an apply sent right after an apply,
+// a job started right after one -- was refused as "cluster busy" by a
+// request that had already finished.
+func waitForHoldEnd(ctx context.Context, e *jobs.Engine, id model.JobID) {
+	deadline := time.Now().Add(holdEndWait)
+	for {
+		j, err := e.Get(ctx, id)
+		if err != nil || j.State.Terminal() || time.Now().After(deadline) {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
 }
