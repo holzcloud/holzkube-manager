@@ -1192,7 +1192,10 @@ gate's numbers. Then two things stand between the plan and the start:
 2. **The cluster's name, typed.**
 
 The job then upgrades one node at a time, with the health gate evaluated before
-each, and verifies every node afterwards (version, schematic, services). It does
+each, and verifies every node afterwards (version, schematic, services). The gate
+asks every control-plane node in the inventory, and it refuses when etcd lists a
+voting member that none of them answered as -- a member added by hand, or one a
+removal left behind -- because a voter it cannot ask is not one it can count on. It does
 not undo an upgrade; see *It verifies upgrades and does not undo them* below for
 what a rollback is and is not. The snapshot is the way back from the one failure
 a rollback cannot help with.
@@ -1602,6 +1605,12 @@ Two things this refuses that are worth naming:
   service, reset it.
 - **one of two.** The cluster stops accepting writes and the Kubernetes API
   stops with it. That one is recoverable by adding a control-plane node back.
+- **a node it cannot find in etcd.** The removal looks for the node among etcd's
+  members by hostname, by the address in the member's peer URL, and finally by
+  asking the node's own etcd which member it is. When none of that answers and
+  etcd lists a member no machine here accounts for, that member may be this
+  node, and the removal refuses before anything changes instead of taking the
+  node for one that already left etcd. Refresh the cluster and start it again.
 
 A locked node is not removable either (a lock is somebody saying "not this one",
 and a removal cannot walk past anything the way a rolling upgrade can), and the
@@ -2431,6 +2440,15 @@ affected.
 Every failed verification says so in its own message, because the job screen
 renders a step's detail verbatim and that message is the screen at the moment
 it matters.
+
+**Each node's step reads what the node runs before it installs anything**, and
+that matters most after a restart of the daemon in the middle of a run. A node
+already on the target is not installed or rebooted again: the step waits for
+its services and verifies it. A node already *past* the target -- moved by hand
+while the job sat unfinished, or a data directory restored from an older backup
+-- is never downgraded: the step fails with a sentence that names both versions,
+and a new run is planned from what the cluster runs now. The Kubernetes
+upgrade's kubelet step does the same with the kubelet's version.
 
 ### It applies manifests and has never done so against a real cluster
 

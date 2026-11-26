@@ -4083,6 +4083,18 @@ nothing a node can be asked distinguishes "wiped five seconds ago and booting"
 from "booting for another reason" — so an interrupted run parks the job and
 `parked_reason` says what to check.
 
+A verifiable step whose question cannot be answered parks too. Two answers are
+deliberately "cannot tell" rather than "done": a shutdown whose node does not
+answer (the daemon may have started before its network is up), and a reboot
+judged against a step start that this host's clock puts in the future or more
+than 12 hours back (a host without a battery-backed clock, such as a Raspberry
+Pi, can start with its clock far off). A removal's settle wait measured against
+such a clock is waited again instead.
+
+If the write that records a step as running fails, the step is not started:
+the job fails with that step `failed` and its detail saying nothing was done,
+because a step that is not on record would be run again after a crash.
+
 `POST /api/v1/jobs/{id}/cancel` stops at the **next step boundary**. It is
 mutating and deliberately **not** destructive: an operator watching something go
 wrong should not have to find their password before they can stop it.

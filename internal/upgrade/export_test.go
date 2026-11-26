@@ -1,6 +1,7 @@
 package upgrade
 
 import (
+	"context"
 	"time"
 
 	"github.com/holzcloud/holzkube-manager/internal/model"
@@ -48,4 +49,10 @@ func FastPolling(t interface{ Cleanup(func()) }) {
 	was := pollInterval
 	pollInterval = 20 * time.Millisecond
 	t.Cleanup(func() { pollInterval = was })
+}
+
+// ApplyKubeletImage moves one node's kubelet the way the Kubernetes upgrade
+// does, so a test can put a node somewhere by hand.
+func ApplyKubeletImage(ctx context.Context, d Deps, id model.MachineID, to Version) error {
+	return applyImage(ctx, d, id, kubeletChange(to))
 }

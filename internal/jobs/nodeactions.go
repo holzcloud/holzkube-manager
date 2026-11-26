@@ -26,11 +26,11 @@ import (
 //   - **Reboot** is verifiable. A node that rebooted has a boot id -- an
 //     uptime that reset -- and asking is a read. An interrupted reboot is
 //     therefore resumed by asking whether the node already came back.
-//   - **Shutdown** is verifiable in the useful direction: a node that is off
-//     does not answer, and "it does not answer" is what the step was trying to
-//     achieve. It is a weaker check than the reboot's -- a node that is
-//     unreachable for another reason looks the same -- so it is taken as
-//     "done" only together with the fact that it answered in step one.
+//   - **Shutdown** is verifiable in one direction only: a node that answers
+//     has not been shut down, and the step runs. A node that does not answer
+//     proves nothing on resume -- Resume runs right after the daemon starts,
+//     and on a Raspberry Pi that can be before its network is up -- so
+//     silence is "cannot tell", which parks.
 //   - **Reset** is **not verifiable**, and that is the whole reason the parked
 //     state exists. Nothing a node can be asked distinguishes "this node was
 //     wiped five seconds ago and is booting" from "this node is booting for
@@ -236,12 +236,18 @@ func ShutdownStep(connect Connector, id model.MachineID, force bool) Step {
 			job.Steps[job.Current].Detail = "the node accepted the shutdown; it will not come back on its own"
 			return nil
 		},
-		// The node answered before this step and does not answer now, which is
-		// what a shutdown looks like. Weaker than the reboot check and
-		// deliberately so: the failure direction is to run the shutdown again
-		// on a node that is already off, which does nothing.
+		// A node that answers has not been shut down: run the step. A node
+		// that does not answer is what a shutdown looks like, and also what
+		// every node looks like from a daemon that has just started and whose
+		// network is not up yet. It used to be taken as "done", which wrote a
+		// running node down as off. Silence is no evidence, so it parks.
 		Happened: func(ctx context.Context, _ *model.Job) (bool, error) {
-			return !Reachable(ctx, connect, id), nil
+			if Reachable(ctx, connect, id) {
+				return false, nil
+			}
+			return false, errors.New("the node does not answer. That is what a node that " +
+				"was shut down looks like, and also what any node looks like while this " +
+				"host's network is not up yet, so it is not proof the shutdown took effect")
 		},
 	}
 }
@@ -310,9 +316,44 @@ func RebootedSince(ctx context.Context, connect Connector, id model.MachineID, s
 	if err != nil {
 		return false, err
 	}
+	if err := PlausibleElapsed(time.Since(since)); err != nil {
+		return false, err
+	}
+	if up < 0 {
+		return false, errors.New("the node's boot time is later than this host's clock, so " +
+			"the two clocks disagree and whether it rebooted cannot be told")
+	}
 	// A node whose uptime is shorter than the age of the request has booted
 	// since the request was made.
 	return time.Since(since) > up, nil
+}
+
+// MaxTrustedElapsed is the longest time since a recorded moment that a
+// resumed step believes. Longer is more likely a clock that jumped than a
+// daemon that was away that long.
+const MaxTrustedElapsed = 12 * time.Hour
+
+// PlausibleElapsed says whether a time measured against a persisted wall-clock
+// moment can be believed.
+//
+// The daemon runs on a Raspberry Pi, which has no clock that keeps time while
+// it is off: at boot the clock is wherever it was saved, and it jumps when NTP
+// answers. A step start recorded before such a jump, or compared after one, is
+// a number that says nothing about how long ago it was. Negative is the clock
+// having gone back; more than MaxTrustedElapsed is either a long absence or a
+// jump, and the two cannot be told apart. Either is "not proven".
+func PlausibleElapsed(elapsed time.Duration) error {
+	switch {
+	case elapsed < 0:
+		return fmt.Errorf("this host's clock is %s earlier than when the step started, so it "+
+			"went back (a clock set late at boot?) and the time since then cannot be measured",
+			(-elapsed).Round(time.Second))
+	case elapsed > MaxTrustedElapsed:
+		return fmt.Errorf("the step started %s ago by this host's clock, which is more than the "+
+			"%s a resumed step trusts: a clock that jumped looks the same as a long absence",
+			elapsed.Round(time.Minute), MaxTrustedElapsed)
+	}
+	return nil
 }
 
 // ResetOptionsFromParams reads a reset's stored parameters.
