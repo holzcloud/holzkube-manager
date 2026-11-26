@@ -3684,6 +3684,18 @@ export const api = {
   },
 
   /**
+   * Ends a provider session: the server destroys the local session and answers
+   * where the browser goes next -- the provider's RP-initiated logout, or the
+   * landing page when it has none. A POST under the CSRF preconditions rather
+   * than a navigation, because a GET would let any page sign the operator out.
+   */
+  oidcLogout: async (): Promise<string> => {
+    const response = await send('POST', oidcPath.signOut, {}, { interceptUnauthenticated: false })
+    const body = z.object({ redirect: z.string() }).parse(await response.json())
+    return body.redirect
+  },
+
+  /**
    * The session probe. Its 401 means "not signed in", which is an answer and
    * not an expiry, so it never triggers the login transition itself.
    */

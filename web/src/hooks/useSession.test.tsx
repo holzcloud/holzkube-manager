@@ -82,4 +82,31 @@ describe('useSession', () => {
     await waitFor(() => expect(result.current.unreachable).toBe(true))
     expect(result.current.authenticated).toBe(false)
   })
+
+  it('signs a provider session out with a POST under the CSRF preconditions, not a navigation', async () => {
+    stubStatus()
+    vi.spyOn(api, 'me').mockResolvedValue({ ...me, sso: true })
+    const calls: { url: string; init?: RequestInit }[] = []
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string, init?: RequestInit) => {
+        calls.push({ url, init })
+        return new Response(JSON.stringify({ redirect: '/' }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        })
+      }),
+    )
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const { result } = renderHook(() => useSession(), { wrapper: wrapper(client) })
+    await waitFor(() => expect(result.current.authenticated).toBe(true))
+
+    await result.current.logout()
+
+    const signOut = calls.find((c) => String(c.url).endsWith('/api/v1/auth/oidc/logout'))
+    expect(signOut).toBeDefined()
+    expect(signOut?.init?.method).toBe('POST')
+    expect(new Headers(signOut?.init?.headers).get('X-Holzkube-Manager-CSRF')).toBe('1')
+    vi.unstubAllGlobals()
+  })
 })

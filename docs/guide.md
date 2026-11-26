@@ -856,7 +856,8 @@ cannot demonstrate freshness and is refused.
 Signing out of a provider session goes through the provider's RP-initiated
 logout. Ending only the local session leaves the provider signed in, so the next
 sign-in returns immediately -- indistinguishable, to the operator, from the
-sign-out having been ignored.
+sign-out having been ignored. The sign-out is a request the page sends, not a
+link: as a link, any other web page could have signed you out by pointing at it.
 
 ### Wrong passwords
 

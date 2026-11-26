@@ -140,6 +140,7 @@ matches on the URL.
 | `POST` | `/api/v1/setup` | false | false | `{"username","password"}` | `201 {"id","username"}`, sets session cookie |
 | `POST` | `/api/v1/auth/login` | false | false | `{"username","password"}` | `204`, rotates the session |
 | `POST` | `/api/v1/auth/logout` | false | true | `{}` | `204` |
+| `POST` | `/api/v1/auth/oidc/logout` | false | true | `{}` | `200 {"redirect"}`: the local session is gone; the client navigates to `redirect`, the provider's RP-initiated logout or `/` when it has none. Only with a provider configured. It was a `GET` that redirected, and any page could sign the operator out with a link; it is a POST under the CSRF preconditions now |
 | `GET` | `/api/v1/auth/me` | false | true | — | `200 {"id","username","dry_run"}` |
 | `GET` | `/api/v1/audit` | false | true | query, see below | `200` audit page |
 

@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { api, type Me, oidcPath, type SystemStatus } from '@/api'
+import { api, type Me, type SystemStatus } from '@/api'
 import { ProblemError } from '@/lib/problem'
 
 /**
@@ -87,10 +87,12 @@ export function useSession(): Session {
       // the next sign-in round-trips and returns immediately -- which is
       // indistinguishable, to the operator, from the sign-out being ignored.
       //
-      // The route destroys the local session itself and then redirects, so this
-      // is a navigation rather than a fetch and nothing after it runs.
+      // The route destroys the local session itself and answers where the
+      // provider's logout is; the browser goes there. It is a POST and not a
+      // navigation to the route, because a route a navigation can reach is
+      // one any page can make the browser reach.
       if (me.data?.sso === true) {
-        window.location.assign(oidcPath.signOut)
+        window.location.assign(await api.oidcLogout())
         return
       }
       await api.logout()
