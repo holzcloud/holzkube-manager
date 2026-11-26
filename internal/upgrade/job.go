@@ -461,6 +461,17 @@ func kubernetesImages(to Version, controlPlane bool) (system, cri []string) {
 	return system, cri
 }
 
+// imageVersion reads the version tag of an image reference. ok is false for a
+// reference without one, such as a digest-pinned image.
+func imageVersion(ref string) (Version, bool) {
+	tag := talos.NodeFacts{KubeletImage: ref}.KubernetesVersion()
+	if tag == "" {
+		return Version{}, false
+	}
+	v, err := ParseVersion(tag)
+	return v, err == nil
+}
+
 func kubeletImage(to Version) string { return "ghcr.io/siderolabs/kubelet:" + to.String() }
 func proxyImage(to Version) string   { return "registry.k8s.io/kube-proxy:" + to.String() }
 
@@ -669,9 +680,39 @@ func componentStep(d Deps, cluster model.ClusterID, ids []model.MachineID, compo
 			if err != nil {
 				return err
 			}
+
+			// What every node runs, before any node is changed: a component
+			// somebody moved past the target by hand is not moved back, and
+			// the run stops before it has touched the first node rather than
+			// halfway. An image whose version cannot be read (a digest-pinned
+			// one, a node that does not answer) is not newer than anything:
+			// that node goes ahead as before.
+			running := make(map[model.MachineID]talos.StaticPod, len(cps))
 			for _, me := range cps {
-				if at, err := staticPodImage(ctx, d, me.ID, component); err == nil && at.Image == want && at.Ready {
-					continue // already there -- a resumed run, or a node done by hand
+				at, err := staticPodImage(ctx, d, me.ID, component)
+				if err != nil {
+					continue
+				}
+				running[me.ID] = at
+				if v, ok := imageVersion(at.Image); ok && newerRelease(v, to) {
+					return fmt.Errorf("upgrade: %s already runs %s %s, which is newer than the %s "+
+						"this run installs. It is not moved back: a downgrade is a decision of its "+
+						"own. Nothing was changed by this step. Plan a new run from what the "+
+						"cluster runs now", nameOf(me), component, v, to)
+				}
+			}
+
+			for _, me := range cps {
+				if at, ok := running[me.ID]; ok && at.Image == want {
+					if at.Ready {
+						continue // already there -- a resumed run, or a node done by hand
+					}
+					// On the target and not ready yet: nothing to apply, only
+					// to verify.
+					if err := waitForStaticPod(ctx, d, me, component, want); err != nil {
+						return err
+					}
+					continue
 				}
 				verdict, err := d.Gate.Evaluate(ctx, cluster, me.ID)
 				if err != nil {
