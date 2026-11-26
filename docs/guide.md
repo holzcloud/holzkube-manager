@@ -2528,7 +2528,11 @@ its services and verifies it. A node already *past* the target -- moved by hand
 while the job sat unfinished, or a data directory restored from an older backup
 -- is never downgraded: the step fails with a sentence that names both versions,
 and a new run is planned from what the cluster runs now. The Kubernetes
-upgrade's kubelet step does the same with the kubelet's version.
+upgrade does the same with the kubelet's version and with the API server,
+controller manager and scheduler: a component past the target on any
+control-plane node stops its step before any node is changed, and one already on
+the target is only waited for. An image pinned by digest names no version, so
+it is moved as before.
 
 ### It applies manifests and has never done so against a real cluster
 

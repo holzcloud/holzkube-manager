@@ -56,3 +56,9 @@ func FastPolling(t interface{ Cleanup(func()) }) {
 func ApplyKubeletImage(ctx context.Context, d Deps, id model.MachineID, to Version) error {
 	return applyImage(ctx, d, id, kubeletChange(to))
 }
+
+// ApplyComponentImage moves one control-plane component of one node, as the
+// upgrade does, so a test can put it somewhere by hand.
+func ApplyComponentImage(ctx context.Context, d Deps, id model.MachineID, component string, to Version) error {
+	return applyImage(ctx, d, id, componentChange(component, to))
+}
