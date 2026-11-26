@@ -300,6 +300,12 @@ type Client struct {
 	// existed.
 	cfg      *rest.Config
 	identity Identity
+
+	// drainDeadline derives the context a drain's Timeout ends. Nil is
+	// context.WithTimeout, which is all the product ever uses; a test sets it
+	// (export_test.go) to end the drain's own time at a moment it chooses
+	// rather than at one a loaded machine may not reach the second pass by.
+	drainDeadline func(context.Context, time.Duration) (context.Context, context.CancelFunc)
 }
 
 // dynamicFor builds the two clients the manifest path needs.

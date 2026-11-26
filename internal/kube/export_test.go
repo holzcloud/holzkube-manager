@@ -1,6 +1,9 @@
 package kube
 
-import "time"
+import (
+	"context"
+	"time"
+)
 
 // SetSummaryBudget shortens the shared deadline on the kubelet reads for one
 // test, and returns what puts it back.
@@ -14,4 +17,11 @@ func SetSummaryBudget(d time.Duration) (restore func()) {
 	previous := summaryBudget
 	summaryBudget = d
 	return func() { summaryBudget = previous }
+}
+
+// SetDrainDeadline replaces how c's drains derive the context their Timeout
+// ends, for one test. The client is the test's own, so parallel tests are not
+// touched.
+func (c *Client) SetDrainDeadline(f func(context.Context, time.Duration) (context.Context, context.CancelFunc)) {
+	c.drainDeadline = f
 }
