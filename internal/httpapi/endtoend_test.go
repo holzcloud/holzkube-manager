@@ -899,8 +899,13 @@ func TestEndToEndSetupLoginAudit(t *testing.T) {
 
 	instances := make([]string, len(results))
 	for i, res := range results {
-		if res.status != http.StatusUnauthorized {
-			t.Fatalf("concurrent login %d: got %d, want 401 (body: %s)", i, res.status, res.body)
+		// 401, or 429: two wrong passwords at once no longer both reach the
+		// check (the limiter charges an attempt before it is checked), and
+		// after the failures above the second may be told to wait. Either is a
+		// problem document with its own instance, which is what this step is
+		// about.
+		if res.status != http.StatusUnauthorized && res.status != http.StatusTooManyRequests {
+			t.Fatalf("concurrent login %d: got %d, want 401 or 429 (body: %s)", i, res.status, res.body)
 		}
 		if !strings.HasPrefix(res.ctype, "application/problem+json") {
 			t.Fatalf("concurrent login %d content-type = %q, want application/problem+json", i, res.ctype)

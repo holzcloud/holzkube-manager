@@ -593,7 +593,15 @@ func (d Deps) wrapRoute(rt Route) http.Handler {
 
 // anonLimit bounds the routes anyone can call that leave a permanent trace:
 // an audit pair, or a session file. See middleware.AnonLimit.
+//
+// The re-authentication is the one route behind a session that gets it too. It
+// is a password oracle like the login, every call leaves an audit pair, and
+// what calls it is whoever holds the cookie -- which is the person the window
+// exists to stop, not necessarily the operator.
 func (d Deps) anonLimit(rt Route) middleware.Middleware {
+	if rt.Action == "auth.sudo" {
+		return d.anonBucket
+	}
 	if rt.RequiresSession || rt.Action == "" ||
 		(!middleware.IsMutating(rt.Method) && !strings.HasPrefix(rt.Pattern, "/api/v1/auth/oidc/")) {
 		return nil
@@ -635,10 +643,13 @@ func (d Deps) fallback(known *http.ServeMux) http.Handler {
 // configured latches the negative. listJSON reads and JSON-decodes every file
 // in users/, and this ran on every non-asset navigation to answer a question
 // whose answer changes exactly once. The latch is only ever set in the
-// direction that is permanent: no route deletes a user, and phase 1's store
-// exposes Users().Delete with no caller. A phase that adds one has to revisit
-// this, because the redirect is D-01's server-side half and is supposed to hold
-// even when the client-side check does not.
+// direction that is permanent. Accounts can be deleted (DELETE
+// /api/v1/users/{id}), but auth.Service.DeleteUser refuses the last admin, so
+// an instance that has had an account never has none again through the API.
+// Removing user files by hand on the host is the one way back to zero, and the
+// latch then holds until the next start. A change that lets the last admin go
+// has to revisit this, because the redirect is D-01's server-side half and is
+// supposed to hold even when the client-side check does not.
 func (d Deps) setupRequired(ctx context.Context, configured *atomic.Bool) bool {
 	if configured.Load() {
 		return false

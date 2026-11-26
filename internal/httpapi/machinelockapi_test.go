@@ -40,3 +40,20 @@ func TestAMachineRouteAsksTheLockOfTheMachinesOwnCluster(t *testing.T) {
 		}
 	}
 }
+
+// TestAnEtcdRestoreAsksTheLockOfTheMachinesCluster: the restore replaces a
+// cluster's etcd, and it declared no cluster, so a cluster adopted read-only
+// could have its whole state replaced.
+func TestAnEtcdRestoreAsksTheLockOfTheMachinesCluster(t *testing.T) {
+	h := newJobHarness(t)
+	id := h.adoptedMachine(t) // adopted read-only, and left that way
+
+	resp, raw := h.do(t, http.MethodPost,
+		"/api/v1/machines/"+string(id)+"/etcd/restore?machine="+string(id), map[string]any{})
+	if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("an etcd restore onto a node of a locked cluster: %d (%s), want 403", resp.StatusCode, raw)
+	}
+	if p := decodeProblem(t, resp, raw); p.Code != httpapi.CodeClusterLocked {
+		t.Errorf("code = %q, want %q", p.Code, httpapi.CodeClusterLocked)
+	}
+}

@@ -138,10 +138,17 @@ func KubernetesRoutes(d httpapi.Deps) []httpapi.Route {
 			// Destructive in the sense D-06 means: it changes objects that are
 			// already there, and an apply of the wrong document into the wrong
 			// cluster is the mistake this product exists to make harder.
+			//
+			// Admin, not operator. A manifest is any object of any kind: a
+			// ClusterRoleBinding to cluster-admin, a privileged pod with the
+			// host's filesystem mounted, a Secret read back through a workload.
+			// An operator who can apply arbitrary manifests can therefore make
+			// themselves the cluster's administrator, and the role ladder would
+			// be a ladder with the top rung reachable from the middle one.
 			Destructive:     true,
 			ClusterScope:    clusterIDFromPath,
 			RequiresSession: true,
-			MinRole:         model.RoleOperator,
+			MinRole:         model.RoleAdmin,
 			Action:          "cluster.kubernetes-manifest-apply",
 			Handler:         handler(kubernetesManifestApply(d)),
 		},

@@ -168,6 +168,14 @@ again until a newer release is published (`--force` installs it anyway).
 as the other runs and records **rolled-back**; the version it leaves is
 remembered as well.
 
+**What the checksum proves, and what it does not.** `checksums.txt` comes from
+the same GitHub release as the archive. It catches a download that broke on the
+way; it does not prove who built the release. Releases are not signed yet --
+the operator has postponed that -- so an update is exactly as trustworthy as
+GitHub and this repository's release workflow: whoever could publish a release
+there could publish a matching checksum with it, and every installation that
+updates hourly would install it within the hour.
+
 **An update waits for a running job.** The restart an update ends with
 interrupts whatever the daemon is doing, so before it downloads anything the
 run asks the daemon whether a job is executing — a rolling upgrade, a removal,
@@ -611,6 +619,12 @@ cluster: the talosconfig, the kubeconfig, the etcd snapshot and its restore, the
 support bundle, the audit archive, and the cluster lock — unlocking is what
 makes every other destructive route reachable.
 
+**Applying a Kubernetes manifest is admin-only too**, for the reason the
+kubeconfig is: a manifest can be any object, including a binding to
+`cluster-admin`, so whoever may apply arbitrary manifests can make themselves
+the cluster's administrator. An operator may still plan one; the form to apply
+it is shown only to admins.
+
 Every route names the least privileged role that may use it, and **a route that
 names none cannot be registered**: the process refuses to start. A permission
 nobody chose is not a permission anybody reviewed.
@@ -764,6 +778,18 @@ as `user.identity-link`, with the account, the provider's host and the address
 it came from (never the `sub`), and a link that was refused is there too, with
 the reason.
 
+**With a provider that has more users than you, that window is theirs too.**
+"Whoever completes it" means anybody your provider lets sign in to this
+application: a colleague, a family member, a guest account. While the account
+is unlinked, the first of them to complete a single sign-on from the local
+network becomes that account -- with its role, admin included -- and you find
+out when your own sign-in is refused. holzkube-manager cannot tell your identity
+from theirs before the link exists; that is what trust on first use means. So
+restrict the application at the provider to the people who may administer this
+installation (a group or a policy binding in the provider), and keep the window
+short: link straight after setup or an unlink, and check the account's Sign-in
+column afterwards.
+
 **Unlinking.** Settings → Accounts → **Unlink single sign-on** removes an
 account's link, issuer and `sub` both, so that the next first sign-in can link a
 different identity. The Sign-in column shows which provider an account is linked
@@ -850,7 +876,41 @@ cannot demonstrate freshness and is refused.
 Signing out of a provider session goes through the provider's RP-initiated
 logout. Ending only the local session leaves the provider signed in, so the next
 sign-in returns immediately -- indistinguishable, to the operator, from the
-sign-out having been ignored.
+sign-out having been ignored. The sign-out is a request the page sends, not a
+link: as a link, any other web page could have signed you out by pointing at it.
+
+### Wrong passwords
+
+A wrong password makes the next attempt from the same address wait: a quarter of
+a second after the first, doubling, never more than thirty seconds. A wait over
+half a second is answered `429` with `Retry-After` instead of being held open.
+Nothing is ever locked: once the wait has passed the right password works, and
+it clears the count.
+
+The sign-in and the re-authentication for a destructive action share that count,
+so switching between them earns no fresh start. An attempt is counted **before**
+the password is checked and taken back only when it turns out right, so a burst
+of attempts sent at once does not all get checked: one goes through, the rest
+wait or are told to come back.
+
+The re-authentication counts per account as well as per address, and it has the
+same per-address request limit in front of it as the sign-in. **Ten wrong
+re-authentication passwords in a row for one account end the session that sent
+the tenth**: whoever holds a session cookie but not the password stops being
+able to guess with it. The operator who mistyped ten times signs in again, and
+signing in clears the account's count.
+
+**Behind a reverse proxy, everybody is one address.** Every limit here counts
+by the address of the connection that reached the daemon, and a forwarded header
+is never believed: it is chosen by the caller, and believing it would let a
+guesser start every attempt with a fresh count. Behind a proxy that address is
+the proxy's, so every client arriving through it shares one count and one
+request bucket: a stranger guessing passwords on the public name slows the
+sign-in for everyone else coming through the same proxy, and the per-address
+counts tell nobody apart. There is no setting for trusted proxies. The local
+network address, which does not go through the proxy, is not affected; that is
+one more reason the public name is best kept to single sign-on
+(`--sso-only-hosts`), where no password is asked at all.
 
 ## Data directory
 
@@ -1010,8 +1070,11 @@ button, and a break is reported through `GET /api/v1/system/status` and shown
 as a banner in the UI.
 
 The chain is tamper-**evidence**, not tamper-proofing: anyone who can write to
-the data directory can rewrite the whole chain. Shipping records off-box is the
-only real answer and is not in this version.
+the data directory can rewrite the whole chain. The hashes use no key, so a
+rewritten archive whose hashes were recomputed verifies as intact; what the
+chain catches is an edit, a deletion or a truncation by somebody who did not
+recompute every hash after it. Shipping records off-box is the only real answer
+and is not in this version.
 
 `holzkube-managerd verify-audit` runs the same check on demand and exits
 non-zero on a break, so a cron entry or a monitoring check can use it without
@@ -1412,6 +1475,21 @@ since the apply has itself changed the node.
 
 If you call the route from a script: this is a change in the alpha stage.
 `base_digest` is required; plan first and send back what the plan gave.
+
+**An apply waits its turn with the jobs.** While a job runs on the cluster -- an
+upgrade, a reboot, a removal, a backup -- an apply is refused with "another job
+is already running on this cluster", and while an apply runs, a job is refused
+the same way. The apply shows up in the job list as `cluster.exclusive` for the
+moment it takes. The same holds for an etcd restore and for removing an etcd
+member. Without it, an upgrade rebooting one control-plane node and an apply in
+reboot mode on a second could take two of three down at once.
+
+**A reboot of a control-plane node asks etcd first.** An apply in mode `reboot`
+or `auto` on a control-plane node asks the same health gate an upgrade asks
+before each node, and is refused with its sentence when the cluster would not
+survive losing that node now (an alarm, a member that does not answer, fewer
+than three voters). A single-node cluster is the gate's exception, as in an
+upgrade. `no-reboot`, `staged` and `try` do not reboot and do not ask.
 
 **What it cannot do.**
 
@@ -1932,7 +2010,9 @@ would take it down, and that is why both buttons exist.
 ### Applying a manifest
 
 Paste a manifest, press **Plan**, read what it would do, then **Apply**. Several
-documents separated by `---` are fine.
+documents separated by `---` are fine. The form is an admin's (see
+[Accounts and roles](#accounts-and-roles)): a manifest can grant anything in the
+cluster, including the role that grants everything.
 
 **The plan is not a courtesy, and Apply stays disabled until there is one for
 exactly the text in the box.** Editing the manifest throws the plan away: a plan

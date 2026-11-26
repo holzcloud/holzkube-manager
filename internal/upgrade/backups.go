@@ -414,9 +414,14 @@ func (s *Service) backupStep() jobs.Step {
 				keep = model.DefaultBackupKeep
 			}
 			err := s.takeScheduled(ctx, j.Cluster, keep)
-			if err != nil && errors.Is(err, context.Canceled) {
+			if err != nil && ctx.Err() != nil {
 				// Interrupted, not finished: the engine resumes or cancels, and
 				// the record says "running" until it does.
+				//
+				// Asked of the context and not of the error, as the engine
+				// does since 6eb348f: a step inside a Talos call returns a
+				// status error with codes.Canceled, which is not
+				// context.Canceled and does not wrap it.
 				return err
 			}
 			s.finishAttempt(j.Cluster, j.ID, err)

@@ -145,3 +145,71 @@ func TestRateLimitForgetsIdleSources(t *testing.T) {
 		t.Errorf("a forgotten source is still delayed by %v", d)
 	}
 }
+
+// TestAReservationIsChargedBeforeThePasswordIsChecked is the parallel-guess
+// fault: Delay read before the check and Fail recorded after it let every
+// attempt sent at once through. With the charge taken in the same critical
+// section as the question, only one of many simultaneous attempts proceeds.
+func TestAReservationIsChargedBeforeThePasswordIsChecked(t *testing.T) {
+	l, _ := frozenLimiter(t)
+
+	granted := 0
+	for range 24 {
+		if wait, res := l.Reserve("192.0.2.1"); res != nil {
+			granted++
+		} else if wait <= 0 {
+			t.Fatalf("a refused reservation reported no wait")
+		}
+	}
+	if granted != 1 {
+		t.Fatalf("%d of 24 simultaneous attempts were let through, want 1", granted)
+	}
+}
+
+// TestAReservationCountsAgainstEveryKey: the re-authentication counts per
+// address and per account, so a second address does not reset the account.
+func TestAReservationCountsAgainstEveryKey(t *testing.T) {
+	l, _ := frozenLimiter(t)
+
+	_, res := l.Reserve("192.0.2.1", "sudo-user:a")
+	if res == nil {
+		t.Fatal("the first attempt was refused")
+	}
+	res.Fail()
+
+	if wait, res := l.Reserve("192.0.2.2", "sudo-user:a"); res != nil || wait <= 0 {
+		t.Fatalf("a second address reset the account's counter (wait %v)", wait)
+	}
+	if got := l.Failures("sudo-user:a"); got != 1 {
+		t.Errorf("Failures = %d, want 1", got)
+	}
+}
+
+// TestAReservationsOutcomeSettlesTheCharge: success forgets, cancel refunds,
+// and failure keeps the charge.
+func TestAReservationsOutcomeSettlesTheCharge(t *testing.T) {
+	l, advance := frozenLimiter(t)
+
+	_, res := l.Reserve("192.0.2.1")
+	res.Cancel()
+	if l.Len() != 0 {
+		t.Errorf("a cancelled attempt left %d sources behind", l.Len())
+	}
+
+	_, res = l.Reserve("192.0.2.1")
+	res.Fail()
+	res.Succeed() // a second outcome does nothing
+	if got := l.Failures("192.0.2.1"); got != 1 {
+		t.Fatalf("after one failure Failures = %d, want 1", got)
+	}
+
+	advance(time.Minute)
+	_, res = l.Reserve("192.0.2.1")
+	if res == nil {
+		t.Fatal("the wait was served and the attempt still refused")
+	}
+	res.Succeed()
+	if l.Len() != 0 {
+		t.Errorf("a successful attempt left %d sources behind", l.Len())
+	}
+}

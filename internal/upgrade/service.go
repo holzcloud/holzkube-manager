@@ -317,6 +317,17 @@ func (s *Service) PlanTalos(ctx context.Context, cluster model.ClusterID, to str
 	return plan, nil
 }
 
+// EvaluateGate asks the etcd health gate whether cluster survives losing
+// taking, for a caller outside a job: a configuration applied in a mode that
+// reboots a control-plane node takes a member down exactly as an upgrade does.
+// A service built without a gate answers an error, never a yes.
+func (s *Service) EvaluateGate(ctx context.Context, cluster model.ClusterID, taking model.MachineID) (Verdict, error) {
+	if s.deps.Gate == nil {
+		return Verdict{}, errors.New("upgrade: this instance was built without the etcd health gate")
+	}
+	return s.deps.Gate.Evaluate(ctx, cluster, taking)
+}
+
 // gatePreview evaluates the health gate and never returns an empty verdict.
 //
 // A gate that could not be evaluated is a refusal, not a blank. The first
