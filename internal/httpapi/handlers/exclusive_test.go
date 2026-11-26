@@ -47,6 +47,9 @@ func TestAHoldRefusesAJob(t *testing.T) {
 	if err != nil {
 		t.Fatalf("hold: %v", err)
 	}
+	// Before the engine's own cleanup (cleanups run last-in first-out): a test
+	// that stops early must not leave Close waiting on a hold nobody releases.
+	t.Cleanup(release)
 
 	if _, err := e.Submit(t.Context(), model.Job{Kind: "test.noop", Cluster: "c-1"}); !errors.Is(err, jobs.ErrClusterBusy) {
 		t.Fatalf("a job on a held cluster: %v, want ErrClusterBusy", err)
@@ -62,10 +65,20 @@ func TestAHoldRefusesAJob(t *testing.T) {
 	// it protects is still running.
 	list, _ := e.List(t.Context())
 	for _, j := range list {
-		if j.Kind == JobKindExclusive {
-			if _, err := e.Cancel(t.Context(), j.ID); err != nil {
-				t.Fatalf("cancel the hold: %v", err)
+		if j.Kind != JobKindExclusive {
+			continue
+		}
+		// The engine writes the record as the step starts, and a cancel landing
+		// on the same revision is a store conflict; it is asked again.
+		var err error
+		for range 50 {
+			if _, err = e.Cancel(t.Context(), j.ID); err == nil {
+				break
 			}
+			time.Sleep(10 * time.Millisecond)
+		}
+		if err != nil {
+			t.Fatalf("cancel the hold: %v", err)
 		}
 	}
 	time.Sleep(50 * time.Millisecond)
