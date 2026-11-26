@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/holzcloud/holzkube-manager/internal/httpapi"
+	"github.com/holzcloud/holzkube-manager/internal/inventory"
 	"github.com/holzcloud/holzkube-manager/internal/jobs"
 	"github.com/holzcloud/holzkube-manager/internal/model"
 	"github.com/holzcloud/holzkube-manager/internal/talos"
@@ -47,6 +48,10 @@ func upgradeConfigured(d httpapi.Deps) *httpapi.Problem {
 // UpgradeRoutes serves the rolling upgrades and etcd management, and the
 // scheduled etcd snapshots.
 func UpgradeRoutes(d httpapi.Deps) []httpapi.Route {
+	// The restore and the member removal hold their cluster's lease while
+	// they run; see JobKindExclusive.
+	registerExclusive(d.Jobs)
+
 	return append(upgradeRoutes(d), backupRoutes(d)...)
 }
 
@@ -621,8 +626,18 @@ func removeEtcdMember(d httpapi.Deps) http.HandlerFunc {
 		ctx, cancel := budgetedContext(r, EtcdRouteBudget)
 		defer cancel()
 
-		err := d.Upgrade.RemoveEtcdMember(ctx,
-			model.ClusterID(r.PathValue("id")), r.PathValue("member"))
+		cluster := model.ClusterID(r.PathValue("id"))
+
+		// Membership changes while an upgrade walks the control plane are how
+		// its gate's last answer stops being true; the lease keeps them apart.
+		release, err := holdCluster(ctx, d, cluster, "etcd.remove-member", "")
+		if err != nil {
+			writeJobError(w, r, d, err)
+			return
+		}
+		defer release()
+
+		err = d.Upgrade.RemoveEtcdMember(ctx, cluster, r.PathValue("member"))
 		if err != nil {
 			writeUpgradeError(w, r, d, err)
 			return
@@ -706,6 +721,26 @@ func etcdRestore(d httpapi.Deps) http.HandlerFunc {
 			httpapi.WriteInternal(w, r, d.Logger, fmt.Errorf("clearing the read deadline: %w", err))
 			return
 		}
+
+		// The restore replaces the cluster's etcd; nothing else may run on
+		// that cluster meanwhile, and nothing may start. No etcd gate: a
+		// restore is what is done when etcd is already lost, and the gate
+		// would refuse exactly then.
+		var cluster model.ClusterID
+		if d.Inventory != nil {
+			c, err := d.Inventory.ClusterOfMachine(r.Context(), id)
+			if err != nil && !errors.Is(err, inventory.ErrNotFound) {
+				httpapi.WriteInternal(w, r, d.Logger, err)
+				return
+			}
+			cluster = c
+		}
+		release, err := holdCluster(r.Context(), d, cluster, "etcd.restore", id)
+		if err != nil {
+			writeJobError(w, r, d, err)
+			return
+		}
+		defer release()
 
 		n, err := d.Upgrade.Restore(r.Context(), id,
 			r.Body, r.URL.Query().Get("skip_hash_check") == "true")

@@ -257,6 +257,12 @@ const (
 	// the moment is not, and retrying later is the remedy.
 	CodeClusterBusy = "store.cluster-busy"
 
+	// CodeEtcdGateRefused: a configuration apply that reboots a control-plane
+	// node was refused because the etcd health gate says the cluster would not
+	// survive losing it now. The same gate an upgrade waits on before each
+	// node; the detail is its sentence.
+	CodeEtcdGateRefused = "conflict.etcd-gate"
+
 	// CodeJobFinished: a cancel arrived for a job that has already finished.
 	CodeJobFinished = "store.job-finished"
 

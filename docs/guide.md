@@ -1427,6 +1427,21 @@ since the apply has itself changed the node.
 If you call the route from a script: this is a change in the alpha stage.
 `base_digest` is required; plan first and send back what the plan gave.
 
+**An apply waits its turn with the jobs.** While a job runs on the cluster -- an
+upgrade, a reboot, a removal, a backup -- an apply is refused with "another job
+is already running on this cluster", and while an apply runs, a job is refused
+the same way. The apply shows up in the job list as `cluster.exclusive` for the
+moment it takes. The same holds for an etcd restore and for removing an etcd
+member. Without it, an upgrade rebooting one control-plane node and an apply in
+reboot mode on a second could take two of three down at once.
+
+**A reboot of a control-plane node asks etcd first.** An apply in mode `reboot`
+or `auto` on a control-plane node asks the same health gate an upgrade asks
+before each node, and is refused with its sentence when the cluster would not
+survive losing that node now (an alarm, a member that does not answer, fewer
+than three voters). A single-node cluster is the gate's exception, as in an
+upgrade. `no-reboot`, `staged` and `try` do not reboot and do not ask.
+
 **What it cannot do.**
 
 - A change of nothing but a secret value is not refused and not turned back: it

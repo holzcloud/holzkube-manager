@@ -4077,6 +4077,30 @@ asked without one. A default is how a confirmation becomes decoration.
 | `store.cluster-busy` | 409 | another mutating job holds this cluster's lease |
 | `store.job-finished` | 409 | a cancel arrived for a job that already ended |
 
+#### Routes that act inside their request hold the lease too
+
+`POST /api/v1/machines/{id}/config/apply` (every mode),
+`POST /api/v1/machines/{id}/etcd/restore` and
+`DELETE /api/v1/clusters/{id}/etcd/members/{member}` change a cluster inside the
+request rather than as a job. They take the cluster's lease for as long as the
+request runs, through a job of kind `cluster.exclusive` whose one step waits for
+the request to end. So they answer `409 store.cluster-busy` while a job holds the
+cluster, and a job submitted while one of them runs is refused the same way. The
+hold job is in the job list with the action and machine in its parameters;
+cancelling it does not end the hold early, and a hold left behind by a restart is
+closed by `Resume` as already done, never parked. A machine in no cluster, and an
+instance in `--dry-run`, take no hold.
+
+A config apply in mode `reboot` or `auto` on a control-plane node also asks the
+etcd health gate an upgrade asks before each node, after taking the lease:
+
+| code | HTTP | when |
+|---|---|---|
+| `conflict.etcd-gate` | 409 | the gate says the cluster would not survive losing this node now, or could not be asked; the detail is the gate's sentence. `no-reboot`, `staged` and `try` do not ask. |
+
+The etcd restore does not ask the gate: it is what is done when etcd is already
+lost, and the gate would refuse exactly then.
+
 ### `GET /api/v1/machines/{id}/reset-preview`
 
 What the machine has, what each scope would do, and what has to be typed. It is
