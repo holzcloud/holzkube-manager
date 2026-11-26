@@ -58,14 +58,14 @@ jobs:
       # go.mod carries `toolchain go1.26.7` and setup-go honours that line, so
       # the Go version is pinned in one place and CI cannot drift from a local
       # build.
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with:
           go-version-file: go.mod
           # Caches the module and build caches. Keyed on the root go.sum only:
           # sandbox/ is a separate module, deliberately outside this build.
           cache-dependency-path: go.sum
 
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: '22'
           cache: npm
@@ -73,7 +73,7 @@ jobs:
 
       - uses: go-task/setup-task@a00fbb05ce67b35648be3c78cbc9fd85354c757e # v2.2.0
         with:
-          version: 3.53.1
+          version: 3.54.0
 
       # ci, not install: it installs exactly what web/package-lock.json pins and
       # fails if the lockfile and the manifest disagree. The frontend gates below
@@ -114,7 +114,7 @@ jobs:
       - name: Lint Go
         uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9
         with:
-          version: v2.13.1
+          version: v2.15.0
 
       # The host helper's root matrix (internal/host/hostaction and the round
       # trip in internal/httpapi) runs the script as root only inside an
@@ -137,7 +137,7 @@ jobs:
       # Reachable known vulnerabilities in the Go code and its modules. Pinned
       # like the linter; Taskfile.yml's GOVULNCHECK_VERSION is the other copy.
       - name: Check for known vulnerabilities
-        run: go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./...
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.10.0 ./...
 
       # Last, because it starts the product and drives a browser over every
       # route, and because it needs the binary the Build step above produced.
@@ -177,7 +177,7 @@ jobs:
           # git history. A shallow clone gives it neither.
           fetch-depth: 0
 
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with:
           go-version-file: go.mod
           cache-dependency-path: go.sum
@@ -185,7 +185,7 @@ jobs:
       # .goreleaser.yaml runs `npm --prefix web ci` and `npm --prefix web run
       # build` in its before hooks, for the same go:embed reason as the Taskfile.
       # The release job therefore needs Node exactly as much as the build does.
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: '22'
           cache: npm
@@ -272,10 +272,10 @@ jobs:
           python3 .github/release-notes.py "$TAG" /tmp/tag-annotation > /tmp/release-notes.md
           cat /tmp/release-notes.md
 
-      - uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7.2.3
+      - uses: goreleaser/goreleaser-action@a4f02ab5355a589de60d917a659ce617ed19b3de # v7.3.0
         with:
           distribution: goreleaser
-          version: v2.18.0
+          version: v2.20.3
           args: release --clean --release-notes=/tmp/release-notes.md
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

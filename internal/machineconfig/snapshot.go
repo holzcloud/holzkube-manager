@@ -70,9 +70,9 @@ type Snap struct {
 // Snapshot makes the snapshot of a raw configuration.
 //
 // It is built from Redact and from nothing else. A configuration that does not
-// load gives no snapshot and no text at all: Redact returns bytes alongside
-// that error, and those bytes have had only the PEM sweep, which is not a
-// snapshot of anything.
+// load gives no snapshot and no text at all: Redact returns nothing for it,
+// and its error is not passed on either, because a parser quotes what it
+// stopped at.
 func Snapshot(raw []byte) (Snap, error) {
 	if len(raw) > MaxSnapshotBytes {
 		return Snap{}, ErrSnapshotTooLarge

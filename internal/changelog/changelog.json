@@ -1,5 +1,63 @@
 [
   {
+    "version": "v0.11.0",
+    "date": "2026-11-26",
+    "changes": [
+      {
+        "icon": "🛡️",
+        "text": "The Kubernetes usage view no longer lets a namespace walk out of its path. A namespace with \"..\" in it used to turn that request into one for any path of the API server, sent with this installation's administrator certificate, from a view every signed-in account may open. A namespace is now checked first and refused with a sentence naming it."
+      },
+      {
+        "icon": "🔑",
+        "text": "Wrong passwords are counted before they are checked. Sending many sign-in or re-authentication attempts at once used to get every one of them checked, so the waiting time between wrong passwords did not hold. Now each attempt is counted the moment it arrives, re-authentication counts per account as well, and ten wrong passwords in a row there end the session. A password change now signs out only your own other sessions instead of everybody's, and an administrator resetting someone's password ends that account's sessions."
+      },
+      {
+        "icon": "👮",
+        "text": "Applying a Kubernetes manifest is for administrators only. It runs with the cluster's administrator identity, so an operator who could apply one could read any Secret through a pod, which made the operator role cluster-admin in all but name. Operators keep cordon, drain, restarts, logs and planning a manifest; the apply form is shown to administrators only."
+      },
+      {
+        "icon": "🚧",
+        "text": "Nothing takes a node down behind a running job's back any more. Applying a configuration, an etcd restore and removing an etcd member used to run straight away even while an upgrade was rebooting another node, which could take two of three control-plane nodes down at once. They now wait their turn: while a job holds the cluster they are refused with a sentence, and while they run no job can start. A configuration apply that reboots a control-plane node asks the etcd health gate first."
+      },
+      {
+        "icon": "🗳️",
+        "text": "The etcd health gate counts every voter. A voting member that holzkube-manager has no machine for in its inventory was counted but never asked, so with that member down the gate could still say yes and the next reboot would cost etcd its quorum. A voter nobody could ask now counts as one that did not answer, and the gate says no and names it. This also covers power actions."
+      },
+      {
+        "icon": "⬇️",
+        "text": "A resumed upgrade never downgrades a node and never installs twice. After a power cut of the machine running holzkube-manager, or a restore of its data directory, a resumed Talos or Kubernetes upgrade used to install its target again without looking. A node someone had meanwhile moved to a newer version was moved back, and a node already on target was reinstalled and rebooted a second time. Each node's step, and each control-plane component (API server, controller manager, scheduler), now reads what runs first: newer than the target stops with a sentence naming both versions, already on target is only checked, not reinstalled."
+      },
+      {
+        "icon": "💾",
+        "text": "A step that cannot be written down does not run. If holzkube-manager could not record that a step was starting (a full SD card, for example), it ran the step anyway, and after a restart it could run it again: for a wipe, twice. Now such a step is not started, and the job stops with a sentence saying nothing was done."
+      },
+      {
+        "icon": "🔍",
+        "text": "A node removal finds its etcd member even when the names differ. A node whose name in the inventory and in etcd did not match was taken for \"not a member\": the quorum check was skipped, leaving etcd was reported as nothing to do, and the node was wiped while still a voter. The member is now also found by address and by asking the node itself, and when it cannot be found at all, the removal refuses before changing anything."
+      },
+      {
+        "icon": "🕰️",
+        "text": "Resuming after a restart trusts neither silence nor a wrong clock. A Raspberry Pi has no battery clock, so its time can be wrong right after boot, and the network may not be up yet. A resumed shutdown no longer counts a node that does not answer as switched off, a resumed reboot or etcd settle wait no longer trusts an elapsed time that went backwards or is implausibly long, and in those cases the job waits again or asks you to look. An interrupted Kubernetes upgrade pulls its images or moves kube-proxy again instead of stopping at those harmless steps (jobs started before this version still stop there), and a snapshot interrupted mid-transfer is recorded as interrupted, not failed."
+      },
+      {
+        "icon": "♻️",
+        "text": "Restoring a backup of the data directory replaces it, all or nothing. The whole archive is read and checked before anything changes, so a damaged one leaves your data as it was, and files written after the backup no longer survive the restore. The backup taken just before a restore is still made first."
+      },
+      {
+        "icon": "🧾",
+        "text": "Smaller fixes from the November audit. The support bundle leaves out a node configuration it cannot read instead of including it unredacted. The hourly update waits while a job runs (from the update after this one, since the new update script does the asking) and installs anyway after 24 hours. A job interrupted in the middle of a call to a node resumes instead of failing. A locked cluster stays locked for reboot, shutdown, reset, configuration apply and etcd restore of its machines. Signing out of the identity provider is a POST, so another website can no longer sign you out."
+      },
+      {
+        "icon": "📦",
+        "text": "Talos machinery v1.14.7 (supported range still v1.14), Kubernetes client libraries v0.34.13, and web libraries past their advisories: zod, the router, vite and vitest. No known vulnerability reaches the shipped program or page."
+      },
+      {
+        "icon": "⚠️",
+        "text": "What to know. Applying a manifest now needs an administrator. A configuration apply, etcd restore or member removal is refused while a job runs on the cluster: wait for it, or cancel it. A resumed job now asks you to look more often when it cannot tell what happened, instead of guessing. Releases are verified by checksums from the same GitHub release and are not signed; the guide says what that does and does not protect against. One exception remains: a kube-proxy someone moved past the target by hand is still set back to the target. The drain and worker gate of v0.10.0 and the fixes here are proven against the simulators only. The product is alpha and breaking changes are possible in any release."
+      }
+    ]
+  },
+  {
     "version": "v0.10.0",
     "date": "2026-11-25",
     "changes": [

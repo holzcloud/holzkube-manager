@@ -226,11 +226,12 @@ func TestLogoutInvalidatesTheSessionServerSide(t *testing.T) {
 	}
 }
 
-// TestChangePasswordInvalidatesEveryOtherSession records the decision the plan
-// left to discretion: a password change is nearly always a reaction to a
-// suspicion, so it throws out every other session and keeps the one doing the
-// throwing.
-func TestChangePasswordInvalidatesEveryOtherSession(t *testing.T) {
+// TestChangePasswordInvalidatesTheAccountsOtherSessions records the decision the
+// plan left to discretion: a password change is nearly always a reaction to a
+// suspicion, so it throws out the account's other sessions and keeps the one
+// doing the throwing. Other accounts are not touched
+// (TestChangePasswordLeavesOtherAccountsSignedIn).
+func TestChangePasswordInvalidatesTheAccountsOtherSessions(t *testing.T) {
 	svc, st := newTestService(t, 24*time.Hour)
 	useTestParams(t)
 	seedCheapUser(t, st)
@@ -344,5 +345,121 @@ func TestSessionCookieFollowsTheTransportContract(t *testing.T) {
 	}
 	if !sm.Cookie.Persist {
 		t.Error("cookie does not survive a browser restart")
+	}
+}
+
+// signedInAs opens an authenticated session for id without going through a
+// password, so a test can hold sessions for several accounts at once.
+func signedInAs(t *testing.T, svc *Service, id model.UserID) string {
+	t.Helper()
+	return runInSession(t, svc, func(ctx context.Context) {
+		if err := svc.sm.RenewToken(ctx); err != nil {
+			t.Fatalf("RenewToken: %v", err)
+		}
+		svc.markAuthenticated(ctx, string(id))
+	})
+}
+
+// TestChangePasswordLeavesOtherAccountsSignedIn holds the half of the audit
+// fix that a reader changing its own password used to break: every other
+// account's sessions went with it.
+func TestChangePasswordLeavesOtherAccountsSignedIn(t *testing.T) {
+	svc, st := newTestService(t, 24*time.Hour)
+	useTestParams(t)
+	seedCheapUser(t, st)
+	other := seedAccount(t, st, "fedcba9876543210fedcba9876543210", "somebody", model.RoleReader)
+
+	mine := runInSession(t, svc, func(ctx context.Context) {
+		if _, err := svc.Login(ctx, testUsername, testPassword); err != nil {
+			t.Fatalf("Login: %v", err)
+		}
+	})
+	theirs := signedInAs(t, svc, other.ID)
+
+	continueSession(t, svc, mine, func(ctx context.Context) {
+		if err := svc.ChangePassword(ctx, testPassword, "a-completely-different-passphrase"); err != nil {
+			t.Fatalf("ChangePassword: %v", err)
+		}
+	})
+
+	if !authenticatedIn(t, svc, theirs) {
+		t.Error("changing one account's password signed another account out")
+	}
+}
+
+// TestAResetEndsTheAccountsSessions holds the other half: an admin resetting a
+// password is acting on an account they no longer trust, and the sessions
+// opened with the old password must end. The admin's own session stays.
+func TestAResetEndsTheAccountsSessions(t *testing.T) {
+	svc, st := newTestService(t, 24*time.Hour)
+	admin := seedAccount(t, st, "a0", "admin", model.RoleAdmin)
+	target := seedAccount(t, st, "a1", "somebody", model.RoleOperator)
+
+	adminSession := signedInAs(t, svc, admin.ID)
+	targetSession := signedInAs(t, svc, target.ID)
+
+	continueSession(t, svc, adminSession, func(ctx context.Context) {
+		if err := svc.SetPassword(ctx, target.ID, "a-brand-new-passphrase"); err != nil {
+			t.Fatalf("SetPassword: %v", err)
+		}
+	})
+
+	if authenticatedIn(t, svc, targetSession) {
+		t.Error("a session opened with the old password survived the reset")
+	}
+	if !authenticatedIn(t, svc, adminSession) {
+		t.Error("the admin doing the reset was signed out")
+	}
+}
+
+// TestAResetOfOwnPasswordKeepsTheResettingSession: an admin resetting their
+// own password through the reset is not signing themselves out, but their
+// other sessions end like anyone else's.
+func TestAResetOfOwnPasswordKeepsTheResettingSession(t *testing.T) {
+	svc, st := newTestService(t, 24*time.Hour)
+	admin := seedAccount(t, st, "a0", "admin", model.RoleAdmin)
+
+	here := signedInAs(t, svc, admin.ID)
+	elsewhere := signedInAs(t, svc, admin.ID)
+
+	continueSession(t, svc, here, func(ctx context.Context) {
+		if err := svc.SetPassword(ctx, admin.ID, "a-brand-new-passphrase"); err != nil {
+			t.Fatalf("SetPassword: %v", err)
+		}
+	})
+
+	if !authenticatedIn(t, svc, here) {
+		t.Error("the session doing the reset was signed out")
+	}
+	if authenticatedIn(t, svc, elsewhere) {
+		t.Error("another session of the same account survived the reset")
+	}
+}
+
+// TestAServiceAccountGetsNoPassword: a service account signs in with a token,
+// so a password set on one would be stored, mean nothing, and be reported as
+// done.
+func TestAServiceAccountGetsNoPassword(t *testing.T) {
+	svc, st := newTestService(t, time.Hour)
+	u, err := st.Users().Put(context.Background(), model.User{
+		ID:        model.UserID("s1"),
+		Username:  "robot",
+		Role:      model.RoleReader,
+		Kind:      model.KindService,
+		CreatedAt: time.Now().UTC(),
+	})
+	if err != nil {
+		t.Fatalf("seed service account: %v", err)
+	}
+
+	if err := svc.SetPassword(t.Context(), u.ID, "a-brand-new-passphrase"); !errors.Is(err, ErrNotAPerson) {
+		t.Fatalf("SetPassword on a service account: %v, want ErrNotAPerson", err)
+	}
+	got, err := st.Users().Get(context.Background(), u.ID)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got.PasswordHash != "" {
+		t.Error("a password hash was stored on a service account")
 	}
 }

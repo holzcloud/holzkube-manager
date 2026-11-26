@@ -18,6 +18,10 @@ import (
 // spend cheaply and we cannot.
 const maxInlineDelay = 500 * time.Millisecond
 
+// newLimiter builds the password limiter AuthRoutes shares between its two
+// routes. A variable so a test can give it a clock it moves by hand.
+var newLimiter = auth.NewLimiter
+
 type loginRequest struct {
 	Username string `json:"username"`
 	Password string `json:"password"`
@@ -58,7 +62,7 @@ type meResponse struct {
 // password. Both are the same oracle, so a guesser must not be able to switch
 // endpoints to get a fresh counter.
 func AuthRoutes(d httpapi.Deps) []httpapi.Route {
-	limiter := auth.NewLimiter()
+	limiter := newLimiter()
 
 	return []httpapi.Route{
 		{
@@ -100,29 +104,50 @@ func AuthRoutes(d httpapi.Deps) []httpapi.Route {
 	}
 }
 
-// throttle applies the accumulated delay for this source before a password is
-// checked, and reports whether it has already answered the request.
+// SudoFailuresBeforeSignOut is how many wrong passwords in a row the
+// re-authentication takes for one account before it ends the session that sent
+// the last of them.
 //
-// The source is the peer address and nothing else (T-01-29). A forwarded header
-// would be attacker-controlled, and honouring one would let a guesser reset
-// their own counter on every attempt -- which is the same as having no limit
-// while looking like having one.
-func throttle(limiter *auth.Limiter, w http.ResponseWriter, r *http.Request) bool {
-	wait := limiter.Delay(middleware.ClientIP(r))
-	switch {
-	case wait <= 0:
-		return false
+// The window is what stands between a stolen session cookie and a destructive
+// action, and the backoff alone lets a cookie thief keep guessing at thirty
+// seconds a try for as long as the session lives. Ending the session costs the
+// operator who mistyped ten times one sign-in; it strands nobody, because the
+// sign-in is still there and its counter is per address, not per account.
+const SudoFailuresBeforeSignOut = 10
 
-	case wait > maxInlineDelay:
-		httpapi.WriteProblem(w, r, httpapi.RateLimited(int(math.Ceil(wait.Seconds()))))
-		return true
+// sudoKey is the limiter key that counts re-authentication attempts per
+// account, beside the per-address one. Without it a thief holding a cookie
+// could spread the guesses over addresses and meet a fresh counter on each.
+func sudoKey(u model.User) string { return "sudo-user:" + string(u.ID) }
 
-	default:
+// throttle reserves one password attempt against keys, waiting out a short
+// delay inline, and reports false when it has already answered the request.
+//
+// The reservation is taken before the password is checked and charged as a
+// failure until the outcome says otherwise (see auth.Limiter.Reserve). Reading
+// the delay first and recording the failure after the check let every attempt
+// sent in parallel through: they all asked before the first one had failed.
+//
+// The address key is the peer address and nothing else (T-01-29). A forwarded
+// header would be attacker-controlled, and honouring one would let a guesser
+// reset their own counter on every attempt -- which is the same as having no
+// limit while looking like having one.
+func throttle(limiter *auth.Limiter, w http.ResponseWriter, r *http.Request, keys ...string) (*auth.Reservation, bool) {
+	for {
+		wait, res := limiter.Reserve(keys...)
+		if res != nil {
+			return res, true
+		}
+		if wait > maxInlineDelay {
+			httpapi.WriteProblem(w, r, httpapi.RateLimited(int(math.Ceil(wait.Seconds()))))
+			return nil, false
+		}
+		// Then ask again: another attempt may have taken the slot meanwhile,
+		// and the answer to that is a longer wait, not a free pass.
 		select {
 		case <-time.After(wait):
-			return false
 		case <-r.Context().Done():
-			return true
+			return nil, false
 		}
 	}
 }
@@ -160,24 +185,30 @@ func login(d httpapi.Deps, limiter *auth.Limiter, w http.ResponseWriter, r *http
 		return
 	}
 
-	if throttle(limiter, w, r) {
+	ip := middleware.ClientIP(r)
+	res, ok := throttle(limiter, w, r, ip)
+	if !ok {
 		return
 	}
-	ip := middleware.ClientIP(r)
 
-	_, err := d.Auth.Login(r.Context(), req.Username, req.Password)
+	u, err := d.Auth.Login(r.Context(), req.Username, req.Password)
 	switch {
 	case errors.Is(err, auth.ErrInvalidCredentials):
-		limiter.Fail(ip)
+		res.Fail()
 		d.Logger.Warn("sign-in failed", "route", r.URL.Path, "peer", ip)
 		httpapi.WriteProblem(w, r, httpapi.Unauthenticated())
 		return
 	case err != nil:
+		res.Cancel()
 		httpapi.WriteInternal(w, r, d.Logger, err)
 		return
 	}
 
-	limiter.Succeed(ip)
+	res.Succeed()
+	// Knowing the password ends the account's re-authentication episode too:
+	// a session ended for wrong sudo passwords would otherwise sign in again
+	// straight into the wait it left behind.
+	limiter.Succeed(sudoKey(u))
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -232,23 +263,37 @@ func openSudo(d httpapi.Deps, limiter *auth.Limiter, w http.ResponseWriter, r *h
 		return
 	}
 
-	if throttle(limiter, w, r) {
+	// Counted per address, as the login is, and per account: the address
+	// alone let somebody holding a stolen cookie spread the guesses.
+	ip := middleware.ClientIP(r)
+	res, ok := throttle(limiter, w, r, ip, sudoKey(u))
+	if !ok {
 		return
 	}
-	ip := middleware.ClientIP(r)
 
 	valid, err := auth.Verify(req.Password, u.PasswordHash)
 	if err != nil {
+		res.Cancel()
 		httpapi.WriteInternal(w, r, d.Logger, err)
 		return
 	}
 	if !valid {
-		limiter.Fail(ip)
+		res.Fail()
 		d.Logger.Warn("sign-in failed", "route", r.URL.Path, "peer", ip)
+		if limiter.Failures(sudoKey(u)) >= SudoFailuresBeforeSignOut {
+			// The session that kept guessing is ended; see
+			// SudoFailuresBeforeSignOut. The 401 is then true of the session
+			// as well as of the password.
+			d.Logger.Warn("session ended after repeated wrong re-authentication",
+				"route", r.URL.Path, "peer", ip, "account", u.Username)
+			if err := d.Auth.Logout(r.Context()); err != nil {
+				d.Logger.Error("could not end the session", "error", err)
+			}
+		}
 		httpapi.WriteProblem(w, r, httpapi.Unauthenticated())
 		return
 	}
-	limiter.Succeed(ip)
+	res.Succeed()
 
 	d.Auth.OpenSudoWindow(r.Context())
 	w.WriteHeader(http.StatusNoContent)

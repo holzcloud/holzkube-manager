@@ -618,7 +618,7 @@ func (s *sessionStore) Put(_ context.Context, rec model.Session) (model.Session,
 // Delete. A session that is never looked up again -- the normal case, because
 // the token left with the browser -- stayed on disk forever, and every login
 // added one. Nothing broke, but the count only grew, and with it the cost of
-// the three places that call List: InvalidateAllExcept on every password
+// the three places that call List: InvalidateUser on every password
 // change, scsstore.All, and the permission Guard walk at every startup.
 func (s *sessionStore) reapExpired(ctx context.Context, now time.Time) (int, error) {
 	recs, err := s.List(ctx)

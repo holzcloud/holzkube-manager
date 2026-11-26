@@ -308,6 +308,23 @@ func (e *Engine) start(j model.Job, steps []Step) bool {
 	return true
 }
 
+// Busy reports whether a job is executing in this process right now.
+//
+// It is what a restart of the daemon has to ask first. A job in a step is
+// interrupted by one: at best Resume picks it up afterwards, at worst the step
+// cannot be verified and the job is parked for a person. The update that runs
+// every hour restarts the daemon, and it used to do so without asking.
+//
+// It answers from memory and reads nothing, because the route that carries it
+// answers before authentication. A parked job is not busy: nothing is
+// executing, and it would otherwise hold off every update until somebody
+// decided about it.
+func (e *Engine) Busy() bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return len(e.running) > 0
+}
+
 // dropTopicLater forgets a finished job's stream once the linger has passed. A
 // job left running or parked by a shutdown keeps its topic: it is not over.
 func (e *Engine) dropTopicLater(id model.JobID) {
@@ -357,17 +374,47 @@ func (e *Engine) run(ctx context.Context, j model.Job, steps []Step) {
 		j.Current = i
 		j.Steps[i].State = model.StepRunning
 		j.Steps[i].StartedAt = e.deps.Now().UTC()
-		j = e.save(ctx, j)
+		// This write is the one Resume reasons from, and so it is the one
+		// write that is not allowed to fail quietly. A step whose "running"
+		// was never recorded and that is then interrupted reads, after a
+		// restart, as a step that never started: Resume runs it as new, and
+		// for a step with no Happened -- a wipe -- that is the second wipe
+		// this engine exists to prevent. So the step does not start: the job
+		// fails before the side effect, which is the one outcome that is
+		// certain about the node.
+		saved, err := e.saveChecked(ctx, j)
+		if err != nil {
+			j.Steps[i].State = model.StepFailed
+			j.Steps[i].Detail = "not started: holzkube-manager could not record that this step was starting (" +
+				err.Error() + "), and a step that is not on record cannot be resumed safely after a crash. " +
+				"Nothing was done on the node by this step."
+			j.Steps[i].FinishedAt = e.deps.Now().UTC()
+			j.State = model.JobFailed
+			j.FinishedAt = j.Steps[i].FinishedAt
+			e.release(j.Cluster, j.ID)
+			j = e.save(context.WithoutCancel(ctx), j)
+			e.publish(j, steps[i].Name, model.StepFailed, j.Steps[i].Detail)
+			return
+		}
+		j = saved
 		e.publish(j, steps[i].Name, model.StepRunning, "")
 
-		err := steps[i].Do(ctx, &j)
+		err = steps[i].Do(ctx, &j)
 
 		now := e.deps.Now().UTC()
 		j.Steps[i].FinishedAt = now
+		// A step that returned an error while its context is cancelled was
+		// interrupted, whatever the error says. It used to be recognised by
+		// errors.Is(err, context.Canceled), and a step that was inside a gRPC
+		// call does not return that: it returns a status error with
+		// codes.Canceled, which is not context.Canceled and does not wrap it.
+		// So a restart of the daemon in the middle of a Talos call wrote the
+		// job down as failed, and Resume never looked at it again -- an
+		// upgrade stopped after the node it happened to be on.
 		switch {
 		case err == nil:
 			j.Steps[i].State = model.StepDone
-		case errors.Is(err, context.Canceled) && ctx.Err() != nil && e.shutdown.Err() == nil:
+		case ctx.Err() != nil && e.shutdown.Err() == nil:
 			// The operator cancelled while the step was in flight. The step was
 			// interrupted, so what it did is unknown; the record says so, and
 			// the job ends cancelled so that no restart resumes it.
@@ -375,7 +422,7 @@ func (e *Engine) run(ctx context.Context, j model.Job, steps []Step) {
 			j.Steps[i].Detail = "cancelled while this step was running; it may or may not have taken effect"
 			e.finishCancelled(j, steps[i].Name, model.StepFailed, j.Steps[i].Detail)
 			return
-		case errors.Is(err, context.Canceled) && ctx.Err() != nil:
+		case ctx.Err() != nil:
 			// The process is shutting down mid-step. Leave the step marked
 			// running and the job marked running: what happens next is
 			// Resume's decision at the next start, and it is the decision this
@@ -687,8 +734,20 @@ func (e *Engine) release(cluster model.ClusterID, id model.JobID) {
 // because the progress record could not be written would abandon the operation
 // half-done for a bookkeeping failure. What it costs is that the crash
 // reasoning above is only as good as the last successful write, which is why
-// the failure is logged loudly.
+// the failure is logged loudly. The one exception is the write that marks a
+// step running: run uses saveChecked for it and does not start the step when
+// it fails, because that write is the whole of what Resume knows.
 func (e *Engine) save(ctx context.Context, j model.Job) model.Job {
+	saved, err := e.saveChecked(ctx, j)
+	if err != nil {
+		return j
+	}
+	return saved
+}
+
+// saveChecked is save that also says whether the write landed. The failure is
+// already logged; the caller decides what it means.
+func (e *Engine) saveChecked(ctx context.Context, j model.Job) (model.Job, error) {
 	// Two attempts. One retry covers the ordinary race -- a cancel landing
 	// between the read and the write -- and a loop would be a spin against
 	// whatever is writing faster than this.
@@ -698,7 +757,7 @@ func (e *Engine) save(ctx context.Context, j model.Job) model.Job {
 			if !errors.Is(err, store.ErrNotFound) {
 				e.deps.Logger.Error("could not read a job before saving it",
 					slog.String("job", string(j.ID)), slog.Any("error", err))
-				return j
+				return j, err
 			}
 			// Not there yet: this is the first write.
 			stored = j
@@ -721,16 +780,16 @@ func (e *Engine) save(ctx context.Context, j model.Job) model.Job {
 
 		saved, err := e.deps.Store.Jobs().Put(ctx, stored)
 		if err == nil {
-			return saved
+			return saved, nil
 		}
 		if errors.Is(err, store.ErrConflict) && attempt == 0 {
 			continue
 		}
 		e.deps.Logger.Error("could not persist job progress",
 			slog.String("job", string(j.ID)), slog.Any("error", err))
-		return j
+		return j, err
 	}
-	return j
+	return j, errors.New("jobs: the job could not be saved")
 }
 
 // publish puts a progress entry on the job's topic.

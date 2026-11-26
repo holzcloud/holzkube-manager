@@ -41,6 +41,9 @@ func configConfigured(d httpapi.Deps) *httpapi.Problem {
 
 // ConfigRoutes serves a node's configuration and the reusable patches.
 func ConfigRoutes(d httpapi.Deps) []httpapi.Route {
+	// The apply holds its cluster's lease while it runs; see JobKindExclusive.
+	registerExclusive(d.Jobs)
+
 	return []httpapi.Route{
 		{
 			Method:          http.MethodGet,
@@ -67,7 +70,7 @@ func ConfigRoutes(d httpapi.Deps) []httpapi.Route {
 			MinRole:         model.RoleOperator,
 			Destructive:     true,
 			Action:          "config.apply",
-			ClusterScope:    clusterFromBody,
+			ClusterScope:    machineClusterFromPath(d),
 			Handler:         handler(applyConfig(d)),
 		},
 		{
@@ -204,8 +207,21 @@ func applyConfig(d httpapi.Deps) http.HandlerFunc {
 		ctx, cancel := budgetedContext(r, ConfigRouteBudget)
 		defer cancel()
 
-		result, err := d.Config.Apply(ctx, model.MachineID(r.PathValue("id")),
-			patches, machineconfig.Mode(body.Mode), body.BaseDigest)
+		id := model.MachineID(r.PathValue("id"))
+		mode := machineconfig.Mode(body.Mode)
+
+		release, problem, err := guardApply(ctx, d, id, mode)
+		if err != nil {
+			writeJobError(w, r, d, err)
+			return
+		}
+		if problem != nil {
+			httpapi.WriteProblem(w, r, problem)
+			return
+		}
+		defer release()
+
+		result, err := d.Config.Apply(ctx, id, patches, mode, body.BaseDigest)
 		if err != nil {
 			writeConfigError(w, r, d, err)
 			return

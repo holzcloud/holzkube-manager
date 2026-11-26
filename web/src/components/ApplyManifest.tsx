@@ -1,8 +1,37 @@
-import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useId, useState } from 'react'
-import { api, type ManifestPlan } from '@/api'
+import { api, type ManifestPlan, roleAtLeast } from '@/api'
 import { Problem } from '@/components/Problem'
 import { Button } from '@/components/ui/button'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { SESSION_QUERY_KEY } from '@/hooks/useSession'
+
+/**
+ * The manifest form as a card, for admins only.
+ *
+ * A manifest can be any object of any kind -- a binding to cluster-admin, a
+ * privileged pod -- so applying one is the admin's, and the server refuses an
+ * operator with 403. This hides the card from everyone else so an operator is
+ * not offered a form whose last button always answers "you may not". It is
+ * presentation, not enforcement, and it renders nothing while the identity is
+ * still loading rather than showing the card and taking it away.
+ */
+export function ApplyManifestCard({ clusterID }: { clusterID: string }) {
+  const me = useQuery({ queryKey: SESSION_QUERY_KEY, queryFn: api.me, retry: false })
+  if (!me.data || !roleAtLeast(me.data.role, 'admin')) {
+    return null
+  }
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Apply a manifest</CardTitle>
+      </CardHeader>
+      <CardContent>
+        <ApplyManifest clusterID={clusterID} />
+      </CardContent>
+    </Card>
+  )
+}
 
 /**
  * Applying a manifest (milestone v1.17, slice 5).

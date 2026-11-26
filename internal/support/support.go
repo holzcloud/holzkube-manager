@@ -298,10 +298,8 @@ func (c *Collector) collectNode(
 
 // collectConfig writes the node's machine configuration, redacted.
 //
-// The redaction is not optional and it is not conditional: an unparsable
-// configuration still gets the PEM sweep and is written *with* the error
-// beside it, because refusing it would hide the problem and writing it raw
-// would hand over the cluster's certificate authority.
+// The redaction is not optional and it is not conditional: a configuration
+// that cannot be redacted is not in the bundle, and the manifest says so.
 func (c *Collector) collectConfig(
 	ctx context.Context,
 	tw *tar.Writer,
@@ -323,33 +321,42 @@ func (c *Collector) collectConfig(
 		return
 	}
 
-	redacted, rerr := machineconfig.Redact(raw)
-	if rerr != nil {
-		// Redact returns the swept bytes alongside its error, so the
-		// configuration is still written -- it is the sweep that matters here,
-		// and the error is recorded as a gap so nobody reads the file as
-		// authoritative.
-		man.Incomplete = append(man.Incomplete, Gap{
-			Node: m.ID, What: "machineconfig.yaml is the PEM sweep only",
-			Reason: rerr.Error(),
-		})
-	}
-
-	// The last line of defence, and it is a refusal rather than a warning: if
-	// a private key is still in these bytes after both passes, the bundle does
-	// not carry the file at all. A bundle that leaks a certificate authority
-	// is worse than a bundle that is missing a configuration.
-	if machineconfig.ContainsPrivateKey(redacted) {
-		man.Incomplete = append(man.Incomplete, Gap{
-			Node: m.ID, What: "machineconfig.yaml",
-			Reason: "redaction left a PEM private key in the bytes, so the file was not written. " +
-				"This is a defect in holzkube-manager and worth reporting; the bundle is still " +
-				"usable without it.",
-		})
+	redacted, reason := configForBundle(raw)
+	if reason != "" {
+		man.Incomplete = append(man.Incomplete, Gap{Node: m.ID, What: "machineconfig.yaml", Reason: reason})
 		return
 	}
 
 	writeFile(tw, path.Join(dir, "machineconfig.yaml"), redacted, man)
+}
+
+// configForBundle is what of a node's configuration may leave the
+// installation: the redacted text, or nothing and the reason for it.
+//
+// Two refusals, and neither carries a byte of the configuration -- nor the
+// parser's own message, which quotes the line it stopped at:
+//
+//   - A configuration this build cannot parse is left out. It used to be
+//     written with a sweep for PEM blocks run over it, and a Talos
+//     configuration has no PEM blocks: its keys are base64 of them. A node on
+//     a Talos with one document kind this build does not know put the
+//     cluster's certificate authorities into the bundle.
+//   - The last line of defence: if a private key is still in the bytes after
+//     the redaction, the file is not written. A bundle that leaks a
+//     certificate authority is worse than one that is missing a configuration.
+func configForBundle(raw []byte) (redacted []byte, reason string) {
+	redacted, err := machineconfig.Redact(raw)
+	if err != nil {
+		return nil, "the node's configuration did not parse with this build of holzkube-manager, " +
+			"so it could not be redacted and was left out. A node on a newer Talos than this " +
+			"build supports is the usual cause."
+	}
+	if machineconfig.ContainsPrivateKey(redacted) {
+		return nil, "redaction left a PEM private key in the bytes, so the file was not written. " +
+			"This is a defect in holzkube-manager and worth reporting; the bundle is still " +
+			"usable without it."
+	}
+	return redacted, ""
 }
 
 // collectStream writes a bounded tail of a log stream.

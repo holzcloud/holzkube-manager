@@ -4,7 +4,7 @@ import userEvent from '@testing-library/user-event'
 import type { ReactNode } from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { api } from '@/api'
-import { ApplyManifest } from '@/components/ApplyManifest'
+import { ApplyManifest, ApplyManifestCard } from '@/components/ApplyManifest'
 
 /**
  * Applying a manifest, from the screen.
@@ -138,5 +138,37 @@ describe('applying a manifest', () => {
     await waitFor(() =>
       expect(screen.getByRole('list', { name: 'Warnings' })).toHaveTextContent(/no namespace/i),
     )
+  })
+})
+
+describe('who is offered the manifest form', () => {
+  const me = (role: string) => ({
+    id: 'u-1',
+    username: 'someone',
+    role,
+    dry_run: false,
+    sso: false,
+  })
+
+  it('shows it to an admin', async () => {
+    vi.spyOn(api, 'me').mockResolvedValue(me('admin'))
+
+    wrap(<ApplyManifestCard clusterID="c-1" />)
+
+    expect(await screen.findByText('Apply a manifest')).toBeInTheDocument()
+    expect(screen.getByLabelText('Manifest')).toBeInTheDocument()
+  })
+
+  it('does not show it to an operator, whom the server refuses', async () => {
+    const asked = vi.spyOn(api, 'me').mockResolvedValue(me('operator'))
+
+    wrap(<ApplyManifestCard clusterID="c-1" />)
+
+    await waitFor(() => expect(asked).toHaveBeenCalled())
+    // One more turn, so a card that appears once the identity resolves would
+    // be on the screen by now.
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(screen.queryByText('Apply a manifest')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Apply' })).not.toBeInTheDocument()
   })
 })

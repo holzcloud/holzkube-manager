@@ -251,6 +251,43 @@ func talosNodeStep(
 				return nil
 			}
 
+			// What the node runs now, before anything is decided. This step
+			// also runs after a restart, when Happened said no -- and no is
+			// also the answer for a node that is on the target with a service
+			// still starting, or one somebody moved past the target by hand
+			// while the job sat unfinished. Installing blindly reinstalled and
+			// rebooted the first and downgraded the second.
+			current, err := talosVersionOf(ctx, d, id)
+			if err != nil {
+				return fmt.Errorf("upgrade: could not read which Talos %s runs, so it was not "+
+					"upgraded: %w", nameOf(me), err)
+			}
+			if newerRelease(current, to) {
+				return fmt.Errorf("upgrade: %s already runs Talos %s, which is newer than the %s this "+
+					"run installs. It is not downgraded: a downgrade is a decision of its own, and "+
+					"this run was confirmed as an upgrade. Plan a new run from what the cluster "+
+					"runs now", nameOf(me), current, to)
+			}
+			if sameRelease(current, to) {
+				// Installed already: nothing is pulled, nothing is rebooted,
+				// and the gate is not asked because no node is taken down.
+				// What is left of this step is the verification.
+				job.Steps[job.Current].Detail = fmt.Sprintf(
+					"%s already runs Talos %s; not installed again, waiting for its services",
+					nameOf(me), current)
+				obs, err := waitForUpgrade(ctx, d, id, to, schematic)
+				if err != nil {
+					return err
+				}
+				job.Steps[job.Current].Detail = fmt.Sprintf(
+					"%s already ran Talos %s and its services are up; nothing was installed",
+					nameOf(me), obs.TalosVersion)
+				if d.Record != nil {
+					return d.Record(ctx, id)
+				}
+				return nil
+			}
+
 			// UPG-02, here and not at the start of the run: this node is being
 			// taken down in a cluster the previous node just changed.
 			if me.Role == model.RoleControlPlane {
@@ -424,6 +461,17 @@ func kubernetesImages(to Version, controlPlane bool) (system, cri []string) {
 	return system, cri
 }
 
+// imageVersion reads the version tag of an image reference. ok is false for a
+// reference without one, such as a digest-pinned image.
+func imageVersion(ref string) (Version, bool) {
+	tag := talos.NodeFacts{KubeletImage: ref}.KubernetesVersion()
+	if tag == "" {
+		return Version{}, false
+	}
+	v, err := ParseVersion(tag)
+	return v, err == nil
+}
+
 func kubeletImage(to Version) string { return "ghcr.io/siderolabs/kubelet:" + to.String() }
 func proxyImage(to Version) string   { return "registry.k8s.io/kube-proxy:" + to.String() }
 
@@ -584,7 +632,11 @@ func prepullStep(d Deps, cluster model.ClusterID, ids []model.MachineID, to Vers
 			return nil
 		},
 		// Pulling again is harmless and cheap once the images are there, so a
-		// resumed run simply does it again rather than guessing.
+		// resumed run simply does it again rather than guessing. That needs a
+		// Happened which says "not done": without one the step was
+		// unverifiable, and a run interrupted in its first and most harmless
+		// step was parked for a person.
+		Happened: func(context.Context, *model.Job) (bool, error) { return false, nil },
 	}
 }
 
@@ -628,9 +680,39 @@ func componentStep(d Deps, cluster model.ClusterID, ids []model.MachineID, compo
 			if err != nil {
 				return err
 			}
+
+			// What every node runs, before any node is changed: a component
+			// somebody moved past the target by hand is not moved back, and
+			// the run stops before it has touched the first node rather than
+			// halfway. An image whose version cannot be read (a digest-pinned
+			// one, a node that does not answer) is not newer than anything:
+			// that node goes ahead as before.
+			running := make(map[model.MachineID]talos.StaticPod, len(cps))
 			for _, me := range cps {
-				if at, err := staticPodImage(ctx, d, me.ID, component); err == nil && at.Image == want && at.Ready {
-					continue // already there -- a resumed run, or a node done by hand
+				at, err := staticPodImage(ctx, d, me.ID, component)
+				if err != nil {
+					continue
+				}
+				running[me.ID] = at
+				if v, ok := imageVersion(at.Image); ok && newerRelease(v, to) {
+					return fmt.Errorf("upgrade: %s already runs %s %s, which is newer than the %s "+
+						"this run installs. It is not moved back: a downgrade is a decision of its "+
+						"own. Nothing was changed by this step. Plan a new run from what the "+
+						"cluster runs now", nameOf(me), component, v, to)
+				}
+			}
+
+			for _, me := range cps {
+				if at, ok := running[me.ID]; ok && at.Image == want {
+					if at.Ready {
+						continue // already there -- a resumed run, or a node done by hand
+					}
+					// On the target and not ready yet: nothing to apply, only
+					// to verify.
+					if err := waitForStaticPod(ctx, d, me, component, want); err != nil {
+						return err
+					}
+					continue
 				}
 				verdict, err := d.Gate.Evaluate(ctx, cluster, me.ID)
 				if err != nil {
@@ -755,6 +837,13 @@ func kubeProxyStep(d Deps, cluster model.ClusterID, ids []model.MachineID, to Ve
 			job.Steps[job.Current].Detail = detail
 			return nil
 		},
+		// Both halves are safe to repeat: the configuration apply merges the
+		// same image into the node's current configuration and applies it in
+		// no-reboot mode, and the DaemonSet patch sets the image it already
+		// has, which changes no template and starts no rollout. So a resumed
+		// run does it again, as the prepull does; without a Happened the step
+		// was unverifiable and a restart inside it parked the upgrade.
+		Happened: func(context.Context, *model.Job) (bool, error) { return false, nil },
 	}
 }
 
@@ -778,6 +867,28 @@ func kubernetesNodeStep(d Deps, cluster model.ClusterID, id model.MachineID, to 
 			}
 			if me.Locked {
 				job.Steps[job.Current].Detail = SkipReason(me)
+				return nil
+			}
+
+			// As in the Talos step: what the node's kubelet image says decides
+			// first. A kubelet already past the target is not moved back, and
+			// one already on it needs no new configuration. A version that
+			// cannot be read (a digest-pinned image, a node that does not
+			// answer) is not newer than anything: the apply below goes ahead
+			// and fails, if it fails, on its own.
+			current, readErr := kubernetesVersionOf(ctx, d, id)
+			if readErr == nil && newerRelease(current, to) {
+				return fmt.Errorf("upgrade: %s already reports Kubernetes %s, which is newer than "+
+					"the %s this run installs. Its kubelet is not moved back: a downgrade is a "+
+					"decision of its own. Plan a new run from what the cluster runs now",
+					nameOf(me), current, to)
+			}
+			if readErr == nil && sameRelease(current, to) {
+				job.Steps[job.Current].Detail = fmt.Sprintf(
+					"%s already reports Kubernetes %s; nothing was applied", nameOf(me), current)
+				if d.Record != nil {
+					return d.Record(ctx, id)
+				}
 				return nil
 			}
 
@@ -833,6 +944,59 @@ func kubernetesNodeStep(d Deps, cluster model.ClusterID, id model.MachineID, to 
 			return got.Major == to.Major && got.Minor == to.Minor && got.Patch == to.Patch, nil
 		},
 	}
+}
+
+// sameRelease reports two versions naming the same release. A suffix is not
+// compared, as VerdictFor does not compare it.
+func sameRelease(a, b Version) bool {
+	return a.Major == b.Major && a.Minor == b.Minor && a.Patch == b.Patch
+}
+
+// newerRelease reports a node version past the target release.
+func newerRelease(node, target Version) bool {
+	n := Version{Major: node.Major, Minor: node.Minor, Patch: node.Patch}
+	t := Version{Major: target.Major, Minor: target.Minor, Patch: target.Patch}
+	return t.Less(n)
+}
+
+// talosVersionOf reads the Talos version a node runs.
+func talosVersionOf(ctx context.Context, d Deps, id model.MachineID) (Version, error) {
+	cc, err := d.Connect(ctx, id)
+	if err != nil {
+		return Version{}, err
+	}
+	defer cc.Close() //nolint:errcheck // the verdict is the read's
+
+	versionCtx, cancel, err := talos.WithClassDeadline(ctx, talos.MethodVersion)
+	if err != nil {
+		return Version{}, err
+	}
+	defer cancel()
+	raw, err := cc.Version(versionCtx)
+	if err != nil {
+		return Version{}, err
+	}
+	return ParseVersion(raw)
+}
+
+// kubernetesVersionOf reads the Kubernetes version a node's kubelet reports.
+func kubernetesVersionOf(ctx context.Context, d Deps, id model.MachineID) (Version, error) {
+	cc, err := d.Connect(ctx, id)
+	if err != nil {
+		return Version{}, err
+	}
+	defer cc.Close() //nolint:errcheck // the verdict is the read's
+
+	factsCtx, cancel, err := talos.WithClassDeadline(ctx, talos.MethodCOSIList)
+	if err != nil {
+		return Version{}, err
+	}
+	defer cancel()
+	facts, err := cc.NodeFacts(factsCtx)
+	if err != nil {
+		return Version{}, err
+	}
+	return ParseVersion(facts.KubernetesVersion())
 }
 
 // ReappearBudget is how long a node gets to come back from an upgrade.

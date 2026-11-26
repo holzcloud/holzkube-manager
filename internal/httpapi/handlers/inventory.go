@@ -207,8 +207,13 @@ func InventoryRoutes(d httpapi.Deps) []httpapi.Route {
 			RequiresSession: true,
 			MinRole:         model.RoleOperator,
 			Destructive:     true,
-			Action:          "machine.forget",
-			Handler:         handler(forgetMachine(d)),
+			// Not under the cluster's read-only lock, deliberately and as
+			// DELETE /api/v1/clusters/{id} is not: forgetting removes this
+			// installation's record and sends nothing to any node. The lock
+			// means "this product changes nothing in the cluster", and a
+			// forgotten machine is a cluster changed in no way at all.
+			Action:  "machine.forget",
+			Handler: handler(forgetMachine(d)),
 		},
 	}
 }

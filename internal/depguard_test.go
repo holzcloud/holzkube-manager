@@ -52,11 +52,11 @@ const (
 	//
 	// cosiVersion moves with it. It arrives with machinery rather than by
 	// choice, which is why it is asserted here at all.
-	// Raised to v1.14.6 on 2026-11-24, the newest stable release (a patch; the
-	// supported range stays v1.14), after the weekly upstream check failed on
-	// 2026-11-23. Before that v1.14.5, from 2026-11-01, and v1.14.2, from
-	// 2026-10-05.
-	machineryVersion = "v1.14.6"
+	// Raised to v1.14.7 on 2026-11-25, the newest stable release (a patch,
+	// released 2026-11-24; the supported range stays v1.14). Before that
+	// v1.14.6, from 2026-11-24, after the weekly upstream check failed on
+	// 2026-11-23; v1.14.5, from 2026-11-01; and v1.14.2, from 2026-10-05.
+	machineryVersion = "v1.14.7"
 	cosiVersion      = "v1.16.3"
 
 	// clientGoVersion is the second upstream, and it became one on 2026-09-19:
@@ -77,7 +77,11 @@ const (
 	// on code that did not yet import it had dropped the pinned requirement
 	// first. Three minors ahead of the server is outside Kubernetes's own skew
 	// policy; it was downgraded deliberately, and this guard is what noticed.
-	clientGoVersion = "v0.34.1"
+	//
+	// Raised to v0.34.13 on 2026-11-25, the newest patch of the 0.34 line, from
+	// v0.34.1. Patches only: the minor is the supported Kubernetes, and moving
+	// it is the decision this pin exists to make visible.
+	clientGoVersion = "v0.34.13"
 	clientGoModule  = "k8s.io/client-go"
 )
 

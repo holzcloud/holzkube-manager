@@ -140,6 +140,7 @@ matches on the URL.
 | `POST` | `/api/v1/setup` | false | false | `{"username","password"}` | `201 {"id","username"}`, sets session cookie |
 | `POST` | `/api/v1/auth/login` | false | false | `{"username","password"}` | `204`, rotates the session |
 | `POST` | `/api/v1/auth/logout` | false | true | `{}` | `204` |
+| `POST` | `/api/v1/auth/oidc/logout` | false | true | `{}` | `200 {"redirect"}`: the local session is gone; the client navigates to `redirect`, the provider's RP-initiated logout or `/` when it has none. Only with a provider configured. It was a `GET` that redirected, and any page could sign the operator out with a link; it is a POST under the CSRF preconditions now |
 | `GET` | `/api/v1/auth/me` | false | true | — | `200 {"id","username","dry_run"}` |
 | `GET` | `/api/v1/audit` | false | true | query, see below | `200` audit page |
 
@@ -213,6 +214,14 @@ per source IP (D-08).
 - A short wait is served by holding the request; anything longer answers `429`
   `ratelimit.delayed` with `Retry-After` in seconds.
 - A successful attempt clears the counter.
+- An attempt is counted before the password is checked and refunded when it is
+  right, so requests sent in parallel do not each get a check: one proceeds, the
+  others wait or meet `429`.
+- `POST /api/v1/auth/sudo` also counts per account, and has the per-peer request
+  bucket of the anonymous routes in front of it (30 in a burst, then one every
+  two seconds; the same `429` `ratelimit.delayed`). After 10 wrong passwords in a row for one
+  account, the `401` also ends the session that sent it; signing in again
+  clears the account's counter.
 - **There is no lock and therefore no unlock.** Waiting is always sufficient;
   no endpoint, flag or recovery path exists to clear the delay, and none may be
   added. Clients should show the `Retry-After` value and let the operator wait.
@@ -1416,6 +1425,14 @@ The check sits **inside** the audit link — an attempt to change a cluster
 somebody adopted read-only belongs in the archive — and **outside** the sudo
 gate, because asking for a password and then refusing anyway teaches an operator
 that the prompt means nothing.
+
+A route that acts on one machine asks the lock of **that machine's** cluster,
+read from the inventory, never a cluster named in the body: reboot, shutdown,
+reset, `config/apply` and `POST /api/v1/machines/{id}/etcd/restore`. Forgetting
+records is not under the lock: `DELETE /api/v1/machines/{id}` and
+`DELETE /api/v1/clusters/{id}` remove this installation's records and send
+nothing to any node, and "read-only" is a promise about the cluster, not about
+what this installation remembers of it.
 
 ### Codes minted here
 
@@ -3431,7 +3448,10 @@ Two routes, and the split is the point:
 | route | what it does |
 |---|---|
 | `POST /api/v1/clusters/{id}/kubernetes/manifest/plan` | takes `{"manifest": "<YAML>"}` and answers `{"objects": [...], "warnings": [...]}`. It writes nothing. |
-| `POST /api/v1/clusters/{id}/kubernetes/manifest/apply` | takes the same body and answers `{"applied": [...], "failed": [...], "fully_applied": bool}` |
+| `POST /api/v1/clusters/{id}/kubernetes/manifest/apply` | **admin**, destructive. Takes the same body and answers `{"applied": [...], "failed": [...], "fully_applied": bool}` |
+
+The plan is an operator's; the apply is an admin's, because a manifest can make
+its author the cluster's administrator (see the roles section).
 
 **The plan is not a courtesy.** An apply that runs without one is the same genus
 as a reset without a confirmation: the operator finds out what it did afterwards.
@@ -3626,6 +3646,12 @@ The admin-only reads are the ones that hand over a credential or the contents of
 a cluster: `talosconfig`, `kubeconfig`, the etcd snapshot and its restore, the
 support bundle, the audit archive, and the cluster lock — because unlocking is
 what makes every other destructive route reachable.
+
+`POST /api/v1/clusters/{id}/kubernetes/manifest/apply` is admin-only for the
+same reason as the kubeconfig: a manifest can be any object of any kind,
+including a binding to `cluster-admin`, so applying arbitrary manifests is
+holding the cluster's credentials by another route. The plan, which writes
+nothing, stays an operator's.
 
 A request from an account without the role answers **403 `forbidden.role`**, and
 the detail names the role it needed. It is a 403 and not a 404: everybody who
@@ -4004,6 +4030,12 @@ That is not a style choice. A reboot takes a minute and a reset several, and an
 endpoint that waits is an endpoint whose progress nobody can watch and whose
 failure arrives as a timeout with no record of how far it got.
 
+The read-only lock these three routes answer to — and the one
+`POST /api/v1/machines/{id}/config/apply` answers to — is the lock of **the
+cluster the machine belongs to**, read from the inventory. A `cluster` in the
+request body does not choose it: until 2026-11-11 it did, and a body that named
+no cluster, or an unlocked one, got a node of a locked cluster rebooted.
+
 ### Confirmation is server-side, and it is bound to the parameters
 
 Two calls, always:
@@ -4046,6 +4078,30 @@ asked without one. A default is how a confirmation becomes decoration.
 | `store.cluster-busy` | 409 | another mutating job holds this cluster's lease |
 | `store.job-finished` | 409 | a cancel arrived for a job that already ended |
 
+#### Routes that act inside their request hold the lease too
+
+`POST /api/v1/machines/{id}/config/apply` (every mode),
+`POST /api/v1/machines/{id}/etcd/restore` and
+`DELETE /api/v1/clusters/{id}/etcd/members/{member}` change a cluster inside the
+request rather than as a job. They take the cluster's lease for as long as the
+request runs, through a job of kind `cluster.exclusive` whose one step waits for
+the request to end. So they answer `409 store.cluster-busy` while a job holds the
+cluster, and a job submitted while one of them runs is refused the same way. The
+hold job is in the job list with the action and machine in its parameters;
+cancelling it does not end the hold early, and a hold left behind by a restart is
+closed by `Resume` as already done, never parked. A machine in no cluster, and an
+instance in `--dry-run`, take no hold.
+
+A config apply in mode `reboot` or `auto` on a control-plane node also asks the
+etcd health gate an upgrade asks before each node, after taking the lease:
+
+| code | HTTP | when |
+|---|---|---|
+| `conflict.etcd-gate` | 409 | the gate says the cluster would not survive losing this node now, or could not be asked; the detail is the gate's sentence. `no-reboot`, `staged` and `try` do not ask. |
+
+The etcd restore does not ask the gate: it is what is done when etcd is already
+lost, and the gate would refuse exactly then.
+
 ### `GET /api/v1/machines/{id}/reset-preview`
 
 What the machine has, what each scope would do, and what has to be typed. It is
@@ -4076,6 +4132,18 @@ interrupted run of it is resumed by asking. An unverifiable step has none —
 nothing a node can be asked distinguishes "wiped five seconds ago and booting"
 from "booting for another reason" — so an interrupted run parks the job and
 `parked_reason` says what to check.
+
+A verifiable step whose question cannot be answered parks too. Two answers are
+deliberately "cannot tell" rather than "done": a shutdown whose node does not
+answer (the daemon may have started before its network is up), and a reboot
+judged against a step start that this host's clock puts in the future or more
+than 12 hours back (a host without a battery-backed clock, such as a Raspberry
+Pi, can start with its clock far off). A removal's settle wait measured against
+such a clock is waited again instead.
+
+If the write that records a step as running fails, the step is not started:
+the job fails with that step `failed` and its detail saying nothing was done,
+because a step that is not on record would be run again after a crash.
 
 `POST /api/v1/jobs/{id}/cancel` stops at the **next step boundary**. It is
 mutating and deliberately **not** destructive: an operator watching something go
@@ -5271,7 +5339,7 @@ quiet exactly when something is added.
 | `holzkube-managerd` | serves (the default; no subcommand needed) |
 | `holzkube-managerd backup [--label X]` | writes a tarball into the data directory |
 | `holzkube-managerd backups` | lists what is there, newest first |
-| `holzkube-managerd restore FILE` | backs up what is there, then unpacks |
+| `holzkube-managerd restore FILE` | backs up what is there, then replaces it with the archive |
 | `holzkube-managerd verify-audit` | checks the audit hash chain; exits non-zero on a break |
 | `holzkube-managerd break-glass [--ttl=15m]` | mints a short-lived admin token on this machine |
 

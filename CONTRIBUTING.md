@@ -16,15 +16,15 @@ These are the versions the project is developed and tested against, on
 the Raspberry Pi 5 (linux/arm64) it is released for. Others may work; these
 are the ones known to.
 
-- **Go 1.26.7.** `go.mod` declares `go 1.26` with `toolchain go1.26.7`, so a machine
-  whose Go predates 1.26.9 fetches the pinned toolchain by itself.
+- **Go 1.26.11.** `go.mod` declares `go 1.26.6` with `toolchain go1.26.11`, so a machine
+  whose Go predates 1.26.11 fetches the pinned toolchain by itself.
 - **Node 22** with **npm 10**.
-- **go-task 3.53.1**, **golangci-lint 2.13.1**, **goreleaser 2.18.0**.
+- **go-task 3.54.0**, **golangci-lint 2.15.0**, **goreleaser 2.20.3**.
 
 ```sh
 brew install go-task/tap/go-task
-go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.13.1
-go install github.com/goreleaser/goreleaser/v2@v2.18.0
+go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.15.0
+go install github.com/goreleaser/goreleaser/v2@v2.20.3
 ```
 
 `go install` writes to `$(go env GOPATH)/bin`. Put it on your `PATH`, or the

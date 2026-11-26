@@ -91,7 +91,7 @@ func OIDCRoutes(d httpapi.Deps) []httpapi.Route {
 			Handler:         handler(func(w http.ResponseWriter, r *http.Request) { oidcCallback(d, w, r) }),
 		},
 		{
-			Method:          http.MethodGet,
+			Method:          http.MethodPost,
 			Pattern:         "/api/v1/auth/oidc/logout",
 			RequiresSession: true,
 			MinRole:         model.RoleReader,
@@ -608,12 +608,16 @@ func oidcLogout(d httpapi.Deps, w http.ResponseWriter, r *http.Request) {
 	if end == "" {
 		// The provider advertises no end_session_endpoint. The local session is
 		// gone either way, which is the part this server is responsible for.
-		http.Redirect(w, r, afterAuth, http.StatusFound)
-		return
+		end = afterAuth
 	}
-	// Same as above: end comes from the provider's end_session_endpoint in the
-	// discovery document, not from anything the caller sent.
-	http.Redirect(w, r, end, http.StatusFound) //nolint:gosec // target derives from the configured issuer, not from the request
+	// The address is answered, not redirected to. The route is a POST under
+	// the CSRF preconditions like every other mutation, because as a GET any
+	// page on the internet could sign the operator out with a link or an
+	// image (SameSite=Lax sends the cookie on a top-level navigation). A
+	// fetch cannot follow a cross-origin redirect into a page, so the client
+	// navigates to what this says. end comes from the provider's discovery
+	// document, never from anything the caller sent.
+	writeJSON(w, http.StatusOK, map[string]string{"redirect": end})
 }
 
 func clearFlow(d httpapi.Deps, r *http.Request) {

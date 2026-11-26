@@ -502,11 +502,11 @@ func TestScenarioSlowLogConsumer(t *testing.T) {
 
 	// Teardown within a second of the caller giving up. A stream that outlived
 	// its caller would hold the emitter goroutine for the life of the process.
-	torn := make(chan error, 1)
+	torn := make(chan struct{})
 	go func() {
+		defer close(torn)
 		for {
 			if _, err := stream.Recv(); err != nil {
-				torn <- err
 				return
 			}
 		}

@@ -286,9 +286,10 @@ func TestUpdateScriptHardening(t *testing.T) {
 			t.Fatalf("exit = %d, want 0", rc)
 		}
 		e.wantStatus(OutcomeUpdated, ptr(fakeRelease), ptr(fakeRelease))
-		// One answer before the install (the host check), three after.
-		if n := e.countCalls("curl-urls", testHealthURL); n != 4 {
-			t.Errorf("the health URL was asked %d times, want 4 (1 before, 3 in a row after the restart)", n)
+		// Two answers before the install -- the host check, and whether the
+		// daemon is executing a job -- and three after.
+		if n := e.countCalls("curl-urls", testHealthURL); n != 5 {
+			t.Errorf("the health URL was asked %d times, want 5 (2 before, 3 in a row after the restart)", n)
 		}
 	})
 

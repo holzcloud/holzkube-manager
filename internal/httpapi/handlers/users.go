@@ -444,6 +444,11 @@ func writeUserError(w http.ResponseWriter, r *http.Request, d httpapi.Deps, err 
 		httpapi.WriteProblem(w, r, httpapi.Conflict("conflict.not-a-service-account",
 			"That account is a person and has a password rather than a token. An admin can reset "+
 				"their password; nobody can mint a token for them."))
+	case errors.Is(err, auth.ErrNotAPerson):
+		// An admin resetting a password the account cannot have. Before SetPassword
+		// refused it the hash was stored and the answer said the reset was done.
+		httpapi.WriteProblem(w, r, notAPerson("That account is a service account and signs in with a "+
+			"token, never a password. Rotate its token instead."))
 	case errors.Is(err, auth.ErrInvalidRole):
 		httpapi.WriteProblem(w, r, httpapi.Validation("That is not a role.",
 			httpapi.FieldError{Field: "role", Reason: "must be one of admin, operator or reader"}))

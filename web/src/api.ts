@@ -285,7 +285,6 @@ export function roleAtLeast(have: string, want: UserRoleName): boolean {
 export const oidcPath = {
   signIn: '/api/v1/auth/oidc/start',
   reauthenticate: '/api/v1/auth/oidc/sudo',
-  signOut: '/api/v1/auth/oidc/logout',
 } as const
 
 /* ---------------------------------------------------------------------- */
@@ -3681,6 +3680,25 @@ export const api = {
 
   logout: async (): Promise<void> => {
     await send('POST', '/api/v1/auth/logout', {}, { interceptUnauthenticated: false })
+  },
+
+  /**
+   * Ends a provider session: the server destroys the local session and answers
+   * where the browser goes next -- the provider's RP-initiated logout, or the
+   * landing page when it has none. A POST under the CSRF preconditions rather
+   * than a navigation, because a GET would let any page sign the operator out.
+   */
+  oidcLogout: async (): Promise<string> => {
+    const response = await send(
+      'POST',
+      '/api/v1/auth/oidc/logout',
+      {},
+      {
+        interceptUnauthenticated: false,
+      },
+    )
+    const body = z.object({ redirect: z.string() }).parse(await response.json())
+    return body.redirect
   },
 
   /**

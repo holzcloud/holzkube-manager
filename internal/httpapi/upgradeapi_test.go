@@ -59,6 +59,18 @@ type upgradeHarnessOptions struct {
 	// KubernetesReleases is the source of the newest patch of a minor; nil means
 	// the service is built without one.
 	KubernetesReleases upgrade.KubernetesReleaseSource
+
+	// Config adds the configuration service and its routes, so an apply can
+	// meet the jobs engine and the etcd gate this harness has.
+	Config bool
+}
+
+// withConfigIf is withConfig when on, and nothing otherwise.
+func withConfigIf(on bool) harnessOpt {
+	if !on {
+		return func(*harnessConfig) {}
+	}
+	return withConfig()
 }
 
 func newUpgradeHarnessOptions(t *testing.T, opts upgradeHarnessOptions) *upgradeHarness {
@@ -87,6 +99,7 @@ func newUpgradeHarnessOptions(t *testing.T, opts upgradeHarnessOptions) *upgrade
 			})
 		}),
 		withJobs(),
+		withConfigIf(opts.Config),
 		// Built inside newHarness, where the inventory already exists: the
 		// upgrade service closes over it, and Deps is copied by value into
 		// every route closure, so a service assigned afterwards would be nil

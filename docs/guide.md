@@ -37,9 +37,9 @@ of the above:
 go build -o bin/holzkubectl ./cmd/holzkubectl   # or: task build:cli
 ```
 
-Toolchain: Go 1.26.9 (pinned in `go.mod`), Node with npm, and — for the full
+Toolchain: Go 1.26.11 (pinned in `go.mod`), Node with npm, and — for the full
 task, lint and release chain — [`go-task`](https://taskfile.dev),
-`golangci-lint` v2.13.1 and `goreleaser` v2.18.0.
+`golangci-lint` v2.15.0 and `goreleaser` v2.20.3.
 
 ## Run
 
@@ -166,7 +166,29 @@ service does not stay healthy, it goes back to the previous binary and records
 again until a newer release is published (`--force` installs it anyway).
 `holzkube-manager-update --rollback` does the same by hand, takes the same lock
 as the other runs and records **rolled-back**; the version it leaves is
-remembered as well. A rollback replaces the binary and
+remembered as well.
+
+**What the checksum proves, and what it does not.** `checksums.txt` comes from
+the same GitHub release as the archive. It catches a download that broke on the
+way; it does not prove who built the release. Releases are not signed yet --
+the operator has postponed that -- so an update is exactly as trustworthy as
+GitHub and this repository's release workflow: whoever could publish a release
+there could publish a matching checksum with it, and every installation that
+updates hourly would install it within the hour.
+
+**An update waits for a running job.** The restart an update ends with
+interrupts whatever the daemon is doing, so before it downloads anything the
+run asks the daemon whether a job is executing — a rolling upgrade, a removal,
+a backup. If one is, the run installs nothing, records **available** and asks
+again next hour; the time it first waited is kept in
+`/var/lib/holzkube-manager-update/deferred-since`. After 24 hours of that it
+installs anyway, because a job that hangs must not hold off the update that
+repairs it, and `--force` installs at once. A parked job — one waiting for you
+to decide — is not a running one and holds nothing back. A daemon that does
+start again in the middle of a job continues it afterwards where the step can
+be checked, and parks it where it cannot.
+
+A rollback replaces the binary and
 not the data directory: after a release that raised the directory's schema, a
 rolled-back binary will not start, and [Schema 7 and going
 back](#schema-7-and-going-back) says what to do then. When the update replaces its own script it first checks the
@@ -597,6 +619,12 @@ cluster: the talosconfig, the kubeconfig, the etcd snapshot and its restore, the
 support bundle, the audit archive, and the cluster lock — unlocking is what
 makes every other destructive route reachable.
 
+**Applying a Kubernetes manifest is admin-only too**, for the reason the
+kubeconfig is: a manifest can be any object, including a binding to
+`cluster-admin`, so whoever may apply arbitrary manifests can make themselves
+the cluster's administrator. An operator may still plan one; the form to apply
+it is shown only to admins.
+
 Every route names the least privileged role that may use it, and **a route that
 names none cannot be registered**: the process refuses to start. A permission
 nobody chose is not a permission anybody reviewed.
@@ -613,6 +641,11 @@ An admin can reset another account's password without knowing the old one. Their
 own change still asks for it, and that asymmetry is deliberate: the account's own
 change defends against a stolen session, and a reset exists precisely because
 nobody has the old password any more.
+
+Either way, the account's other sessions end: whoever was signed in with the old
+password has to sign in again. A reset keeps the admin's own session, and an own
+change keeps the session that made it. Other accounts stay signed in. A service
+account has no password to reset; it gets a new token instead.
 
 **Upgrading from a single-account installation changes nothing.** An account
 stored before roles existed has none, and that is read as admin — it was the only
@@ -745,6 +778,18 @@ as `user.identity-link`, with the account, the provider's host and the address
 it came from (never the `sub`), and a link that was refused is there too, with
 the reason.
 
+**With a provider that has more users than you, that window is theirs too.**
+"Whoever completes it" means anybody your provider lets sign in to this
+application: a colleague, a family member, a guest account. While the account
+is unlinked, the first of them to complete a single sign-on from the local
+network becomes that account -- with its role, admin included -- and you find
+out when your own sign-in is refused. holzkube-manager cannot tell your identity
+from theirs before the link exists; that is what trust on first use means. So
+restrict the application at the provider to the people who may administer this
+installation (a group or a policy binding in the provider), and keep the window
+short: link straight after setup or an unlink, and check the account's Sign-in
+column afterwards.
+
 **Unlinking.** Settings → Accounts → **Unlink single sign-on** removes an
 account's link, issuer and `sub` both, so that the next first sign-in can link a
 different identity. The Sign-in column shows which provider an account is linked
@@ -831,7 +876,41 @@ cannot demonstrate freshness and is refused.
 Signing out of a provider session goes through the provider's RP-initiated
 logout. Ending only the local session leaves the provider signed in, so the next
 sign-in returns immediately -- indistinguishable, to the operator, from the
-sign-out having been ignored.
+sign-out having been ignored. The sign-out is a request the page sends, not a
+link: as a link, any other web page could have signed you out by pointing at it.
+
+### Wrong passwords
+
+A wrong password makes the next attempt from the same address wait: a quarter of
+a second after the first, doubling, never more than thirty seconds. A wait over
+half a second is answered `429` with `Retry-After` instead of being held open.
+Nothing is ever locked: once the wait has passed the right password works, and
+it clears the count.
+
+The sign-in and the re-authentication for a destructive action share that count,
+so switching between them earns no fresh start. An attempt is counted **before**
+the password is checked and taken back only when it turns out right, so a burst
+of attempts sent at once does not all get checked: one goes through, the rest
+wait or are told to come back.
+
+The re-authentication counts per account as well as per address, and it has the
+same per-address request limit in front of it as the sign-in. **Ten wrong
+re-authentication passwords in a row for one account end the session that sent
+the tenth**: whoever holds a session cookie but not the password stops being
+able to guess with it. The operator who mistyped ten times signs in again, and
+signing in clears the account's count.
+
+**Behind a reverse proxy, everybody is one address.** Every limit here counts
+by the address of the connection that reached the daemon, and a forwarded header
+is never believed: it is chosen by the caller, and believing it would let a
+guesser start every attempt with a fresh count. Behind a proxy that address is
+the proxy's, so every client arriving through it shares one count and one
+request bucket: a stranger guessing passwords on the public name slows the
+sign-in for everyone else coming through the same proxy, and the per-address
+counts tell nobody apart. There is no setting for trusted proxies. The local
+network address, which does not go through the proxy, is not affected; that is
+one more reason the public name is best kept to single sign-on
+(`--sso-only-hosts`), where no password is asked at all.
 
 ## Data directory
 
@@ -868,7 +947,7 @@ of reporting it.
 ```sh
 holzkube-managerd backup            # writes a tarball into the data directory
 holzkube-managerd backups           # lists what is there, newest first
-holzkube-managerd restore FILE      # backs up what is there, then unpacks
+holzkube-managerd restore FILE      # backs up what is there, then replaces it
 holzkube-managerd verify-audit      # checks the audit hash chain
 holzkube-managerd break-glass       # a short-lived admin token, on this machine
 ```
@@ -895,6 +974,15 @@ wrong without one would have replaced a working installation with a broken one
 and left nothing to go back to. Every entry in the archive is checked against
 the destination before a byte is written, because `../../../etc/shadow` is a
 valid tar entry.
+
+The archive is unpacked in full into a staging directory inside the data
+directory, and read to its end, gzip checksum included, before anything that is
+there is touched. A truncated or damaged archive is refused with the data
+directory exactly as it was. Only then are the current contents swapped out for
+the staged ones, so **the restored directory is the backup and nothing else**:
+a record written after the backup was taken is gone afterwards (it is in the
+pre-restore backup). What a backup never contains stays where it is: `backups/`,
+`upgrade-snapshots/` and the lock file.
 
 A backup contains every secret in the data directory verbatim. It is `0600`
 inside the `0700` directory; copying it somewhere else copies those secrets.
@@ -923,8 +1011,9 @@ directory. There are two ways out:
   `holzkube-managerd restore <data-dir>/backups/pre-migration-6-to-7-<time>.tar.gz`.
   That puts the directory back to the version 6 state of the moment before the
   migration, so whatever was changed since is gone, and it takes a backup of what
-  is there first, as every restore does. The `config-baselines/` directory stays
-  where it is; a binary that does not know it leaves it alone.
+  is there first, as every restore does. The `config-baselines/` directory goes
+  with it, because a version 6 backup does not contain it; the newer version
+  creates it again on its next start and fills it as nodes are read.
 
 What is in `config-baselines/` and what is not (secret values are replaced, a
 few kinds of field are stored as the Config view shows them) is described under
@@ -981,8 +1070,11 @@ button, and a break is reported through `GET /api/v1/system/status` and shown
 as a banner in the UI.
 
 The chain is tamper-**evidence**, not tamper-proofing: anyone who can write to
-the data directory can rewrite the whole chain. Shipping records off-box is the
-only real answer and is not in this version.
+the data directory can rewrite the whole chain. The hashes use no key, so a
+rewritten archive whose hashes were recomputed verifies as intact; what the
+chain catches is an edit, a deletion or a truncation by somebody who did not
+recompute every hash after it. Shipping records off-box is the only real answer
+and is not in this version.
 
 `holzkube-managerd verify-audit` runs the same check on demand and exits
 non-zero on a break, so a cron entry or a monitoring check can use it without
@@ -1163,7 +1255,10 @@ gate's numbers. Then two things stand between the plan and the start:
 2. **The cluster's name, typed.**
 
 The job then upgrades one node at a time, with the health gate evaluated before
-each, and verifies every node afterwards (version, schematic, services). It does
+each, and verifies every node afterwards (version, schematic, services). The gate
+asks every control-plane node in the inventory, and it refuses when etcd lists a
+voting member that none of them answered as -- a member added by hand, or one a
+removal left behind -- because a voter it cannot ask is not one it can count on. It does
 not undo an upgrade; see *It verifies upgrades and does not undo them* below for
 what a rollback is and is not. The snapshot is the way back from the one failure
 a rollback cannot help with.
@@ -1381,6 +1476,21 @@ since the apply has itself changed the node.
 If you call the route from a script: this is a change in the alpha stage.
 `base_digest` is required; plan first and send back what the plan gave.
 
+**An apply waits its turn with the jobs.** While a job runs on the cluster -- an
+upgrade, a reboot, a removal, a backup -- an apply is refused with "another job
+is already running on this cluster", and while an apply runs, a job is refused
+the same way. The apply shows up in the job list as `cluster.exclusive` for the
+moment it takes. The same holds for an etcd restore and for removing an etcd
+member. Without it, an upgrade rebooting one control-plane node and an apply in
+reboot mode on a second could take two of three down at once.
+
+**A reboot of a control-plane node asks etcd first.** An apply in mode `reboot`
+or `auto` on a control-plane node asks the same health gate an upgrade asks
+before each node, and is refused with its sentence when the cluster would not
+survive losing that node now (an alarm, a member that does not answer, fewer
+than three voters). A single-node cluster is the gate's exception, as in an
+upgrade. `no-reboot`, `staged` and `try` do not reboot and do not ask.
+
 **What it cannot do.**
 
 - A change of nothing but a secret value is not refused and not turned back: it
@@ -1573,6 +1683,12 @@ Two things this refuses that are worth naming:
   service, reset it.
 - **one of two.** The cluster stops accepting writes and the Kubernetes API
   stops with it. That one is recoverable by adding a control-plane node back.
+- **a node it cannot find in etcd.** The removal looks for the node among etcd's
+  members by hostname, by the address in the member's peer URL, and finally by
+  asking the node's own etcd which member it is. When none of that answers and
+  etcd lists a member no machine here accounts for, that member may be this
+  node, and the removal refuses before anything changes instead of taking the
+  node for one that already left etcd. Refresh the cluster and start it again.
 
 A locked node is not removable either (a lock is somebody saying "not this one",
 and a removal cannot walk past anything the way a rolling upgrade can), and the
@@ -1894,7 +2010,9 @@ would take it down, and that is why both buttons exist.
 ### Applying a manifest
 
 Paste a manifest, press **Plan**, read what it would do, then **Apply**. Several
-documents separated by `---` are fine.
+documents separated by `---` are fine. The form is an admin's (see
+[Accounts and roles](#accounts-and-roles)): a manifest can grant anything in the
+cluster, including the role that grants everything.
 
 **The plan is not a courtesy, and Apply stays disabled until there is one for
 exactly the text in the box.** Editing the manifest throws the plan away: a plan
@@ -2402,6 +2520,19 @@ affected.
 Every failed verification says so in its own message, because the job screen
 renders a step's detail verbatim and that message is the screen at the moment
 it matters.
+
+**Each node's step reads what the node runs before it installs anything**, and
+that matters most after a restart of the daemon in the middle of a run. A node
+already on the target is not installed or rebooted again: the step waits for
+its services and verifies it. A node already *past* the target -- moved by hand
+while the job sat unfinished, or a data directory restored from an older backup
+-- is never downgraded: the step fails with a sentence that names both versions,
+and a new run is planned from what the cluster runs now. The Kubernetes
+upgrade does the same with the kubelet's version and with the API server,
+controller manager and scheduler: a component past the target on any
+control-plane node stops its step before any node is changed, and one already on
+the target is only waited for. An image pinned by digest names no version, so
+it is moved as before.
 
 ### It applies manifests and has never done so against a real cluster
 
