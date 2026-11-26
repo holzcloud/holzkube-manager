@@ -168,6 +168,14 @@ again until a newer release is published (`--force` installs it anyway).
 as the other runs and records **rolled-back**; the version it leaves is
 remembered as well.
 
+**What the checksum proves, and what it does not.** `checksums.txt` comes from
+the same GitHub release as the archive. It catches a download that broke on the
+way; it does not prove who built the release. Releases are not signed yet --
+the operator has postponed that -- so an update is exactly as trustworthy as
+GitHub and this repository's release workflow: whoever could publish a release
+there could publish a matching checksum with it, and every installation that
+updates hourly would install it within the hour.
+
 **An update waits for a running job.** The restart an update ends with
 interrupts whatever the daemon is doing, so before it downloads anything the
 run asks the daemon whether a job is executing — a rolling upgrade, a removal,
@@ -770,6 +778,18 @@ as `user.identity-link`, with the account, the provider's host and the address
 it came from (never the `sub`), and a link that was refused is there too, with
 the reason.
 
+**With a provider that has more users than you, that window is theirs too.**
+"Whoever completes it" means anybody your provider lets sign in to this
+application: a colleague, a family member, a guest account. While the account
+is unlinked, the first of them to complete a single sign-on from the local
+network becomes that account -- with its role, admin included -- and you find
+out when your own sign-in is refused. holzkube-manager cannot tell your identity
+from theirs before the link exists; that is what trust on first use means. So
+restrict the application at the provider to the people who may administer this
+installation (a group or a policy binding in the provider), and keep the window
+short: link straight after setup or an unlink, and check the account's Sign-in
+column afterwards.
+
 **Unlinking.** Settings → Accounts → **Unlink single sign-on** removes an
 account's link, issuer and `sub` both, so that the next first sign-in can link a
 different identity. The Sign-in column shows which provider an account is linked
@@ -879,6 +899,18 @@ re-authentication passwords in a row for one account end the session that sent
 the tenth**: whoever holds a session cookie but not the password stops being
 able to guess with it. The operator who mistyped ten times signs in again, and
 signing in clears the account's count.
+
+**Behind a reverse proxy, everybody is one address.** Every limit here counts
+by the address of the connection that reached the daemon, and a forwarded header
+is never believed: it is chosen by the caller, and believing it would let a
+guesser start every attempt with a fresh count. Behind a proxy that address is
+the proxy's, so every client arriving through it shares one count and one
+request bucket: a stranger guessing passwords on the public name slows the
+sign-in for everyone else coming through the same proxy, and the per-address
+counts tell nobody apart. There is no setting for trusted proxies. The local
+network address, which does not go through the proxy, is not affected; that is
+one more reason the public name is best kept to single sign-on
+(`--sso-only-hosts`), where no password is asked at all.
 
 ## Data directory
 
@@ -1028,8 +1060,11 @@ button, and a break is reported through `GET /api/v1/system/status` and shown
 as a banner in the UI.
 
 The chain is tamper-**evidence**, not tamper-proofing: anyone who can write to
-the data directory can rewrite the whole chain. Shipping records off-box is the
-only real answer and is not in this version.
+the data directory can rewrite the whole chain. The hashes use no key, so a
+rewritten archive whose hashes were recomputed verifies as intact; what the
+chain catches is an edit, a deletion or a truncation by somebody who did not
+recompute every hash after it. Shipping records off-box is the only real answer
+and is not in this version.
 
 `holzkube-managerd verify-audit` runs the same check on demand and exits
 non-zero on a break, so a cron entry or a monitoring check can use it without

@@ -643,10 +643,13 @@ func (d Deps) fallback(known *http.ServeMux) http.Handler {
 // configured latches the negative. listJSON reads and JSON-decodes every file
 // in users/, and this ran on every non-asset navigation to answer a question
 // whose answer changes exactly once. The latch is only ever set in the
-// direction that is permanent: no route deletes a user, and phase 1's store
-// exposes Users().Delete with no caller. A phase that adds one has to revisit
-// this, because the redirect is D-01's server-side half and is supposed to hold
-// even when the client-side check does not.
+// direction that is permanent. Accounts can be deleted (DELETE
+// /api/v1/users/{id}), but auth.Service.DeleteUser refuses the last admin, so
+// an instance that has had an account never has none again through the API.
+// Removing user files by hand on the host is the one way back to zero, and the
+// latch then holds until the next start. A change that lets the last admin go
+// has to revisit this, because the redirect is D-01's server-side half and is
+// supposed to hold even when the client-side check does not.
 func (d Deps) setupRequired(ctx context.Context, configured *atomic.Bool) bool {
 	if configured.Load() {
 		return false
