@@ -285,7 +285,6 @@ export function roleAtLeast(have: string, want: UserRoleName): boolean {
 export const oidcPath = {
   signIn: '/api/v1/auth/oidc/start',
   reauthenticate: '/api/v1/auth/oidc/sudo',
-  signOut: '/api/v1/auth/oidc/logout',
 } as const
 
 /* ---------------------------------------------------------------------- */
@@ -3690,7 +3689,14 @@ export const api = {
    * than a navigation, because a GET would let any page sign the operator out.
    */
   oidcLogout: async (): Promise<string> => {
-    const response = await send('POST', oidcPath.signOut, {}, { interceptUnauthenticated: false })
+    const response = await send(
+      'POST',
+      '/api/v1/auth/oidc/logout',
+      {},
+      {
+        interceptUnauthenticated: false,
+      },
+    )
     const body = z.object({ redirect: z.string() }).parse(await response.json())
     return body.redirect
   },
