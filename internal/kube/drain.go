@@ -214,7 +214,11 @@ func (c *Client) Drain(ctx context.Context, node string, opts DrainOptions) (Dra
 	parent := ctx
 	if opts.Timeout > 0 {
 		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, opts.Timeout)
+		deadline := context.WithTimeout
+		if c.drainDeadline != nil {
+			deadline = c.drainDeadline
+		}
+		ctx, cancel = deadline(ctx, opts.Timeout)
 		defer cancel()
 	}
 

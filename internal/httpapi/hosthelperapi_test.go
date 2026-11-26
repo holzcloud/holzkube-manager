@@ -55,17 +55,29 @@ func helperState(t *testing.T, edit func(m fstest.MapFS)) fs.FS {
 // wires them; signed in, with the sudo window open.
 func hostHelperHarness(t *testing.T, boxFS fs.FS, collectorFS fs.FS) *harness {
 	t.Helper()
-	return hostHelperHarnessUp(t, boxFS, collectorFS, nil)
+	return hostHelperHarnessAt(t, time.Time{}, boxFS, collectorFS, nil)
 }
 
-// hostHelperHarnessUp is hostHelperHarness with the Box told how long the
-// machine has been up (nil: not told).
-func hostHelperHarnessUp(t *testing.T, boxFS fs.FS, collectorFS fs.FS, up func() (time.Duration, error)) *harness {
+// hostHelperHarnessAt is hostHelperHarness with the Box's clock stopped at now
+// (zero: the real clock) and told how long the machine has been up (nil: not
+// told).
+//
+// A test that stages the helper's record some seconds before now hands the
+// same now in here. Otherwise the record ages by the wall clock between the
+// staging and the routes' question -- the harness's login and sudo, a loaded
+// machine, a laptop asleep in the middle of the suite -- and a check "started
+// 5 s ago" was read as past the helper's 3-minute limit while the subtest had
+// run for 23 s.
+func hostHelperHarnessAt(t *testing.T, now time.Time, boxFS fs.FS, collectorFS fs.FS, up func() (time.Duration, error)) *harness {
 	t.Helper()
+	var clock func() time.Time
+	if !now.IsZero() {
+		clock = func() time.Time { return now }
+	}
 	sys := hostSys{uname: host.Uname{Nodename: "example-host", Release: "6.18.50+rpt-rpi-2712", Machine: "aarch64"}}
 	h := newHarness(t,
 		withHostActions(func(dataDir string) *hostaction.Box {
-			return hostaction.NewBox(hostaction.Config{FS: boxFS, DataDir: dataDir, Place: fsstore.PlaceNew, SinceBoot: up})
+			return hostaction.NewBox(hostaction.Config{FS: boxFS, DataDir: dataDir, Place: fsstore.PlaceNew, SinceBoot: up, Now: clock})
 		}),
 		withHostOver(func(box *hostaction.Box) *host.Collector {
 			return host.New(host.Config{FS: collectorFS, Sys: sys, Actions: box})
@@ -501,8 +513,9 @@ func TestHostActionsWaitForARunningCheck(t *testing.T) {
 	t.Parallel()
 
 	// Every time is taken inside the subtest, just before its harness is
-	// built: the subtests run in parallel with the whole package, and a
-	// "5 s ago" taken when the test began can be minutes old by then.
+	// built, and the Box reads the same instant as its now: the subtests run
+	// in parallel with the whole package, and a "5 s ago" read by the wall
+	// clock can be minutes old by the time the routes ask.
 	const id = "c0ffee00c0ffee11"
 	stamp := func(at time.Time) string { return at.UTC().Truncate(time.Second).Format(time.RFC3339) }
 	recorded := func(action, outcome string, ago time.Duration) func(now time.Time) func(m fstest.MapFS) {
@@ -547,7 +560,7 @@ func TestHostActionsWaitForARunningCheck(t *testing.T) {
 				m[name] = file
 			}
 		}
-		return hostHelperHarnessUp(t, helperState(t, both), status, func() (time.Duration, error) { return up, nil })
+		return hostHelperHarnessAt(t, now, helperState(t, both), status, func() (time.Duration, error) { return up, nil })
 	}
 
 	busy := []fixture{
@@ -719,16 +732,17 @@ func TestABusyRefusalKeepsTheToken(t *testing.T) {
 
 	fsys, stateDir := installedHelperFS(t)
 	last := filepath.Join(stateDir, "last")
+	now := time.Now()
 	write := func(outcome string) {
 		t.Helper()
 		line := "c0ffee00c0ffee11 check-update " + outcome + " " +
-			time.Now().UTC().Add(-5*time.Second).Truncate(time.Second).Format(time.RFC3339) + "\n"
+			now.UTC().Add(-5*time.Second).Truncate(time.Second).Format(time.RFC3339) + "\n"
 		if err := os.WriteFile(last, []byte(line), 0o644); err != nil { //nolint:gosec // the reader wants 0644, as the helper writes it
 			t.Fatal(err)
 		}
 	}
 	write("started")
-	h := hostHelperHarness(t, fsys, fstest.MapFS{})
+	h := hostHelperHarnessAt(t, now, fsys, fstest.MapFS{}, nil)
 
 	tok := sessionHostToken(t, h.confirmer, h.srv.URL, h.client, "host.reboot")
 	const path = "/api/v1/host/actions/reboot"
@@ -774,12 +788,13 @@ func TestAHelperBusyAtPlacementIsRefusedAsBusy(t *testing.T) {
 	t.Parallel()
 
 	fsys, stateDir := installedHelperFS(t)
-	line := "c0ffee00c0ffee11 check-update started " + time.Now().UTC().Truncate(time.Second).Format(time.RFC3339) + "\n"
+	now := time.Now()
+	line := "c0ffee00c0ffee11 check-update started " + now.UTC().Truncate(time.Second).Format(time.RFC3339) + "\n"
 	if err := os.WriteFile(filepath.Join(stateDir, "last"), []byte(line), 0o644); err != nil { //nolint:gosec // as the helper writes it
 		t.Fatal(err)
 	}
 	stats := &atomic.Int32{}
-	h := hostHelperHarness(t, flipResultFS{FS: fsys, stats: stats}, fstest.MapFS{})
+	h := hostHelperHarnessAt(t, now, flipResultFS{FS: fsys, stats: stats}, fstest.MapFS{}, nil)
 
 	tok := sessionHostToken(t, h.confirmer, h.srv.URL, h.client, "host.reboot")
 	const path = "/api/v1/host/actions/reboot"
@@ -940,8 +955,9 @@ func TestHostUpdateNeedsTheUpdateUnit(t *testing.T) {
 	})
 	t.Run("busy too", func(t *testing.T) {
 		t.Parallel()
-		started := "c0ffee00c0ffee11 check-update started " + time.Now().UTC().Add(-5*time.Second).Truncate(time.Second).Format(time.RFC3339)
-		h := hostHelperHarnessUp(t, helperState(t, noUnit(helperRecorded(started))), fstest.MapFS{},
+		now := time.Now()
+		started := "c0ffee00c0ffee11 check-update started " + now.UTC().Add(-5*time.Second).Truncate(time.Second).Format(time.RFC3339)
+		h := hostHelperHarnessAt(t, now, helperState(t, noUnit(helperRecorded(started))), fstest.MapFS{},
 			func() (time.Duration, error) { return time.Hour, nil })
 		// The unit before busy: waiting will not cure it.
 		refusedUpdate(t, h, code)
@@ -1071,8 +1087,9 @@ func TestHostUpdateActionsNeedTheUpdateScript(t *testing.T) {
 	})
 	t.Run("busy", func(t *testing.T) {
 		t.Parallel()
-		started := "c0ffee00c0ffee11 check-update started " + time.Now().UTC().Add(-5*time.Second).Truncate(time.Second).Format(time.RFC3339)
-		h := hostHelperHarnessUp(t, helperState(t, func(m fstest.MapFS) {
+		now := time.Now()
+		started := "c0ffee00c0ffee11 check-update started " + now.UTC().Add(-5*time.Second).Truncate(time.Second).Format(time.RFC3339)
+		h := hostHelperHarnessAt(t, now, helperState(t, func(m fstest.MapFS) {
 			delete(m, helperUpdateScript)
 			helperRecorded(started)(m)
 		}), fstest.MapFS{}, func() (time.Duration, error) { return time.Hour, nil })

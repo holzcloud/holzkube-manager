@@ -24,8 +24,13 @@ var weakParams = &argon2id.Params{
 // restores whatever was there before.
 //
 // It lives in a test file on purpose. Production code has no way to lower the
-// cost of a hash: the only writer of the active parameters is the calibration,
-// and the calibration cannot return anything below DefaultParams.
+// cost of a hash: the only writers of the active parameters are the
+// calibration, which cannot return anything below DefaultParams, and
+// UseParamsForTest (testhooks.go), which other packages' tests need because
+// they cannot reach this file. That one panics unless testing.Testing() says
+// the process is a test binary, so a running daemon cannot take that path
+// either -- the operator's decision of 2026-11-26, to keep internal/httpapi's
+// suite clear of its timeout under load.
 func useTestParams(t *testing.T) {
 	t.Helper()
 	prev := activeParams.Load()

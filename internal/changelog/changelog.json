@@ -1,5 +1,23 @@
 [
   {
+    "version": "v0.11.1",
+    "date": "2026-11-26",
+    "changes": [
+      {
+        "icon": "⬇️",
+        "text": "A Kubernetes upgrade never moves kube-proxy back. A kube-proxy someone had moved past the upgrade's target by hand was set back to the target, the one exception v0.11.0 still named. The step now reads what kube-proxy runs first and, if that is newer than the target, stops with a sentence naming both versions and changes nothing. When it cannot read the version (no Kubernetes access, an image pinned by digest), it goes ahead as before."
+      },
+      {
+        "icon": "🧪",
+        "text": "Steadier checks behind each release. A few tests depended on the wall clock and could fail on a busy build machine, which would have stopped a release for no fault of the program. They now run on clocks of their own, and the web API's test suite takes about two minutes instead of five. Nothing changes in the running program."
+      },
+      {
+        "icon": "⚠️",
+        "text": "What to know. A kube-proxy image that is newer only in a node's own configuration, while the cluster's kube-proxy still runs the target, is not detected. Everything in v0.11.0 and here is proven against the simulators only. The product is alpha and breaking changes are possible in any release."
+      }
+    ]
+  },
+  {
     "version": "v0.11.0",
     "date": "2026-11-26",
     "changes": [

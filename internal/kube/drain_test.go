@@ -292,6 +292,13 @@ func TestADrainThatMayRetryWaitsOutABudgetAndThenFinishes(t *testing.T) {
 // never opens, and a loop with no end would run into the thirty seconds of the
 // test's own context. The drain ends at its own deadline, with the verdict a
 // drain gives -- blocked -- and not with the context's error.
+//
+// The deadline is the drain's own -- the context its Timeout derives -- but it
+// runs out when the test says so: after the third refused eviction. A real
+// 200 ms ran out on a loaded machine before the second pass had reached the
+// server, and the test then read a drain that never asked again. Ending it on
+// the attempt count rather than on the wall clock is what lets "asked again
+// until the deadline" be a fact about the drain and not about the machine.
 func TestADrainWhoseBudgetNeverOpensEndsAtItsDeadline(t *testing.T) {
 	t.Parallel()
 
@@ -301,25 +308,51 @@ func TestADrainWhoseBudgetNeverOpensEndsAtItsDeadline(t *testing.T) {
 		Pods:  []kubesim.Pod{budgetPod("cp-1")},
 	})
 
-	started := time.Now()
+	var asked time.Duration
+	expiredAt := make(chan time.Time, 1)
+	client.SetDrainDeadline(func(parent context.Context, d time.Duration) (context.Context, context.CancelFunc) {
+		asked = d
+		inner, cancel := context.WithCancel(parent)
+		go func() {
+			for sim.Calls(evictionOf("default", "db-0")) < 3 {
+				select {
+				case <-inner.Done():
+					return
+				case <-time.After(2 * time.Millisecond):
+				}
+			}
+			expiredAt <- time.Now()
+			cancel()
+		}()
+		return heldDeadline{Context: inner, parent: parent}, cancel
+	})
+
 	result, err := client.Drain(ctx, "cp-1", kube.DrainOptions{
 		RetryBlocked: 10 * time.Millisecond, Timeout: 200 * time.Millisecond,
 	})
-	took := time.Since(started)
+	returned := time.Now()
 
+	if asked != 200*time.Millisecond {
+		t.Errorf("the drain's deadline was derived from %s, want its Timeout of 200ms", asked)
+	}
 	if !errors.Is(err, kube.ErrDrainBlocked) {
 		t.Fatalf("Drain = %v, want ErrDrainBlocked", err)
 	}
 	if errors.Is(err, context.DeadlineExceeded) {
 		t.Errorf("Drain = %v: a drain that ran out of time says blocked, not that a context expired", err)
 	}
-	if took > 5*time.Second {
-		t.Errorf("the drain took %s with a 200ms deadline", took)
+	select {
+	case at := <-expiredAt:
+		if took := returned.Sub(at); took > 5*time.Second {
+			t.Errorf("the drain went on for %s after its deadline had passed", took)
+		}
+	default:
+		t.Error("the drain returned before its deadline: it did not ask again until then")
 	}
 	if got := sim.Evicted(); len(got) != 0 {
 		t.Errorf("the server evicted %v despite the budget", got)
 	}
-	if got := sim.Calls(evictionOf("default", "db-0")); got < 2 {
+	if got := sim.Calls(evictionOf("default", "db-0")); got < 3 {
 		t.Errorf("the eviction was attempted %d times, want it asked again until the deadline", got)
 	}
 	if len(result.Blocked) != 1 || result.Blocked[0].Pod != "default/db-0" ||
@@ -552,4 +585,20 @@ func TestADrainCountsThePodsWhoseLocalDataWentWithThem(t *testing.T) {
 	if len(without.LocalData) != 0 {
 		t.Errorf("LocalData = %v for a pod that was not evicted", without.LocalData)
 	}
+}
+
+// heldDeadline is a drain's deadline context that runs out when the test
+// cancels it: Err answers as an expired deadline does, unless it was the
+// caller's context that ended.
+type heldDeadline struct {
+	context.Context
+	parent context.Context
+}
+
+func (h heldDeadline) Err() error {
+	err := h.Context.Err()
+	if err != nil && h.parent.Err() == nil {
+		return context.DeadlineExceeded
+	}
+	return err
 }

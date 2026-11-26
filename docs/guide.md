@@ -2531,8 +2531,11 @@ and a new run is planned from what the cluster runs now. The Kubernetes
 upgrade does the same with the kubelet's version and with the API server,
 controller manager and scheduler: a component past the target on any
 control-plane node stops its step before any node is changed, and one already on
-the target is only waited for. An image pinned by digest names no version, so
-it is moved as before.
+the target is only waited for. kube-proxy is read from its DaemonSet: one past
+the target stops the kube-proxy step before the DaemonSet or any node's
+configuration is changed. An image pinned by digest names no version, and a
+kube-proxy that cannot be read (no Kubernetes access, an API server that does
+not answer) says nothing about its version, so both are moved as before.
 
 ### It applies manifests and has never done so against a real cluster
 

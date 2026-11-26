@@ -52,8 +52,9 @@ const (
 // activeParams holds the parameters new hashes are written with. It is nil
 // until the first call to ActiveParams, which calibrates.
 //
-// Nothing in this package can lower it: CalibrateParams starts from
-// DefaultParams and only ever increases the iteration count.
+// Nothing in this package can lower it in the daemon: CalibrateParams starts
+// from DefaultParams and only ever increases the iteration count, and the one
+// other writer, UseParamsForTest, refuses outside a test binary.
 var (
 	activeParams   atomic.Pointer[argon2id.Params]
 	calibrationMu  sync.Mutex
